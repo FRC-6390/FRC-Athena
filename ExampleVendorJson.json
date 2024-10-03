@@ -7,7 +7,7 @@
     "mavenUrls": [
         "ThisNeedsToBeTheRootMavenUrl"
     ],
-    "jsonUrl": "https://github.com/FRC-6390/FRC-Athena/blob/main/ExampleVendorJson.json",
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/ExampleVendorJson.json",
     "javaDependencies": [
         {
             "groupId": "ca.frc6390.frc",
