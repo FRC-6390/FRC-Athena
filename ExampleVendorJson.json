@@ -1,74 +1,18 @@
 {
-    "fileName": "ExampleVendorJson.json",
-    "name": "ExampleVendorDep",
-    "version": "0.0.1",
+    "fileName": "FRC6390-Athena.json",
+    "name": "FRC6390 Athena (v0.5)",
+    "version": "0.5.0",
     "frcYear": "2024",
-    "uuid": "Generate A Unique GUID https://guidgenerator.com/online-guid-generator.aspx and insert it here", This line is to purposely make this fail to parse
+    "uuid": "e9bbc616-2d62-4e83-b291-3933ea14f1dc",
     "mavenUrls": [
         "ThisNeedsToBeTheRootMavenUrl"
     ],
-    "jsonUrl": "InsertSomeUrlHere",
+    "jsonUrl": "https://github.com/FRC-6390/FRC-Athena/blob/main/ExampleVendorJson.json",
     "javaDependencies": [
         {
-            "groupId": "com.vendor.frc",
-            "artifactId": "Vendor-java",
-            "version": "0.0.1"
-        }
-    ],
-    "jniDependencies": [
-        {
-            "groupId": "com.vendor.frc",
-            "artifactId": "Vendor-driver",
-            "version": "0.0.1",
-            "skipInvalidPlatforms": true,
-            "isJar": false,
-            "validPlatforms": [
-                "windowsx86-64",
-                "windowsx86",
-                "linuxarm64",
-                "linuxx86-64",
-                "linuxathena",
-                "linuxarm32",
-                "osxuniversal"
-            ]
-        }
-    ],
-    "cppDependencies": [
-        {
-            "groupId": "com.vendor.frc",
-            "artifactId": "Vendor-cpp",
-            "version": "0.0.1",
-            "libName": "Vendor",
-            "headerClassifier": "headers",
-            "sharedLibrary": false,
-            "skipInvalidPlatforms": true,
-            "binaryPlatforms": [
-                "windowsx86-64",
-                "windowsx86",
-                "linuxarm64",
-                "linuxx86-64",
-                "linuxathena",
-                "linuxarm32",
-                "osxuniversal"
-            ]
-        },
-        {
-            "groupId": "com.vendor.frc",
-            "artifactId": "Vendor-driver",
-            "version": "0.0.1",
-            "libName": "VendorDriver",
-            "headerClassifier": "headers",
-            "sharedLibrary": false,
-            "skipInvalidPlatforms": true,
-            "binaryPlatforms": [
-                "windowsx86-64",
-                "windowsx86",
-                "linuxarm64",
-                "linuxx86-64",
-                "linuxathena",
-                "linuxarm32",
-                "osxuniversal"
-            ]
+            "groupId": "ca.frc6390.frc",
+            "artifactId": "api-java",
+            "version": "0.5.0"
         }
     ]
 }
