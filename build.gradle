@@ -54,72 +54,72 @@ nativeUtils {
 
 model {
   components {
-    Vendor(NativeLibrarySpec) {
-      sources {
-        cpp {
-          source {
-            srcDirs 'src/main/native/cpp'
-            include '**/*.cpp'
-          }
-          exportedHeaders {
-            srcDirs 'src/main/native/include'
-          }
-        }
-      }
-      binaries.all {
-        lib library: 'VendorDriver', linkage: 'shared'
-      }
-      nativeUtils.useRequiredLibrary(it, 'wpilib_shared')
-    }
+    // Vendor(NativeLibrarySpec) {
+    //   sources {
+    //     // cpp {
+    //     //   source {
+    //     //     srcDirs 'src/main/native/cpp'
+    //     //     include '**/*.cpp'
+    //     //   }
+    //     //   exportedHeaders {
+    //     //     srcDirs 'src/main/native/include'
+    //     //   }
+    //     // }
+    //   }
+    //   binaries.all {
+    //     lib library: 'VendorDriver', linkage: 'shared'
+    //   }
+    //   nativeUtils.useRequiredLibrary(it, 'wpilib_shared')
+    // }
 
-    VendorDriver(JniNativeLibrarySpec) {
-      enableCheckTask true
-      javaCompileTasks << compileJava
-      jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.roborio)
-      // Leave these for future proofing
-      jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.linuxarm32)
-      jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.linuxarm64)
-      sources {
-        cpp {
-          source {
-            srcDirs 'src/main/driver/cpp'
-            include '**/*.cpp'
-          }
-          exportedHeaders {
-            srcDirs 'src/main/driver/include'
-          }
-        }
-      }
+    // VendorDriver(JniNativeLibrarySpec) {
+    //   enableCheckTask true
+    //   javaCompileTasks << compileJava
+    //   jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.roborio)
+    //   // Leave these for future proofing
+    //   jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.linuxarm32)
+    //   jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.linuxarm64)
+    //   // sources {
+    //   //   cpp {
+    //   //     source {
+    //   //       srcDirs 'src/main/driver/cpp'
+    //   //       include '**/*.cpp'
+    //   //     }
+    //   //     exportedHeaders {
+    //   //       srcDirs 'src/main/driver/include'
+    //   //     }
+    //   //   }
+    //   // }
 
-      nativeUtils.useRequiredLibrary(it, "driver_shared")
-    }
+    //   nativeUtils.useRequiredLibrary(it, "driver_shared")
+    // }
   }
   testSuites {
-    VendorTest {
-        sources.cpp {
-            source {
-                srcDir 'src/test/native/cpp'
-                include '**/*.cpp'
-            }
-        }
+    // VendorTest {
+    //     sources.cpp {
+    //         source {
+    //             srcDir 'src/test/native/cpp'
+    //             include '**/*.cpp'
+    //         }
+    //     }
 
-        binaries.all {
-          lib library: 'VendorDriver', linkage: 'shared'
-        }
+    //     binaries.all {
+    //       lib library: 'VendorDriver', linkage: 'shared'
+    //     }
 
-        nativeUtils.useRequiredLibrary(it, "wpilib_executable_shared", "googletest_static")
-    }
+    //     nativeUtils.useRequiredLibrary(it, "wpilib_executable_shared", "googletest_static")
+    // }
 
-    VendorDriverTest {
-        sources.cpp {
-            source {
-                srcDir 'src/test/driver/cpp'
-                include '**/*.cpp'
-            }
-        }
+    // VendorDriverTest {
+    //     sources.cpp {
+    //         source {
+    //             srcDir 'src/test/driver/cpp'
+    //             include '**/*.cpp'
+    //         }
+    //     }
 
-        nativeUtils.useRequiredLibrary(it, "wpilib_executable_shared", "googletest_static")
-    }
+    //     nativeUtils.useRequiredLibrary(it, "wpilib_executable_shared", "googletest_static")
+    // }
   }
 }
 
