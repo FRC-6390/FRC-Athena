@@ -102,10 +102,10 @@ task sourcesJar(type: Jar, dependsOn: classes) {
     from sourceSets.main.allSource
 }
 
-task javadocJar(type: Jar, dependsOn: javadoc) {
-    archiveClassifier = 'javadoc'
-    from javadoc.destinationDir
-}
+// task javadocJar(type: Jar, dependsOn: javadoc) {
+//     archiveClassifier = 'javadoc'
+//     from javadoc.destinationDir
+// }
 
 task outputJar(type: Jar, dependsOn: classes) {
     archiveBaseName = javaBaseName
@@ -120,27 +120,27 @@ task outputSourcesJar(type: Jar, dependsOn: classes) {
     from sourceSets.main.allSource
 }
 
-task outputJavadocJar(type: Jar, dependsOn: javadoc) {
-    archiveBaseName = javaBaseName
-    destinationDirectory = outputsFolder
-    archiveClassifier = 'javadoc'
-    from javadoc.destinationDir
-}
+// task outputJavadocJar(type: Jar, dependsOn: javadoc) {
+//     archiveBaseName = javaBaseName
+//     destinationDirectory = outputsFolder
+//     archiveClassifier = 'javadoc'
+//     from javadoc.destinationDir
+// }
 
 artifacts {
     archives sourcesJar
-    archives javadocJar
+    // archives javadocJar
     archives outputJar
     archives outputSourcesJar
-    archives outputJavadocJar
+    // archives outputJavadocJar
 }
 
 addTaskToCopyAllOutputs(outputSourcesJar)
-addTaskToCopyAllOutputs(outputJavadocJar)
+// addTaskToCopyAllOutputs(outputJavadocJar)
 addTaskToCopyAllOutputs(outputJar)
 
 build.dependsOn outputSourcesJar
-build.dependsOn outputJavadocJar
+// build.dependsOn outputJavadocJar
 build.dependsOn outputJar
 
 libraryBuild.dependsOn build
@@ -194,7 +194,7 @@ model {
             java(MavenPublication) {
                 artifact jar
                 artifact sourcesJar
-                artifact javadocJar
+                // artifact javadocJar
 
                 artifactId = "${baseArtifactId}-java"
                 groupId artifactGroupId
