@@ -5,14 +5,14 @@
     "frcYear": "2024",
     "uuid": "e9bbc616-2d62-4e83-b291-3933ea14f1dc",
     "mavenUrls": [
-        "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/src"
+        "https://maven.pkg.github.com/FRC-6390/FRC-Athena"
     ],
     "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/ExampleVendorJson.json",
     "javaDependencies": [
         {
-            "groupId": "ca.frc6390.frc",
-            "artifactId": "api-java",
-            "version": "0.5.0"
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "competition",
+            "version": "1.0"
         }
     ]
 }
