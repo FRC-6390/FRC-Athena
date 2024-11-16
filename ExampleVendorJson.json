@@ -14,5 +14,8 @@
             "artifactId": "competition",
             "version": "1.0"
         }
-    ]
+    ],
+    "jniDependencies": [],
+    "cppDependencies": []
 }
+
