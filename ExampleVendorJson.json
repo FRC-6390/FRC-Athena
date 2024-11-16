@@ -5,7 +5,7 @@
     "frcYear": "2024",
     "uuid": "e9bbc616-2d62-4e83-b291-3933ea14f1dc",
     "mavenUrls": [
-        "ThisNeedsToBeTheRootMavenUrl"
+        "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/src"
     ],
     "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/ExampleVendorJson.json",
     "javaDependencies": [
