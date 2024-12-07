@@ -2,7 +2,7 @@ apply plugin: 'maven-publish'
 
 ext.licenseFile = files("$rootDir/LICENSE.txt")
 
-def pubVersion = '0.5.0'
+def pubVersion = '1.0.0'
 
 def outputsFolder = file("$buildDir/outputs")
 
@@ -42,11 +42,11 @@ ext.addTaskToCopyAllOutputs = { task ->
     copyAllOutputs.from task.archiveFile
 }
 
-def artifactGroupId = 'ca.frc6390.frc'
-def baseArtifactId = 'api-java'
-def driverZipBaseName = "_GROUP_ca_frc6390_frc_ID_${baseArtifactId}-driver_CLS"
-def zipBaseName = "_GROUP_ca_frc6390_frc_ID_${baseArtifactId}-cpp_CLS"
-def javaBaseName = "_GROUP_ca_frc6390_frc_ID_${baseArtifactId}-java_CLS"
+def artifactGroupId = 'ca.frc6390.athena'
+def baseArtifactId = 'competition'
+def driverZipBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-driver_CLS"
+def zipBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-cpp_CLS"
+def javaBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-java_CLS"
 
 // task cppHeadersZip(type: Zip) {
 //     destinationDirectory = outputsFolder
@@ -148,10 +148,20 @@ libraryBuild.dependsOn build
 def releasesRepoUrl = "$buildDir/repos/releases"
 
 publishing {
+    
     repositories {
-        maven {
+        // maven {
 
-            url = releasesRepoUrl
+        //     url = releasesRepoUrl
+        // }
+
+        maven {
+            name = "FRC-Athena"
+            url = "https://maven.pkg.github.com/FRC-6390/FRC-Athena"
+            credentials {
+                username = System.getenv("MAVEN_USERNAME")
+                password = System.getenv("MAVEN_PASSWORD")
+            }
         }
     }
 }

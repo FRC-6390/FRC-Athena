@@ -8,7 +8,7 @@
     <artifactId>competition</artifactId>
     <version>1.0</version>
 
-    <properties>
+    <!-- <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
     </properties>
@@ -18,13 +18,13 @@
             <name>GitHub FRC-6390 Apache Maven Packages</name>
             <url>https://maven.pkg.github.com/FRC-6390/FRC-Athena</url>
         </repository>
-    </distributionManagement>
+    </distributionManagement> -->
 
-    <repositories>
+    <!-- <repositories>
         <repository>
             <id>github-public</id>
             <url>https://public:&#103;hp_yk3VnfGNv7Wj9K9M60ORgfNrne8TvC1I7ID3@maven.pkg.github.com/FRC-6390/FRC-Athena</url>
         </repository>
-    </repositories>
+    </repositories> -->
 
 </project>
