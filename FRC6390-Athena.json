@@ -7,7 +7,7 @@
     "mavenUrls": [
         "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
     ],
-    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/FRCAthena2024.json",
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/FRCAthena.json",
     "javaDependencies": [
         {
             "groupId": "ca.frc6390.athena",
