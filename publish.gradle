@@ -43,7 +43,7 @@ ext.addTaskToCopyAllOutputs = { task ->
 }
 
 def artifactGroupId = 'ca.frc6390.athena'
-def baseArtifactId = 'competition-java'
+def baseArtifactId = 'competition'
 def driverZipBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-driver_CLS"
 def zipBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-cpp_CLS"
 def javaBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-java_CLS"
