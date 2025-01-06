@@ -1,7 +1,7 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.AbsoluteSensorRangeValue;
+import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import com.ctre.phoenix6.StatusSignal;
@@ -15,6 +15,8 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
 
 public class SwerveModule {
 
@@ -25,7 +27,8 @@ public class SwerveModule {
     private CANcoder encoder;
     private final PIDController rotationPidController;
 
-    private StatusSignal<Double> drivePos, driveVel, rotationPos, encoderPos;
+    private StatusSignal<AngularVelocity> driveVel;
+    private StatusSignal<Angle> encoderPos, drivePos, rotationPos;
 
     // SWERVE MOTOR RECORD
     public record SwerveMotor(int motor, boolean motorReversed, double gearRatio, double maxSpeedMetersPerSecond,
@@ -49,6 +52,19 @@ public class SwerveModule {
         public SwerveMotor(int motor, boolean motorReversed, String canbus) {
             this(motor, motorReversed, 1, 0, canbus);
         }
+
+        public TalonFXConfiguration generateTalonFXConfig(double currentLimit) {
+            TalonFXConfiguration driveConfig = new TalonFXConfiguration();
+            CurrentLimitsConfigs driveCurrentLimit = new CurrentLimitsConfigs();
+            driveCurrentLimit.SupplyCurrentLimitEnable = true;
+            driveCurrentLimit.SupplyCurrentLimit = currentLimit;
+            driveConfig.withCurrentLimits(driveCurrentLimit);
+
+            InvertedValue isInverted = motorReversed ? InvertedValue.CounterClockwise_Positive : InvertedValue.Clockwise_Positive;
+            driveConfig.MotorOutput.withInverted(isInverted);
+
+            return driveConfig;
+        } 
     }
 
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, double offsetRadians, int encoder, double encoderGearRatio) {
@@ -69,24 +85,17 @@ public class SwerveModule {
         driveMotor = new TalonFX(config.driveMotor().motor(), config.driveMotor().canbus());
         rotationMotor = new TalonFX(config.rotationMotor().motor(), config.rotationMotor().canbus());
 
-        // INVERTING MOTORS
-        driveMotor.setInverted(config.driveMotor().motorReversed());
-        rotationMotor.setInverted(config.rotationMotor().motorReversed());
-
-        // CURRENT LIMITING
-        TalonFXConfiguration driveConfig = new TalonFXConfiguration();
-        CurrentLimitsConfigs driveCurrentLimit = new CurrentLimitsConfigs();
-        driveCurrentLimit.SupplyCurrentLimitEnable = true;
-        driveCurrentLimit.SupplyCurrentLimit = 60;
-        driveConfig.withCurrentLimits(driveCurrentLimit);
-        driveMotor.getConfigurator().apply(driveConfig);
+        //CONFIGS
+        rotationMotor.getConfigurator().apply(config.rotationMotor().generateTalonFXConfig(60));
+        driveMotor.getConfigurator().apply(config.driveMotor().generateTalonFXConfig(60));
 
         if (config.encoder() > -1) {
             encoder = new CANcoder(config.encoder(), config.rotationMotor().canbus());
             encoderPos = encoder.getPosition();
 
             CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
-            encoderConfig.MagnetSensor.AbsoluteSensorRange = AbsoluteSensorRangeValue.Signed_PlusMinusHalf;
+            //TODO find the new way to set this 
+            // encoderConfig.MagnetSensor.AbsoluteSensorRange = AbsoluteSensorRangeValue.Signed_PlusMinusHalf;
             encoderConfig.MagnetSensor.MagnetOffset = config.offsetRadians();
             encoder.getConfigurator().apply(encoderConfig);
         }
@@ -184,7 +193,7 @@ public class SwerveModule {
             return;
         }
 
-        state = SwerveModuleState.optimize(state, getState().angle);
+        state.optimize(getState().angle);
         driveMotor.set(state.speedMetersPerSecond / config.driveMotor().maxSpeedMetersPerSecond());
 
         rotationMotor.set(rotationPidController.calculate(-getEncoderRadians(), -state.angle.getRadians()));
