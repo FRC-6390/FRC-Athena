@@ -8,11 +8,12 @@
     <artifactId>competition-java</artifactId>
     <version>1.0.0</version>
 
-    <!-- <properties>
+    <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
     </properties>
-    <distributionManagement>
+    
+    <!-- <distributionManagement>
         <repository>
             <id>github</id>
             <name>GitHub FRC-6390 Apache Maven Packages</name>

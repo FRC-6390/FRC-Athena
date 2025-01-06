@@ -6,5 +6,5 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public interface DriveTrainBase {
     
-    public void drive(WheelSpeeds speeds);
+    public void drive(ChassisSpeeds speeds);
 }

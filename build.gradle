@@ -2,18 +2,27 @@ plugins {
   id 'cpp'
   id 'java'
   id 'google-test'
-  id 'edu.wpi.first.wpilib.repositories.WPILibRepositoriesPlugin' version '2020.2'
-  id 'edu.wpi.first.NativeUtils' version '2024.7.2'
+  id 'edu.wpi.first.wpilib.repositories.WPILibRepositoriesPlugin' version '2025.0'
+  id 'edu.wpi.first.NativeUtils' version '2025.9.0'
   id 'edu.wpi.first.GradleJni' version '1.1.0'
   id 'edu.wpi.first.GradleVsCode' version '2.1.0'
 }
 
+ext.wpilibVersion = "2025.+"
+
+java {
+    sourceCompatibility = "17"
+    targetCompatibility = "17"
+}
+
+
 repositories {
   mavenCentral()
-  maven {
-        url 'https://maven.ctr-electronics.com/release/'
-    }
+  maven { url 'https://maven.ctr-electronics.com/release/' }
+  maven { url 'https://maven.revrobotics.com/' }
+  maven { url 'https://3015rangerrobotics.github.io/pathplannerlib/repo'}
 }
+
 if (project.hasProperty('releaseMode')) {
   wpilibRepositories.addAllReleaseRepositories(project)
 } else {
@@ -25,23 +34,23 @@ apply from: 'config.gradle'
 
 // Apply Java configuration
 dependencies {
-    implementation 'com.ctre.phoenix6:wpiapi-java:24.2.0'
-    implementation 'edu.wpi.first.cscore:cscore-java:2024.+'
-    implementation 'edu.wpi.first.cameraserver:cameraserver-java:2024.+'
-    implementation 'edu.wpi.first.ntcore:ntcore-java:2024.+'
-    implementation 'edu.wpi.first.wpilibj:wpilibj-java:2024.+'
-    implementation 'edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:2024.+'
-    implementation 'edu.wpi.first.wpiutil:wpiutil-java:2024.+'
-    implementation 'edu.wpi.first.wpimath:wpimath-java:2024.+'
-    implementation 'edu.wpi.first.wpiunits:wpiunits-java:2024.+'
-    implementation 'edu.wpi.first.hal:hal-java:2024.+'
+    implementation "edu.wpi.first.cscore:cscore-java:$wpilibVersion"
+    implementation "edu.wpi.first.cameraserver:cameraserver-java:$wpilibVersion"
+    implementation "edu.wpi.first.ntcore:ntcore-java:$wpilibVersion"
+    implementation "edu.wpi.first.wpilibj:wpilibj-java:$wpilibVersion"
+    implementation "edu.wpi.first.wpiutil:wpiutil-java:$wpilibVersion"
+    implementation "edu.wpi.first.wpimath:wpimath-java:$wpilibVersion"
+    implementation "edu.wpi.first.wpiunits:wpiunits-java:$wpilibVersion"
+    implementation "edu.wpi.first.hal:hal-java:$wpilibVersion"
     implementation "org.ejml:ejml-simple:0.43.1"
     implementation "com.fasterxml.jackson.core:jackson-annotations:2.15.2"
     implementation "com.fasterxml.jackson.core:jackson-core:2.15.2"
     implementation "com.fasterxml.jackson.core:jackson-databind:2.15.2"
-    implementation 'edu.wpi.first.thirdparty.frc2024.opencv:opencv-java:4.8.0-2'
+    implementation 'edu.wpi.first.thirdparty.frc2025.opencv:opencv-java:4.10.0-2'
 
-    
+    implementation 'com.ctre.phoenix6:wpiapi-java:25.1.0'
+    implementation 'com.pathplanner.lib:PathplannerLib-java:2025.1.1'
+    implementation 'com.revrobotics.frc:REVLib-java:2025.0.0'
 }
 
 // Set up exports properly
