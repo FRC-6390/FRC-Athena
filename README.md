@@ -1,5 +1,5 @@
 # VENDOR DEP
-`https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/FRCAthena2024.json`
+`https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/FRC6390-Athena.json`
 
 # Publishing
 ```bash
