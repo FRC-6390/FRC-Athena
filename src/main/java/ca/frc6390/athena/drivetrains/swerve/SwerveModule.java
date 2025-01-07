@@ -31,26 +31,26 @@ public class SwerveModule {
     private StatusSignal<Angle> encoderPos, drivePos, rotationPos;
 
     // SWERVE MOTOR RECORD
-    public record SwerveMotor(int motor, boolean motorReversed, double gearRatio, double maxSpeedMetersPerSecond,
+    public record SwerveMotor(int id, boolean motorReversed, double gearRatio, double maxSpeedMetersPerSecond,
             String canbus) {
-        public SwerveMotor(int motor, boolean motorReversed, double maxSpeedMetersPerSecond, double gearRatio) {
-            this(motor, motorReversed, gearRatio, maxSpeedMetersPerSecond, "can");
+        public SwerveMotor(int id, boolean motorReversed, double maxSpeedMetersPerSecond, double gearRatio) {
+            this(id, motorReversed, gearRatio, maxSpeedMetersPerSecond, "can");
         }
 
-        public SwerveMotor(int motor, boolean motorReversed, double maxSpeedMetersPerSecond) {
-            this(motor, motorReversed, 1, maxSpeedMetersPerSecond, "can");
+        public SwerveMotor(int id, boolean motorReversed, double maxSpeedMetersPerSecond) {
+            this(id, motorReversed, 1, maxSpeedMetersPerSecond, "can");
         }
 
-        public SwerveMotor(int motor, boolean motorReversed, double maxSpeedMetersPerSecond, String canbus) {
-            this(motor, motorReversed, 1, maxSpeedMetersPerSecond, canbus);
+        public SwerveMotor(int id, boolean motorReversed, double maxSpeedMetersPerSecond, String canbus) {
+            this(id, motorReversed, 1, maxSpeedMetersPerSecond, canbus);
         }
 
-        public SwerveMotor(int motor, boolean motorReversed) {
-            this(motor, motorReversed, 1, 0, "can");
+        public SwerveMotor(int id, boolean motorReversed) {
+            this(id, motorReversed, 1, 0, "can");
         }
 
-        public SwerveMotor(int motor, boolean motorReversed, String canbus) {
-            this(motor, motorReversed, 1, 0, canbus);
+        public SwerveMotor(int id, boolean motorReversed, String canbus) {
+            this(id, motorReversed, 1, 0, canbus);
         }
 
         public TalonFXConfiguration generateTalonFXConfig(double currentLimit) {
@@ -65,11 +65,34 @@ public class SwerveModule {
 
             return driveConfig;
         } 
+
+        public SwerveMotor reversed(){
+            return new SwerveMotor(id, true, gearRatio, maxSpeedMetersPerSecond, canbus);
+        }
+
+        public SwerveEncoder asEncoder(double offsetRadian) {
+            return new SwerveEncoder(id, offsetRadian, gearRatio, canbus);
+        }
     }
 
-    public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, double offsetRadians, int encoder, double encoderGearRatio) {
+    public record SwerveEncoder(int id, double offsetRadians, double gearRatio, String canbus) {
+
+        public SwerveEncoder(int id, double offsetRadians, double gearRatio) {
+            this(id, offsetRadians, gearRatio, "can");
+        }
+
+        public SwerveEncoder(int id, double offsetRadians) {
+            this(id, offsetRadians, 1, "can");
+        }
+
+        public SwerveEncoder(int id, double offsetRadians, String canbus) {
+            this(id, offsetRadians, 1, canbus);
+        }
+    }
+
+    public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, SwerveEncoder encoder) {
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, double offsetRadian) {
-            this(module_location, wheelDiameter, driveMotor, rotationMotor, rotationPID, offsetRadian, -1, -1);
+            this(module_location, wheelDiameter, driveMotor, rotationMotor, rotationPID, rotationMotor.asEncoder(offsetRadian));
         }
     }
 
@@ -82,20 +105,20 @@ public class SwerveModule {
         rotationPidController.enableContinuousInput(-Math.PI, Math.PI);
 
         // MOTOR INITIALIZATION
-        driveMotor = new TalonFX(config.driveMotor().motor(), config.driveMotor().canbus());
-        rotationMotor = new TalonFX(config.rotationMotor().motor(), config.rotationMotor().canbus());
+        driveMotor = new TalonFX(config.driveMotor().id(), config.driveMotor().canbus());
+        rotationMotor = new TalonFX(config.rotationMotor().id(), config.rotationMotor().canbus());
 
         //CONFIGS
         rotationMotor.getConfigurator().apply(config.rotationMotor().generateTalonFXConfig(60));
         driveMotor.getConfigurator().apply(config.driveMotor().generateTalonFXConfig(60));
 
-        if (config.encoder() > -1) {
-            encoder = new CANcoder(config.encoder(), config.rotationMotor().canbus());
+        if (config.encoder().id() != config.rotationMotor().id()) {
+            encoder = new CANcoder(config.encoder().id(), config.encoder().canbus());
             encoderPos = encoder.getPosition();
 
             CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
             encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 0.5; //180 <-> (-180)
-            encoderConfig.MagnetSensor.MagnetOffset = config.offsetRadians();
+            encoderConfig.MagnetSensor.MagnetOffset = config.encoder().offsetRadians();
             encoder.getConfigurator().apply(encoderConfig);
         }
 
@@ -146,11 +169,11 @@ public class SwerveModule {
     }
 
     public double getEncoderRadiansAbsolute() {
-        return getEncoderRadians() * config.encoderGearRatio();
+        return getEncoderRadians() * config.encoder().gearRatio();
     }
 
     public double getOffsetRadians() {
-        return config.offsetRadians();
+        return config.encoder().offsetRadians();
     }
 
     public double getRotationMotorRadiansAbsolute() {
