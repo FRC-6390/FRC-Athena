@@ -8,7 +8,6 @@ import edu.wpi.first.math.geometry.Translation2d;
 
 public class SwerveHelpers {
  
-    
     public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
         Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, wheelbase/2);
         Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, -wheelbase/2);

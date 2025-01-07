@@ -2,6 +2,7 @@ package ca.frc6390.athena.drivetrains.swerve;
 
 import com.ctre.phoenix6.hardware.Pigeon2;
 
+import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -20,19 +21,19 @@ public class SwerveDrivetrain extends SubsystemBase {
   private static boolean enableDriftCorrection;
   private double desiredHeading;
 
-  public SwerveDrivetrain(SwerveModule[] modules, int gyro) {
-    this(modules, 1, true, new PIDController(0, 0, 0));
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, int gyro) {
+    this(configs, 1, true, new PIDController(0, 0, 0));
   }
 
-  public SwerveDrivetrain(SwerveModule[] modules, int gyroPigeon2, boolean driftCorrection,
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, int gyroPigeon2, boolean driftCorrection,
     PIDController driftCorrectionPID) {
-    for (int i = 0; i < modules.length; i++) {
-      swerveModules[i] = modules[i];
+    for (int i = 0; i < configs.length; i++) {
+      swerveModules[i] = new SwerveModule(configs[i]) ;
     }
     gyro = new Pigeon2(gyroPigeon2);
-    Translation2d[] moduleLocations = new Translation2d[modules.length];
-    for (int i = 0; i < modules.length; i++) {
-      moduleLocations[i] = modules[i].getModuleLocation();
+    Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
+    for (int i = 0; i < configs.length; i++) {
+      moduleLocations[i] = swerveModules[i].getModuleLocation();
     }
     kinematics = new SwerveDriveKinematics(moduleLocations);
     enableDriftCorrection = driftCorrection;
