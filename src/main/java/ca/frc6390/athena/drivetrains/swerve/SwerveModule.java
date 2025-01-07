@@ -94,8 +94,7 @@ public class SwerveModule {
             encoderPos = encoder.getPosition();
 
             CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
-            //TODO find the new way to set this 
-            // encoderConfig.MagnetSensor.AbsoluteSensorRange = AbsoluteSensorRangeValue.Signed_PlusMinusHalf;
+            encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 0.5; //180 <-> (-180)
             encoderConfig.MagnetSensor.MagnetOffset = config.offsetRadians();
             encoder.getConfigurator().apply(encoderConfig);
         }
