@@ -7,7 +7,7 @@ import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
 
-public class SwerverDriveCommand extends Command {
+public class SwerveDriveCommand extends Command {
 
 
   public record SwerverDriveCommandConfig(double thetaDeadzone, double maxAcceleration, double maxAngularAcceleration) {}
@@ -21,7 +21,7 @@ public class SwerverDriveCommand extends Command {
 
   private double maxAcceleration, maxAngularAcceleration;
 
-  public SwerverDriveCommand(SwerveDrivetrain driveTrain, DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput, SwerverDriveCommandConfig config) {
+  public SwerveDriveCommand(SwerveDrivetrain driveTrain, DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput, SwerverDriveCommandConfig config) {
     this.driveTrain = driveTrain;
     this.xInput = xInput;
     this.yInput = yInput;
