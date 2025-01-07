@@ -10,7 +10,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 public class SwerveDriveCommand extends Command {
 
 
-  public record SwerverDriveCommandConfig(double thetaDeadzone, double maxAcceleration, double maxAngularAcceleration) {}
+  public record SwerveDriveCommandConfig(double thetaDeadzone, double maxAcceleration, double maxAngularAcceleration) {}
 
   //Creates a drivetrain subsystem
   private SwerveDrivetrain driveTrain;
@@ -21,7 +21,7 @@ public class SwerveDriveCommand extends Command {
 
   private double maxAcceleration, maxAngularAcceleration;
 
-  public SwerveDriveCommand(SwerveDrivetrain driveTrain, DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput, SwerverDriveCommandConfig config) {
+  public SwerveDriveCommand(SwerveDrivetrain driveTrain, DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput, SwerveDriveCommandConfig config) {
     this.driveTrain = driveTrain;
     this.xInput = xInput;
     this.yInput = yInput;
