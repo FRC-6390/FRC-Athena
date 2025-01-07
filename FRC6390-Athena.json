@@ -1,7 +1,7 @@
 {
     "fileName": "FRC6390-Athena.json",
     "name": "FRC6390 Athena (v1.0)",
-    "version": "2025.0.5",
+    "version": "2025.0.6",
     "frcYear": "2025",
     "uuid": "e9bbc616-2d62-4e83-b291-3933ea14f1dc",
     "mavenUrls": [
@@ -12,7 +12,7 @@
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "competition-java",
-            "version": "2025.0.5"
+            "version": "2025.0.6"
         }
     ],
     "jniDependencies": [],

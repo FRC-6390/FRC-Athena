@@ -18,15 +18,19 @@ import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.AngularVelocity;
 
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.ComplexWidget;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class SwerveModule {
 
     private final SwerveModuleConfig config;
 
     private final TalonFX driveMotor;
     private final TalonFX rotationMotor;
+    private NeutralModeValue mode;
     private CANcoder encoder;
     private final PIDController rotationPidController;
-
+    
     private StatusSignal<AngularVelocity> driveVel;
     private StatusSignal<Angle> encoderPos, drivePos, rotationPos;
 
@@ -75,24 +79,35 @@ public class SwerveModule {
         }
     }
 
-    public record SwerveEncoder(int id, double offsetRadians, double gearRatio, String canbus) {
+    public record SwerveEncoder(int id, double offsetRotations, double gearRatio, String canbus) {
 
-        public SwerveEncoder(int id, double offsetRadians, double gearRatio) {
-            this(id, offsetRadians, gearRatio, "can");
+        public SwerveEncoder(int id, double offsetRotations, double gearRatio) {
+            this(id, offsetRotations, gearRatio, "can");
         }
 
-        public SwerveEncoder(int id, double offsetRadians) {
-            this(id, offsetRadians, 1, "can");
+        public SwerveEncoder(int id, double offsetRotations) {
+            this(id, offsetRotations, 1, "can");
         }
 
-        public SwerveEncoder(int id, double offsetRadians, String canbus) {
-            this(id, offsetRadians, 1, canbus);
+        public SwerveEncoder(int id, double offsetRotations, String canbus) {
+            this(id, offsetRotations, 1, canbus);
         }
+
+        public CANcoderConfiguration generateConfig() {
+           return generateConfig(offsetRotations);
+        } 
+
+        public CANcoderConfiguration generateConfig(double offset) {
+            CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
+            encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 0.5; //180 <-> (-180)
+            encoderConfig.MagnetSensor.MagnetOffset = offset;
+           return encoderConfig;
+        } 
     }
 
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, SwerveEncoder encoder) {
-        public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, double offsetRadian) {
-            this(module_location, wheelDiameter, driveMotor, rotationMotor, rotationPID, rotationMotor.asEncoder(offsetRadian));
+        public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, double offsetRotations) {
+            this(module_location, wheelDiameter, driveMotor, rotationMotor, rotationPID, rotationMotor.asEncoder(offsetRotations));
         }
     }
 
@@ -115,27 +130,22 @@ public class SwerveModule {
         if (config.encoder().id() != config.rotationMotor().id()) {
             encoder = new CANcoder(config.encoder().id(), config.encoder().canbus());
             encoderPos = encoder.getPosition();
-
-            CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
-            encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 0.5; //180 <-> (-180)
-            encoderConfig.MagnetSensor.MagnetOffset = config.encoder().offsetRadians();
-            encoder.getConfigurator().apply(encoderConfig);
+            encoder.getConfigurator().apply(config.encoder().generateConfig());
+        }else {
+            encoderPos = rotationMotor.getRotorPosition();
         }
 
         // DRIVE MOTOR POSITION AND VELOCITY
         drivePos = driveMotor.getRotorPosition();
         driveVel = driveMotor.getRotorVelocity();
         rotationPos = rotationMotor.getRotorPosition();
-
         // RESET ENCODERS AND BRAKE MODE MODULES
         resetEncoders();
-        lock();
+        setNeutralMode(NeutralModeValue.Brake);
     }
 
     public double getDriveMotorVelocity() {
-
         return driveVel.getValueAsDouble() * config.driveMotor().gearRatio() * Math.PI * config.wheelDiameter();
-
     }
 
     public Translation2d getModuleLocation() {
@@ -143,46 +153,37 @@ public class SwerveModule {
     }
 
     public double getDriveMotorPosition() {
-
         return drivePos.getValueAsDouble() * config.driveMotor().gearRatio() * Math.PI * config.wheelDiameter();
-    }
-
-    public double getModuleRotationRadians() {
-        if (encoder != null) {
-            return getEncoderRadians();
-        }
-
-        return getRotationMotorRadians();
-    }
-
-    public double getModuleRotationRadiansAbsolute(){
-
-        if(encoder != null) {
-            return getEncoderRadiansAbsolute();
-        }
-
-        return getEncoderRadiansAbsolute();
     }
 
     public double getEncoderRadians() {
         return (encoderPos.getValueAsDouble() * 360 * Math.PI / 180d);
     }
 
-    public double getEncoderRadiansAbsolute() {
-        return getEncoderRadians() * config.encoder().gearRatio();
+    public double getEncoderRotations() {
+        return encoderPos.getValueAsDouble();
     }
 
-    public double getOffsetRadians() {
-        return config.encoder().offsetRadians();
+    public double getEncoderDegrees() {
+        return (encoderPos.getValueAsDouble() * 360) + 180;
     }
 
-    public double getRotationMotorRadiansAbsolute() {
-        return getRotationMotorRadians() * config.rotationMotor().gearRatio();
+    public double getOffsetRotations() {
+        return config.encoder().offsetRotations();
     }
-  
 
-    public double getRotationMotorRadians() {
-        return (rotationPos.getValueAsDouble() * 360 * Math.PI / 180d);
+    public void setOffsetRotations(double offset) {
+        encoder.getConfigurator().apply(config.encoder().generateConfig(offset));
+    }
+
+    public double getOffsetDegreesUnsigned() {
+        return (config.encoder().offsetRotations() * 360) + 180;
+    }
+
+    public void setOffsetDegreesUnsigned(double offset) {
+        
+
+        encoder.getConfigurator().apply(config.encoder().generateConfig(((offset-180)/360)));
     }
 
     public void resetEncoders() {
@@ -191,11 +192,11 @@ public class SwerveModule {
     }
 
     public SwerveModuleState getState() {
-        return new SwerveModuleState(getDriveMotorVelocity(), new Rotation2d(getModuleRotationRadians()));
+        return new SwerveModuleState(getDriveMotorVelocity(), new Rotation2d(getEncoderRadians()));
     }
 
     public SwerveModulePosition getPostion() {
-        return new SwerveModulePosition(getDriveMotorPosition(), new Rotation2d(getModuleRotationRadians()));
+        return new SwerveModulePosition(getDriveMotorPosition(), new Rotation2d(getEncoderRadians()));
     }
 
     public void setDriveMotor(double speed) {
@@ -227,19 +228,21 @@ public class SwerveModule {
     }
 
     public void setToAngle(double angle) {
-        SwerveModuleState state = new SwerveModuleState(0, new Rotation2d(angle));
-
-        rotationMotor.set(rotationPidController.calculate(-getEncoderRadians(), -state.angle.getRadians()));
+        setDesiredState(new SwerveModuleState(0, new Rotation2d(angle)));
     }
 
-    public void lock() {
-        driveMotor.setNeutralMode(NeutralModeValue.Brake);
-        rotationMotor.setNeutralMode(NeutralModeValue.Brake);
+    public void setNeutralMode(boolean brake){
+        setNeutralMode(brake ? NeutralModeValue.Brake : NeutralModeValue.Coast);
     }
 
-    public void unlock() {
-        driveMotor.setNeutralMode(NeutralModeValue.Coast);
-        rotationMotor.setNeutralMode(NeutralModeValue.Coast);
+    public void setNeutralMode(NeutralModeValue mode){
+        this.mode = mode;
+        driveMotor.setNeutralMode(mode);
+        rotationMotor.setNeutralMode(mode);
+    }
+
+    public NeutralModeValue getNeutralMode(){
+        return mode;
     }
 
     public void refresh() {
@@ -249,4 +252,17 @@ public class SwerveModule {
         rotationPos.refresh();
     }
 
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+
+        ComplexWidget lockedWidget = layout.add((builder) -> builder.addBooleanProperty("Locked", () -> mode == NeutralModeValue.Brake ? true : false, this::setNeutralMode));
+        lockedWidget.withWidget(BuiltInWidgets.kBooleanBox);
+
+        ComplexWidget offsetWidget = layout.add((builder) -> builder.addDoubleProperty("Offset Rotations", this::getOffsetDegreesUnsigned, this::setOffsetDegreesUnsigned));
+        offsetWidget.withWidget(BuiltInWidgets.kGyro);
+
+        ComplexWidget encoderWidget = layout.add((builder) -> builder.addDoubleProperty("Encoder Rotations", this::getEncoderRotations, null));
+        encoderWidget.withWidget(BuiltInWidgets.kGyro);
+        
+        return layout;
+    }
 }
