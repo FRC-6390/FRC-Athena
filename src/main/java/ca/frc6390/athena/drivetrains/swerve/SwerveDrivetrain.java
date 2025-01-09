@@ -33,7 +33,8 @@ public class SwerveDrivetrain extends SubsystemBase {
 
   public SwerveDrivetrain(SwerveModuleConfig[] configs, int gyroId, boolean driftCorrection,
       PIDController driftCorrectionPID) {
-
+    speeds = new ChassisSpeeds();
+    feedbackSpeeds = new ChassisSpeeds();
     swerveModules = new SwerveModule[configs.length];
     for (int i = 0; i < configs.length; i++) {
       swerveModules[i] = new SwerveModule(configs[i]);
