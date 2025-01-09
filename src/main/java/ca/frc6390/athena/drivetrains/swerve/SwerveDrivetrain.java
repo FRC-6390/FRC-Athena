@@ -39,7 +39,7 @@ public class SwerveDrivetrain extends SubsystemBase {
     for (int i = 0; i < configs.length; i++) {
       swerveModules[i] = new SwerveModule(configs[i]);
     }
-    gyro = new Pigeon2(gyroId);
+    gyro = new Pigeon2(gyroId, "can");
     Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
     for (int i = 0; i < configs.length; i++) {
       moduleLocations[i] = swerveModules[i].getModuleLocation();
