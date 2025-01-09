@@ -48,7 +48,7 @@ public class SDSModules {
     }
 
     public SwerveMotor[] generateMotors(double gearRatio, int[] ids, String canbus){
-        return SwerveHelpers.generateMotors(gearRatio, calculateFreeSpeedMeter(motor, module), canbus, ids);
+        return SwerveHelpers.generateMotors(gearRatio, calculateFreeSpeedMeter(), canbus, ids);
     }
 
     public SwerveEncoder[] generateEncoders(int[] ids, double[] offsets){
@@ -177,14 +177,14 @@ public class SDSModules {
         }
     }
 
-    public static double calculateFreeSpeedFeet(SDSMotor motor, SDSMK module) {
+    public double calculateFreeSpeedFeet() {
         double wheelCircumferenceFeet = Math.PI * (module.getWheelDiameterInches() / 12.0);
         double motorRPM = motor.getFreeSpeedRPM();
         double wheelRPM = motorRPM / module.getDriveGearRatio();
         return wheelCircumferenceFeet * (wheelRPM / 60.0);
     }
 
-    public static double calculateFreeSpeedMeter(SDSMotor motor, SDSMK module) {
-        return Units.feetToMeters(calculateFreeSpeedFeet(motor, module));
+    public double calculateFreeSpeedMeter() {
+        return Units.feetToMeters(calculateFreeSpeedFeet());
     }
 }
