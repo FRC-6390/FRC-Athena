@@ -5,7 +5,7 @@ apply plugin: 'maven-publish'
 // Common Variables & Config
 // -----------------------------------------------------------------------------
 ext.licenseFile = files("$rootDir/LICENSE.txt")
-def pubVersion = '2025.1.8'
+def pubVersion = '2025.2.0'
 def frcYear = project.hasProperty('frcYear') ? project.property('frcYear') : '2025'
 
 // Group/Artifact used below and for updating JSON
@@ -189,20 +189,18 @@ task publishLocal {
     dependsOn copyJsonToVendordeps
 }
 
-task publishOnline {
-    group = 'Publishing'
-    description = 'Publishes artifacts online to the GitHub Maven repository.'
-    dependsOn publish
-}
+// task publishOnline {
+//     group = 'Publishing'
+//     description = 'Publishes artifacts online to the GitHub Maven repository.'
+//     dependsOn publish
+// }
 
 // Decide default publish behavior
 if (publishMode == 'local') {
     publish.dependsOn publishLocal
 } else if (publishMode == 'online') {
-    publish.dependsOn publishOnline
 } else {
     publish.dependsOn publishLocal
-    publish.dependsOn publishOnline
 }
 
 // -----------------------------------------------------------------------------
