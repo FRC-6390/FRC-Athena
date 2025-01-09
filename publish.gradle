@@ -5,7 +5,7 @@ apply plugin: 'maven-publish'
 // Common Variables & Config
 // -----------------------------------------------------------------------------
 ext.licenseFile = files("$rootDir/LICENSE.txt")
-def pubVersion = '2025.1.4'
+def pubVersion = '2025.1.8'
 def frcYear = project.hasProperty('frcYear') ? project.property('frcYear') : '2025'
 
 // Group/Artifact used below and for updating JSON
@@ -245,21 +245,21 @@ publishing {
             }
         }
 
-        // Additional local release repo (2nd snippet)
-        maven {
-            name = "localReleasesRepo"
-            url = releasesRepoUrl
-        }
+        // // Additional local release repo (2nd snippet)
+        // maven {
+        //     name = "localReleasesRepo"
+        //     url = releasesRepoUrl
+        // }
 
-        // Another remote (if needed, can remove if duplicate)
-        maven {
-            name = "FRC-Athena"
-            url = "https://maven.pkg.github.com/FRC-6390/FRC-Athena"
-            credentials {
-                username = System.getenv("MAVEN_USERNAME")
-                password = System.getenv("MAVEN_PASSWORD")
-            }
-        }
+        // // Another remote (if needed, can remove if duplicate)
+        // maven {
+        //     name = "FRC-Athena"
+        //     url = "https://maven.pkg.github.com/FRC-6390/FRC-Athena"
+        //     credentials {
+        //         username = System.getenv("MAVEN_USERNAME")
+        //         password = System.getenv("MAVEN_PASSWORD")
+        //     }
+        // }
     }
 
     // Publications

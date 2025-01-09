@@ -4,6 +4,8 @@ import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import java.util.Map;
+
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.configs.CANcoderConfiguration;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
@@ -19,7 +21,6 @@ import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.AngularVelocity;
 
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ComplexWidget;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class SwerveModule {
 
@@ -253,15 +254,10 @@ public class SwerveModule {
     }
 
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
-
-        ComplexWidget lockedWidget = layout.add("Locked", (builder) -> builder.addBooleanProperty("Locked", () -> mode == NeutralModeValue.Brake ? true : false, this::setNeutralMode));
-        lockedWidget.withWidget(BuiltInWidgets.kBooleanBox);
-
-        ComplexWidget offsetWidget = layout.add("Offset Rotations", (builder) -> builder.addDoubleProperty("Offset Rotations", this::getOffsetDegreesUnsigned, this::setOffsetDegreesUnsigned));
-        offsetWidget.withWidget(BuiltInWidgets.kGyro);
-
-        ComplexWidget encoderWidget = layout.add("Encoder Rotations", (builder) -> builder.addDoubleProperty("Encoder Rotations", this::getEncoderRotations, null));
-        encoderWidget.withWidget(BuiltInWidgets.kGyro);
+        layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
+        layout.addBoolean("Locked", () -> mode == NeutralModeValue.Brake ? true : false).withWidget(BuiltInWidgets.kBooleanBox).withPosition(0, 1);
+        layout.addDouble("Offset Rotations", this::getOffsetDegreesUnsigned).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
+        layout.addDouble("Encoder Rotations", this::getEncoderRotations).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
         
         return layout;
     }
