@@ -28,15 +28,17 @@ public class SwerveDrivetrain extends SubsystemBase {
   private double desiredHeading;
 
   public SwerveDrivetrain(SwerveModuleConfig[] configs, int gyro) {
-    this(configs, 1, true, new PIDController(0, 0, 0));
+    this(configs, gyro, false, new PIDController(0, 0, 0));
   }
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, int gyroPigeon2, boolean driftCorrection,
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, int gyroId, boolean driftCorrection,
       PIDController driftCorrectionPID) {
+
+    swerveModules = new SwerveModule[configs.length];
     for (int i = 0; i < configs.length; i++) {
       swerveModules[i] = new SwerveModule(configs[i]);
     }
-    gyro = new Pigeon2(gyroPigeon2);
+    gyro = new Pigeon2(gyroId);
     Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
     for (int i = 0; i < configs.length; i++) {
       moduleLocations[i] = swerveModules[i].getModuleLocation();

@@ -40,31 +40,31 @@ public class SwerveHelpers {
         return result;
     }
 
-    public static SwerveEncoder[] generateEncoders(double gearRatio, double[] offsetRadians, String canbus, int... ids) {
+    public static SwerveEncoder[] generateEncoders(double gearRatio, double[] offsetRotations, String canbus, int... ids) {
 
-        if (ids.length != offsetRadians.length) {
+        if (ids.length != offsetRotations.length) {
             throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE ENCODERS");
         }
 
         SwerveEncoder[] result = new SwerveEncoder[ids.length];
     
         for (int i = 0; i < ids.length; i++) {
-            result[i] = new SwerveEncoder(ids[i], offsetRadians[i], gearRatio, canbus);
+            result[i] = new SwerveEncoder(ids[i], offsetRotations[i], gearRatio, canbus);
         }
 
         return result;
     }
 
-    public static SwerveEncoder[] generateEncoders(double gearRatio, double[] offsetRadians, int... ids) {
+    public static SwerveEncoder[] generateEncoders(double gearRatio, double[] offsetRotations, int... ids) {
 
-        if (ids.length != offsetRadians.length) {
+        if (ids.length != offsetRotations.length) {
             throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE ENCODERS");
         }
 
         SwerveEncoder[] result = new SwerveEncoder[ids.length];
     
         for (int i = 0; i < ids.length; i++) {
-            result[i] = new SwerveEncoder(ids[i], offsetRadians[i], gearRatio);
+            result[i] = new SwerveEncoder(ids[i], offsetRotations[i], gearRatio);
         }
 
         return result;
