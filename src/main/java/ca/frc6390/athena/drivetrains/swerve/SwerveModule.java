@@ -254,13 +254,13 @@ public class SwerveModule {
 
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
 
-        ComplexWidget lockedWidget = layout.add((builder) -> builder.addBooleanProperty("Locked", () -> mode == NeutralModeValue.Brake ? true : false, this::setNeutralMode));
+        ComplexWidget lockedWidget = layout.add("Locked", (builder) -> builder.addBooleanProperty("Locked", () -> mode == NeutralModeValue.Brake ? true : false, this::setNeutralMode));
         lockedWidget.withWidget(BuiltInWidgets.kBooleanBox);
 
-        ComplexWidget offsetWidget = layout.add((builder) -> builder.addDoubleProperty("Offset Rotations", this::getOffsetDegreesUnsigned, this::setOffsetDegreesUnsigned));
+        ComplexWidget offsetWidget = layout.add("Offset Rotations", (builder) -> builder.addDoubleProperty("Offset Rotations", this::getOffsetDegreesUnsigned, this::setOffsetDegreesUnsigned));
         offsetWidget.withWidget(BuiltInWidgets.kGyro);
 
-        ComplexWidget encoderWidget = layout.add((builder) -> builder.addDoubleProperty("Encoder Rotations", this::getEncoderRotations, null));
+        ComplexWidget encoderWidget = layout.add("Encoder Rotations", (builder) -> builder.addDoubleProperty("Encoder Rotations", this::getEncoderRotations, null));
         encoderWidget.withWidget(BuiltInWidgets.kGyro);
         
         return layout;

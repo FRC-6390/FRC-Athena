@@ -1,15 +1,45 @@
+// Apply the Maven Publish plugin once
 apply plugin: 'maven-publish'
 
+// -----------------------------------------------------------------------------
+// Common Variables & Config
+// -----------------------------------------------------------------------------
 ext.licenseFile = files("$rootDir/LICENSE.txt")
+def pubVersion = '2025.1.4'
+def frcYear = project.hasProperty('frcYear') ? project.property('frcYear') : '2025'
 
-def pubVersion = '2025.0.9'
+// Group/Artifact used below and for updating JSON
+def artifactGroupId = 'ca.frc6390.athena'
+def baseArtifactId = 'competition-java'
 
+// Detect OS for WPILib folder
+def osName = System.getProperty("os.name").toLowerCase()
+def wpilibFolder
+if (osName.contains("win")) {
+    wpilibFolder = file("C:/Users/Public/wpilib/${frcYear}")
+} else if (osName.contains("mac")) {
+    wpilibFolder = file("/Users/Shared/wpilib/${frcYear}")
+} else {
+    wpilibFolder = file("/home/${System.getenv('USER')}/wpilib/${frcYear}")
+}
+
+// Key directories
+def vendordepsFolder = file("$wpilibFolder/vendordeps")
+def mavenFolder = file("$wpilibFolder/maven")
 def outputsFolder = file("$buildDir/outputs")
-
 def versionFile = file("$outputsFolder/version.txt")
+def athenaJsonFile = file("$projectDir/FRC6390-Athena.json")
+def localRepoDir = file("$buildDir/repos/releases")
+
+// Publish mode can be: 'local', 'online', 'all'
+def publishMode = project.hasProperty('publishMode') ? project.property('publishMode') : 'all'
+
+// -----------------------------------------------------------------------------
+// Tasks: outputVersions, updateAthenaJson, copy tasks
+// -----------------------------------------------------------------------------
 
 task outputVersions() {
-    description = 'Prints the versions of wpilib to a file for use by the downstream packaging project'
+    description = 'Prints the version to a file (for use by downstream tasks)'
     group = 'Build'
     outputs.files(versionFile)
 
@@ -19,94 +49,97 @@ task outputVersions() {
     }
 
     doLast {
-        versionFile.write pubVersion
+        versionFile.write(pubVersion)
     }
 }
 
-task libraryBuild() {}
+task updateAthenaJson {
+    description = 'Updates the FRC6390-Athena.json file with the correct version, frcYear, and javaDependencies[0]'
+    group = 'Publishing'
+    inputs.file athenaJsonFile
+    outputs.file file("$outputsFolder/FRC6390-Athena.json")
 
-build.dependsOn outputVersions
+    doLast {
+        def jsonContent = new groovy.json.JsonSlurper().parse(athenaJsonFile)
+        // top-level version/frcYear
+        jsonContent.version = pubVersion
+        jsonContent.frcYear = frcYear
 
+        // Only update javaDependencies[0]
+        // (Assumes the array and index [0] exist in your JSON!)
+        jsonContent.javaDependencies[0].version = pubVersion
+        jsonContent.javaDependencies[0].groupId = artifactGroupId
+        jsonContent.javaDependencies[0].artifactId = baseArtifactId
+
+        def updatedJson = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(jsonContent))
+        athenaJsonFile.write(updatedJson)
+    }
+}
+
+task copyToWpilib(type: Copy) {
+    description = 'Copies local Maven artifacts + updated JSON to WPILib folder'
+    group = 'Publishing'
+    dependsOn updateAthenaJson
+    onlyIf { publishMode == 'local' || publishMode == 'all' }
+    from localRepoDir
+    into mavenFolder
+
+    doFirst {
+        wpilibFolder.mkdirs()
+        mavenFolder.mkdirs()
+        vendordepsFolder.mkdirs()
+    }
+}
+
+task copyJsonToVendordeps(type: Copy) {
+    description = 'Copies the updated FRC6390-Athena.json file to the vendordeps folder'
+    group = 'Publishing'
+    dependsOn updateAthenaJson
+    from file("$athenaJsonFile")
+    into vendordepsFolder
+}
+
+// -----------------------------------------------------------------------------
+// Adding the extra build tasks from the second snippet
+// -----------------------------------------------------------------------------
+
+task libraryBuild() {
+    description = 'Dummy library build task'
+    group = 'Build'
+}
+
+// Simple copy-all-outputs pattern
 task copyAllOutputs(type: Copy) {
+    description = 'Copies all final outputs to a single folder'
+    group = 'Build'
     destinationDir file("$buildDir/allOutputs")
     from versionFile
     dependsOn outputVersions
 }
 
-build.dependsOn copyAllOutputs
-copyAllOutputs.dependsOn outputVersions
-
-ext.addTaskToCopyAllOutputs = { task ->
-    copyAllOutputs.dependsOn task
-    copyAllOutputs.inputs.file task.archiveFile
-    copyAllOutputs.from task.archiveFile
+// Utility extension to attach build artifacts to copyAllOutputs
+ext.addTaskToCopyAllOutputs = { theTask ->
+    copyAllOutputs.dependsOn theTask
+    copyAllOutputs.inputs.file theTask.archiveFile
+    copyAllOutputs.from theTask.archiveFile
 }
 
-def artifactGroupId = 'ca.frc6390.athena'
-def baseArtifactId = 'competition'
+// -----------------------------------------------------------------------------
+// Jar tasks & artifacts
+// -----------------------------------------------------------------------------
+
+// We'll build a small naming convention with these
 def driverZipBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-driver_CLS"
 def zipBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-cpp_CLS"
 def javaBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-java_CLS"
 
-// task cppHeadersZip(type: Zip) {
-//     destinationDirectory = outputsFolder
-//     archiveBaseName = zipBaseName
-//     archiveClassifier = "headers"
-
-//     from(licenseFile) {
-//         into '/'
-//     }
-
-//     from('src/main/native/include') {
-//         into '/'
-//     }
-// }
-
-// task cppSourceZip(type: Zip) {
-//     destinationDirectory = outputsFolder
-//     archiveBaseName = zipBaseName
-//     archiveClassifier = "sources"
-
-//     from(licenseFile) {
-//         into '/'
-//     }
-
-//     from('src/main/native/cpp') {
-//         into '/'
-//     }
-// }
-
-// task cppDriverHeadersZip(type: Zip) {
-//     destinationDirectory = outputsFolder
-//     archiveBaseName = driverZipBaseName
-//     archiveClassifier = "headers"
-
-//     from(licenseFile) {
-//         into '/'
-//     }
-
-//     from('src/main/driver/include') {
-//         into '/'
-//     }
-// }
-
-// build.dependsOn cppHeadersZip
-// addTaskToCopyAllOutputs(cppHeadersZip)
-// build.dependsOn cppSourceZip
-// addTaskToCopyAllOutputs(cppSourceZip)
-// build.dependsOn cppDriverHeadersZip
-// addTaskToCopyAllOutputs(cppDriverHeadersZip)
-
+// Source jar
 task sourcesJar(type: Jar, dependsOn: classes) {
     archiveClassifier = 'sources'
     from sourceSets.main.allSource
 }
 
-// task javadocJar(type: Jar, dependsOn: javadoc) {
-//     archiveClassifier = 'javadoc'
-//     from javadoc.destinationDir
-// }
-
+// Jars for publication
 task outputJar(type: Jar, dependsOn: classes) {
     archiveBaseName = javaBaseName
     destinationDirectory = outputsFolder
@@ -120,41 +153,105 @@ task outputSourcesJar(type: Jar, dependsOn: classes) {
     from sourceSets.main.allSource
 }
 
-// task outputJavadocJar(type: Jar, dependsOn: javadoc) {
-//     archiveBaseName = javaBaseName
-//     destinationDirectory = outputsFolder
-//     archiveClassifier = 'javadoc'
-//     from javadoc.destinationDir
-// }
-
 artifacts {
     archives sourcesJar
-    // archives javadocJar
     archives outputJar
     archives outputSourcesJar
-    // archives outputJavadocJar
 }
 
+// Tie new jars into copyAllOutputs
 addTaskToCopyAllOutputs(outputSourcesJar)
-// addTaskToCopyAllOutputs(outputJavadocJar)
 addTaskToCopyAllOutputs(outputJar)
 
-build.dependsOn outputSourcesJar
-// build.dependsOn outputJavadocJar
-build.dependsOn outputJar
+// -----------------------------------------------------------------------------
+// Wire up build dependencies
+// -----------------------------------------------------------------------------
 
+build.dependsOn outputVersions
+build.dependsOn copyAllOutputs
+build.dependsOn updateAthenaJson
+build.dependsOn copyToWpilib
+build.dependsOn copyJsonToVendordeps
+build.dependsOn sourcesJar
+build.dependsOn outputJar
+build.dependsOn outputSourcesJar
 libraryBuild.dependsOn build
 
+// -----------------------------------------------------------------------------
+// Publishing Tasks
+// -----------------------------------------------------------------------------
+
+task publishLocal {
+    group = 'Publishing'
+    description = 'Publishes artifacts locally and copies them to the WPILib folder.'
+    dependsOn publishToMavenLocal
+    dependsOn copyToWpilib
+    dependsOn copyJsonToVendordeps
+}
+
+task publishOnline {
+    group = 'Publishing'
+    description = 'Publishes artifacts online to the GitHub Maven repository.'
+    dependsOn publish
+}
+
+// Decide default publish behavior
+if (publishMode == 'local') {
+    publish.dependsOn publishLocal
+} else if (publishMode == 'online') {
+    publish.dependsOn publishOnline
+} else {
+    publish.dependsOn publishLocal
+    publish.dependsOn publishOnline
+}
+
+// -----------------------------------------------------------------------------
+// Repositories & Publications
+// -----------------------------------------------------------------------------
+
+// Extra local 'releases' folder for debugging
 def releasesRepoUrl = "$buildDir/repos/releases"
 
+// An optional clean-up step. Remove if undesired.
+task cleanReleaseRepo(type: Delete) {
+    description = 'Cleans up the local releases repo before repopulating'
+    delete releasesRepoUrl
+}
+
+// Force all tasks (except the cleaner itself) to run after cleaning
+tasks.matching { it != cleanReleaseRepo }.all {
+    it.dependsOn cleanReleaseRepo
+}
+
 publishing {
-    
+    // Repositories
     repositories {
-        // maven {
+        // From the first snippet: local or online or both
+        if (publishMode == 'local' || publishMode == 'all') {
+            maven {
+                name = "localRepo"
+                url = localRepoDir
+            }
+        }
 
-        //     url = releasesRepoUrl
-        // }
+        if (publishMode == 'online' || publishMode == 'all') {
+            maven {
+                name = "FRC-Athena-GitHub"
+                url = "https://maven.pkg.github.com/FRC-6390/FRC-Athena"
+                credentials {
+                    username = System.getenv("MAVEN_USERNAME")
+                    password = System.getenv("MAVEN_PASSWORD")
+                }
+            }
+        }
 
+        // Additional local release repo (2nd snippet)
+        maven {
+            name = "localReleasesRepo"
+            url = releasesRepoUrl
+        }
+
+        // Another remote (if needed, can remove if duplicate)
         maven {
             name = "FRC-Athena"
             url = "https://maven.pkg.github.com/FRC-6390/FRC-Athena"
@@ -164,52 +261,35 @@ publishing {
             }
         }
     }
+
+    // Publications
+    publications {
+        // The main Java publication
+        java(MavenPublication) {
+            artifact jar
+            artifact sourcesJar
+            groupId = artifactGroupId
+            artifactId = baseArtifactId
+            version = pubVersion
+        }
+    }
 }
 
-task cleanReleaseRepo(type: Delete) {
-    delete releasesRepoUrl
-}
-
-tasks.matching {it != cleanReleaseRepo}.all {it.dependsOn cleanReleaseRepo}
+// -----------------------------------------------------------------------------
+// (Optional) Model block if you need custom packaging tasks. You can remove
+// or adapt these if you do not actually use them for your competition library.
+// -----------------------------------------------------------------------------
 
 model {
     publishing {
+        // Example calls to a helper method createComponentZipTasks(...) if you have it.
+        // If you do not have that method or do not need them, remove or comment out.
         def taskList = createComponentZipTasks($.components, ['Vendor'], zipBaseName, Zip, project, includeStandardZipFormat)
-
         def driverTaskList = createComponentZipTasks($.components, ['VendorDriver'], driverZipBaseName, Zip, project, includeStandardZipFormat)
 
         publications {
-            // cpp(MavenPublication) {
-            //     taskList.each {
-            //         artifact it
-            //     }
-            //     artifact cppHeadersZip
-            //     artifact cppSourceZip
-
-            //     artifactId = "${baseArtifactId}-cpp"
-            //     groupId artifactGroupId
-            //     version pubVersion
-            // }
-            // driver(MavenPublication) {
-            //     driverTaskList.each {
-            //         artifact it
-            //     }
-            //     artifact cppDriverHeadersZip
-
-            //     artifactId = "${baseArtifactId}-driver"
-            //     groupId artifactGroupId
-            //     version pubVersion
-            // }
-
-            java(MavenPublication) {
-                artifact jar
-                artifact sourcesJar
-                // artifact javadocJar
-
-                artifactId = "${baseArtifactId}-java"
-                groupId artifactGroupId
-                version pubVersion
-            }
+            // If you need an additional publication, define it here.
+            // Otherwise, we already declared a 'java(MavenPublication)' above.
         }
     }
 }

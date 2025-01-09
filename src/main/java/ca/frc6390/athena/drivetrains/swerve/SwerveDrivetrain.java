@@ -20,12 +20,12 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 public class SwerveDrivetrain extends SubsystemBase {
 
   public static SwerveModule[] swerveModules;
-  private static Pigeon2 gyro;
-  private static SwerveDriveKinematics kinematics;
-  private static PIDController driftpid;
-  private ChassisSpeeds speeds, feedbackSpeeds;
-  private static boolean enableDriftCorrection;
-  private double desiredHeading;
+  public static Pigeon2 gyro;
+  public static SwerveDriveKinematics kinematics;
+  public static PIDController driftpid;
+  public ChassisSpeeds speeds, feedbackSpeeds;
+  public static boolean enableDriftCorrection;
+  public double desiredHeading;
 
   public SwerveDrivetrain(SwerveModuleConfig[] configs, int gyro) {
     this(configs, gyro, false, new PIDController(0, 0, 0));
@@ -136,12 +136,13 @@ public class SwerveDrivetrain extends SubsystemBase {
   }
 
   public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+    
+    ShuffleboardLayout swervelayout = tab.getLayout("Swerve Modules", BuiltInLayouts.kGrid).withSize(4, 6);
 
-    ShuffleboardLayout swervelayout = tab.getLayout("Swerve Modules", BuiltInLayouts.kGrid).withSize(2, 6);
     {
       int x = 0, y = 0;
       for (int i = 0; i < swerveModules.length; i++) {
-        swerveModules[i].shuffleboard(swervelayout.getLayout("Module " + i)).withPosition(x, y);
+        swerveModules[i].shuffleboard(swervelayout.getLayout("Module " + i, BuiltInLayouts.kList).withSize(2, 3)).withPosition(x, y);
 
         if (x < 1) {
           x++;
@@ -152,7 +153,7 @@ public class SwerveDrivetrain extends SubsystemBase {
       }
     }
 
-    tab.addDouble("Swerve Modules", this::getHeading).withWidget(BuiltInWidgets.kGyro); // might not display properly bc
+    tab.addDouble("Heading", this::getHeading).withWidget(BuiltInWidgets.kGyro); // might not display properly bc
                                                                                               // get heading is +-180
     ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kGrid).withSize(2, 3);
     {
@@ -166,7 +167,7 @@ public class SwerveDrivetrain extends SubsystemBase {
       feedbackLayout.addDouble("Z", () -> feedbackSpeeds.omegaRadiansPerSecond);
     }
 
-    ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands", BuiltInLayouts.kList);
+    ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands", BuiltInLayouts.kList).withSize(2, 6);
     {
       commandsLayout.add("Reset Heading", new InstantCommand(this::resetHeading));
       commandsLayout.add("Brake Mode", new InstantCommand(() -> setNeutralMode(NeutralModeValue.Brake)));
@@ -175,7 +176,7 @@ public class SwerveDrivetrain extends SubsystemBase {
 
     ShuffleboardLayout driftCorrectionLayout = tab.getLayout("Drift Correction", BuiltInLayouts.kList);
     {
-      driftCorrectionLayout.add((builder) -> builder.addBooleanProperty("Drift Correction", this::getDriftCorrectionMode, this::setDriftCorrectionMode)).withWidget(BuiltInWidgets.kBooleanBox);
+      driftCorrectionLayout.add("Drift Correction", (builder) -> builder.addBooleanProperty("Drift Correction", this::getDriftCorrectionMode, this::setDriftCorrectionMode)).withWidget(BuiltInWidgets.kBooleanBox);
       driftCorrectionLayout.addDouble("Desired Heading", () -> desiredHeading).withWidget(BuiltInWidgets.kGyro);// might not display properly bc get heading is +-180
       driftCorrectionLayout.add(driftpid).withWidget(BuiltInWidgets.kPIDController);
     }
