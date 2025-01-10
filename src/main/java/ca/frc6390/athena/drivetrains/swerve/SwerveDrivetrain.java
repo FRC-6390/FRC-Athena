@@ -144,8 +144,7 @@ public class SwerveDrivetrain extends SubsystemBase {
       }
     }
 
-    tab.addDouble("Heading", this::getHeading).withWidget(BuiltInWidgets.kGyro); // might not display properly bc
-                                                                                              // get heading is +-180
+    tab.addDouble("Heading", this::getHeading).withWidget(BuiltInWidgets.kGyro);
     ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kGrid).withSize(2, 3).withProperties(Map.of("Number of columns", 2, "Number of rows", 1));
     {
       ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kGrid).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));

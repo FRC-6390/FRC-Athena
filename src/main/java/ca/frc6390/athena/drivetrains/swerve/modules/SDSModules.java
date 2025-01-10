@@ -178,7 +178,7 @@ public class SDSModules {
     }
 
     public double calculateFreeSpeedFeet() {
-        double wheelCircumferenceFeet = Math.PI * (module.getWheelDiameterInches() / 12.0);
+        double wheelCircumferenceFeet = Math.PI * module.getWheelDiameterInches();
         double motorRPM = motor.getFreeSpeedRPM();
         double wheelRPM = motorRPM / module.getDriveGearRatio();
         return wheelCircumferenceFeet * (wheelRPM / 60.0);

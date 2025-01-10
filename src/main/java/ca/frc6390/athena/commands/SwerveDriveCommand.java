@@ -12,7 +12,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 public class SwerveDriveCommand extends Command {
 
 
-  public record SwerveDriveCommandConfig(double thetaDeadzone, double maxAcceleration, double maxAngularAcceleration) {}
+  public record SwerveDriveCommandConfig(double thetaDeadzone, double maxVelocity, double maxAngularVelocity, double maxAcceleration, double maxAngularAcceleration) {}
 
   //Creates a drivetrain subsystem
   private SwerveDrivetrain driveTrain;
@@ -21,17 +21,16 @@ public class SwerveDriveCommand extends Command {
   //These are limiters. The make sure the rate of change is never too abrupt and smooth out inputs from the joystick.
   private SlewRateLimiter xLimiter, yLimiter, thetaLimiter;
 
-  private double maxAcceleration, maxAngularAcceleration;
+  private SwerveDriveCommandConfig config;
 
   public SwerveDriveCommand(SwerveDrivetrain driveTrain, DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput, SwerveDriveCommandConfig config) {
     this.driveTrain = driveTrain;
     this.xInput = xInput;
     this.yInput = yInput;
-    this.maxAcceleration = config.maxAcceleration();
-    this.maxAngularAcceleration = config.maxAngularAcceleration();
-    xLimiter = new SlewRateLimiter(maxAcceleration);
-    yLimiter = new SlewRateLimiter(maxAcceleration);
-    thetaLimiter = new SlewRateLimiter(maxAngularAcceleration);
+    this.config = config;
+    xLimiter = new SlewRateLimiter(config.maxAcceleration());
+    yLimiter = new SlewRateLimiter(config.maxAcceleration());
+    thetaLimiter = new SlewRateLimiter(config.maxAngularAcceleration());
     addRequirements(driveTrain);
 
     this.thetaInput = () -> {return Math.abs(thetaInput.getAsDouble()) > config.thetaDeadzone() ? thetaInput.getAsDouble() : 0;};
@@ -45,9 +44,9 @@ public class SwerveDriveCommand extends Command {
   @Override
   public void execute() {
     
-    double xSpeed = xLimiter.calculate(xInput.getAsDouble()) * maxAcceleration;
-    double ySpeed = yLimiter.calculate(yInput.getAsDouble()) * maxAcceleration;
-    double thetaSpeed = thetaLimiter.calculate(thetaInput.getAsDouble()) * maxAngularAcceleration;
+    double xSpeed = xLimiter.calculate(xInput.getAsDouble()) * config.maxVelocity();
+    double ySpeed = yLimiter.calculate(yInput.getAsDouble()) * config.maxVelocity();
+    double thetaSpeed = thetaLimiter.calculate(thetaInput.getAsDouble()) * config.maxAngularVelocity();
 
     ChassisSpeeds chassisSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.getRotation2d());
 

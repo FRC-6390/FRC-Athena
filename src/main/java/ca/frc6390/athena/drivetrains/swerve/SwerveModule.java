@@ -130,7 +130,7 @@ public class SwerveModule {
 
         if (config.encoder().id() != config.rotationMotor().id()) {
             encoder = new CANcoder(config.encoder().id(), config.encoder().canbus());
-            encoderPos = encoder.getPosition();
+            encoderPos = encoder.getAbsolutePosition();
             encoder.getConfigurator().apply(config.encoder().generateConfig());
         }else {
             encoderPos = rotationMotor.getRotorPosition();
@@ -158,15 +158,15 @@ public class SwerveModule {
     }
 
     public double getEncoderRadians() {
-        return (encoderPos.getValueAsDouble() * 360 * Math.PI / 180d);
+        return getEncoderDegrees() * Math.PI / 180d;
     }
 
     public double getEncoderRotations() {
-        return encoderPos.getValueAsDouble();
+        return Math.IEEEremainder(encoderPos.getValueAsDouble() * config.encoder().gearRatio(), 1);
     }
 
     public double getEncoderDegrees() {
-        return (encoderPos.getValueAsDouble() * 360) + 180;
+        return Math.IEEEremainder(encoderPos.getValueAsDouble() * config.encoder().gearRatio() * 360, 360);
     }
 
     public double getOffsetRotations() {
@@ -177,14 +177,8 @@ public class SwerveModule {
         encoder.getConfigurator().apply(config.encoder().generateConfig(offset));
     }
 
-    public double getOffsetDegreesUnsigned() {
-        return (config.encoder().offsetRotations() * 360) + 180;
-    }
-
-    public void setOffsetDegreesUnsigned(double offset) {
-        
-
-        encoder.getConfigurator().apply(config.encoder().generateConfig(((offset-180)/360)));
+    public double getOffsetDegrees() {
+        return (config.encoder().offsetRotations() * 360);
     }
 
     public void resetEncoders() {
@@ -220,7 +214,7 @@ public class SwerveModule {
         state.optimize(getState().angle);
         driveMotor.set(state.speedMetersPerSecond / config.driveMotor().maxSpeedMetersPerSecond());
 
-        rotationMotor.set(rotationPidController.calculate(-getEncoderRadians(), -state.angle.getRadians()));
+        rotationMotor.set(rotationPidController.calculate(getEncoderRadians(), state.angle.getRadians()));
     }
 
     public void stop() {
@@ -254,11 +248,10 @@ public class SwerveModule {
     }
 
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
-        layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
+        layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
         layout.addBoolean("Locked", () -> mode == NeutralModeValue.Brake ? true : false).withWidget(BuiltInWidgets.kBooleanBox).withPosition(0, 1);
         layout.addDouble("Offset Rotations", this::getOffsetRotations).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Encoder Rotations", this::getEncoderRotations).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
-        
         return layout;
     }
 }
