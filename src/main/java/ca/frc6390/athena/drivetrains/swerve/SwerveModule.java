@@ -256,7 +256,7 @@ public class SwerveModule {
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
         layout.addBoolean("Locked", () -> mode == NeutralModeValue.Brake ? true : false).withWidget(BuiltInWidgets.kBooleanBox).withPosition(0, 1);
-        layout.addDouble("Offset Rotations", this::getOffsetDegreesUnsigned).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
+        layout.addDouble("Offset Rotations", this::getOffsetRotations).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Encoder Rotations", this::getEncoderRotations).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
         
         return layout;
