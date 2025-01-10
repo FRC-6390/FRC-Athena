@@ -97,10 +97,10 @@ public class SDSModules {
     }
 
     public enum MK4 implements SDSMK {
-        L1(8.14d,12.8, 1),
-        L2(6.75d,12.8,1),
-        L3(6.12d,12.8,1),
-        L4(5.14,12.8,1);
+        L1(1d/8.14d,1d/12.8, 1),
+        L2(1d/6.75d,1d/12.8,1),
+        L3(1d/6.12d,1d/12.8,1),
+        L4(1d/5.14,1d/12.8,1);
 
         private final double driveGearRatio, rotationGearRatio, encoderGearRatio, wheelDiameterInches;
 
@@ -138,9 +138,9 @@ public class SDSModules {
     }
 
     public enum MK4i implements SDSMK {
-        L1(8.14d,150d/7d, 1),
-        L2(6.75d,150d/7d,1),
-        L3(6.12d,150d/7d,1);
+        L1(1d/8.14d,1d/150d/7d, 1),
+        L2(1d/6.75d,1d/150d/7d,1),
+        L3(1d/6.12d,1d/150d/7d,1);
 
         private final double driveGearRatio, rotationGearRatio, encoderGearRatio, wheelDiameterInches;
 
