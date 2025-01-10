@@ -48,6 +48,7 @@ public class SwerveDrivetrain extends SubsystemBase {
     kinematics = new SwerveDriveKinematics(moduleLocations);
     enableDriftCorrection = driftCorrection;
     driftpid = driftCorrectionPID;
+    this.imu = imu;
   }
 
   public void resetHeading() {
