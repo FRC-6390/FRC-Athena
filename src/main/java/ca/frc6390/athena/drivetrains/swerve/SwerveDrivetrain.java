@@ -36,6 +36,7 @@ public class SwerveDrivetrain extends SubsystemBase {
 
   public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu, boolean driftCorrection,
       PIDController driftCorrectionPID) {
+    driftCorrectionPID.enableContinuousInput(-Math.PI, Math.PI);
     speeds = new ChassisSpeeds();
     feedbackSpeeds = new ChassisSpeeds();
     swerveModules = new SwerveModule[configs.length];

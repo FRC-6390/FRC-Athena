@@ -12,6 +12,15 @@ public class RobotVision {
 
    private final String defaultCameraKey;
 
+   public RobotVision(String... tables) {
+      cameras = new HashMap<>();
+      for (int i = 0; i < tables.length; i++) {
+         LimeLight limeLight = new LimeLight(new LimelightConfig(tables[i]));
+         cameras.put(tables[i], limeLight);
+      }
+      defaultCameraKey = tables[0];
+   }
+
    public RobotVision(LimelightConfig... configs) {
       cameras = new HashMap<>();
       for (int i = 0; i < configs.length; i++) {
