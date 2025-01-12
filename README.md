@@ -4,5 +4,14 @@
 # Publishing
 ```bash
 export $(cat .env | xargs)
-./gradlew publish
-```
+ ./gradlew publish -PpublishMode=all -PfrcYear=2025 #Publish local to wpilib folder and online
+ ```
+
+ ```bash
+ ./gradlew publish -PpublishMode=local -PfrcYear=2025 #Publish local to wpilib folder
+ ```
+
+ ```bash
+export $(cat .env | xargs)
+ ./gradlew publish -PpublishMode=online -PfrcYear=2025 #Publish to online
+ ```
