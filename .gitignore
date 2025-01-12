@@ -2,3 +2,5 @@
 /gradle
 # /.vscode
 .env
+/.gradle
+/bin

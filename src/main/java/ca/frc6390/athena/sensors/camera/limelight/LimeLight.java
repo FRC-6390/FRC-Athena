@@ -202,15 +202,6 @@ public class LimeLight {
         }
     }
 
-    
-    public LimeLight(){
-        this(LimelightConfig.defualt());
-    }
-
-    public LimeLight(String table){
-        this(LimelightConfig.defualt(table));
-    }
-
     public LimeLight(LimelightConfig config){
         this.config = config;
         limelightTable = NetworkTableInstance.getDefault().getTable(config.table());

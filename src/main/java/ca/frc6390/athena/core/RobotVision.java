@@ -3,6 +3,7 @@ package ca.frc6390.athena.core;
 import java.util.HashMap;
 
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
+import ca.frc6390.athena.sensors.camera.limelight.LimelightConfig;
 
 public class RobotVision {
 
@@ -10,13 +11,13 @@ public class RobotVision {
 
    private final String defaultCameraKey;
 
-   public RobotVision(String... tableNames) {
+   public RobotVision(LimelightConfig... configs) {
       cameras = new HashMap<>();
-      for (int i = 0; i < tableNames.length; i++) {
-         LimeLight limeLight = new LimeLight(tableNames[i]);
-         cameras.put(tableNames[i], limeLight);
+      for (int i = 0; i < configs.length; i++) {
+         LimeLight limeLight = new LimeLight(configs[i]);
+         cameras.put(configs[i].table(), limeLight);
       }
-      defaultCameraKey = tableNames[0];
+      defaultCameraKey = configs[0].table();
    }
 
    public RobotVision(LimeLight... camerasPopulate) {

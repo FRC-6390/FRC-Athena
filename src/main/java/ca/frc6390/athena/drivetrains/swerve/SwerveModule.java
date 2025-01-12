@@ -162,7 +162,7 @@ public class SwerveModule {
     }
 
     public double getEncoderRotations() {
-        return Math.IEEEremainder(encoderPos.getValueAsDouble() * config.encoder().gearRatio(), 1);
+        return encoderPos.getValueAsDouble() * config.encoder().gearRatio();
     }
 
     public double getEncoderDegrees() {

@@ -6,6 +6,7 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import ca.frc6390.athena.core.RobotIMU;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -25,8 +26,8 @@ public class SwerveDrivetrain extends SubsystemBase {
   public static SwerveDriveKinematics kinematics;
   public static PIDController driftpid;
   public ChassisSpeeds speeds, feedbackSpeeds;
-  public static boolean enableDriftCorrection;
-  public double desiredHeading;
+  public static boolean enableDriftCorrection, ena;
+  public double desiredHeading, maxVelocity, maxAngularVelocity,  maxVelocityPrecentOutput, maxAngularVelocityPrecentOutput;
   public RobotIMU<?> imu;
 
   public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu) {
@@ -40,6 +41,9 @@ public class SwerveDrivetrain extends SubsystemBase {
     swerveModules = new SwerveModule[configs.length];
     for (int i = 0; i < configs.length; i++) {
       swerveModules[i] = new SwerveModule(configs[i]);
+
+      maxVelocity = configs[i].driveMotor().maxSpeedMetersPerSecond();
+      maxAngularVelocity = configs[i].driveMotor().maxSpeedMetersPerSecond();
     }
     Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
     for (int i = 0; i < configs.length; i++) {
@@ -49,6 +53,9 @@ public class SwerveDrivetrain extends SubsystemBase {
     enableDriftCorrection = driftCorrection;
     driftpid = driftCorrectionPID;
     this.imu = imu;
+    maxVelocityPrecentOutput = 1;
+    maxAngularVelocityPrecentOutput = 1;
+
   }
 
   public void resetHeading() {
@@ -103,27 +110,37 @@ public class SwerveDrivetrain extends SubsystemBase {
     this.feedbackSpeeds = feedbackSpeeds;
   }
 
-  private void driftCorrection(ChassisSpeeds speeds) {
+  private ChassisSpeeds driftCorrection(ChassisSpeeds speeds) {
     if (Math.abs(speeds.omegaRadiansPerSecond) > 0.0) {
       desiredHeading = getHeading();
     } else {
-      speeds.omegaRadiansPerSecond += driftpid.calculate(desiredHeading);
+      speeds.omegaRadiansPerSecond += driftpid.calculate(getHeading(), desiredHeading);
     }
-    ;
+    return speeds;
   }
 
-  public void update() {
-    ChassisSpeeds speed = speeds.plus(feedbackSpeeds);
+  public void setMaxVelocityPrecentOutput(double maxVelocityPrecentOutput) {
+    this.maxVelocityPrecentOutput = MathUtil.clamp(maxVelocityPrecentOutput, 0, 1);
+  }
 
-    SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
+  public double getMaxVelocityPrecentOutput() {
+    return maxVelocityPrecentOutput;
+  }
 
-    if (enableDriftCorrection) {
-      driftCorrection(speed);
-    }
+  public void setMaxAngularVelocityPrecentOutput(double maxAngularVelocityPrecentOutput) {
+    this.maxAngularVelocityPrecentOutput = MathUtil.clamp(maxAngularVelocityPrecentOutput, 0, 1);
+  }
 
-    setModuleStates(states);
+  public double getMaxAngluarVelocityPrecentOutput() {
+    return maxAngularVelocityPrecentOutput;
+  }
 
-    imu.update();
+  public double getMaxVelocity() {
+    return maxVelocity * maxVelocityPrecentOutput;
+  }
+
+  public double getMaxAngularVelocity() {
+    return maxAngularVelocity * maxAngularVelocityPrecentOutput;
   }
 
   public void setDriftCorrectionMode(boolean enabled) {
@@ -133,6 +150,23 @@ public class SwerveDrivetrain extends SubsystemBase {
   public boolean getDriftCorrectionMode() {
     return enableDriftCorrection;
   }
+
+
+  public void update() {
+    ChassisSpeeds speed = speeds.plus(feedbackSpeeds);
+
+    SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
+
+    if (enableDriftCorrection) {
+      speeds = driftCorrection(speed);
+    }
+    SwerveDriveKinematics.desaturateWheelSpeeds(states, getMaxVelocity());
+    setModuleStates(states);
+
+    imu.update();
+  }
+
+ 
 
   public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
     

@@ -4,7 +4,7 @@ package ca.frc6390.athena.controllers;
 import edu.wpi.first.wpilibj.XboxController;
 
 public class DebouncedController extends XboxController {
-
+    
     private enum BUTTONS{
         A(1),
         B(2),
@@ -57,38 +57,37 @@ public class DebouncedController extends XboxController {
         }
     }
 
-    public DebouncedButton a = new DebouncedButton(this, BUTTONS.A.get()),
-    b = new DebouncedButton(this, BUTTONS.B.get()),
-    x = new DebouncedButton(this, BUTTONS.X.get()),
-    y = new DebouncedButton(this, BUTTONS.Y.get()),
-    leftBumper = new DebouncedButton(this, BUTTONS.LEFT_BUMPER.get()),
-    rightBumper = new DebouncedButton(this, BUTTONS.RIGHT_BUMPER.get()),
-    leftStick = new DebouncedButton(this, BUTTONS.LEFT_JOYSTICK.get()),
-    rightStick = new DebouncedButton(this, BUTTONS.RIGHT_JOYSTICK.get()),
-    top = new DebouncedButton(this, BUTTONS.TOP.get()),
-    topRight = new DebouncedButton(this, BUTTONS.TOP_RIGHT.get()),
-    topLeft = new DebouncedButton(this, BUTTONS.TOP_LEFT.get()),
-    bottom = new DebouncedButton(this, BUTTONS.BOTTOM.get()),
-    bottomRight = new DebouncedButton(this, BUTTONS.BOTTOM_RIGHT.get()),
-    bottomLeft = new DebouncedButton(this, BUTTONS.BOTTOM_LEFT.get()),
-    right = new DebouncedButton(this, BUTTONS.RIGHT.get()),
-    left = new DebouncedButton(this, BUTTONS.LEFT.get()),
-    back = new DebouncedButton(this, BUTTONS.BACK.get()),
-    start = new DebouncedButton(this, BUTTONS.START.get()), 
-    rightTriggerB = new DebouncedButton(this, AXIS.RIGHT_TRIGGER.get()),
-    leftTriggerB = new DebouncedButton(this, AXIS.LEFT_TRIGGER.get());
-    
-    public ModifiedAxis leftX = new ModifiedAxis(this, AXIS.LEFT_X.get()),
-    leftY = new ModifiedAxis(this, AXIS.LEFT_Y.get()),
-    rightX = new ModifiedAxis(this, AXIS.RIGHT_X.get()),
-    rightY = new ModifiedAxis(this, AXIS.RIGHT_Y.get()),
-    rightTrigger = new ModifiedAxis(this, AXIS.RIGHT_TRIGGER.get()),
-    leftTrigger = new ModifiedAxis(this, AXIS.LEFT_TRIGGER.get());
-
-
+    public DebouncedButton a,b,x,y,leftBumper,rightBumper,leftStick,rightStick,top,topRight,topLeft,bottom,bottomRight,bottomLeft,right,left,back,start,rightTriggerB,leftTriggerB;
+    public ModifiedAxis leftX,leftY,rightX,rightY,rightTrigger,leftTrigger;
 
     public DebouncedController(int port) {
         super(port);
-    }
+        a = new DebouncedButton(this, BUTTONS.A.get());
+        b = new DebouncedButton(this, BUTTONS.B.get());
+        x = new DebouncedButton(this, BUTTONS.X.get());
+        y = new DebouncedButton(this, BUTTONS.Y.get());
+        leftBumper = new DebouncedButton(this, BUTTONS.LEFT_BUMPER.get());
+        rightBumper = new DebouncedButton(this, BUTTONS.RIGHT_BUMPER.get());
+        leftStick = new DebouncedButton(this, BUTTONS.LEFT_JOYSTICK.get());
+        rightStick = new DebouncedButton(this, BUTTONS.RIGHT_JOYSTICK.get());
+        top = new DebouncedButton(this, BUTTONS.TOP.get());
+        topRight = new DebouncedButton(this, BUTTONS.TOP_RIGHT.get());
+        topLeft = new DebouncedButton(this, BUTTONS.TOP_LEFT.get());
+        bottom = new DebouncedButton(this, BUTTONS.BOTTOM.get());
+        bottomRight = new DebouncedButton(this, BUTTONS.BOTTOM_RIGHT.get());
+        bottomLeft = new DebouncedButton(this, BUTTONS.BOTTOM_LEFT.get());
+        right = new DebouncedButton(this, BUTTONS.RIGHT.get());
+        left = new DebouncedButton(this, BUTTONS.LEFT.get());
+        back = new DebouncedButton(this, BUTTONS.BACK.get());
+        start = new DebouncedButton(this, BUTTONS.START.get()); 
+        rightTriggerB = new DebouncedButton(this, AXIS.RIGHT_TRIGGER.get());
+        leftTriggerB = new DebouncedButton(this, AXIS.LEFT_TRIGGER.get());
 
+        leftX = new ModifiedAxis(this, AXIS.LEFT_X.get());
+        leftY = new ModifiedAxis(this, AXIS.LEFT_Y.get());
+        rightX = new ModifiedAxis(this, AXIS.RIGHT_X.get());
+        rightY = new ModifiedAxis(this, AXIS.RIGHT_Y.get());
+        rightTrigger = new ModifiedAxis(this, AXIS.RIGHT_TRIGGER.get());
+        leftTrigger = new ModifiedAxis(this, AXIS.LEFT_TRIGGER.get());
+    }
 }

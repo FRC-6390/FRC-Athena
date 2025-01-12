@@ -48,7 +48,7 @@ public class SDSModules {
     }
 
     public SwerveMotor[] generateMotors(double gearRatio, int[] ids, String canbus){
-        return SwerveHelpers.generateMotors(gearRatio, calculateFreeSpeedMeter(), canbus, ids);
+        return SwerveHelpers.generateMotors(gearRatio, getFreeSpeed(), canbus, ids);
     }
 
     public SwerveEncoder[] generateEncoders(int[] ids, double[] offsets){
@@ -61,6 +61,13 @@ public class SDSModules {
 
     public SwerveModuleConfig[] generateConfigs(Translation2d[] locations, SwerveMotor[] drive, SwerveMotor[] rotation, PIDController rotationPID, SwerveEncoder[] encoders) {
         return SwerveHelpers.generateConfigs(locations, module.getWheelDiameterMeters(), drive, rotation, rotationPID, encoders);
+    }
+
+    public SwerveModuleConfig[] generateConfigs(Translation2d[] locations, int[] drive, int[] rotation, PIDController rotationPID, int[] encoders, double[] offsets) {
+        SwerveMotor[] DRIVE_MOTORS = generateDriveMotors(drive);
+        SwerveMotor[] ROTATION_MOTORS = generateRotationMotors(rotation);
+        SwerveEncoder[] MODULE_ENCODERS = generateEncoders(encoders, offsets);
+        return SwerveHelpers.generateConfigs(locations, module.getWheelDiameterMeters(), DRIVE_MOTORS, ROTATION_MOTORS, rotationPID, MODULE_ENCODERS);
     }
 
     private interface SDSMK {
@@ -97,10 +104,10 @@ public class SDSModules {
     }
 
     public enum MK4 implements SDSMK {
-        L1(1d/8.14d,1d/12.8, 1),
-        L2(1d/6.75d,1d/12.8,1),
-        L3(1d/6.12d,1d/12.8,1),
-        L4(1d/5.14,1d/12.8,1);
+        L1(8.14d,12.8, 1),
+        L2(6.75d,12.8,1),
+        L3(6.12d,12.8,1),
+        L4(5.14,12.8,1);
 
         private final double driveGearRatio, rotationGearRatio, encoderGearRatio, wheelDiameterInches;
 
@@ -138,9 +145,9 @@ public class SDSModules {
     }
 
     public enum MK4i implements SDSMK {
-        L1(1d/8.14d,1d/150d/7d, 1),
-        L2(1d/6.75d,1d/150d/7d,1),
-        L3(1d/6.12d,1d/150d/7d,1);
+        L1(8.14d,150d/7d, 1),
+        L2(6.75d,150d/7d,1),
+        L3(6.12d,150d/7d,1);
 
         private final double driveGearRatio, rotationGearRatio, encoderGearRatio, wheelDiameterInches;
 
@@ -177,14 +184,15 @@ public class SDSModules {
         }
     }
 
-    public double calculateFreeSpeedFeet() {
+    public double freeSpeedFeet() {
         double wheelCircumferenceFeet = Math.PI * module.getWheelDiameterInches();
         double motorRPM = motor.getFreeSpeedRPM();
         double wheelRPM = motorRPM / module.getDriveGearRatio();
         return wheelCircumferenceFeet * (wheelRPM / 60.0);
     }
 
-    public double calculateFreeSpeedMeter() {
-        return Units.feetToMeters(calculateFreeSpeedFeet());
+    //Free speed in meter/s
+    public double getFreeSpeed() {
+        return Units.feetToMeters(freeSpeedFeet());
     }
 }
