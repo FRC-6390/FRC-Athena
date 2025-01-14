@@ -24,16 +24,21 @@ import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class SwerveModule {
 
+    //should make changes so this can work with any motor as the code is not really motor specific and can fairly easily remove the dependancy on CTRE
+
     private final SwerveModuleConfig config;
 
-    private final TalonFX driveMotor;
-    private final TalonFX rotationMotor;
+    private final TalonFX driveMotor; //switch to double consumer in future
+    private final TalonFX rotationMotor; //switch to double consumer in future
     private DriveTrainNeutralMode mode;
-    private CANcoder encoder;
+    private final CANcoder encoder; //could possibly be entirely remove and manager by a backend instead
     private final PIDController rotationPidController;
     
-    private StatusSignal<AngularVelocity> driveVel;
-    private StatusSignal<Angle> encoderPos, drivePos, rotationPos;
+    private StatusSignal<AngularVelocity> driveVel; //switch to double suppliers in future
+    private StatusSignal<Angle> encoderPos, drivePos; //switch to double suppliers in future
+
+    //private final DoubleConsumer driveMotor, rotationMotor
+    //private final DoubleSupplier driveVel, encoderPos;
 
     // SWERVE MOTOR RECORD
     public record SwerveMotor(int id, double maxSpeedMetersPerSecond,  double gearRatio, String canbus) {
@@ -84,7 +89,7 @@ public class SwerveModule {
         public CANcoderConfiguration generateConfig(double offset) {
             CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
             encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 1;
-            encoderConfig.MagnetSensor.MagnetOffset = offset;
+            encoderConfig.MagnetSensor.MagnetOffset = offset; //shoule move away from using configs for offset makes code less dependant on CTRE
            return encoderConfig;
         } 
     }
@@ -117,12 +122,12 @@ public class SwerveModule {
             encoder.getConfigurator().apply(config.encoder().generateConfig());
         }else {
             encoderPos = rotationMotor.getRotorPosition();
+            encoder = null;
         }
 
         // DRIVE MOTOR POSITION AND VELOCITY
         drivePos = driveMotor.getRotorPosition();
         driveVel = driveMotor.getRotorVelocity();
-        rotationPos = rotationMotor.getRotorPosition();
         // RESET ENCODERS AND BRAKE MODE MODULES
         resetEncoders();
         setNeutralMode(DriveTrainNeutralMode.Brake);
@@ -161,7 +166,7 @@ public class SwerveModule {
     }
 
     public void setOffset(double offsetRotations) {
-        encoder.getConfigurator().apply(config.encoder().generateConfig(offsetRotations));
+        if (encoder != null) encoder.getConfigurator().apply(config.encoder().generateConfig(offsetRotations));
     }
 
     public void resetEncoders() {
@@ -227,7 +232,6 @@ public class SwerveModule {
         drivePos.refresh();
         driveVel.refresh();
         encoderPos.refresh();
-        rotationPos.refresh();
     }
 
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
