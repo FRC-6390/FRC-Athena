@@ -12,6 +12,7 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -106,6 +107,10 @@ public class RobotLocalization extends SubsystemBase{
 
     public Field2d getField2d() {
         return field;
+    }
+
+    public ShuffleboardTab shuffleboard(String tab) {
+        return shuffleboard(Shuffleboard.getTab(tab));
     }
 
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {

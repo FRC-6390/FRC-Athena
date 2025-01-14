@@ -15,6 +15,7 @@ import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -148,6 +149,10 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     return new SwerveDriveCommand(this, xInput, yInput, thetaInput);
   }
 
+  public ShuffleboardTab shuffleboard(String tab) {
+      return shuffleboard(Shuffleboard.getTab(tab));
+  }
+
   public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
     
     ShuffleboardLayout swervelayout = tab.getLayout("Swerve Modules", BuiltInLayouts.kGrid).withSize(4, 8).withProperties(Map.of("Number of columns", 2, "Number of rows", 2));
@@ -161,7 +166,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     ShuffleboardLayout imuLayout = tab.getLayout("IMU", BuiltInLayouts.kGrid).withSize(4, 8).withProperties(Map.of("Number of columns", 2, "Number of rows", 3));
 
     getIMU().shuffleboard(imuLayout);
-    
+
     ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kGrid).withSize(2, 3).withProperties(Map.of("Number of columns", 2, "Number of rows", 1));
     { 
       Map<String, Object> props = Map.of("Min", -getMaxVelocity(), "Max", getMaxVelocity(),"Label position", "TOP");

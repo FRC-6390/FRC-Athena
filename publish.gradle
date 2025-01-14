@@ -5,7 +5,7 @@ apply plugin: 'maven-publish'
 // Common Variables & Config
 // -----------------------------------------------------------------------------
 ext.licenseFile = files("$rootDir/LICENSE.txt")
-def pubVersion = '2025.5.0'
+def pubVersion = '2025.5.1'
 def frcYear = project.hasProperty('frcYear') ? project.property('frcYear') : '2025'
 
 // Group/Artifact used below and for updating JSON
