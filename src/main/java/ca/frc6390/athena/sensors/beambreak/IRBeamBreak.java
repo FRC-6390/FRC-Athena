@@ -9,15 +9,20 @@ public class IRBeamBreak {
 
     private final DigitalInput input;
     private final Trigger trigger;
-
+    private final boolean inverted;
     /**
      * Constructs an IRBeamBreak sensor.
      *
      * @param port The digital input port number where the beam break sensor is connected.
      */
     public IRBeamBreak(int port) {
+       this(port, true);
+    }
+
+    public IRBeamBreak(int port, boolean inverted) {
         this.input = new DigitalInput(port);
         this.trigger = new Trigger(this::isBroken);
+        this.inverted = inverted;
     }
 
     /**
@@ -26,7 +31,7 @@ public class IRBeamBreak {
      * @return true if the beam is broken, false otherwise.
      */
     public boolean isBroken() {
-        return !input.get();
+        return inverted ? !input.get() : input.get();
     }
 
     /**

@@ -9,24 +9,30 @@ public class GenericButton {
 
     private final DigitalInput input;
     private final Trigger trigger;
+    private final boolean inverted;
 
     /**
-     * Constructs an IRBeamBreak sensor.
+     * Constructs an GenericButton sensor.
      *
-     * @param port The digital input port number where the beam break sensor is connected.
+     * @param port The digital input port number where the button sensor is connected.
      */
     public GenericButton(int port) {
+        this(port, true);
+    }
+ 
+    public GenericButton(int port, boolean inverted) {
         this.input = new DigitalInput(port);
         this.trigger = new Trigger(this::isPressed);
+        this.inverted = inverted;
     }
 
     /**
-     * Checks if the IR beam is broken.
+     * Checks if the IR button is press.
      *
-     * @return true if the beam is broken, false otherwise.
+     * @return true if the button is press, false otherwise.
      */
     public boolean isPressed() {
-        return !input.get();
+        return inverted ? !input.get() : input.get();
     }
 
     /**
