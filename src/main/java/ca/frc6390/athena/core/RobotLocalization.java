@@ -14,9 +14,10 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-public class RobotLocalization {
+public class RobotLocalization extends SubsystemBase{
     
     public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd) {
 
@@ -113,5 +114,10 @@ public class RobotLocalization {
         tab.addDouble("Y", () -> getPose().getY());
         tab.addDouble("Theta", () -> getPose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro);
         return tab;
+    }
+
+    @Override
+    public void periodic() {
+       update();
     }
 }
