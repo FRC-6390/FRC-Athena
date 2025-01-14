@@ -9,9 +9,11 @@ import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.kinematics.SwerveDriveOdometry;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 public class RobotLocalization {
@@ -31,20 +33,20 @@ public class RobotLocalization {
         }
     }
 
-    private final SwerveDriveOdometry odometry;
     private final SwerveDrivePoseEstimator estimator;
     private final SwerveDrivetrain drivetrain;
     private final RobotVision vision;
-    private Pose2d odometryPose, estimatorPose;
+    private Pose2d estimatorPose;
+    private Field2d field;
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
-        this.odometryPose = pose;
         this.estimatorPose = pose;
         this.drivetrain = drivetrain;
         this.vision = vision;
 
-        estimator = new SwerveDrivePoseEstimator(drivetrain.getKinematics(), Rotation2d.fromDegrees(drivetrain.getHeading()), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd());
-        odometry = new SwerveDriveOdometry(drivetrain.getKinematics(), Rotation2d.fromDegrees(drivetrain.getHeading()), drivetrain.getSwerveModulePositions());
+        estimator = config != null ?
+         new SwerveDrivePoseEstimator(drivetrain.getKinematics(),drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd()) : 
+         new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose);
     }
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config) {
@@ -55,43 +57,21 @@ public class RobotLocalization {
         this(drivetrain, null, config);
     }
 
+    public RobotLocalization(SwerveDrivetrain drivetrain) {
+        this(drivetrain, null, null);
+    }
+
     public void reset(Pose2d pose, Rotation2d heading) {
-        resetOdometry(pose, heading);
-        resetEstimator(pose, heading);
-    }
-
-    public void reset(Pose2d pose) {
-        reset(new Pose2d(), drivetrain.getRotation2d());
-    }
-
-    public void reset() {
-        reset(new Pose2d());
-    }
-
-    public void resetEstimator(Pose2d pose, Rotation2d heading) {
         estimator.resetPosition(heading, drivetrain.getSwerveModulePositions(), pose);
         this.estimatorPose = pose;
     }
 
-    public void resetEstimator(Pose2d pose) {
-        resetEstimator(new Pose2d(), drivetrain.getRotation2d());
+    public void reset(Pose2d pose) {
+        reset(new Pose2d(), drivetrain.getIMU().getYaw());
     }
 
-    public void resetEstimator() {
-        resetEstimator(new Pose2d());
-    }
-
-    public void resetOdometry(Pose2d pose, Rotation2d heading) {
-        odometry.resetPosition(heading, drivetrain.getSwerveModulePositions(), pose);
-        this.odometryPose = pose;
-    }
-
-    public void resetOdometry(Pose2d pose) {
-        resetOdometry(new Pose2d(), drivetrain.getRotation2d());
-    }
-
-    public void resetOdometry() {
-        resetOdometry(new Pose2d());
+    public void reset() {
+        reset(new Pose2d());
     }
 
     public void setVisionStd(Matrix<N3, N1> matrix){
@@ -115,19 +95,23 @@ public class RobotLocalization {
             }
         }
 
-        odometryPose = odometry.update(drivetrain.getRotation2d(), drivetrain.getSwerveModulePositions());
-        estimatorPose = estimator.update(drivetrain.getRotation2d(), drivetrain.getSwerveModulePositions());
-    }
-
-    public Pose2d getOdometryPose() {
-        return odometryPose;
-    }
-
-    public Pose2d getEstimatorPose() {
-        return estimatorPose;
+        estimatorPose = estimator.update(drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions());
+        field.setRobotPose(estimatorPose);
     }
 
     public Pose2d getPose(){
-        return vision != null ? getEstimatorPose() : getOdometryPose();
+        return estimatorPose;
+    }
+
+    public Field2d getField2d() {
+        return field;
+    }
+
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+        tab.add("Estimator", field);
+        tab.addDouble("X", () -> getPose().getX());
+        tab.addDouble("Y", () -> getPose().getY());
+        tab.addDouble("Theta", () -> getPose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro);
+        return tab;
     }
 }

@@ -1,58 +1,44 @@
 package ca.frc6390.athena.core;
 
-import ca.frc6390.athena.core.imu.IMU;
+import java.util.Map;
+
 import ca.frc6390.athena.core.imu.Pigeon2IMU;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
-public class RobotIMU<T extends IMU> {
+public interface RobotIMU {
 
-    private final T imu;
+    void setYaw(double yaw);
 
-    public RobotIMU(T imu) {
-        this.imu = imu;
+    Rotation2d getRoll();
+    Rotation2d getPitch();
+    Rotation2d getYaw();
+
+    Rotation2d getAccelerationX();
+    Rotation2d getAccelerationY();
+    Rotation2d getAccelerationZ();
+
+    void update();
+
+    default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+        layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
+        layout.addDouble("Yaw",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
+        layout.addDouble("Roll",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
+        layout.addDouble("Pitch",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
+
+        layout.addDouble("Acceleration X",() -> getAccelerationX().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withPosition(0, 1);
+        layout.addDouble("Acceleration Y",() -> getAccelerationY().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 2);
+        layout.addDouble("Acceleration Z",() -> getAccelerationZ().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 3);
+        return layout;
     }
 
-    public static RobotIMU<Pigeon2IMU> createFromPigeon2(int id) {
+    public static Pigeon2IMU createFromPigeon2(int id) {
         return createFromPigeon2(id, "rio");
     }
 
-    public static RobotIMU<Pigeon2IMU> createFromPigeon2(int id, String canbus) {
+    public static Pigeon2IMU createFromPigeon2(int id, String canbus) {
         Pigeon2IMU pigeonIMU = new Pigeon2IMU(id, canbus);
-        return new RobotIMU<>(pigeonIMU);
-    }
-
-    public void setYaw(double yaw) {
-        imu.setYaw(yaw);
-    }
-
-    public double getRoll() {
-        return imu.getRoll();
-    }
-
-    public double getPitch() {
-        return imu.getPitch();
-    }
-
-    public double getYaw() {
-        return imu.getYaw();
-    }
-
-    public double getAccelerationX() {
-        return imu.getAccelerationX();
-    }
-
-    public double getAccelerationY() {
-        return imu.getAccelerationY();
-    }
-
-    public double getAccelerationZ() {
-        return imu.getAccelerationZ();
-    }
-
-    public T getIMU() {
-        return imu;
-    }
-
-    public void update() {
-        imu.update();
+        return pigeonIMU;
     }
 }

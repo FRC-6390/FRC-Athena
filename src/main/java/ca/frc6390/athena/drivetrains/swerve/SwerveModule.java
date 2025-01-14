@@ -1,8 +1,8 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.InvertedValue;
-import com.ctre.phoenix6.signals.NeutralModeValue;
+
+import ca.frc6390.athena.core.RobotDrivetrain.DriveTrainNeutralMode;
 
 import java.util.Map;
 
@@ -28,7 +28,7 @@ public class SwerveModule {
 
     private final TalonFX driveMotor;
     private final TalonFX rotationMotor;
-    private NeutralModeValue mode;
+    private DriveTrainNeutralMode mode;
     private CANcoder encoder;
     private final PIDController rotationPidController;
     
@@ -36,26 +36,17 @@ public class SwerveModule {
     private StatusSignal<Angle> encoderPos, drivePos, rotationPos;
 
     // SWERVE MOTOR RECORD
-    public record SwerveMotor(int id, boolean motorReversed, double gearRatio, double maxSpeedMetersPerSecond,
-            String canbus) {
-        public SwerveMotor(int id, boolean motorReversed, double maxSpeedMetersPerSecond, double gearRatio) {
-            this(id, motorReversed, gearRatio, maxSpeedMetersPerSecond, "can");
+    public record SwerveMotor(int id, double maxSpeedMetersPerSecond,  double gearRatio, String canbus) {
+        public SwerveMotor(int id, double maxSpeedMetersPerSecond, double gearRatio) {
+            this(id, gearRatio, maxSpeedMetersPerSecond, "can");
         }
 
-        public SwerveMotor(int id, boolean motorReversed, double maxSpeedMetersPerSecond) {
-            this(id, motorReversed, 1, maxSpeedMetersPerSecond, "can");
+        public SwerveMotor(int id, double maxSpeedMetersPerSecond, String canbus) {
+            this(id, maxSpeedMetersPerSecond, 1, canbus);
         }
 
-        public SwerveMotor(int id, boolean motorReversed, double maxSpeedMetersPerSecond, String canbus) {
-            this(id, motorReversed, 1, maxSpeedMetersPerSecond, canbus);
-        }
-
-        public SwerveMotor(int id, boolean motorReversed) {
-            this(id, motorReversed, 1, 0, "can");
-        }
-
-        public SwerveMotor(int id, boolean motorReversed, String canbus) {
-            this(id, motorReversed, 1, 0, canbus);
+        public SwerveMotor(int id, double maxSpeedMetersPerSecond) {
+            this(id, maxSpeedMetersPerSecond, 1,"can");
         }
 
         public TalonFXConfiguration generateTalonFXConfig(double currentLimit) {
@@ -64,15 +55,7 @@ public class SwerveModule {
             driveCurrentLimit.SupplyCurrentLimitEnable = true;
             driveCurrentLimit.SupplyCurrentLimit = currentLimit;
             driveConfig.withCurrentLimits(driveCurrentLimit);
-
-            InvertedValue isInverted = motorReversed ? InvertedValue.CounterClockwise_Positive : InvertedValue.Clockwise_Positive;
-            driveConfig.MotorOutput.withInverted(isInverted);
-
             return driveConfig;
-        } 
-
-        public SwerveMotor reversed(){
-            return new SwerveMotor(id, true, gearRatio, maxSpeedMetersPerSecond, canbus);
         }
 
         public SwerveEncoder asEncoder(double offsetRadian) {
@@ -100,7 +83,7 @@ public class SwerveModule {
 
         public CANcoderConfiguration generateConfig(double offset) {
             CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
-            encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 0.5; //180 <-> (-180)
+            encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 1;
             encoderConfig.MagnetSensor.MagnetOffset = offset;
            return encoderConfig;
         } 
@@ -121,15 +104,15 @@ public class SwerveModule {
         rotationPidController.enableContinuousInput(-Math.PI, Math.PI);
 
         // MOTOR INITIALIZATION
-        driveMotor = new TalonFX(config.driveMotor().id(), config.driveMotor().canbus());
-        rotationMotor = new TalonFX(config.rotationMotor().id(), config.rotationMotor().canbus());
+        driveMotor = new TalonFX(config.driveMotor().id, config.driveMotor().canbus);
+        rotationMotor = new TalonFX(config.rotationMotor().id, config.rotationMotor().canbus);
 
         //CONFIGS
         rotationMotor.getConfigurator().apply(config.rotationMotor().generateTalonFXConfig(60));
         driveMotor.getConfigurator().apply(config.driveMotor().generateTalonFXConfig(60));
 
-        if (config.encoder().id() != config.rotationMotor().id()) {
-            encoder = new CANcoder(config.encoder().id(), config.encoder().canbus());
+        if (config.encoder().id() != config.rotationMotor().id) {
+            encoder = new CANcoder(config.encoder().id, config.encoder().canbus);
             encoderPos = encoder.getAbsolutePosition();
             encoder.getConfigurator().apply(config.encoder().generateConfig());
         }else {
@@ -142,19 +125,23 @@ public class SwerveModule {
         rotationPos = rotationMotor.getRotorPosition();
         // RESET ENCODERS AND BRAKE MODE MODULES
         resetEncoders();
-        setNeutralMode(NeutralModeValue.Brake);
+        setNeutralMode(DriveTrainNeutralMode.Brake);
     }
 
     public double getDriveMotorVelocity() {
-        return driveVel.getValueAsDouble() * config.driveMotor().gearRatio() * Math.PI * config.wheelDiameter();
+        return driveVel.getValueAsDouble() / config.driveMotor().gearRatio * Math.PI * config.wheelDiameter;
     }
 
     public Translation2d getModuleLocation() {
         return config.module_location();
     }
 
+    public double getDriveMotorRotations() {
+        return drivePos.getValueAsDouble() / config.driveMotor().gearRatio;
+    }
+
     public double getDriveMotorPosition() {
-        return drivePos.getValueAsDouble() * config.driveMotor().gearRatio() * Math.PI * config.wheelDiameter();
+        return getDriveMotorRotations() * Math.PI * config.wheelDiameter;
     }
 
     public double getEncoderRadians() {
@@ -162,23 +149,19 @@ public class SwerveModule {
     }
 
     public double getEncoderRotations() {
-        return encoderPos.getValueAsDouble() * config.encoder().gearRatio();
+        return encoderPos.getValueAsDouble() * config.encoder().gearRatio;
     }
 
     public double getEncoderDegrees() {
-        return Math.IEEEremainder(encoderPos.getValueAsDouble() * config.encoder().gearRatio() * 360, 360);
+        return Math.IEEEremainder(getEncoderRotations() * 360, 360);
     }
 
-    public double getOffsetRotations() {
+    public double getOffset() {
         return config.encoder().offsetRotations();
     }
 
-    public void setOffsetRotations(double offset) {
-        encoder.getConfigurator().apply(config.encoder().generateConfig(offset));
-    }
-
-    public double getOffsetDegrees() {
-        return (config.encoder().offsetRotations() * 360);
+    public void setOffset(double offsetRotations) {
+        encoder.getConfigurator().apply(config.encoder().generateConfig(offsetRotations));
     }
 
     public void resetEncoders() {
@@ -227,16 +210,16 @@ public class SwerveModule {
     }
 
     public void setNeutralMode(boolean brake){
-        setNeutralMode(brake ? NeutralModeValue.Brake : NeutralModeValue.Coast);
+        setNeutralMode(DriveTrainNeutralMode.fromBoolean(brake));
     }
 
-    public void setNeutralMode(NeutralModeValue mode){
+    public void setNeutralMode(DriveTrainNeutralMode mode){
         this.mode = mode;
-        driveMotor.setNeutralMode(mode);
-        rotationMotor.setNeutralMode(mode);
+        driveMotor.setNeutralMode(mode.asCTRE());
+        rotationMotor.setNeutralMode(mode.asCTRE());
     }
 
-    public NeutralModeValue getNeutralMode(){
+    public DriveTrainNeutralMode getNeutralMode(){
         return mode;
     }
 
@@ -249,8 +232,8 @@ public class SwerveModule {
 
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
-        layout.addBoolean("Locked", () -> mode == NeutralModeValue.Brake ? true : false).withWidget(BuiltInWidgets.kBooleanBox).withPosition(0, 1);
-        layout.addDouble("Offset Rotations", this::getOffsetRotations).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
+        layout.addBoolean("Brake Mode", () -> mode.asBoolean()).withWidget(BuiltInWidgets.kBooleanBox).withPosition(0, 1);
+        layout.addDouble("Offset Rotations", this::getOffset).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Encoder Rotations", this::getEncoderRotations).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
         return layout;
     }

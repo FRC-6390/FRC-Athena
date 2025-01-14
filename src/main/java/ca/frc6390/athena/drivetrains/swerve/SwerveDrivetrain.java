@@ -1,13 +1,13 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
 import java.util.Map;
+import java.util.function.DoubleSupplier;
 
-import com.ctre.phoenix6.signals.NeutralModeValue;
-
+import ca.frc6390.athena.commands.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotIMU;
+import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
-import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
@@ -17,34 +17,34 @@ import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
-public class SwerveDrivetrain extends SubsystemBase {
+public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
   public PIDController driftpid;
-  public ChassisSpeeds speeds, feedbackSpeeds;
+  public ChassisSpeeds driveSpeeds, feedbackSpeeds;
   public boolean enableDriftCorrection;
-  public double desiredHeading, maxVelocity, maxAngularVelocity;
-  public RobotIMU<?> imu;
+  public double desiredHeading, maxVelocity;
+  public RobotIMU imu;
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu) {
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU imu) {
     this(configs, imu, false, new PIDController(0, 0, 0));
   }
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu, boolean driftCorrection,
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU imu, boolean driftCorrection,
       PIDController driftCorrectionPID) {
     driftCorrectionPID.enableContinuousInput(-Math.PI, Math.PI);
-    speeds = new ChassisSpeeds();
+    driveSpeeds = new ChassisSpeeds();
     feedbackSpeeds = new ChassisSpeeds();
     swerveModules = new SwerveModule[configs.length];
     for (int i = 0; i < configs.length; i++) {
       swerveModules[i] = new SwerveModule(configs[i]);
 
       maxVelocity = configs[i].driveMotor().maxSpeedMetersPerSecond();
-      maxAngularVelocity = configs[i].driveMotor().maxSpeedMetersPerSecond();
     }
     Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
     for (int i = 0; i < configs.length; i++) {
@@ -56,13 +56,10 @@ public class SwerveDrivetrain extends SubsystemBase {
     this.imu = imu;
   }
 
+  
   public SwerveDriveKinematics getKinematics() {
-      return kinematics;
-  }
-
-  public RobotIMU<?> getImu() {
-      return imu;
-  }
+    return kinematics;
+  } 
 
   public SwerveModulePosition[] getSwerveModulePositions(){
     SwerveModulePosition[] positions = new SwerveModulePosition[swerveModules.length];
@@ -72,36 +69,8 @@ public class SwerveDrivetrain extends SubsystemBase {
     return positions;
   }
 
-  public void resetHeading() {
-    imu.setYaw(0);
-  }
-
-  public double getRoll() {
-    return Math.IEEEremainder(imu.getRoll(), 360);
-  }
-
-  public double getPitch() {
-    return Math.IEEEremainder(imu.getPitch(), 360);
-  }
-
-  public double getHeading() {
-    return Math.IEEEremainder(imu.getYaw(), 360);
-  }
-
-  public ChassisSpeeds getSpeeds() {
-    return speeds;
-  }
-
-  public void zeroHeading() {
-    imu.setYaw(0);
-  }
-
-  public void setHeading(double heading) {
-    imu.setYaw(heading);
-  }
-
-  public Rotation2d getRotation2d() {
-    return Rotation2d.fromDegrees(getHeading());
+  public ChassisSpeeds getDriveSpeeds() {
+    return driveSpeeds;
   }
 
   private void setModuleStates(SwerveModuleState[] states) {
@@ -110,34 +79,18 @@ public class SwerveDrivetrain extends SubsystemBase {
     }
   }
 
-  public void setNeutralMode(NeutralModeValue mode) {
-    for (int i = 0; i < swerveModules.length; i++) {
-      swerveModules[i].setNeutralMode(mode);
-    }
-  }
 
-  public void drive(ChassisSpeeds driveSpeeds) {
-    speeds = driveSpeeds;
-  }
-
-  public void addFeedbackSpeed(ChassisSpeeds feedbackSpeeds) {
-    this.feedbackSpeeds = feedbackSpeeds;
-  }
-
-  private void driftCorrection(ChassisSpeeds speeds) {
+  private double driftCorrection(ChassisSpeeds speeds) {
     if (Math.abs(speeds.omegaRadiansPerSecond) > 0.0) {
-      desiredHeading = getHeading();
+      desiredHeading = getIMU().getYaw().getRadians();
+      return 0;
     } else {
-      speeds.omegaRadiansPerSecond += driftpid.calculate(getHeading(), desiredHeading);
+      return driftpid.calculate(getIMU().getYaw().getRadians(), desiredHeading);
     }
   }
 
   public double getMaxVelocity() {
     return maxVelocity;
-  }
-
-  public double getMaxAngularVelocity() {
-    return maxAngularVelocity;
   }
 
   public void setDriftCorrectionMode(boolean enabled) {
@@ -148,18 +101,51 @@ public class SwerveDrivetrain extends SubsystemBase {
     return enableDriftCorrection;
   }
 
+  @Override
+  public RobotIMU getIMU() {
+      return imu;
+  }
+
+  @Override
+  public void setNeutralMode(DriveTrainNeutralMode mode) {
+    for (int i = 0; i < swerveModules.length; i++) {
+      swerveModules[i].setNeutralMode(mode);
+    }
+  }
+
+  @Override
+  public DriveTrainNeutralMode getNeutralMode() {
+    return swerveModules[0].getNeutralMode();
+  }
+
+  @Override
+  public void drive(ChassisSpeeds driveSpeeds) {
+    this.driveSpeeds = driveSpeeds;
+  }
+
+  @Override
+  public void addFeedbackSpeed(ChassisSpeeds feedbackSpeeds) {
+    this.feedbackSpeeds = feedbackSpeeds;
+  }
+
+  @Override
   public void update() {
     imu.update();
     
-    ChassisSpeeds speed = speeds.plus(feedbackSpeeds);
+    ChassisSpeeds speed = driveSpeeds.plus(feedbackSpeeds);
 
     if (enableDriftCorrection) {
-      driftCorrection(speed);
+      speed.omegaRadiansPerSecond += driftCorrection(speed);
     }
 
     SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
     SwerveDriveKinematics.desaturateWheelSpeeds(states, getMaxVelocity());
     setModuleStates(states);    
+  }
+
+  @Override
+  public Command createDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
+    return new SwerveDriveCommand(this, xInput, yInput, thetaInput);
   }
 
   public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
@@ -172,24 +158,28 @@ public class SwerveDrivetrain extends SubsystemBase {
       }
     }
 
-    tab.addDouble("Heading", this::getHeading).withWidget(BuiltInWidgets.kGyro);
+    ShuffleboardLayout imuLayout = tab.getLayout("IMU", BuiltInLayouts.kGrid).withSize(4, 8).withProperties(Map.of("Number of columns", 2, "Number of rows", 3));
+
+    getIMU().shuffleboard(imuLayout);
+    
     ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kGrid).withSize(2, 3).withProperties(Map.of("Number of columns", 2, "Number of rows", 1));
-    {
+    { 
+      Map<String, Object> props = Map.of("Min", -getMaxVelocity(), "Max", getMaxVelocity(),"Label position", "TOP");
       ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kGrid).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
-      chassisLayout.addDouble("X", () -> speeds.vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
-      chassisLayout.addDouble("Y", () -> speeds.vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
-      chassisLayout.addDouble("Z", () -> speeds.omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar);
+      chassisLayout.addDouble("X", () -> driveSpeeds.vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      chassisLayout.addDouble("Y", () -> driveSpeeds.vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      chassisLayout.addDouble("Z", () -> driveSpeeds.omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
       ShuffleboardLayout feedbackLayout = speedsLayout.getLayout("Feedback", BuiltInLayouts.kGrid).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
-      feedbackLayout.addDouble("X", () -> speeds.vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(Map.of("Min", 1, "Max", 3,"Label position", "TOP"));
-      feedbackLayout.addDouble("Y", () -> feedbackSpeeds.vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
-      feedbackLayout.addDouble("Z", () -> feedbackSpeeds.omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar);
+      feedbackLayout.addDouble("X", () -> driveSpeeds.vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      feedbackLayout.addDouble("Y", () -> feedbackSpeeds.vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      feedbackLayout.addDouble("Z", () -> feedbackSpeeds.omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
     }
 
     ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kGrid).withSize(1, 3).withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
     {
-      commandsLayout.add("Reset Heading", new InstantCommand(this::resetHeading)).withWidget(BuiltInWidgets.kCommand);
-      commandsLayout.add("Brake Mode", new InstantCommand(() -> setNeutralMode(NeutralModeValue.Brake))).withWidget(BuiltInWidgets.kCommand);
-      commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(NeutralModeValue.Coast))).withWidget(BuiltInWidgets.kCommand);
+      commandsLayout.add("Reset Heading", new InstantCommand(() -> getIMU().setYaw(0))).withWidget(BuiltInWidgets.kCommand);
+      commandsLayout.add("Brake Mode", new InstantCommand(() -> setNeutralMode(DriveTrainNeutralMode.Brake))).withWidget(BuiltInWidgets.kCommand);
+      commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(DriveTrainNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
     }
 
     ShuffleboardLayout driftCorrectionLayout = tab.getLayout("Drift Correction", BuiltInLayouts.kList).withSize(2, 2);
@@ -200,4 +190,6 @@ public class SwerveDrivetrain extends SubsystemBase {
     }
     return tab;
   }
+
+  
 }

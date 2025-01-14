@@ -2,8 +2,7 @@ package ca.frc6390.athena.commands;
 
 import java.util.function.DoubleSupplier;
 
-import com.ctre.phoenix6.signals.NeutralModeValue;
-
+import ca.frc6390.athena.core.RobotDrivetrain.DriveTrainNeutralMode;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -25,7 +24,7 @@ public class SwerveDriveCommand extends Command {
 
   @Override
   public void initialize() {
-    driveTrain.setNeutralMode(NeutralModeValue.Brake);
+    driveTrain.setNeutralMode(DriveTrainNeutralMode.Brake);
   }
 
   @Override
@@ -33,9 +32,9 @@ public class SwerveDriveCommand extends Command {
 
     double xSpeed = xInput.getAsDouble() * driveTrain.getMaxVelocity();
     double ySpeed =  yInput.getAsDouble() * driveTrain.getMaxVelocity();
-    double thetaSpeed = thetaInput.getAsDouble() * driveTrain.getMaxAngularVelocity();
+    double thetaSpeed = thetaInput.getAsDouble() * driveTrain.getMaxVelocity();
 
-    ChassisSpeeds chassisSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.getRotation2d());
+    ChassisSpeeds chassisSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.getIMU().getYaw());
 
     driveTrain.drive(chassisSpeeds);    
   }

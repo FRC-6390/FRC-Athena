@@ -23,7 +23,7 @@ public class SwerveHelpers {
         SwerveMotor[] result = new SwerveMotor[ids.length];
     
         for (int i = 0; i < ids.length; i++) {
-            result[i] = new SwerveMotor(ids[i], false, maxSpeedMetersPerSecond, gearRatio, canbus);
+            result[i] = new SwerveMotor(ids[i], maxSpeedMetersPerSecond, gearRatio, canbus);
         }
 
         return result;
@@ -34,7 +34,7 @@ public class SwerveHelpers {
         SwerveMotor[] result = new SwerveMotor[ids.length];
     
         for (int i = 0; i < ids.length; i++) {
-            result[i] = new SwerveMotor(ids[i], false, maxSpeedMetersPerSecond, gearRatio);
+            result[i] = new SwerveMotor(ids[i], maxSpeedMetersPerSecond, gearRatio);
         }
 
         return result;
@@ -84,5 +84,4 @@ public class SwerveHelpers {
 
         return result;
     }
-
 }
