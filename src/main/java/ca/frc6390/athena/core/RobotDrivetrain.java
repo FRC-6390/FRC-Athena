@@ -46,4 +46,5 @@ public interface RobotDrivetrain {
     void addFeedbackSpeed(ChassisSpeeds speeds);
     void update();
     Command createDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
+    void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
 }

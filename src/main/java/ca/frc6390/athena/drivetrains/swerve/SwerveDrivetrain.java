@@ -149,6 +149,12 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     return new SwerveDriveCommand(this, xInput, yInput, thetaInput);
   }
 
+  @Override
+  public void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
+    this.setDefaultCommand(createDriveCommand(xInput, yInput, thetaInput));
+  }
+
+
   public ShuffleboardTab shuffleboard(String tab) {
       return shuffleboard(Shuffleboard.getTab(tab));
   }
