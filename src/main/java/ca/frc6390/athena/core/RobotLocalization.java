@@ -45,6 +45,7 @@ public class RobotLocalization extends SubsystemBase{
         this.estimatorPose = pose;
         this.drivetrain = drivetrain;
         this.vision = vision;
+        this.field = new Field2d();
 
         estimator = config != null ?
          new SwerveDrivePoseEstimator(drivetrain.getKinematics(),drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd()) : 

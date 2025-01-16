@@ -12,6 +12,7 @@ import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.hardware.CANcoder;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -33,7 +34,8 @@ public class SwerveModule {
     private DriveTrainNeutralMode mode;
     private final CANcoder encoder; //could possibly be entirely remove and manager by a backend instead
     private final PIDController rotationPidController;
-    
+    private double offset; 
+
     private StatusSignal<AngularVelocity> driveVel; //switch to double suppliers in future
     private StatusSignal<Angle> encoderPos, drivePos; //switch to double suppliers in future
 
@@ -68,35 +70,34 @@ public class SwerveModule {
         }
     }
 
-    public record SwerveEncoder(int id, double offsetRotations, double gearRatio, String canbus) {
+    public record SwerveEncoder(int id, double offsetRadians, double gearRatio, String canbus) {
 
-        public SwerveEncoder(int id, double offsetRotations, double gearRatio) {
-            this(id, offsetRotations, gearRatio, "can");
+        public SwerveEncoder(int id, double offsetRadians, double gearRatio) {
+            this(id, offsetRadians, gearRatio, "can");
         }
 
-        public SwerveEncoder(int id, double offsetRotations) {
-            this(id, offsetRotations, 1, "can");
+        public SwerveEncoder(int id, double offsetRadians) {
+            this(id, offsetRadians, 1, "can");
         }
 
-        public SwerveEncoder(int id, double offsetRotations, String canbus) {
-            this(id, offsetRotations, 1, canbus);
+        public SwerveEncoder(int id, double offsetRadians, String canbus) {
+            this(id, offsetRadians, 1, canbus);
         }
 
         public CANcoderConfiguration generateConfig() {
-           return generateConfig(offsetRotations);
+           return generateConfig(offsetRadians);
         } 
 
         public CANcoderConfiguration generateConfig(double offset) {
             CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
             encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 1;
-            encoderConfig.MagnetSensor.MagnetOffset = offset; //shoule move away from using configs for offset makes code less dependant on CTRE
            return encoderConfig;
         } 
     }
 
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, SwerveEncoder encoder) {
-        public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, double offsetRotations) {
-            this(module_location, wheelDiameter, driveMotor, rotationMotor, rotationPID, rotationMotor.asEncoder(offsetRotations));
+        public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, double offsetRadians) {
+            this(module_location, wheelDiameter, driveMotor, rotationMotor, rotationPID, rotationMotor.asEncoder(offsetRadians));
         }
     }
 
@@ -125,6 +126,8 @@ public class SwerveModule {
             encoder = null;
         }
 
+        offset = config.encoder().offsetRadians;
+
         // DRIVE MOTOR POSITION AND VELOCITY
         drivePos = driveMotor.getRotorPosition();
         driveVel = driveMotor.getRotorVelocity();
@@ -149,24 +152,16 @@ public class SwerveModule {
         return getDriveMotorRotations() * Math.PI * config.wheelDiameter;
     }
 
-    public double getEncoderRadians() {
-        return getEncoderDegrees() * Math.PI / 180d;
-    }
-
-    public double getEncoderRotations() {
-        return encoderPos.getValueAsDouble() * config.encoder().gearRatio;
-    }
-
-    public double getEncoderDegrees() {
-        return Math.IEEEremainder(getEncoderRotations() * 360, 360);
+    public Rotation2d getEncoderPosition() {
+        return Rotation2d.fromRotations(encoderPos.getValueAsDouble() * config.encoder().gearRatio).minus(Rotation2d.fromRadians(offset));
     }
 
     public double getOffset() {
-        return config.encoder().offsetRotations();
+        return offset;
     }
 
-    public void setOffset(double offsetRotations) {
-        if (encoder != null) encoder.getConfigurator().apply(config.encoder().generateConfig(offsetRotations));
+    public void setOffset(double offset) {
+        this.offset = offset;
     }
 
     public void resetEncoders() {
@@ -175,11 +170,11 @@ public class SwerveModule {
     }
 
     public SwerveModuleState getState() {
-        return new SwerveModuleState(getDriveMotorVelocity(), new Rotation2d(getEncoderRadians()));
+        return new SwerveModuleState(getDriveMotorVelocity(), getEncoderPosition());
     }
 
     public SwerveModulePosition getPostion() {
-        return new SwerveModulePosition(getDriveMotorPosition(), new Rotation2d(getEncoderRadians()));
+        return new SwerveModulePosition(getDriveMotorPosition(), getEncoderPosition());
     }
 
     public void setDriveMotor(double speed) {
@@ -201,8 +196,7 @@ public class SwerveModule {
 
         state.optimize(getState().angle);
         driveMotor.set(state.speedMetersPerSecond / config.driveMotor().maxSpeedMetersPerSecond());
-
-        rotationMotor.set(rotationPidController.calculate(getEncoderRadians(), state.angle.getRadians()));
+        rotationMotor.set(-rotationPidController.calculate( MathUtil.angleModulus(getEncoderPosition().getRadians()), state.angle.getRadians()));
     }
 
     public void stop() {
@@ -238,7 +232,9 @@ public class SwerveModule {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
         layout.addBoolean("Brake Mode", () -> mode.asBoolean()).withWidget(BuiltInWidgets.kBooleanBox).withPosition(0, 1);
         layout.addDouble("Offset Rotations", this::getOffset).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
-        layout.addDouble("Encoder Rotations", this::getEncoderRotations).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
+        layout.addDouble("Encoder Radians", () -> MathUtil.angleModulus(getEncoderPosition().getRadians())).withSize(1, 1).withPosition(0, 3);
+        layout.add("PID", rotationPidController).withSize(1, 1).withPosition(0, 3);
+
         return layout;
     }
 }

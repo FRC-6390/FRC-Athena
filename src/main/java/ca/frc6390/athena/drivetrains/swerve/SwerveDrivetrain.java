@@ -139,8 +139,12 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
       speed.omegaRadiansPerSecond += driftCorrection(speed);
     }
 
+
     SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
+
+
     SwerveDriveKinematics.desaturateWheelSpeeds(states, getMaxVelocity());
+
     setModuleStates(states);    
   }
 
