@@ -20,7 +20,11 @@ import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 public class RobotLocalization extends SubsystemBase{
     
-    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd) {
+    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, PoseEstimateWithLatencyType pose) {
+
+        public RobotLocalizationConfig(double xStd, double yStd, double thetaSt, double vXStd, double vYStda, double vThetaStd) {
+            this(xStd, yStd, thetaSt, vXStd, vYStda, vThetaStd, PoseEstimateWithLatencyType.BOT_POSE_BLUE);
+        }
 
         public RobotLocalizationConfig(double xStd, double yStd, double thetaSt) {
             this(xStd, yStd, thetaSt, 0.9, 0.9, 0.9);
@@ -38,6 +42,7 @@ public class RobotLocalization extends SubsystemBase{
     private final SwerveDrivePoseEstimator estimator;
     private final SwerveDrivetrain drivetrain;
     private final RobotVision vision;
+    private final PoseEstimateWithLatencyType estimateWithLatencyType;
     private Pose2d estimatorPose;
     private Field2d field;
 
@@ -46,6 +51,7 @@ public class RobotLocalization extends SubsystemBase{
         this.drivetrain = drivetrain;
         this.vision = vision;
         this.field = new Field2d();
+        estimateWithLatencyType = config.pose;
 
         estimator = config != null ?
          new SwerveDrivePoseEstimator(drivetrain.getKinematics(),drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd()) : 
@@ -91,14 +97,15 @@ public class RobotLocalization extends SubsystemBase{
             for (String table : vision.getCameraTables()) {
                 LimeLight camera = vision.getCamera(table);
                 if(camera.hasValidTarget()){
-                    PoseEstimateWithLatency data = camera.getPoseEstimate(PoseEstimateWithLatencyType.BOT_POSE_MT2_BLUE);
+                    PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
                     double timestamp = Timer.getFPGATimestamp() - (data.getLatency() / 1000.0);
                     estimator.addVisionMeasurement(data.getPose(), timestamp);
+                    // drivetrain.getIMU().setFieldYawOffset(data.getPose().getRotation());
                 }
             }
         }
 
-        estimatorPose = estimator.update(drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions());
+        estimatorPose = estimator.update(drivetrain.getIMU().getFieldYaw(), drivetrain.getSwerveModulePositions());
         field.setRobotPose(estimatorPose);
     }
 

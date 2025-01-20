@@ -55,6 +55,7 @@ public class LimeLight {
     public NetworkTableEntry cy0;
     public NetworkTableEntry cx1;
     public NetworkTableEntry cy1;
+    public NetworkTableEntry rawfiducials;
 
     public enum LedMode{
         PIPELINE(0),
@@ -197,7 +198,7 @@ public class LimeLight {
             Double[] poseReal = getRaw(table);
             if (poseReal == null) return new Pose2d();
             Translation2d translation = new Translation2d(poseReal[0], poseReal[1]);
-            Rotation2d rotation2d = new Rotation2d(poseReal[5]);
+            Rotation2d rotation2d = new Rotation2d(poseReal[4]);
             return new Pose2d(translation, rotation2d);
         }
     }
@@ -251,6 +252,7 @@ public class LimeLight {
         cy0 = limelightTable.getEntry("cy0");
         cx1 = limelightTable.getEntry("cx1");
         cy1 = limelightTable.getEntry("cy1");
+        rawfiducials =  limelightTable.getEntry("rawfiducials");
     }
     
     
@@ -416,6 +418,10 @@ public class LimeLight {
      */
     public void setStream(int mode){
         pipeline.setNumber(mode);
+    }
+
+    public Number[] getRawFiducials(){
+        return rawfiducials.getNumberArray(new Number[]{});
     }
 
     /**

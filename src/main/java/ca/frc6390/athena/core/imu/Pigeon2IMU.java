@@ -13,6 +13,7 @@ public class Pigeon2IMU implements RobotIMU {
     private final Pigeon2 pigeon;
     private final StatusSignal<Angle> roll, pitch, yaw;
     private final StatusSignal<LinearAcceleration> accelX, accelY, accelZ;
+    private Rotation2d fieldYawOffset;
 
     public Pigeon2IMU(int id, String canbus) {
         this.pigeon = new Pigeon2(id, canbus);
@@ -22,6 +23,7 @@ public class Pigeon2IMU implements RobotIMU {
         accelX = pigeon.getAccelerationX();
         accelY = pigeon.getAccelerationY();
         accelZ = pigeon.getAccelerationZ();
+        fieldYawOffset = new Rotation2d();
     }
     
     public Pigeon2 getPigeon() {
@@ -29,6 +31,7 @@ public class Pigeon2IMU implements RobotIMU {
     }
     @Override
     public void setYaw(double yaw) {
+        fieldYawOffset = fieldYawOffset.minus(Rotation2d.fromDegrees(getYaw().getDegrees() - yaw));
         pigeon.setYaw(yaw);
     }
 
@@ -70,5 +73,20 @@ public class Pigeon2IMU implements RobotIMU {
         accelX.refresh();
         accelY.refresh();
         accelZ.refresh();
+    }
+
+    @Override
+    public void setFieldYawOffset(Rotation2d fieldYaw) {
+        fieldYawOffset = getYaw().minus(fieldYaw);
+    }
+
+    @Override
+    public Rotation2d getFieldYaw() {
+       return getYaw().minus(fieldYawOffset);
+    }
+
+    @Override
+    public Rotation2d getFieldYawOffset() {
+       return fieldYawOffset;
     }
 }
