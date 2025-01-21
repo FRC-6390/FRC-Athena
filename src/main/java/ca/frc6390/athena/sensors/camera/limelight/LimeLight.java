@@ -157,19 +157,19 @@ public class LimeLight {
 
         public double getLatency()
         {
-            return getRaw(table)[7];
+            return getRaw()[7];
         }
         public double getTagCount()
         {
-            return getRaw(table)[8];
+            return getRaw()[8];
         }
         public double getDistToTag()
         {
-            return getRaw(table)[9];
+            return getRaw()[9];
         }
         public double getAvgTagArea()
         {
-            return getRaw(table)[10];
+            return getRaw()[10];
         }
         
     }
@@ -188,17 +188,17 @@ public class LimeLight {
         {
             this.table = table;
         }
-        public Double[] getRaw(String table)
+        public Double[] getRaw()
         {
             return limelightTable.getEntry(table).getDoubleArray(dub);
         }
 
         public Pose2d getPose()
         {
-            Double[] poseReal = getRaw(table);
+            Double[] poseReal = getRaw();
             if (poseReal == null) return new Pose2d();
             Translation2d translation = new Translation2d(poseReal[0], poseReal[1]);
-            Rotation2d rotation2d = new Rotation2d(poseReal[4]);
+            Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[4]);
             return new Pose2d(translation, rotation2d);
         }
     }
