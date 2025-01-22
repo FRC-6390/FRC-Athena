@@ -54,7 +54,7 @@ public class RobotLocalization extends SubsystemBase{
         estimateWithLatencyType = config.pose;
 
         estimator = config != null ?
-         new SwerveDrivePoseEstimator(drivetrain.getKinematics(),drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd()) : 
+         new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd()) : 
          new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose);
     }
 

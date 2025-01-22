@@ -125,7 +125,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   }
 
   @Override
-  public void addFeedbackSpeed(ChassisSpeeds feedbackSpeeds) {
+  public void feedbackSpeeds(ChassisSpeeds feedbackSpeeds) {
     this.feedbackSpeeds = feedbackSpeeds;
   }
 

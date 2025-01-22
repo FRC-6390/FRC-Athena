@@ -43,7 +43,7 @@ public interface RobotDrivetrain {
     DriveTrainNeutralMode getNeutralMode();
     void setNeutralMode(DriveTrainNeutralMode mode);
     void drive(ChassisSpeeds speeds);
-    void addFeedbackSpeed(ChassisSpeeds speeds);
+    void feedbackSpeeds(ChassisSpeeds speeds);
     void update();
     Command createDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
     void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
