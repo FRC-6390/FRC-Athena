@@ -76,7 +76,7 @@ public class RobotLocalization extends SubsystemBase{
     }
 
     public void reset(Pose2d pose) {
-        reset(new Pose2d(), drivetrain.getIMU().getYaw());
+        reset(pose, drivetrain.getIMU().getFieldYaw());
     }
 
     public void reset() {

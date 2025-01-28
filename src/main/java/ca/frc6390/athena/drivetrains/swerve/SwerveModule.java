@@ -233,6 +233,7 @@ public class SwerveModule {
         layout.addBoolean("Brake Mode", () -> mode.asBoolean()).withWidget(BuiltInWidgets.kBooleanBox).withPosition(0, 1);
         layout.addDouble("Offset Rotations", this::getOffset).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Encoder Radians", () -> MathUtil.angleModulus(getEncoderPosition().getRadians())).withSize(1, 1).withPosition(0, 3);
+        layout.addDouble("Drive Motor Rotations", () -> getDriveMotorRotations()).withSize(1, 1).withPosition(0, 3);
         layout.add("PID", rotationPidController).withSize(1, 1).withPosition(0, 3);
 
         return layout;

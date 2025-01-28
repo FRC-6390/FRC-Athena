@@ -21,7 +21,7 @@ public class SwerveDriveCommand extends Command {
     this.thetaInput = thetaInput;
     addRequirements(driveTrain);
   }
-
+  
   @Override
   public void initialize() {
     driveTrain.setNeutralMode(DriveTrainNeutralMode.Brake);
