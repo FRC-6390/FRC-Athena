@@ -9,7 +9,7 @@ public class ModifiedAxis implements DoubleSupplier {
     private static final double DEFUALT_DEADBAND = 0.01d;
     private DoubleSupplier input;
     private double deadzone;
-    private boolean doSquaring = true;
+    private boolean inverted = false, doSquaring = true;
     
     public ModifiedAxis(DoubleSupplier input){
         this(input, DEFUALT_DEADBAND);
@@ -33,7 +33,7 @@ public class ModifiedAxis implements DoubleSupplier {
         return this;
     }
 
-    public ModifiedAxis withoutSquaring(){
+    public ModifiedAxis setSquaring(){
         doSquaring = false;
         return this;
     }
@@ -51,9 +51,20 @@ public class ModifiedAxis implements DoubleSupplier {
         return Math.copySign(value*value, value);
     }
 
+    public ModifiedAxis setInverted(boolean inverted){
+        this.inverted = inverted;
+        return this;
+    }
+
+    public boolean getInveted() {
+        return inverted;
+    }
+
     @Override
     public double getAsDouble() {
         double value = applyDeadzone(input.getAsDouble());
-        return doSquaring ? sqaureAxis(value) : value;
+
+        double squared = doSquaring ? sqaureAxis(value) : value;
+        return inverted ? -squared : squared;
     }
 }

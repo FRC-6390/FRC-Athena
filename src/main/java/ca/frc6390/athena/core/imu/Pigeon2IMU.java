@@ -52,18 +52,18 @@ public class Pigeon2IMU implements RobotIMU {
     }
 
     @Override
-    public Rotation2d getAccelerationX() {
-        return Rotation2d.fromDegrees(accelX.getValueAsDouble());
+    public double getAccelerationX() {
+        return accelX.getValueAsDouble();
     }
 
     @Override
-    public Rotation2d getAccelerationY() {
-        return Rotation2d.fromDegrees(accelY.getValueAsDouble());
+    public double getAccelerationY() {
+        return accelY.getValueAsDouble();
     }
 
     @Override
-    public Rotation2d getAccelerationZ() {
-        return Rotation2d.fromDegrees(accelZ.getValueAsDouble());
+    public double getAccelerationZ() {
+        return accelZ.getValueAsDouble();
     }
 
     @Override

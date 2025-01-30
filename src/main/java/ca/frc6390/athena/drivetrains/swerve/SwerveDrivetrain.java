@@ -5,7 +5,6 @@ import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.commands.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotIMU;
-import ca.frc6390.athena.dashboard.Elastic;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
@@ -207,5 +206,9 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     return tab;
   }
 
+  @Override
+  public void periodic() {
+      update();
+  }
   
 }

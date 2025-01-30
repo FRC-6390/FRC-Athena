@@ -61,10 +61,10 @@ public class DebouncedJoystick extends Joystick {
 
      public ModifiedAxis leftX = new ModifiedAxis(this, AXIS.LEFT_X.get()),
      leftY = new ModifiedAxis(this, AXIS.LEFT_Y.get()),
-     leftTrigger = new ModifiedAxis(this, AXIS.LEFT_TRIGGER.get()).withoutSquaring(),
+     leftTrigger = new ModifiedAxis(this, AXIS.LEFT_TRIGGER.get()).setSquaring(),
      rightX = new ModifiedAxis(this, AXIS.RIGHT_X.get()),
      rightY = new ModifiedAxis(this, AXIS.RIGHT_Y.get()),
-     rightTrigger = new ModifiedAxis(this, AXIS.RIGHT_TRIGGER.get()).withoutSquaring();
+     rightTrigger = new ModifiedAxis(this, AXIS.RIGHT_TRIGGER.get()).setSquaring();
 
 
     public DebouncedJoystick(int port) {

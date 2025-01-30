@@ -22,9 +22,9 @@ public interface RobotIMU {
     Rotation2d getFieldYaw();
 
 
-    Rotation2d getAccelerationX();
-    Rotation2d getAccelerationY();
-    Rotation2d getAccelerationZ();
+    double getAccelerationX();
+    double getAccelerationY();
+    double getAccelerationZ();
 
     void update();
 
@@ -37,9 +37,9 @@ public interface RobotIMU {
         layout.addDouble("Roll",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Pitch",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
 
-        layout.addDouble("Acceleration X",() -> getAccelerationX().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withPosition(0, 1);
-        layout.addDouble("Acceleration Y",() -> getAccelerationY().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 2);
-        layout.addDouble("Acceleration Z",() -> getAccelerationZ().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 3);
+        layout.addDouble("Acceleration X",() -> getAccelerationX()).withWidget(BuiltInWidgets.kNumberSlider).withPosition(0, 1);
+        layout.addDouble("Acceleration Y",() -> getAccelerationY()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 2);
+        layout.addDouble("Acceleration Z",() -> getAccelerationZ()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 3);
         return layout;
     }
 
