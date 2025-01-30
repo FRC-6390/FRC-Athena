@@ -29,6 +29,7 @@ public class Pigeon2IMU implements RobotIMU {
     public Pigeon2 getPigeon() {
         return pigeon;
     }
+   
     @Override
     public void setYaw(double yaw) {
         fieldYawOffset = fieldYawOffset.minus(Rotation2d.fromDegrees(getYaw().getDegrees() - yaw));
@@ -75,9 +76,10 @@ public class Pigeon2IMU implements RobotIMU {
         accelZ.refresh();
     }
 
+
     @Override
-    public void setFieldYawOffset(Rotation2d fieldYaw) {
-        fieldYawOffset = getYaw().minus(fieldYaw);
+    public void setFieldYaw(Rotation2d fieldYaw) {
+         fieldYawOffset = getYaw().minus(fieldYaw);
     }
 
     @Override
@@ -88,5 +90,10 @@ public class Pigeon2IMU implements RobotIMU {
     @Override
     public Rotation2d getFieldYawOffset() {
        return fieldYawOffset;
+    }
+
+    @Override
+    public void setFieldYawOffset(Rotation2d yaw) {
+        fieldYawOffset = yaw;
     }
 }

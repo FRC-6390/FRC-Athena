@@ -71,16 +71,26 @@ public class RobotLocalization extends SubsystemBase{
     }
 
     public void reset(Pose2d pose, Rotation2d heading) {
-        estimator.resetPosition(heading, drivetrain.getSwerveModulePositions(), pose);
+        drivetrain.getIMU().setFieldYaw(heading);
+        estimator.resetPose(pose);
+        estimator.resetRotation(heading);
         this.estimatorPose = pose;
     }
 
     public void reset(Pose2d pose) {
-        reset(pose, drivetrain.getIMU().getFieldYaw());
+        reset(pose, pose.getRotation());
     }
 
     public void reset() {
-        reset(new Pose2d());
+        reset(new Pose2d(0,0, new Rotation2d(0)));
+    }
+
+    public void resetXY() {
+        reset(new Pose2d(0,0,drivetrain.getIMU().getFieldYaw()));
+    }
+
+    public void resetXY(double x, double y) {
+        reset(new Pose2d(x, y, drivetrain.getIMU().getFieldYaw()));
     }
 
     public void setVisionStd(Matrix<N3, N1> matrix){

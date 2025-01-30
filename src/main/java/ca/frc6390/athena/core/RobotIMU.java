@@ -11,6 +11,8 @@ public interface RobotIMU {
     //TODO add the ability to have a driver heading and an absolute heading relative to the field
     void setYaw(double yaw);
     void setFieldYawOffset(Rotation2d yaw);
+    void setFieldYaw(Rotation2d yaw);
+    
     Rotation2d getFieldYawOffset();
 
 
