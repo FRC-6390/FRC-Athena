@@ -1,5 +1,10 @@
 package ca.frc6390.athena.core;
 
+import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.config.PIDConstants;
+import com.pathplanner.lib.config.RobotConfig;
+import com.pathplanner.lib.controllers.PPHolonomicDriveController;
+
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatency;
@@ -10,6 +15,7 @@ import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
@@ -45,6 +51,8 @@ public class RobotLocalization extends SubsystemBase{
     private final PoseEstimateWithLatencyType estimateWithLatencyType;
     private Pose2d estimatorPose;
     private Field2d field;
+    private RobotConfig config;
+
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
         this.estimatorPose = pose;
@@ -68,6 +76,32 @@ public class RobotLocalization extends SubsystemBase{
 
     public RobotLocalization(SwerveDrivetrain drivetrain) {
         this(drivetrain, null, null);
+    }
+
+    public void configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants){
+        try{
+        config = RobotConfig.fromGUISettings();  }catch(Exception e){
+            DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", e.getStackTrace());
+        }
+        AutoBuilder.configure(
+            this::getPose, 
+            this::reset, 
+            drivetrain::getDriveSpeeds, 
+            (speeds, feedforwards) -> drivetrain.drive(speeds), 
+            new PPHolonomicDriveController(
+            translationConstants,
+            rotationConstants
+            ),
+            config,
+            () -> {
+                var alliance = DriverStation.getAlliance();
+                if (alliance.isPresent()) {
+                    return alliance.get() == DriverStation.Alliance.Red;
+                }
+                return false;
+            },
+            drivetrain
+      );
     }
 
     public void reset(Pose2d pose, Rotation2d heading) {
