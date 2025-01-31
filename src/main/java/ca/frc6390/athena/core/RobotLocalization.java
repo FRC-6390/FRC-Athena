@@ -85,7 +85,7 @@ public class RobotLocalization extends SubsystemBase{
         }
         AutoBuilder.configure(
             this::getPose, 
-            this::reset, 
+            this::resetPathPlannerPose, 
             drivetrain::getDriveSpeeds, 
             (speeds, feedforwards) -> drivetrain.drive(speeds), 
             new PPHolonomicDriveController(
@@ -102,6 +102,11 @@ public class RobotLocalization extends SubsystemBase{
             },
             drivetrain
       );
+    }
+
+    private void resetPathPlannerPose(Pose2d pose){
+        reset(pose);
+        drivetrain.getIMU().setYaw(pose.getRotation().getDegrees());
     }
 
     public void reset(Pose2d pose, Rotation2d heading) {
