@@ -435,9 +435,8 @@ public class LimeLight {
         return getDistanceFromTarget(config.mountingAngle(), config.mountingHeightMeters(), targetHeightMeters);
     }
 
-    //Change back to vertical on good robot
     public double getDistanceFromTarget(double mountingAngle, double mountingHeightMeters, double targetHeightMeters){
-        double angleToTargetRadains =  (mountingAngle + getTargetHorizontalOffset()) * (Math.PI/180d); 
+        double angleToTargetRadains =  (mountingAngle + getTargetVerticalOffset()) * (Math.PI/180d); 
         double heightDiff = targetHeightMeters - mountingHeightMeters;
         
         return heightDiff == 0 ? Math.tan(angleToTargetRadains) : (heightDiff)/Math.tan(angleToTargetRadains);
