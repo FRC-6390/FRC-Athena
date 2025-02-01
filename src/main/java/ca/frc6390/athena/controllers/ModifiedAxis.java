@@ -2,6 +2,7 @@ package ca.frc6390.athena.controllers;
 
 import java.util.function.DoubleSupplier;
 
+import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.wpilibj.GenericHID;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 
@@ -10,6 +11,7 @@ public class ModifiedAxis implements DoubleSupplier {
     private DoubleSupplier input;
     private double deadzone;
     private boolean inverted = false, doSquaring = true;
+    private SlewRateLimiter slewRateLimiter;
     
     public ModifiedAxis(DoubleSupplier input){
         this(input, DEFUALT_DEADBAND);
@@ -33,8 +35,18 @@ public class ModifiedAxis implements DoubleSupplier {
         return this;
     }
 
-    public ModifiedAxis setSquaring(){
-        doSquaring = false;
+    public ModifiedAxis setSquaring(boolean squaring){
+        doSquaring = squaring;
+        return this;
+    }
+
+    public ModifiedAxis enableSlewrate(double rate){
+        slewRateLimiter = new SlewRateLimiter(rate);
+        return this;
+    }
+
+    public ModifiedAxis enableSlewrate(double frate, double rrate){
+        slewRateLimiter = new SlewRateLimiter(frate, rrate, 0);
         return this;
     }
 
@@ -65,6 +77,7 @@ public class ModifiedAxis implements DoubleSupplier {
         double value = applyDeadzone(input.getAsDouble());
 
         double squared = doSquaring ? sqaureAxis(value) : value;
-        return inverted ? -squared : squared;
+        double slewRate = slewRateLimiter != null ? slewRateLimiter.calculate(squared) : squared;
+        return inverted ? -slewRate : slewRate;
     }
 }

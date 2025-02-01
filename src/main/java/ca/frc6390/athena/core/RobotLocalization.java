@@ -105,8 +105,8 @@ public class RobotLocalization extends SubsystemBase{
     }
 
     private void resetPathPlannerPose(Pose2d pose){
-        reset(pose);
         drivetrain.getIMU().setYaw(pose.getRotation().getDegrees());
+        reset(pose);
     }
 
     public void reset(Pose2d pose, Rotation2d heading) {

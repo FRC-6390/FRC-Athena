@@ -114,8 +114,8 @@ public class SwerveModule {
         rotationMotor = new TalonFX(config.rotationMotor().id, config.rotationMotor().canbus);
 
         //CONFIGS
-        rotationMotor.getConfigurator().apply(config.rotationMotor().generateTalonFXConfig(60));
-        driveMotor.getConfigurator().apply(config.driveMotor().generateTalonFXConfig(60));
+        rotationMotor.getConfigurator().apply(config.rotationMotor().generateTalonFXConfig(40));
+        driveMotor.getConfigurator().apply(config.driveMotor().generateTalonFXConfig(40));
 
         if (config.encoder().id() != config.rotationMotor().id) {
             encoder = new CANcoder(config.encoder().id, config.encoder().canbus);

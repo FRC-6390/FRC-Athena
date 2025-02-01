@@ -23,6 +23,7 @@ public class Pigeon2IMU implements RobotIMU {
         accelX = pigeon.getAccelerationX();
         accelY = pigeon.getAccelerationY();
         accelZ = pigeon.getAccelerationZ();
+        
         fieldYawOffset = new Rotation2d();
     }
     
