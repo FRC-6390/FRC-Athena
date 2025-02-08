@@ -19,6 +19,7 @@ public class RobotIMU<T extends IMUHIL> extends VirtualIMU implements IMUHIL {
 
     public void setYaw(double yaw) {
         imu.setYaw(yaw);
+        updateVirtualOffsets(Rotation2d.fromDegrees(yaw));
     }
 
     public void setYaw(Rotation2d yaw) {
