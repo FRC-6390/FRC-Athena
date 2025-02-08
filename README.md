@@ -8,7 +8,7 @@ export $(cat .env | xargs)
  ```
 
  ```bash
- ./gradlew publish -PpublishMode=local -PfrcYear=2025 #Publish local to wpilib folder
+ ./gradlew publish -PpublishMode=local -PfrcYear=2025 -Pversion=2025.9.9 #Publish local to wpilib folder
  ```
 
  ```bash

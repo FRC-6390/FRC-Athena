@@ -29,6 +29,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public PIDController driftpid;
   public ChassisSpeeds driveSpeeds, feedbackSpeeds;
   public boolean enableDriftCorrection;
+  public AXIS enabledAxes = AXIS.Enable;
   public double desiredHeading, maxVelocity;
   public RobotIMU<?> imu;
 
@@ -129,11 +130,39 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     this.feedbackSpeeds = feedbackSpeeds;
   }
 
+  public enum AXIS
+  {
+    XDisable(new ChassisSpeeds(0,1,1)),
+    YDisable(new ChassisSpeeds(1,0,1)),
+    XYDisable(new ChassisSpeeds(0,0,1)),
+    Disable(new ChassisSpeeds(0,0,0)),
+    RotDisable(new ChassisSpeeds(1,1,0)),
+    Enable(new ChassisSpeeds(1,1,1));
+
+    ChassisSpeeds num;
+    private AXIS(ChassisSpeeds num)
+    {
+      this.num = num;
+    } 
+
+    public ChassisSpeeds get()
+    {
+      return num;
+    }
+  }
+  
+  public void disableAxis(AXIS axis)
+  {
+    this.enabledAxes = axis;
+  }
+
   @Override
   public void update() {
     imu.update();
     
-    ChassisSpeeds speed = driveSpeeds.plus(feedbackSpeeds);
+    ChassisSpeeds speed = new ChassisSpeeds(driveSpeeds.vxMetersPerSecond * enabledAxes.get().vxMetersPerSecond, driveSpeeds.vyMetersPerSecond * enabledAxes.get().vyMetersPerSecond, driveSpeeds.omegaRadiansPerSecond *  enabledAxes.get().omegaRadiansPerSecond);
+     speed = driveSpeeds.plus(feedbackSpeeds);
+    
 
     if (enableDriftCorrection) {
       speed.omegaRadiansPerSecond += driftCorrection(speed);
