@@ -2,37 +2,77 @@ package ca.frc6390.athena.core;
 
 import java.util.Map;
 
-import ca.frc6390.athena.core.imu.Pigeon2IMU;
+import ca.frc6390.athena.core.imu.IMUHIL;
+import ca.frc6390.athena.core.imu.VirtualIMU;
+import ca.frc6390.athena.core.imu.devices.Pigeon2IMU;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
-public interface RobotIMU {
-    //TODO add the ability to have a driver heading and an absolute heading relative to the field
-    void setYaw(double yaw);
-    void setFieldYawOffset(Rotation2d yaw);
-    void setFieldYaw(Rotation2d yaw);
+public class RobotIMU<T extends IMUHIL> extends VirtualIMU implements IMUHIL {
+
+    private final T imu;
+
+    public RobotIMU(T imu){
+        this.imu = imu;
+    }
+
+    public void setYaw(double yaw) {
+        imu.setYaw(yaw);
+    }
+
+    public void setYaw(Rotation2d yaw) {
+        imu.setYaw(yaw.getDegrees());
+    }
+
+    public Rotation2d getRoll(){
+        return imu.getRoll();
+    }
     
-    Rotation2d getFieldYawOffset();
+    public Rotation2d getPitch(){
+        return imu.getPitch();
+    }
+    public Rotation2d getYaw(){
+        return imu.getYaw();
+    }
 
+    public double getRollAsDegrees(){
+        return imu.getRoll().getDegrees();
+    }
+    public double getPitchAsDegrees(){
+        return imu.getPitch().getDegrees();
+    }
+    public double getYawAsDegrees(){
+        return imu.getYaw().getDegrees();
+    }
 
-    Rotation2d getRoll();
-    Rotation2d getPitch();
-    Rotation2d getYaw();
-    Rotation2d getFieldYaw();
+    public double getRollAsRadians(){
+        return imu.getRoll().getRadians();
+    }
+    public double getPitchAsRadians(){
+        return imu.getPitch().getRadians();
+    }
+    public double getYawAsRadians(){
+        return imu.getYaw().getRadians();
+    }
 
+    public double getAccelerationX(){
+        return imu.getAccelerationX();
+    }
+    public double getAccelerationY(){
+        return imu.getAccelerationY();
+    }
+    public double getAccelerationZ(){
+        return imu.getAccelerationZ();
+    }
 
-    double getAccelerationX();
-    double getAccelerationY();
-    double getAccelerationZ();
+    public void update(){
+        imu.update();
+    }
 
-    void update();
-
-    default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
 
-        layout.addDouble("Field Yaw Offset",() -> getFieldYawOffset().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
-        layout.addDouble("Field Yaw",() -> getFieldYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
         layout.addDouble("Yaw",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
         layout.addDouble("Roll",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Pitch",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
@@ -43,12 +83,11 @@ public interface RobotIMU {
         return layout;
     }
 
-    public static Pigeon2IMU createFromPigeon2(int id) {
+    public static RobotIMU<Pigeon2IMU> createFromPigeon2(int id) {
         return createFromPigeon2(id, "rio");
     }
 
-    public static Pigeon2IMU createFromPigeon2(int id, String canbus) {
-        Pigeon2IMU pigeonIMU = new Pigeon2IMU(id, canbus);
-        return pigeonIMU;
+    public static RobotIMU<Pigeon2IMU> createFromPigeon2(int id, String canbus) {
+        return new RobotIMU<Pigeon2IMU>(new Pigeon2IMU(id, canbus));
     }
 }

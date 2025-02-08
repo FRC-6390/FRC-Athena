@@ -30,13 +30,13 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public ChassisSpeeds driveSpeeds, feedbackSpeeds;
   public boolean enableDriftCorrection;
   public double desiredHeading, maxVelocity;
-  public RobotIMU imu;
+  public RobotIMU<?> imu;
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU imu) {
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu) {
     this(configs, imu, false, new PIDController(0, 0, 0));
   }
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU imu, boolean driftCorrection,
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu, boolean driftCorrection,
       PIDController driftCorrectionPID) {
     driftCorrectionPID.enableContinuousInput(-Math.PI, Math.PI);
     driveSpeeds = new ChassisSpeeds();
@@ -103,7 +103,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   }
 
   @Override
-  public RobotIMU getIMU() {
+  public RobotIMU<?> getIMU() {
       return imu;
   }
 

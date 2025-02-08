@@ -1,19 +1,18 @@
-package ca.frc6390.athena.core.imu;
+package ca.frc6390.athena.core.imu.devices;
 
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.hardware.Pigeon2;
 
-import ca.frc6390.athena.core.RobotIMU;
+import ca.frc6390.athena.core.imu.IMUHIL;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.LinearAcceleration;
 
-public class Pigeon2IMU implements RobotIMU {
+public class Pigeon2IMU implements IMUHIL {
 
     private final Pigeon2 pigeon;
     private final StatusSignal<Angle> roll, pitch, yaw;
     private final StatusSignal<LinearAcceleration> accelX, accelY, accelZ;
-    private Rotation2d fieldYawOffset;
 
     public Pigeon2IMU(int id, String canbus) {
         this.pigeon = new Pigeon2(id, canbus);
@@ -23,17 +22,14 @@ public class Pigeon2IMU implements RobotIMU {
         accelX = pigeon.getAccelerationX();
         accelY = pigeon.getAccelerationY();
         accelZ = pigeon.getAccelerationZ();
-        
-        fieldYawOffset = new Rotation2d();
     }
     
     public Pigeon2 getPigeon() {
         return pigeon;
     }
-   
+
     @Override
     public void setYaw(double yaw) {
-        fieldYawOffset = fieldYawOffset.minus(Rotation2d.fromDegrees(getYaw().getDegrees() - yaw));
         pigeon.setYaw(yaw);
     }
 
@@ -75,26 +71,5 @@ public class Pigeon2IMU implements RobotIMU {
         accelX.refresh();
         accelY.refresh();
         accelZ.refresh();
-    }
-
-
-    @Override
-    public void setFieldYaw(Rotation2d fieldYaw) {
-         fieldYawOffset = getYaw().minus(fieldYaw);
-    }
-
-    @Override
-    public Rotation2d getFieldYaw() {
-       return getYaw().minus(fieldYawOffset);
-    }
-
-    @Override
-    public Rotation2d getFieldYawOffset() {
-       return fieldYawOffset;
-    }
-
-    @Override
-    public void setFieldYawOffset(Rotation2d yaw) {
-        fieldYawOffset = yaw;
     }
 }

@@ -1,9 +1,9 @@
 package ca.frc6390.athena.controllers;
 
+import ca.frc6390.athena.commands.RunnableTrigger;
 import edu.wpi.first.wpilibj.GenericHID;
-import edu.wpi.first.wpilibj2.command.button.Trigger;
 
-public class DebouncedButton extends Trigger {
+public class DebouncedButton extends RunnableTrigger {
     private static float DEFUALT_DEBOUNCE_PERIOD = 0.5f;
     private Debouncer debouncer;
 

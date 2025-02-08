@@ -39,7 +39,7 @@ public interface RobotDrivetrain {
         }
     }
 
-    RobotIMU getIMU();
+    RobotIMU<?> getIMU();
     DriveTrainNeutralMode getNeutralMode();
     void setNeutralMode(DriveTrainNeutralMode mode);
     void drive(ChassisSpeeds speeds);

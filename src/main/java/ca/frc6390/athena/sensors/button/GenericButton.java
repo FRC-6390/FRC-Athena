@@ -27,7 +27,7 @@ public class GenericButton {
     }
 
     /**
-     * Checks if the IR button is press.
+     * Checks if the button is press.
      *
      * @return true if the button is press, false otherwise.
      */

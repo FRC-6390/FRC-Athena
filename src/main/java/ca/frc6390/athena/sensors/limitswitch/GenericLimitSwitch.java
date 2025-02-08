@@ -12,9 +12,9 @@ public class GenericLimitSwitch {
     private final boolean inverted;
 
     /**
-     * Constructs an GenericButton sensor.
+     * Constructs an GenericLimitSwitch sensor.
      *
-     * @param port The digital input port number where the button sensor is connected.
+     * @param port The digital input port number where the switch sensor is connected.
      */
     public GenericLimitSwitch(int port) {
         this(port, true);
@@ -27,9 +27,9 @@ public class GenericLimitSwitch {
     }
 
     /**
-     * Checks if the IR button is press.
+     * Checks if the switch is press.
      *
-     * @return true if the button is press, false otherwise.
+     * @return true if the switch is press, false otherwise.
      */
     public boolean isPressed() {
         return inverted ? !input.get() : input.get();
@@ -54,7 +54,7 @@ public class GenericLimitSwitch {
     }
 
     /**
-     * Registers an action to perform when the button is released.
+     * Registers an action to perform when the switch is released.
      *
      * @param action The action to perform.
      */
@@ -63,7 +63,7 @@ public class GenericLimitSwitch {
     }
 
     /**
-     * Registers an action to perform when the button is released.
+     * Registers an action to perform when the switch is released.
      *
      * @param action The action to perform.
      */

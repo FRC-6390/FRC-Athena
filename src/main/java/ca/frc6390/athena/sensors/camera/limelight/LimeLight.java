@@ -197,7 +197,7 @@ public class LimeLight {
         {
             Double[] poseReal = getRaw();
             if (poseReal == null) return new Pose2d();
-            Translation2d translation = new Translation2d(poseReal[0], poseReal[1]);
+            Translation2d translation = new Translation2d(poseReal[2], poseReal[0]);
             Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[4]);
             return new Pose2d(translation, rotation2d);
         }
@@ -416,7 +416,7 @@ public class LimeLight {
      /**
      *  Sets limelight’s current pipeline (0-9)
      */
-    public void setStream(int mode){
+    public void setPipeline(int mode){
         pipeline.setNumber(mode);
     }
 
@@ -455,4 +455,7 @@ public class LimeLight {
         camerapose_robotspace_set.setDoubleArray(pose);
     }
 
+    public void setRobotOrientation(Double[] orientation){
+        robot_orientation_set.setDoubleArray(orientation);
+    }
 }

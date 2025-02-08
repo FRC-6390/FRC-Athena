@@ -45,17 +45,18 @@ public class RobotLocalization extends SubsystemBase{
         }
     }
 
-    private final SwerveDrivePoseEstimator estimator;
+    private final SwerveDrivePoseEstimator estimator, relativeEstimator;
     private final SwerveDrivetrain drivetrain;
     private final RobotVision vision;
     private final PoseEstimateWithLatencyType estimateWithLatencyType;
-    private Pose2d estimatorPose;
+    private Pose2d estimatorPose, relativePose;
     private Field2d field;
     private RobotConfig config;
 
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
         this.estimatorPose = pose;
+        this.relativePose = pose;
         this.drivetrain = drivetrain;
         this.vision = vision;
         this.field = new Field2d();
@@ -64,6 +65,11 @@ public class RobotLocalization extends SubsystemBase{
         estimator = config != null ?
          new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd()) : 
          new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose);
+
+        relativeEstimator = new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose);
+
+        drivetrain.getIMU().addVirtualAxis("relative", drivetrain.getIMU()::getYaw);
+        drivetrain.getIMU().addVirtualAxis("field", drivetrain.getIMU()::getYaw);
     }
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config) {
@@ -84,7 +90,7 @@ public class RobotLocalization extends SubsystemBase{
             DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", e.getStackTrace());
         }
         AutoBuilder.configure(
-            this::getPose, 
+            this::getFieldPose, 
             this::resetPathPlannerPose, 
             drivetrain::getDriveSpeeds, 
             (speeds, feedforwards) -> drivetrain.drive(speeds), 
@@ -106,31 +112,55 @@ public class RobotLocalization extends SubsystemBase{
 
     private void resetPathPlannerPose(Pose2d pose){
         drivetrain.getIMU().setYaw(pose.getRotation().getDegrees());
-        reset(pose);
+        resetFieldPose(pose);
     }
 
-    public void reset(Pose2d pose, Rotation2d heading) {
-        drivetrain.getIMU().setFieldYaw(heading);
+    public void resetFieldPose(Pose2d pose, Rotation2d heading) {
+        drivetrain.getIMU().setVirtualAxis("field", heading);
         estimator.resetPose(pose);
         estimator.resetRotation(heading);
         this.estimatorPose = pose;
     }
 
-    public void reset(Pose2d pose) {
-        reset(pose, pose.getRotation());
+    public void resetFieldPose(Pose2d pose) {
+        resetFieldPose(pose, pose.getRotation());
     }
 
-    public void reset() {
-        reset(new Pose2d(0,0, new Rotation2d(0)));
+    public void resetFieldPose(double x, double y) {
+        resetFieldPose(new Pose2d(x, y, drivetrain.getIMU().getVirtualAxis("field")));
     }
 
-    public void resetXY() {
-        reset(new Pose2d(0,0,drivetrain.getIMU().getFieldYaw()));
+    public void resetFieldPose(double x, double y, double r) {
+        resetFieldPose(new Pose2d(x, y, new Rotation2d(r)));
     }
 
-    public void resetXY(double x, double y) {
-        reset(new Pose2d(x, y, drivetrain.getIMU().getFieldYaw()));
+    public void resetFieldPose() {
+        resetFieldPose(new Pose2d(0,0, new Rotation2d(0)));
     }
+
+
+    public void resetRelativePose(Pose2d pose, Rotation2d heading) {
+        drivetrain.getIMU().setVirtualAxis("relative", heading);
+        relativeEstimator.resetPose(pose);
+        relativeEstimator.resetRotation(heading);
+        this.relativePose = pose;
+    }
+
+    public void resetRelativePose(Pose2d pose) {
+        resetRelativePose(pose, pose.getRotation());
+    }
+
+    public void resetRelativePose(double x, double y) {
+        resetRelativePose(new Pose2d(x, y, drivetrain.getIMU().getVirtualAxis("relative")));
+    }
+
+    public void resetRelativePose(double x, double y, double r) {
+        resetRelativePose(new Pose2d(x, y, new Rotation2d(r)));
+    }
+
+    public void resetRelativePose() {
+        resetRelativePose(0,0, 0);
+    } //jeremy was not here
 
     public void setVisionStd(Matrix<N3, N1> matrix){
         estimator.setVisionMeasurementStdDevs(matrix);
@@ -143,8 +173,10 @@ public class RobotLocalization extends SubsystemBase{
     public void update() {
 
         if(vision != null) {
+            Double[] orientation = {estimatorPose.getRotation().getDegrees(),0d,0d,0d,0d,0d};
             for (String table : vision.getCameraTables()) {
                 LimeLight camera = vision.getCamera(table);
+                camera.setRobotOrientation(orientation);
                 if(camera.hasValidTarget()){
                     PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
                     double timestamp = Timer.getFPGATimestamp() - (data.getLatency() / 1000.0);
@@ -154,12 +186,17 @@ public class RobotLocalization extends SubsystemBase{
             }
         }
 
-        estimatorPose = estimator.update(drivetrain.getIMU().getFieldYaw(), drivetrain.getSwerveModulePositions());
+        estimatorPose = estimator.update(drivetrain.getIMU().getVirtualAxis("field"), drivetrain.getSwerveModulePositions());
+        relativePose = relativeEstimator.update(drivetrain.getIMU().getVirtualAxis("relative"), drivetrain.getSwerveModulePositions());
         field.setRobotPose(estimatorPose);
     }
 
-    public Pose2d getPose(){
+    public Pose2d getFieldPose(){
         return estimatorPose;
+    }
+
+    public Pose2d getRelativePose(){
+        return relativePose;
     }
 
     public Field2d getField2d() {
@@ -172,9 +209,12 @@ public class RobotLocalization extends SubsystemBase{
 
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
         tab.add("Estimator", field);
-        tab.addDouble("X", () -> getPose().getX());
-        tab.addDouble("Y", () -> getPose().getY());
-        tab.addDouble("Theta", () -> getPose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro);
+        tab.addDouble("Field X", () -> getFieldPose().getX());
+        tab.addDouble("Field Y", () -> getFieldPose().getY());
+        tab.addDouble("Field Theta", () -> getFieldPose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro);
+        tab.addDouble("Relative X", () -> getRelativePose().getX());
+        tab.addDouble("Relative Y", () -> getRelativePose().getY());
+        tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro);
         return tab;
     }
 
@@ -182,4 +222,4 @@ public class RobotLocalization extends SubsystemBase{
     public void periodic() {
        update();
     }
-}
+} //IM A SCATMAN

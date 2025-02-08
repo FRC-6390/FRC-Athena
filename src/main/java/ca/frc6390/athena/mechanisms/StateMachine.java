@@ -9,29 +9,30 @@ public class StateMachine<E extends Enum<E>> {
     
     private Trigger stateChanger;
     private E goalState, nextState;
-    private BooleanSupplier atStateSupplier;
+    private BooleanSupplier atStateSupplier, changeStateSupplier;
 
     public StateMachine(E initialState, BooleanSupplier atStateSupplier){
         this.atStateSupplier = atStateSupplier;
-        setGoalState(initialState);
-    }
-
-    public void setGoalState(E state){
-        nextState = state;
-        createStateChanger(() -> true);
-    }
-
-    public void setGoalState(E state, BooleanSupplier condition){
-        nextState = state;
-        createStateChanger(condition);
-    }
-
-    private void createStateChanger(BooleanSupplier condition) {
-        this.stateChanger = new Trigger(condition);
+        this.changeStateSupplier = () -> true;
+        this.stateChanger = new Trigger(this::isAtState);
         this.stateChanger.onTrue(new InstantCommand(() -> 
         {
             goalState = nextState;
         }));
+        setGoalState(initialState);
+    }
+
+    public void setGoalState(E state){
+        setGoalState(state, () -> true);
+    }
+
+    public void setGoalState(E state, BooleanSupplier condition){
+        nextState = state;
+        changeStateSupplier = condition;
+    }
+
+    private boolean isAtState() {
+        return this.changeStateSupplier.getAsBoolean();
     }
 
     public E getGoalState() {
