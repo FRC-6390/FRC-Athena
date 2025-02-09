@@ -15,15 +15,17 @@ public class RobotIMU<T extends IMUHIL> extends VirtualIMU implements IMUHIL {
 
     public RobotIMU(T imu){
         this.imu = imu;
+        addVirtualAxis("driver", this::getYaw);
     }
 
     public void setYaw(double yaw) {
-        imu.setYaw(yaw);
-        updateVirtualOffsets(Rotation2d.fromDegrees(yaw));
+        // recalculateVirtualOffsets(Rotation2d.fromDegrees(yaw));
+        // imu.setYaw(yaw);
+        this.setYaw(Rotation2d.fromDegrees(yaw));
     }
 
     public void setYaw(Rotation2d yaw) {
-        imu.setYaw(yaw.getDegrees());
+        setVirtualAxis("driver", yaw);
     }
 
     public Rotation2d getRoll(){
@@ -74,7 +76,8 @@ public class RobotIMU<T extends IMUHIL> extends VirtualIMU implements IMUHIL {
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
 
-        layout.addDouble("Yaw",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
+        layout.addDouble("Raw Yaw",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
+        layout.addDouble("Yaw",() -> getVirtualAxis("driver").getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
         layout.addDouble("Roll",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Pitch",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
 

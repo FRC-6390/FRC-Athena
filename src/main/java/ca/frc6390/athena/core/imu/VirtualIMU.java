@@ -21,11 +21,7 @@ public class VirtualIMU {
         }
 
         public void set(Rotation2d val){
-            offset = supplier.get().minus(val);
-        }
-
-        public void updateOffset(Rotation2d val){
-            offset = offset.minus(supplier.get().minus(val));
+            offset = supplier.get().plus(val);
         }
 
         public void setOffset(Rotation2d offset){
@@ -57,11 +53,5 @@ public class VirtualIMU {
 
     public void setVirtualOffset(String id, Rotation2d val) {
         virtualAxis.get(id).setOffset(val);
-    }
-
-    public void updateVirtualOffsets(Rotation2d yaw) {
-        for(VirtualAxis axis: virtualAxis.values()) {
-            axis.updateOffset(yaw);
-        }
     }
 }

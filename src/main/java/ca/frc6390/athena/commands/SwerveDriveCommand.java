@@ -34,7 +34,7 @@ public class SwerveDriveCommand extends Command {
     double ySpeed =  yInput.getAsDouble() * driveTrain.getMaxVelocity();
     double thetaSpeed = thetaInput.getAsDouble() * driveTrain.getMaxVelocity();
 
-    ChassisSpeeds chassisSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.getIMU().getYaw());
+    ChassisSpeeds chassisSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.getIMU().getVirtualAxis("driver"));
 
     driveTrain.drive(chassisSpeeds);    
   }
