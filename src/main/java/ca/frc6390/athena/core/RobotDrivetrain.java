@@ -5,7 +5,6 @@ import java.util.function.DoubleSupplier;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
 
 public interface RobotDrivetrain {
@@ -42,8 +41,7 @@ public interface RobotDrivetrain {
     RobotIMU<?> getIMU();
     DriveTrainNeutralMode getNeutralMode();
     void setNeutralMode(DriveTrainNeutralMode mode);
-    void drive(ChassisSpeeds speeds);
-    void feedbackSpeeds(ChassisSpeeds speeds);
+    RobotSpeeds getRobotSpeeds();
     void update();
     Command createDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
     void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);

@@ -53,7 +53,6 @@ public class RobotLocalization extends SubsystemBase{
     private Field2d field;
     private RobotConfig config;
 
-
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
         this.fieldPose = pose;
         this.relativePose = pose;
@@ -92,8 +91,8 @@ public class RobotLocalization extends SubsystemBase{
         AutoBuilder.configure(
             this::getFieldPose, 
             this::resetFieldPose, 
-            drivetrain::getDriveSpeeds, 
-            (speeds, feedforwards) -> drivetrain.drive(speeds), 
+            () -> drivetrain.getRobotSpeeds().getDriverSpeeds(), 
+            (speeds, feedforwards) -> drivetrain.getRobotSpeeds().setAutoSpeeds(speeds), 
             new PPHolonomicDriveController(
             translationConstants,
             rotationConstants

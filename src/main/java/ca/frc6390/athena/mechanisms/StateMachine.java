@@ -1,10 +1,6 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.function.BooleanSupplier;
-
-import edu.wpi.first.wpilibj2.command.InstantCommand;
-import edu.wpi.first.wpilibj2.command.button.Trigger;
-
 public class StateMachine<E extends Enum<E>> {
     
     private E goalState, nextState;

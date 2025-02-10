@@ -5,6 +5,7 @@ import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.commands.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotIMU;
+import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
@@ -27,11 +28,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
   public PIDController driftpid;
-  public ChassisSpeeds driveSpeeds, feedbackSpeeds;
   public boolean enableDriftCorrection;
-  public AXIS enabledAxes = AXIS.Enable;
+  // public AXIS enabledAxes = AXIS.Enable;
   public double desiredHeading, maxVelocity;
   public RobotIMU<?> imu;
+  public RobotSpeeds robotSpeeds;
 
   public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu) {
     this(configs, imu, false, new PIDController(0, 0, 0));
@@ -40,8 +41,6 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu, boolean driftCorrection,
       PIDController driftCorrectionPID) {
     driftCorrectionPID.enableContinuousInput(-Math.PI, Math.PI);
-    driveSpeeds = new ChassisSpeeds();
-    feedbackSpeeds = new ChassisSpeeds();
     swerveModules = new SwerveModule[configs.length];
     for (int i = 0; i < configs.length; i++) {
       swerveModules[i] = new SwerveModule(configs[i]);
@@ -56,6 +55,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     enableDriftCorrection = driftCorrection;
     driftpid = driftCorrectionPID;
     this.imu = imu;
+    robotSpeeds = new RobotSpeeds(maxVelocity, maxVelocity);
   }
 
   
@@ -69,10 +69,6 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
       positions[i] = swerveModules[i].getPostion();
     }
     return positions;
-  }
-
-  public ChassisSpeeds getDriveSpeeds() {
-    return driveSpeeds;
   }
 
   private void setModuleStates(SwerveModuleState[] states) {
@@ -120,57 +116,48 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     return swerveModules[0].getNeutralMode();
   }
 
-  @Override
-  public void drive(ChassisSpeeds driveSpeeds) {
-    this.driveSpeeds = driveSpeeds;
-  }
+  // public enum AXIS
+  // {
+  //   XDisable(new ChassisSpeeds(0,1,1)),
+  //   YDisable(new ChassisSpeeds(1,0,1)),
+  //   XYDisable(new ChassisSpeeds(0,0,1)),
+  //   Disable(new ChassisSpeeds(0,0,0)),
+  //   RotDisable(new ChassisSpeeds(1,1,0)),
+  //   Enable(new ChassisSpeeds(1,1,1));
 
-  @Override
-  public void feedbackSpeeds(ChassisSpeeds feedbackSpeeds) {
-    this.feedbackSpeeds = feedbackSpeeds;
-  }
+  //   ChassisSpeeds num;
+  //   private AXIS(ChassisSpeeds num)
+  //   {
+  //     this.num = num;
+  //   } 
 
-  public enum AXIS
-  {
-    XDisable(new ChassisSpeeds(0,1,1)),
-    YDisable(new ChassisSpeeds(1,0,1)),
-    XYDisable(new ChassisSpeeds(0,0,1)),
-    Disable(new ChassisSpeeds(0,0,0)),
-    RotDisable(new ChassisSpeeds(1,1,0)),
-    Enable(new ChassisSpeeds(1,1,1));
-
-    ChassisSpeeds num;
-    private AXIS(ChassisSpeeds num)
-    {
-      this.num = num;
-    } 
-
-    public ChassisSpeeds get()
-    {
-      return num;
-    }
-  }
+  //   public ChassisSpeeds get()
+  //   {
+  //     return num;
+  //   }
+  // }
   
-  public void disableAxis(AXIS axis)
-  {
-    this.enabledAxes = axis;
+  // public void disableAxis(AXIS axis)
+  // {
+  //   this.enabledAxes = axis;
+  // }
+
+  @Override
+  public RobotSpeeds getRobotSpeeds() {
+    return robotSpeeds;
   }
 
   @Override
   public void update() {
     imu.update();
     
-    ChassisSpeeds speed = new ChassisSpeeds(driveSpeeds.vxMetersPerSecond * enabledAxes.get().vxMetersPerSecond, driveSpeeds.vyMetersPerSecond * enabledAxes.get().vyMetersPerSecond, driveSpeeds.omegaRadiansPerSecond *  enabledAxes.get().omegaRadiansPerSecond);
-     speed = driveSpeeds.plus(feedbackSpeeds);
-    
+    ChassisSpeeds speed = robotSpeeds.calculate();
 
     if (enableDriftCorrection) {
       speed.omegaRadiansPerSecond += driftCorrection(speed);
     }
 
-
     SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
-
 
     SwerveDriveKinematics.desaturateWheelSpeeds(states, getMaxVelocity());
 
@@ -210,13 +197,13 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     { 
       Map<String, Object> props = Map.of("Min", -getMaxVelocity(), "Max", getMaxVelocity(),"Label position", "TOP");
       ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kGrid).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
-      chassisLayout.addDouble("X", () -> driveSpeeds.vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-      chassisLayout.addDouble("Y", () -> driveSpeeds.vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-      chassisLayout.addDouble("Z", () -> driveSpeeds.omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      chassisLayout.addDouble("X", () -> robotSpeeds.getDriverSpeeds().vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      chassisLayout.addDouble("Y", () -> robotSpeeds.getDriverSpeeds().vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      chassisLayout.addDouble("Z", () -> robotSpeeds.getDriverSpeeds().omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
       ShuffleboardLayout feedbackLayout = speedsLayout.getLayout("Feedback", BuiltInLayouts.kGrid).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
-      feedbackLayout.addDouble("X", () -> driveSpeeds.vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-      feedbackLayout.addDouble("Y", () -> feedbackSpeeds.vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-      feedbackLayout.addDouble("Z", () -> feedbackSpeeds.omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      feedbackLayout.addDouble("X", () -> robotSpeeds.getFeedbackSpeeds().vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      feedbackLayout.addDouble("Y", () -> robotSpeeds.getFeedbackSpeeds().vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      feedbackLayout.addDouble("Z", () -> robotSpeeds.getFeedbackSpeeds().omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
     }
 
     ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kGrid).withSize(1, 3).withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
@@ -239,5 +226,4 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public void periodic() {
       update();
   }
-  
 }
