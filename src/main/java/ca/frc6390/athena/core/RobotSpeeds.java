@@ -77,8 +77,20 @@ public class RobotSpeeds {
     }
 
     public void stop(){
+        stopAutoSpeeds();
+        stopDriverSpeeds();
+        stopFeedbackSpeeds();
+    }
+
+    public void stopAutoSpeeds(){
         setAutoSpeeds(new ChassisSpeeds());
+    }
+
+    public void stopDriverSpeeds(){
         setDriverSpeeds(new ChassisSpeeds());
+    }
+
+    public void stopFeedbackSpeeds(){
         setFeedbackSpeeds(new ChassisSpeeds());
     }
 
