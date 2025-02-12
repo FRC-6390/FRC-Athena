@@ -1,7 +1,6 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.function.BooleanSupplier;
-import java.util.function.DoubleConsumer;
 
 import ca.frc6390.athena.commands.RunnableTrigger;
 import ca.frc6390.athena.devices.Encoder;
@@ -35,7 +34,7 @@ public class ProfiledMechanism {
     }
 
     public ProfiledMechanism withUpperLimitSwitch(RunnableTrigger upperLimit, double maxPosition){
-        upperLimit.whileTrue(() -> encoder.setPosition(maxPosition));
+        upperLimit.whileTrue(() -> {encoder.setPosition(maxPosition); motorController.stopMotor();});
         return withUpperLimitSwitch(upperLimit);
     }
 
@@ -45,7 +44,7 @@ public class ProfiledMechanism {
     }
 
     public ProfiledMechanism withLowerLimitSwitch(RunnableTrigger lowerLimit, double minPosition){
-        lowerLimit.whileTrue(() -> encoder.setPosition(minPosition));
+        lowerLimit.whileTrue(() -> {encoder.setPosition(minPosition); motorController.stopMotor();});
         return withLowerLimitSwitch(lowerLimit);
     }
 
@@ -84,6 +83,4 @@ public class ProfiledMechanism {
 
         motorController.setSpeed(speed);
     }
-
-
 }

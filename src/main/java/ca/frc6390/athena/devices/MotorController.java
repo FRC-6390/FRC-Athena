@@ -169,7 +169,7 @@ public class MotorController {
         setVoltage.accept(voltage);
     }
 
-    public void stop(){
+    public void stopMotor(){
         setSpeed.accept(0);
     }
 }
