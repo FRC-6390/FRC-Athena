@@ -1,8 +1,14 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.function.BooleanSupplier;
-public class StateMachine<E extends Enum<E>> {
+
+import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
+public class StateMachine<E extends Enum<E> & SetpointProvider> {
     
+    public interface SetpointProvider {
+        double getSetpoint();
+    }
+
     private E goalState, nextState;
     private BooleanSupplier atStateSupplier, changeStateSupplier;
 
