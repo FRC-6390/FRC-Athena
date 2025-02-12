@@ -2,7 +2,8 @@ package ca.frc6390.athena.drivetrains.swerve;
 
 import com.ctre.phoenix6.hardware.TalonFX;
 
-import ca.frc6390.athena.core.RobotDrivetrain.DriveTrainNeutralMode;
+import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
+import ca.frc6390.athena.drivetrains.swerve.modules.SwerveModuleVendors;
 
 import java.util.Map;
 
@@ -25,23 +26,20 @@ import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class SwerveModule {
 
+    public static SwerveModuleVendors vendorModules;
     //should make changes so this can work with any motor as the code is not really motor specific and can fairly easily remove the dependancy on CTRE
 
     private final SwerveModuleConfig config;
 
     private final TalonFX driveMotor; //switch to double consumer in future
     private final TalonFX rotationMotor; //switch to double consumer in future
-    private DriveTrainNeutralMode mode;
+    private MotorNeutralMode mode;
     private final CANcoder encoder; //could possibly be entirely remove and manager by a backend instead
     private final PIDController rotationPidController;
     private double offset; 
 
     private StatusSignal<AngularVelocity> driveVel; //switch to double suppliers in future
     private StatusSignal<Angle> encoderPos, drivePos; //switch to double suppliers in future
-
-    //private final DoubleConsumer driveMotor, rotationMotor
-    //private final DoubleSupplier driveVel, encoderPos;
-
     // SWERVE MOTOR RECORD
     public record SwerveMotor(int id, double maxSpeedMetersPerSecond,  double gearRatio, String canbus) {
         public SwerveMotor(int id, double maxSpeedMetersPerSecond, double gearRatio) {
@@ -133,7 +131,7 @@ public class SwerveModule {
         driveVel = driveMotor.getRotorVelocity();
         // RESET ENCODERS AND BRAKE MODE MODULES
         resetEncoders();
-        setNeutralMode(DriveTrainNeutralMode.Brake);
+        setNeutralMode(MotorNeutralMode.Brake);
     }
 
     public double getDriveMotorVelocity() {
@@ -209,16 +207,16 @@ public class SwerveModule {
     }
 
     public void setNeutralMode(boolean brake){
-        setNeutralMode(DriveTrainNeutralMode.fromBoolean(brake));
+        setNeutralMode(MotorNeutralMode.fromBoolean(brake));
     }
 
-    public void setNeutralMode(DriveTrainNeutralMode mode){
+    public void setNeutralMode(MotorNeutralMode mode){
         this.mode = mode;
         driveMotor.setNeutralMode(mode.asCTRE());
         rotationMotor.setNeutralMode(mode.asCTRE());
     }
 
-    public DriveTrainNeutralMode getNeutralMode(){
+    public MotorNeutralMode getNeutralMode(){
         return mode;
     }
 

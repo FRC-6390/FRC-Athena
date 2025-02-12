@@ -1,4 +1,4 @@
-package ca.frc6390.athena.core.imu;
+package ca.frc6390.athena.devices;
 
 import java.util.HashMap;
 import java.util.function.Supplier;

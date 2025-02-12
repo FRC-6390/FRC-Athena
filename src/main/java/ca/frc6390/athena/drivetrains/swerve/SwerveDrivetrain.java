@@ -4,8 +4,9 @@ import java.util.Map;
 import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.commands.SwerveDriveCommand;
-import ca.frc6390.athena.core.RobotIMU;
 import ca.frc6390.athena.core.RobotSpeeds;
+import ca.frc6390.athena.devices.IMU;
+import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
@@ -30,14 +31,14 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public PIDController driftpid;
   public boolean enableDriftCorrection;
   public double desiredHeading, maxVelocity;
-  public RobotIMU<?> imu;
+  public IMU imu;
   public RobotSpeeds robotSpeeds;
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu) {
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, IMU imu) {
     this(configs, imu, false, new PIDController(0, 0, 0));
   }
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, RobotIMU<?> imu, boolean driftCorrection,
+  public SwerveDrivetrain(SwerveModuleConfig[] configs, IMU imu, boolean driftCorrection,
       PIDController driftCorrectionPID) {
     driftCorrectionPID.enableContinuousInput(-Math.PI, Math.PI);
     swerveModules = new SwerveModule[configs.length];
@@ -99,19 +100,19 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   }
 
   @Override
-  public RobotIMU<?> getIMU() {
+  public IMU getIMU() {
       return imu;
   }
 
   @Override
-  public void setNeutralMode(DriveTrainNeutralMode mode) {
+  public void setNeutralMode(MotorNeutralMode mode) {
     for (int i = 0; i < swerveModules.length; i++) {
       swerveModules[i].setNeutralMode(mode);
     }
   }
 
   @Override
-  public DriveTrainNeutralMode getNeutralMode() {
+  public MotorNeutralMode getNeutralMode() {
     return swerveModules[0].getNeutralMode();
   }
 
@@ -138,13 +139,13 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   }
 
   @Override
-  public Command createDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
+  public Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
     return new SwerveDriveCommand(this, xInput, yInput, thetaInput);
   }
 
   @Override
   public void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
-    this.setDefaultCommand(createDriveCommand(xInput, yInput, thetaInput));
+    this.setDefaultCommand(getDriveCommand(xInput, yInput, thetaInput));
   }
 
 
@@ -182,8 +183,8 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kGrid).withSize(1, 3).withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
     {
       commandsLayout.add("Reset Heading", new InstantCommand(() -> getIMU().setYaw(0))).withWidget(BuiltInWidgets.kCommand);
-      commandsLayout.add("Brake Mode", new InstantCommand(() -> setNeutralMode(DriveTrainNeutralMode.Brake))).withWidget(BuiltInWidgets.kCommand);
-      commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(DriveTrainNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
+      commandsLayout.add("Brake Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Brake))).withWidget(BuiltInWidgets.kCommand);
+      commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
     }
 
     ShuffleboardLayout driftCorrectionLayout = tab.getLayout("Drift Correction", BuiltInLayouts.kList).withSize(2, 2);

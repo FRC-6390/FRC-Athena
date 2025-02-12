@@ -5,11 +5,12 @@ import java.util.function.BooleanSupplier;
 import ca.frc6390.athena.commands.RunnableTrigger;
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.MotorController;
+import ca.frc6390.athena.devices.MotorControllerGroup;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 
 public class ProfiledMechanism {
     
-    private final MotorController motorController;
+    private final MotorControllerGroup motorControllers;
     private final Encoder encoder;
     private final ProfiledPIDController controller;
 
@@ -17,13 +18,19 @@ public class ProfiledMechanism {
     private double setpoint = 0;
 
     public ProfiledMechanism(MotorController motorController, ProfiledPIDController controller){
-        this.motorController = motorController;
-        this.encoder = motorController.getRelativeEncoder();
-        this.controller = controller;
+        this(new MotorController[] {motorController}, motorController.getRelativeEncoder(), controller);
     } 
 
     public ProfiledMechanism(MotorController motorController, Encoder encoder, ProfiledPIDController controller){
-        this.motorController = motorController;
+        this(new MotorController[] {motorController}, encoder, controller);
+    }   
+
+    public ProfiledMechanism(MotorController[] motorControllers, Encoder encoder, ProfiledPIDController controller){
+        this(new MotorControllerGroup(motorControllers), encoder, controller);
+    }   
+
+    public ProfiledMechanism(MotorControllerGroup motorControllers, Encoder encoder, ProfiledPIDController controller){
+        this.motorControllers = motorControllers;
         this.encoder = encoder;
         this.controller = controller;
     }   
@@ -34,7 +41,7 @@ public class ProfiledMechanism {
     }
 
     public ProfiledMechanism withUpperLimitSwitch(RunnableTrigger upperLimit, double maxPosition){
-        upperLimit.whileTrue(() -> {encoder.setPosition(maxPosition); motorController.stopMotor();});
+        upperLimit.whileTrue(() -> {encoder.setPosition(maxPosition); motorControllers.stopMotors();});
         return withUpperLimitSwitch(upperLimit);
     }
 
@@ -44,7 +51,7 @@ public class ProfiledMechanism {
     }
 
     public ProfiledMechanism withLowerLimitSwitch(RunnableTrigger lowerLimit, double minPosition){
-        lowerLimit.whileTrue(() -> {encoder.setPosition(minPosition); motorController.stopMotor();});
+        lowerLimit.whileTrue(() -> {encoder.setPosition(minPosition); motorControllers.stopMotors();});
         return withLowerLimitSwitch(lowerLimit);
     }
 
@@ -81,6 +88,6 @@ public class ProfiledMechanism {
             speed = 0;
         }
 
-        motorController.setSpeed(speed);
+        motorControllers.setSpeed(speed);
     }
 }

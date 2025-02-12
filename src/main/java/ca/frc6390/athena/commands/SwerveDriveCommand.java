@@ -2,7 +2,7 @@ package ca.frc6390.athena.commands;
 
 import java.util.function.DoubleSupplier;
 
-import ca.frc6390.athena.core.RobotDrivetrain.DriveTrainNeutralMode;
+import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -24,7 +24,7 @@ public class SwerveDriveCommand extends Command {
   
   @Override
   public void initialize() {
-    driveTrain.setNeutralMode(DriveTrainNeutralMode.Brake);
+    driveTrain.setNeutralMode(MotorNeutralMode.Brake);
   }
 
   @Override
