@@ -19,6 +19,10 @@ public class Debouncer {
         this.debounce_period = period;
     }
 
+    public void setPeriod(double period){
+        debounce_period = period;
+    }
+
     public boolean get(){
         double now = Timer.getFPGATimestamp();
         if(input.getAsBoolean())

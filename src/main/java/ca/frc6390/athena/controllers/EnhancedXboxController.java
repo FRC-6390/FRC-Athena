@@ -1,9 +1,10 @@
 package ca.frc6390.athena.controllers;
 
 
+import edu.wpi.first.wpilibj.GenericHID;
 import edu.wpi.first.wpilibj.XboxController;
 
-public class DebouncedController extends XboxController {
+public class EnhancedXboxController extends XboxController {
     
     private enum BUTTONS{
         A(1),
@@ -19,16 +20,7 @@ public class DebouncedController extends XboxController {
         LEFT_X(0),
         LEFT_Y(1),
         RIGHT_X(4),
-        RIGHT_Y(5),
-        TOP(11),
-        TOP_RIGHT(12),
-        RIGHT(13),
-        BOTTOM_RIGHT(14),
-        BOTTOM(15),
-        BOTTOM_LEFT(16),
-        LEFT(17),
-        TOP_LEFT(18),
-        POV(11);
+        RIGHT_Y(5);
         private int port;
         private BUTTONS(int port){
             this.port = port;
@@ -57,10 +49,11 @@ public class DebouncedController extends XboxController {
         }
     }
 
-    public DebouncedButton a,b,x,y,leftBumper,rightBumper,leftStick,rightStick,top,topRight,topLeft,bottom,bottomRight,bottomLeft,right,left,back,start,rightTriggerB,leftTriggerB;
-    public ModifiedAxis leftX,leftY,rightX,rightY,rightTrigger,leftTrigger;
+    public final DebouncedButton a,b,x,y,leftBumper,rightBumper,leftStick,rightStick,back,start;
+    public final ModifiedAxis leftX,leftY,rightX,rightY,rightTrigger,leftTrigger;
+    public final EnhancedPOV pov;
 
-    public DebouncedController(int port) {
+    public EnhancedXboxController(int port) {
         super(port);
         a = new DebouncedButton(this, BUTTONS.A.get());
         b = new DebouncedButton(this, BUTTONS.B.get());
@@ -70,18 +63,9 @@ public class DebouncedController extends XboxController {
         rightBumper = new DebouncedButton(this, BUTTONS.RIGHT_BUMPER.get());
         leftStick = new DebouncedButton(this, BUTTONS.LEFT_JOYSTICK.get());
         rightStick = new DebouncedButton(this, BUTTONS.RIGHT_JOYSTICK.get());
-        top = new DebouncedButton(this, BUTTONS.TOP.get());
-        topRight = new DebouncedButton(this, BUTTONS.TOP_RIGHT.get());
-        topLeft = new DebouncedButton(this, BUTTONS.TOP_LEFT.get());
-        bottom = new DebouncedButton(this, BUTTONS.BOTTOM.get());
-        bottomRight = new DebouncedButton(this, BUTTONS.BOTTOM_RIGHT.get());
-        bottomLeft = new DebouncedButton(this, BUTTONS.BOTTOM_LEFT.get());
-        right = new DebouncedButton(this, BUTTONS.RIGHT.get());
-        left = new DebouncedButton(this, BUTTONS.LEFT.get());
+
         back = new DebouncedButton(this, BUTTONS.BACK.get());
         start = new DebouncedButton(this, BUTTONS.START.get()); 
-        rightTriggerB = new DebouncedButton(this, AXIS.RIGHT_TRIGGER.get());
-        leftTriggerB = new DebouncedButton(this, AXIS.LEFT_TRIGGER.get());
 
         leftX = new ModifiedAxis(this, AXIS.LEFT_X.get());
         leftY = new ModifiedAxis(this, AXIS.LEFT_Y.get());
@@ -89,5 +73,22 @@ public class DebouncedController extends XboxController {
         rightY = new ModifiedAxis(this, AXIS.RIGHT_Y.get());
         rightTrigger = new ModifiedAxis(this, AXIS.RIGHT_TRIGGER.get());
         leftTrigger = new ModifiedAxis(this, AXIS.LEFT_TRIGGER.get());
+
+        pov = new EnhancedPOV(this);
+    }
+
+    public class EnhancedPOV {
+        public final DebouncedButton center,up,upRight,upLeft,down,downRight,downLeft,right,left;
+        public EnhancedPOV(GenericHID hid){
+            center = new DebouncedButton(() -> hid.getPOV() == -1);
+            up = new DebouncedButton(() -> hid.getPOV() == 0);
+            upRight = new DebouncedButton(() -> hid.getPOV() == 45);
+            right = new DebouncedButton(() -> hid.getPOV() == 90);
+            downRight = new DebouncedButton(() -> hid.getPOV() == 135);
+            down = new DebouncedButton(() -> hid.getPOV() == 180);
+            downLeft = new DebouncedButton(() -> hid.getPOV() == 225);
+            left = new DebouncedButton(() -> hid.getPOV() == 270);
+            upLeft = new DebouncedButton(() -> hid.getPOV() == 315);       
+        }       
     }
 }

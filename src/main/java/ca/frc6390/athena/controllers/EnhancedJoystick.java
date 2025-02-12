@@ -2,7 +2,7 @@ package ca.frc6390.athena.controllers;
 
 import edu.wpi.first.wpilibj.Joystick;
 
-public class DebouncedJoystick extends Joystick {
+public class EnhancedJoystick extends Joystick {
 
     private enum BUTTONS{
         ONE(1),
@@ -67,7 +67,7 @@ public class DebouncedJoystick extends Joystick {
      rightTrigger = new ModifiedAxis(this, AXIS.RIGHT_TRIGGER.get()).setSquaring(true);
 
 
-    public DebouncedJoystick(int port) {
+    public EnhancedJoystick(int port) {
         super(port);
     }
 }

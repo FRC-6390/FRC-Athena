@@ -1,14 +1,14 @@
 package ca.frc6390.athena.sensors.limitswitch;
 
+import ca.frc6390.athena.commands.RunnableTrigger;
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
-import edu.wpi.first.wpilibj2.command.button.Trigger;
 
 public class GenericLimitSwitch {
 
     private final DigitalInput input;
-    private final Trigger trigger;
+    private final RunnableTrigger trigger;
     private final boolean inverted;
 
     /**
@@ -22,7 +22,7 @@ public class GenericLimitSwitch {
  
     public GenericLimitSwitch(int port, boolean inverted) {
         this.input = new DigitalInput(port);
-        this.trigger = new Trigger(this::isPressed);
+        this.trigger = new RunnableTrigger(this::isPressed);
         this.inverted = inverted;
     }
 
@@ -76,7 +76,7 @@ public class GenericLimitSwitch {
      *
      * @return The Trigger instance.
      */
-    public Trigger getTrigger() {
+    public RunnableTrigger getTrigger() {
         return trigger;
     }
 

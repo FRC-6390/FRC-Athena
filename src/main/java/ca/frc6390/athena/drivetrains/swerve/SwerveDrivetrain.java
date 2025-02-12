@@ -29,7 +29,6 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public SwerveDriveKinematics kinematics;
   public PIDController driftpid;
   public boolean enableDriftCorrection;
-  // public AXIS enabledAxes = AXIS.Enable;
   public double desiredHeading, maxVelocity;
   public RobotIMU<?> imu;
   public RobotSpeeds robotSpeeds;
@@ -115,32 +114,6 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public DriveTrainNeutralMode getNeutralMode() {
     return swerveModules[0].getNeutralMode();
   }
-
-  // public enum AXIS
-  // {
-  //   XDisable(new ChassisSpeeds(0,1,1)),
-  //   YDisable(new ChassisSpeeds(1,0,1)),
-  //   XYDisable(new ChassisSpeeds(0,0,1)),
-  //   Disable(new ChassisSpeeds(0,0,0)),
-  //   RotDisable(new ChassisSpeeds(1,1,0)),
-  //   Enable(new ChassisSpeeds(1,1,1));
-
-  //   ChassisSpeeds num;
-  //   private AXIS(ChassisSpeeds num)
-  //   {
-  //     this.num = num;
-  //   } 
-
-  //   public ChassisSpeeds get()
-  //   {
-  //     return num;
-  //   }
-  // }
-  
-  // public void disableAxis(AXIS axis)
-  // {
-  //   this.enabledAxes = axis;
-  // }
 
   @Override
   public RobotSpeeds getRobotSpeeds() {

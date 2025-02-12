@@ -2,9 +2,9 @@ package ca.frc6390.athena.controllers;
 
 import java.util.function.DoubleSupplier;
 
+import ca.frc6390.athena.commands.RunnableTrigger;
 import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.wpilibj.GenericHID;
-import edu.wpi.first.wpilibj2.command.button.Trigger;
 
 public class ModifiedAxis implements DoubleSupplier {
     private static final double DEFUALT_DEADBAND = 0.01d;
@@ -55,8 +55,8 @@ public class ModifiedAxis implements DoubleSupplier {
         return value > 0.0 ? (value - deadzone) / (1.0 - deadzone) : (value + deadzone) / (1.0 - deadzone);
     }
 
-    public Trigger tiggerAt(double value) {
-        return new Trigger(() -> {return getAsDouble() >= value;});
+    public RunnableTrigger tiggerAt(double value) {
+        return new RunnableTrigger(() -> {return getAsDouble() >= value;});
     }
 
     private double sqaureAxis(double value){
