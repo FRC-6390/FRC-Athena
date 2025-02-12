@@ -1,17 +1,11 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
-import com.ctre.phoenix6.hardware.TalonFX;
-
+import ca.frc6390.athena.devices.Encoder;
+import ca.frc6390.athena.devices.Encoder.EncoderConfig;
+import ca.frc6390.athena.devices.MotorController;
+import ca.frc6390.athena.devices.MotorController.MotorControllerConfig;
 import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
-import ca.frc6390.athena.drivetrains.swerve.modules.SwerveModuleVendors;
-
 import java.util.Map;
-
-import com.ctre.phoenix6.StatusSignal;
-import com.ctre.phoenix6.configs.CANcoderConfiguration;
-import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
-import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.hardware.CANcoder;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
@@ -19,83 +13,59 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
-import edu.wpi.first.units.measure.Angle;
-import edu.wpi.first.units.measure.AngularVelocity;
 
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class SwerveModule {
-
-    public static SwerveModuleVendors vendorModules;
-    //should make changes so this can work with any motor as the code is not really motor specific and can fairly easily remove the dependancy on CTRE
-
+    
     private final SwerveModuleConfig config;
-
-    private final TalonFX driveMotor; //switch to double consumer in future
-    private final TalonFX rotationMotor; //switch to double consumer in future
-    private MotorNeutralMode mode;
-    private final CANcoder encoder; //could possibly be entirely remove and manager by a backend instead
+    private final MotorController driveMotor; //switch to double consumer in future
+    private final MotorController rotationMotor; //switch to double consumer in future
+    private final Encoder encoder; //could possibly be entirely remove and manager by a backend instead
     private final PIDController rotationPidController;
-    private double offset; 
-
-    private StatusSignal<AngularVelocity> driveVel; //switch to double suppliers in future
-    private StatusSignal<Angle> encoderPos, drivePos; //switch to double suppliers in future
     // SWERVE MOTOR RECORD
-    public record SwerveMotor(int id, double maxSpeedMetersPerSecond,  double gearRatio, String canbus) {
-        public SwerveMotor(int id, double maxSpeedMetersPerSecond, double gearRatio) {
-            this(id, gearRatio, maxSpeedMetersPerSecond, "can");
+    public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder) {
+        public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID) {
+            this(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, rotationMotor.encoderConfig());
         }
 
-        public SwerveMotor(int id, double maxSpeedMetersPerSecond, String canbus) {
-            this(id, maxSpeedMetersPerSecond, 1, canbus);
+        public SwerveModuleConfig setCanbus(String canbus){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setCanbus(canbus), rotationMotor.setCanbus(canbus), rotationPID, encoder.setCanbus(canbus));
         }
 
-        public SwerveMotor(int id, double maxSpeedMetersPerSecond) {
-            this(id, maxSpeedMetersPerSecond, 1,"can");
+        public SwerveModuleConfig setPID(PIDController rotationPID){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder);
         }
 
-        public TalonFXConfiguration generateTalonFXConfig(double currentLimit) {
-            TalonFXConfiguration driveConfig = new TalonFXConfiguration();
-            CurrentLimitsConfigs driveCurrentLimit = new CurrentLimitsConfigs();
-            driveCurrentLimit.SupplyCurrentLimitEnable = true;
-            driveCurrentLimit.SupplyCurrentLimit = currentLimit;
-            driveConfig.withCurrentLimits(driveCurrentLimit);
-            return driveConfig;
+        public SwerveModuleConfig setEncoder(EncoderConfig encoder){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder);
         }
 
-        public SwerveEncoder asEncoder(double offsetRadian) {
-            return new SwerveEncoder(id, offsetRadian, gearRatio, canbus);
-        }
-    }
-
-    public record SwerveEncoder(int id, double offsetRadians, double gearRatio, String canbus) {
-
-        public SwerveEncoder(int id, double offsetRadians, double gearRatio) {
-            this(id, offsetRadians, gearRatio, "can");
+        public SwerveModuleConfig setOffset(double offset){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setOffset(offset));
         }
 
-        public SwerveEncoder(int id, double offsetRadians) {
-            this(id, offsetRadians, 1, "can");
+        public SwerveModuleConfig setLocation(Translation2d module_location){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder);
         }
 
-        public SwerveEncoder(int id, double offsetRadians, String canbus) {
-            this(id, offsetRadians, 1, canbus);
+        public SwerveModuleConfig setDriveID(int id){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setID(id), rotationMotor, rotationPID, encoder); 
         }
 
-        public CANcoderConfiguration generateConfig() {
-           return generateConfig(offsetRadians);
-        } 
+        public SwerveModuleConfig setSteerID(int id){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor.setID(id), rotationPID, encoder); 
+        }
 
-        public CANcoderConfiguration generateConfig(double offset) {
-            CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
-            encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 1;
-           return encoderConfig;
-        } 
-    }
+        public SwerveModuleConfig setEncoderID(int id){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setID(id)); 
+        }
 
-    public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, SwerveEncoder encoder) {
-        public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, SwerveMotor driveMotor, SwerveMotor rotationMotor, PIDController rotationPID, double offsetRadians) {
-            this(module_location, wheelDiameter, driveMotor, rotationMotor, rotationPID, rotationMotor.asEncoder(offsetRadians));
+        public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
+            Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, wheelbase/2);
+            Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, -wheelbase/2);
+            Translation2d BACK_LEFT = new Translation2d(-trackwidth/2, wheelbase/2);
+            Translation2d BACK_RIGHT = new Translation2d(-trackwidth/2, -wheelbase/2);
+            return new Translation2d[]{FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT};
         }
     }
 
@@ -108,63 +78,39 @@ public class SwerveModule {
         rotationPidController.enableContinuousInput(-Math.PI, Math.PI);
 
         // MOTOR INITIALIZATION
-        driveMotor = new TalonFX(config.driveMotor().id, config.driveMotor().canbus);
-        rotationMotor = new TalonFX(config.rotationMotor().id, config.rotationMotor().canbus);
+        driveMotor = MotorController.fromConfig(config.driveMotor);
+        rotationMotor = MotorController.fromConfig(config.rotationMotor);
 
-        //CONFIGS
-        rotationMotor.getConfigurator().apply(config.rotationMotor().generateTalonFXConfig(40));
-        driveMotor.getConfigurator().apply(config.driveMotor().generateTalonFXConfig(40));
+        encoder = Encoder.fromConfig(config.encoder);
 
-        if (config.encoder().id() != config.rotationMotor().id) {
-            encoder = new CANcoder(config.encoder().id, config.encoder().canbus);
-            encoderPos = encoder.getAbsolutePosition();
-            encoder.getConfigurator().apply(config.encoder().generateConfig());
-        }else {
-            encoderPos = rotationMotor.getRotorPosition();
-            encoder = null;
-        }
-
-        offset = config.encoder().offsetRadians;
-
-        // DRIVE MOTOR POSITION AND VELOCITY
-        drivePos = driveMotor.getRotorPosition();
-        driveVel = driveMotor.getRotorVelocity();
-        // RESET ENCODERS AND BRAKE MODE MODULES
         resetEncoders();
         setNeutralMode(MotorNeutralMode.Brake);
     }
 
     public double getDriveMotorVelocity() {
-        return driveVel.getValueAsDouble() / config.driveMotor().gearRatio * Math.PI * config.wheelDiameter;
+        return driveMotor.getEncoder().getVelocity();
     }
 
     public Translation2d getModuleLocation() {
         return config.module_location();
     }
 
-    public double getDriveMotorRotations() {
-        return drivePos.getValueAsDouble() / config.driveMotor().gearRatio;
-    }
-
     public double getDriveMotorPosition() {
-        return getDriveMotorRotations() * Math.PI * config.wheelDiameter;
+        return driveMotor.getEncoder().getPosition();
     }
 
     public Rotation2d getEncoderPosition() {
-        return Rotation2d.fromRotations(encoderPos.getValueAsDouble() * config.encoder().gearRatio).minus(Rotation2d.fromRadians(offset));
-    }
-
-    public double getOffset() {
-        return offset;
+        return encoder.getRotation2d();
+        // return Rotation2d.fromRotations(encoder.getPosition() * config.encoder().gearRatio).minus(Rotation2d.fromRadians(offset));
     }
 
     public void setOffset(double offset) {
-        this.offset = offset;
+        encoder.setOffset(offset);
     }
 
     public void resetEncoders() {
-        driveMotor.setPosition(0);
-        rotationMotor.setPosition(encoderPos.getValueAsDouble());
+        driveMotor.getEncoder().setPosition(0);
+        rotationMotor.getEncoder().setPosition(encoder.getPosition());
     }
 
     public SwerveModuleState getState() {
@@ -176,11 +122,11 @@ public class SwerveModule {
     }
 
     public void setDriveMotor(double speed) {
-        driveMotor.set(speed);
+        driveMotor.setSpeed(speed);
     }
 
     public void setRotationMotor(double speed) {
-        rotationMotor.set(speed);
+        rotationMotor.setSpeed(speed);
     }
 
     public void setDesiredState(SwerveModuleState state) {
@@ -193,13 +139,13 @@ public class SwerveModule {
         }
 
         state.optimize(getState().angle);
-        driveMotor.set(state.speedMetersPerSecond / config.driveMotor().maxSpeedMetersPerSecond());
-        rotationMotor.set(-rotationPidController.calculate( MathUtil.angleModulus(getEncoderPosition().getRadians()), state.angle.getRadians()));
+        setDriveMotor(state.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
+        setRotationMotor(-rotationPidController.calculate( MathUtil.angleModulus(getEncoderPosition().getRadians()), state.angle.getRadians()));
     }
 
     public void stop() {
-        driveMotor.set(0);
-        rotationMotor.set(0);
+        driveMotor.stopMotor();
+        rotationMotor.stopMotor();
     }
 
     public void setToAngle(double angle) {
@@ -211,27 +157,18 @@ public class SwerveModule {
     }
 
     public void setNeutralMode(MotorNeutralMode mode){
-        this.mode = mode;
-        driveMotor.setNeutralMode(mode.asCTRE());
-        rotationMotor.setNeutralMode(mode.asCTRE());
-    }
-
-    public MotorNeutralMode getNeutralMode(){
-        return mode;
+        driveMotor.setNeutralMode(mode);
+        rotationMotor.setNeutralMode(mode);
     }
 
     public void refresh() {
-        drivePos.refresh();
-        driveVel.refresh();
-        encoderPos.refresh();
+        encoder.update();
     }
 
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
-        layout.addBoolean("Brake Mode", () -> mode.asBoolean()).withWidget(BuiltInWidgets.kBooleanBox).withPosition(0, 1);
-        layout.addDouble("Offset Rotations", this::getOffset).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Encoder Radians", () -> MathUtil.angleModulus(getEncoderPosition().getRadians())).withSize(1, 1).withPosition(0, 3);
-        layout.addDouble("Drive Motor Rotations", () -> getDriveMotorRotations()).withSize(1, 1).withPosition(0, 3);
+        layout.addDouble("Drive Motor Position", () -> getDriveMotorPosition()).withSize(1, 1).withPosition(0, 3);
         layout.add("PID", rotationPidController).withSize(1, 1).withPosition(0, 3);
 
         return layout;

@@ -18,7 +18,7 @@ public class ProfiledMechanism {
     private double setpoint = 0;
 
     public ProfiledMechanism(MotorController motorController, ProfiledPIDController controller){
-        this(new MotorController[] {motorController}, motorController.getRelativeEncoder(), controller);
+        this(new MotorController[] {motorController}, motorController.getEncoder(), controller);
     } 
 
     public ProfiledMechanism(MotorController motorController, Encoder encoder, ProfiledPIDController controller){

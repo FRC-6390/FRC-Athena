@@ -5,6 +5,10 @@ import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.commands.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotSpeeds;
+import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.DriveIDs;
+import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.DrivetrainIDs;
+import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.EncoderIDs;
+import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.SteerIDs;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
 import ca.frc6390.athena.core.RobotDrivetrain;
@@ -34,30 +38,129 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public IMU imu;
   public RobotSpeeds robotSpeeds;
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, IMU imu) {
-    this(configs, imu, false, new PIDController(0, 0, 0));
+  public record SwerveDrivetrainConfig(SwerveModuleConfig[] modules) {
+
+    public static SwerveDrivetrainConfig standard(SwerveModuleConfig config){
+      return SwerveDrivetrainConfig.custom(config,config,config,config);
+   }
+
+    public static SwerveDrivetrainConfig custom(SwerveModuleConfig... modules){
+       return new SwerveDrivetrainConfig(modules);
+    }
+
+    public SwerveDrivetrainConfig setModulueLocations(Translation2d[] locations){
+      if (locations.length != modules.length) {
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+      }
+
+      for (int i = 0; i < locations.length; i++) {
+        modules[i].setLocation(locations[i]);
+      } 
+
+      return this;
+    }
+
+    public SwerveDrivetrainConfig setModulueLocations(double trackWidth, double wheelbase){
+      return setModulueLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, wheelbase));
+    }
+
+    public SwerveDrivetrainConfig setDriveIDs(DriveIDs ids){
+      return setDriveIDs(ids.getIDs());
+    }
+
+    public SwerveDrivetrainConfig setDriveIDs(int[] ids){
+
+      if (ids.length != modules.length) {
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+      }
+
+      for (int i = 0; i < ids.length; i++) {
+        modules[i].setDriveID(ids[i]);
+      } 
+
+      return this;
+    }
+
+    public SwerveDrivetrainConfig setSteerIDs(SteerIDs ids){
+      return setSteerIDs(ids.getIDs());
+    }
+
+    public SwerveDrivetrainConfig setSteerIDs(int[] ids){
+
+      if (ids.length != modules.length) {
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+      }
+
+      for (int i = 0; i < ids.length; i++) {
+        modules[i].setSteerID(ids[i]);
+      } 
+
+      return this;
+    }
+
+    public SwerveDrivetrainConfig setEncoderIDs(EncoderIDs ids){
+      return setEncoderIDs(ids.getIDs());
+    }
+
+    public SwerveDrivetrainConfig setEncoderIDs(int[] ids){
+
+      if (ids.length != modules.length) {
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+      }
+
+      for (int i = 0; i < ids.length; i++) {
+        modules[i].setEncoderID(ids[i]);
+      } 
+
+      return this;
+    }
+
+    public SwerveDrivetrainConfig setIDs(DrivetrainIDs ids){
+      setDriveIDs(ids.getDrive());
+      setSteerIDs(ids.getSteer());
+      setEncoderIDs(ids.getEncoders());
+      return this;
+    }
+
+    public SwerveDrivetrainConfig setOffsets(double... offsets){
+      if (offsets.length != modules.length) {
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+      }
+
+      for (int i = 0; i < offsets.length; i++) {
+        modules[i].setOffset(offsets[i]);
+      } 
+      return this;
+    }
   }
 
-  public SwerveDrivetrain(SwerveModuleConfig[] configs, IMU imu, boolean driftCorrection,
-      PIDController driftCorrectionPID) {
-    driftCorrectionPID.enableContinuousInput(-Math.PI, Math.PI);
-    swerveModules = new SwerveModule[configs.length];
-    for (int i = 0; i < configs.length; i++) {
-      swerveModules[i] = new SwerveModule(configs[i]);
+  public SwerveDrivetrain(IMU imu, SwerveModuleConfig... modules) {
+    this.imu = imu;
 
-      maxVelocity = configs[i].driveMotor().maxSpeedMetersPerSecond();
+    enableDriftCorrection = false; 
+    driftpid = new PIDController(0, 0,0);
+    driftpid.enableContinuousInput(-Math.PI, Math.PI);
+
+    swerveModules = new SwerveModule[modules.length];
+    for (int i = 0; i < modules.length; i++) {
+      swerveModules[i] = new SwerveModule(modules[i]);
+
+      maxVelocity = modules[i].maxSpeedMetersPerSecond();
     }
     Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
-    for (int i = 0; i < configs.length; i++) {
+    for (int i = 0; i < modules.length; i++) {
       moduleLocations[i] = swerveModules[i].getModuleLocation();
     }
+
     kinematics = new SwerveDriveKinematics(moduleLocations);
-    enableDriftCorrection = driftCorrection;
-    driftpid = driftCorrectionPID;
-    this.imu = imu;
     robotSpeeds = new RobotSpeeds(maxVelocity, maxVelocity);
   }
 
+  public SwerveDrivetrain withDriftCorretion(PIDController controller){
+    driftpid = controller;
+    enableDriftCorrection = true;
+    return this;
+  }
   
   public SwerveDriveKinematics getKinematics() {
     return kinematics;
@@ -109,11 +212,6 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     for (int i = 0; i < swerveModules.length; i++) {
       swerveModules[i].setNeutralMode(mode);
     }
-  }
-
-  @Override
-  public MotorNeutralMode getNeutralMode() {
-    return swerveModules[0].getNeutralMode();
   }
 
   @Override

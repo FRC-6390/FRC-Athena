@@ -3,10 +3,12 @@ package ca.frc6390.athena.devices;
 import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
 
+import com.ctre.phoenix6.configs.CANcoderConfiguration;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.revrobotics.AbsoluteEncoder;
 import com.revrobotics.RelativeEncoder;
+import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
 
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -15,8 +17,8 @@ import edu.wpi.first.wpilibj.DriverStation;
 public class Encoder {
 
     private final DoubleConsumer setPosition;
-    private final DoubleSupplier getPosition, getVelocity;
-    private double position, velocity, gearRatio = 1, offset = 0, conversion = 1;
+    private final DoubleSupplier getPosition, getAbsolutePosition, getVelocity;
+    private double absolutePosition = 0, position = 0, velocity = 0, gearRatio = 1, offset = 0, conversion = 1;
     private boolean inverted = false;
 
     public enum EncoderType {
@@ -38,65 +40,61 @@ public class Encoder {
             this(type, id, "rio", 1, 0, 1, false);
         }
 
-        public EncoderConfig withCanbus(String canbus){
+        public EncoderConfig setCanbus(String canbus){
             return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion, inverted);
         }
 
-        public EncoderConfig withOffset(double offset){
+        public EncoderConfig setOffset(double offset){
             return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
         }
 
-        public EncoderConfig withGearRatio(double gearRatio){
+        public EncoderConfig setGearRatio(double gearRatio){
             return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
         }
 
-        public EncoderConfig withConversion(double conversion){
+        public EncoderConfig setConversion(double conversion){
             return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
         }
 
         public EncoderConfig setInverted(boolean inverted){
             return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
         }
+
+        public EncoderConfig setID(int id){
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
+        }
     }
 
     public Encoder(TalonFX motor){
-        this(motor, false);
-    }
-
-    public Encoder(TalonFX motor, boolean absolute){
-        getPosition = absolute ?  () -> motor.getRotorPosition(true).getValueAsDouble() : () -> motor.getPosition(true).getValueAsDouble();
-        setPosition = absolute ? (val) -> DriverStation.reportError("Cannot set position of absolute encoder!", null) : (val) -> motor.setPosition(val);
-        getVelocity = absolute ? ()-> motor.getRotorVelocity(true).getValueAsDouble() : () -> motor.getVelocity(true).getValueAsDouble();
+        getAbsolutePosition = () -> motor.getRotorPosition(true).getValueAsDouble();
+        getPosition = () -> motor.getPosition(true).getValueAsDouble();
+        setPosition = (val) -> motor.setPosition(val);
+        getVelocity = () -> motor.getRotorVelocity(true).getValueAsDouble();
     }
     
+
     public Encoder(CANcoder encoder){
-       this(encoder, false);
-    }
-
-    public Encoder(CANcoder encoder, boolean absolute){
-        getPosition = absolute ?  () -> encoder.getAbsolutePosition(true).getValueAsDouble() : () -> encoder.getPosition(true).getValueAsDouble();
-        setPosition = absolute ? (val) -> DriverStation.reportError("Cannot set position of absolute encoder!", null) : (val) -> encoder.setPosition(val);
+        getAbsolutePosition = () -> encoder.getAbsolutePosition(true).getValueAsDouble();
+        getPosition = () -> encoder.getPosition(true).getValueAsDouble();
+        setPosition = (val) -> encoder.setPosition(val);
         getVelocity = () -> encoder.getVelocity(true).getValueAsDouble();
+
+        CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
+        encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 1;
+        encoder.getConfigurator().apply(encoderConfig);
     }
 
-    public Encoder(RelativeEncoder encoder){
-        this(encoder::setPosition, encoder::getPosition, encoder::getVelocity);
-    }
-
-    public Encoder(AbsoluteEncoder encoder){
-        this(encoder::getPosition, encoder::getVelocity);
-    }
-
-    public Encoder(DoubleSupplier getPosition, DoubleSupplier getVelocity){
-        this((val) -> DriverStation.reportError("Cannot set position of absolute encoder!", null), getPosition, getVelocity);
+    public Encoder(RelativeEncoder relativeEncoder, AbsoluteEncoder absoluteEncoder){
+        this(relativeEncoder::setPosition,absoluteEncoder::getPosition, relativeEncoder::getPosition, relativeEncoder::getVelocity);
     }
 
     public Encoder(edu.wpi.first.wpilibj.Encoder encoder, double dpp){
-        this((val) -> encoder.reset(), encoder::getDistance, encoder::getRate);
+        this( (val) -> encoder.reset(), encoder::getRaw, encoder::getDistance, encoder::getRate);
         encoder.setDistancePerPulse(dpp);
     }
 
-    public Encoder(DoubleConsumer setPosition, DoubleSupplier getPosition, DoubleSupplier getVelocity){
+    public Encoder(DoubleConsumer setPosition, DoubleSupplier getAbsolutePosition, DoubleSupplier getPosition, DoubleSupplier getVelocity){
+        this.getAbsolutePosition = getAbsolutePosition;
         this.getPosition = getPosition;
         this.getVelocity = getVelocity;
         this.setPosition = setPosition;
@@ -106,28 +104,21 @@ public class Encoder {
         return new Encoder(new CANcoder(id));
     }
 
-    public static Encoder newCTRECANCoderAbsolute(int id){
-        return new Encoder(new CANcoder(id), true);
-    }
-
     public static Encoder newCTRECANCoder(int id, String canbus){
         return new Encoder(new CANcoder(id, canbus));
     }
 
-    public static Encoder newCTRECANCoderAbsolute(int id, String canbus){
-        return new Encoder(new CANcoder(id, canbus), true);
+    public static Encoder newREVSparkMax(SparkMax motor){
+        return new Encoder(motor.getEncoder(), motor.getAbsoluteEncoder());
     }
 
-    public static Encoder newREVRelative(SparkMax motor){
-        return new Encoder(motor.getEncoder());
+    public static Encoder newREVSparkFlex(SparkFlex motor){
+        return new Encoder(motor.getEncoder(), motor.getAbsoluteEncoder());
     }
 
-    public static Encoder newREVAbsolute(SparkMax motor){
-        return new Encoder(motor.getAbsoluteEncoder());
-    }
-
-    public static Encoder newWPILib(SparkMax motor){
-        return new Encoder(motor.getAbsoluteEncoder());
+    public static Encoder newWPILib(int channelA, int channelB, double ddp){
+        edu.wpi.first.wpilibj.Encoder encoder = new edu.wpi.first.wpilibj.Encoder(channelA, channelB);
+        return new Encoder(encoder,ddp);
     }
 
     public static Encoder fromConfig(EncoderConfig config) {
@@ -143,7 +134,7 @@ public class Encoder {
                 DriverStation.reportError("Cannot create REVAbsoluteEncoder without motor, please make encoder using the motor!", null); 
             return null;
             case WPILibEncoder:
-                DriverStation.reportError("Cannot create WPILibEncoder without motor, please make encoder using the motor!", null); 
+                DriverStation.reportError("Cannot create WPILibEncoder without channels, please make encoder using the newWPILib!", null); 
             return null;
             default:
             return null;
@@ -182,8 +173,12 @@ public class Encoder {
         setPosition.accept(pos);
     }
 
-    public double getRawPosition() {
+    public double getRawValue() {
         return position;
+    }
+
+    public double getRawAbsoluteValue() {
+        return absolutePosition;
     }
 
     public double getRawVelocity() {
@@ -197,11 +192,25 @@ public class Encoder {
         return position * gearRatio - offset;
     }
 
+     /**
+     * Get the absolute rotations of the encoder with gearRatio and offset applied
+     */
+    public double getAbsoluteRotations() {
+        return absolutePosition * gearRatio - offset;
+    }
+
     /**
      * Get the rotations of the encoder with gearRatio, offset and conversion applied
      */
     public double getPosition() {
         return getRotations() * conversion;
+    }
+
+      /**
+     * Get the absolute rotations of the encoder with gearRatio, offset and conversion applied
+     */
+    public double getAbsolutePosition() {
+        return getAbsoluteRotations() * conversion;
     }
 
      /**
@@ -210,6 +219,14 @@ public class Encoder {
     public Rotation2d getRotation2d() {
         return Rotation2d.fromRotations(getRotations());
     }
+
+      /**
+     * Get the absolute rotations of the encoder with gearRatio and offset applied
+     */
+    public Rotation2d getAbsoluteRotation2d() {
+        return Rotation2d.fromRotations(getAbsoluteRotations());
+    }
+
 
      /**
      * Get the velocity in rotations of the encoder with gearRatio and offset applied
@@ -228,5 +245,6 @@ public class Encoder {
     public void update() {
         position = inverted ? -getPosition.getAsDouble() : getPosition.getAsDouble();
         velocity = inverted ? -getVelocity.getAsDouble() : getVelocity.getAsDouble();
+        absolutePosition = inverted ? -getAbsolutePosition.getAsDouble() : -getAbsolutePosition.getAsDouble();
     }
 }

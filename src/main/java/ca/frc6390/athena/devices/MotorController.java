@@ -22,7 +22,7 @@ public class MotorController {
 
     private final DoubleConsumer setSpeed, setVoltage, setCurrentLimit;
     private final Consumer<MotorNeutralMode> setNeutralMode;
-    private final Encoder relativeEncoder, absoluteEncoder;
+    private final Encoder encoder;
     private boolean inverted = false;
 
     public enum MotorControllerType {
@@ -38,7 +38,7 @@ public class MotorController {
             this(type, id, "rio", 40, false, new EncoderConfig(), MotorNeutralMode.Coast);
         }
 
-        public MotorControllerConfig withCanbus(String canbus){
+        public MotorControllerConfig setCanbus(String canbus){
             return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
         }
 
@@ -55,6 +55,10 @@ public class MotorController {
         }
 
         public MotorControllerConfig setNeutralMode(MotorNeutralMode neutralMode){
+            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
+        }
+
+        public MotorControllerConfig setID(int id){
             return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
         }
     }
@@ -125,8 +129,7 @@ public class MotorController {
                 config.withCurrentLimits(currentConfig);
                 controller.getConfigurator().apply(config);
             },
-            new Encoder(controller),
-            new Encoder(controller, true)
+            new Encoder(controller)
         );
     }
 
@@ -146,8 +149,7 @@ public class MotorController {
                 config.idleMode(controller.configAccessor.getIdleMode());
                 controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
             },
-            new Encoder(controller.getEncoder()),
-            new Encoder(controller.getAbsoluteEncoder())
+            Encoder.newREVSparkMax(controller)
         );
     }
 
@@ -167,18 +169,16 @@ public class MotorController {
                 config.idleMode(controller.configAccessor.getIdleMode());
                 controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
             },
-            new Encoder(controller.getEncoder()),
-            new Encoder(controller.getAbsoluteEncoder())
+            Encoder.newREVSparkFlex(controller)
         );
     }
 
-    public MotorController(Consumer<MotorNeutralMode> setNeutralMode, DoubleConsumer setSpeed, DoubleConsumer setVoltage, DoubleConsumer setCurrentLimit, Encoder relativeEncoder, Encoder absoluteEncoder) {
+    public MotorController(Consumer<MotorNeutralMode> setNeutralMode, DoubleConsumer setSpeed, DoubleConsumer setVoltage, DoubleConsumer setCurrentLimit, Encoder encoder) {
         this.setNeutralMode = setNeutralMode;
         this.setSpeed = setSpeed;
         this.setVoltage = setVoltage;
         this.setCurrentLimit = setCurrentLimit;
-        this.relativeEncoder = relativeEncoder;
-        this.absoluteEncoder = absoluteEncoder;
+        this.encoder = encoder;
     }
 
     public static MotorController newREVSparkFlexBrushed(int id){
@@ -198,7 +198,7 @@ public class MotorController {
     }
 
     public static MotorController newCTRETalonFx(int id, String canbus){
-        return fromConfig(new MotorControllerConfig(MotorControllerType.CTRETalonFX, id).withCanbus(canbus));
+        return fromConfig(new MotorControllerConfig(MotorControllerType.CTRETalonFX, id).setCanbus(canbus));
     }
 
     public static MotorController newCTRETalonFx(int id){
@@ -227,8 +227,7 @@ public class MotorController {
         withCurrentLimit(config.currentLimit);
         setInverted(config.inverted);
         setNeutralMode(config.neutralMode);
-        getAbsoluteEncoder().applyConfig(config.encoderConfig);
-        getRelativeEncoder().applyConfig(config.encoderConfig);
+        getEncoder().applyConfig(config.encoderConfig);
         return this;
     }
 
@@ -251,12 +250,8 @@ public class MotorController {
         return this;
     }
 
-    public Encoder getRelativeEncoder() {
-        return relativeEncoder;
-    }
-
-    public Encoder getAbsoluteEncoder() {
-        return absoluteEncoder;
+    public Encoder getEncoder() {
+        return encoder;
     }
 
     public void setSpeed(double speed) {
@@ -269,5 +264,37 @@ public class MotorController {
 
     public void stopMotor(){
         setSpeed.accept(0);
+    }
+
+
+    public enum Motor {
+        KRAKEN_X60_FOC(MotorControllerType.CTRETalonFX, 5800, true),
+        KRAKEN_X60(MotorControllerType.CTRETalonFX,6000, false),
+        FALCON_500_FOC(MotorControllerType.CTRETalonFX,6080, true),
+        FALCON_500(MotorControllerType.CTRETalonFX,6380, false),
+        NEO_V1(MotorControllerType.REVSparkFlexBrushless,5820, false),
+        NEO_VORTEX(MotorControllerType.REVSparkFlexBrushless,6784, false);
+
+        private final int freeSpeedRPM;
+        private final boolean foc;
+        private final MotorControllerType controllerType;
+
+        Motor(MotorControllerType controllerType, int freeSpeedRPM, boolean foc) {
+            this.controllerType = controllerType;
+            this.freeSpeedRPM = freeSpeedRPM;
+            this.foc = foc;
+        }
+
+        public int getFreeSpeedRPM() {
+            return freeSpeedRPM;
+        }
+
+        public boolean isFOC() {
+            return foc;
+        }
+
+        public MotorControllerType getMotorControllerType(){
+            return controllerType;
+        }
     }
 }
