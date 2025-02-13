@@ -17,6 +17,7 @@ import com.revrobotics.spark.config.SparkFlexConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
 import ca.frc6390.athena.devices.Encoder.EncoderConfig;
+import ca.frc6390.athena.devices.Encoder.EncoderType;
 
 public class MotorController {
 
@@ -26,16 +27,26 @@ public class MotorController {
     private boolean inverted = false;
 
     public enum MotorControllerType {
-        CTRETalonFX,
-        REVSparkMaxBrushed,
-        REVSparkMaxBrushless,
-        REVSparkFlexBrushed,
-        REVSparkFlexBrushless,
+        CTRETalonFX(EncoderType.CTRETalonFX),
+        REVSparkMaxBrushed(EncoderType.REVSparkMax),
+        REVSparkMaxBrushless(EncoderType.REVSparkMax),
+        REVSparkFlexBrushed(EncoderType.REVSparkFlex),
+        REVSparkFlexBrushless(EncoderType.REVSparkFlex);
+
+        private EncoderType encoder;
+        MotorControllerType(EncoderType encoder){
+            this.encoder = encoder;
+        }
+
+
+        public EncoderType getEncoder(){
+            return encoder;
+        }
     }
 
     public record MotorControllerConfig(MotorControllerType type, int id, String canbus, double currentLimit, boolean inverted, EncoderConfig encoderConfig, MotorNeutralMode neutralMode) {
         public MotorControllerConfig(MotorControllerType type, int id){
-            this(type, id, "rio", 40, false, new EncoderConfig(), MotorNeutralMode.Coast);
+            this(type, id, "rio", 40, false, new EncoderConfig(type.getEncoder()), MotorNeutralMode.Coast);
         }
 
         public MotorControllerConfig setCanbus(String canbus){

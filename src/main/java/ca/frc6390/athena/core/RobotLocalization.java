@@ -18,22 +18,37 @@ import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-public class RobotLocalization extends SubsystemBase{
+public class RobotLocalization extends SubsystemBase implements RobotSendable{
     
-    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, PoseEstimateWithLatencyType pose) {
+    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, PoseEstimateWithLatencyType pose, PIDConstants translation, PIDConstants rotation) {
 
-        public RobotLocalizationConfig(double xStd, double yStd, double thetaSt, double vXStd, double vYStda, double vThetaStd) {
-            this(xStd, yStd, thetaSt, vXStd, vYStda, vThetaStd, PoseEstimateWithLatencyType.BOT_POSE_BLUE);
+        public RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd) {
+            this(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, PoseEstimateWithLatencyType.BOT_POSE_BLUE, new PIDConstants(0), new PIDConstants(0));
         }
 
-        public RobotLocalizationConfig(double xStd, double yStd, double thetaSt) {
-            this(xStd, yStd, thetaSt, 0.9, 0.9, 0.9);
+        public RobotLocalizationConfig(double xStd, double yStd, double thetaStd) {
+            this(xStd, yStd, thetaStd, 0.9, 0.9, 0.9);
+        }
+
+        public RobotLocalizationConfig() {
+            this(0.1,0.1,0.001);
+        }
+
+        public RobotLocalizationConfig setPathPlannerPID(PIDConstants translation, PIDConstants rotation){
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation);
+        }
+
+        public RobotLocalizationConfig setPoseEstimateOrigin(PoseEstimateWithLatencyType pose){
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation);
+        }
+
+        public RobotLocalizationConfig setVision(double vXStd, double vYStda, double vThetaStd){
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation);
         }
 
         public Matrix<N3, N1> getStd(){
@@ -47,7 +62,7 @@ public class RobotLocalization extends SubsystemBase{
 
     private final SwerveDrivePoseEstimator fieldEstimator, relativeEstimator;
     private final SwerveDrivetrain drivetrain;
-    private final RobotVision vision;
+    private RobotVision vision;
     private final PoseEstimateWithLatencyType estimateWithLatencyType;
     private Pose2d fieldPose, relativePose;
     private Field2d field;
@@ -69,6 +84,10 @@ public class RobotLocalization extends SubsystemBase{
 
         drivetrain.getIMU().addVirtualAxis("relative", drivetrain.getIMU()::getYaw);
         drivetrain.getIMU().addVirtualAxis("field", drivetrain.getIMU()::getYaw);
+
+        if(config.rotation != null && config.translation != null){
+            configurePathPlanner(config.translation, config.rotation);
+        }
     }
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config) {
@@ -83,7 +102,12 @@ public class RobotLocalization extends SubsystemBase{
         this(drivetrain, null, null);
     }
 
-    public void configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants){
+    public RobotLocalization setRobotVision(RobotVision vision){
+        this.vision = vision;
+        return this;
+    }
+
+    public RobotLocalization configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants){
         try{
         config = RobotConfig.fromGUISettings();  }catch(Exception e){
             DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", e.getStackTrace());
@@ -107,6 +131,7 @@ public class RobotLocalization extends SubsystemBase{
             },
             drivetrain
       );
+      return this;
     }
 
     public Pose2d getPose(){
@@ -182,7 +207,6 @@ public class RobotLocalization extends SubsystemBase{
                     PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
                     double timestamp = Timer.getFPGATimestamp() - (data.getLatency() / 1000.0);
                     fieldEstimator.addVisionMeasurement(data.getPose(), timestamp);
-                    // drivetrain.getIMU().setFieldYawOffset(data.getPose().getRotation());
                 }
             }
         }
@@ -204,18 +228,15 @@ public class RobotLocalization extends SubsystemBase{
         return field;
     }
 
-    public ShuffleboardTab shuffleboard(String tab) {
-        return shuffleboard(Shuffleboard.getTab(tab));
-    }
-
+    @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
-        tab.add("Estimator", field);
-        tab.addDouble("Field X", () -> getFieldPose().getX());
-        tab.addDouble("Field Y", () -> getFieldPose().getY());
-        tab.addDouble("Field Theta", () -> getFieldPose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro);
-        tab.addDouble("Relative X", () -> getRelativePose().getX());
-        tab.addDouble("Relative Y", () -> getRelativePose().getY());
-        tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro);
+        tab.add("Estimator", field).withPosition( 0,0).withSize(4, 3);
+        tab.addDouble("Field X", () -> getFieldPose().getX()).withPosition( 4,2);
+        tab.addDouble("Field Y", () -> getFieldPose().getY()).withPosition( 5,2);
+        tab.addDouble("Field Theta", () -> getFieldPose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition( 4,0).withSize(2, 2);
+        tab.addDouble("Relative X", () -> getRelativePose().getX()).withPosition( 6,2);
+        tab.addDouble("Relative Y", () -> getRelativePose().getY()).withPosition( 7,2);
+        tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition( 6,0).withSize(2, 2);
         return tab;
     }
 

@@ -2,14 +2,16 @@ package ca.frc6390.athena.core;
 
 import java.util.function.DoubleSupplier;
 
+import ca.frc6390.athena.controllers.EnhancedXboxController;
+import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
 import edu.wpi.first.wpilibj2.command.Command;
 
-public interface RobotDrivetrain {
+public interface RobotDrivetrain extends RobotSendable{
     
-    public record RobotDrivetrainConfig() {
-        
+    public interface RobotDrivetrainConfig<T extends RobotDrivetrain> {
+        T create();
     }
 
     IMU getIMU();
@@ -18,22 +20,29 @@ public interface RobotDrivetrain {
     void update();
     Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
     void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
+    
+    default void setDriveCommand(EnhancedXboxController driverController) {
+        setDriveCommand(driverController.leftX, driverController.leftY, driverController.rightX);
+    }
 
+    RobotLocalization localization(RobotLocalizationConfig config);
 
     public class RobotDriveTrainIDs {
 
         public enum DrivetrainIDs {
-            SWERVE_CHASSIS_STANDARD(DriveIDs.SWERVE_CHASSIS_STANDARD, SteerIDs.SWERVE_CHASSIS_STANDARD, EncoderIDs.SWERVE_CHASSIS_STANDARD),
-            DUAL_MOTOR_TANK(DriveIDs.DUAL_MOTOR_TANK, SteerIDs.DUAL_MOTOR_TANK, EncoderIDs.DUAL_MOTOR_TANK);
+            SWERVE_CHASSIS_STANDARD(DriveIDs.SWERVE_CHASSIS_STANDARD, SteerIDs.SWERVE_CHASSIS_STANDARD, EncoderIDs.SWERVE_CHASSIS_STANDARD, 0),
+            DUAL_MOTOR_TANK(DriveIDs.DUAL_MOTOR_TANK, SteerIDs.DUAL_MOTOR_TANK, EncoderIDs.DUAL_MOTOR_TANK, 0);
 
             private final DriveIDs drive;
             private final SteerIDs steer;
             private final EncoderIDs encoders;
+            private final int gyro;
     
-            DrivetrainIDs(DriveIDs drive, SteerIDs steer, EncoderIDs encoders) {
+            DrivetrainIDs(DriveIDs drive, SteerIDs steer, EncoderIDs encoders, int gyro) {
                 this.drive = drive;
                 this.steer = steer;
                 this.encoders = encoders;
+                this.gyro = gyro;
             }
     
             public DriveIDs getDrive() {
@@ -46,6 +55,10 @@ public interface RobotDrivetrain {
 
             public SteerIDs getSteer() {
                 return steer;
+            }
+
+            public int getGyro(){
+                return gyro;
             }
         }
     

@@ -52,6 +52,7 @@ public class EnhancedXboxController extends XboxController {
     public final DebouncedButton a,b,x,y,leftBumper,rightBumper,leftStick,rightStick,back,start;
     public final ModifiedAxis leftX,leftY,rightX,rightY,rightTrigger,leftTrigger;
     public final EnhancedPOV pov;
+    
 
     public EnhancedXboxController(int port) {
         super(port);
@@ -76,6 +77,40 @@ public class EnhancedXboxController extends XboxController {
 
         pov = new EnhancedPOV(this);
     }
+
+    public EnhancedXboxController setSticksInverted(boolean inverted){
+        leftX.setInverted(inverted);
+        leftY.setInverted(inverted);
+        rightX.setInverted(inverted);
+        rightY.setInverted(inverted);
+        return this;
+    }
+
+    public EnhancedXboxController setSticksDeadzone(double deadzone){
+        leftX.setDeadzone(deadzone);
+        leftY.setDeadzone(deadzone);
+        rightX.setDeadzone(deadzone);
+        rightY.setDeadzone(deadzone);
+        return this;
+    }
+
+    public EnhancedXboxController setSticksSlewrate(double rate){
+        leftX.enableSlewrate(rate);
+        leftY.enableSlewrate(rate);
+        rightX.enableSlewrate(rate);
+        rightY.enableSlewrate(rate);
+        return this;
+    }
+
+    public EnhancedXboxController setSticksSlewrate(double frate, double rrate){
+        leftX.enableSlewrate(frate, rrate);
+        leftY.enableSlewrate(frate, rrate);
+        rightX.enableSlewrate(frate, rrate);
+        rightY.enableSlewrate(frate, rrate);
+        return this;
+    }
+
+
 
     public class EnhancedPOV {
         public final DebouncedButton center,up,upRight,upLeft,down,downRight,downLeft,right,left;

@@ -4,40 +4,14 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.DrivetrainIDs;
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.MotorController;
 import ca.frc6390.athena.devices.Encoder.EncoderConfig;
+import ca.frc6390.athena.devices.Encoder.EncoderType;
 import ca.frc6390.athena.devices.MotorController.MotorControllerConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Translation2d;
 
-public class SwerveModuleVendors {
-    public static SDSModules SDS;
+public interface SwerveVendorModule {
 
-    public enum SwerveMotor {
-        KRAKEN_X60_FOC(5800, true),
-        KRAKEN_X60(6000, false),
-        FALCON_500_FOC(6080, true),
-        FALCON_500(6380, false),
-        NEO_V1(5820, false),
-        NEO_VORTEX(6784, false);
-
-        private final int freeSpeedRPM;
-        private final boolean foc;
-
-        SwerveMotor(int freeSpeedRPM, boolean foc) {
-            this.freeSpeedRPM = freeSpeedRPM;
-            this.foc = foc;
-        }
-
-        public int getFreeSpeedRPM() {
-            return freeSpeedRPM;
-        }
-
-        public boolean isFOC() {
-            return foc;
-        }
-    }
-
-    public interface VendorSwerveModule {
         public double getDriveGearRatio();
         public double getSteerGearRatio();
         public double getEncoderGearRatio();
@@ -59,6 +33,14 @@ public class SwerveModuleVendors {
             return config(null, motor, -1, motor, -1);
         }
 
+        default SwerveModuleConfig config(MotorController.Motor motor, EncoderType type){
+            return config( motor, motor, type);
+        }
+
+        default SwerveModuleConfig config(MotorController.Motor drive,  MotorController.Motor steer, EncoderType type){
+            return config(null, drive, -1, steer, -1).setEncoder(new EncoderConfig(type).setGearRatio(getEncoderGearRatio()));
+        }       
+
         default SwerveModuleConfig config(MotorController.Motor motor, int drive, int steer){
             return config(null, motor, drive, motor, steer);
         }
@@ -73,7 +55,7 @@ public class SwerveModuleVendors {
             driveMotorController.withEncoderConfig( new EncoderConfig().setConversion(Math.PI * getWheelDiameter()).setGearRatio(getDriveGearRatio()));
 
             MotorControllerConfig steerMotorController = new MotorControllerConfig(steerMotor.getMotorControllerType(), steer);
-            driveMotorController.withEncoderConfig(new EncoderConfig().setGearRatio(getSteerGearRatio()));
+            steerMotorController.withEncoderConfig(new EncoderConfig().setGearRatio(getSteerGearRatio()));
 
             SwerveModuleConfig moduleConfig = new SwerveModuleConfig(location, getWheelDiameter(), getFreeSpeed(driveMotor), driveMotorController, steerMotorController, null);
            
@@ -125,6 +107,4 @@ public class SwerveModuleVendors {
         default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, double trackWidth, MotorController.Motor driveMotor, MotorController.Motor steerMotor, Encoder.EncoderType encoderType, PIDController rotationPID){
             return configs(SwerveModuleConfig.generateModuleLocations(trackWidth, wheelbase), driveMotor, IDs.getDrive().getIDs(), steerMotor, IDs.getSteer().getIDs(), rotationPID, encoderType, IDs.getEncoders().getIDs());        
         }
-    }
-
 }

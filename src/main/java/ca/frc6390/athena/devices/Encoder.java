@@ -25,8 +25,8 @@ public class Encoder {
         None,
         CTRETalonFX,
         CTRECANcoder,
-        REVRelativeEncoder,
-        REVAbsoluteEncoder,
+        REVSparkFlex,
+        REVSparkMax,
         WPILibEncoder,
     }
 
@@ -36,6 +36,10 @@ public class Encoder {
             this(EncoderType.None, -1, "rio", 1, 0, 1, false);
         }
         
+        public EncoderConfig(EncoderType type){
+            this(type, -1, "rio", 1, 0, 1, false);
+        }
+
         public EncoderConfig(EncoderType type, int id){
             this(type, id, "rio", 1, 0, 1, false);
         }
@@ -61,6 +65,10 @@ public class Encoder {
         }
 
         public EncoderConfig setID(int id){
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
+        }
+
+        public EncoderConfig setEncoderType(EncoderType type){
             return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
         }
     }
@@ -127,10 +135,10 @@ public class Encoder {
             return new Encoder(new TalonFX(config.id, config.canbus)).applyConfig(config);
             case CTRECANcoder:
             return new Encoder(new CANcoder(config.id, config.canbus)).applyConfig(config);
-            case REVRelativeEncoder:
+            case REVSparkFlex:
                 DriverStation.reportError("Cannot create REVRelativeEncoder without motor, please make encoder using the motor!", null); 
             return null;
-            case REVAbsoluteEncoder:
+            case REVSparkMax:
                 DriverStation.reportError("Cannot create REVAbsoluteEncoder without motor, please make encoder using the motor!", null); 
             return null;
             case WPILibEncoder:
@@ -219,7 +227,7 @@ public class Encoder {
     public Rotation2d getRotation2d() {
         return Rotation2d.fromRotations(getRotations());
     }
-
+    
       /**
      * Get the absolute rotations of the encoder with gearRatio and offset applied
      */

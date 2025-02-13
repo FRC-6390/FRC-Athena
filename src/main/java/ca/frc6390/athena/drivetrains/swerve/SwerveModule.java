@@ -2,6 +2,7 @@ package ca.frc6390.athena.drivetrains.swerve;
 
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.Encoder.EncoderConfig;
+import ca.frc6390.athena.devices.Encoder.EncoderType;
 import ca.frc6390.athena.devices.MotorController;
 import ca.frc6390.athena.devices.MotorController.MotorControllerConfig;
 import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
@@ -38,6 +39,10 @@ public class SwerveModule {
 
         public SwerveModuleConfig setEncoder(EncoderConfig encoder){
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder);
+        }
+
+        public SwerveModuleConfig setEncoder(EncoderType encoder){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder().setEncoderType(encoder));
         }
 
         public SwerveModuleConfig setOffset(double offset){
@@ -79,6 +84,7 @@ public class SwerveModule {
 
         // MOTOR INITIALIZATION
         driveMotor = MotorController.fromConfig(config.driveMotor);
+
         rotationMotor = MotorController.fromConfig(config.rotationMotor);
 
         encoder = Encoder.fromConfig(config.encoder);
@@ -100,8 +106,7 @@ public class SwerveModule {
     }
 
     public Rotation2d getEncoderPosition() {
-        return encoder.getRotation2d();
-        // return Rotation2d.fromRotations(encoder.getPosition() * config.encoder().gearRatio).minus(Rotation2d.fromRadians(offset));
+        return encoder.getAbsoluteRotation2d();
     }
 
     public void setOffset(double offset) {
@@ -110,7 +115,7 @@ public class SwerveModule {
 
     public void resetEncoders() {
         driveMotor.getEncoder().setPosition(0);
-        rotationMotor.getEncoder().setPosition(encoder.getPosition());
+        rotationMotor.getEncoder().setPosition(encoder.getAbsolutePosition());
     }
 
     public SwerveModuleState getState() {
@@ -139,8 +144,9 @@ public class SwerveModule {
         }
 
         state.optimize(getState().angle);
+        state.speedMetersPerSecond *= state.angle.minus(encoder.getRotation2d()).getCos();
         setDriveMotor(state.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
-        setRotationMotor(-rotationPidController.calculate( MathUtil.angleModulus(getEncoderPosition().getRadians()), state.angle.getRadians()));
+        setRotationMotor(rotationPidController.calculate(MathUtil.angleModulus(getEncoderPosition().getRadians()), state.angle.getRadians()));
     }
 
     public void stop() {
@@ -166,11 +172,9 @@ public class SwerveModule {
     }
 
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
-        layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
-        layout.addDouble("Encoder Radians", () -> MathUtil.angleModulus(getEncoderPosition().getRadians())).withSize(1, 1).withPosition(0, 3);
-        layout.addDouble("Drive Motor Position", () -> getDriveMotorPosition()).withSize(1, 1).withPosition(0, 3);
-        layout.add("PID", rotationPidController).withSize(1, 1).withPosition(0, 3);
-
+        layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 2));
+        layout.addDouble("Encoder Rotations", () -> getEncoderPosition().getRotations()).withSize(1, 1).withPosition(1, 1);
+        layout.addDouble("Drive Motor Position", () -> getDriveMotorPosition()).withSize(1, 1).withPosition(1, 2);
         return layout;
     }
 }

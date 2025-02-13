@@ -33,6 +33,7 @@ public class ProfiledMechanism {
         this.motorControllers = motorControllers;
         this.encoder = encoder;
         this.controller = controller;
+        controller.reset(getPosition());
     }   
 
     public ProfiledMechanism withUpperLimitSwitch(RunnableTrigger upperLimit){
@@ -73,12 +74,16 @@ public class ProfiledMechanism {
         this.setpoint = setpoint;
     }
 
+    public double getPosition(){
+        return encoder.getPosition();
+    }
+
     //will call encoder update loop
     public void update(){
         
         encoder.update();
 
-        double speed = controller.calculate(encoder.getRotations(), setpoint);
+        double speed = controller.calculate(encoder.getPosition(), setpoint);
         
         if(getLimitValue(lowerLimit) && speed < 0){
             speed = 0;

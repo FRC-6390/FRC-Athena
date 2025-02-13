@@ -7,6 +7,7 @@ import com.ctre.phoenix6.hardware.Pigeon2;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.ADXRS450_Gyro;
+import edu.wpi.first.wpilibj.SPI.Port;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
@@ -25,7 +26,15 @@ public class IMU extends VirtualIMU{
             this(type, id, "rio");
         }
 
-        public IMUConfig withCanbus(String canbus){
+        public IMUConfig(IMUType type){
+            this(type, -1);
+        }
+
+        public IMUConfig setCanbus(String canbus){
+            return new IMUConfig(type, id, canbus);
+        }
+
+        public IMUConfig setId(int id){
             return new IMUConfig(type, id, canbus);
         }
     }
@@ -118,7 +127,7 @@ public class IMU extends VirtualIMU{
             case CTREPigeon2:
                 return new IMU(new Pigeon2(config.id, config.canbus)).applyConfig(config);
             case WPILibADXRS450:
-                return new IMU(new Pigeon2(config.id, config.canbus)).applyConfig(config);
+                return new IMU(new ADXRS450_Gyro(Port.kMXP)).applyConfig(config);
             default:
                 return null;
         }

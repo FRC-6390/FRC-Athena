@@ -9,7 +9,11 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.DrivetrainIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.EncoderIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.SteerIDs;
+import ca.frc6390.athena.core.RobotLocalization;
+import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.devices.IMU;
+import ca.frc6390.athena.devices.IMU.IMUConfig;
+import ca.frc6390.athena.devices.IMU.IMUType;
 import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
@@ -19,9 +23,10 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -37,24 +42,37 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public double desiredHeading, maxVelocity;
   public IMU imu;
   public RobotSpeeds robotSpeeds;
+  private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault()
+  .getStructArrayTopic("/SwerveStates", SwerveModuleState.struct).publish();
+  public record SwerveDrivetrainConfig(IMUConfig imu, SwerveModuleConfig[] modules, PIDController drift) implements RobotDrivetrainConfig<SwerveDrivetrain> {
 
-  public record SwerveDrivetrainConfig(SwerveModuleConfig[] modules) {
+    public SwerveDrivetrainConfig(IMUType imu){
+        this(new IMUConfig(imu));
+    }
 
-    public static SwerveDrivetrainConfig standard(SwerveModuleConfig config){
-      return SwerveDrivetrainConfig.custom(config,config,config,config);
-   }
+    public SwerveDrivetrainConfig(IMUConfig imu){
+      this(imu, null, null);
+  }
 
-    public static SwerveDrivetrainConfig custom(SwerveModuleConfig... modules){
-       return new SwerveDrivetrainConfig(modules);
+    public SwerveDrivetrainConfig sameModule(SwerveModuleConfig config){
+      return custom(config,config,config,config);
+    }
+
+    public SwerveDrivetrainConfig custom(SwerveModuleConfig... modules){
+       return new SwerveDrivetrainConfig(imu, modules, null);
+    }
+
+    public SwerveDrivetrainConfig setDriftCorrectionPID(PIDController drift){
+      return new SwerveDrivetrainConfig(imu, modules, drift);
     }
 
     public SwerveDrivetrainConfig setModulueLocations(Translation2d[] locations){
       if (locations.length != modules.length) {
-        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS (expected: "+modules.length +", got: "+locations.length+")");
       }
 
       for (int i = 0; i < locations.length; i++) {
-        modules[i].setLocation(locations[i]);
+        modules[i] = modules[i].setLocation(locations[i]);
       } 
 
       return this;
@@ -64,6 +82,10 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
       return setModulueLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, wheelbase));
     }
 
+    public SwerveDrivetrainConfig setModulueLocations(double trackWidth){
+      return setModulueLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, trackWidth));
+    }
+
     public SwerveDrivetrainConfig setDriveIDs(DriveIDs ids){
       return setDriveIDs(ids.getIDs());
     }
@@ -71,11 +93,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     public SwerveDrivetrainConfig setDriveIDs(int[] ids){
 
       if (ids.length != modules.length) {
-        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS (expected: "+modules.length +", got: "+ids.length+")");
       }
 
       for (int i = 0; i < ids.length; i++) {
-        modules[i].setDriveID(ids[i]);
+        modules[i] = modules[i].setDriveID(ids[i]);
       } 
 
       return this;
@@ -88,11 +110,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     public SwerveDrivetrainConfig setSteerIDs(int[] ids){
 
       if (ids.length != modules.length) {
-        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS (expected: "+modules.length +", got: "+ids.length+")");
       }
 
       for (int i = 0; i < ids.length; i++) {
-        modules[i].setSteerID(ids[i]);
+        modules[i] = modules[i].setSteerID(ids[i]);
       } 
 
       return this;
@@ -105,33 +127,65 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     public SwerveDrivetrainConfig setEncoderIDs(int[] ids){
 
       if (ids.length != modules.length) {
-        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS (expected: "+modules.length +", got: "+ids.length+")");
       }
 
       for (int i = 0; i < ids.length; i++) {
-        modules[i].setEncoderID(ids[i]);
+        modules[i] = modules[i].setEncoderID(ids[i]);
       } 
 
       return this;
+    }
+
+    public SwerveDrivetrainConfig setGyroID(int id){
+      return new SwerveDrivetrainConfig(imu.setId(id), modules, drift);
     }
 
     public SwerveDrivetrainConfig setIDs(DrivetrainIDs ids){
       setDriveIDs(ids.getDrive());
       setSteerIDs(ids.getSteer());
       setEncoderIDs(ids.getEncoders());
-      return this;
+      return setGyroID(ids.getGyro());
     }
+    
 
     public SwerveDrivetrainConfig setOffsets(double... offsets){
       if (offsets.length != modules.length) {
-        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
+        throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS (expected: "+modules.length +", got: "+offsets.length+")");
       }
 
       for (int i = 0; i < offsets.length; i++) {
-        modules[i].setOffset(offsets[i]);
+        modules[i] = modules[i].setOffset(offsets[i]);
       } 
       return this;
     }
+
+    public SwerveDrivetrainConfig setCanbus(String canbus){
+  
+      for (int i = 0; i < modules.length; i++) {
+        modules[i] = modules[i].setCanbus(canbus);
+      } 
+
+      return new SwerveDrivetrainConfig(imu.setCanbus(canbus), modules, drift);
+    }
+
+    public SwerveDrivetrainConfig setRotationPID(PIDController pid){
+  
+      for (int i = 0; i < modules.length; i++) {
+        modules[i] = modules[i].setPID(pid);
+      } 
+
+      return this;
+    }
+
+    @Override
+    public SwerveDrivetrain create() {
+      return new SwerveDrivetrain(IMU.fromConfig(imu), modules);
+    }
+  }
+  
+  public SwerveDrivetrain(IMU imu, SwerveDrivetrainConfig config) {
+    this(imu, config.modules);
   }
 
   public SwerveDrivetrain(IMU imu, SwerveModuleConfig... modules) {
@@ -194,6 +248,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     return maxVelocity;
   }
 
+  public SwerveDrivetrain setDriftCorrectionPID(PIDController controller) {
+    driftpid = controller;
+    return this;
+  }
+  
   public void setDriftCorrectionMode(boolean enabled) {
     enableDriftCorrection = enabled;
   }
@@ -231,6 +290,8 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
     SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
 
+    publisher.set(states);
+
     SwerveDriveKinematics.desaturateWheelSpeeds(states, getMaxVelocity());
 
     setModuleStates(states);    
@@ -246,18 +307,14 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     this.setDefaultCommand(getDriveCommand(xInput, yInput, thetaInput));
   }
 
-
-  public ShuffleboardTab shuffleboard(String tab) {
-      return shuffleboard(Shuffleboard.getTab(tab));
-  }
-
+  @Override
   public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
 
-    ShuffleboardLayout swervelayout = tab.getLayout("Swerve Modules", BuiltInLayouts.kGrid).withSize(4, 8).withProperties(Map.of("Number of columns", 2, "Number of rows", 2));
+    ShuffleboardLayout swervelayout = tab.getLayout("Swerve Modules", BuiltInLayouts.kGrid).withSize(4, 8).withProperties(Map.of("Number of columns", 2, "Number of rows", 2)).withPosition(1, 1);
 
     {
       for (int i = 0; i < swerveModules.length; i++) {
-        swerveModules[i].shuffleboard(swervelayout.getLayout("Module " + i, BuiltInLayouts.kGrid));
+        swerveModules[i].shuffleboard(swervelayout.getLayout("Module " + i, BuiltInLayouts.kGrid)).withPosition(1, i+1);
       }
     }
 
@@ -297,5 +354,10 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   @Override
   public void periodic() {
       update();
+  }
+
+  @Override
+  public RobotLocalization localization(RobotLocalizationConfig config) {
+    return new RobotLocalization(this, config);
   }
 }
