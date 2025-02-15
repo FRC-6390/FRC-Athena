@@ -39,19 +39,24 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public SwerveDriveKinematics kinematics;
   public PIDController driftpid;
   public boolean enableDriftCorrection;
-  public double desiredHeading, maxVelocity;
+  public double desiredHeading, maxVelocity, driftActivationSpeed;
   public IMU imu;
   public RobotSpeeds robotSpeeds;
   private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault()
   .getStructArrayTopic("/SwerveStates", SwerveModuleState.struct).publish();
-  public record SwerveDrivetrainConfig(IMUConfig imu, SwerveModuleConfig[] modules, PIDController drift) implements RobotDrivetrainConfig<SwerveDrivetrain> {
+  public record SwerveDrivetrainConfig(IMUConfig imu, SwerveModuleConfig[] modules, PIDController drift, double driftActivationSpeed) implements RobotDrivetrainConfig<SwerveDrivetrain> {
 
     public SwerveDrivetrainConfig(IMUType imu){
         this(new IMUConfig(imu));
     }
 
+
+    public SwerveDrivetrainConfig(IMUType imu, boolean inverted){
+      this(new IMUConfig(imu).setInverted(inverted));
+  }
+
     public SwerveDrivetrainConfig(IMUConfig imu){
-      this(imu, null, null);
+      this(imu, null, null, 0.05);
   }
 
     public SwerveDrivetrainConfig sameModule(SwerveModuleConfig config){
@@ -59,11 +64,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     }
 
     public SwerveDrivetrainConfig custom(SwerveModuleConfig... modules){
-       return new SwerveDrivetrainConfig(imu, modules, null);
+       return new SwerveDrivetrainConfig(imu, modules, null, 0.05);
     }
 
     public SwerveDrivetrainConfig setDriftCorrectionPID(PIDController drift){
-      return new SwerveDrivetrainConfig(imu, modules, drift);
+      return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed);
     }
 
     public SwerveDrivetrainConfig setModulueLocations(Translation2d[] locations){
@@ -138,7 +143,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     }
 
     public SwerveDrivetrainConfig setGyroID(int id){
-      return new SwerveDrivetrainConfig(imu.setId(id), modules, drift);
+      return new SwerveDrivetrainConfig(imu.setId(id), modules, drift, driftActivationSpeed);
     }
 
     public SwerveDrivetrainConfig setIDs(DrivetrainIDs ids){
@@ -166,7 +171,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
         modules[i] = modules[i].setCanbus(canbus);
       } 
 
-      return new SwerveDrivetrainConfig(imu.setCanbus(canbus), modules, drift);
+      return new SwerveDrivetrainConfig(imu.setCanbus(canbus), modules, drift, driftActivationSpeed);
     }
 
     public SwerveDrivetrainConfig setRotationPID(PIDController pid){
@@ -178,9 +183,21 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
       return this;
     }
 
+    public SwerveDrivetrainConfig setDriftActivationSpeed(double driftActivationSpeed){
+      return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed);
+    }
+
     @Override
     public SwerveDrivetrain create() {
-      return new SwerveDrivetrain(IMU.fromConfig(imu), modules);
+      SwerveDrivetrain dt = new SwerveDrivetrain(IMU.fromConfig(imu), modules);
+
+      if (drift != null){
+        dt.setDriftCorrectionPID(drift);
+        dt.setDriftCorrectionMode(true);
+      }
+
+      dt.driftActivationSpeed = driftActivationSpeed;
+      return dt;
     }
   }
   
@@ -208,10 +225,15 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
     kinematics = new SwerveDriveKinematics(moduleLocations);
     robotSpeeds = new RobotSpeeds(maxVelocity, maxVelocity);
+    getIMU().addVirtualAxis("drift", () -> getIMU().getYaw());
+    getIMU().setVirtualAxis("drift", getIMU().getVirtualAxis("driver"));
+    desiredHeading = getIMU().getVirtualAxis("drift").getRadians();
+    
   }
 
   public SwerveDrivetrain withDriftCorretion(PIDController controller){
     driftpid = controller;
+    driftpid.enableContinuousInput(-Math.PI, Math.PI);
     enableDriftCorrection = true;
     return this;
   }
@@ -236,11 +258,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
 
   private double driftCorrection(ChassisSpeeds speeds) {
-    if (Math.abs(speeds.omegaRadiansPerSecond) > 0.0) {
-      desiredHeading = getIMU().getYaw().getRadians();
+    if (Math.abs(speeds.omegaRadiansPerSecond) > driftActivationSpeed) {
+      desiredHeading = getIMU().getVirtualAxis("drift").getRadians();
       return 0;
     } else {
-      return driftpid.calculate(getIMU().getYaw().getRadians(), desiredHeading);
+      return driftpid.calculate(getIMU().getVirtualAxis("drift").getRadians(), desiredHeading);
     }
   }
 

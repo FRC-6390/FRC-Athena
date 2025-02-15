@@ -15,15 +15,16 @@ public class IMU extends VirtualIMU{
 
     private final DoubleSupplier getRoll, getPitch, getYaw, getAccelX, getAccelY, getAccelZ;
     private double roll, pitch, yaw, accelX, accelY, accelZ;
+    private boolean inverted = false;
 
     public enum IMUType{
         CTREPigeon2,
         WPILibADXRS450
     }
 
-    public record IMUConfig(IMUType type, int id, String canbus) {
+    public record IMUConfig(IMUType type, int id, String canbus, boolean inverted) {
         public IMUConfig(IMUType type, int id){
-            this(type, id, "rio");
+            this(type, id, "rio", false);
         }
 
         public IMUConfig(IMUType type){
@@ -31,11 +32,15 @@ public class IMU extends VirtualIMU{
         }
 
         public IMUConfig setCanbus(String canbus){
-            return new IMUConfig(type, id, canbus);
+            return new IMUConfig(type, id, canbus, inverted);
         }
 
         public IMUConfig setId(int id){
-            return new IMUConfig(type, id, canbus);
+            return new IMUConfig(type, id, canbus, inverted);
+        }
+
+        public IMUConfig setInverted(boolean inverted){
+            return new IMUConfig(type, id, canbus, inverted);
         }
     }
 
@@ -101,16 +106,25 @@ public class IMU extends VirtualIMU{
         return accelZ;
     }
 
+    public void setInverted(boolean inverted){
+        this.inverted = inverted;
+    }
+
+    public boolean isInverted() {
+        return inverted;
+    }
+
     public void update(){
-       roll = getRoll.getAsDouble();
-       pitch = getPitch.getAsDouble();
-       yaw = getYaw.getAsDouble();
-       accelX = getAccelX.getAsDouble();
-       accelY = getAccelY.getAsDouble();
-       accelZ = getAccelZ.getAsDouble();
+       roll =  inverted ? -getRoll.getAsDouble() : getRoll.getAsDouble();
+       pitch = inverted ? -getPitch.getAsDouble() : getPitch.getAsDouble();
+       yaw = inverted ? -getYaw.getAsDouble() : getYaw.getAsDouble();
+       accelX = inverted ? -getAccelX.getAsDouble() : getAccelX.getAsDouble();
+       accelY = inverted ? -getAccelY.getAsDouble() : getAccelY.getAsDouble();
+       accelZ = inverted ? -getAccelZ.getAsDouble() : getAccelZ.getAsDouble();
     }
 
     public IMU applyConfig(IMUConfig config){
+        setInverted(config.inverted);
         return this;
     }
 
@@ -119,7 +133,7 @@ public class IMU extends VirtualIMU{
     }
 
     public static IMU createCTREPigeon2(int id, String canbus){
-        return fromConfig(new IMUConfig(IMUType.CTREPigeon2, id, canbus));
+        return fromConfig(new IMUConfig(IMUType.CTREPigeon2, id, canbus, false));
     }
 
     public static IMU fromConfig(IMUConfig config){

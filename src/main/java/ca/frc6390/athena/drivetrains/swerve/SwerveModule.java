@@ -19,9 +19,9 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class SwerveModule {
     
     private final SwerveModuleConfig config;
-    private final MotorController driveMotor; //switch to double consumer in future
-    private final MotorController rotationMotor; //switch to double consumer in future
-    private final Encoder encoder; //could possibly be entirely remove and manager by a backend instead
+    private final MotorController driveMotor;
+    private final MotorController rotationMotor;
+    private final Encoder encoder;
     private final PIDController rotationPidController;
     // SWERVE MOTOR RECORD
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder) {
@@ -66,10 +66,10 @@ public class SwerveModule {
         }
 
         public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
-            Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, wheelbase/2);
-            Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, -wheelbase/2);
-            Translation2d BACK_LEFT = new Translation2d(-trackwidth/2, wheelbase/2);
-            Translation2d BACK_RIGHT = new Translation2d(-trackwidth/2, -wheelbase/2);
+            Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, -wheelbase/2);
+            Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, wheelbase/2);
+            Translation2d BACK_LEFT = new Translation2d(-trackwidth/2, -wheelbase/2);
+            Translation2d BACK_RIGHT = new Translation2d(-trackwidth/2, wheelbase/2);
             return new Translation2d[]{FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT};
         }
     }
@@ -144,7 +144,7 @@ public class SwerveModule {
         }
 
         state.optimize(getState().angle);
-        state.speedMetersPerSecond *= state.angle.minus(encoder.getRotation2d()).getCos();
+        // state.speedMetersPerSecond *= state.angle.minus(encoder.getRotation2d()).getCos();
         setDriveMotor(state.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
         setRotationMotor(rotationPidController.calculate(MathUtil.angleModulus(getEncoderPosition().getRadians()), state.angle.getRadians()));
     }

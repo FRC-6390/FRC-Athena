@@ -72,6 +72,10 @@ public class MotorController {
         public MotorControllerConfig setID(int id){
             return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
         }
+
+        public MotorControllerConfig setCurrentLimit(double currentLimit){
+            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
+        }
     }
 
     public enum MotorNeutralMode {

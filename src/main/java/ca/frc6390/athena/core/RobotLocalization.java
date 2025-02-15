@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core;
 
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.commands.FollowPathCommand;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
@@ -25,10 +26,10 @@ import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 public class RobotLocalization extends SubsystemBase implements RobotSendable{
     
-    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, PoseEstimateWithLatencyType pose, PIDConstants translation, PIDConstants rotation) {
+    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, PoseEstimateWithLatencyType pose, PIDConstants translation, PIDConstants rotation, boolean useVision) {
 
         public RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd) {
-            this(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, PoseEstimateWithLatencyType.BOT_POSE_BLUE, new PIDConstants(0), new PIDConstants(0));
+            this(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, PoseEstimateWithLatencyType.BOT_POSE_BLUE, new PIDConstants(0), new PIDConstants(0), true);
         }
 
         public RobotLocalizationConfig(double xStd, double yStd, double thetaStd) {
@@ -40,15 +41,19 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
         }
 
         public RobotLocalizationConfig setPathPlannerPID(PIDConstants translation, PIDConstants rotation){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
         }
 
         public RobotLocalizationConfig setPoseEstimateOrigin(PoseEstimateWithLatencyType pose){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
         }
 
         public RobotLocalizationConfig setVision(double vXStd, double vYStda, double vThetaStd){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
+        }
+
+        public RobotLocalizationConfig setVisionEnabled(boolean useVision){
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
         }
 
         public Matrix<N3, N1> getStd(){
@@ -67,6 +72,7 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
     private Pose2d fieldPose, relativePose;
     private Field2d field;
     private RobotConfig config;
+    private boolean visionEnabled = false;
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
         this.fieldPose = pose;
@@ -75,6 +81,7 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
         this.vision = vision;
         this.field = new Field2d();
         estimateWithLatencyType = config.pose;
+        this.visionEnabled = config.useVision;
 
         fieldEstimator = config != null ?
          new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd()) : 
@@ -88,6 +95,8 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
         if(config.rotation != null && config.translation != null){
             configurePathPlanner(config.translation, config.rotation);
         }
+        System.out.println("CRETAED");
+
     }
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config) {
@@ -100,6 +109,11 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
 
     public RobotLocalization(SwerveDrivetrain drivetrain) {
         this(drivetrain, null, null);
+    }
+
+    public RobotLocalization enableVisionForLocalization(boolean visionEnabled){
+        this.visionEnabled = visionEnabled;
+        return this;
     }
 
     public RobotLocalization setRobotVision(RobotVision vision){
@@ -128,9 +142,9 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
                     return alliance.get() == DriverStation.Alliance.Red;
                 }
                 return false;
-            },
-            drivetrain
+            }            
       );
+      FollowPathCommand.warmupCommand().schedule();
       return this;
     }
 
@@ -197,8 +211,9 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
     }
 
     public void update() {
+        System.out.println("UPDATE");
 
-        if(vision != null) {
+        if(vision != null && visionEnabled) {
             Double[] orientation = {fieldPose.getRotation().getDegrees(),0d,0d,0d,0d,0d};
             for (String table : vision.getCameraTables()) {
                 LimeLight camera = vision.getCamera(table);
@@ -242,6 +257,7 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
 
     @Override
     public void periodic() {
+        System.out.println("PERIODIC");
        update();
     }
 } //IM A SCATMAN

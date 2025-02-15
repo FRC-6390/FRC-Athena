@@ -79,36 +79,78 @@ public class EnhancedXboxController extends XboxController {
     }
 
     public EnhancedXboxController setSticksInverted(boolean inverted){
+        setLeftInverted(inverted);
+        setRightInverted(inverted);
+        return this;
+    }
+
+    public EnhancedXboxController setLeftInverted(boolean inverted){
         leftX.setInverted(inverted);
         leftY.setInverted(inverted);
+        return this;
+    }
+
+    public EnhancedXboxController setRightInverted(boolean inverted){
         rightX.setInverted(inverted);
         rightY.setInverted(inverted);
         return this;
     }
 
+
     public EnhancedXboxController setSticksDeadzone(double deadzone){
-        leftX.setDeadzone(deadzone);
-        leftY.setDeadzone(deadzone);
+        setRightDeadzone(deadzone);
+        setLeftDeadzone(deadzone);
+        return this;
+    }
+
+    public EnhancedXboxController setRightDeadzone(double deadzone){
         rightX.setDeadzone(deadzone);
         rightY.setDeadzone(deadzone);
         return this;
     }
 
+    public EnhancedXboxController setLeftDeadzone(double deadzone){
+        leftX.setDeadzone(deadzone);
+        leftY.setDeadzone(deadzone);
+        return this;
+    }
+
     public EnhancedXboxController setSticksSlewrate(double rate){
+       setLeftSlewrate(rate);
+       setRightSlewrate(rate);
+        return this;
+    }
+
+    public EnhancedXboxController setLeftSlewrate(double rate){
         leftX.enableSlewrate(rate);
         leftY.enableSlewrate(rate);
+        return this;
+    }
+
+    public EnhancedXboxController setRightSlewrate(double rate){
         rightX.enableSlewrate(rate);
         rightY.enableSlewrate(rate);
         return this;
     }
 
+
     public EnhancedXboxController setSticksSlewrate(double frate, double rrate){
-        leftX.enableSlewrate(frate, rrate);
-        leftY.enableSlewrate(frate, rrate);
-        rightX.enableSlewrate(frate, rrate);
-        rightY.enableSlewrate(frate, rrate);
-        return this;
-    }
+        setLeftSlewrate(frate, rrate);
+        setRightSlewrate(frate, rrate);
+         return this;
+     }
+ 
+     public EnhancedXboxController setLeftSlewrate(double frate, double rrate){
+         leftX.enableSlewrate(frate, rrate);
+         leftY.enableSlewrate(frate, rrate);
+         return this;
+     }
+ 
+     public EnhancedXboxController setRightSlewrate(double frate, double rrate){
+         rightX.enableSlewrate(frate, rrate);
+         rightY.enableSlewrate(frate, rrate);
+         return this;
+     }
 
 
 

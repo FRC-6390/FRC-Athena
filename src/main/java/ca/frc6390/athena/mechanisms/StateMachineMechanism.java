@@ -8,15 +8,17 @@ import edu.wpi.first.math.controller.ProfiledPIDController;
 
 public class StateMachineMechanism<E extends Enum<E> & SetpointProvider> extends ProfiledMechanism {
     
-    public StateMachine<E> stateMachine;
+    private final StateMachine<E> stateMachine;
     private boolean stateMachineEnabled;
 
-    public StateMachineMechanism(MotorController motorController, ProfiledPIDController controller){
+    public StateMachineMechanism(MotorController motorController, ProfiledPIDController controller, E initialState){
         super(motorController, controller);
+        stateMachine = new StateMachine<E>(initialState, controller::atSetpoint);
     }
 
-    public StateMachineMechanism(MotorController motorController, Encoder encoder, ProfiledPIDController controller){
+    public StateMachineMechanism(MotorController motorController, Encoder encoder, ProfiledPIDController controller, E initialState){
         super(motorController, encoder, controller);
+        stateMachine = new StateMachine<E>(initialState, controller::atSetpoint);
     }
 
     @SuppressWarnings("unchecked")
@@ -63,7 +65,8 @@ public class StateMachineMechanism<E extends Enum<E> & SetpointProvider> extends
 
     @Override
     public void update() {
-        if(stateMachineEnabled) {
+        stateMachine.update();
+        if(isStateMachineEnabled()) {
             setSetpoint(stateMachine.getGoalState().getSetpoint());
         }
         super.update();

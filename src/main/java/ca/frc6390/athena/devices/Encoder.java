@@ -18,7 +18,7 @@ public class Encoder {
 
     private final DoubleConsumer setPosition;
     private final DoubleSupplier getPosition, getAbsolutePosition, getVelocity;
-    private double absolutePosition = 0, position = 0, velocity = 0, gearRatio = 1, offset = 0, conversion = 1;
+    private double absolutePosition = 0, position = 0, velocity = 0, gearRatio = 1, offset = 0, conversion = 1, conversionOffset = 1;
     private boolean inverted = false;
 
     public enum EncoderType {
@@ -30,46 +30,50 @@ public class Encoder {
         WPILibEncoder,
     }
 
-    public record EncoderConfig(EncoderType type, int id, String canbus, double gearRatio, double offset, double conversion, boolean inverted) {
+    public record EncoderConfig(EncoderType type, int id, String canbus, double gearRatio, double offset, double conversion, boolean inverted, double conversionOffset) {
 
         public EncoderConfig(){
-            this(EncoderType.None, -1, "rio", 1, 0, 1, false);
+            this(EncoderType.None, -1, "rio", 1, 0, 1, false,0);
         }
         
         public EncoderConfig(EncoderType type){
-            this(type, -1, "rio", 1, 0, 1, false);
+            this(type, -1, "rio", 1, 0, 1, false,0);
         }
 
         public EncoderConfig(EncoderType type, int id){
-            this(type, id, "rio", 1, 0, 1, false);
+            this(type, id, "rio", 1, 0, 1, false,0);
         }
 
         public EncoderConfig setCanbus(String canbus){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion, inverted);
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion, inverted, conversionOffset);
         }
 
         public EncoderConfig setOffset(double offset){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
         }
 
         public EncoderConfig setGearRatio(double gearRatio){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
         }
 
         public EncoderConfig setConversion(double conversion){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
         }
 
         public EncoderConfig setInverted(boolean inverted){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
         }
 
         public EncoderConfig setID(int id){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
+        }
+
+        public EncoderConfig setConversionOffset(double conversionOffset){
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
         }
 
         public EncoderConfig setEncoderType(EncoderType type){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted);
+            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
         }
     }
 
@@ -154,6 +158,7 @@ public class Encoder {
         setConversion(config.conversion);
         setOffset(config.offset);
         setInverted(config.inverted);
+        setConversionOffset(config.conversionOffset);
         return this;
     }
 
@@ -169,6 +174,10 @@ public class Encoder {
 
     public Encoder setConversion(double conversion) {
         this.conversion = conversion;
+        return this;
+    }
+    public Encoder setConversionOffset(double conversionOffset) {
+        this.conversionOffset = conversionOffset;
         return this;
     }
 
@@ -208,17 +217,17 @@ public class Encoder {
     }
 
     /**
-     * Get the rotations of the encoder with gearRatio, offset and conversion applied
+     * Get the rotations of the encoder with gearRatio, offsets and conversion applied
      */
     public double getPosition() {
-        return getRotations() * conversion;
+        return (getRotations() * conversion)+ conversionOffset;
     }
 
       /**
-     * Get the absolute rotations of the encoder with gearRatio, offset and conversion applied
+     * Get the absolute rotations of the encoder with gearRatio, offsets and conversion applied
      */
     public double getAbsolutePosition() {
-        return getAbsoluteRotations() * conversion;
+        return (getAbsoluteRotations() * conversion) + conversionOffset;
     }
 
      /**
@@ -250,9 +259,10 @@ public class Encoder {
         return getRate() * conversion;
     }
 
-    public void update() {
+    public Encoder update() {
         position = inverted ? -getPosition.getAsDouble() : getPosition.getAsDouble();
         velocity = inverted ? -getVelocity.getAsDouble() : getVelocity.getAsDouble();
         absolutePosition = inverted ? -getAbsolutePosition.getAsDouble() : -getAbsolutePosition.getAsDouble();
+        return this;
     }
 }
