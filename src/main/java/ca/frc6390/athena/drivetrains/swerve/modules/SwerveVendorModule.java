@@ -51,11 +51,9 @@ public interface SwerveVendorModule {
 
         default SwerveModuleConfig config(Translation2d location, MotorController.Motor driveMotor, int drive, MotorController.Motor steerMotor, int steer){
     
-            MotorControllerConfig driveMotorController = new MotorControllerConfig(driveMotor.getMotorControllerType(), drive);
-            driveMotorController.withEncoderConfig( new EncoderConfig().setConversion(Math.PI * getWheelDiameter()).setGearRatio(getDriveGearRatio()));
+            MotorControllerConfig driveMotorController = new MotorControllerConfig(driveMotor.getMotorControllerType(), drive).withEncoderConfig(new EncoderConfig().setConversion(Math.PI * getWheelDiameter()).setGearRatio(getDriveGearRatio()));
 
-            MotorControllerConfig steerMotorController = new MotorControllerConfig(steerMotor.getMotorControllerType(), steer);
-            steerMotorController.withEncoderConfig(new EncoderConfig().setGearRatio(getSteerGearRatio()));
+            MotorControllerConfig steerMotorController = new MotorControllerConfig(steerMotor.getMotorControllerType(), steer).withEncoderConfig(new EncoderConfig().setGearRatio(getSteerGearRatio()));
 
             SwerveModuleConfig moduleConfig = new SwerveModuleConfig(location, getWheelDiameter(), getFreeSpeed(driveMotor), driveMotorController, steerMotorController, null);
            

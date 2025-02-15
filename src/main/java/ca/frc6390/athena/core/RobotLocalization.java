@@ -24,7 +24,7 @@ import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-public class RobotLocalization extends SubsystemBase implements RobotSendable{
+public class RobotLocalization extends SubsystemBase implements RobotSendableSystem{
     
     public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, PoseEstimateWithLatencyType pose, PIDConstants translation, PIDConstants rotation, boolean useVision) {
 
@@ -92,11 +92,13 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
         drivetrain.getIMU().addVirtualAxis("relative", drivetrain.getIMU()::getYaw);
         drivetrain.getIMU().addVirtualAxis("field", drivetrain.getIMU()::getYaw);
 
+
+        drivetrain.getIMU().setVirtualAxis("relative", new Rotation2d());
+        drivetrain.getIMU().setVirtualAxis("field", new Rotation2d());
+
         if(config.rotation != null && config.translation != null){
             configurePathPlanner(config.translation, config.rotation);
         }
-        System.out.println("CRETAED");
-
     }
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config) {
@@ -148,13 +150,12 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
       return this;
     }
 
-    public Pose2d getPose(){
-        return new Pose2d(fieldPose.getX(), fieldPose.getY(), drivetrain.getIMU().getYaw());
+    public RobotLocalization configureChoreo(PIDConstants translationConstants, PIDConstants rotationConstants){
+      return this;
     }
 
-    public void resetPathPlannerPose(Pose2d pose){
-        drivetrain.getIMU().setYaw(pose.getRotation().getDegrees());
-        resetFieldPose(pose);
+    public Pose2d getPose(){
+        return new Pose2d(fieldPose.getX(), fieldPose.getY(), drivetrain.getIMU().getYaw());
     }
 
     public void resetFieldPose(Pose2d pose, Rotation2d heading) {
@@ -211,8 +212,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
     }
 
     public void update() {
-        System.out.println("UPDATE");
-
         if(vision != null && visionEnabled) {
             Double[] orientation = {fieldPose.getRotation().getDegrees(),0d,0d,0d,0d,0d};
             for (String table : vision.getCameraTables()) {
@@ -257,7 +256,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendable{
 
     @Override
     public void periodic() {
-        System.out.println("PERIODIC");
        update();
     }
 } //IM A SCATMAN

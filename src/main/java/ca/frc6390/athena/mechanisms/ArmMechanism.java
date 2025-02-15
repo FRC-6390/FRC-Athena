@@ -1,28 +1,28 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-import edu.wpi.first.math.controller.ElevatorFeedforward;
+import edu.wpi.first.math.controller.ArmFeedforward;
 
-public class ElevatorMechanism extends Mechanism{
-    private final ElevatorFeedforward feedforward;
+public class ArmMechanism extends Mechanism {
+    private final ArmFeedforward feedforward;
 
-    public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config, ElevatorFeedforward feedforward) {
+    public ArmMechanism(MechanismConfig<? extends ArmMechanism> config, ArmFeedforward feedforward) {
         super(config);
         this.feedforward = feedforward;
     }
 
     @Override
     public double calculateFeedForward() {
-        double value = feedforward.calculate(getVelocity());
+        double value = feedforward.calculate(getRotation2d().getRadians(), getVelocity());
         return isUseVoltage() ? value : value / 12d;
     }
-    
 
-    public static class StatefulElevatorMechanism<E extends Enum<E> & SetpointProvider> extends ElevatorMechanism {
-    
+
+    public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider> extends ArmMechanism {
+
         private final StateMachine<E> stateMachine;
 
-        public StatefulElevatorMechanism(MechanismConfig<StatefulElevatorMechanism<E>> config,ElevatorFeedforward feedforward, E initialState) {
+        public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config,ArmFeedforward feedforward, E initialState) {
             super(config, feedforward);
             this.stateMachine = new StateMachine<>(initialState, () -> true);
         }
@@ -43,3 +43,6 @@ public class ElevatorMechanism extends Mechanism{
         }
     }
 }
+
+
+

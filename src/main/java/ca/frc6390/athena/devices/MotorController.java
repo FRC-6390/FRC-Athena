@@ -46,7 +46,7 @@ public class MotorController {
 
     public record MotorControllerConfig(MotorControllerType type, int id, String canbus, double currentLimit, boolean inverted, EncoderConfig encoderConfig, MotorNeutralMode neutralMode) {
         public MotorControllerConfig(MotorControllerType type, int id){
-            this(type, id, "rio", 40, false, new EncoderConfig(type.getEncoder()), MotorNeutralMode.Coast);
+            this(type, Math.abs(id), "rio", 40, id < 0, new EncoderConfig(type.getEncoder()), MotorNeutralMode.Coast);
         }
 
         public MotorControllerConfig setCanbus(String canbus){

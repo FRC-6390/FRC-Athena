@@ -8,7 +8,7 @@ import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import ca.frc6390.athena.sensors.camera.limelight.LimelightConfig;
 
 public class RobotVision {
-
+   
    public record RobotVisionConfig(LimelightConfig... configs) {
       
       public static RobotVisionConfig limelight(String... limelights){

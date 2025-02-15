@@ -11,10 +11,12 @@ import com.revrobotics.RelativeEncoder;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
 
+import ca.frc6390.athena.core.RobotSendableSystem;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
-public class Encoder {
+public class Encoder implements RobotSendableSystem{
 
     private final DoubleConsumer setPosition;
     private final DoubleSupplier getPosition, getAbsolutePosition, getVelocity;
@@ -41,7 +43,7 @@ public class Encoder {
         }
 
         public EncoderConfig(EncoderType type, int id){
-            this(type, id, "rio", 1, 0, 1, false,0);
+            this(type, Math.abs(id), "rio", 1, 0, 1, id < 0,0);
         }
 
         public EncoderConfig setCanbus(String canbus){
@@ -190,6 +192,22 @@ public class Encoder {
         setPosition.accept(pos);
     }
 
+    public double getGearRatio() {
+        return gearRatio;
+    }
+
+    public double getConversion() {
+        return conversion;
+    }
+
+    public double getConversionOffset() {
+        return conversionOffset;
+    }
+
+    public double getOffset() {
+        return offset;
+    }
+
     public double getRawValue() {
         return position;
     }
@@ -200,6 +218,10 @@ public class Encoder {
 
     public double getRawVelocity() {
         return velocity;
+    }
+
+    public boolean isInverted() {
+        return inverted;
     }
 
     /**
@@ -262,7 +284,23 @@ public class Encoder {
     public Encoder update() {
         position = inverted ? -getPosition.getAsDouble() : getPosition.getAsDouble();
         velocity = inverted ? -getVelocity.getAsDouble() : getVelocity.getAsDouble();
-        absolutePosition = inverted ? -getAbsolutePosition.getAsDouble() : -getAbsolutePosition.getAsDouble();
+        absolutePosition = inverted ? -getAbsolutePosition.getAsDouble() : getAbsolutePosition.getAsDouble();
         return this;
+    }
+
+
+    @Override
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+        tab.addDouble("Gear Ratio", this::getGearRatio);
+        tab.addBoolean("Intervetd", this::isInverted);
+        tab.addDouble("Conversion", this::getConversion);
+        tab.addDouble("Conversion Offset", this::getConversionOffset);
+        tab.addDouble("Position", this::getPosition);
+        tab.addDouble("Rotations", this::getRawValue);
+        tab.addDouble("Absolute Positon", this::getAbsolutePosition);
+        tab.addDouble("Absolute Roation", this::getAbsoluteRotations);
+        tab.addDouble("Raw Velocity", this::getRawVelocity);
+        tab.addDouble("Velocity", this::getVelocity);
+        throw new UnsupportedOperationException("Unimplemented method 'shuffleboard'");
     }
 }

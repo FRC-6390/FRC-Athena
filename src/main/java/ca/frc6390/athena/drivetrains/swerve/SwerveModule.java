@@ -1,5 +1,6 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
+import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.Encoder.EncoderConfig;
 import ca.frc6390.athena.devices.Encoder.EncoderType;
@@ -16,7 +17,7 @@ import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
 
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-public class SwerveModule {
+public class SwerveModule implements RobotSendableDevice {
     
     private final SwerveModuleConfig config;
     private final MotorController driveMotor;
@@ -66,10 +67,10 @@ public class SwerveModule {
         }
 
         public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
-            Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, -wheelbase/2);
-            Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, wheelbase/2);
-            Translation2d BACK_LEFT = new Translation2d(-trackwidth/2, -wheelbase/2);
-            Translation2d BACK_RIGHT = new Translation2d(-trackwidth/2, wheelbase/2);
+            Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, wheelbase/2);
+            Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, -wheelbase/2);
+            Translation2d BACK_LEFT = new Translation2d(-trackwidth/2, wheelbase/2);
+            Translation2d BACK_RIGHT = new Translation2d(-trackwidth/2, -wheelbase/2);
             return new Translation2d[]{FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT};
         }
     }
@@ -169,8 +170,11 @@ public class SwerveModule {
 
     public void refresh() {
         encoder.update();
+        driveMotor.getEncoder().update();
+        // System.out.println(driveMotor.getEncoder().getGearRatio());
     }
 
+    @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 2));
         layout.addDouble("Encoder Rotations", () -> getEncoderPosition().getRotations()).withSize(1, 1).withPosition(1, 1);

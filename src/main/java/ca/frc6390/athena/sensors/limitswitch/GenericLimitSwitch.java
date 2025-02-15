@@ -7,10 +7,36 @@ import edu.wpi.first.wpilibj2.command.InstantCommand;
 
 public class GenericLimitSwitch {
 
+    public record GenericLimitSwitchConfig(int id, boolean inverted, double position, boolean isHardstop) {
+        public static GenericLimitSwitchConfig inverted(int id){
+            return new GenericLimitSwitchConfig(id ,true, 0, false);
+        }
+
+        public static GenericLimitSwitchConfig normal(int id){
+            return new GenericLimitSwitchConfig(id ,false, 0, false);
+        }
+
+        public GenericLimitSwitchConfig setPosition(double position){
+            return new GenericLimitSwitchConfig(id, inverted, position, isHardstop);
+        }
+
+        public GenericLimitSwitchConfig setHardstop(boolean isHardstop){
+            return new GenericLimitSwitchConfig(id, inverted, position, isHardstop);
+        }
+
+        public GenericLimitSwitch create(){
+            return new GenericLimitSwitch(id, inverted).applyConfig(this);
+        }
+
+    }
+
     private final DigitalInput input;
     private final RunnableTrigger trigger;
     private final boolean inverted;
+    private double position;
+    private boolean isHardstop;
 
+    
     /**
      * Constructs an GenericLimitSwitch sensor.
      *
@@ -24,6 +50,17 @@ public class GenericLimitSwitch {
         this.input = new DigitalInput(port);
         this.trigger = new RunnableTrigger(this::isPressed);
         this.inverted = inverted;
+        this.position = 0;
+    }
+
+    public static GenericLimitSwitch fromConfig(GenericLimitSwitchConfig config){
+        return new GenericLimitSwitch(config.id, config.inverted);
+    }
+
+    public GenericLimitSwitch applyConfig(GenericLimitSwitchConfig config){
+        setPosition(config.position);
+        setHardstop(config.isHardstop);
+        return this;
     }
 
     /**
@@ -87,4 +124,27 @@ public class GenericLimitSwitch {
     public void close() {
         input.close();
     }
+
+    public GenericLimitSwitch setPosition(double position) {
+        this.position = position;
+        return this;
+    }
+
+    public double getPosition() {
+        return position;
+    }
+
+    public boolean isHardstop() {
+        return isHardstop;
+    }
+
+    public boolean isInverted() {
+        return inverted;
+    }
+    
+    public void setHardstop(boolean isHardstop) {
+        this.isHardstop = isHardstop;
+    }
+    
+    
 }

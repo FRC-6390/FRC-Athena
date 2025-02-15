@@ -8,7 +8,7 @@ import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
 import edu.wpi.first.wpilibj2.command.Command;
 
-public interface RobotDrivetrain extends RobotSendable{
+public interface RobotDrivetrain extends RobotSendableSystem {
     
     public interface RobotDrivetrainConfig<T extends RobotDrivetrain> {
         T create();

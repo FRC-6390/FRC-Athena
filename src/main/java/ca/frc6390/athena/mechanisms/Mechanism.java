@@ -1,14 +1,16 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.ArrayList;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.MotorControllerGroup;
-import ca.frc6390.athena.mechanisms.Mechanism.ArmMech;
-import ca.frc6390.athena.mechanisms.Mechanism.ElevatorMech;
-import ca.frc6390.athena.mechanisms.Mechanism.TurretMech;
+import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
+import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
+import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
+import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
 import ca.frc6390.athena.devices.Encoder.EncoderConfig;
 import ca.frc6390.athena.devices.Encoder.EncoderType;
 import ca.frc6390.athena.devices.MotorController.Motor;
@@ -22,75 +24,9 @@ import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
+import edu.wpi.first.wpilibj2.command.Subsystem;
 
-public class Mechanism {
-
-    public static class StateMachineMech<E extends Enum<E> & SetpointProvider> extends Mechanism {
-
-        private final StateMachine<E> machine;
-
-        public StateMachineMech(MechanismConfig<StateMachineMech<E>> config, E intialState) {
-            super(config);
-            this.machine = new StateMachine<>(intialState, () -> true);
-        }
-
-        public StateMachine<E> getStateMachine(){
-            return machine;
-        }
-
-        @Override
-        public double getSetpoint() {
-            return getStateMachine().getGoalState().getSetpoint();
-        }
-    }
-
-    public static class ElevatorMech extends Mechanism {
-
-        private final ElevatorFeedforward feedforward;
-
-        public ElevatorMech(MechanismConfig<ElevatorMech> config, ElevatorFeedforward feedforward) {
-            super(config);
-            this.feedforward = feedforward;
-        }
-
-        @Override
-        public double calculateFeedForward() {
-            return feedforward.calculate(getVelocity());
-        }
-    }
-
-    public static class ArmMech extends Mechanism {
-        
-        private final ArmFeedforward feedforward;
-
-        public ArmMech(MechanismConfig<ArmMech> config, ArmFeedforward feedforward) {
-            super(config);
-            this.feedforward = feedforward;
-        }
-
-        @Override
-        public double calculateFeedForward() {
-            return feedforward.calculate(getRotation2d().getRadians(), getVelocity());
-        }
-    }
-
-
-    public static class TurretMech extends Mechanism {
-
-        private final SimpleMotorFeedforward feedforward;
-
-        public TurretMech(MechanismConfig<TurretMech> config, SimpleMotorFeedforward feedforward) {
-            super(config);
-            this.feedforward = feedforward;
-        }
-
-        @Override
-        public double calculateFeedForward() {
-            return feedforward.calculate(getVelocity());
-        }
-    }
-
-
+public class Mechanism implements Subsystem{
     public record MechanismConfig<T extends Mechanism>(
         ArrayList<MotorControllerConfig> motors, 
         EncoderConfig encoder, 
@@ -98,31 +34,68 @@ public class Mechanism {
         ProfiledPIDController profiledPIDController, 
         boolean useAbsolute, 
         boolean useVoltage,
-        Function<MechanismConfig<T>, T> factory
+        Function<MechanismConfig<T>, T> factory,
+        ArrayList<GenericLimitSwitchConfig> limitSwitches
         ) {
 
         public static MechanismConfig<Mechanism> generic(){
             return custom(Mechanism::new);
         }
 
-        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StateMachineMech<E>> stateMachine(E initalSate){
-            return custom(config -> new StateMachineMech<E>(config, initalSate));
+        public static <E extends Enum<E> & SetpointProvider, T extends StatefulMechanism<E>> MechanismConfig<T> stateful(BiFunction<MechanismConfig<T>, E, T> factory, E initialState) {
+            return custom(config -> factory.apply(config, initialState));
         }
 
-        public static MechanismConfig<ElevatorMech> elevator(ElevatorFeedforward feedforward) {
-            return custom(config -> new ElevatorMech(config, feedforward));
+        public static MechanismConfig<ElevatorMechanism> elevator(ElevatorFeedforward feedforward) {
+            return custom(config -> new ElevatorMechanism(config, feedforward));
         }
 
-        public static MechanismConfig<TurretMech> turret(SimpleMotorFeedforward feedforward) {
-            return custom(config -> new TurretMech(config, feedforward));
+        public static <T extends ElevatorMechanism> MechanismConfig<T> elevator(ElevatorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+            return custom(factory);
         }
 
-        public static MechanismConfig<ArmMech> arm(ArmFeedforward feedforward) {
-            return custom(config -> new ArmMech(config, feedforward));
+        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(ElevatorFeedforward feedforward, E initialState) {
+            return custom(config -> new StatefulElevatorMechanism<>(config, feedforward, initialState));
+        }
+
+        public static <E extends Enum<E> & SetpointProvider, T extends StatefulElevatorMechanism<E>> MechanismConfig<T> statefulElevator(ElevatorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+            return custom(factory);
+        }
+
+        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StatefulArmMechanism<E>> statefulArm(ArmFeedforward feedforward, E initialState) {
+            return custom(config -> new StatefulArmMechanism<>(config, feedforward, initialState));
+        }
+
+        public static <E extends Enum<E> & SetpointProvider, T extends StatefulArmMechanism<E>> MechanismConfig<T> statefulArm(ArmFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+            return custom(factory);
+        }
+
+        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(SimpleMotorFeedforward feedforward, E initialState) {
+            return custom(config -> new StatefulTurretMechanism<>(config, feedforward, initialState));
+        }
+
+        public static <E extends Enum<E> & SetpointProvider, T extends StatefulTurretMechanism<E>> MechanismConfig<T> statefulTurret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+            return custom(factory);
+        }
+
+        public static MechanismConfig<TurretMechanism> turret(SimpleMotorFeedforward feedforward) {
+            return custom(config -> new TurretMechanism(config, feedforward));
+        }
+
+        public static <T extends TurretMechanism> MechanismConfig<T> turret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+            return custom(factory);
+        }
+
+        public static MechanismConfig<ArmMechanism> arm(ArmFeedforward feedforward) {
+            return custom(config -> new ArmMechanism(config, feedforward));
+        }
+
+        public static <T extends ArmMechanism> MechanismConfig<T> arm(ArmFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+            return custom(factory);
         }
 
         public static <T extends Mechanism> MechanismConfig<T> custom(Function<MechanismConfig<T>, T> factory){
-            return new MechanismConfig<>(new ArrayList<>(), null, null, null, false, false, factory);
+            return new MechanismConfig<>(new ArrayList<>(), null, null, null, false, false, factory, new ArrayList<>());
         }
 
         public MechanismConfig<T> addMotor(MotorControllerConfig config){
@@ -134,12 +107,32 @@ public class Mechanism {
             return addMotor(new MotorControllerConfig(type, id));
         }
 
+        public MechanismConfig<T> addMotor(MotorControllerType type, int... ids){
+            MechanismConfig<T> s = this;
+
+            for (int i = 0; i < ids.length; i++) {
+               s = s.addMotor(new MotorControllerConfig(type, ids[i]));
+            }
+
+            return s;
+        }
+
         public MechanismConfig<T> addMotor(Motor type, int id){
             return addMotor(new MotorControllerConfig(type.getMotorControllerType(), id));
         }
 
+        public MechanismConfig<T> addMotor(Motor type, int... ids){
+            MechanismConfig<T> s = this;
+
+            for (int i = 0; i < ids.length; i++) {
+               s = s.addMotor(new MotorControllerConfig(type.getMotorControllerType(), ids[i]));
+            }
+
+            return s;
+        }
+
         public MechanismConfig<T> setEncoder(EncoderConfig config){
-            return new MechanismConfig<T>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory);
+            return new MechanismConfig<T>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory, limitSwitches);
         }
 
         public MechanismConfig<T> setEncoder(EncoderType type, int id){
@@ -155,7 +148,7 @@ public class Mechanism {
         }
 
         public MechanismConfig<T> setPID(PIDController pidController){
-            return new MechanismConfig<T>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory);
+            return new MechanismConfig<T>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory, limitSwitches);
         }
 
         public MechanismConfig<T> setProfiledPID(double p, double i, double d, double maxVel, double maxAccel){
@@ -167,7 +160,7 @@ public class Mechanism {
         }
 
         public MechanismConfig<T> setProfiledPID(ProfiledPIDController profiledPIDController){
-            return new MechanismConfig<>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory);
+            return new MechanismConfig<>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory, limitSwitches);
         }
 
         public MechanismConfig<T> setCanbus(String canbus){
@@ -207,20 +200,33 @@ public class Mechanism {
         }
 
         public MechanismConfig<T> setEncoderConfig(Function<EncoderConfig, EncoderConfig> func){
-            return new MechanismConfig<>(motors, func.apply(encoder), pidController, profiledPIDController, useAbsolute, useVoltage, factory);
+            return new MechanismConfig<>(motors, func.apply(encoder), pidController, profiledPIDController, useAbsolute, useVoltage, factory, limitSwitches);
         }
 
         public MechanismConfig<T> setUseEncoderAbsolute(boolean useAbsolute){
-            return new MechanismConfig<>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory);
+            return new MechanismConfig<>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory, limitSwitches);
         }
 
         public MechanismConfig<T> setUseVoltage(boolean useVoltage){
-            return new MechanismConfig<>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory);
+            return new MechanismConfig<>(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, factory, limitSwitches);
         }
 
         public MechanismConfig<T> setNeutralMode(MotorNeutralMode mode){
             motors.forEach((motor) -> motor.setNeutralMode(mode));
             return this;
+        }
+
+        public MechanismConfig<T> addLimitSwitch(GenericLimitSwitchConfig config) {
+            limitSwitches.add(config);
+            return this;
+        }
+
+        public MechanismConfig<T> addLimitSwitch(int id, double position){
+           return addLimitSwitch(id, position, false);
+        }
+
+        public MechanismConfig<T> addLimitSwitch(int id, double position, boolean stopMotors){
+            return addLimitSwitch(GenericLimitSwitchConfig.normal(id).setPosition(position).setHardstop(stopMotors));
         }
 
         public T create(){
@@ -230,13 +236,13 @@ public class Mechanism {
 
     private final MotorControllerGroup motors;
     private final Encoder encoder;
-    final PIDController pidController;
+    private final PIDController pidController;
     private final ProfiledPIDController profiledPIDController;
     private final boolean useAbsolute, useVoltage;
     private boolean override;
     private double setpoint;
 
-    public Mechanism(MechanismConfig<?> config){
+    public Mechanism(MechanismConfig<? extends Mechanism> config){
         this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage);
     }
 
@@ -252,15 +258,6 @@ public class Mechanism {
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
         }
-
-        MechanismConfig.elevator(new ElevatorFeedforward(0, 0, 0))
-                        .addMotor(Motor.KRAKEN_X60, 20)
-                        .addMotor(Motor.KRAKEN_X60, 21)
-                        .setEncoder(EncoderType.CTRECANcoder, 22)
-                        .setEncoderConversion(3)
-                        .setEncoderConversionOffset(20)
-                        .setEncoderInverted(true)
-                        .setProfiledPID(setpoint, setpoint, setpoint, 1,1);
     }
 
     public void setVoltage(double voltage){
@@ -307,6 +304,14 @@ public class Mechanism {
         this.override = override;
     }
 
+    public boolean isUseAbsolute() {
+        return useAbsolute;
+    }
+
+    public boolean isUseVoltage() {
+        return useVoltage;
+    }
+
     public double calculateFeedForward(){
         return 0;
     }
@@ -320,6 +325,7 @@ public class Mechanism {
         }
 
         if(profiledPIDController != null){
+            profiledPIDController.reset(getPosition(), getVelocity());
             output += profiledPIDController.calculate(encoderPos, getSetpoint());
         }
 
@@ -341,5 +347,36 @@ public class Mechanism {
         }else {
             setSpeed(value);
         }
+    }
+
+    @Override
+    public void periodic() {
+        update();
+    }
+
+    public static class StatefulMechanism<E extends Enum<E> & SetpointProvider> extends Mechanism {
+        
+        private final StateMachine<E> stateMachine;
+
+        public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
+            super(config);
+            this.stateMachine = new StateMachine<>(initialState, () -> true);
+        }
+
+        @Override
+        public double getSetpoint() {
+            return stateMachine.getGoalState().getSetpoint();
+        }
+
+        @Override
+        public void update() {
+            stateMachine.update();  
+            super.update();
+        }
+
+        public StateMachine<E> getStateMachine() {
+            return stateMachine;
+        }
+
     }
 }

@@ -71,7 +71,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
       return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed);
     }
 
-    public SwerveDrivetrainConfig setModulueLocations(Translation2d[] locations){
+    public SwerveDrivetrainConfig setModuleLocations(Translation2d[] locations){
       if (locations.length != modules.length) {
         throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS (expected: "+modules.length +", got: "+locations.length+")");
       }
@@ -83,12 +83,12 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
       return this;
     }
 
-    public SwerveDrivetrainConfig setModulueLocations(double trackWidth, double wheelbase){
-      return setModulueLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, wheelbase));
+    public SwerveDrivetrainConfig setModuleLocations(double trackWidth, double wheelbase){
+      return setModuleLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, wheelbase));
     }
 
-    public SwerveDrivetrainConfig setModulueLocations(double trackWidth){
-      return setModulueLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, trackWidth));
+    public SwerveDrivetrainConfig setModuleLocations(double trackWidth){
+      return setModuleLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, trackWidth));
     }
 
     public SwerveDrivetrainConfig setDriveIDs(DriveIDs ids){
@@ -206,6 +206,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   }
 
   public SwerveDrivetrain(IMU imu, SwerveModuleConfig... modules) {
+
     this.imu = imu;
 
     enableDriftCorrection = false; 
@@ -213,13 +214,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     driftpid.enableContinuousInput(-Math.PI, Math.PI);
 
     swerveModules = new SwerveModule[modules.length];
+    Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
+
     for (int i = 0; i < modules.length; i++) {
       swerveModules[i] = new SwerveModule(modules[i]);
-
       maxVelocity = modules[i].maxSpeedMetersPerSecond();
-    }
-    Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
-    for (int i = 0; i < modules.length; i++) {
       moduleLocations[i] = swerveModules[i].getModuleLocation();
     }
 

@@ -1,7 +1,5 @@
 package ca.frc6390.athena.drivetrains.swerve.modules;
 
-import edu.wpi.first.math.util.Units;
-
 public class SwerveVendorWPC {
     
     // public static enum SwerveX implements SwerveVendorModule {
