@@ -23,7 +23,7 @@ public class TurretMechanism  extends Mechanism  {
 
         public StatefulTurretMechanism(MechanismConfig<StatefulTurretMechanism<E>> config,SimpleMotorFeedforward feedforward, E initialState) {
             super(config, feedforward);
-            this.stateMachine = new StateMachine<>(initialState, () -> true);
+            this.stateMachine = new StateMachine<>(initialState, this::atSetpoint);
         }
 
         @Override

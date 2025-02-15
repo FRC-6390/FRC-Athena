@@ -24,7 +24,7 @@ public class ArmMechanism extends Mechanism {
 
         public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config,ArmFeedforward feedforward, E initialState) {
             super(config, feedforward);
-            this.stateMachine = new StateMachine<>(initialState, () -> true);
+            this.stateMachine = new StateMachine<>(initialState, this::atSetpoint);
         }
 
         @Override

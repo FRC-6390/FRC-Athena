@@ -31,7 +31,7 @@ public class Mechanism implements Subsystem{
         ArrayList<MotorControllerConfig> motors, 
         EncoderConfig encoder, 
         PIDController pidController, 
-        ProfiledPIDController profiledPIDController, 
+        ProfiledPIDController profiledPIDController,
         boolean useAbsolute, 
         boolean useVoltage,
         Function<MechanismConfig<T>, T> factory,
@@ -107,7 +107,7 @@ public class Mechanism implements Subsystem{
             return addMotor(new MotorControllerConfig(type, id));
         }
 
-        public MechanismConfig<T> addMotor(MotorControllerType type, int... ids){
+        public MechanismConfig<T> addMotors(MotorControllerType type, int... ids){
             MechanismConfig<T> s = this;
 
             for (int i = 0; i < ids.length; i++) {
@@ -121,7 +121,7 @@ public class Mechanism implements Subsystem{
             return addMotor(new MotorControllerConfig(type.getMotorControllerType(), id));
         }
 
-        public MechanismConfig<T> addMotor(Motor type, int... ids){
+        public MechanismConfig<T> addMotors(Motor type, int... ids){
             MechanismConfig<T> s = this;
 
             for (int i = 0; i < ids.length; i++) {
@@ -288,6 +288,11 @@ public class Mechanism implements Subsystem{
         return getEncoder().getVelocity();
     }
 
+    public boolean atSetpoint(){
+        return (pidController == null || pidController.atSetpoint()) &&
+           (profiledPIDController == null || profiledPIDController.atSetpoint());
+    }
+
     public void setSetpoint(double setpoint){
         this.setpoint = setpoint;
     }
@@ -360,7 +365,7 @@ public class Mechanism implements Subsystem{
 
         public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
             super(config);
-            this.stateMachine = new StateMachine<>(initialState, () -> true);
+            this.stateMachine = new StateMachine<>(initialState, this::atSetpoint);
         }
 
         @Override

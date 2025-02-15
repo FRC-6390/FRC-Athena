@@ -40,7 +40,7 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
             this(0.1,0.1,0.001);
         }
 
-        public RobotLocalizationConfig setPathPlannerPID(PIDConstants translation, PIDConstants rotation){
+        public RobotLocalizationConfig setAutoPlannerPID(PIDConstants translation, PIDConstants rotation){
             return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
         }
 
@@ -212,6 +212,7 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     }
 
     public void update() {
+        
         if(vision != null && visionEnabled) {
             Double[] orientation = {fieldPose.getRotation().getDegrees(),0d,0d,0d,0d,0d};
             for (String table : vision.getCameraTables()) {

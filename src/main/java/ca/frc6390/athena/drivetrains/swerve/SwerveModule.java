@@ -66,6 +66,18 @@ public class SwerveModule implements RobotSendableDevice {
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setID(id)); 
         }
 
+        public SwerveModuleConfig setDriveInverted(boolean inverted){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setInverted(inverted), rotationMotor, rotationPID, encoder); 
+        }
+
+        public SwerveModuleConfig setSteerInverted(boolean inverted){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor.setInverted(inverted), rotationPID, encoder); 
+        }
+
+        public SwerveModuleConfig setEncoderInverted(boolean inverted){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setInverted(inverted)); 
+        }
+
         public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
             Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, wheelbase/2);
             Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, -wheelbase/2);

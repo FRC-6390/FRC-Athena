@@ -182,4 +182,12 @@ public class RobotSpeeds {
     private double clamp(double value, double maxValue) {
         return Math.copySign(Math.min(Math.abs(value), maxValue), value);
     }
+
+    public double getMaxAngularVelocity() {
+        return maxAngularVelocity;
+    }
+
+    public double getMaxVelocity() {
+        return maxVelocity;
+    }
 }

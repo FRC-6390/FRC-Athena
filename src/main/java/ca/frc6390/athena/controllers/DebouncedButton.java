@@ -28,7 +28,7 @@ public class DebouncedButton extends RunnableTrigger {
     }
 
     public boolean debounced() {
-        return debouncer.get();
+        return debouncer.getAsBoolean();
     }
     
 }

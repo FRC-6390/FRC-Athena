@@ -38,13 +38,13 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
   public PIDController driftpid;
-  public boolean enableDriftCorrection;
-  public double desiredHeading, maxVelocity, driftActivationSpeed;
+  public boolean enableDriftCorrection, fieldRelative;
+  public double desiredHeading, driftActivationSpeed;
   public IMU imu;
   public RobotSpeeds robotSpeeds;
   private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault()
   .getStructArrayTopic("/SwerveStates", SwerveModuleState.struct).publish();
-  public record SwerveDrivetrainConfig(IMUConfig imu, SwerveModuleConfig[] modules, PIDController drift, double driftActivationSpeed) implements RobotDrivetrainConfig<SwerveDrivetrain> {
+  public record SwerveDrivetrainConfig(IMUConfig imu, SwerveModuleConfig[] modules, PIDController drift, double driftActivationSpeed, boolean fieldRelative) implements RobotDrivetrainConfig<SwerveDrivetrain> {
 
     public SwerveDrivetrainConfig(IMUType imu){
         this(new IMUConfig(imu));
@@ -56,7 +56,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   }
 
     public SwerveDrivetrainConfig(IMUConfig imu){
-      this(imu, null, null, 0.05);
+      this(imu, null, null, 0.05, true);
   }
 
     public SwerveDrivetrainConfig sameModule(SwerveModuleConfig config){
@@ -64,11 +64,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     }
 
     public SwerveDrivetrainConfig custom(SwerveModuleConfig... modules){
-       return new SwerveDrivetrainConfig(imu, modules, null, 0.05);
+       return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed, fieldRelative);
     }
 
     public SwerveDrivetrainConfig setDriftCorrectionPID(PIDController drift){
-      return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed);
+      return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed, fieldRelative);
     }
 
     public SwerveDrivetrainConfig setModuleLocations(Translation2d[] locations){
@@ -108,6 +108,27 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
       return this;
     }
 
+    public SwerveDrivetrainConfig setDriveInverted(boolean inverted){
+      for (int i = 0; i < modules.length; i++) {
+        modules[i] = modules[i].setDriveInverted(inverted);
+      } 
+      return this;
+    }
+
+    public SwerveDrivetrainConfig setSteerInverted(boolean inverted){
+      for (int i = 0; i < modules.length; i++) {
+        modules[i] = modules[i].setSteerInverted(inverted);
+      } 
+      return this;
+    }
+
+    public SwerveDrivetrainConfig setEncoderInverted(boolean inverted){
+      for (int i = 0; i < modules.length; i++) {
+        modules[i] = modules[i].setEncoderInverted(inverted);
+      } 
+      return this;
+    }
+
     public SwerveDrivetrainConfig setSteerIDs(SteerIDs ids){
       return setSteerIDs(ids.getIDs());
     }
@@ -143,7 +164,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     }
 
     public SwerveDrivetrainConfig setGyroID(int id){
-      return new SwerveDrivetrainConfig(imu.setId(id), modules, drift, driftActivationSpeed);
+      return new SwerveDrivetrainConfig(imu.setId(id), modules, drift, driftActivationSpeed, fieldRelative);
     }
 
     public SwerveDrivetrainConfig setIDs(DrivetrainIDs ids){
@@ -171,7 +192,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
         modules[i] = modules[i].setCanbus(canbus);
       } 
 
-      return new SwerveDrivetrainConfig(imu.setCanbus(canbus), modules, drift, driftActivationSpeed);
+      return new SwerveDrivetrainConfig(imu.setCanbus(canbus), modules, drift, driftActivationSpeed, fieldRelative);
     }
 
     public SwerveDrivetrainConfig setRotationPID(PIDController pid){
@@ -184,7 +205,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     }
 
     public SwerveDrivetrainConfig setDriftActivationSpeed(double driftActivationSpeed){
-      return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed);
+      return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed, fieldRelative);
+    }
+
+    public SwerveDrivetrainConfig setFieldRelative(boolean fieldRelative){
+      return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed, fieldRelative);
     }
 
     @Override
@@ -195,6 +220,8 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
         dt.setDriftCorrectionPID(drift);
         dt.setDriftCorrectionMode(true);
       }
+
+      dt.setFieldRelative(fieldRelative);
 
       dt.driftActivationSpeed = driftActivationSpeed;
       return dt;
@@ -215,7 +242,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
     swerveModules = new SwerveModule[modules.length];
     Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
-
+    double maxVelocity = 0;
     for (int i = 0; i < modules.length; i++) {
       swerveModules[i] = new SwerveModule(modules[i]);
       maxVelocity = modules[i].maxSpeedMetersPerSecond();
@@ -265,10 +292,6 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
     }
   }
 
-  public double getMaxVelocity() {
-    return maxVelocity;
-  }
-
   public SwerveDrivetrain setDriftCorrectionPID(PIDController controller) {
     driftpid = controller;
     return this;
@@ -280,6 +303,10 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
   public boolean getDriftCorrectionMode() {
     return enableDriftCorrection;
+  }
+
+  public void setFieldRelative(boolean fieldRelative) {
+      this.fieldRelative = fieldRelative;
   }
 
   @Override
@@ -313,14 +340,14 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
     publisher.set(states);
 
-    SwerveDriveKinematics.desaturateWheelSpeeds(states, getMaxVelocity());
+    SwerveDriveKinematics.desaturateWheelSpeeds(states, getRobotSpeeds().getMaxVelocity());
 
     setModuleStates(states);    
   }
 
   @Override
   public Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
-    return new SwerveDriveCommand(this, xInput, yInput, thetaInput);
+    return new SwerveDriveCommand(this, xInput, yInput, thetaInput, fieldRelative);
   }
 
   @Override
@@ -345,7 +372,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
     ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kGrid).withSize(2, 3).withProperties(Map.of("Number of columns", 2, "Number of rows", 1));
     { 
-      Map<String, Object> props = Map.of("Min", -getMaxVelocity(), "Max", getMaxVelocity(),"Label position", "TOP");
+      Map<String, Object> props = Map.of("Min", -getRobotSpeeds().getMaxVelocity(), "Max", getRobotSpeeds().getMaxVelocity(),"Label position", "TOP");
       ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kGrid).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
       chassisLayout.addDouble("X", () -> robotSpeeds.getDriverSpeeds().vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
       chassisLayout.addDouble("Y", () -> robotSpeeds.getDriverSpeeds().vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);

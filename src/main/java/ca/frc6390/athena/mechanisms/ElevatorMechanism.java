@@ -24,7 +24,7 @@ public class ElevatorMechanism extends Mechanism{
 
         public StatefulElevatorMechanism(MechanismConfig<StatefulElevatorMechanism<E>> config,ElevatorFeedforward feedforward, E initialState) {
             super(config, feedforward);
-            this.stateMachine = new StateMachine<>(initialState, () -> true);
+            this.stateMachine = new StateMachine<>(initialState, this::atSetpoint);
         }
 
         @Override

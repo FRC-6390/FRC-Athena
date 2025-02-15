@@ -2,6 +2,8 @@ package ca.frc6390.athena.commands;
 
 import java.util.function.BooleanSupplier;
 
+import ca.frc6390.athena.controllers.DelayedInput;
+import edu.wpi.first.math.filter.Debouncer.DebounceType;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
@@ -168,6 +170,65 @@ public class RunnableTrigger extends Trigger {
    */
   public RunnableTrigger toggleOnFalse(Command command) {
     return (RunnableTrigger) super.toggleOnFalse(command);
+  }
+
+
+   /**
+   * Creates a new debounced trigger from this trigger - it will become active when this trigger has
+   * been active for longer than the specified period.
+   *
+   * @param seconds The debounce period.
+   * @return The debounced trigger (rising edges debounced only)
+   */
+  public RunnableTrigger debounce(double seconds) {
+    return (RunnableTrigger) super.debounce(seconds);
+  }
+
+  /**
+   * Creates a new debounced trigger from this trigger - it will become active when this trigger has
+   * been active for longer than the specified period.
+   *
+   * @param seconds The debounce period.
+   * @param type The debounce type.
+   * @return The debounced trigger.
+   */
+  public RunnableTrigger debounce(double seconds, DebounceType type) {
+      return (RunnableTrigger) super.debounce(seconds, type);
+  }
+
+
+   /**
+   * Composes two triggers with logical AND.
+   *
+   * @param trigger the condition to compose with
+   * @return A trigger which is active when both component triggers are active.
+   */
+  public RunnableTrigger and(BooleanSupplier trigger) {
+    return (RunnableTrigger) super.and(trigger);
+  }
+
+  /**
+   * Composes two triggers with logical OR.
+   *
+   * @param trigger the condition to compose with
+   * @return A trigger which is active when either component trigger is active.
+   */
+  public RunnableTrigger or(BooleanSupplier trigger) {
+    return (RunnableTrigger) super.or(trigger);
+  }
+
+  /**
+   * Creates a new trigger that is active when this trigger is inactive, i.e. that acts as the
+   * negation of this trigger.
+   *
+   * @return the negated trigger
+   */
+  public RunnableTrigger negate() {
+    return (RunnableTrigger) super.negate();
+  }
+
+  public RunnableTrigger after(double seconds) {
+    return new RunnableTrigger(new DelayedInput(this, seconds));
   }
 
 }
