@@ -10,6 +10,7 @@ import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
+import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
 import ca.frc6390.athena.devices.Encoder.EncoderConfig;
 import ca.frc6390.athena.devices.Encoder.EncoderType;
@@ -221,12 +222,28 @@ public class Mechanism implements Subsystem{
             return this;
         }
 
-        public MechanismConfig<T> addLimitSwitch(int id, double position){
-           return addLimitSwitch(id, position, false);
+        public MechanismConfig<T> addLowerLimitSwitch(int id, double position){
+            return addLimitSwitch(id, position, false, 0);
+        }
+ 
+        public MechanismConfig<T> addLowerLimitSwitch(int id, double position, boolean stopMotors){
+            return addLimitSwitch(GenericLimitSwitchConfig.normal(id).setPosition(position).setHardstop(stopMotors, -1));
         }
 
-        public MechanismConfig<T> addLimitSwitch(int id, double position, boolean stopMotors){
-            return addLimitSwitch(GenericLimitSwitchConfig.normal(id).setPosition(position).setHardstop(stopMotors));
+        public MechanismConfig<T> addUpperLimitSwitch(int id, double position){
+            return addLimitSwitch(id, position, false, 0);
+        }
+ 
+        public MechanismConfig<T> addUpperLimitSwitch(int id, double position, boolean stopMotors){
+            return addLimitSwitch(GenericLimitSwitchConfig.normal(id).setPosition(position).setHardstop(stopMotors, 1));
+        }
+
+        public MechanismConfig<T> addLimitSwitch(int id, double position){
+           return addLimitSwitch(id, position, false, 0);
+        }
+
+        public MechanismConfig<T> addLimitSwitch(int id, double position, boolean stopMotors, int blockDirection){
+            return addLimitSwitch(GenericLimitSwitchConfig.normal(id).setPosition(position).setHardstop(stopMotors, blockDirection));
         }
 
         public T create(){
@@ -239,14 +256,15 @@ public class Mechanism implements Subsystem{
     private final PIDController pidController;
     private final ProfiledPIDController profiledPIDController;
     private final boolean useAbsolute, useVoltage;
+    private final GenericLimitSwitch[] limitSwitches;
     private boolean override;
     private double setpoint;
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
-        this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage);
+        this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage,config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new));
     }
 
-    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController, ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage){
+    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController, ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage, GenericLimitSwitch[] limitSwitches){
         this.motors = motors;
         this.encoder = encoder;
         this.pidController = pidController;
@@ -254,6 +272,7 @@ public class Mechanism implements Subsystem{
         this.useAbsolute = useAbsolute;
         this.useVoltage = useVoltage;
         this.override = false;
+        this.limitSwitches = limitSwitches;
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
@@ -347,6 +366,17 @@ public class Mechanism implements Subsystem{
 
         double value = calculatePID() + calculateFeedForward(); 
         
+        for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
+            if (genericLimitSwitch.isHardstop() && genericLimitSwitch.getAsBoolean()){
+                if(Math.signum(genericLimitSwitch.getBlockDirection()) == value){
+                    value = 0;
+                    if (!Double.isNaN(genericLimitSwitch.getPosition())) {
+                        encoder.setPosition(genericLimitSwitch.getPosition());
+                    }
+                }
+            }
+        }
+
         if (useVoltage) {
             setVoltage(value);
         }else {

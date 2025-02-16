@@ -189,7 +189,7 @@ public class Encoder implements RobotSendableSystem{
     }
 
     public void setPosition(double pos) {
-        setPosition.accept(pos);
+        setRaw(((pos + conversionOffset) / conversion + offset) / gearRatio);
     }
 
     public double getGearRatio() {
@@ -242,14 +242,14 @@ public class Encoder implements RobotSendableSystem{
      * Get the rotations of the encoder with gearRatio, offsets and conversion applied
      */
     public double getPosition() {
-        return (getRotations() * conversion)+ conversionOffset;
+        return (getRotations() * conversion) - conversionOffset;
     }
 
       /**
      * Get the absolute rotations of the encoder with gearRatio, offsets and conversion applied
      */
     public double getAbsolutePosition() {
-        return (getAbsoluteRotations() * conversion) + conversionOffset;
+        return (getAbsoluteRotations() * conversion) - conversionOffset;
     }
 
      /**
@@ -286,6 +286,14 @@ public class Encoder implements RobotSendableSystem{
         velocity = inverted ? -getVelocity.getAsDouble() : getVelocity.getAsDouble();
         absolutePosition = inverted ? -getAbsolutePosition.getAsDouble() : getAbsolutePosition.getAsDouble();
         return this;
+    }
+
+    public void setRotations(double rotations){
+        setRaw((rotations + offset) / gearRatio);
+    }
+
+    public void setRaw(double raw){
+        setPosition.accept(raw);
     }
 
 

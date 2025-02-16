@@ -10,11 +10,14 @@ import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatency;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatencyType;
+import choreo.auto.AutoFactory;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
+import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
@@ -73,6 +76,8 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     private Field2d field;
     private RobotConfig config;
     private boolean visionEnabled = false;
+    private PIDController rotationController, translationController;
+    private AutoFactory factory;
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
         this.fieldPose = pose;
@@ -151,11 +156,32 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     }
 
     public RobotLocalization configureChoreo(PIDConstants translationConstants, PIDConstants rotationConstants){
+        rotationController = new PIDController(rotationConstants.kP, rotationConstants.kI, rotationConstants.kD);
+        rotationController.setIZone(rotationConstants.iZone);
+
+        translationController = new PIDController(translationConstants.kP, translationConstants.kI, translationConstants.kD);
+        translationController.setIZone(translationConstants.iZone);
+
+        factory = new AutoFactory(this::getFieldPose, this::resetFieldPose, 
+        (sample) -> {
+            Pose2d botpose = getFieldPose();
+            Pose2d trajpose = sample.getPose();
+            
+            ChassisSpeeds speeds = sample.getChassisSpeeds();
+
+            speeds.vxMetersPerSecond = translationController.calculate(botpose.getX(), trajpose.getX());
+            speeds.vyMetersPerSecond = translationController.calculate(botpose.getY(), trajpose.getY());
+            speeds.omegaRadiansPerSecond = rotationController.calculate(botpose.getRotation().getRadians(), trajpose.getRotation().getRadians());
+
+            drivetrain.getRobotSpeeds().setAutoSpeeds(speeds);
+        }, 
+        true, 
+        drivetrain);
       return this;
     }
 
-    public Pose2d getPose(){
-        return new Pose2d(fieldPose.getX(), fieldPose.getY(), drivetrain.getIMU().getYaw());
+    public AutoFactory getChoreoAutoFactory(){
+        return factory;
     }
 
     public void resetFieldPose(Pose2d pose, Rotation2d heading) {

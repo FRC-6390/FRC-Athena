@@ -22,6 +22,8 @@ repositories {
   maven { url 'https://maven.ctr-electronics.com/release/' }
   maven { url 'https://maven.revrobotics.com/' }
   maven { url 'https://3015rangerrobotics.github.io/pathplannerlib/repo'}
+  maven { url 'https://lib.choreo.autos/dep'}
+
 }
 
 if (project.hasProperty('releaseMode')) {
@@ -53,6 +55,7 @@ dependencies {
     implementation 'com.ctre.phoenix6:wpiapi-java:25.1.0'
     implementation 'com.pathplanner.lib:PathplannerLib-java:2025.1.1'
     implementation 'com.revrobotics.frc:REVLib-java:2025.0.0'
+    implementation 'choreo:ChoreoLib-java:2025.0.3'
 }
 
 // Set up exports properly

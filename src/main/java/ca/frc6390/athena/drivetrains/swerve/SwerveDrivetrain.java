@@ -405,6 +405,11 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   }
 
   @Override
+  public void simulationPeriodic() {
+      update();
+  }
+
+  @Override
   public RobotLocalization localization(RobotLocalizationConfig config) {
     return new RobotLocalization(this, config);
   }
