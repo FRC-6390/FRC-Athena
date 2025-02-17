@@ -247,7 +247,7 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
                 if(camera.hasValidTarget()){
                     PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
                     double timestamp = Timer.getFPGATimestamp() - (data.getLatency() / 1000.0);
-                    fieldEstimator.addVisionMeasurement(data.getPose(), timestamp);
+                    fieldEstimator.addVisionMeasurement(data.getLocalizationPose(), timestamp);
                 }
             }
         }
@@ -285,4 +285,5 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     public void periodic() {
        update();
     }
-} //IM A SCATMAN
+
+} 

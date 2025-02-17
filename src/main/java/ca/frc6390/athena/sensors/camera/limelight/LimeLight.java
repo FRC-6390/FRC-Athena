@@ -201,6 +201,15 @@ public class LimeLight {
             Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[4]);
             return new Pose2d(translation, rotation2d);
         }
+
+        public Pose2d getLocalizationPose()
+        {
+            Double[] poseReal = getRaw();
+            if (poseReal == null) return new Pose2d();
+            Translation2d translation = new Translation2d(poseReal[0], poseReal[1]);
+            Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[4]);
+            return new Pose2d(translation, rotation2d);
+        }
     }
 
     public LimeLight(LimelightConfig config){

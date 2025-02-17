@@ -3,7 +3,6 @@ package ca.frc6390.athena.drivetrains.swerve;
 import java.util.Map;
 import java.util.function.DoubleSupplier;
 
-import ca.frc6390.athena.commands.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.DrivetrainIDs;
@@ -15,6 +14,7 @@ import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.IMU.IMUConfig;
 import ca.frc6390.athena.devices.IMU.IMUType;
 import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
+import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
@@ -33,7 +33,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
-public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
+public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<SwerveDrivetrain> {
 
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
@@ -284,7 +284,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
 
 
   private double driftCorrection(ChassisSpeeds speeds) {
-    if (Math.abs(speeds.omegaRadiansPerSecond) > driftActivationSpeed) {
+    if (Math.abs(speeds.omegaRadiansPerSecond) > driftActivationSpeed && Math.abs(imu.getVelocityZ().getRadians()) > 0.5) {
       desiredHeading = getIMU().getVirtualAxis("drift").getRadians();
       return 0;
     } else {
@@ -412,5 +412,10 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain {
   @Override
   public RobotLocalization localization(RobotLocalizationConfig config) {
     return new RobotLocalization(this, config);
+  }
+
+  @Override
+  public SwerveDrivetrain get() {
+    return this;
   }
 }

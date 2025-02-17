@@ -13,8 +13,8 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 public class IMU extends VirtualIMU{
 
-    private final DoubleSupplier getRoll, getPitch, getYaw, getAccelX, getAccelY, getAccelZ;
-    private double roll, pitch, yaw, accelX, accelY, accelZ;
+    private final DoubleSupplier getRoll, getPitch, getYaw, getVelX, getVelY, getVelZ;
+    private double roll, pitch, yaw, velX, velY, velZ;
     private boolean inverted = false;
 
     public enum IMUType{
@@ -44,13 +44,13 @@ public class IMU extends VirtualIMU{
         }
     }
 
-    public IMU(DoubleSupplier getRoll, DoubleSupplier getPitch, DoubleSupplier getYaw, DoubleSupplier getAccelX, DoubleSupplier getAccelY, DoubleSupplier getAccelZ){
+    public IMU(DoubleSupplier getRoll, DoubleSupplier getPitch, DoubleSupplier getYaw, DoubleSupplier getvelX, DoubleSupplier getvelY, DoubleSupplier getvelZ){
         this.getRoll = getRoll;
         this.getPitch = getPitch;
         this.getYaw = getYaw;
-        this.getAccelX = getAccelX;
-        this.getAccelY = getAccelY;
-        this.getAccelZ = getAccelZ;
+        this.getVelX = getvelX;
+        this.getVelY = getvelY;
+        this.getVelZ = getvelZ;
         addVirtualAxis("driver", this::getYaw);
     }
 
@@ -59,9 +59,9 @@ public class IMU extends VirtualIMU{
             ()-> gyro.getRoll(true).getValueAsDouble(), 
             ()-> gyro.getPitch(true).getValueAsDouble(), 
             ()-> gyro.getYaw(true).getValueAsDouble(), 
-            ()-> gyro.getAccelerationX(true).getValueAsDouble(), 
-            ()-> gyro.getAccelerationY(true).getValueAsDouble(), 
-            ()-> gyro.getAccelerationZ(true).getValueAsDouble());
+            ()-> gyro.getAngularVelocityXWorld(true).getValueAsDouble(), 
+            ()-> gyro.getAngularVelocityYWorld(true).getValueAsDouble(), 
+            ()-> gyro.getAngularVelocityZWorld(true).getValueAsDouble());
     }
 
     public IMU(ADXRS450_Gyro gyro){
@@ -94,16 +94,16 @@ public class IMU extends VirtualIMU{
         return Rotation2d.fromDegrees(yaw);
     }
 
-    public double getAccelerationX(){
-        return accelX;
+    public Rotation2d getVelocityX(){
+        return Rotation2d.fromDegrees(velX);
     }
 
-    public double getAccelerationY(){
-        return accelY;
+    public Rotation2d getVelocityY(){
+        return Rotation2d.fromDegrees(velY);
     }
 
-    public double getAccelerationZ(){
-        return accelZ;
+    public Rotation2d getVelocityZ(){
+        return Rotation2d.fromDegrees(velZ);
     }
 
     public void setInverted(boolean inverted){
@@ -118,9 +118,9 @@ public class IMU extends VirtualIMU{
        roll =  inverted ? -getRoll.getAsDouble() : getRoll.getAsDouble();
        pitch = inverted ? -getPitch.getAsDouble() : getPitch.getAsDouble();
        yaw = inverted ? -getYaw.getAsDouble() : getYaw.getAsDouble();
-       accelX = inverted ? -getAccelX.getAsDouble() : getAccelX.getAsDouble();
-       accelY = inverted ? -getAccelY.getAsDouble() : getAccelY.getAsDouble();
-       accelZ = inverted ? -getAccelZ.getAsDouble() : getAccelZ.getAsDouble();
+       velX = inverted ? -getVelX.getAsDouble() : getVelX.getAsDouble();
+       velY = inverted ? -getVelY.getAsDouble() : getVelY.getAsDouble();
+       velZ = inverted ? -getVelZ.getAsDouble() : getVelZ.getAsDouble();
     }
 
     public IMU applyConfig(IMUConfig config){
@@ -155,9 +155,9 @@ public class IMU extends VirtualIMU{
         layout.addDouble("Roll",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
         layout.addDouble("Pitch",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
 
-        layout.addDouble("Acceleration X",() -> getAccelerationX()).withWidget(BuiltInWidgets.kNumberSlider).withPosition(0, 1);
-        layout.addDouble("Acceleration Y",() -> getAccelerationY()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 2);
-        layout.addDouble("Acceleration Z",() -> getAccelerationZ()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 3);
+        layout.addDouble("Velocity X",() -> getVelocityX().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withPosition(0, 1);
+        layout.addDouble("Velocity Y",() -> getVelocityY().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 2);
+        layout.addDouble("Velocity Z",() -> getVelocityZ().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 3);
         return layout;
     }
 }

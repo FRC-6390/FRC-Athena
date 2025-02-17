@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
+import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.MotorControllerGroup;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
@@ -25,9 +26,10 @@ import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 
-public class Mechanism implements Subsystem{
+public class Mechanism implements Subsystem, RobotSendableSystem{
     public record MechanismConfig<T extends Mechanism>(
         ArrayList<MotorControllerConfig> motors, 
         EncoderConfig encoder, 
@@ -41,6 +43,10 @@ public class Mechanism implements Subsystem{
 
         public static MechanismConfig<Mechanism> generic(){
             return custom(Mechanism::new);
+        }
+
+        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StatefulMechanism<E>> statefulGeneric(E initialState){
+            return custom(config -> new StatefulMechanism<>(config, initialState));
         }
 
         public static <E extends Enum<E> & SetpointProvider, T extends StatefulMechanism<E>> MechanismConfig<T> stateful(BiFunction<MechanismConfig<T>, E, T> factory, E initialState) {
@@ -358,9 +364,9 @@ public class Mechanism implements Subsystem{
 
     public void update(){
 
-        encoder.update();
+        if (encoder != null) encoder.update();
 
-        if (override){
+        if (override || encoder == null){
             return;
         }
 
@@ -387,6 +393,12 @@ public class Mechanism implements Subsystem{
     @Override
     public void periodic() {
         update();
+    }
+
+    @Override
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'shuffleboard'");
     }
 
     public static class StatefulMechanism<E extends Enum<E> & SetpointProvider> extends Mechanism {

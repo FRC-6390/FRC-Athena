@@ -2,7 +2,7 @@ package ca.frc6390.athena.drivetrains.tank;
 
 import java.util.function.DoubleSupplier;
 
-import ca.frc6390.athena.commands.TankDriveCommand;
+import ca.frc6390.athena.commands.control.TankDriveCommand;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.RobotLocalization;
 import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
@@ -17,7 +17,7 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
-public class TankDrivetrain extends SubsystemBase implements RobotDrivetrain{
+public class TankDrivetrain extends SubsystemBase implements RobotDrivetrain<TankDrivetrain>{
 
     public record TankDriveConfig(IMUConfig imu, double maxVelocity) implements RobotDrivetrainConfig<TankDrivetrain> {
 
@@ -88,5 +88,10 @@ public class TankDrivetrain extends SubsystemBase implements RobotDrivetrain{
     @Override
     public void periodic() {
         update();
+    }
+
+    @Override
+    public TankDrivetrain get() {
+        return this;
     }
 }
