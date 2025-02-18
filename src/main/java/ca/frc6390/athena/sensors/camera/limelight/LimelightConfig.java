@@ -1,5 +1,7 @@
 package ca.frc6390.athena.sensors.camera.limelight;
 
+import edu.wpi.first.math.geometry.Rotation2d;
+
 public record LimelightConfig(String table, double mountingAngle, double mountingHeightMeters, double angleRelativeToForwards) {
     private static final String DEFUALT_TABLE = "limelight"; 
 
@@ -25,5 +27,9 @@ public record LimelightConfig(String table, double mountingAngle, double mountin
 
     public LimelightConfig setAngleRelativeToForwards(double angleRelativeToForwards){
         return new LimelightConfig(table, mountingAngle, mountingHeightMeters, angleRelativeToForwards);
+    }
+
+    public Rotation2d getRotationRelativeToForwards(){
+        return Rotation2d.fromDegrees(angleRelativeToForwards);
     }
 }

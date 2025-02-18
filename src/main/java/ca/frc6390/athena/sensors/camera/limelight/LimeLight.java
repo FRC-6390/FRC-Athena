@@ -207,7 +207,7 @@ public class LimeLight {
             Double[] poseReal = getRaw();
             if (poseReal == null) return new Pose2d();
             Translation2d translation = new Translation2d(poseReal[0], poseReal[1]);
-            Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[4]);
+            Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[5]);
             return new Pose2d(translation, rotation2d);
         }
     }

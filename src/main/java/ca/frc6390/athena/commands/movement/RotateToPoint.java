@@ -8,7 +8,7 @@ public class RotateToPoint extends RotateToAngle {
 
     public RotateToPoint(RobotBase<?> base, double x, double y, boolean relative){
         super(base, relative);
-        this.setSupplier((pose) -> Units.radiansToDegrees(Math.atan2(x - pose.getX(), y - pose.getY())));
+        this.setSupplier((pose) -> Units.radiansToDegrees(Math.atan2(y - pose.getY(), x - pose.getX())));
     }
 
     public RotateToPoint setPID(ProfiledPIDController rotationPID){
