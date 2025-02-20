@@ -78,7 +78,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
 
     private final SwerveDrivePoseEstimator fieldEstimator, relativeEstimator;
     private final SwerveDrivetrain drivetrain;
-    private final HashMap<String, FilteredPose> visionPoses;
     private RobotVision vision;
     private final PoseEstimateWithLatencyType estimateWithLatencyType;
     private Pose2d fieldPose, relativePose;
@@ -97,7 +96,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         this.drivetrain = drivetrain;
         this.vision = vision;
         this.field = new Field2d();
-        this.visionPoses = new HashMap<>();
         estimateWithLatencyType = config.pose;
         this.visionEnabled = config.useVision;
 
@@ -120,16 +118,16 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
             configurePathPlanner(config.translation, config.rotation);
         }
 
-        if(vision != null){
-            for (String table : vision.getCameraTables()) {
-                LimeLight camera = vision.getCamera(table);
-                FilteredPose vpose = new FilteredPose(()-> {
-                    PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
-                    return data.getLocalizationPose();
-                });
-                visionPoses.put(table, vpose);
-            }
-        }
+        // if(vision != null){
+        //     for (String table : vision.getCameraTables()) {
+        //         LimeLight camera = vision.getCamera(table);
+        //         FilteredPose vpose = new FilteredPose(()-> {
+        //             PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
+        //             return data.getLocalizationPose();
+        //         });
+        //         visionPoses.put(table, vpose);
+        //     }
+        // }
        
     }
 
@@ -152,17 +150,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
 
     public RobotLocalization setRobotVision(RobotVision vision){
         this.vision = vision;
-
-        if(vision != null){
-            for (String table : vision.getCameraTables()) {
-                LimeLight camera = vision.getCamera(table);
-                FilteredPose vpose = new FilteredPose(()-> {
-                    PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
-                    return data.getLocalizationPose();
-                });
-                visionPoses.put(table, vpose);
-            }
-        }
         return this;
     }
 
@@ -279,15 +266,14 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     public void update() {
         
         if(vision != null && visionEnabled) {
-            Double[] orientation = {drivetrain.getIMU().getVirtualAxis("limelight").getDegrees(),0d,0d,0d,0d,0d};
+            Double[] orientation = {fieldPose.getRotation().getDegrees(),0d,0d,0d,0d,0d};
             for (String table : vision.getCameraTables()) {
                 LimeLight camera = vision.getCamera(table);
-                FilteredPose pose = visionPoses.get(table);
                 camera.setRobotOrientation(orientation);
                 if(camera.hasValidTarget()){
                     PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
                     double timestamp = Timer.getFPGATimestamp() - (data.getLatency() / 1000.0);
-                    fieldEstimator.addVisionMeasurement(pose.get(true), timestamp);
+                    fieldEstimator.addVisionMeasurement(data.getLocalizationPose(), timestamp);
                 }
             }
         }
