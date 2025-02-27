@@ -21,12 +21,13 @@ public class SlipCompensatingSwerveDrivePoseEstimator extends SwerveDrivePoseEst
     
     private static final double TAU = 0.1;
 
-    private final double slipThreshold;
+    private double slipThreshold;
     private final double minSlipFactor;
     private final double maxSlipFactor;
     
     private SwerveModulePosition[] previousModulePositions;
-    private Pose2d compensatedPose;
+    private Pose2d previousRawPose;
+    private Translation2d slipOffset = new Translation2d(0, 0);
     
     private double previousUpdateTime;
     private double filteredSlipFactor = 1.0;
@@ -38,7 +39,7 @@ public class SlipCompensatingSwerveDrivePoseEstimator extends SwerveDrivePoseEst
             Matrix<N3, N1> stateStdDevs,
             Matrix<N3, N1> visionMeasurementStdDevs) {
         super(kinematics, gyroAngle, modulePositions, initialPoseMeters, stateStdDevs, visionMeasurementStdDevs);
-        this.compensatedPose = initialPoseMeters;
+        this.previousRawPose = initialPoseMeters;
         
         this.slipThreshold = DEFAULT_SLIP_THRESHOLD;
         this.minSlipFactor = DEFAULT_MIN_SLIP_FACTOR;
@@ -63,23 +64,33 @@ public class SlipCompensatingSwerveDrivePoseEstimator extends SwerveDrivePoseEst
 
 
         Pose2d rawPose = super.update(gyroAngle, modulePositions);
-        Translation2d rawDeltaTranslation = rawPose.getTranslation().minus(compensatedPose.getTranslation());
+        if (previousRawPose == null) {
+            previousRawPose = rawPose;
+        }
+
+        Translation2d rawDeltaTranslation = rawPose.getTranslation().minus(previousRawPose.getTranslation());
 
         double computedSlipFactor = computeSlipFactor(modulePositions);
-        
         double alpha = dt / (TAU + dt);
         filteredSlipFactor = alpha * computedSlipFactor + (1 - alpha) * filteredSlipFactor;
-        
-        Translation2d compensatedDeltaTranslation = rawDeltaTranslation.times(filteredSlipFactor);
-        Translation2d newCompensatedTranslation = compensatedPose.getTranslation().plus(compensatedDeltaTranslation);
-        Pose2d newCompensatedPose = new Pose2d(newCompensatedTranslation, rawPose.getRotation());
-        
-        compensatedPose = newCompensatedPose;
-        previousModulePositions = modulePositions;
-        
-        resetPosition(gyroAngle, modulePositions, newCompensatedPose);
 
-        return newCompensatedPose;
+        Translation2d compensatedDeltaTranslation = rawDeltaTranslation.times(filteredSlipFactor);
+
+        Translation2d deltaOffset = compensatedDeltaTranslation.minus(rawDeltaTranslation);
+
+        slipOffset = slipOffset.plus(deltaOffset);
+
+        Translation2d finalTranslation = rawPose.getTranslation().plus(slipOffset);
+        Pose2d finalPose = new Pose2d(finalTranslation, rawPose.getRotation());
+
+        previousRawPose = rawPose;
+        previousModulePositions = modulePositions;
+
+        return finalPose;
+    }
+
+    public void setSlipThreshold(double slipThreshold) {
+        this.slipThreshold = slipThreshold;
     }
 
     private double computeSlipFactor(SwerveModulePosition[] currentPositions) {

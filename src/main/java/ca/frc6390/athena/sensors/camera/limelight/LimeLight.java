@@ -1,5 +1,6 @@
 package ca.frc6390.athena.sensors.camera.limelight;
 
+import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -7,8 +8,8 @@ import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
 
-public class LimeLight {
-    public LimelightConfig config;
+public class LimeLight implements LocalizationCamera{
+    public LimeLightConfig config;
     private NetworkTable limelightTable;
     public NetworkTableEntry tv;
     public NetworkTableEntry tx;
@@ -157,19 +158,19 @@ public class LimeLight {
 
         public double getLatency()
         {
-            return getRaw()[7];
+            return getRaw()[6];
         }
         public double getTagCount()
         {
-            return getRaw()[8];
+            return getRaw()[7];
         }
         public double getDistToTag()
         {
-            return getRaw()[9];
+            return getRaw()[8];
         }
         public double getAvgTagArea()
         {
-            return getRaw()[10];
+            return getRaw()[9];
         }
         
     }
@@ -198,7 +199,7 @@ public class LimeLight {
             Double[] poseReal = getRaw();
             if (poseReal == null) return new Pose2d();
             Translation2d translation = new Translation2d(poseReal[2], poseReal[0]);
-            Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[4]);
+            Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[5]);
             return new Pose2d(translation, rotation2d);
         }
 
@@ -212,7 +213,7 @@ public class LimeLight {
         }
     }
 
-    public LimeLight(LimelightConfig config){
+    public LimeLight(LimeLightConfig config){
         this.config = config;
         limelightTable = NetworkTableInstance.getDefault().getTable(config.table());
         tv = limelightTable.getEntry("tv");
@@ -441,7 +442,7 @@ public class LimeLight {
     }
 
     public double getDistanceFromTarget(double targetHeightMeters){
-        return getDistanceFromTarget(config.mountingAngle(), config.mountingHeightMeters(), targetHeightMeters);
+        return getDistanceFromTarget(config.cameraRobotSpace().getRotation().getY(), config.cameraRobotSpace().getTranslation().getZ(), targetHeightMeters);
     }
 
     public double getDistanceFromTarget(double mountingAngle, double mountingHeightMeters, double targetHeightMeters){
@@ -466,5 +467,15 @@ public class LimeLight {
 
     public void setRobotOrientation(Double[] orientation){
         robot_orientation_set.setDoubleArray(orientation);
+    }
+
+    @Override
+    public double getLocalizationLatency() {
+        return getPoseEstimate(config.localizationEstimator()).getLatency(); 
+    }
+
+    @Override
+    public Pose2d getLocalizationPose() {
+        return getPoseEstimate(config.localizationEstimator()).getLocalizationPose(); 
     }
 }

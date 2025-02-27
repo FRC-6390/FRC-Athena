@@ -102,10 +102,11 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
     
         LimeLight bestCamera = null;
         double smallestAngleDiff = Double.MAX_VALUE;
-    
-        for (String table : vision.getCameraTables()) {
-            LimeLight camera = vision.getCamera(table);
-            Rotation2d cameraRelativeAngleRad = camera.config.getRotationRelativeToForwards();
+
+        
+
+        for (LimeLight camera : vision.getLimelights().values()) {
+            Rotation2d cameraRelativeAngleRad = camera.config.getYawRelativeToForwards();
             double angleDiff = Math.abs(desiredRelativeAngle.minus(cameraRelativeAngleRad).getDegrees());
             if (angleDiff < smallestAngleDiff) {
                 smallestAngleDiff = angleDiff;

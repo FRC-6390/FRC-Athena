@@ -7,6 +7,7 @@ import ca.frc6390.athena.devices.Encoder.EncoderType;
 import ca.frc6390.athena.devices.MotorController;
 import ca.frc6390.athena.devices.MotorController.MotorControllerConfig;
 import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
+
 import java.util.Map;
 
 import edu.wpi.first.math.MathUtil;

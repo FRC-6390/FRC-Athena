@@ -224,6 +224,7 @@ public class RunnableTrigger extends Trigger {
    * @return the negated trigger
    */
   public RunnableTrigger negate() {
+    
     return (RunnableTrigger) super.negate();
   }
 

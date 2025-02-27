@@ -1,6 +1,6 @@
 package ca.frc6390.athena.core;
 
-import java.util.HashMap;
+import java.util.List;
 
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.FollowPathCommand;
@@ -9,11 +9,6 @@ import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
-import ca.frc6390.athena.filters.FilteredPose;
-import ca.frc6390.athena.odometry.SlipCompensatingSwerveDrivePoseEstimator;
-import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
-import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatency;
-import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatencyType;
 import choreo.auto.AutoFactory;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
@@ -24,19 +19,18 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 public class RobotLocalization extends SubsystemBase implements RobotSendableSystem{
     
-    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, PoseEstimateWithLatencyType pose, PIDConstants translation, PIDConstants rotation, boolean useVision) {
+    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, double v2XStd, double v2YStda, double v2ThetaStd, PIDConstants translation, PIDConstants rotation, boolean useVision ,double slipThresh) {
 
         public RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd) {
-            this(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, PoseEstimateWithLatencyType.BOT_POSE_BLUE, new PIDConstants(0), new PIDConstants(0), true);
+            this(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, vXStd, vYStda, vThetaStd, new PIDConstants(0), new PIDConstants(0), true,0.2);
         }
 
         public RobotLocalizationConfig(double xStd, double yStd, double thetaStd) {
@@ -48,19 +42,19 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         }
 
         public RobotLocalizationConfig setAutoPlannerPID(PIDConstants translation, PIDConstants rotation){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
-        }
-
-        public RobotLocalizationConfig setPoseEstimateOrigin(PoseEstimateWithLatencyType pose){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
         }
 
         public RobotLocalizationConfig setVision(double vXStd, double vYStda, double vThetaStd){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
+        }
+
+        public RobotLocalizationConfig setVisionMultitag(double v2XStd, double v2YStda, double v2ThetaStd){
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
         }
 
         public RobotLocalizationConfig setVisionEnabled(boolean useVision){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, pose, translation, rotation, useVision);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
         }
 
         public Matrix<N3, N1> getStd(){
@@ -70,41 +64,43 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         public Matrix<N3, N1> getVisionStd(){
             return VecBuilder.fill(vXStd,vYStda,Units.degreesToRadians(vThetaStd));
         }
+        public Matrix<N3, N1> getVisionMultitagStd(){
+            return VecBuilder.fill(v2XStd,v2YStda,Units.degreesToRadians(v2ThetaStd));
+        }
+
+        public RobotLocalizationConfig setSlipThresh(double slipThresh){
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
+        }
     }
 
-    private final SlipCompensatingSwerveDrivePoseEstimator slipEstimator, slipVisionEstimator;
     private final SwerveDrivePoseEstimator fieldEstimator, relativeEstimator;
     private final SwerveDrivetrain drivetrain;
     private RobotVision vision;
-    private final PoseEstimateWithLatencyType estimateWithLatencyType;
-    private Pose2d fieldPose, relativePose, slipPose, slipVisionPose;
-    private Field2d field, slipField, slipVisionField;
+
+    private Pose2d fieldPose, relativePose;
+    private Field2d field;
     private RobotConfig robotConfig;
 
+    private RobotLocalizationConfig localizationConfig;
     private boolean visionEnabled = false;
     private PIDController rotationController, translationController;
     private AutoFactory factory;
 
+
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
+        this.localizationConfig = config;
         this.fieldPose = pose;
         this.relativePose = pose;
-        this.slipPose = pose;
-        this.slipVisionPose = pose;
+      
         this.drivetrain = drivetrain;
         this.vision = vision;
         this.field = new Field2d();
-        this.slipField = new Field2d();
-        this.slipVisionField = new Field2d();
-        this.visionPoses = new HashMap<>();
-        estimateWithLatencyType = config.pose;
+
         this.visionEnabled = config.useVision;
         config = config == null ? new RobotLocalizationConfig() : config;
 
         fieldEstimator = new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd());
         relativeEstimator = new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose);
-
-        slipEstimator = new SlipCompensatingSwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose);
-        slipVisionEstimator = new SlipCompensatingSwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd());
 
         drivetrain.getIMU().addVirtualAxis("relative", drivetrain.getIMU()::getYaw);
         drivetrain.getIMU().addVirtualAxis("field", drivetrain.getIMU()::getYaw);
@@ -115,19 +111,7 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
 
         if(config.rotation != null && config.translation != null){
             configurePathPlanner(config.translation, config.rotation);
-        }
-
-        // if(vision != null){
-        //     for (String table : vision.getCameraTables()) {
-        //         LimeLight camera = vision.getCamera(table);
-        //         FilteredPose vpose = new FilteredPose(()-> {
-        //             PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
-        //             return data.getLocalizationPose();
-        //         });
-        //         visionPoses.put(table, vpose);
-        //     }
-        // }
-       
+        }        
     }
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config) {
@@ -211,8 +195,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     public void resetFieldPose(Pose2d pose, Rotation2d heading) {
         drivetrain.getIMU().setVirtualAxis("field", heading);
         fieldEstimator.resetPosition(heading.unaryMinus(), drivetrain.getSwerveModulePositions(), pose);
-        slipVisionEstimator.resetPosition(heading.unaryMinus(), drivetrain.getSwerveModulePositions(), pose);
-        slipEstimator.resetPosition(heading.unaryMinus(), drivetrain.getSwerveModulePositions(), pose);
         
         this.fieldPose = pose;
     }
@@ -267,29 +249,24 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     public void update() {
         
         if(vision != null && visionEnabled) {
-            Double[] orientation = {fieldPose.getRotation().getDegrees(),0d,0d,0d,0d,0d};
-            for (String table : vision.getCameraTables()) {
-                LimeLight camera = vision.getCamera(table);
-                camera.setRobotOrientation(orientation);
-                if(camera.hasValidTarget()){
-                    PoseEstimateWithLatency data = camera.getPoseEstimate(estimateWithLatencyType);
-                    double timestamp = Timer.getFPGATimestamp() - (data.getLatency() / 1000.0);
-                    Pose2d vpose = pose.get(true);
-                    fieldEstimator.addVisionMeasurement(vpose, timestamp);
-                    slipVisionEstimator.addVisionMeasurement(vpose, timestamp);
-                }
+            vision.setRobotOrientation(drivetrain.getIMU().getVirtualAxis("field"));
+            
+            List<Pose2d> poses = vision.getLocalizationPoses();
+
+            SmartDashboard.putNumber("Localization Poses", poses.size());
+            if(poses.size() < 2){
+                fieldEstimator.setVisionMeasurementStdDevs(localizationConfig.getVisionMultitagStd());
+            }else{
+                fieldEstimator.setVisionMeasurementStdDevs(localizationConfig.getVisionStd());
             }
+
+            vision.setLocalizationPoses(fieldEstimator::addVisionMeasurement);
         }
 
         fieldPose = fieldEstimator.update(drivetrain.getIMU().getVirtualAxis("field"), drivetrain.getSwerveModulePositions());
         relativePose = relativeEstimator.update(drivetrain.getIMU().getVirtualAxis("relative"), drivetrain.getSwerveModulePositions());
 
-        slipPose = slipEstimator.update(drivetrain.getIMU().getVirtualAxis("field"), drivetrain.getSwerveModulePositions());
-        slipVisionPose = slipVisionEstimator.update(drivetrain.getIMU().getVirtualAxis("field"), drivetrain.getSwerveModulePositions());
-
         field.setRobotPose(fieldPose);
-        slipField.setRobotPose(slipPose);
-        slipVisionField.setRobotPose(slipVisionPose);
     }
 
     public Pose2d getFieldPose(){
@@ -309,17 +286,10 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         tab.add("Estimator", field).withPosition( 0,0).withSize(4, 3);
         tab.addDouble("Field X", () -> getFieldPose().getX()).withPosition( 4,2);
         tab.addDouble("Field Y", () -> getFieldPose().getY()).withPosition( 5,2);
-        tab.addDouble("Field Theta", () -> getFieldPose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition( 4,0).withSize(2, 2);
+        tab.addDouble("Field Theta", () -> getFieldPose().getRotation().getDegrees()).withPosition( 4,0).withSize(2, 2);
         tab.addDouble("Relative X", () -> getRelativePose().getX()).withPosition( 6,2);
         tab.addDouble("Relative Y", () -> getRelativePose().getY()).withPosition( 7,2);
-        tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition( 6,0).withSize(2, 2);
-        tab.add("Slip", slipField).withPosition( 0,3).withSize(4, 3);
-        tab.addDouble("Slip X", () -> slipPose.getX()).withPosition( 4,3);
-        tab.addDouble("Slip Y", () -> slipPose.getY()).withPosition( 5,3);
-        tab.add("Slip Vision", slipVisionField).withPosition( 0,7).withSize(4, 3);
-        tab.addDouble("Slip Vision X", () -> slipVisionPose.getX()).withPosition( 4,7);
-        tab.addDouble("Slip Vision Y", () -> slipVisionPose.getY()).withPosition( 5,7);
-
+        tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withPosition( 6,0).withSize(2, 2);
         return tab;
     }
 
