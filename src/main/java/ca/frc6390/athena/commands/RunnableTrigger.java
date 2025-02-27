@@ -2,7 +2,7 @@ package ca.frc6390.athena.commands;
 
 import java.util.function.BooleanSupplier;
 
-import ca.frc6390.athena.controllers.DelayedInput;
+import ca.frc6390.athena.controllers.DelayedOutput;
 import edu.wpi.first.math.filter.Debouncer.DebounceType;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
@@ -228,7 +228,7 @@ public class RunnableTrigger extends Trigger {
   }
 
   public RunnableTrigger after(double seconds) {
-    return new RunnableTrigger(new DelayedInput(this, seconds));
+    return new RunnableTrigger(new DelayedOutput(this, seconds));
   }
 
 }

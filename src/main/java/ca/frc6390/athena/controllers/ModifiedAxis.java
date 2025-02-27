@@ -1,10 +1,12 @@
 package ca.frc6390.athena.controllers;
 
+import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.commands.RunnableTrigger;
 import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.wpilibj.GenericHID;
+import edu.wpi.first.wpilibj2.command.RunCommand;
 
 public class ModifiedAxis implements DoubleSupplier {
     private static final double DEFUALT_DEADBAND = 0.01d;
@@ -56,7 +58,23 @@ public class ModifiedAxis implements DoubleSupplier {
     }
 
     public RunnableTrigger tiggerAt(double value) {
-        return new RunnableTrigger(() -> {return getAsDouble() >= value;});
+        return new RunnableTrigger(() -> Math.abs(getAsDouble()) >= value);
+    }
+
+    public RunnableTrigger continuously(DoubleConsumer consumer) {
+        return when(0.0, consumer);
+    }
+
+    public RunnableTrigger when(double threshold, DoubleConsumer consumer) {
+        return new RunnableTrigger(() -> Math.abs(getAsDouble()) > threshold).whileTrue(new RunCommand(() -> consumer.accept(getAsDouble()))).onFalse(() -> consumer.accept(0));
+    }
+
+    public RunnableTrigger whenNot(double lowerThreshold, double upperThreshold, DoubleConsumer consumer) {
+        return new RunnableTrigger(() -> !(getAsDouble() < upperThreshold && getAsDouble() > lowerThreshold) ).whileTrue(new RunCommand(() -> consumer.accept(getAsDouble()))).onFalse(() -> consumer.accept(0));
+    }
+
+    public RunnableTrigger when(double lowerThreshold, double upperThreshold, DoubleConsumer consumer) {
+        return new RunnableTrigger(() -> getAsDouble() < upperThreshold && getAsDouble() > lowerThreshold ).whileTrue(new RunCommand(() -> consumer.accept(getAsDouble()))).onFalse(() -> consumer.accept(0));
     }
 
     private double sqaureAxis(double value){

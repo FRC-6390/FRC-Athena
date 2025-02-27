@@ -3,12 +3,12 @@ package ca.frc6390.athena.controllers;
 import java.util.function.BooleanSupplier;
 import edu.wpi.first.wpilibj.Timer;
 
-public class DelayedInput implements BooleanSupplier {
+public class DelayedOutput implements BooleanSupplier {
     private final BooleanSupplier input;
     private final double delay;
     private double startTime = Double.NaN; // Not started
 
-    public DelayedInput(BooleanSupplier input, double delay) {
+    public DelayedOutput(BooleanSupplier input, double delay) {
         this.input = input;
         this.delay = delay;
     }

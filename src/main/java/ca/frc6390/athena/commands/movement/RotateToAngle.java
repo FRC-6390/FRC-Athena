@@ -4,6 +4,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotBase;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.devices.IMU;
@@ -20,6 +21,7 @@ public class RotateToAngle extends Command{
     private final Supplier<Pose2d> pose;
     private Supplier<Rotation2d> angle;
     private ProfiledPIDController rotationPID;
+    private final DelayedOutput delayedOutput;
 
     public RotateToAngle(RobotBase<?> base, Supplier<Rotation2d> angle, boolean relative){
         this.speeds = base.getDrivetrain().getRobotSpeeds();
@@ -29,7 +31,8 @@ public class RotateToAngle extends Command{
 
         this.rotationPID = new ProfiledPIDController(0, 0, 0, new Constraints(0, 0));
         this.rotationPID.enableContinuousInput(-Math.PI, Math.PI);
-        this.rotationPID.setTolerance(5);
+        this.rotationPID.setTolerance(2.5);
+        delayedOutput = new DelayedOutput(rotationPID::atSetpoint, 1);
     }
 
     public RotateToAngle(RobotBase<?> base, Rotation2d angle, boolean relative){
@@ -62,7 +65,7 @@ public class RotateToAngle extends Command{
 
     @Override
     public void initialize() {
-        rotationPID.reset(imu.getYaw().getDegrees(), imu.getVelocityZ().getDegrees());
+        rotationPID.reset(pose.get().getRotation().getDegrees(), imu.getVelocityZ().getDegrees());
     }
 
     @Override
@@ -78,6 +81,6 @@ public class RotateToAngle extends Command{
 
     @Override
     public boolean isFinished() {
-        return rotationPID.atSetpoint();
+        return delayedOutput.getAsBoolean();
     }
 }

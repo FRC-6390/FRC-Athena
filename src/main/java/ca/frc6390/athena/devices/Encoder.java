@@ -11,12 +11,12 @@ import com.revrobotics.RelativeEncoder;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
 
-import ca.frc6390.athena.core.RobotSendableSystem;
+import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
-public class Encoder implements RobotSendableSystem{
+public class Encoder implements RobotSendableDevice{
 
     private final DoubleConsumer setPosition;
     private final DoubleSupplier getPosition, getAbsolutePosition, getVelocity;
@@ -298,17 +298,17 @@ public class Encoder implements RobotSendableSystem{
 
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
-        tab.addDouble("Gear Ratio", this::getGearRatio);
-        tab.addBoolean("Intervetd", this::isInverted);
-        tab.addDouble("Conversion", this::getConversion);
-        tab.addDouble("Conversion Offset", this::getConversionOffset);
-        tab.addDouble("Position", this::getPosition);
-        tab.addDouble("Rotations", this::getRawValue);
-        tab.addDouble("Absolute Positon", this::getAbsolutePosition);
-        tab.addDouble("Absolute Roation", this::getAbsoluteRotations);
-        tab.addDouble("Raw Velocity", this::getRawVelocity);
-        tab.addDouble("Velocity", this::getVelocity);
-        throw new UnsupportedOperationException("Unimplemented method 'shuffleboard'");
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+        layout.addDouble("Gear Ratio", this::getGearRatio);
+        layout.addBoolean("Intervetd", this::isInverted);
+        layout.addDouble("Conversion", this::getConversion);
+        layout.addDouble("Conversion Offset", this::getConversionOffset);
+        layout.addDouble("Position", this::getPosition);
+        layout.addDouble("Rotations", this::getRawValue);
+        layout.addDouble("Absolute Positon", this::getAbsolutePosition);
+        layout.addDouble("Absolute Roation", this::getAbsoluteRotations);
+        layout.addDouble("Raw Velocity", this::getRawVelocity);
+        layout.addDouble("Velocity", this::getVelocity);
+        return layout;
     }
 }
