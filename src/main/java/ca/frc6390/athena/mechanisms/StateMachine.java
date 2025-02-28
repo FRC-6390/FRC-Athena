@@ -1,12 +1,13 @@
 package ca.frc6390.athena.mechanisms;
 
+import java.util.Arrays;
 import java.util.function.BooleanSupplier;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-public class StateMachine<E extends Enum<E> & SetpointProvider> {
+public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>> {
     
-    public interface SetpointProvider {
-        double getSetpoint();
+    public interface SetpointProvider<T> {
+        T getSetpoint();
     }
 
     private E goalState, nextState;
@@ -53,9 +54,17 @@ public class StateMachine<E extends Enum<E> & SetpointProvider> {
         return atGoalState() && state == goalState;
     }
 
+    public boolean atAnyState(@SuppressWarnings("unchecked") E... states) {
+        return Arrays.asList(states).stream().anyMatch((state) -> atGoalState() && state == goalState);
+    }
+
     public void update() {
         if(shouldChangeState()){
             goalState = nextState;
         }
+    }
+
+    public T getGoalStateSetpoint(){
+        return getGoalState().getSetpoint();
     }
 }

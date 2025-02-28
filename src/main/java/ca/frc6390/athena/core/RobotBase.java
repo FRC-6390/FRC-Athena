@@ -135,4 +135,8 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
     public RotateToAngle rotateBy(double degrees){
         return new RotateToAngle(this, getDrivetrain().getIMU().getYaw().plus(Rotation2d.fromDegrees(degrees)), false);
     }
+
+    public RobotSpeeds getRobotSpeeds(){
+        return drivetrain.getRobotSpeeds();
+    }
 }

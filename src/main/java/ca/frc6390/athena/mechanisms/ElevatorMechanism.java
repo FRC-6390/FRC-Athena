@@ -18,9 +18,9 @@ public class ElevatorMechanism extends Mechanism{
     }
     
 
-    public static class StatefulElevatorMechanism<E extends Enum<E> & SetpointProvider> extends ElevatorMechanism {
+    public static class StatefulElevatorMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ElevatorMechanism {
     
-        private final StateMachine<E> stateMachine;
+        private final StateMachine<Double, E> stateMachine;
 
         public StatefulElevatorMechanism(MechanismConfig<StatefulElevatorMechanism<E>> config,ElevatorFeedforward feedforward, E initialState) {
             super(config, feedforward);
@@ -38,7 +38,7 @@ public class ElevatorMechanism extends Mechanism{
             super.update();
         }
 
-        public StateMachine<E> getStateMachine() {
+        public StateMachine<Double, E> getStateMachine() {
             return stateMachine;
         }
     }

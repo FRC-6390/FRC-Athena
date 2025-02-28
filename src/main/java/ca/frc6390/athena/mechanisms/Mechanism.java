@@ -45,11 +45,11 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
             return custom(Mechanism::new);
         }
 
-        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StatefulMechanism<E>> statefulGeneric(E initialState){
+        public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> statefulGeneric(E initialState){
             return custom(config -> new StatefulMechanism<>(config, initialState));
         }
 
-        public static <E extends Enum<E> & SetpointProvider, T extends StatefulMechanism<E>> MechanismConfig<T> stateful(BiFunction<MechanismConfig<T>, E, T> factory, E initialState) {
+        public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulMechanism<E>> MechanismConfig<T> stateful(BiFunction<MechanismConfig<T>, E, T> factory, E initialState) {
             return custom(config -> factory.apply(config, initialState));
         }
 
@@ -61,27 +61,27 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
             return custom(factory);
         }
 
-        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(ElevatorFeedforward feedforward, E initialState) {
+        public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(ElevatorFeedforward feedforward, E initialState) {
             return custom(config -> new StatefulElevatorMechanism<>(config, feedforward, initialState));
         }
 
-        public static <E extends Enum<E> & SetpointProvider, T extends StatefulElevatorMechanism<E>> MechanismConfig<T> statefulElevator(ElevatorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+        public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulElevatorMechanism<E>> MechanismConfig<T> statefulElevator(ElevatorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
             return custom(factory);
         }
 
-        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StatefulArmMechanism<E>> statefulArm(ArmFeedforward feedforward, E initialState) {
+        public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulArmMechanism<E>> statefulArm(ArmFeedforward feedforward, E initialState) {
             return custom(config -> new StatefulArmMechanism<>(config, feedforward, initialState));
         }
 
-        public static <E extends Enum<E> & SetpointProvider, T extends StatefulArmMechanism<E>> MechanismConfig<T> statefulArm(ArmFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+        public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulArmMechanism<E>> MechanismConfig<T> statefulArm(ArmFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
             return custom(factory);
         }
 
-        public static <E extends Enum<E> & SetpointProvider> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(SimpleMotorFeedforward feedforward, E initialState) {
+        public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(SimpleMotorFeedforward feedforward, E initialState) {
             return custom(config -> new StatefulTurretMechanism<>(config, feedforward, initialState));
         }
 
-        public static <E extends Enum<E> & SetpointProvider, T extends StatefulTurretMechanism<E>> MechanismConfig<T> statefulTurret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+        public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulTurretMechanism<E>> MechanismConfig<T> statefulTurret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
             return custom(factory);
         }
 
@@ -401,9 +401,9 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
         throw new UnsupportedOperationException("Unimplemented method 'shuffleboard'");
     }
 
-    public static class StatefulMechanism<E extends Enum<E> & SetpointProvider> extends Mechanism {
+    public static class StatefulMechanism<E extends Enum<E> & SetpointProvider<Double>> extends Mechanism {
         
-        private final StateMachine<E> stateMachine;
+        private final StateMachine<Double, E> stateMachine;
 
         public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
             super(config);
@@ -421,7 +421,7 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
             super.update();
         }
 
-        public StateMachine<E> getStateMachine() {
+        public StateMachine<Double, E> getStateMachine() {
             return stateMachine;
         }
 

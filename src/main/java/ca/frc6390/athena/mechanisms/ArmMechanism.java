@@ -18,9 +18,9 @@ public class ArmMechanism extends Mechanism {
     }
 
 
-    public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider> extends ArmMechanism {
+    public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ArmMechanism {
 
-        private final StateMachine<E> stateMachine;
+        private final StateMachine<Double, E> stateMachine;
 
         public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config,ArmFeedforward feedforward, E initialState) {
             super(config, feedforward);
@@ -38,7 +38,7 @@ public class ArmMechanism extends Mechanism {
             super.update();
         }
 
-        public StateMachine<E> getStateMachine() {
+        public StateMachine<Double, E> getStateMachine() {
             return stateMachine;
         }
     }

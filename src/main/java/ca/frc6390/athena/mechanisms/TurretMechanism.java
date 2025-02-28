@@ -17,9 +17,9 @@ public class TurretMechanism  extends Mechanism  {
         return isUseVoltage() ? value : value / 12d;
     }
 
-    public static class StatefulTurretMechanism<E extends Enum<E> & SetpointProvider> extends TurretMechanism {
+    public static class StatefulTurretMechanism<E extends Enum<E> & SetpointProvider<Double>> extends TurretMechanism {
     
-        private final StateMachine<E> stateMachine;
+        private final StateMachine<Double, E> stateMachine;
 
         public StatefulTurretMechanism(MechanismConfig<StatefulTurretMechanism<E>> config,SimpleMotorFeedforward feedforward, E initialState) {
             super(config, feedforward);
@@ -37,7 +37,7 @@ public class TurretMechanism  extends Mechanism  {
             super.update();
         }
 
-        public StateMachine<E> getStateMachine() {
+        public StateMachine<Double, E> getStateMachine() {
             return stateMachine;
         }
     }
