@@ -79,6 +79,10 @@ public class SwerveModule implements RobotSendableDevice {
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setInverted(inverted)); 
         }
 
+        public SwerveModuleConfig setCurrentLimit(double currentLimit) {
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setCurrentLimit(currentLimit), rotationMotor.setCurrentLimit(currentLimit),rotationPID, encoder); 
+        }
+
         public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
             Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, wheelbase/2);
             Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, -wheelbase/2);

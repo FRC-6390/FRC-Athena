@@ -14,6 +14,7 @@ import ca.frc6390.athena.sensors.camera.photonvision.PhotonVision;
 import ca.frc6390.athena.sensors.camera.photonvision.PhotonVisionConfig;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.Timer;
 
 public class RobotVision {
    
@@ -112,7 +113,7 @@ public class RobotVision {
    }
 
    public void setLimelightRobotPoses(BiConsumer<Pose2d, Double> estimator){
-      getLimelights().values().stream().filter(ll -> ll.hasValidTarget()).forEach(ll -> estimator.accept(ll.getLocalizationPose(), ll.getLocalizationLatency()));
+      getLimelights().values().stream().filter(ll -> ll.hasValidTarget()).forEach(ll -> estimator.accept(ll.getLocalizationPose(), Timer.getFPGATimestamp() - (ll.getLocalizationLatency()/1000.0)));
    }
 
    public ArrayList<Pose2d> getPhotonVisionPoses(){
@@ -120,7 +121,12 @@ public class RobotVision {
    }
 
    public void setPhotonVisionPoses(BiConsumer<Pose2d, Double> estimator){
-      getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget()).forEach(pv -> estimator.accept(pv.getLocalizationPose(), pv.getLocalizationLatency()));
+      getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget()).forEach((pv) ->  {
+            Pose2d pose = pv.getLocalizationPose();
+            if(pose == null) return;
+            estimator.accept(pose, Timer.getFPGATimestamp() - pv.getLocalizationLatency());
+         }
+      );
    }
 
    public ArrayList<Pose2d> getLocalizationPoses(){

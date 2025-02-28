@@ -30,11 +30,11 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
         super(config.table());
         this.config = config;
         this.pose = config.cameraRobotSpace();
-        this.estimator = new PhotonPoseEstimator(AprilTagFieldLayout.loadField(AprilTagFields.k2025ReefscapeWelded), PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, pose);
+        this.estimator = new PhotonPoseEstimator(AprilTagFieldLayout.loadField(AprilTagFields.k2025ReefscapeWelded), config.poseStrategy() , pose);
     }
 
     public PhotonVision(String table, Transform3d pose) {
-        this(new PhotonVisionConfig(table, pose));
+        this(new PhotonVisionConfig(table, pose,PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR ));
     }
 
     public PhotonVisionConfig getConfig() {
@@ -45,17 +45,22 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
     public Pose2d getLocalizationPose() {
          Optional<EstimatedRobotPose> visionEst = Optional.empty();
          if(!isConnected()) return null;
-        for (var change : getAllUnreadResults()) {
-            
-            change.getTimestampSeconds();
+        for (var change : getAllUnreadResults()) {            
             visionEst = estimator.update(change);
         }
 
-        return visionEst.get().estimatedPose.toPose2d();
+        if (visionEst.isPresent()) {
+            return visionEst.get().estimatedPose.toPose2d();
+        }
+
+        return null;
     }
 
     @Override
     public double getLocalizationLatency() {
+        for (var change : getAllUnreadResults()) {
+            return change.getTimestampSeconds();
+        }
         return 0;
     }
 

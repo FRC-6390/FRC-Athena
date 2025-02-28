@@ -1,12 +1,14 @@
 package ca.frc6390.athena.core;
 
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.FollowPathCommand;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
+import com.pathplanner.lib.util.DriveFeedforwards;
 
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import choreo.auto.AutoFactory;
@@ -86,11 +88,13 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     private PIDController rotationController, translationController;
     private AutoFactory factory;
 
+    private BiConsumer<ChassisSpeeds, DriveFeedforwards> autoDrive;
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
         this.localizationConfig = config;
         this.fieldPose = pose;
         this.relativePose = pose;
+        this.autoDrive = (speeds, feed) ->  drivetrain.getRobotSpeeds().setAutoSpeeds(speeds);
       
         this.drivetrain = drivetrain;
         this.vision = vision;
@@ -136,7 +140,15 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         return this;
     }
 
+    public void setAutoDrive(BiConsumer<RobotSpeeds, ChassisSpeeds> autoDrive) {
+        this.autoDrive = (speeds, feeds) -> autoDrive.accept(drivetrain.getRobotSpeeds(), speeds);
+    }
+
     public RobotLocalization configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants){
+      return configurePathPlanner(translationConstants, rotationConstants, autoDrive);
+    }
+
+    public RobotLocalization configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants, BiConsumer<ChassisSpeeds, DriveFeedforwards> output){
         try{
             robotConfig = RobotConfig.fromGUISettings();  }catch(Exception e){
             DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", e.getStackTrace());
@@ -145,7 +157,7 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
             this::getFieldPose, 
             this::resetFieldPose, 
             () -> drivetrain.getRobotSpeeds().getDriverSpeeds(), 
-            (speeds, feedforwards) -> drivetrain.getRobotSpeeds().setAutoSpeeds(speeds), 
+            output, 
             new PPHolonomicDriveController(
             translationConstants,
             rotationConstants

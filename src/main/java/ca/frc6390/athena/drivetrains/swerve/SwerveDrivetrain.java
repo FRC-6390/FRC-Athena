@@ -50,7 +50,6 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
         this(new IMUConfig(imu));
     }
 
-
     public SwerveDrivetrainConfig(IMUType imu, boolean inverted){
       this(new IMUConfig(imu).setInverted(inverted));
   }
@@ -210,6 +209,15 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
 
     public SwerveDrivetrainConfig setFieldRelative(boolean fieldRelative){
       return new SwerveDrivetrainConfig(imu, modules, drift, driftActivationSpeed, fieldRelative);
+    }
+
+    public SwerveDrivetrainConfig setCurrentLimit(double currentLimit){
+  
+      for (int i = 0; i < modules.length; i++) {
+        modules[i] = modules[i].setCurrentLimit(currentLimit);
+      } 
+
+      return this;
     }
 
     @Override

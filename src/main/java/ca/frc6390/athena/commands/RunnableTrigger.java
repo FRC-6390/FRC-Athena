@@ -204,7 +204,7 @@ public class RunnableTrigger extends Trigger {
    * @return A trigger which is active when both component triggers are active.
    */
   public RunnableTrigger and(BooleanSupplier trigger) {
-    return (RunnableTrigger) super.and(trigger);
+    return new RunnableTrigger(() -> getAsBoolean() && trigger.getAsBoolean());
   }
 
   /**
@@ -214,7 +214,7 @@ public class RunnableTrigger extends Trigger {
    * @return A trigger which is active when either component trigger is active.
    */
   public RunnableTrigger or(BooleanSupplier trigger) {
-    return (RunnableTrigger) super.or(trigger);
+    return new RunnableTrigger(() -> getAsBoolean() || trigger.getAsBoolean());
   }
 
   /**
