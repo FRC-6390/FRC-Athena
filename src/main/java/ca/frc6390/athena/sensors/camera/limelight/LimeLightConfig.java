@@ -1,5 +1,7 @@
 package ca.frc6390.athena.sensors.camera.limelight;
 
+import com.revrobotics.spark.config.LimitSwitchConfig;
+
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatencyType;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -27,6 +29,10 @@ public record LimeLightConfig(String table, Transform3d cameraRobotSpace, PoseEs
 
     public LimeLightConfig setYawRelativeToForwards(double degrees){
         return new LimeLightConfig(table, new Transform3d(cameraRobotSpace.getTranslation(), new Rotation3d(cameraRobotSpace.getRotation().getX(), cameraRobotSpace.getRotation().getY(), degrees)), localizationEstimator);
+    }
+
+    public LimeLightConfig setPosezestimateType(PoseEstimateWithLatencyType localizationEstimator){
+        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator);
     }
     
     @Override
