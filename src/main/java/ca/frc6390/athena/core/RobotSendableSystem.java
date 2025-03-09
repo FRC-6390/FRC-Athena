@@ -10,8 +10,9 @@ public interface RobotSendableSystem {
       ShuffleboardLayout shuffleboard(ShuffleboardLayout layout);
     }
     
-    default ShuffleboardTab shuffleboard(String tab) {
-      return shuffleboard(Shuffleboard.getTab(tab));
+    default RobotSendableSystem shuffleboard(String tab) {
+      shuffleboard(Shuffleboard.getTab(tab));
+      return this;
     }
 
     ShuffleboardTab shuffleboard(ShuffleboardTab tab);

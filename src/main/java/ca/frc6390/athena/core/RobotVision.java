@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
+import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLightConfig;
 import ca.frc6390.athena.sensors.camera.photonvision.PhotonVision;
@@ -20,7 +21,7 @@ public class RobotVision {
    
    public record RobotVisionConfig(ArrayList<LimeLightConfig> limelight, ArrayList<PhotonVisionConfig> photon) {
 
-      public static RobotVisionConfig blank(){
+      public static RobotVisionConfig defualt(){
          return new RobotVisionConfig(new ArrayList<>(), new ArrayList<>());
       }
 
@@ -41,6 +42,29 @@ public class RobotVision {
 
       public RobotVisionConfig addPhotonVision(PhotonVisionConfig config){
          photon.add(config);
+         return this;
+      }
+
+      @SafeVarargs
+      public final <T extends ConfigurableCamera> RobotVisionConfig addCameras(T... configs){
+         
+         for (ConfigurableCamera c : configs) {
+            addCamera(c);
+         }
+
+         return this;
+      }
+
+      public <T extends ConfigurableCamera> RobotVisionConfig addCamera(T config){
+       
+         if (config instanceof LimeLightConfig){
+            limelight.add((LimeLightConfig)config);
+         }
+
+         if (config instanceof PhotonVisionConfig){
+            photon.add((PhotonVisionConfig)config);
+         }
+
          return this;
       }
 

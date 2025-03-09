@@ -35,6 +35,14 @@ public class SwerveModule implements RobotSendableDevice {
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setCanbus(canbus), rotationMotor.setCanbus(canbus), rotationPID, encoder.setCanbus(canbus));
         }
 
+        public SwerveModuleConfig setP(double kP){
+            return setPID(new PIDController(kP,0,0));
+        }
+
+        public SwerveModuleConfig setPID(double kP, double kI, double kD){
+            return setPID(new PIDController(kP, kI, kD));
+        }
+
         public SwerveModuleConfig setPID(PIDController rotationPID){
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder);
         }

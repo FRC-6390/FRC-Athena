@@ -22,7 +22,7 @@ public class TankDrivetrain extends SubsystemBase implements RobotDrivetrain<Tan
     public record TankDriveConfig(IMUConfig imu, double maxVelocity) implements RobotDrivetrainConfig<TankDrivetrain> {
 
         @Override
-        public TankDrivetrain create() {
+        public TankDrivetrain build() {
             return new TankDrivetrain(IMU.fromConfig(imu), maxVelocity);
         }
     }

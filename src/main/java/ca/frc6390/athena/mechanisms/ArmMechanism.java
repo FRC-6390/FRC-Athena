@@ -17,7 +17,11 @@ public class ArmMechanism extends Mechanism {
         return isUseVoltage() ? value : value / 12d;
     }
 
-
+    @Override
+    public ArmMechanism shuffleboard(String tab) {
+        return (ArmMechanism) super.shuffleboard(tab);
+    }
+    
     public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ArmMechanism {
 
         private final StateMachine<Double, E> stateMachine;
@@ -40,6 +44,12 @@ public class ArmMechanism extends Mechanism {
 
         public StateMachine<Double, E> getStateMachine() {
             return stateMachine;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public StatefulArmMechanism<E> shuffleboard(String tab) {
+            return (StatefulArmMechanism<E>) super.shuffleboard(tab);
         }
     }
 }

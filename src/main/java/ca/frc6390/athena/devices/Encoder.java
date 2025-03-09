@@ -1,5 +1,6 @@
 package ca.frc6390.athena.devices;
 
+import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
 
@@ -7,6 +8,7 @@ import com.ctre.phoenix6.configs.CANcoderConfiguration;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.revrobotics.AbsoluteEncoder;
+import com.revrobotics.REVLibError;
 import com.revrobotics.RelativeEncoder;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
@@ -19,6 +21,7 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class Encoder implements RobotSendableDevice{
 
     private final DoubleConsumer setPosition;
+    private final BooleanSupplier getIsConnected;
     private final DoubleSupplier getPosition, getAbsolutePosition, getVelocity;
     private double absolutePosition = 0, position = 0, velocity = 0, gearRatio = 1, offset = 0, conversion = 1, conversionOffset = 1;
     private boolean inverted = false;
@@ -84,6 +87,7 @@ public class Encoder implements RobotSendableDevice{
         getPosition = () -> motor.getPosition(true).getValueAsDouble();
         setPosition = (val) -> motor.setPosition(val);
         getVelocity = () -> motor.getRotorVelocity(true).getValueAsDouble();
+        getIsConnected = () -> motor.isConnected();
     }
     
 
@@ -92,6 +96,7 @@ public class Encoder implements RobotSendableDevice{
         getPosition = () -> encoder.getPosition(true).getValueAsDouble();
         setPosition = (val) -> encoder.setPosition(val);
         getVelocity = () -> encoder.getVelocity(true).getValueAsDouble();
+        getIsConnected = () -> encoder.isConnected();
 
         CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
         encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 1;
@@ -99,19 +104,21 @@ public class Encoder implements RobotSendableDevice{
     }
 
     public Encoder(RelativeEncoder relativeEncoder, AbsoluteEncoder absoluteEncoder){
-        this(relativeEncoder::setPosition,absoluteEncoder::getPosition, relativeEncoder::getPosition, relativeEncoder::getVelocity);
+        this(relativeEncoder::setPosition,absoluteEncoder::getPosition, relativeEncoder::getPosition, relativeEncoder::getVelocity, () -> relativeEncoder.setPosition(relativeEncoder.getPosition()).equals(REVLibError.kCANDisconnected));
+        
     }
 
     public Encoder(edu.wpi.first.wpilibj.Encoder encoder, double dpp){
-        this( (val) -> encoder.reset(), encoder::getRaw, encoder::getDistance, encoder::getRate);
+        this( (val) -> encoder.reset(), encoder::getRaw, encoder::getDistance, encoder::getRate, () -> true);
         encoder.setDistancePerPulse(dpp);
     }
 
-    public Encoder(DoubleConsumer setPosition, DoubleSupplier getAbsolutePosition, DoubleSupplier getPosition, DoubleSupplier getVelocity){
+    public Encoder(DoubleConsumer setPosition, DoubleSupplier getAbsolutePosition, DoubleSupplier getPosition, DoubleSupplier getVelocity, BooleanSupplier getIsConnected){
         this.getAbsolutePosition = getAbsolutePosition;
         this.getPosition = getPosition;
         this.getVelocity = getVelocity;
         this.setPosition = setPosition;
+        this.getIsConnected = getIsConnected;
     }
 
     public static Encoder newCTRECANCoder(int id){
@@ -281,6 +288,10 @@ public class Encoder implements RobotSendableDevice{
         return getRate() * conversion;
     }
 
+    public boolean isConnected(){
+        return getIsConnected.getAsBoolean();
+    }
+
     public Encoder update() {
         position = inverted ? -getPosition.getAsDouble() : getPosition.getAsDouble();
         velocity = inverted ? -getVelocity.getAsDouble() : getVelocity.getAsDouble();
@@ -295,7 +306,6 @@ public class Encoder implements RobotSendableDevice{
     public void setRaw(double raw){
         setPosition.accept(raw);
     }
-
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {

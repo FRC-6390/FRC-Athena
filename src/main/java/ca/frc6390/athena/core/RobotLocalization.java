@@ -29,10 +29,10 @@ import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 public class RobotLocalization extends SubsystemBase implements RobotSendableSystem{
     
-    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, double v2XStd, double v2YStda, double v2ThetaStd, PIDConstants translation, PIDConstants rotation, boolean useVision ,double slipThresh) {
+    public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, double v2XStd, double v2YStda, double v2ThetaStd, PIDConstants translation, PIDConstants rotation, boolean useVision) {
 
         public RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd) {
-            this(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, vXStd, vYStda, vThetaStd, new PIDConstants(0), new PIDConstants(0), true,0.2);
+            this(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, vXStd, vYStda, vThetaStd, new PIDConstants(0), new PIDConstants(0), true);
         }
 
         public RobotLocalizationConfig(double xStd, double yStd, double thetaStd) {
@@ -43,20 +43,32 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
             this(0.1,0.1,0.001);
         }
 
+        public static RobotLocalizationConfig vision(double vXStd, double vYStda, double vThetaStd){
+            return new RobotLocalizationConfig().setVision(vXStd, vYStda, vThetaStd).setVisionEnabled(true);
+        }
+
+        public static RobotLocalizationConfig defualt(){
+            return new RobotLocalizationConfig();
+        }
+
+        public RobotLocalizationConfig setAutoPlannerPID(double tP, double tI, double tD, double rP, double rI, double rD){
+            return setAutoPlannerPID(new PIDConstants(tP, tI, tD), new PIDConstants(rP, rI, rD));
+        }
+
         public RobotLocalizationConfig setAutoPlannerPID(PIDConstants translation, PIDConstants rotation){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision);
         }
 
         public RobotLocalizationConfig setVision(double vXStd, double vYStda, double vThetaStd){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision);
         }
 
         public RobotLocalizationConfig setVisionMultitag(double v2XStd, double v2YStda, double v2ThetaStd){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision);
         }
 
         public RobotLocalizationConfig setVisionEnabled(boolean useVision){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
+            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision);
         }
 
         public Matrix<N3, N1> getStd(){
@@ -68,10 +80,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         }
         public Matrix<N3, N1> getVisionMultitagStd(){
             return VecBuilder.fill(v2XStd,v2YStda,Units.degreesToRadians(v2ThetaStd));
-        }
-
-        public RobotLocalizationConfig setSlipThresh(double slipThresh){
-            return new RobotLocalizationConfig(xStd, yStd, thetaStd, vXStd, vYStda, vThetaStd, v2XStd, v2YStda, v2ThetaStd, translation, rotation, useVision,slipThresh);
         }
     }
 

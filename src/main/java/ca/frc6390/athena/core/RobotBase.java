@@ -5,8 +5,10 @@ import ca.frc6390.athena.commands.movement.RotateToPoint;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
+import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
-import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain.SwerveDrivetrainConfig;
+import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrainConfig;
+import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -28,6 +30,10 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
             return new RobotBaseConfig<>(driveTrain, localizationConfig, visionConfig);
         }
 
+        public RobotBaseConfig<T> setVision(ConfigurableCamera... cameras){
+            return new RobotBaseConfig<>(driveTrain, localizationConfig, RobotVisionConfig.defualt().addCameras(cameras));
+        }
+
         public RobotBase<T> create(){
             return new RobotBase<>(this);
         }
@@ -38,7 +44,7 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
     private final RobotVision vision;
 
     public RobotBase(RobotBaseConfig<T> config){
-        drivetrain = config.driveTrain.create();
+        drivetrain = config.driveTrain.build();
         localization = config.localizationConfig != null ? drivetrain.localization(config.localizationConfig()) : null;
         vision = config.visionConfig != null ? RobotVision.fromConfig(config.visionConfig) : null; 
 
@@ -138,5 +144,9 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
 
     public RobotSpeeds getRobotSpeeds(){
         return drivetrain.getRobotSpeeds();
+    }
+
+    public IMU getIMU(){
+        return drivetrain.getIMU();
     }
 }

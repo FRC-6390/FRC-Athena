@@ -34,7 +34,7 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
     }
 
     public PhotonVision(String table, Transform3d pose) {
-        this(PhotonVisionConfig.transform(pose).setTable(table));
+        this(PhotonVisionConfig.table(table).setCameraRobotSpace(pose));
     }
 
     public PhotonVisionConfig getConfig() {

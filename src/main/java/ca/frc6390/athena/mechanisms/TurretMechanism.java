@@ -17,6 +17,11 @@ public class TurretMechanism  extends Mechanism  {
         return isUseVoltage() ? value : value / 12d;
     }
 
+    @Override
+    public TurretMechanism shuffleboard(String tab) {
+        return (TurretMechanism) super.shuffleboard(tab);
+    }
+
     public static class StatefulTurretMechanism<E extends Enum<E> & SetpointProvider<Double>> extends TurretMechanism {
     
         private final StateMachine<Double, E> stateMachine;
@@ -39,6 +44,12 @@ public class TurretMechanism  extends Mechanism  {
 
         public StateMachine<Double, E> getStateMachine() {
             return stateMachine;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public StatefulTurretMechanism<E> shuffleboard(String tab) {
+            return (StatefulTurretMechanism<E>) super.shuffleboard(tab);
         }
     }
 }

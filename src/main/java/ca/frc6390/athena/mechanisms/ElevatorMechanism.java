@@ -16,8 +16,12 @@ public class ElevatorMechanism extends Mechanism{
         double value = feedforward.calculate(getVelocity());
         return isUseVoltage() ? value : value / 12d;
     }
-    
 
+    @Override
+    public ElevatorMechanism shuffleboard(String tab) {
+        return (ElevatorMechanism) super.shuffleboard(tab);
+    }
+    
     public static class StatefulElevatorMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ElevatorMechanism {
     
         private final StateMachine<Double, E> stateMachine;
@@ -40,6 +44,12 @@ public class ElevatorMechanism extends Mechanism{
 
         public StateMachine<Double, E> getStateMachine() {
             return stateMachine;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public StatefulElevatorMechanism<E> shuffleboard(String tab) {
+            return (StatefulElevatorMechanism<E>) super.shuffleboard(tab);
         }
     }
 }

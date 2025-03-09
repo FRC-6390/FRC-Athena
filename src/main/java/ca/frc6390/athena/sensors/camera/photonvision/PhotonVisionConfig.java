@@ -19,15 +19,19 @@ public record PhotonVisionConfig(String table, Transform3d cameraRobotSpace, Pos
         return CameraSoftware.PhotonVision;
     }
 
-    public static PhotonVisionConfig transform(Transform3d cameraRobotSpace){
-        return new PhotonVisionConfig("photonvision", cameraRobotSpace, PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, new double[]{}, AprilTagFields.k2025ReefscapeWelded);
-    }
-
-    public static PhotonVisionConfig fieldLayout(AprilTagFields fieldLayout){
-        return new PhotonVisionConfig("photonvision", new Transform3d(), PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, new double[]{}, fieldLayout);
+    public static PhotonVisionConfig table(String table){
+        return new PhotonVisionConfig(table, new Transform3d(), PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, new double[]{}, AprilTagFields.k2025ReefscapeWelded);
     }
 
     public PhotonVisionConfig setFieldLayout(AprilTagFields fieldLayout){
+        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,ignoreTags,fieldLayout);
+    }
+
+    public PhotonVisionConfig setCameraRobotSpace(Transform3d cameraRobotSpace){
+        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,ignoreTags,fieldLayout);
+    }
+
+    public PhotonVisionConfig setCameraRobotSpace(double x){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,ignoreTags,fieldLayout);
     }
 

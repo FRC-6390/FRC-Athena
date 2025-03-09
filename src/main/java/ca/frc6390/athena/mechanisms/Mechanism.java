@@ -263,7 +263,7 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
     private final ProfiledPIDController profiledPIDController;
     private final boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
-    private boolean override;
+    private boolean override, emergancyStopped, pidEnabled, feedforwardEnabled;
     private double setpoint;
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
@@ -291,6 +291,15 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
 
     public void setSpeed(double speed){
         motors.setSpeed(speed);
+    }
+
+    /**
+     * Will enable manual override (should not be used unless manual control is wanted, override will not be disabled until done explicitly)
+     * @param speed
+     */
+    public void setMotors(double speed){
+        setOverride(true);
+        setSpeed(speed);
     }
 
     public MotorControllerGroup getMotorGroup(){
@@ -330,6 +339,10 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
         return override;
     }
 
+    public boolean isEmergancyStopped() {
+        return emergancyStopped;
+    }
+
     public void setOverride(boolean override) {
         this.override = override;
     }
@@ -344,6 +357,12 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
 
     public double calculateFeedForward(){
         return 0;
+    }
+
+    public void setEncoderPosition(double position){
+        if(encoder != null){
+            encoder.setPosition(position);
+        }
     }
 
     public double calculatePID(){
@@ -363,10 +382,19 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
     }
 
     public void update(){
-
+        
         if (encoder != null) encoder.update();
 
         if (override || encoder == null){
+            return;
+        }
+        
+        if (!encoder.isConnected()) {
+            emergancyStopped = true;
+        }
+
+        if(emergancyStopped){
+            motors.stopMotors();
             return;
         }
 
@@ -393,6 +421,11 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
     @Override
     public void periodic() {
         update();
+    }
+
+    @Override
+    public Mechanism shuffleboard(String tab) {
+        return (Mechanism) RobotSendableSystem.super.shuffleboard(tab);
     }
 
     @Override
@@ -423,6 +456,12 @@ public class Mechanism implements Subsystem, RobotSendableSystem{
 
         public StateMachine<Double, E> getStateMachine() {
             return stateMachine;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public StatefulMechanism<E> shuffleboard(String tab) {
+            return (StatefulMechanism<E>) super.shuffleboard(tab);
         }
 
     }

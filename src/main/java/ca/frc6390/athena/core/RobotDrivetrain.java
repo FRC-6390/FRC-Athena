@@ -11,7 +11,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSendableSystem {
     
     public interface RobotDrivetrainConfig<T extends RobotDrivetrain<T>> {
-        T create();
+        T build();
     }
 
     T get();
@@ -28,7 +28,7 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
 
     RobotLocalization localization(RobotLocalizationConfig config);
 
-    public class RobotDriveTrainIDs {
+    public class RobotDrivetrainIDs {
 
         public enum DrivetrainIDs {
             SWERVE_CHASSIS_STANDARD(DriveIDs.SWERVE_CHASSIS_STANDARD, SteerIDs.SWERVE_CHASSIS_STANDARD, EncoderIDs.SWERVE_CHASSIS_STANDARD, 0),

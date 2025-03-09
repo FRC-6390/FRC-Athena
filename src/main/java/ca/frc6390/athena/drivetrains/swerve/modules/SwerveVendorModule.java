@@ -1,6 +1,6 @@
 package ca.frc6390.athena.drivetrains.swerve.modules;
 
-import ca.frc6390.athena.core.RobotDrivetrain.RobotDriveTrainIDs.DrivetrainIDs;
+import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs;
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.MotorController;
 import ca.frc6390.athena.devices.Encoder.EncoderConfig;
@@ -23,6 +23,10 @@ public interface SwerveVendorModule {
             double wheelRPM = motorRPM * getDriveGearRatio();
 
             return wheelCircumferenceMeters * (wheelRPM / 60.0);
+        }
+
+        default SwerveModuleConfig defualt(){
+            return config(null);
         }
 
         default SwerveModuleConfig config(MotorController.Motor drive, MotorController.Motor steer){
