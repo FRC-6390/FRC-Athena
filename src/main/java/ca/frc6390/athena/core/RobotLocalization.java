@@ -97,7 +97,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         this.autoDrive = (speeds, feed) ->  drivetrain.getRobotSpeeds().setAutoSpeeds(speeds);
       
         this.drivetrain = drivetrain;
-        this.vision = vision;
         this.field = new Field2d();
 
         this.visionEnabled = config.useVision;
@@ -115,7 +114,8 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
 
         if(config.rotation != null && config.translation != null){
             configurePathPlanner(config.translation, config.rotation);
-        }        
+        }  
+        setRobotVision(vision);      
     }
 
     public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config) {
@@ -227,7 +227,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         resetFieldPose(new Pose2d(0,0, new Rotation2d(0)));
     }
 
-
     public void resetRelativePose(Pose2d pose, Rotation2d heading) {
         drivetrain.getIMU().setVirtualAxis("relative", heading);
         relativeEstimator.resetPosition(heading.unaryMinus(), drivetrain.getSwerveModulePositions(), pose);
@@ -262,9 +261,8 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         
         if(vision != null && visionEnabled) {
             vision.setRobotOrientation(drivetrain.getIMU().getVirtualAxis("field"));
-            
+            vision.getLimelights().forEach((table, ll) -> ll.setFiducialIdFilters(ll.config.ignoreTags()));
             List<Pose2d> poses = vision.getLocalizationPoses();
-
             SmartDashboard.putNumber("Localization Poses", poses.size());
             if(poses.size() < 2){
                 fieldEstimator.setVisionMeasurementStdDevs(localizationConfig.getVisionMultitagStd());

@@ -106,6 +106,8 @@ public class RobotVision {
    public void setRobotOrientation(Rotation2d yaw){
       Double[] orientation = {yaw.getDegrees(),0d,0d,0d,0d,0d};
       getLimelights().values().forEach(ll -> ll.setRobotOrientation(orientation));
+      getPhotonVisions().values().forEach(pv -> pv.setRobotOrientation(orientation));
+
    }
 
    public ArrayList<Pose2d> getLimelightRobotPoses(){

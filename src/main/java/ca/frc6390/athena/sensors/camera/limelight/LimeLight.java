@@ -263,6 +263,8 @@ public class LimeLight implements LocalizationCamera{
         cx1 = limelightTable.getEntry("cx1");
         cy1 = limelightTable.getEntry("cy1");
         rawfiducials =  limelightTable.getEntry("rawfiducials");
+
+        setFiducialIdFilters(config.ignoreTags());
     }
     
     
@@ -477,5 +479,13 @@ public class LimeLight implements LocalizationCamera{
     @Override
     public Pose2d getLocalizationPose() {
         return getPoseEstimate(config.localizationEstimator()).getLocalizationPose(); 
+    }
+
+    public void setFiducialIdFilters(double[] array){
+        fiducial_id_filters_set.setDoubleArray(array);
+    }
+
+    public Double[] getFiducialIdFilters(){
+        return fiducial_id_filters_set.getDoubleArray(new Double[]{});
     }
 }

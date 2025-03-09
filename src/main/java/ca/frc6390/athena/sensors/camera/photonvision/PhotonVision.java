@@ -6,14 +6,14 @@ import java.util.Optional;
 import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonCamera;
 import org.photonvision.PhotonPoseEstimator;
-import org.photonvision.PhotonPoseEstimator.PoseStrategy;
 import org.photonvision.targeting.PhotonPipelineResult;
 
 import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform3d;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
-import edu.wpi.first.apriltag.AprilTagFields;
 
 
 public class PhotonVision extends PhotonCamera implements LocalizationCamera{
@@ -30,11 +30,11 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
         super(config.table());
         this.config = config;
         this.pose = config.cameraRobotSpace();
-        this.estimator = new PhotonPoseEstimator(AprilTagFieldLayout.loadField(AprilTagFields.k2025ReefscapeWelded), config.poseStrategy() , pose);
+        this.estimator = new PhotonPoseEstimator(AprilTagFieldLayout.loadField(config.fieldLayout()), config.poseStrategy() , pose);
     }
 
     public PhotonVision(String table, Transform3d pose) {
-        this(new PhotonVisionConfig(table, pose,PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR ));
+        this(PhotonVisionConfig.transform(pose).setTable(table));
     }
 
     public PhotonVisionConfig getConfig() {
@@ -42,11 +42,16 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
     }
 
     @Override
+    public void setRobotOrientation(Double[] orientation){
+        estimator.addHeadingData(Timer.getFPGATimestamp(), Rotation2d.fromDegrees(orientation[0]));
+    }
+
+    @Override
     public Pose2d getLocalizationPose() {
-         Optional<EstimatedRobotPose> visionEst = Optional.empty();
-         if(!isConnected()) return null;
-        for (var change : getAllUnreadResults()) {            
-            visionEst = estimator.update(change);
+        Optional<EstimatedRobotPose> visionEst = Optional.empty();
+        if(!isConnected()) return null;
+        for (var change : getAllUnreadResults()) {       
+            visionEst = estimator.update(change);    
         }
 
         if (visionEst.isPresent()) {

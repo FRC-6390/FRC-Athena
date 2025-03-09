@@ -3,10 +3,11 @@ package ca.frc6390.athena.sensors.camera.photonvision;
 import org.photonvision.PhotonPoseEstimator.PoseStrategy;
 
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
+import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform3d;
 
-public record PhotonVisionConfig(String table, Transform3d cameraRobotSpace, PoseStrategy poseStrategy) implements ConfigurableCamera {
+public record PhotonVisionConfig(String table, Transform3d cameraRobotSpace, PoseStrategy poseStrategy, double[] ignoreTags, AprilTagFields fieldLayout) implements ConfigurableCamera {
 
     @Override
     public Rotation2d getYawRelativeToForwards() {
@@ -19,15 +20,27 @@ public record PhotonVisionConfig(String table, Transform3d cameraRobotSpace, Pos
     }
 
     public static PhotonVisionConfig transform(Transform3d cameraRobotSpace){
-        return new PhotonVisionConfig("photonvision", cameraRobotSpace, PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR);
+        return new PhotonVisionConfig("photonvision", cameraRobotSpace, PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, new double[]{}, AprilTagFields.k2025ReefscapeWelded);
+    }
+
+    public static PhotonVisionConfig fieldLayout(AprilTagFields fieldLayout){
+        return new PhotonVisionConfig("photonvision", new Transform3d(), PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, new double[]{}, fieldLayout);
+    }
+
+    public PhotonVisionConfig setFieldLayout(AprilTagFields fieldLayout){
+        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,ignoreTags,fieldLayout);
     }
 
     public PhotonVisionConfig setTable(String table){
-        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy);
+        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,ignoreTags,fieldLayout);
     }
 
     public PhotonVisionConfig setPoseStrategy(PoseStrategy poseStrategy){
-        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy);
+        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,ignoreTags,fieldLayout);
+    }
+
+     public PhotonVisionConfig setLocalizationTagExcludeList(double... ignoreTags){
+        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, ignoreTags,fieldLayout);
     }
 
     @Override
