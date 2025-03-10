@@ -7,7 +7,7 @@ import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotLocalization;
 import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.devices.IMU;
-import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
+import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;

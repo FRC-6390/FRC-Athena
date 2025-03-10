@@ -2,11 +2,11 @@ package ca.frc6390.athena.drivetrains.swerve;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.devices.Encoder;
-import ca.frc6390.athena.devices.Encoder.EncoderConfig;
-import ca.frc6390.athena.devices.Encoder.EncoderType;
+import ca.frc6390.athena.devices.EncoderConfig;
+import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 import ca.frc6390.athena.devices.MotorController;
-import ca.frc6390.athena.devices.MotorController.MotorControllerConfig;
-import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
+import ca.frc6390.athena.devices.MotorControllerConfig;
+import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 
 import java.util.Map;
 
@@ -28,7 +28,7 @@ public class SwerveModule implements RobotSendableDevice {
     // SWERVE MOTOR RECORD
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder) {
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID) {
-            this(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, rotationMotor.encoderConfig());
+            this(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, rotationMotor.encoderConfig);
         }
 
         public SwerveModuleConfig setCanbus(String canbus){

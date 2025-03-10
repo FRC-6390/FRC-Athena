@@ -5,7 +5,7 @@ import java.util.function.DoubleSupplier;
 import ca.frc6390.athena.controllers.EnhancedXboxController;
 import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.devices.IMU;
-import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
+import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import edu.wpi.first.wpilibj2.command.Command;
 
 public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSendableSystem {

@@ -2,7 +2,7 @@ package ca.frc6390.athena.commands.control;
 
 import java.util.function.DoubleSupplier;
 
-import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
+import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.drivetrains.tank.TankDrivetrain;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;

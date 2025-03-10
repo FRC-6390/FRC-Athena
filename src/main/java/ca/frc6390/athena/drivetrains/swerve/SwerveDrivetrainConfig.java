@@ -23,7 +23,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     private int[] driveIds = DriveIDs.SWERVE_CHASSIS_STANDARD.getIDs();
     private int[] steerIDs = SteerIDs.SWERVE_CHASSIS_STANDARD.getIDs();
     private int[] encoderIds = EncoderIDs.SWERVE_CHASSIS_STANDARD.getIDs();
-    private boolean steerInverted = false;
+    private boolean steerInverted = true;
     private boolean encoderInverted = false;
     private boolean driveInverted = false;
     private PIDController rotationPID = null;
@@ -101,7 +101,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     } 
 
     public SwerveDrivetrainConfig setEncoderIds(EncoderIDs encoderIds){
-        return setSteerIds(encoderIds.getIDs());
+        return setEncoderIds(encoderIds.getIDs());
     } 
 
     public SwerveDrivetrainConfig setIMUId(int id){
@@ -209,7 +209,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
             }
         } 
 
-        imu.setCanbus(canbus);
+        imu = imu.setCanbus(canbus);
 
         SwerveDrivetrain dt = new SwerveDrivetrain(IMU.fromConfig(imu), modules);
 

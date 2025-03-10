@@ -18,7 +18,7 @@ public class LimeLight implements LocalizationCamera{
     public NetworkTableEntry tync;
     public NetworkTableEntry botpose_targetspace_set;
     public NetworkTableEntry ta;
-    public NetworkTableEntry ts;
+    public NetworkTableEntry t2d;
     public NetworkTableEntry tl;
     public NetworkTableEntry tshort;
     public NetworkTableEntry tlong;
@@ -220,7 +220,7 @@ public class LimeLight implements LocalizationCamera{
         tx = limelightTable.getEntry("tx");
         ty = limelightTable.getEntry("ty");
         ta = limelightTable.getEntry("ta");
-        ts = limelightTable.getEntry("ts");
+        t2d = limelightTable.getEntry("t2d");
         tl = limelightTable.getEntry("tl");
         tshort = limelightTable.getEntry("tshort");
         tlong = limelightTable.getEntry("tlong");
@@ -301,11 +301,14 @@ public class LimeLight implements LocalizationCamera{
         return ta.getDouble(0);
     }
 
+    
      /**
      * Skew or rotation (-90 degrees to 0 degrees)
      */
     public double getTargetSkew(){
-        return ts.getDouble(0);
+        var data = t2d.getDoubleArray(new Double[]{});
+        if(data.length == 0) return 0;
+        return t2d.getDoubleArray(new Double[]{})[16];
     }
 
      /**

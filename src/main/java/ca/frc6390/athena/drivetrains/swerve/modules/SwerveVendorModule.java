@@ -1,11 +1,10 @@
 package ca.frc6390.athena.drivetrains.swerve.modules;
 
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs;
-import ca.frc6390.athena.devices.Encoder;
+import ca.frc6390.athena.devices.EncoderConfig;
+import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 import ca.frc6390.athena.devices.MotorController;
-import ca.frc6390.athena.devices.Encoder.EncoderConfig;
-import ca.frc6390.athena.devices.Encoder.EncoderType;
-import ca.frc6390.athena.devices.MotorController.MotorControllerConfig;
+import ca.frc6390.athena.devices.MotorControllerConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -42,7 +41,7 @@ public interface SwerveVendorModule {
         }
 
         default SwerveModuleConfig config(MotorController.Motor drive,  MotorController.Motor steer, EncoderType type){
-            return config(null, drive, -1, steer, -1).setEncoder(new EncoderConfig(type).setGearRatio(getEncoderGearRatio()));
+            return config(null, drive, -1, steer, -1).setEncoder(EncoderConfig.type(type).setGearRatio(getEncoderGearRatio()));
         }       
 
         default SwerveModuleConfig config(MotorController.Motor motor, int drive, int steer){
@@ -55,9 +54,9 @@ public interface SwerveVendorModule {
 
         default SwerveModuleConfig config(Translation2d location, MotorController.Motor driveMotor, int drive, MotorController.Motor steerMotor, int steer){
     
-            MotorControllerConfig driveMotorController = new MotorControllerConfig(driveMotor.getMotorControllerType(), drive).withEncoderConfig(new EncoderConfig().setConversion(Math.PI * getWheelDiameter()).setGearRatio(getDriveGearRatio()));
+            MotorControllerConfig driveMotorController = new MotorControllerConfig(driveMotor.getMotorControllerType(), drive).setEncoderConfig(new EncoderConfig().setConversion(Math.PI * getWheelDiameter()).setGearRatio(getDriveGearRatio()));
 
-            MotorControllerConfig steerMotorController = new MotorControllerConfig(steerMotor.getMotorControllerType(), steer).withEncoderConfig(new EncoderConfig().setGearRatio(getSteerGearRatio()));
+            MotorControllerConfig steerMotorController = new MotorControllerConfig(steerMotor.getMotorControllerType(), steer).setEncoderConfig(new EncoderConfig().setGearRatio(getSteerGearRatio()));
 
             SwerveModuleConfig moduleConfig = new SwerveModuleConfig(location, getWheelDiameter(), getFreeSpeed(driveMotor), driveMotorController, steerMotorController, null);
            
@@ -68,11 +67,11 @@ public interface SwerveVendorModule {
             return config(location, driveMotor, drive, steerMotor, steer).setPID(rotationPID);
         }
 
-        default SwerveModuleConfig config(Translation2d location, MotorController.Motor driveMotor, int drive, MotorController.Motor steerMotor, int steer, PIDController rotationPID, Encoder.EncoderType encoderType, int encoder){
-            return config(location, driveMotor, drive, steerMotor, steer, rotationPID).setEncoder(new EncoderConfig(encoderType, encoder));
+        default SwerveModuleConfig config(Translation2d location, MotorController.Motor driveMotor, int drive, MotorController.Motor steerMotor, int steer, PIDController rotationPID, EncoderType encoderType, int encoder){
+            return config(location, driveMotor, drive, steerMotor, steer, rotationPID).setEncoder(EncoderConfig.type(encoderType, encoder));
         }
 
-        default SwerveModuleConfig[] configs(Translation2d[] locations, MotorController.Motor driveMotor, int[] drive, MotorController.Motor steerMotor, int[] steer, PIDController rotationPID, Encoder.EncoderType encoderType, int[] encoders){
+        default SwerveModuleConfig[] configs(Translation2d[] locations, MotorController.Motor driveMotor, int[] drive, MotorController.Motor steerMotor, int[] steer, PIDController rotationPID, EncoderType encoderType, int[] encoders){
             if (locations.length != drive.length || locations.length != steer.length || locations.length != encoders.length) {
                 throw new Error("ARRAY LENGTHS DO NOT MATCH TO GENERATE SWERVEMODULE CONFIGS");
             }
@@ -86,27 +85,27 @@ public interface SwerveVendorModule {
             return result;            
         }
 
-        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, Translation2d[] locations, MotorController.Motor driveMotor, MotorController.Motor steerMotor, Encoder.EncoderType encoderType, PIDController rotationPID){
+        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, Translation2d[] locations, MotorController.Motor driveMotor, MotorController.Motor steerMotor, EncoderType encoderType, PIDController rotationPID){
            return configs(locations, driveMotor, IDs.getDrive().getIDs(), steerMotor, IDs.getSteer().getIDs(), rotationPID, encoderType, IDs.getEncoders().getIDs());        
         }
 
-        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, Translation2d[] locations, MotorController.Motor motor, Encoder.EncoderType encoderType, PIDController rotationPID){
+        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, Translation2d[] locations, MotorController.Motor motor, EncoderType encoderType, PIDController rotationPID){
             return configs(locations, motor, IDs.getDrive().getIDs(), motor, IDs.getSteer().getIDs(), rotationPID, encoderType, IDs.getEncoders().getIDs());        
          }
 
-        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, double trackWidth, MotorController.Motor motor, Encoder.EncoderType encoderType, PIDController rotationPID){
+        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, double trackWidth, MotorController.Motor motor, EncoderType encoderType, PIDController rotationPID){
             return configs(IDs, wheelbase, trackWidth, motor, motor, encoderType, rotationPID);        
         }
 
-        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, MotorController.Motor motor, Encoder.EncoderType encoderType, PIDController rotationPID){
+        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, MotorController.Motor motor, EncoderType encoderType, PIDController rotationPID){
             return configs(IDs, wheelbase, wheelbase, motor, motor, encoderType, rotationPID);        
         }
 
-        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, MotorController.Motor driveMotor, MotorController.Motor steerMotor, Encoder.EncoderType encoderType, PIDController rotationPID){
+        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, MotorController.Motor driveMotor, MotorController.Motor steerMotor, EncoderType encoderType, PIDController rotationPID){
             return configs(IDs, wheelbase, wheelbase, driveMotor, steerMotor, encoderType, rotationPID);        
         }
 
-        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, double trackWidth, MotorController.Motor driveMotor, MotorController.Motor steerMotor, Encoder.EncoderType encoderType, PIDController rotationPID){
+        default SwerveModuleConfig[] configs(DrivetrainIDs IDs, double wheelbase, double trackWidth, MotorController.Motor driveMotor, MotorController.Motor steerMotor, EncoderType encoderType, PIDController rotationPID){
             return configs(SwerveModuleConfig.generateModuleLocations(trackWidth, wheelbase), driveMotor, IDs.getDrive().getIDs(), steerMotor, IDs.getSteer().getIDs(), rotationPID, encoderType, IDs.getEncoders().getIDs());        
         }
 }

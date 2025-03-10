@@ -14,6 +14,7 @@ import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
@@ -25,62 +26,9 @@ public class Encoder implements RobotSendableDevice{
     private final DoubleSupplier getPosition, getAbsolutePosition, getVelocity;
     private double absolutePosition = 0, position = 0, velocity = 0, gearRatio = 1, offset = 0, conversion = 1, conversionOffset = 1;
     private boolean inverted = false;
-
-    public enum EncoderType {
-        None,
-        CTRETalonFX,
-        CTRECANcoder,
-        REVSparkFlex,
-        REVSparkMax,
-        WPILibEncoder,
-    }
-
-    public record EncoderConfig(EncoderType type, int id, String canbus, double gearRatio, double offset, double conversion, boolean inverted, double conversionOffset) {
-
-        public EncoderConfig(){
-            this(EncoderType.None, -1, "rio", 1, 0, 1, false,0);
-        }
-        
-        public EncoderConfig(EncoderType type){
-            this(type, -1, "rio", 1, 0, 1, false,0);
-        }
-
-        public EncoderConfig(EncoderType type, int id){
-            this(type, Math.abs(id), "rio", 1, 0, 1, id < 0,0);
-        }
-
-        public EncoderConfig setCanbus(String canbus){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion, inverted, conversionOffset);
-        }
-
-        public EncoderConfig setOffset(double offset){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
-        }
-
-        public EncoderConfig setGearRatio(double gearRatio){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
-        }
-
-        public EncoderConfig setConversion(double conversion){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
-        }
-
-        public EncoderConfig setInverted(boolean inverted){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
-        }
-
-        public EncoderConfig setID(int id){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
-        }
-
-        public EncoderConfig setConversionOffset(double conversionOffset){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
-        }
-
-        public EncoderConfig setEncoderType(EncoderType type){
-            return new EncoderConfig(type, id, canbus, gearRatio, offset, conversion,inverted, conversionOffset);
-        }
-    }
+    private String canbus;
+    private int id;
+    private EncoderType type;
 
     public Encoder(TalonFX motor){
         getAbsolutePosition = () -> motor.getRotorPosition(true).getValueAsDouble();
@@ -144,14 +92,14 @@ public class Encoder implements RobotSendableDevice{
 
     public static Encoder fromConfig(EncoderConfig config) {
         switch (config.type) {
-            case CTRETalonFX:
+            case CTRETalonFXEncoder:
             return new Encoder(new TalonFX(config.id, config.canbus)).applyConfig(config);
             case CTRECANcoder:
             return new Encoder(new CANcoder(config.id, config.canbus)).applyConfig(config);
-            case REVSparkFlex:
+            case REVSparkFlexEncoder:
                 DriverStation.reportError("Cannot create REVRelativeEncoder without motor, please make encoder using the motor!", null); 
             return null;
-            case REVSparkMax:
+            case REVSparkMaxEncoder:
                 DriverStation.reportError("Cannot create REVAbsoluteEncoder without motor, please make encoder using the motor!", null); 
             return null;
             case WPILibEncoder:
@@ -168,6 +116,9 @@ public class Encoder implements RobotSendableDevice{
         setOffset(config.offset);
         setInverted(config.inverted);
         setConversionOffset(config.conversionOffset);
+        canbus = config.canbus;
+        id = config.id;
+        type = config.type;
         return this;
     }
 
@@ -307,6 +258,22 @@ public class Encoder implements RobotSendableDevice{
         setPosition.accept(raw);
     }
 
+    public String getCanbus() {
+        return canbus;
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public EncoderType getEncoderType() {
+        return type;
+    }
+
+    public String getName(){
+        return getCanbus()+"\\"+getId()+"\\"+getEncoderType().name();
+    }
+
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.addDouble("Gear Ratio", this::getGearRatio);
@@ -319,6 +286,10 @@ public class Encoder implements RobotSendableDevice{
         layout.addDouble("Absolute Roation", this::getAbsoluteRotations);
         layout.addDouble("Raw Velocity", this::getRawVelocity);
         layout.addDouble("Velocity", this::getVelocity);
+        layout.addBoolean("Is Connected", this::isConnected);
+        layout.addString("Canbus", this::getCanbus);
+        layout.addInteger("Id", this::getId);
+        layout.addString("Encoder Type", () -> this.getEncoderType().name());
         return layout;
     }
 }

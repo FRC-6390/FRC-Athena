@@ -10,7 +10,7 @@ import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorControllerGroup;
 import ca.frc6390.athena.devices.IMU.IMUConfig;
-import ca.frc6390.athena.devices.MotorController.MotorNeutralMode;
+import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;

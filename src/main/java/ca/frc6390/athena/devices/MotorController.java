@@ -1,133 +1,38 @@
 package ca.frc6390.athena.devices;
 
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
 
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkBase.PersistMode;
 import com.revrobotics.spark.SparkBase.ResetMode;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
-import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkFlexConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
-import ca.frc6390.athena.devices.Encoder.EncoderConfig;
-import ca.frc6390.athena.devices.Encoder.EncoderType;
+import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.devices.MotorControllerConfig.MotorControllerType;
+import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
-public class MotorController {
+public class MotorController implements RobotSendableDevice {
 
     private final DoubleConsumer setSpeed, setVoltage, setCurrentLimit;
+    private final BooleanSupplier getIsConnected;
     private final Consumer<MotorNeutralMode> setNeutralMode;
     private final Encoder encoder;
     private boolean inverted = false;
-
-    public enum MotorControllerType {
-        CTRETalonFX(EncoderType.CTRETalonFX),
-        REVSparkMaxBrushed(EncoderType.REVSparkMax),
-        REVSparkMaxBrushless(EncoderType.REVSparkMax),
-        REVSparkFlexBrushed(EncoderType.REVSparkFlex),
-        REVSparkFlexBrushless(EncoderType.REVSparkFlex);
-
-        private EncoderType encoder;
-        MotorControllerType(EncoderType encoder){
-            this.encoder = encoder;
-        }
-
-
-        public EncoderType getEncoder(){
-            return encoder;
-        }
-    }
-
-    public record MotorControllerConfig(MotorControllerType type, int id, String canbus, double currentLimit, boolean inverted, EncoderConfig encoderConfig, MotorNeutralMode neutralMode) {
-        public MotorControllerConfig(MotorControllerType type, int id){
-            this(type, Math.abs(id), "rio", 40, id < 0, new EncoderConfig(type.getEncoder()), MotorNeutralMode.Coast);
-        }
-
-        public MotorControllerConfig setCanbus(String canbus){
-            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
-        }
-
-        public MotorControllerConfig withEncoderConfig(EncoderConfig encoderConfig){
-            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
-        }
-
-        public MotorControllerConfig withCurrentLimit(double currentLimit){
-            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
-        }
-
-        public MotorControllerConfig setInverted(boolean inverted){
-            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
-        }
-
-        public MotorControllerConfig setNeutralMode(MotorNeutralMode neutralMode){
-            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
-        }
-
-        public MotorControllerConfig setID(int id){
-            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
-        }
-
-        public MotorControllerConfig setCurrentLimit(double currentLimit){
-            return new MotorControllerConfig(type, id, canbus, currentLimit, inverted, encoderConfig, neutralMode);
-        }
-    }
-
-    public enum MotorNeutralMode {
-        Coast(NeutralModeValue.Coast, IdleMode.kCoast),
-        Brake(NeutralModeValue.Brake, IdleMode.kBrake);
-
-        private final NeutralModeValue ctre;
-        private final IdleMode rev;
-
-        MotorNeutralMode(NeutralModeValue ctre, IdleMode rev){
-            this.ctre = ctre;
-            this.rev = rev;
-        }
-
-        public NeutralModeValue asCTRE(){
-            return ctre;
-        }
-
-        public IdleMode asREV(){
-            return rev;
-        }
-
-        public boolean asBoolean(){
-            return ctre == NeutralModeValue.Brake;
-        }
-
-        public static MotorNeutralMode fromBoolean(boolean value) {
-            return value ? MotorNeutralMode.Brake : MotorNeutralMode.Coast;
-        }
-
-        public static MotorNeutralMode fromREV(IdleMode mode){
-            switch (mode) {
-                case kBrake:
-                return MotorNeutralMode.Brake;            
-                case kCoast:
-                return MotorNeutralMode.Coast;
-                default:
-                return null;
-            }
-        }
-
-        public static MotorNeutralMode fromCTRE(NeutralModeValue mode){
-            switch (mode) {
-                case Brake:
-                return MotorNeutralMode.Brake;            
-                case Coast:
-                return MotorNeutralMode.Coast;
-                default:
-                return null;
-            }
-        }
-    }
+    private double currentLimit = 0;
+    private MotorNeutralMode motorNeutralMode;
+    private String canbus;
+    private int id;
+    private MotorControllerType type;
 
     public MotorController(TalonFX controller){
         this(
@@ -144,6 +49,7 @@ public class MotorController {
                 config.withCurrentLimits(currentConfig);
                 controller.getConfigurator().apply(config);
             },
+            controller::isConnected,
             new Encoder(controller)
         );
     }
@@ -164,6 +70,7 @@ public class MotorController {
                 config.idleMode(controller.configAccessor.getIdleMode());
                 controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
             },
+            () -> controller.getFaults().can,
             Encoder.newREVSparkMax(controller)
         );
     }
@@ -184,15 +91,17 @@ public class MotorController {
                 config.idleMode(controller.configAccessor.getIdleMode());
                 controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
             },
+            () -> controller.getFaults().can,
             Encoder.newREVSparkFlex(controller)
         );
     }
 
-    public MotorController(Consumer<MotorNeutralMode> setNeutralMode, DoubleConsumer setSpeed, DoubleConsumer setVoltage, DoubleConsumer setCurrentLimit, Encoder encoder) {
+    public MotorController(Consumer<MotorNeutralMode> setNeutralMode, DoubleConsumer setSpeed, DoubleConsumer setVoltage, DoubleConsumer setCurrentLimit, BooleanSupplier getIsConnected, Encoder encoder) {
         this.setNeutralMode = setNeutralMode;
         this.setSpeed = setSpeed;
         this.setVoltage = setVoltage;
         this.setCurrentLimit = setCurrentLimit;
+        this.getIsConnected = getIsConnected;
         this.encoder = encoder;
     }
 
@@ -239,15 +148,19 @@ public class MotorController {
     }
 
     public MotorController applyConfig(MotorControllerConfig config) {
-        withCurrentLimit(config.currentLimit);
+        setCurrentLimit(config.currentLimit);
         setInverted(config.inverted);
         setNeutralMode(config.neutralMode);
         getEncoder().applyConfig(config.encoderConfig);
+        canbus = config.canbus;
+        id = config.id;
+        type = config.type;
         return this;
     }
 
-    public MotorController withCurrentLimit(double limit){
+    public MotorController setCurrentLimit(double limit){
         setCurrentLimit.accept(limit);
+        currentLimit = limit;
         return this;
     }
 
@@ -262,6 +175,7 @@ public class MotorController {
 
     public MotorController setNeutralMode(MotorNeutralMode mode){
         setNeutralMode.accept(mode);
+        motorNeutralMode = mode;
         return this;
     }
 
@@ -281,6 +195,37 @@ public class MotorController {
         setSpeed.accept(0);
     }
 
+    public boolean isConnected(){
+        return getIsConnected.getAsBoolean();
+    }
+
+    public double getCurrentLimit() {
+        return currentLimit;
+    }
+
+    public MotorNeutralMode getNeutralMode() {
+        return motorNeutralMode;
+    }
+
+    public String getCanbus() {
+        return canbus;
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public MotorControllerType getMotorControllerType() {
+        return type;
+    }
+
+    public String getName(){
+        return getCanbus()+"\\"+getId()+"\\"+getMotorControllerType().name();
+    }
+
+    public void update(){
+        encoder.update();
+    }
 
     public enum Motor {
         KRAKEN_X60_FOC(MotorControllerType.CTRETalonFX, 5800, true),
@@ -311,5 +256,19 @@ public class MotorController {
         public MotorControllerType getMotorControllerType(){
             return controllerType;
         }
+    }
+
+    @Override
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+        encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList));
+        layout.addBoolean("Inverted", this::isInverted);
+        layout.addBoolean("Is Connected", this::isConnected);
+        layout.addDouble("Current Limit", this::getCurrentLimit);
+        layout.addString("Neutral Mode", () -> getNeutralMode().name());
+        layout.addString("Canbus", this::getCanbus);
+        layout.addInteger("Id", this::getId);
+        layout.addString("Motor Controller", () -> this.getMotorControllerType().name());
+    
+        return layout;
     }
 }
