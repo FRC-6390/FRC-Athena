@@ -264,7 +264,7 @@ public class LimeLight implements LocalizationCamera{
         cy1 = limelightTable.getEntry("cy1");
         rawfiducials =  limelightTable.getEntry("rawfiducials");
 
-        setFiducialIdFilters(config.ignoreTags());
+        setFiducialIdFilters(config.filteredTags());
     }
     
     
@@ -308,7 +308,14 @@ public class LimeLight implements LocalizationCamera{
     public double getTargetSkew(){
         var data = t2d.getDoubleArray(new Double[]{});
         if(data.length == 0) return 0;
-        return t2d.getDoubleArray(new Double[]{})[16];
+        return data[16];
+    }
+
+      /**
+     * Skew or rotation (-90 degrees to 0 degrees)
+     */
+    public Double[] getT2D(){
+        return t2d.getDoubleArray(new Double[]{});
     }
 
      /**

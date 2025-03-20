@@ -21,7 +21,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private final ProfiledPIDController profiledPIDController;
     private final boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
-    private boolean override, emergancyStopped, pidEnabled, feedforwardEnabled;
+    private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled;
     private double setpoint, pidOutput, feedforwardOutput, output; 
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
@@ -100,8 +100,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         return override;
     }
 
-    public boolean isEmergancyStopped() {
-        return emergancyStopped;
+    public boolean isEmergencyStopped() {
+        return emergencyStopped;
     }
 
     public void setOverride(boolean override) {
@@ -145,14 +145,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     public void update(){
 
         if (!encoder.isConnected() || !motors.allMotorsConnected()) {
-            emergancyStopped = true;
+            emergencyStopped = true;
         }
 
         if (override || encoder == null){
             return;
         }
         
-        if(emergancyStopped){
+        if(emergencyStopped){
             motors.stopMotors();
             return;
         }
@@ -165,12 +165,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         output += isFeedforwardEnabled() ? feedforwardOutput : 0;
 
         for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
-            if (genericLimitSwitch.isHardstop() && genericLimitSwitch.getAsBoolean()){
-                if(Math.signum(genericLimitSwitch.getBlockDirection()) == output){
-                    output = 0;
-                    if (!Double.isNaN(genericLimitSwitch.getPosition())) {
-                        encoder.setPosition(genericLimitSwitch.getPosition());
+            if(genericLimitSwitch.getAsBoolean()){
+
+                if (genericLimitSwitch.isHardstop()){
+                    if(Math.signum(genericLimitSwitch.getBlockDirection()) == output){
+                        output = 0;
                     }
+                }
+
+                if (!Double.isNaN(genericLimitSwitch.getPosition())) {
+                    setEncoderPosition(genericLimitSwitch.getPosition());
                 }
             }
         }
@@ -206,8 +210,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         this.pidEnabled = pidEnabled;
     }
 
-    public void setEmergancyStopped(boolean emergancyStopped) {
-        this.emergancyStopped = emergancyStopped;
+    public void setEmergencyStopped(boolean emergancyStopped) {
+        this.emergencyStopped = emergancyStopped;
     }
 
     public double getOutput() {
@@ -230,7 +234,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         
         motors.shuffleboard(tab.getLayout("Motors", BuiltInLayouts.kList));
         if (encoder != null) encoder.shuffleboard(tab.getLayout(encoder.getName(), BuiltInLayouts.kList));
-        tab.addBoolean("Emergency Stopped", this::isEmergancyStopped);
+        tab.addBoolean("Emergency Stopped", this::isEmergencyStopped);
         tab.addBoolean("Override", this::isOverride);
         tab.addBoolean("Use Voltage", this::isUseVoltage);
         tab.addBoolean("Use Absolute", this::isUseAbsolute);
@@ -241,6 +245,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         tab.addDouble("PID Output", this::getPidOutput);
         tab.addDouble("Feedforward Output", this::getFeedforwardOutput);
         tab.addDouble("Output", this::getOutput);
+        for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
+           genericLimitSwitch.shuffleboard(tab.getLayout(genericLimitSwitch.getPort()+"\\Limitswitch",BuiltInLayouts.kList));  
+        }
 
         return tab;
     }

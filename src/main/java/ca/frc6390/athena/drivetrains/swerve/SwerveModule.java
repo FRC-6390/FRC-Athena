@@ -170,7 +170,7 @@ public class SwerveModule implements RobotSendableDevice {
         }
 
         state.optimize(getState().angle);
-        // state.speedMetersPerSecond *= state.angle.minus(encoder.getRotation2d()).getCos();
+        state.speedMetersPerSecond *= state.angle.minus(encoder.getRotation2d()).getCos();
         setDriveMotor(state.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
         setRotationMotor(rotationPidController.calculate(MathUtil.angleModulus(getEncoderPosition().getRadians()), state.angle.getRadians()));
     }

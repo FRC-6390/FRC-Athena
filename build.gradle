@@ -25,6 +25,7 @@ repositories {
   maven { url 'https://lib.choreo.autos/dep'}
   maven { url 'https://maven.photonvision.org/repository/internal' }
   maven { url 'https://maven.photonvision.org/repository/snapshots' }
+  maven { url 'https://dev.studica.com/maven/release/2025/' }
 
 }
 
@@ -61,6 +62,7 @@ dependencies {
     implementation 'com.pathplanner.lib:PathplannerLib-java:2025.1.1'
     implementation 'com.revrobotics.frc:REVLib-java:2025.0.0'
     implementation 'choreo:ChoreoLib-java:2025.0.3'
+    implementation 'com.studica.frc:Studica-java:2025.0.1'
 }
 
 // Set up exports properly

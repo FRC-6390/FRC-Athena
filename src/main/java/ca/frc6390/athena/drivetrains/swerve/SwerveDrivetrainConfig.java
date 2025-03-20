@@ -44,16 +44,25 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         return new SwerveDrivetrainConfig().setModuleLocations(trackWidth, wheelbase);
     }
 
+    public static SwerveDrivetrainConfig standard(Translation2d[] locations){
+        return SwerveDrivetrainConfig.defualt(locations).setIds(DrivetrainIDs.SWERVE_CHASSIS_STANDARD);
+    }
+
+    public static SwerveDrivetrainConfig standard(double trackWidth){
+        return SwerveDrivetrainConfig.defualt(trackWidth).setIds(DrivetrainIDs.SWERVE_CHASSIS_STANDARD);
+    }
+
+    public static SwerveDrivetrainConfig standard(double trackWidth, double wheelbase){
+        return SwerveDrivetrainConfig.defualt(trackWidth, wheelbase).setIds(DrivetrainIDs.SWERVE_CHASSIS_STANDARD);
+    }
+
     public SwerveDrivetrainConfig setIMU(IMUType imu, boolean inverted){
         this.imu = new IMUConfig(imu).setInverted(inverted);
         return this;
     }
 
-    public SwerveDrivetrainConfig modules(SwerveModuleConfig modules){
-       return modules(modules, modules, modules, modules);
-    }
-
     public SwerveDrivetrainConfig modules(SwerveModuleConfig... modules){
+        if (modules.length == 1) return modules(modules[0],modules[0],modules[0],modules[0]);
         this.modules = modules;
         return this;
     }

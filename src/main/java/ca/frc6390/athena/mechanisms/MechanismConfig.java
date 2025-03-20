@@ -145,7 +145,7 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public MechanismConfig<T> setEncoderFromMotor(int id){
-        return setEncoder(motors.stream().filter((motors) -> motors.id == id).findFirst().get().encoderConfig);
+        return setEncoder(motors.stream().filter((motors) -> motors.id == Math.abs(id)).findFirst().get().encoderConfig.setInverted(id < 0));
     }
 
     public MechanismConfig<T> setPID(double p, double i, double d){
@@ -236,7 +236,7 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public MechanismConfig<T> addLowerLimitSwitch(int id, double position, boolean stopMotors){
-        return addLimitSwitch(GenericLimitSwitchConfig.normal(id).setPosition(position).setHardstop(stopMotors, -1));
+        return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, -1));
     }
 
     public MechanismConfig<T> addUpperLimitSwitch(int id, double position){
@@ -244,7 +244,7 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public MechanismConfig<T> addUpperLimitSwitch(int id, double position, boolean stopMotors){
-        return addLimitSwitch(GenericLimitSwitchConfig.normal(id).setPosition(position).setHardstop(stopMotors, 1));
+        return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, 1));
     }
 
     public MechanismConfig<T> addLimitSwitch(int id, double position){
@@ -252,7 +252,7 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public MechanismConfig<T> addLimitSwitch(int id, double position, boolean stopMotors, int blockDirection){
-        return addLimitSwitch(GenericLimitSwitchConfig.normal(id).setPosition(position).setHardstop(stopMotors, blockDirection));
+        return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, blockDirection));
     }
 
     public T build(){

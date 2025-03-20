@@ -22,6 +22,10 @@ public class MotorControllerConfig {
         public EncoderType getEncoder(){
             return encoder;
         }
+
+        public MotorControllerConfig config(int id){
+            return new MotorControllerConfig(this, id);
+        }
     }
 
     public enum MotorNeutralMode {

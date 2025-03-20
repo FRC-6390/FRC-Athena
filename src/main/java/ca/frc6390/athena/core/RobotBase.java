@@ -6,6 +6,8 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
 import ca.frc6390.athena.devices.IMU;
+import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
+import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrainConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrainConfig;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
@@ -22,6 +24,10 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
             return new RobotBaseConfig<>(config, null, null);
         }
         
+        public static RobotBaseConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config){
+            return new RobotBaseConfig<>(config, null, null);
+        }
+
         public RobotBaseConfig<T> setLocalization(RobotLocalizationConfig localizationConfig){
             return new RobotBaseConfig<>(driveTrain, localizationConfig, visionConfig);
         }
@@ -40,7 +46,7 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
     }
 
     private final RobotDrivetrain<T> drivetrain;
-    private final RobotLocalization localization;
+    private final RobotLocalization<?> localization;
     private final RobotVision vision;
 
     public RobotBase(RobotBaseConfig<T> config){
@@ -51,9 +57,11 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
         if(localization != null && vision != null){
             localization.setRobotVision(vision);
         }
+
+        localization.configureChoreo(drivetrain);
     }
 
-    public RobotLocalization getLocalization(){
+    public RobotLocalization<?> getLocalization(){
         return localization;
     }
 

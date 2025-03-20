@@ -21,7 +21,7 @@ public class VirtualIMU {
         }
 
         public void set(Rotation2d val){
-            offset = supplier.get().plus(val);
+            offset = supplier.get().minus(val);
         }
 
         public void setOffset(Rotation2d offset){

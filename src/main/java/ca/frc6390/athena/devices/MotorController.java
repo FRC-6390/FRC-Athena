@@ -60,7 +60,7 @@ public class MotorController implements RobotSendableDevice {
                 SparkMaxConfig config = new SparkMaxConfig();
                 config.smartCurrentLimit(controller.configAccessor.getSmartCurrentLimit());
                 config.idleMode(mode.asREV());
-                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
             },
             controller::set,
             controller::setVoltage, 
@@ -68,7 +68,7 @@ public class MotorController implements RobotSendableDevice {
                 SparkMaxConfig config = new SparkMaxConfig();
                 config.smartCurrentLimit((int) limit);
                 config.idleMode(controller.configAccessor.getIdleMode());
-                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
             },
             () -> controller.getFaults().can,
             Encoder.newREVSparkMax(controller)
@@ -81,7 +81,7 @@ public class MotorController implements RobotSendableDevice {
                 SparkFlexConfig config = new SparkFlexConfig();
                 config.smartCurrentLimit(controller.configAccessor.getSmartCurrentLimit());
                 config.idleMode(mode.asREV());
-                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
             },
             controller::set,
             controller::setVoltage, 
@@ -89,7 +89,7 @@ public class MotorController implements RobotSendableDevice {
                 SparkFlexConfig config = new SparkFlexConfig();
                 config.smartCurrentLimit((int) limit);
                 config.idleMode(controller.configAccessor.getIdleMode());
-                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
             },
             () -> controller.getFaults().can,
             Encoder.newREVSparkFlex(controller)
@@ -232,7 +232,7 @@ public class MotorController implements RobotSendableDevice {
         KRAKEN_X60(MotorControllerType.CTRETalonFX,6000, false),
         FALCON_500_FOC(MotorControllerType.CTRETalonFX,6080, true),
         FALCON_500(MotorControllerType.CTRETalonFX,6380, false),
-        NEO_V1(MotorControllerType.REVSparkFlexBrushless,5820, false),
+        NEO_V1(MotorControllerType.REVSparkMaxBrushless,5820, false),
         NEO_VORTEX(MotorControllerType.REVSparkFlexBrushless,6784, false);
 
         private final int freeSpeedRPM;
@@ -255,6 +255,10 @@ public class MotorController implements RobotSendableDevice {
 
         public MotorControllerType getMotorControllerType(){
             return controllerType;
+        }
+
+        public MotorControllerConfig config(int id){
+            return getMotorControllerType().config(id);
         }
     }
 

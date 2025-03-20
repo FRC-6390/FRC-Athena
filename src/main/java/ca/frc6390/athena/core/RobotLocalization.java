@@ -2,6 +2,7 @@ package ca.frc6390.athena.core;
 
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.FollowPathCommand;
@@ -10,12 +11,12 @@ import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.util.DriveFeedforwards;
 
-import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
+import ca.frc6390.athena.devices.IMU;
 import choreo.auto.AutoFactory;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
-import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
+import edu.wpi.first.math.estimator.PoseEstimator;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
@@ -24,10 +25,11 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-public class RobotLocalization extends SubsystemBase implements RobotSendableSystem{
+public class RobotLocalization<T> extends SubsystemBase implements RobotSendableSystem{
     
     public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, double v2XStd, double v2YStda, double v2ThetaStd, PIDConstants translation, PIDConstants rotation, boolean useVision) {
 
@@ -83,9 +85,11 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         }
     }
 
-    private final SwerveDrivePoseEstimator fieldEstimator, relativeEstimator;
-    private final SwerveDrivetrain drivetrain;
+    private final PoseEstimator<T> fieldEstimator, relativeEstimator;
     private RobotVision vision;
+    private final IMU imu;
+    private final RobotSpeeds robotSpeeds;
+    private final Supplier<T> wheelPositions;
 
     private Pose2d fieldPose, relativePose;
     private Field2d field;
@@ -98,27 +102,28 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
 
     private BiConsumer<ChassisSpeeds, DriveFeedforwards> autoDrive;
 
-    public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config, Pose2d pose) {
+    public RobotLocalization(PoseEstimator<T> fieldEstimator, PoseEstimator<T> relativeEstimator, RobotLocalizationConfig config, RobotSpeeds robotSpeeds, IMU imu, Supplier<T> wheelPositions) {
         this.localizationConfig = config;
-        this.fieldPose = pose;
-        this.relativePose = pose;
-        this.autoDrive = (speeds, feed) ->  drivetrain.getRobotSpeeds().setAutoSpeeds(speeds);
+        this.robotSpeeds = robotSpeeds;
+        this.imu = imu;
+        this.wheelPositions = wheelPositions;
+        this.fieldPose = new Pose2d();
+        this.relativePose = new Pose2d();
+        this.autoDrive = (speeds, feed) ->  robotSpeeds.setAutoSpeeds(speeds);
       
-        this.drivetrain = drivetrain;
         this.field = new Field2d();
 
         this.visionEnabled = config.useVision;
         config = config == null ? new RobotLocalizationConfig() : config;
 
-        fieldEstimator = new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose, config.getStd(), config.getVisionStd());
-        relativeEstimator = new SwerveDrivePoseEstimator(drivetrain.getKinematics(), drivetrain.getIMU().getYaw(), drivetrain.getSwerveModulePositions(), pose);
+        
+        this.fieldEstimator = fieldEstimator;
+        this.relativeEstimator = relativeEstimator;
 
-        drivetrain.getIMU().addVirtualAxis("relative", drivetrain.getIMU()::getYaw);
-        drivetrain.getIMU().addVirtualAxis("field", drivetrain.getIMU()::getYaw);
-
-
-        drivetrain.getIMU().setVirtualAxis("relative", new Rotation2d());
-        drivetrain.getIMU().setVirtualAxis("field", new Rotation2d());
+        imu.addVirtualAxis("relative", imu::getYaw);
+        imu.addVirtualAxis("field", imu::getYaw);
+        imu.setVirtualAxis("relative", new Rotation2d());
+        imu.setVirtualAxis("field", new Rotation2d());
 
         if(config.rotation != null && config.translation != null){
             configurePathPlanner(config.translation, config.rotation);
@@ -126,45 +131,35 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         setRobotVision(vision);      
     }
 
-    public RobotLocalization(SwerveDrivetrain drivetrain, RobotVision vision, RobotLocalizationConfig config) {
-        this(drivetrain, vision, config, new Pose2d());
-    }
-
-    public RobotLocalization(SwerveDrivetrain drivetrain, RobotLocalizationConfig config) {
-        this(drivetrain, null, config);
-    }
-
-    public RobotLocalization(SwerveDrivetrain drivetrain) {
-        this(drivetrain, null, null);
-    }
-
-    public RobotLocalization enableVisionForLocalization(boolean visionEnabled){
+    public RobotLocalization<T> enableVisionForLocalization(boolean visionEnabled){
         this.visionEnabled = visionEnabled;
         return this;
     }
 
-    public RobotLocalization setRobotVision(RobotVision vision){
+    public RobotLocalization<T> setRobotVision(RobotVision vision){
         this.vision = vision;
         return this;
     }
 
     public void setAutoDrive(BiConsumer<RobotSpeeds, ChassisSpeeds> autoDrive) {
-        this.autoDrive = (speeds, feeds) -> autoDrive.accept(drivetrain.getRobotSpeeds(), speeds);
+        this.autoDrive = (speeds, feeds) -> autoDrive.accept(robotSpeeds, speeds);
     }
 
-    public RobotLocalization configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants){
+    public RobotLocalization<T> configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants){
       return configurePathPlanner(translationConstants, rotationConstants, autoDrive);
     }
 
-    public RobotLocalization configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants, BiConsumer<ChassisSpeeds, DriveFeedforwards> output){
+    public RobotLocalization<T> configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants, BiConsumer<ChassisSpeeds, DriveFeedforwards> output){
         try{
-            robotConfig = RobotConfig.fromGUISettings();  }catch(Exception e){
-            DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", e.getStackTrace());
+            robotConfig = RobotConfig.fromGUISettings();  
+        }catch(Exception e){
+            DriverStation.reportWarning("Failed to load PathPlanner config and configure AutoBuilder", e.getStackTrace());
+            return this;
         }
         AutoBuilder.configure(
             this::getFieldPose, 
             this::resetFieldPose, 
-            () -> drivetrain.getRobotSpeeds().getDriverSpeeds(), 
+            () -> robotSpeeds.getDriverSpeeds(), 
             output, 
             new PPHolonomicDriveController(
             translationConstants,
@@ -183,12 +178,12 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
       return this;
     }
 
-    public RobotLocalization configureChoreo(PIDConstants translationConstants, PIDConstants rotationConstants){
-        rotationController = new PIDController(rotationConstants.kP, rotationConstants.kI, rotationConstants.kD);
-        rotationController.setIZone(rotationConstants.iZone);
+    public RobotLocalization<T> configureChoreo(Subsystem drivetrain){
+        rotationController = new PIDController(localizationConfig.rotation.kP, localizationConfig.rotation.kI, localizationConfig.rotation.kD);
+        rotationController.setIZone(localizationConfig.rotation.iZone);
 
-        translationController = new PIDController(translationConstants.kP, translationConstants.kI, translationConstants.kD);
-        translationController.setIZone(translationConstants.iZone);
+        translationController = new PIDController(localizationConfig.translation.kP, localizationConfig.translation.kI, localizationConfig.translation.kD);
+        translationController.setIZone(localizationConfig.translation.iZone);
 
         factory = new AutoFactory(this::getFieldPose, this::resetFieldPose, 
         (sample) -> {
@@ -201,9 +196,9 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
             speeds.vyMetersPerSecond = translationController.calculate(botpose.getY(), trajpose.getY());
             speeds.omegaRadiansPerSecond = rotationController.calculate(botpose.getRotation().getRadians(), trajpose.getRotation().getRadians());
 
-            drivetrain.getRobotSpeeds().setAutoSpeeds(speeds);
+            robotSpeeds.setAutoSpeeds(speeds);
         }, 
-        true, 
+        true,
         drivetrain);
       return this;
     }
@@ -212,19 +207,14 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         return factory;
     }
 
-    public void resetFieldPose(Pose2d pose, Rotation2d heading) {
-        drivetrain.getIMU().setVirtualAxis("field", heading);
-        fieldEstimator.resetPosition(heading.unaryMinus(), drivetrain.getSwerveModulePositions(), pose);
-        
+    public void resetFieldPose(Pose2d pose) {
+        fieldEstimator.resetPosition(pose.getRotation(), wheelPositions.get(), pose);
+        imu.setVirtualAxis("field", pose.getRotation());
         this.fieldPose = pose;
     }
 
-    public void resetFieldPose(Pose2d pose) {
-        resetFieldPose(pose, pose.getRotation());
-    }
-
     public void resetFieldPose(double x, double y) {
-        resetFieldPose(new Pose2d(x, y, drivetrain.getIMU().getVirtualAxis("field")));
+        resetFieldPose(new Pose2d(x, y, imu.getVirtualAxis("field")));
     }
 
     public void resetFieldPose(double x, double y, double thetaDegree) {
@@ -235,18 +225,14 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
         resetFieldPose(new Pose2d(0,0, new Rotation2d(0)));
     }
 
-    public void resetRelativePose(Pose2d pose, Rotation2d heading) {
-        drivetrain.getIMU().setVirtualAxis("relative", heading);
-        relativeEstimator.resetPosition(heading.unaryMinus(), drivetrain.getSwerveModulePositions(), pose);
+    public void resetRelativePose(Pose2d pose) {
+        relativeEstimator.resetPosition(pose.getRotation(), wheelPositions.get(), pose);
+        imu.setVirtualAxis("relative", pose.getRotation());
         this.relativePose = pose;
     }
 
-    public void resetRelativePose(Pose2d pose) {
-        resetRelativePose(pose, pose.getRotation());
-    }
-
     public void resetRelativePose(double x, double y) {
-        resetRelativePose(new Pose2d(x, y, drivetrain.getIMU().getVirtualAxis("relative")));
+        resetRelativePose(new Pose2d(x, y, imu.getVirtualAxis("relative")));
     }
 
     public void resetRelativePose(double x, double y, double r) {
@@ -268,8 +254,8 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
     public void update() {
         
         if(vision != null && visionEnabled) {
-            vision.setRobotOrientation(drivetrain.getIMU().getVirtualAxis("field"));
-            vision.getLimelights().forEach((table, ll) -> ll.setFiducialIdFilters(ll.config.ignoreTags()));
+            vision.setRobotOrientation(imu.getVirtualAxis("field"));
+            vision.getLimelights().forEach((table, ll) -> ll.setFiducialIdFilters(ll.config.filteredTags()));
             List<Pose2d> poses = vision.getLocalizationPoses();
             SmartDashboard.putNumber("Localization Poses", poses.size());
             if(poses.size() < 2){
@@ -281,8 +267,8 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
             vision.setLocalizationPoses(fieldEstimator::addVisionMeasurement);
         }
 
-        fieldPose = fieldEstimator.update(drivetrain.getIMU().getVirtualAxis("field"), drivetrain.getSwerveModulePositions());
-        relativePose = relativeEstimator.update(drivetrain.getIMU().getVirtualAxis("relative"), drivetrain.getSwerveModulePositions());
+        fieldPose = fieldEstimator.update(imu.getVirtualAxis("field"), wheelPositions.get());
+        relativePose = relativeEstimator.update(imu.getVirtualAxis("relative"), wheelPositions.get());
 
         field.setRobotPose(fieldPose);
     }
@@ -293,10 +279,6 @@ public class RobotLocalization extends SubsystemBase implements RobotSendableSys
 
     public Pose2d getRelativePose(){
         return relativePose;
-    }
-
-    public Field2d getField() {
-        return field;
     }
 
     @Override

@@ -1,15 +1,13 @@
 package ca.frc6390.athena.sensors.limitswitch;
 
 import ca.frc6390.athena.sensors.EnhancedDigitalInput;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class GenericLimitSwitch extends EnhancedDigitalInput {
 
     public record GenericLimitSwitchConfig(int id, boolean inverted, double position, boolean isHardstop, int blockDirection) {
-        public static GenericLimitSwitchConfig inverted(int id){
-            return new GenericLimitSwitchConfig(id ,true,  Double.NaN, false, 0);
-        }
 
-        public static GenericLimitSwitchConfig normal(int id){
-            return new GenericLimitSwitchConfig(id ,false,  Double.NaN, false, 0);
+        public static GenericLimitSwitchConfig create(int id){
+            return new GenericLimitSwitchConfig(Math.abs(id) ,id<0,  Double.NaN, false, 0);
         }
 
         public GenericLimitSwitchConfig setPosition(double position){
@@ -43,7 +41,7 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
     }
 
     public static GenericLimitSwitch fromConfig(GenericLimitSwitchConfig config){
-        return new GenericLimitSwitch(config.id, config.inverted);
+        return new GenericLimitSwitch(config.id, config.inverted).applyConfig(config);
     }
 
     public GenericLimitSwitch applyConfig(GenericLimitSwitchConfig config){
@@ -77,4 +75,14 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
     public int getBlockDirection() {
         return blockDirection;
     }
+
+    @Override
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+        super.shuffleboard(layout);
+        layout.addDouble("Block Direction", this::getBlockDirection);
+        layout.addBoolean("Is Hardstop", this::isHardstop);
+        layout.addDouble("Position", this::getPosition);
+        return layout;
+    }
+    
 }

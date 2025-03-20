@@ -1,18 +1,63 @@
 {
     "fileName": "FRC6390-Athena.json",
     "name": "FRC6390 Athena (v1.0)",
-    "version": "2025.12.30",
+    "version": "2025.13.26",
     "frcYear": "2025",
     "uuid": "e9bbc616-2d62-4e83-b291-3933ea14f1dc",
     "mavenUrls": [
         "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
     ],
     "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/FRC6390-Athena.json",
+    "requires": [
+        {
+            "uuid": "e995de00-2c64-4df5-8831-c1441420ff19",
+            "errorMessage": "AthenaLib requires Phoenix 6. Please add the Phoenix 6 vendordep",
+            "offlineFileName": "Phoenix6-frc2025-latest.json",
+            "onlineUrl": "https://maven.ctr-electronics.com/release/com/ctre/phoenix6/latest/Phoenix6-frc2025-latest.json"
+        },
+        {
+            "uuid": "ab676553-b602-441f-a38d-f1296eff6537",
+            "errorMessage": "AthenaLib requires Phoenix 5. Please add the Phoenix 5 vendordep",
+            "offlineFileName": "Phoenix5-frc2025-latest.json",
+            "onlineUrl": "https://maven.ctr-electronics.com/release/com/ctre/phoenix/Phoenix5-frc2025-latest.json"
+        },
+        {
+            "uuid": "515fe07e-bfc6-11fa-b3de-0242ac130004",
+            "errorMessage": "AthenaLib requires PhotonLib. Please add the PhotonLib vendordep",
+            "onlineUrl": "https://maven.photonvision.org/repository/internal/org/photonvision/photonlib-json/1.0/photonlib-json-1.0.json"
+        },
+        {
+            "uuid": "1b42324f-17c6-4875-8e77-1c312bc8c786",
+            "errorMessage": "AthenaLib requires PathplannerLib. Please add the PathplannerLib vendordep",
+            "onlineUrl": "https://3015rangerrobotics.github.io/pathplannerlib/PathplannerLib.json"
+        },
+        {
+            "uuid": "3f48eb8c-50fe-43a6-9cb7-44c86353c4cb",
+            "errorMessage": "AthenaLib requires REVLib.  Please add the REVLib vendordep",
+            "offlineFileName": "REVLib.json",
+            "onlineUrl": "https://software-metadata.revrobotics.com/REVLib-2025.json"
+        },
+        {
+            "uuid": "8ef3423d-9532-4665-8339-206dae1d7168",
+            "errorMessage": "AthenaLib requires LibGrappleFRC. Please add the LibGrappleFRC vendordep",
+            "onlineUrl": "https://storage.googleapis.com/grapple-frc-maven/libgrapplefrc2025.json"
+        },
+        {
+            "uuid": "b5e23f0a-dac9-4ad2-8dd6-02767c520aca",
+            "errorMessage": "AthenaLib requires ChoreoLib. Please add the ChoreoLib vendordep",
+            "onlineUrl": "https://lib.choreo.autos/dep/ChoreoLib2025.json"
+        },
+        {
+            "uuid": "cb311d09-36e9-4143-a032-55bb2b94443b",
+            "errorMessage": "AthenaLib requires Studica. Please add the Studica vendordep",
+            "onlineUrl": "https://dev.studica.com/releases/2025/Studica-2025.0.1.json"
+        }
+    ],
     "javaDependencies": [
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "competition-java",
-            "version": "2025.13.0"
+            "version": "2025.13.26"
         }
     ],
     "jniDependencies": [

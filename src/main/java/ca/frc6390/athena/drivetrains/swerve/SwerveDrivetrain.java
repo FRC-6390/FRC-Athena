@@ -4,14 +4,16 @@ import java.util.Map;
 import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.core.RobotSpeeds;
-import ca.frc6390.athena.core.RobotLocalization;
-import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotDrivetrain;
+import ca.frc6390.athena.core.RobotLocalization;
+import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
@@ -74,7 +76,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
     return kinematics;
   } 
 
-  public SwerveModulePosition[] getSwerveModulePositions(){
+  public SwerveModulePosition[] getPositions(){
     SwerveModulePosition[] positions = new SwerveModulePosition[swerveModules.length];
     for (int i = 0; i < swerveModules.length; i++) {
       positions[i] = swerveModules[i].getPostion();
@@ -216,12 +218,16 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   }
 
   @Override
-  public RobotLocalization localization(RobotLocalizationConfig config) {
-    return new RobotLocalization(this, config);
+  public SwerveDrivetrain get() {
+    return this;
   }
 
   @Override
-  public SwerveDrivetrain get() {
-    return this;
+  public RobotLocalization<SwerveModulePosition[]> localization(RobotLocalizationConfig config) {
+    
+    SwerveDrivePoseEstimator f = new SwerveDrivePoseEstimator(kinematics, imu.getYaw(), getPositions(), new Pose2d(), config.getStd(), config.getVisionStd());
+    SwerveDrivePoseEstimator r = new SwerveDrivePoseEstimator(kinematics, imu.getYaw(), getPositions(), new Pose2d(), config.getStd(), config.getVisionStd());
+
+    return new RobotLocalization<SwerveModulePosition[]>(f, r, config, robotSpeeds, imu, this::getPositions);
   }
 }

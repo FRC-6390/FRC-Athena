@@ -4,6 +4,8 @@ import java.util.Map;
 import java.util.function.DoubleSupplier;
 
 import com.ctre.phoenix6.hardware.Pigeon2;
+import com.studica.frc.AHRS;
+import com.studica.frc.AHRS.NavXComType;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.ADXRS450_Gyro;
@@ -19,7 +21,13 @@ public class IMU extends VirtualIMU{
 
     public enum IMUType{
         CTREPigeon2,
-        WPILibADXRS450
+        WPILibADXRS450,
+        NAVX_IC2,
+        NAVX_MXP_SPI,
+        NAVX_MXP_UART,
+        NAVX_USB1,
+        NAVX_USB2,
+
     }
 
     public record IMUConfig(IMUType type, int id, String canbus, boolean inverted) {
@@ -71,7 +79,17 @@ public class IMU extends VirtualIMU{
             ()-> gyro.getAngle(), 
             ()-> 0d, 
             ()-> 0d, 
-            ()-> gyro.getRate());
+            ()-> gyro.getRate());   
+    }
+
+    public IMU(AHRS gyro){
+        this(
+            ()-> gyro.getRoll(), 
+            ()-> gyro.getPitch(), 
+            ()-> gyro.getYaw(), 
+            ()-> gyro.getVelocityX(), 
+            ()-> gyro.getVelocityY(), 
+            ()-> gyro.getVelocityZ());
     }
     
     public void setYaw(double yaw) {
@@ -142,6 +160,16 @@ public class IMU extends VirtualIMU{
                 return new IMU(new Pigeon2(config.id, config.canbus)).applyConfig(config);
             case WPILibADXRS450:
                 return new IMU(new ADXRS450_Gyro(Port.kMXP)).applyConfig(config);
+            case NAVX_IC2:
+                return new IMU(new AHRS(NavXComType.kI2C)).applyConfig(config);
+            case NAVX_MXP_SPI:
+                return new IMU(new AHRS(NavXComType.kMXP_SPI)).applyConfig(config);
+            case NAVX_MXP_UART:
+                return new IMU(new AHRS(NavXComType.kMXP_UART)).applyConfig(config);
+            case NAVX_USB1:
+                return new IMU(new AHRS(NavXComType.kUSB1)).applyConfig(config);
+            case NAVX_USB2:
+                return new IMU(new AHRS(NavXComType.kUSB2)).applyConfig(config);
             default:
                 return null;
         }

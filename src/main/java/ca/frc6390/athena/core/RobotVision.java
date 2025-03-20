@@ -135,19 +135,19 @@ public class RobotVision {
    }
 
    public ArrayList<Pose2d> getLimelightRobotPoses(){
-      return getLimelights().values().stream().filter(ll -> ll.hasValidTarget()).map(ll -> ll.getPoseEstimate(ll.config.localizationEstimator()).getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
+      return getLimelights().values().stream().filter(ll -> ll.hasValidTarget() && ll.config.useForLocalization()).map(ll -> ll.getPoseEstimate(ll.config.localizationEstimator()).getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
    }
 
    public void setLimelightRobotPoses(BiConsumer<Pose2d, Double> estimator){
-      getLimelights().values().stream().filter(ll -> ll.hasValidTarget()).forEach(ll -> estimator.accept(ll.getLocalizationPose(), Timer.getFPGATimestamp() - (ll.getLocalizationLatency()/1000.0)));
+      getLimelights().values().stream().filter(ll -> ll.hasValidTarget() && ll.config.useForLocalization()).forEach(ll -> estimator.accept(ll.getLocalizationPose(), Timer.getFPGATimestamp() - (ll.getLocalizationLatency()/1000.0)));
    }
 
    public ArrayList<Pose2d> getPhotonVisionPoses(){
-      return getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget()).map(pv -> pv.getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
+      return getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget() && pv.getConfig().useForLocalization()).map(pv -> pv.getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
    }
 
    public void setPhotonVisionPoses(BiConsumer<Pose2d, Double> estimator){
-      getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget()).forEach((pv) ->  {
+      getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget() && pv.getConfig().useForLocalization()).forEach((pv) ->  {
             Pose2d pose = pv.getLocalizationPose();
             if(pose == null) return;
             estimator.accept(pose, Timer.getFPGATimestamp() - pv.getLocalizationLatency());
