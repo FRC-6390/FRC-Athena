@@ -34,7 +34,15 @@ public class MechanismConfig<T extends Mechanism> {
     public boolean useVoltage = false;
     public Function<MechanismConfig<T>, T> factory = null;
     public ArrayList<GenericLimitSwitchConfig> limitSwitches = new ArrayList<>();
-    public String canbus = null;
+    
+    public String canbus = "rio";
+    public double encoderGearRatio = 1;
+    public double encoderConversion = 1;
+    public double encoderConversionOffset = 0;
+    public double encoderOffset = 0;
+    public double motorCurrentLimit = 40;
+    public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
+
 
     public static MechanismConfig<Mechanism> generic(){
         return custom(Mechanism::new);
@@ -112,13 +120,10 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public MechanismConfig<T> addMotors(MotorControllerType type, int... ids){
-        MechanismConfig<T> s = this;
-
         for (int i = 0; i < ids.length; i++) {
-            s = s.addMotor(new MotorControllerConfig(type, ids[i]));
-        }
-
-        return s;
+            addMotor(new MotorControllerConfig(type, ids[i]));
+         }
+         return this;
     }
 
     public MechanismConfig<T> addMotor(Motor type, int id){
@@ -126,13 +131,7 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public MechanismConfig<T> addMotors(Motor type, int... ids){
-        MechanismConfig<T> s = this;
-
-        for (int i = 0; i < ids.length; i++) {
-        s = s.addMotor(new MotorControllerConfig(type.getMotorControllerType(), ids[i]));
-        }
-
-        return s;
+        return addMotors(type.getMotorControllerType(), ids);
     }
 
     public MechanismConfig<T> setEncoder(EncoderConfig encoder){
@@ -171,38 +170,32 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public MechanismConfig<T> setCanbus(String canbus){
-        motors.forEach((motor) -> motor.setCanbus(canbus));
-        if (this.encoder != null) this.encoder = encoder.setCanbus(canbus);
+        this.canbus = canbus;
         return this;
     }
 
     public MechanismConfig<T> setEncoderGearRatio(double ratio){
-        encoder.setGearRatio(ratio);
+        this.encoderGearRatio = ratio;
         return this;
     }
 
     public MechanismConfig<T> setEncoderConversion(double conversion){
-        encoder.setConversion(conversion);
+        this.encoderConversion = conversion;
         return this;
     }
 
-    public MechanismConfig<T> setEncoderConversionOffset(double conversion){
-        encoder.setConversionOffset(conversion);
+    public MechanismConfig<T> setEncoderConversionOffset(double conversionOffset){
+        this.encoderConversionOffset = conversionOffset;
         return this;
     }
 
     public MechanismConfig<T> setEncoderOffset(double offset){
-        encoder.setOffset(offset);
-        return this;
-    }
-
-    public MechanismConfig<T> setEncoderInverted(boolean inverted){
-        encoder.setInverted(inverted);
+        this.encoderOffset = offset;
         return this;
     }
 
     public MechanismConfig<T> setCurrentLimit(double limit){
-        motors.forEach((motor) -> motor.setCurrentLimit(limit));
+        this.motorCurrentLimit = limit;
         return this;
     }
 
@@ -222,7 +215,7 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public MechanismConfig<T> setNeutralMode(MotorNeutralMode mode){
-        motors.forEach((motor) -> motor.setNeutralMode(mode));
+        this.motorNeutralMode = mode;
         return this;
     }
 
@@ -256,6 +249,21 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public T build(){
+
+        motors.forEach(
+            (motor) -> motor.setNeutralMode(motorNeutralMode)
+                            .setCurrentLimit(motorCurrentLimit)
+                            .setCanbus(canbus)
+                            );
+
+        if (encoder != null) {
+             encoder.setCanbus(canbus)
+                    .setConversion(encoderConversion)
+                    .setConversionOffset(encoderConversionOffset)
+                    .setGearRatio(encoderGearRatio)
+                    .setOffset(encoderConversionOffset);
+        }
+
         return factory.apply(this);
     }
 }
