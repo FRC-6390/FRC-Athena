@@ -172,7 +172,7 @@ public class MechanismConfig<T extends Mechanism> {
 
     public MechanismConfig<T> setCanbus(String canbus){
         motors.forEach((motor) -> motor.setCanbus(canbus));
-        this.encoder = encoder.setCanbus(canbus);
+        if (this.encoder != null) this.encoder = encoder.setCanbus(canbus);
         return this;
     }
 
