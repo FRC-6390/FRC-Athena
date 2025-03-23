@@ -44,16 +44,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         this.goalState = initialState;
         this.atStateSupplier = atStateSupplier;
         this.changeStateSupplier = () -> true;
-        setGoalState(initialState);
-    }
-
-    public void setGoalState(E state){
-        setGoalState(state, () -> true);
-    }
-
-    public void setGoalState(E state, BooleanSupplier condition){
-        goalState = state;
-        changeStateSupplier = condition;
+        queueState(initialState);
     }
 
     public void queueState(E state) {
@@ -92,6 +83,10 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
                 .collect(Collectors.joining(", "));
     }
 
+    public void resetQueue(){
+        stateQueue.clear();
+    }
+
     public Command atGoalStateCommand() {
         return Commands.waitUntil(this::atGoalState);
     }
@@ -124,11 +119,13 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
 
         layout.add("State Chooser", chooser);
-        layout.add("Set State", new InstantCommand(() -> setGoalState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
+        layout.add("Set State", new InstantCommand(() -> goalState = chooser.getSelected())).withWidget(BuiltInWidgets.kCommand);
         layout.add("Queue State", new InstantCommand(() -> queueState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
+        layout.add("Reset Queue", new InstantCommand(() -> resetQueue())).withWidget(BuiltInWidgets.kCommand);
 
         layout.addString("Goal State", () -> this.getGoalState().name());
         layout.addString("Next State", () -> this.getNextState().name());
+        layout.addString("State Queue", () -> this.getNextStateQueue());
         layout.addBoolean("Should Change State", () -> this.shouldChangeState());
 
         ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
