@@ -74,12 +74,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     }
 
     public double getPosition(){
-        if (encoder == null) return Double.NEGATIVE_INFINITY;
+        if (encoder == null) return 0;
         return useAbsolute ? getEncoder().getAbsolutePosition() : getEncoder().getPosition();
     }
 
     public double getVelocity(){
-        if (encoder == null) return Double.NEGATIVE_INFINITY;
+        if (encoder == null) return 0;
         return getEncoder().getVelocity();
     }
 
@@ -149,9 +149,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             emergencyStopped = true;
         }
 
-
         pidOutput = calculatePID();
         feedforwardOutput = calculateFeedForward();
+
+        output = isPidEnabled() ? pidOutput : 0;
+        output += isFeedforwardEnabled() ? feedforwardOutput : 0;
 
         if (override || encoder == null){
             return;
@@ -161,11 +163,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             motors.stopMotors();
             return;
         }
-
-
-
-        output = isPidEnabled() ? pidOutput : 0;
-        output += isFeedforwardEnabled() ? feedforwardOutput : 0;
 
         for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
             if(genericLimitSwitch.getAsBoolean()){
