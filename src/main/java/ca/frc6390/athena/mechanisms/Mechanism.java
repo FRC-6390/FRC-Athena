@@ -136,7 +136,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
-            output += profiledPIDController.calculate(encoderPos, getSetpoint());
+            profiledPIDController.calculate(encoderPos, getSetpoint());
+            output += profiledPIDController.getSetpoint().velocity;
         }
 
         return output;

@@ -56,9 +56,9 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
 
         if(localization != null && vision != null){
             localization.setRobotVision(vision);
+            localization.configureChoreo(drivetrain);
         }
-
-        localization.configureChoreo(drivetrain);
+        
     }
 
     public RobotLocalization<?> getLocalization(){
