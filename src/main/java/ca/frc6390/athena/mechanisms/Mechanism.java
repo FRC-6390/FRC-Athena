@@ -309,5 +309,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             return (StatefulMechanism<E>) super.shuffleboard(tab);
         }
 
+        @Override
+        public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList));
+            return super.shuffleboard(tab);
+        }
+
     }
 }

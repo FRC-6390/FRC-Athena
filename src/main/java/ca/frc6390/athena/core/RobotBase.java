@@ -15,6 +15,9 @@ import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Command;
 
 public class RobotBase<T extends RobotDrivetrain<T>> {
     
@@ -48,11 +51,13 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
     private final RobotDrivetrain<T> drivetrain;
     private final RobotLocalization<?> localization;
     private final RobotVision vision;
+    private final RobotAuto autos;
 
     public RobotBase(RobotBaseConfig<T> config){
         drivetrain = config.driveTrain.build();
         localization = config.localizationConfig != null ? drivetrain.localization(config.localizationConfig()) : null;
         vision = config.visionConfig != null ? RobotVision.fromConfig(config.visionConfig) : null; 
+        autos = new RobotAuto();
 
         if(localization != null && vision != null){
             localization.setRobotVision(vision);
@@ -156,5 +161,19 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
 
     public IMU getIMU(){
         return drivetrain.getIMU();
+    }
+
+    public RobotBase<T> registerPathPlannerAuto(String... auto){
+        autos.registerPathplannerAuto(auto);
+        return this;
+    }
+
+    public SendableChooser<Command> registerAutoChooser(String defualtAuto){
+        SmartDashboard.putData("Auto Chooser", autos.getSendableChooser(defualtAuto));
+        return autos.getAutoChooser();
+    }
+
+    public RobotAuto getAutos(){
+        return autos;
     }
 }

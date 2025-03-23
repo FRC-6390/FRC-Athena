@@ -1,185 +1,175 @@
 package ca.frc6390.athena.core;
 
+import java.util.HashMap;
+
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 
 public class RobotSpeeds {
 
-    public enum SpeedSource {
-        DRIVER,
-        AUTO,
-        FEEDBACK
+    public static class SpeedSource {
+
+        private String name;
+        private int priority;
+        private ChassisSpeeds speeds;
+        private boolean enabled, enableX, enableY, enableTheta;
+
+        public SpeedSource(String name, int priority){
+            this.name = name;
+            this.priority = priority;
+            enabled = true;
+            enableX = true;
+            enableY = true;
+            enableTheta = true;
+        }
+
+        public int getPriority() {
+            return priority;
+        }
+        
+        public String getName() {
+            return name;
+        }
+
+        public void setInputSpeeds(ChassisSpeeds speeds){
+            this.speeds = speeds;
+        }
+
+        public ChassisSpeeds getOutputSpeeds() {
+            double x = enableX ? speeds.vxMetersPerSecond : 0;
+            double y = enableY ? speeds.vyMetersPerSecond : 0;
+            double theta = enableTheta ? speeds.omegaRadiansPerSecond : 0;
+    
+            return enabled ? new ChassisSpeeds(x,y,theta) : new ChassisSpeeds();
+        }
+
+        public void stop(){
+            speeds = new ChassisSpeeds();
+        }
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public void setAxisState(SpeedAxis axis, boolean enabled){
+            switch (axis) {
+                case X:
+                    enableX = enabled;
+                break;
+                case Y:
+                    enableY = enabled;
+                break;
+                case Theta:
+                    enableTheta = enabled;
+                break;
+                default:
+                    break;
+            }
+        }
+
+        public boolean isAxisActive(SpeedAxis axis){
+            switch (axis) {
+                case X:
+                return enableX;
+                case Y:
+                return enableY;
+                case Theta:
+                return enableTheta;
+                default:
+                return false;
+            }
+        }
     }
 
     public enum SpeedAxis {
         X,
         Y,
         Theta,
-        XAuto,
-        YAuto,
-        ThetaAuto
     }
 
-    private ChassisSpeeds driver;
-    private ChassisSpeeds auto;
-    private ChassisSpeeds feedback;
+    private HashMap<String, SpeedSource> sources;
+
     private double maxVelocity, maxAngularVelocity;
-    private boolean enableDriver, enableAuto, enableFeedback;
-    private boolean enableX, enableY, enableTheta;
-    private boolean enableXAuto, enableYAuto, enableThetaAuto;
 
     public RobotSpeeds(double maxVelocity, double maxAngularVelocity){
         this.maxVelocity = maxVelocity;
         this.maxAngularVelocity = maxAngularVelocity;
+        this.sources = new HashMap<>();
 
-        driver = new ChassisSpeeds();
-        auto = new ChassisSpeeds();
-        feedback = new ChassisSpeeds();
-
-        enableDriver = true;
-        enableAuto = true;
-        enableFeedback = true;
-
-        enableX = true;
-        enableY = true;
-        enableTheta = true;
-        enableXAuto = true;
-        enableYAuto = true;
-        enableThetaAuto = true;
+        registerSpeedSource("drive", 0);
     }
 
-    public void setDriverSpeeds(ChassisSpeeds speeds) {
-        this.driver = speeds;
+    public void registerSpeedSource(String name, int priority){
+
+        if(priority <= 0){
+            throw new Error("priority level must be greater than 0, 0 is reserved for drive");
+        }
+
+        sources.put(name, new SpeedSource(name, priority));
     }
 
-    public void setDriverSpeeds(double x, double y, double theta) {
-        setDriverSpeeds(new ChassisSpeeds(x, y, theta));
+    public void setSpeeds(String source, ChassisSpeeds speeds) {
+        sources.get(source.toLowerCase()).setInputSpeeds(speeds);
     }
 
-    public void setAutoSpeeds(ChassisSpeeds speeds) {
-        this.auto = speeds;
+    public void setSpeeds(String source, double x, double y, double theta) {
+        setSpeeds(source.toLowerCase(), new ChassisSpeeds(x, y, theta));
     }
 
-    public void setAutoSpeeds(double x, double y, double theta) {
-        setAutoSpeeds(new ChassisSpeeds(x, y, theta));
+    public ChassisSpeeds getSpeeds(String source) {
+        return sources.get(source.toLowerCase()).getOutputSpeeds();
     }
 
-    public void setFeedbackSpeeds(ChassisSpeeds speeds) {
-        this.feedback = speeds;
-    }
-
-    public void setFeedbackSpeeds(double x, double y, double theta) {
-        setFeedbackSpeeds(new ChassisSpeeds(x, y, theta));
-    }
-
-    public ChassisSpeeds getDriverSpeeds() {
-        return enableDriver ? driver : new ChassisSpeeds();
-    }
-
-    public ChassisSpeeds getAutoSpeeds() {
-        double x = enableXAuto ? auto.vxMetersPerSecond : 0;
-        double y = enableYAuto ? auto.vyMetersPerSecond : 0;
-        double theta = enableThetaAuto ? auto.omegaRadiansPerSecond : 0;
-
-        return enableAuto ? new ChassisSpeeds(x,y,theta) : new ChassisSpeeds();
-    }
-
-    public ChassisSpeeds getFeedbackSpeeds() {
-        return enableFeedback ? feedback : new ChassisSpeeds();
+    public ChassisSpeeds getSpeedsAtPriorityLevel(int priority) {
+        ChassisSpeeds speeds = new ChassisSpeeds();
+        sources.values().stream().filter(val -> val.getPriority() == priority).forEach(val -> speeds.plus(val.getOutputSpeeds()));
+        return speeds;
     }
 
     public void stop(){
-        stopAutoSpeeds();
-        stopDriverSpeeds();
-        stopFeedbackSpeeds();
+        sources.forEach((key, value) -> value.stop());
     }
 
-    public void stopAutoSpeeds(){
-        setAutoSpeeds(new ChassisSpeeds());
+    public void stopSpeeds(String source){
+        sources.get(source.toLowerCase()).stop();
     }
 
-    public void stopDriverSpeeds(){
-        setDriverSpeeds(new ChassisSpeeds());
+    public void setSpeedSourceState(String source, boolean enabled){
+        sources.get(source.toLowerCase()).setEnabled(enabled);
     }
 
-    public void stopFeedbackSpeeds(){
-        setFeedbackSpeeds(new ChassisSpeeds());
+    public boolean isSpeedsSourceActive(String source){
+        return sources.get(source.toLowerCase()).isEnabled();
     }
 
-    public void enableSpeeds(SpeedSource speed, boolean enabled){
-        switch (speed) {
-            case DRIVER:
-                enableDriver = enabled;
-            break;
-            case AUTO:
-                enableAuto = enabled;
-            break;
-            case FEEDBACK:
-                enableFeedback = enabled;
-            break;
-        }
+    public void setAxisState(String source, SpeedAxis axis, boolean enabled){
+        sources.get(source.toLowerCase()).setAxisState(axis, enabled);
     }
 
-    public boolean isSpeedsEnabled(SpeedSource axis){
-        switch (axis) {
-            case DRIVER:
-            return enableDriver;
-            case AUTO:
-            return enableAuto;
-            case FEEDBACK:
-            return enableFeedback;
-            default:
-            return false;
-        }
+    public void setAllAxisState(String source, SpeedAxis axis, boolean enabled){
+        sources.forEach((key, value)-> value.setAxisState(axis, enabled));
     }
 
-    public void enableAxis(SpeedAxis axis, boolean enabled){
-        switch (axis) {
-            case X:
-                enableX = enabled;
-            break;
-            case Y:
-                enableY = enabled;
-            break;
-            case Theta:
-                enableTheta = enabled;
-            break;
-            case XAuto:
-                enableXAuto = enabled;
-            break;
-            case YAuto:
-                enableYAuto = enabled;
-            break;
-            case ThetaAuto:
-                enableThetaAuto = enabled;
-            break;
-        }
-    }
-
-    public boolean isAxisEnabled(SpeedAxis axis){
-        switch (axis) {
-            case X:
-            return enableX;
-            case Y:
-            return enableY;
-            case Theta:
-            return enableTheta;
-            default:
-            return false;
-        }
+    public boolean isAxisActive(String source, SpeedAxis axis){
+        return sources.get(source).isAxisActive(axis);
     }
 
     public ChassisSpeeds calculate(){
 
-        ChassisSpeeds autoPlusFeedback = getAutoSpeeds().plus(getFeedbackSpeeds());
-        ChassisSpeeds tempDriver = getDriverSpeeds();
+        ChassisSpeeds nonDriveSpeeds = new ChassisSpeeds(); 
+        sources.values().stream().filter(val -> val.getPriority() != 0).forEach(val -> nonDriveSpeeds.plus(val.getOutputSpeeds()));
+        ChassisSpeeds tempDriver = getSpeeds("drive");
 
-        double finalVx = combineAxis(tempDriver.vxMetersPerSecond, autoPlusFeedback.vxMetersPerSecond);
-        double finalVy = combineAxis(tempDriver.vyMetersPerSecond, autoPlusFeedback.vyMetersPerSecond);
-        double finalOmega = combineAxis(tempDriver.omegaRadiansPerSecond, autoPlusFeedback.omegaRadiansPerSecond);
+        double finalVx = combineAxis(tempDriver.vxMetersPerSecond, nonDriveSpeeds.vxMetersPerSecond);
+        double finalVy = combineAxis(tempDriver.vyMetersPerSecond, nonDriveSpeeds.vyMetersPerSecond);
+        double finalOmega = combineAxis(tempDriver.omegaRadiansPerSecond, nonDriveSpeeds.omegaRadiansPerSecond);
 
-        finalVx = enableX ? clamp(finalVx, maxVelocity) : 0;
-        finalVy = enableY ? clamp(finalVy, maxVelocity) : 0;
-        finalOmega = enableTheta ? clamp(finalOmega, maxAngularVelocity) : 0;
+        finalVx = clamp(finalVx, maxVelocity);
+        finalVy = clamp(finalVy, maxVelocity);
+        finalOmega = clamp(finalOmega, maxAngularVelocity);
 
         return new ChassisSpeeds(finalVx, finalVy, finalOmega);
     }

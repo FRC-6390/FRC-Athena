@@ -3,8 +3,11 @@ package ca.frc6390.athena.mechanisms;
 import java.util.Arrays;
 import java.util.function.BooleanSupplier;
 
+import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>> {
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implements RobotSendableDevice {
     
     public interface SetpointProvider<T> {
         T getSetpoint();
@@ -66,5 +69,20 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>> {
 
     public T getGoalStateSetpoint(){
         return getGoalState().getSetpoint();
+    }
+
+    @Override
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+
+        layout.addString("Goal State", () -> this.getGoalState().name());
+        layout.addString("Next State", () -> this.getNextState().name());
+        layout.addBoolean("Should Change State", () -> this.shouldChangeState());
+
+        ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
+        for (E state: goalState.getDeclaringClass().getEnumConstants()){
+            statesLayout.add(state.name(), state.getSetpoint());
+        }
+
+        return layout;
     }
 }
