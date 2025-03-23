@@ -10,7 +10,7 @@ public class RobotSpeeds {
 
         private String name;
         private int priority;
-        private ChassisSpeeds speeds;
+        private ChassisSpeeds speeds = new ChassisSpeeds();
         private boolean enabled, enableX, enableY, enableTheta;
 
         public SpeedSource(String name, int priority){
@@ -99,7 +99,10 @@ public class RobotSpeeds {
         this.maxAngularVelocity = maxAngularVelocity;
         this.sources = new HashMap<>();
 
-        registerSpeedSource("drive", 0);
+        sources.put("drive", new SpeedSource("drive", 0));
+        registerSpeedSource("auto", 1);
+        registerSpeedSource("feedback", 1);
+
     }
 
     public void registerSpeedSource(String name, int priority){

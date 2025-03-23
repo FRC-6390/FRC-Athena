@@ -38,12 +38,12 @@ public class SwerveDriveCommand extends Command {
 
     ChassisSpeeds chassisSpeeds = !fieldRelative ? ChassisSpeeds.fromRobotRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.getIMU().getVirtualAxis("driver")) : ChassisSpeeds.fromFieldRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.getIMU().getVirtualAxis("driver"));
 
-    driveTrain.getRobotSpeeds().setDriverSpeeds(chassisSpeeds);    
+    driveTrain.getRobotSpeeds().setSpeeds("drive", chassisSpeeds);    
   }
 
   @Override
   public void end(boolean interrupted) {
-    driveTrain.getRobotSpeeds().setDriverSpeeds(new ChassisSpeeds());
+    driveTrain.getRobotSpeeds().stopSpeeds("drive");
   }
 
   @Override

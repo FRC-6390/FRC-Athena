@@ -71,12 +71,12 @@ public class RotateToAngle extends Command{
     @Override
     public void execute() {
         double turnRate = rotationPID.calculate(pose.get().getRotation().getDegrees(), angle.get().getDegrees());
-        speeds.setFeedbackSpeeds(0, 0, turnRate);
+        speeds.setSpeeds("feedback", 0, 0, turnRate);
     }
 
     @Override
     public void end(boolean interrupted) {
-        speeds.stopFeedbackSpeeds();
+        speeds.stopSpeeds("feedbackl");
     }
 
     @Override

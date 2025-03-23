@@ -182,13 +182,13 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
     { 
       Map<String, Object> props = Map.of("Min", -getRobotSpeeds().getMaxVelocity(), "Max", getRobotSpeeds().getMaxVelocity(),"Label position", "TOP");
       ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kGrid).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
-      chassisLayout.addDouble("X", () -> robotSpeeds.getDriverSpeeds().vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-      chassisLayout.addDouble("Y", () -> robotSpeeds.getDriverSpeeds().vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-      chassisLayout.addDouble("Z", () -> robotSpeeds.getDriverSpeeds().omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      chassisLayout.addDouble("X", () -> robotSpeeds.getSpeeds("drive").vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      chassisLayout.addDouble("Y", () -> robotSpeeds.getSpeeds("drive").vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      chassisLayout.addDouble("Z", () -> robotSpeeds.getSpeeds("drive").omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
       ShuffleboardLayout feedbackLayout = speedsLayout.getLayout("Feedback", BuiltInLayouts.kGrid).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
-      feedbackLayout.addDouble("X", () -> robotSpeeds.getFeedbackSpeeds().vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-      feedbackLayout.addDouble("Y", () -> robotSpeeds.getFeedbackSpeeds().vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-      feedbackLayout.addDouble("Z", () -> robotSpeeds.getFeedbackSpeeds().omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      feedbackLayout.addDouble("X", () -> robotSpeeds.getSpeeds("feedback").vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      feedbackLayout.addDouble("Y", () -> robotSpeeds.getSpeeds("feedback").vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
+      feedbackLayout.addDouble("Z", () -> robotSpeeds.getSpeeds("feedback").omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
     }
 
     ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kGrid).withSize(1, 3).withProperties(Map.of("Number of columns", 1, "Number of rows", 3));

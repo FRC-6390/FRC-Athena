@@ -35,12 +35,12 @@ public class TankDriveCommand extends Command {
 
     ChassisSpeeds chassisSpeeds = new ChassisSpeeds(xSpeed, 0, thetaSpeed);
 
-    driveTrain.getRobotSpeeds().setDriverSpeeds(chassisSpeeds);    
+    driveTrain.getRobotSpeeds().setSpeeds("drive", chassisSpeeds);    
   }
 
   @Override
   public void end(boolean interrupted) {
-    driveTrain.getRobotSpeeds().setDriverSpeeds(new ChassisSpeeds());
+    driveTrain.getRobotSpeeds().stopSpeeds("drive");
   }
 
   @Override

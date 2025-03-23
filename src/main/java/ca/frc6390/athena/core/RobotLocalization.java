@@ -109,7 +109,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.wheelPositions = wheelPositions;
         this.fieldPose = new Pose2d();
         this.relativePose = new Pose2d();
-        this.autoDrive = (speeds, feed) ->  robotSpeeds.setAutoSpeeds(speeds);
+        this.autoDrive = (speeds, feed) ->  robotSpeeds.setSpeeds("auto",speeds);
       
         this.field = new Field2d();
 
@@ -119,7 +119,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         
         this.fieldEstimator = fieldEstimator;
         this.relativeEstimator = relativeEstimator;
-
+ 
         imu.addVirtualAxis("relative", imu::getYaw);
         imu.addVirtualAxis("field", imu::getYaw);
         imu.setVirtualAxis("relative", new Rotation2d());
@@ -159,7 +159,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         AutoBuilder.configure(
             this::getFieldPose, 
             this::resetFieldPose, 
-            () -> robotSpeeds.getDriverSpeeds(), 
+            () -> robotSpeeds.getSpeeds("drive"), 
             output, 
             new PPHolonomicDriveController(
             translationConstants,
@@ -196,7 +196,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             speeds.vyMetersPerSecond = translationController.calculate(botpose.getY(), trajpose.getY());
             speeds.omegaRadiansPerSecond = rotationController.calculate(botpose.getRotation().getRadians(), trajpose.getRotation().getRadians());
 
-            robotSpeeds.setAutoSpeeds(speeds);
+            robotSpeeds.setSpeeds("auto", speeds);
         }, 
         true,
         drivetrain);
