@@ -1,7 +1,10 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.Arrays;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
@@ -18,9 +21,20 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         T getSetpoint();
     }
 
-    private E goalState, nextState;
-    private BooleanSupplier atStateSupplier, changeStateSupplier, nextchangeStateSupplier;
-    private SendableChooser<E> chooser = new SendableChooser<>();
+    private static class StateQueueEntry<E> {
+        final E state;
+        final BooleanSupplier condition;
+        
+        StateQueueEntry(E state, BooleanSupplier condition) {
+            this.state = state;
+            this.condition = condition;
+        }
+    }
+
+    private E goalState;
+    private BooleanSupplier atStateSupplier, changeStateSupplier;
+    private final SendableChooser<E> chooser = new SendableChooser<>();
+    private final Queue<StateQueueEntry<E>> stateQueue = new LinkedList<>();
 
     public StateMachine(E initialState, BooleanSupplier atStateSupplier){
         chooser.setDefaultOption(initialState.name(), initialState);
@@ -28,10 +42,8 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
             chooser.addOption(state.name(), state);
         }
         this.goalState = initialState;
-        this.nextState = initialState;
         this.atStateSupplier = atStateSupplier;
         this.changeStateSupplier = () -> true;
-        this.nextchangeStateSupplier = () -> true;
         setGoalState(initialState);
     }
 
@@ -44,14 +56,13 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         changeStateSupplier = condition;
     }
 
-    public void setNextState(E state){
-        setNextState(state, () -> true);
+    public void queueState(E state) {
+        queueState(state, () -> true);
     }
 
-    public void setNextState(E state, BooleanSupplier condition){
-        nextState = state;
-        nextchangeStateSupplier = condition;
-    }    
+    public void queueState(E state, BooleanSupplier condition) {
+        stateQueue.add(new StateQueueEntry<>(state, condition));
+    }
 
     public BooleanSupplier getChangeStateSupplier(){
         return changeStateSupplier;
@@ -66,7 +77,19 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     }
 
     public E getNextState() {
-        return nextState;
+        if (!stateQueue.isEmpty()) {
+            return stateQueue.peek().state;
+        }
+        return goalState;
+    }
+
+    public String getNextStateQueue() {
+        if (stateQueue.isEmpty()) {
+            return "None";
+        }
+        return stateQueue.stream()
+                .map(entry -> entry.state.name())
+                .collect(Collectors.joining(", "));
     }
 
     public Command atGoalStateCommand() {
@@ -86,13 +109,10 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     }
 
     public void update() {
-        if(shouldChangeState()){
-            if (nextState != null) {
-                goalState = nextState;
-                changeStateSupplier = nextchangeStateSupplier;
-            }
-            nextchangeStateSupplier = null;
-            nextState = null;
+        if (shouldChangeState() && !stateQueue.isEmpty()) {
+            StateQueueEntry<E> entry = stateQueue.poll();
+            goalState = entry.state;
+            changeStateSupplier = entry.condition;
         }
     }
 
@@ -105,6 +125,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
 
         layout.add("State Chooser", chooser);
         layout.add("Set State", new InstantCommand(() -> setGoalState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
+        layout.add("Queue State", new InstantCommand(() -> queueState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
 
         layout.addString("Goal State", () -> this.getGoalState().name());
         layout.addString("Next State", () -> this.getNextState().name());
