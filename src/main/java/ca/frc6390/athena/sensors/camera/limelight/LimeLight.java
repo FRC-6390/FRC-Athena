@@ -1,12 +1,16 @@
 package ca.frc6390.athena.sensors.camera.limelight;
 
 import ca.frc6390.athena.sensors.camera.LocalizationCamera;
+import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.numbers.N1;
+import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.wpilibj.Timer;
 
 public class LimeLight implements LocalizationCamera{
     public LimeLightConfig config;
@@ -501,7 +505,7 @@ public class LimeLight implements LocalizationCamera{
 
     @Override
     public double getLocalizationLatency() {
-        return getPoseEstimate(config.localizationEstimator()).getLatency(); 
+        return  Timer.getFPGATimestamp() - (getPoseEstimate(config.localizationEstimator()).getLatency()/1000.0); 
     }
 
     @Override
@@ -515,5 +519,19 @@ public class LimeLight implements LocalizationCamera{
 
     public Double[] getFiducialIdFilters(){
         return fiducial_id_filters_set.getDoubleArray(new Double[]{});
+    }
+
+    Matrix<N3, N1> single, multi;
+    
+    @Override
+    public Matrix<N3, N1> getLocalizationStdDevs() {
+        return single;
+    }
+
+
+    @Override
+    public void setStdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
+        this.single = single;
+        this.multi = multi;
     }
 }

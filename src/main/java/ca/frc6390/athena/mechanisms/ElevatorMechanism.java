@@ -2,8 +2,11 @@ package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
-public class ElevatorMechanism extends Mechanism{
+public class ElevatorMechanism extends Mechanism {
+
     private final ElevatorFeedforward feedforward;
 
     public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config, ElevatorFeedforward feedforward) {
@@ -50,6 +53,13 @@ public class ElevatorMechanism extends Mechanism{
         @Override
         public StatefulElevatorMechanism<E> shuffleboard(String tab) {
             return (StatefulElevatorMechanism<E>) super.shuffleboard(tab);
+        }
+
+
+        @Override
+        public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList));
+            return super.shuffleboard(tab);
         }
     }
 }

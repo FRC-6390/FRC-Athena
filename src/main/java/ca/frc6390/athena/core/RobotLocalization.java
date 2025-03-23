@@ -138,6 +138,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public RobotLocalization<T> setRobotVision(RobotVision vision){
         this.vision = vision;
+        vision.setLocalizationStdDevs(localizationConfig.getVisionStd(), localizationConfig.getVisionMultitagStd());
         return this;
     }
 
@@ -258,13 +259,15 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             vision.getLimelights().forEach((table, ll) -> ll.setFiducialIdFilters(ll.config.filteredTags()));
             List<Pose2d> poses = vision.getLocalizationPoses();
             SmartDashboard.putNumber("Localization Poses", poses.size());
-            if(poses.size() < 2){
-                fieldEstimator.setVisionMeasurementStdDevs(localizationConfig.getVisionMultitagStd());
-            }else{
-                fieldEstimator.setVisionMeasurementStdDevs(localizationConfig.getVisionStd());
-            }
-
-            vision.setLocalizationPoses(fieldEstimator::addVisionMeasurement);
+            vision.addLocalizationPoses(data -> {
+                if(data.pose() != null){
+                    if (data.stdDevs() != null){
+                        fieldEstimator.addVisionMeasurement(data.pose(), data.latency(), data.stdDevs());
+                    }else {
+                        fieldEstimator.addVisionMeasurement(data.pose(), data.latency());
+                    }
+                }
+            });
         }
 
         fieldPose = fieldEstimator.update(imu.getVirtualAxis("field"), wheelPositions.get());

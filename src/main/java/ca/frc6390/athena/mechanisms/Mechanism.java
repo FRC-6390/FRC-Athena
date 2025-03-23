@@ -26,7 +26,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private final boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
     private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput;
-    private double setpoint, pidOutput, feedforwardOutput, output; 
+    private double setpoint, pidOutput, feedforwardOutput, output, nudge; 
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
         this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage,config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new), config.useSetpointAsOutput);
@@ -131,17 +131,21 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }
     }
 
+    public void resetPID(){
+        if(pidController != null) pidController.reset();
+        if(profiledPIDController != null) profiledPIDController.reset(getPosition(), getVelocity());
+    }
+
     public double calculatePID(){
         double output = 0;
         double encoderPos = getPosition();
 
         if (pidController != null){
-            output += pidController.calculate(encoderPos, getSetpoint());
+            output += pidController.calculate(encoderPos, getSetpoint() + getNudge());
         }
 
         if(profiledPIDController != null){
-            profiledPIDController.reset(getPosition(), getVelocity());
-            profiledPIDController.calculate(encoderPos, getSetpoint());
+            profiledPIDController.calculate(encoderPos, getSetpoint() + getNudge());
             output += profiledPIDController.getSetpoint().velocity;
         }
 
@@ -161,7 +165,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         output += isFeedforwardEnabled() ? feedforwardOutput : 0;
 
         if (setpointIsOutput){
-            output = getSetpoint();
+            output = getSetpoint() + getNudge();
         }
 
         if (override || encoder == null){
@@ -235,6 +239,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         return output;
     }
 
+    public void setNudge(double nudge){
+        this.nudge = nudge;
+    }
+
+    public double getNudge() {
+        return nudge;
+    }
+
     @Override
     public void periodic() {
         if (encoder != null) encoder.update();
@@ -259,6 +271,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         tab.addBoolean("PID Enabled", this::isPidEnabled);
         tab.addBoolean("At Setpoint", this::atSetpoint);
         tab.addDouble("Setpoint", this::getSetpoint);
+        tab.addDouble("Nudge", this::getNudge);
+
+        tab.addDouble("Nudge + Setpoint", () -> getNudge() + getSetpoint());
+
         tab.addDouble("PID Output", this::getPidOutput);
         tab.addDouble("Feedforward Output", this::getFeedforwardOutput);
         tab.addDouble("Output", this::getOutput);
@@ -275,6 +291,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             commandsLayout.add("Enable\\Disable Override", new InstantCommand(() -> setOverride(!override))).withWidget(BuiltInWidgets.kCommand);
             commandsLayout.add("Enable\\Disable Emergency Stop", new InstantCommand(() -> setEmergencyStopped(!emergencyStopped))).withWidget(BuiltInWidgets.kCommand);
         }
+
+        if(pidController != null) tab.add("PID Controller", pidController);
+        if(profiledPIDController != null) tab.add("Profiled PID Controller", pidController);
 
         return tab;
     }

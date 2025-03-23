@@ -4,7 +4,6 @@
 # Publishing
 ```bash
 export $(cat .env | xargs)
- ./gradlew publish -PpublishMode=all -PfrcYear=2025 -Pversion=2025.9.11 #Publish local to wpilib folder and online
  ```
 
  ```bash

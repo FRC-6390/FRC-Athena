@@ -2,6 +2,8 @@ package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public class TurretMechanism  extends Mechanism  {
     private final SimpleMotorFeedforward feedforward;
@@ -21,7 +23,6 @@ public class TurretMechanism  extends Mechanism  {
     public TurretMechanism shuffleboard(String tab) {
         return (TurretMechanism) super.shuffleboard(tab);
     }
-
     public static class StatefulTurretMechanism<E extends Enum<E> & SetpointProvider<Double>> extends TurretMechanism {
     
         private final StateMachine<Double, E> stateMachine;
@@ -50,6 +51,12 @@ public class TurretMechanism  extends Mechanism  {
         @Override
         public StatefulTurretMechanism<E> shuffleboard(String tab) {
             return (StatefulTurretMechanism<E>) super.shuffleboard(tab);
+        }
+
+        @Override
+        public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList));
+            return super.shuffleboard(tab);
         }
     }
 }

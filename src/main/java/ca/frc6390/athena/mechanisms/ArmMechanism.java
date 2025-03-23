@@ -2,6 +2,8 @@ package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.math.controller.ArmFeedforward;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public class ArmMechanism extends Mechanism {
     private final ArmFeedforward feedforward;
@@ -50,6 +52,12 @@ public class ArmMechanism extends Mechanism {
         @Override
         public StatefulArmMechanism<E> shuffleboard(String tab) {
             return (StatefulArmMechanism<E>) super.shuffleboard(tab);
+        }
+
+        @Override
+        public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList));
+            return super.shuffleboard(tab);
         }
     }
 }
