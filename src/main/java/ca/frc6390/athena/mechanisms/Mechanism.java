@@ -148,6 +148,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             emergencyStopped = true;
         }
 
+
+        pidOutput = calculatePID();
+        feedforwardOutput = calculateFeedForward();
+
         if (override || encoder == null){
             return;
         }
@@ -158,8 +162,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }
 
 
-        pidOutput = calculatePID();
-        feedforwardOutput = calculateFeedForward();
 
         output = isPidEnabled() ? pidOutput : 0;
         output += isFeedforwardEnabled() ? feedforwardOutput : 0;
