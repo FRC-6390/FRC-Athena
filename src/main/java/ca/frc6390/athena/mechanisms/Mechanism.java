@@ -21,14 +21,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private final ProfiledPIDController profiledPIDController;
     private final boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
-    private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled;
+    private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput;
     private double setpoint, pidOutput, feedforwardOutput, output; 
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
-        this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage,config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new));
+        this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage,config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new), config.useSetpointAsOutput);
     }
 
-    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController, ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage, GenericLimitSwitch[] limitSwitches){
+    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController, ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage, GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput){
         this.motors = motors;
         this.encoder = encoder;
         this.pidController = pidController;
@@ -37,6 +37,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         this.useVoltage = useVoltage;
         this.override = false;
         this.limitSwitches = limitSwitches;
+        this.setpointIsOutput = useSetpointAsOutput;
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
@@ -154,6 +155,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
         output = isPidEnabled() ? pidOutput : 0;
         output += isFeedforwardEnabled() ? feedforwardOutput : 0;
+
+        if (setpointIsOutput){
+            output = getSetpoint();
+        }
 
         if (override || encoder == null){
             return;

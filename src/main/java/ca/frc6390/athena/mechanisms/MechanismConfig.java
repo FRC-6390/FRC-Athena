@@ -32,6 +32,7 @@ public class MechanismConfig<T extends Mechanism> {
     public ProfiledPIDController profiledPIDController = null;
     public boolean useAbsolute = false;
     public boolean useVoltage = false;
+    public boolean useSetpointAsOutput = false;
     public Function<MechanismConfig<T>, T> factory = null;
     public ArrayList<GenericLimitSwitchConfig> limitSwitches = new ArrayList<>();
     
@@ -221,6 +222,11 @@ public class MechanismConfig<T extends Mechanism> {
 
     public MechanismConfig<T> addLimitSwitch(GenericLimitSwitchConfig config) {
         limitSwitches.add(config);
+        return this;
+    }
+
+    public MechanismConfig<T> setUseSetpointAsOutput(boolean useSetpointAsOutput) {
+        this.useSetpointAsOutput = useSetpointAsOutput;
         return this;
     }
 
