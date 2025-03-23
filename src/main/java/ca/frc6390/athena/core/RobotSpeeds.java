@@ -13,7 +13,10 @@ public class RobotSpeeds {
     public enum SpeedAxis {
         X,
         Y,
-        Theta
+        Theta,
+        XAuto,
+        YAuto,
+        ThetaAuto
     }
 
     private ChassisSpeeds driver;
@@ -22,6 +25,7 @@ public class RobotSpeeds {
     private double maxVelocity, maxAngularVelocity;
     private boolean enableDriver, enableAuto, enableFeedback;
     private boolean enableX, enableY, enableTheta;
+    private boolean enableXAuto, enableYAuto, enableThetaAuto;
 
     public RobotSpeeds(double maxVelocity, double maxAngularVelocity){
         this.maxVelocity = maxVelocity;
@@ -38,6 +42,9 @@ public class RobotSpeeds {
         enableX = true;
         enableY = true;
         enableTheta = true;
+        enableXAuto = true;
+        enableYAuto = true;
+        enableThetaAuto = true;
     }
 
     public void setDriverSpeeds(ChassisSpeeds speeds) {
@@ -69,7 +76,11 @@ public class RobotSpeeds {
     }
 
     public ChassisSpeeds getAutoSpeeds() {
-        return enableAuto ? auto : new ChassisSpeeds();
+        double x = enableXAuto ? auto.vxMetersPerSecond : 0;
+        double y = enableYAuto ? auto.vyMetersPerSecond : 0;
+        double theta = enableThetaAuto ? auto.omegaRadiansPerSecond : 0;
+
+        return enableAuto ? new ChassisSpeeds(x,y,theta) : new ChassisSpeeds();
     }
 
     public ChassisSpeeds getFeedbackSpeeds() {
@@ -131,6 +142,15 @@ public class RobotSpeeds {
             break;
             case Theta:
                 enableTheta = enabled;
+            break;
+            case XAuto:
+                enableXAuto = enabled;
+            break;
+            case YAuto:
+                enableYAuto = enabled;
+            break;
+            case ThetaAuto:
+                enableThetaAuto = enabled;
             break;
         }
     }
