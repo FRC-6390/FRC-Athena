@@ -46,6 +46,13 @@ public class MotorControllerGroup implements RobotSendableDevice{
         return this;
     }
 
+    public void setCurrentLimit(double currentLimit){
+        for (MotorController motorController : controllers) {
+            motorController.setCurrentLimit(currentLimit);
+        }
+    }
+
+
     public void setSpeed(double speed){
         for (MotorController motorController : controllers) {
             motorController.setSpeed(speed);

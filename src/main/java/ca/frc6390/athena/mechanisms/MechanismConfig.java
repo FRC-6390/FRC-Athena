@@ -42,6 +42,7 @@ public class MechanismConfig<T extends Mechanism> {
     public double encoderConversionOffset = 0;
     public double encoderOffset = 0;
     public double motorCurrentLimit = 40;
+    public double tolerance = 0;
     public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
 
 
@@ -170,6 +171,10 @@ public class MechanismConfig<T extends Mechanism> {
         return this;
     }
 
+    public MechanismConfig<T> setTolerance(double tolerance){
+        this.tolerance = tolerance;
+        return this;
+    }
     public MechanismConfig<T> setCanbus(String canbus){
         this.canbus = canbus;
         return this;
@@ -268,6 +273,14 @@ public class MechanismConfig<T extends Mechanism> {
                     .setConversionOffset(encoderConversionOffset)
                     .setGearRatio(encoderGearRatio)
                     .setOffset(encoderOffset);
+        }
+
+        if(pidController != null){
+            pidController.setTolerance(tolerance);
+        }
+
+        if(profiledPIDController != null){
+            profiledPIDController.setTolerance(tolerance);
         }
 
         return factory.apply(this);

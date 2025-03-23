@@ -1,7 +1,5 @@
 package ca.frc6390.athena.mechanisms;
 
-import java.util.Map;
-
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.MotorControllerGroup;
@@ -195,6 +193,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }else {
             setSpeed(output);
         }
+    }
+
+    public void setCurrentLimit(double currentLimit){
+        motors.setCurrentLimit(currentLimit);
     }
 
     public void setMotorNeutralMode(MotorNeutralMode mode){
