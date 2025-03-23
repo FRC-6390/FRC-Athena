@@ -91,6 +91,9 @@ public class Encoder implements RobotSendableDevice{
     }
 
     public static Encoder fromConfig(EncoderConfig config) {
+
+        if(config == null) return null;
+
         switch (config.type) {
             case CTRETalonFXEncoder:
             return new Encoder(new TalonFX(config.id, config.canbus)).applyConfig(config);
