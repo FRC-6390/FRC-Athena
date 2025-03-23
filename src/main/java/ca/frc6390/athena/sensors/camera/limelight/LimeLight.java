@@ -1,5 +1,7 @@
 package ca.frc6390.athena.sensors.camera.limelight;
 
+import java.util.Arrays;
+
 import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -270,7 +272,7 @@ public class LimeLight implements LocalizationCamera{
         cy1 = limelightTable.getEntry("cy1");
         rawfiducials =  limelightTable.getEntry("rawfiducials");
 
-        setFiducialIdFilters(config.filteredTags());
+        setFiducialIdFilters(Arrays.stream(config.filteredTags()).mapToDouble(i -> i).toArray());
     }
     
     
@@ -522,7 +524,7 @@ public class LimeLight implements LocalizationCamera{
     }
 
     Matrix<N3, N1> single, multi;
-    
+
     @Override
     public Matrix<N3, N1> getLocalizationStdDevs() {
         return single;

@@ -33,7 +33,7 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
      * @param port The digital input port number where the switch sensor is connected.
      */
     public GenericLimitSwitch(int port) {
-        this(port, true);
+        this(port, port < 0);
     }
  
     public GenericLimitSwitch(int port, boolean inverted) {

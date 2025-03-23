@@ -2,11 +2,11 @@ package ca.frc6390.athena.sensors.camera.photonvision;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonCamera;
 import org.photonvision.PhotonPoseEstimator;
-import org.photonvision.PhotonPoseEstimator.PoseStrategy;
 import org.photonvision.targeting.PhotonPipelineResult;
 import org.photonvision.targeting.PhotonTrackedTarget;
 
@@ -40,7 +40,7 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
         this.config = config;
         this.pose = config.cameraRobotSpace();
         this.estimator = new PhotonPoseEstimator(AprilTagFieldLayout.loadField(config.fieldLayout()), config.poseStrategy() , pose);
-        estimator.setMultiTagFallbackStrategy(PoseStrategy.PNP_DISTANCE_TRIG_SOLVE); // LOWEST_AMBIGUITY
+        estimator.setMultiTagFallbackStrategy(config.poseStrategyFallback());
     }
 
     public PhotonVision(String table, Transform3d pose) {
@@ -54,6 +54,7 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
     @Override
     public void setRobotOrientation(Double[] orientation){
         estimator.addHeadingData(Timer.getFPGATimestamp(), Rotation2d.fromDegrees(orientation[0]));
+        
     }
 
     @Override
@@ -61,8 +62,9 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
         updateResults();
         Optional<EstimatedRobotPose> visionEst = Optional.empty();
         if(!isConnected()) return null;
-        for (var change : results) {       
-            visionEst = estimator.update(change);
+        for (var change : results) {
+            List<PhotonTrackedTarget> filtered = change.getTargets().stream().filter(t -> getConfig().filteredTags().contains(t.getFiducialId())).collect(Collectors.toList());
+            visionEst = estimator.update(new PhotonPipelineResult(change.metadata, filtered, change.multitagResult));
             updateEstimationStdDevs(visionEst, change.getTargets());
         }
         

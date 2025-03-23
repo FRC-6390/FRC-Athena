@@ -7,11 +7,11 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
 
-public record LimeLightConfig(String table, Transform3d cameraRobotSpace, PoseEstimateWithLatencyType localizationEstimator, double[] filteredTags, boolean useForLocalization) implements ConfigurableCamera {
+public record LimeLightConfig(String table, Transform3d cameraRobotSpace, PoseEstimateWithLatencyType localizationEstimator, int[] filteredTags, boolean useForLocalization) implements ConfigurableCamera {
     private static final String DEFUALT_TABLE = "limelight"; 
 
     public LimeLightConfig(String table){
-        this(table, new Transform3d(), PoseEstimateWithLatencyType.BOT_POSE_MT2_BLUE, new double[]{}, false);
+        this(table, new Transform3d(), PoseEstimateWithLatencyType.BOT_POSE_MT2_BLUE, new int[]{}, false);
     }
 
     public LimeLightConfig(){
@@ -34,7 +34,7 @@ public record LimeLightConfig(String table, Transform3d cameraRobotSpace, PoseEs
         return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization);
     }
 
-    public LimeLightConfig setLocalizationTagFilter(double... filteredTags){
+    public LimeLightConfig setLocalizationTagFilter(int... filteredTags){
         return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization);
     }
     

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.core;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
@@ -256,7 +257,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         
         if(vision != null && visionEnabled) {
             vision.setRobotOrientation(imu.getVirtualAxis("field"));
-            vision.getLimelights().forEach((table, ll) -> ll.setFiducialIdFilters(ll.config.filteredTags()));
+            vision.getLimelights().forEach((table, ll) -> ll.setFiducialIdFilters(Arrays.stream(ll.config.filteredTags()).mapToDouble(i -> i).toArray()));
             List<Pose2d> poses = vision.getLocalizationPoses();
             SmartDashboard.putNumber("Localization Poses", poses.size());
             vision.addLocalizationPoses(data -> {
