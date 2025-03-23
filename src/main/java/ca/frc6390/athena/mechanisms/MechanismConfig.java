@@ -261,7 +261,7 @@ public class MechanismConfig<T extends Mechanism> {
                     .setConversion(encoderConversion)
                     .setConversionOffset(encoderConversionOffset)
                     .setGearRatio(encoderGearRatio)
-                    .setOffset(encoderConversionOffset);
+                    .setOffset(encoderOffset);
         }
 
         return factory.apply(this);

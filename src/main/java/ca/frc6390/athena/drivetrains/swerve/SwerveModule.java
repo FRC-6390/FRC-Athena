@@ -196,7 +196,6 @@ public class SwerveModule implements RobotSendableDevice {
     public void refresh() {
         encoder.update();
         driveMotor.getEncoder().update();
-        // System.out.println(driveMotor.getEncoder().getGearRatio());
     }
 
     @Override

@@ -18,6 +18,7 @@ public class LimeLight implements LocalizationCamera{
     public NetworkTableEntry tync;
     public NetworkTableEntry botpose_targetspace_set;
     public NetworkTableEntry ta;
+    public NetworkTableEntry crosshairs;
     public NetworkTableEntry t2d;
     public NetworkTableEntry tl;
     public NetworkTableEntry tshort;
@@ -220,6 +221,7 @@ public class LimeLight implements LocalizationCamera{
         tx = limelightTable.getEntry("tx");
         ty = limelightTable.getEntry("ty");
         ta = limelightTable.getEntry("ta");
+        crosshairs = limelightTable.getEntry("crosshairs");
         t2d = limelightTable.getEntry("t2d");
         tl = limelightTable.getEntry("tl");
         tshort = limelightTable.getEntry("tshort");
@@ -359,6 +361,22 @@ public class LimeLight implements LocalizationCamera{
     public double getPipeline(){
         return getpipe.getDouble(0);
     }
+
+
+     /**
+     * 2D Crosshairs [cx0, cy0, cx1, cy1]
+     */
+    public Double[] getCrosshairs(){
+        return crosshairs.getDoubleArray(new Double[]{});
+    }
+
+     /**
+     * 2D Crosshairs [cx0, cy0, cx1, cy1]
+     */
+    public void setCrosshairs(Double[] value){
+         crosshairs.setDoubleArray(value);
+    }
+
 
      /**
      * Camera transform in target space of primary apriltag or solvepnp target, NumberArray: Translation (x,y,z) Rotation(pitch,yaw,roll)

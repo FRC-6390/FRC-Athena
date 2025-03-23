@@ -277,12 +277,12 @@ public class Encoder implements RobotSendableDevice{
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.addDouble("Gear Ratio", this::getGearRatio);
-        layout.addBoolean("Intervetd", this::isInverted);
+        layout.addBoolean("Inverted", this::isInverted);
         layout.addDouble("Conversion", this::getConversion);
         layout.addDouble("Conversion Offset", this::getConversionOffset);
         layout.addDouble("Position", this::getPosition);
         layout.addDouble("Rotations", this::getRawValue);
-        layout.addDouble("Absolute Positon", this::getAbsolutePosition);
+        layout.addDouble("Absolute Position", this::getAbsolutePosition);
         layout.addDouble("Absolute Roation", this::getAbsoluteRotations);
         layout.addDouble("Raw Velocity", this::getRawVelocity);
         layout.addDouble("Velocity", this::getVelocity);
