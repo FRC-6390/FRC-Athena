@@ -76,7 +76,7 @@ public class RotateToAngle extends Command{
 
     @Override
     public void end(boolean interrupted) {
-        speeds.stopSpeeds("feedbackl");
+        speeds.stopSpeeds("feedback");
     }
 
     @Override

@@ -129,7 +129,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if(config.rotation != null && config.translation != null){
             configurePathPlanner(config.translation, config.rotation);
         }  
-        setRobotVision(vision);      
     }
 
     public RobotLocalization<T> enableVisionForLocalization(boolean visionEnabled){

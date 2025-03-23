@@ -154,7 +154,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
     public void update(){
 
-        if (!encoder.isConnected() || !motors.allMotorsConnected()) {
+        if ( (encoder != null && !encoder.isConnected()) || !motors.allMotorsConnected()) {
             emergencyStopped = true;
         }
 

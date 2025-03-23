@@ -38,7 +38,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
 
     public StateMachine(E initialState, BooleanSupplier atStateSupplier){
         chooser.setDefaultOption(initialState.name(), initialState);
-        for (E state: goalState.getDeclaringClass().getEnumConstants()){
+        for (E state: initialState.getDeclaringClass().getEnumConstants()){
             chooser.addOption(state.name(), state);
         }
         this.goalState = initialState;
