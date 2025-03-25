@@ -54,5 +54,11 @@ public class SimpleMotorMechanism  extends Mechanism  {
             stateCore.shuffleboard(tab);
             return super.shuffleboard(tab);
         }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public StatefulSimpleMotorMechanism<E> shuffleboard(String tab) {
+            return (StatefulSimpleMotorMechanism<E>) super.shuffleboard(tab);
+        }
     }
 }

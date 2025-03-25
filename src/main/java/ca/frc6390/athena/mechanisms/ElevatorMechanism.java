@@ -54,6 +54,12 @@ public class ElevatorMechanism extends Mechanism {
             stateCore.shuffleboard(tab);
             return super.shuffleboard(tab);
         }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public StatefulElevatorMechanism<E> shuffleboard(String tab) {
+            return (StatefulElevatorMechanism<E>) super.shuffleboard(tab);
+        }
     }
 
 }

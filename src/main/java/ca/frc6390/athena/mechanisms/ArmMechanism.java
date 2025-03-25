@@ -54,6 +54,12 @@ public class ArmMechanism extends Mechanism {
             stateCore.shuffleboard(tab);
             return super.shuffleboard(tab);
         }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public StatefulArmMechanism<E> shuffleboard(String tab) {
+            return (StatefulArmMechanism<E>) super.shuffleboard(tab);
+        }
     }
 }
 

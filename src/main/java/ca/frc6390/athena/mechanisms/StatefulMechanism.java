@@ -38,6 +38,8 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         return super.shuffleboard(tab);
     }
 
+    
+
     public static class StatefulMechanismCore<T, E extends Enum<E> & SetpointProvider<Double>> {
         private final StateMachine<Double, E> stateMachine;
         private final Map<Enum<?>, Function<T, Boolean>> stateActions;
