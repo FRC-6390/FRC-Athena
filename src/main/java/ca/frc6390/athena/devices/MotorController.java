@@ -3,6 +3,7 @@ package ca.frc6390.athena.devices;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
+import java.util.function.DoubleSupplier;
 
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
@@ -25,6 +26,7 @@ public class MotorController implements RobotSendableDevice {
 
     private final DoubleConsumer setSpeed, setVoltage, setCurrentLimit;
     private final BooleanSupplier getIsConnected;
+    private final DoubleSupplier getTemperature;
     private final Consumer<MotorNeutralMode> setNeutralMode;
     private final Encoder encoder;
     private boolean inverted = false;
@@ -33,6 +35,8 @@ public class MotorController implements RobotSendableDevice {
     private String canbus;
     private int id;
     private MotorControllerType type;
+    private double temperature;
+
 
     public MotorController(TalonFX controller){
         this(
@@ -50,6 +54,7 @@ public class MotorController implements RobotSendableDevice {
                 controller.getConfigurator().apply(config);
             },
             controller::isConnected,
+            () -> controller.getDeviceTemp(true).getValueAsDouble(),
             new Encoder(controller)
         );
     }
@@ -71,6 +76,7 @@ public class MotorController implements RobotSendableDevice {
                 controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
             },
             () -> controller.getFaults().can,
+            controller::getMotorTemperature,
             Encoder.newREVSparkMax(controller)
         );
     }
@@ -92,17 +98,19 @@ public class MotorController implements RobotSendableDevice {
                 controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
             },
             () -> controller.getFaults().can,
+            controller::getMotorTemperature,
             Encoder.newREVSparkFlex(controller)
         );
     }
 
-    public MotorController(Consumer<MotorNeutralMode> setNeutralMode, DoubleConsumer setSpeed, DoubleConsumer setVoltage, DoubleConsumer setCurrentLimit, BooleanSupplier getIsConnected, Encoder encoder) {
+    public MotorController(Consumer<MotorNeutralMode> setNeutralMode, DoubleConsumer setSpeed, DoubleConsumer setVoltage, DoubleConsumer setCurrentLimit, BooleanSupplier getIsConnected, DoubleSupplier getTemperature, Encoder encoder) {
         this.setNeutralMode = setNeutralMode;
         this.setSpeed = setSpeed;
         this.setVoltage = setVoltage;
         this.setCurrentLimit = setCurrentLimit;
         this.getIsConnected = getIsConnected;
         this.encoder = encoder;
+        this.getTemperature = getTemperature;
     }
 
     public static MotorController newREVSparkFlexBrushed(int id){
@@ -225,6 +233,12 @@ public class MotorController implements RobotSendableDevice {
 
     public void update(){
         encoder.update();
+        this.temperature = getTemperature.getAsDouble();
+    }
+
+
+    public double getTemperature() {
+        return temperature;
     }
 
     public enum Motor {
@@ -272,7 +286,7 @@ public class MotorController implements RobotSendableDevice {
         layout.addString("Canbus", this::getCanbus);
         layout.addInteger("Id", this::getId);
         layout.addString("Motor Controller", () -> this.getMotorControllerType().name());
-    
+        layout.addDouble("Tempature", this::getTemperature);
         return layout;
     }
 }

@@ -134,6 +134,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     public void resetPID(){
         if(pidController != null) pidController.reset();
         if(profiledPIDController != null) profiledPIDController.reset(getPosition(), getVelocity());
+        this.output = 0;
     }
 
     public double calculatePID(){
@@ -154,6 +155,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
     public void update(){
 
+        double output = 0;
+
         if ( (encoder != null && !encoder.isConnected()) || !motors.allMotorsConnected()) {
             emergencyStopped = true;
         }
@@ -167,6 +170,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         if (setpointIsOutput){
             output = getSetpoint() + getNudge();
         }
+
+        this.output = output;
 
         if (override){
             return;
@@ -250,6 +255,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     @Override
     public void periodic() {
         if (encoder != null) encoder.update();
+        motors.update();
         update();
     }
 
