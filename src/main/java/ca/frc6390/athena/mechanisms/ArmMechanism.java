@@ -17,7 +17,7 @@ public class ArmMechanism extends Mechanism {
     @Override
     public double calculateFeedForward() {
         double value = feedforward.calculate(getRotation2d().getRadians(), getVelocity());
-        return value / 12d;
+        return  isUseVoltage() ? value : value / 12d;
     }
 
     @Override
