@@ -64,7 +64,12 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
 
     public SwerveDrivetrainConfig modules(SwerveModuleConfig... modules){
         if (modules.length == 1) {
-            modules = new SwerveModuleConfig[]{modules[0], modules[0], modules[0], modules[0]};
+            modules = new SwerveModuleConfig[]{
+                new SwerveModuleConfig(modules[0]),
+                new SwerveModuleConfig(modules[0]),
+                new SwerveModuleConfig(modules[0]),
+                new SwerveModuleConfig(modules[0])
+            };
         }
         this.modules = modules;
         return this;

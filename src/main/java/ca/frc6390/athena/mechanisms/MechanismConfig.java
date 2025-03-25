@@ -1,6 +1,8 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -13,7 +15,6 @@ import ca.frc6390.athena.devices.MotorControllerConfig.MotorControllerType;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
-import ca.frc6390.athena.mechanisms.Mechanism.StatefulMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
@@ -43,8 +44,10 @@ public class MechanismConfig<T extends Mechanism> {
     public double encoderOffset = 0;
     public double motorCurrentLimit = 40;
     public double tolerance = 0;
-    public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
+    public double stateMachineDelay = 0;
 
+    public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
+    public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
 
     public static MechanismConfig<Mechanism> generic(){
         return custom(Mechanism::new);
@@ -258,6 +261,16 @@ public class MechanismConfig<T extends Mechanism> {
     public MechanismConfig<T> addLimitSwitch(int id, double position, boolean stopMotors, int blockDirection){
         return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, blockDirection));
     }
+
+    public MechanismConfig<T> setStateMachineDelay(double delay){
+        this.stateMachineDelay = delay;
+        return this;
+    }
+
+    public MechanismConfig<T> setStateAction(Enum<?> state, Function<T, Boolean> action) {
+        stateActions.put(state, action);
+        return this;
+   }
 
     public T build(){
 

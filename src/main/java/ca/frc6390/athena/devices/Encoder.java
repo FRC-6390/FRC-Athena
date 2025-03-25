@@ -17,6 +17,7 @@ import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 public class Encoder implements RobotSendableDevice{
@@ -253,6 +254,23 @@ public class Encoder implements RobotSendableDevice{
         return this;
     }
 
+    private double simPosition = 0;
+    private double simVelocity = 0;
+
+    public void setSimulatedVelocity(double velocity) {
+        this.simVelocity = velocity;
+    }
+
+    public Encoder simulatedUpdate(double dt) {
+        simPosition += simVelocity * dt;
+
+        position = inverted ? -simPosition : simPosition;
+        velocity = inverted ? -simVelocity : simVelocity;
+        absolutePosition = position - Math.floor(position);
+        
+        return this;
+    }
+
     public void setRotations(double rotations){
         setRaw((rotations + offset) / gearRatio);
     }
@@ -293,6 +311,10 @@ public class Encoder implements RobotSendableDevice{
         layout.addString("Canbus", this::getCanbus);
         layout.addInteger("Id", this::getId);
         layout.addString("Encoder Type", () -> this.getEncoderType().name());
+        if(RobotBase.isSimulation()){
+            layout.addDouble("simPosition", () -> simPosition);
+            layout.addDouble("simVelocity", () -> simVelocity);
+        }
         return layout;
     }
 }

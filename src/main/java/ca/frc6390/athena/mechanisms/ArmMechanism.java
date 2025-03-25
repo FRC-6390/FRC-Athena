@@ -1,8 +1,8 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
+import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import edu.wpi.first.math.controller.ArmFeedforward;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public class ArmMechanism extends Mechanism {
@@ -11,6 +11,7 @@ public class ArmMechanism extends Mechanism {
     public ArmMechanism(MechanismConfig<? extends ArmMechanism> config, ArmFeedforward feedforward) {
         super(config);
         this.feedforward = feedforward;
+        setFeedforwardEnabled(true);
     }
 
     @Override
@@ -26,37 +27,31 @@ public class ArmMechanism extends Mechanism {
     
     public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ArmMechanism {
 
-        private final StateMachine<Double, E> stateMachine;
+        private final StatefulMechanismCore<StatefulArmMechanism<E>, E> stateCore;
 
-        public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config,ArmFeedforward feedforward, E initialState) {
+        public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config, ArmFeedforward feedforward, E initialState) {
             super(config, feedforward);
-            this.stateMachine = new StateMachine<>(initialState, this::atSetpoint);
+            stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.stateMachineDelay, config.stateActions);
         }
 
         @Override
         public double getSetpoint() {
-            return stateMachine.getGoalState().getSetpoint();
+            return stateCore.getSetpoint();
         }
 
         @Override
         public void update() {
-            stateMachine.update();  
+            setSuppressMotorOutput(!stateCore.update(this));
             super.update();
         }
 
         public StateMachine<Double, E> getStateMachine() {
-            return stateMachine;
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public StatefulArmMechanism<E> shuffleboard(String tab) {
-            return (StatefulArmMechanism<E>) super.shuffleboard(tab);
+            return stateCore.getStateMachine();
         }
 
         @Override
         public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
-            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList));
+            stateCore.shuffleboard(tab);
             return super.shuffleboard(tab);
         }
     }

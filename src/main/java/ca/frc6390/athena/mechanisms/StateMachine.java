@@ -6,6 +6,7 @@ import java.util.Queue;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
+import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
@@ -17,6 +18,8 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implements RobotSendableDevice {
     
+    private final DelayedOutput atGoalDelayedOutput;
+
     public interface SetpointProvider<T> {
         T getSetpoint();
     }
@@ -32,7 +35,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     }
 
     private E goalState;
-    private BooleanSupplier atStateSupplier, changeStateSupplier;
+    private BooleanSupplier changeStateSupplier;
     private final SendableChooser<E> chooser = new SendableChooser<>();
     private final Queue<StateQueueEntry<E>> stateQueue = new LinkedList<>();
 
@@ -42,9 +45,13 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
             chooser.addOption(state.name(), state);
         }
         this.goalState = initialState;
-        this.atStateSupplier = atStateSupplier;
         this.changeStateSupplier = () -> true;
+        this.atGoalDelayedOutput = new DelayedOutput(atStateSupplier, 0);
         queueState(initialState);
+    }
+
+    public void setAtStateDelay(double delay){
+        atGoalDelayedOutput.setDelay(delay);
     }
 
     public void queueState(E state) {
@@ -87,25 +94,20 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         stateQueue.clear();
     }
 
-    public Command atGoalStateCommand() {
+    public Command waitUntilAtGoal() {
         return Commands.waitUntil(this::atGoalState);
     }
 
-    public Command atAnyStateCommand(@SuppressWarnings("unchecked") E... states) {
-        return Commands.waitUntil(() -> this.atAnyState(states));
+    public Command waitUntil(@SuppressWarnings("unchecked") E... states) {
+        return Commands.waitUntil(() -> this.atState(states));
     }
-
 
     public boolean atGoalState() {
-        return atStateSupplier.getAsBoolean();
+        return atGoalDelayedOutput.getAsBoolean();
     }
 
-    public boolean atState(E state) {
-        return atGoalState() && state == goalState;
-    }
-
-    public boolean atAnyState(@SuppressWarnings("unchecked") E... states) {
-        return Arrays.stream(states).anyMatch((state) -> atGoalState() && state == goalState);
+    public boolean atState(@SuppressWarnings("unchecked") E... states) {
+        return Arrays.stream(states).anyMatch((state) -> atGoalState() && state.equals(goalState));
     }
 
     public void update() {

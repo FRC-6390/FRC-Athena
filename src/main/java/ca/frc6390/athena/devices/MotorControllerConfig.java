@@ -6,6 +6,7 @@ import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 
 public class MotorControllerConfig {
+    
      public enum MotorControllerType {
         CTRETalonFX(EncoderType.CTRETalonFXEncoder),
         REVSparkMaxBrushed(EncoderType.REVSparkMaxEncoder),

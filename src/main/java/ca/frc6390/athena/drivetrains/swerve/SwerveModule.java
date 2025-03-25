@@ -16,8 +16,10 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
-
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+import edu.wpi.first.wpilibj2.command.InstantCommand;
 public class SwerveModule implements RobotSendableDevice {
     
     private final SwerveModuleConfig config;
@@ -25,10 +27,24 @@ public class SwerveModule implements RobotSendableDevice {
     private final MotorController rotationMotor;
     private final Encoder encoder;
     private final PIDController rotationPidController;
+    private final double startUpOffset;
     // SWERVE MOTOR RECORD
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder) {
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID) {
             this(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, rotationMotor.encoderConfig);
+        }
+
+        //cloning
+        public SwerveModuleConfig(SwerveModuleConfig other) {
+            this(
+                new Translation2d(other.module_location().getX(), other.module_location().getY()),
+                other.wheelDiameter(),
+                other.maxSpeedMetersPerSecond(),
+                other.driveMotor(),
+                other.rotationMotor(),
+                new PIDController(other.rotationPID().getP(), other.rotationPID().getI(), other.rotationPID().getD()),
+                other.encoder()
+            );
         }
 
         public SwerveModuleConfig setCanbus(String canbus){
@@ -117,6 +133,7 @@ public class SwerveModule implements RobotSendableDevice {
 
         resetEncoders();
         setNeutralMode(MotorNeutralMode.Brake);
+        this.startUpOffset = encoder.getOffset();
     }
 
     public double getDriveMotorVelocity() {
@@ -203,6 +220,18 @@ public class SwerveModule implements RobotSendableDevice {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 2));
         layout.addDouble("Encoder Rotations", () -> getEncoderPosition().getRotations()).withSize(1, 1).withPosition(1, 1);
         layout.addDouble("Drive Motor Position", () -> getDriveMotorPosition()).withSize(1, 1).withPosition(1, 2);
+        
+        driveMotor.shuffleboard(layout.getLayout("Drive Motor", BuiltInLayouts.kList));
+        rotationMotor.shuffleboard(layout.getLayout("Steer Motor", BuiltInLayouts.kList));
+        encoder.shuffleboard(layout.getLayout("Encoder", BuiltInLayouts.kList));
+        
+        ShuffleboardLayout commandsLayout = layout.getLayout("Quick Commands",BuiltInLayouts.kList);
+        {
+            commandsLayout.add("Set Offset", new InstantCommand(() -> setOffset(encoder.getRawAbsoluteValue()))).withWidget(BuiltInWidgets.kCommand);
+            commandsLayout.add("Zero Offset", new InstantCommand(() -> setOffset(0))).withWidget(BuiltInWidgets.kCommand);
+            commandsLayout.add("Clear Offset", new InstantCommand(() -> setOffset(startUpOffset))).withWidget(BuiltInWidgets.kCommand);
+        }
+
         return layout;
     }
 }

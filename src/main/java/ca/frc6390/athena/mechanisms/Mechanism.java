@@ -3,13 +3,13 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.MotorControllerGroup;
-import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import ca.frc6390.athena.devices.MotorControllerConfig;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
@@ -25,8 +25,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private final ProfiledPIDController profiledPIDController;
     private final boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
-    private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput;
+    private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput;
     private double setpoint, pidOutput, feedforwardOutput, output, nudge; 
+    private RobotMode prevRobotMode = RobotMode.DISABLE, robotMode = RobotMode.DISABLE;
+
+    private enum RobotMode {
+        TELE,
+        AUTO,
+        DISABLE,
+        TEST,
+    }
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
         this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage,config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new), config.useSetpointAsOutput);
@@ -46,6 +54,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
         }
+
+        pidEnabled = pidController != null || profiledPIDController != null;
     }
 
     public void setVoltage(double voltage){
@@ -153,6 +163,20 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         return output;
     }
 
+    private void outputMotor(double output) {
+        if (!suppressMotorOutput){
+            if (useVoltage) {
+                setVoltage(output);
+            } else {
+                setSpeed(output);
+            }
+        }
+    }
+
+    public void setSuppressMotorOutput(boolean suppressMotorOutput) {
+        this.suppressMotorOutput = suppressMotorOutput;
+    }
+
     public void update(){
 
         double output = 0;
@@ -197,11 +221,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             }
         }
 
-        if (useVoltage) {
-            setVoltage(output);
-        }else {
-            setSpeed(output);
-        }
+        outputMotor(output);
     }
 
     public void setCurrentLimit(double currentLimit){
@@ -254,9 +274,31 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
     @Override
     public void periodic() {
+
+        if(DriverStation.isAutonomousEnabled()){
+            robotMode = RobotMode.AUTO;
+        } else if(DriverStation.isTeleopEnabled()){
+            robotMode = RobotMode.TELE;
+        } else if(DriverStation.isDisabled()){
+            robotMode = RobotMode.DISABLE;
+        } else if(DriverStation.isTestEnabled()){
+            robotMode = RobotMode.TEST;
+        }
+
+        if(!prevRobotMode.equals(robotMode)){
+            resetPID();
+        }
+
         if (encoder != null) encoder.update();
         motors.update();
         update();
+
+        prevRobotMode = robotMode;
+    }
+
+    @Override
+    public void simulationPeriodic() {
+        periodic();
     }
 
     @Override
@@ -302,43 +344,5 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         if(profiledPIDController != null) tab.add("Profiled PID Controller", pidController);
 
         return tab;
-    }
-
-    public static class StatefulMechanism<E extends Enum<E> & SetpointProvider<Double>> extends Mechanism {
-        
-        private final StateMachine<Double, E> stateMachine;
-
-        public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
-            super(config);
-            this.stateMachine = new StateMachine<>(initialState, this::atSetpoint);
-        }
-
-        @Override
-        public double getSetpoint() {
-            return stateMachine.getGoalState().getSetpoint();
-        }
-
-        @Override
-        public void update() {
-            stateMachine.update();  
-            super.update();
-        }
-
-        public StateMachine<Double, E> getStateMachine() {
-            return stateMachine;
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public StatefulMechanism<E> shuffleboard(String tab) {
-            return (StatefulMechanism<E>) super.shuffleboard(tab);
-        }
-
-        @Override
-        public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
-            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList));
-            return super.shuffleboard(tab);
-        }
-
     }
 }

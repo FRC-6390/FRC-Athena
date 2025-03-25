@@ -5,12 +5,17 @@ import edu.wpi.first.wpilibj.Timer;
 
 public class DelayedOutput implements BooleanSupplier {
     private final BooleanSupplier input;
-    private final double delay;
+    private double delay;
     private double startTime = Double.NaN; // Not started
 
     public DelayedOutput(BooleanSupplier input, double delay) {
         this.input = input;
         this.delay = delay;
+    }
+
+    public DelayedOutput setDelay(double delay){
+        this.delay = delay;
+        return this;
     }
 
     @Override

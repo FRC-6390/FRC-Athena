@@ -242,29 +242,23 @@ public class MotorController implements RobotSendableDevice {
     }
 
     public enum Motor {
-        KRAKEN_X60_FOC(MotorControllerType.CTRETalonFX, 5800, true),
-        KRAKEN_X60(MotorControllerType.CTRETalonFX,6000, false),
-        FALCON_500_FOC(MotorControllerType.CTRETalonFX,6080, true),
-        FALCON_500(MotorControllerType.CTRETalonFX,6380, false),
-        NEO_V1(MotorControllerType.REVSparkMaxBrushless,5820, false),
-        NEO_VORTEX(MotorControllerType.REVSparkFlexBrushless,6784, false);
+        KRAKEN_X60_FOC(MotorControllerType.CTRETalonFX, 5800),
+        KRAKEN_X60(MotorControllerType.CTRETalonFX,6000),
+        FALCON_500_FOC(MotorControllerType.CTRETalonFX,6080),
+        FALCON_500(MotorControllerType.CTRETalonFX,6380),
+        NEO_V1(MotorControllerType.REVSparkMaxBrushless,5820),
+        NEO_VORTEX(MotorControllerType.REVSparkFlexBrushless,6784);
 
         private final int freeSpeedRPM;
-        private final boolean foc;
         private final MotorControllerType controllerType;
 
-        Motor(MotorControllerType controllerType, int freeSpeedRPM, boolean foc) {
+        Motor(MotorControllerType controllerType, int freeSpeedRPM) {
             this.controllerType = controllerType;
             this.freeSpeedRPM = freeSpeedRPM;
-            this.foc = foc;
         }
 
         public int getFreeSpeedRPM() {
             return freeSpeedRPM;
-        }
-
-        public boolean isFOC() {
-            return foc;
         }
 
         public MotorControllerType getMotorControllerType(){

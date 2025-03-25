@@ -1,14 +1,15 @@
 package ca.frc6390.athena.mechanisms;
 
+import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
-import edu.wpi.first.math.controller.ElevatorFeedforward;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
-public class ElevatorMechanism extends Mechanism {
+public class SimpleMotorMechanism  extends Mechanism  {
+    
+    private final SimpleMotorFeedforward feedforward;
 
-    private final ElevatorFeedforward feedforward;
-
-    public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config, ElevatorFeedforward feedforward) {
+    public SimpleMotorMechanism(MechanismConfig<? extends SimpleMotorMechanism> config, SimpleMotorFeedforward feedforward) {
         super(config);
         this.feedforward = feedforward;
         setFeedforwardEnabled(true);
@@ -21,15 +22,14 @@ public class ElevatorMechanism extends Mechanism {
     }
 
     @Override
-    public ElevatorMechanism shuffleboard(String tab) {
-        return (ElevatorMechanism) super.shuffleboard(tab);
+    public SimpleMotorMechanism shuffleboard(String tab) {
+        return (SimpleMotorMechanism) super.shuffleboard(tab);
     }
+    public static class StatefulSimpleMotorMechanism<E extends Enum<E> & SetpointProvider<Double>> extends SimpleMotorMechanism {
     
-    public static class StatefulElevatorMechanism<E extends Enum<E> & StateMachine.SetpointProvider<Double>> extends ElevatorMechanism {
+        private final StatefulMechanismCore<StatefulSimpleMotorMechanism<E>, E> stateCore;
 
-        private final StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateCore;
-
-        public StatefulElevatorMechanism(MechanismConfig<StatefulElevatorMechanism<E>> config, ElevatorFeedforward feedforward, E initialState) {
+        public StatefulSimpleMotorMechanism(MechanismConfig<StatefulSimpleMotorMechanism<E>> config, SimpleMotorFeedforward feedforward, E initialState) {
             super(config, feedforward);
             stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.stateMachineDelay, config.stateActions);
         }
@@ -40,9 +40,9 @@ public class ElevatorMechanism extends Mechanism {
         }
 
         @Override
-        public void periodic() {
+        public void update() {
             setSuppressMotorOutput(!stateCore.update(this));
-            super.update();   
+            super.update();
         }
 
         public StateMachine<Double, E> getStateMachine() {
@@ -55,5 +55,4 @@ public class ElevatorMechanism extends Mechanism {
             return super.shuffleboard(tab);
         }
     }
-
 }
