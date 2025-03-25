@@ -16,7 +16,7 @@ import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
+import ca.frc6390.athena.mechanisms.SimpleMotorMechanism.StatefulSimpleMotorMechanism;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
@@ -85,19 +85,19 @@ public class MechanismConfig<T extends Mechanism> {
         return custom(factory);
     }
 
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(SimpleMotorFeedforward feedforward, E initialState) {
-        return custom(config -> new StatefulTurretMechanism<>(config, feedforward, initialState));
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulSimpleMotorMechanism<E>> statefulTurret(SimpleMotorFeedforward feedforward, E initialState) {
+        return custom(config -> new StatefulSimpleMotorMechanism<>(config, feedforward, initialState));
     }
 
-    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulTurretMechanism<E>> MechanismConfig<T> statefulTurret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulSimpleMotorMechanism<E>> MechanismConfig<T> statefulTurret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
         return custom(factory);
     }
 
-    public static MechanismConfig<TurretMechanism> turret(SimpleMotorFeedforward feedforward) {
-        return custom(config -> new TurretMechanism(config, feedforward));
+    public static MechanismConfig<SimpleMotorMechanism> turret(SimpleMotorFeedforward feedforward) {
+        return custom(config -> new SimpleMotorMechanism(config, feedforward));
     }
 
-    public static <T extends TurretMechanism> MechanismConfig<T> turret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+    public static <T extends SimpleMotorMechanism> MechanismConfig<T> turret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
         return custom(factory);
     }
 
