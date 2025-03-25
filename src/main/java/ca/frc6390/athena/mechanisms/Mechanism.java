@@ -224,6 +224,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         outputMotor(output);
     }
 
+    public GenericLimitSwitch[] getLimitSwitches() {
+        return limitSwitches;
+    }
+
     public void setCurrentLimit(double currentLimit){
         motors.setCurrentLimit(currentLimit);
     }

@@ -270,7 +270,21 @@ public class MechanismConfig<T extends Mechanism> {
     public MechanismConfig<T> setStateAction(Enum<?> state, Function<T, Boolean> action) {
         stateActions.put(state, action);
         return this;
-   }
+    }
+
+    public MechanismConfig<T> setStateAction(Enum<?> state, Consumer<T> action) {
+        return setStateAction(state, mech -> {
+            action.accept(mech);
+            return false;
+        });
+    }
+
+    public MechanismConfig<T> setStateActionSupressMotors(Enum<?> state, Consumer<T> action) {
+        return setStateAction(state, mech -> {
+            action.accept(mech);
+            return true;
+        });
+    }
 
     public T build(){
 

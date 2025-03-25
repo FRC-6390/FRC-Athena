@@ -18,7 +18,7 @@ public class SimpleMotorMechanism  extends Mechanism  {
     @Override
     public double calculateFeedForward() {
         double value = feedforward.calculate(getVelocity());
-        return isUseVoltage() ? value : value / 12d;
+        return value / 12d;
     }
 
     @Override
