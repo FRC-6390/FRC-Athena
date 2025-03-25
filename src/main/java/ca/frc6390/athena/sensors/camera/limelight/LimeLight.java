@@ -501,8 +501,8 @@ public class LimeLight implements LocalizationCamera{
         camerapose_robotspace_set.setDoubleArray(pose);
     }
 
-    public void setRobotOrientation(Double[] orientation){
-        robot_orientation_set.setDoubleArray(orientation);
+    public void setRobotOrientation(Pose2d pose){
+        robot_orientation_set.setDoubleArray(new Double[] {pose.getRotation().getDegrees(),0d,0d,0d,0d,0d});
     }
 
     @Override

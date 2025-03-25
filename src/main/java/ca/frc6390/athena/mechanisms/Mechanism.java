@@ -90,7 +90,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
     public boolean atSetpoint(){
         return (pidController == null || pidController.atSetpoint()) &&
-           (profiledPIDController == null || profiledPIDController.atSetpoint());
+           (profiledPIDController == null || profiledPIDController.atGoal());
     }
 
     public void setSetpoint(double setpoint){
@@ -168,7 +168,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             output = getSetpoint() + getNudge();
         }
 
-        if (override || encoder == null){
+        if (override){
             return;
         }
         

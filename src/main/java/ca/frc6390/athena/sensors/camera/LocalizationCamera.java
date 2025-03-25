@@ -17,7 +17,7 @@ public interface LocalizationCamera {
     
     double getLocalizationLatency();
 
-    void setRobotOrientation(Double[] orientation);
+    void setRobotOrientation(Pose2d pose);
 
     Matrix<N3, N1> getLocalizationStdDevs();
 

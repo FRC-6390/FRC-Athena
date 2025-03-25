@@ -1,7 +1,6 @@
 package ca.frc6390.athena.core;
 
 import java.util.Arrays;
-import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
@@ -25,7 +24,6 @@ import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
@@ -255,11 +253,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     public void update() {
         
         if(vision != null && visionEnabled) {
-            vision.setRobotOrientation(imu.getVirtualAxis("field"));
+            vision.setRobotOrientation(fieldPose);
             vision.getLimelights().forEach((table, ll) -> ll.setFiducialIdFilters(Arrays.stream(ll.config.filteredTags()).mapToDouble(i -> i).toArray()));
-            List<Pose2d> poses = vision.getLocalizationPoses();
-            SmartDashboard.putNumber("Localization Poses", poses.size());
+            // List<Pose2d> poses = vision.getLocalizationPoses();
+            // SmartDashboard.putNumber("Localization Poses", poses.size());
             vision.addLocalizationPoses(data -> {
+                // System.out.println(data);
                 if(data.pose() != null){
                     if (data.stdDevs() != null){
                         fieldEstimator.addVisionMeasurement(data.pose(), data.latency(), data.stdDevs());

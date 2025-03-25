@@ -52,24 +52,29 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
     }
 
     @Override
-    public void setRobotOrientation(Double[] orientation){
-        estimator.addHeadingData(Timer.getFPGATimestamp(), Rotation2d.fromDegrees(orientation[0]));
-        
+    public void setRobotOrientation(Pose2d pose){
+        estimator.addHeadingData(Timer.getFPGATimestamp(), pose.getRotation());
+        estimator.setLastPose(pose);
     }
 
     @Override
     public Pose2d getLocalizationPose() {
         updateResults();
         Optional<EstimatedRobotPose> visionEst = Optional.empty();
-        if(!isConnected()) return null;
+        if(!isConnected()) {
+            clearResults();
+            return null;
+        }
+
         for (var change : results) {
-            List<PhotonTrackedTarget> filtered = change.getTargets().stream().filter(t -> getConfig().filteredTags().contains(t.getFiducialId())).collect(Collectors.toList());
+            List<PhotonTrackedTarget> filtered = getConfig().filteredTags().size() > 0 ? change.getTargets().stream().filter(t -> getConfig().filteredTags().contains(t.getFiducialId())).collect(Collectors.toList()) : change.getTargets();
             visionEst = estimator.update(new PhotonPipelineResult(change.metadata, filtered, change.multitagResult));
             updateEstimationStdDevs(visionEst, change.getTargets());
         }
         
         if (visionEst.isPresent()) {
             latency = visionEst.get().timestampSeconds;
+            clearResults();
             return visionEst.get().estimatedPose.toPose2d();
         }
         clearResults();
@@ -134,8 +139,9 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
                 // Decrease std devs if multiple targets are visible
                 if (numTags > 1) estStdDevs = multiTagStdDevs;
                 // Increase std devs based on (average) distance
-                if (numTags == 1 && avgDist > 4)
-                    estStdDevs = VecBuilder.fill(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE);
+                if (numTags == 1 && avgDist > 4){
+                   estStdDevs = VecBuilder.fill(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE);
+                }
                 else estStdDevs = estStdDevs.times(1 + (avgDist * avgDist / 30));
                 curStdDevs = estStdDevs;
             }

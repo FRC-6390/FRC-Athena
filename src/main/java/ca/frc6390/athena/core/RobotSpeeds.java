@@ -163,7 +163,13 @@ public class RobotSpeeds {
     public ChassisSpeeds calculate(){
 
         ChassisSpeeds nonDriveSpeeds = new ChassisSpeeds(); 
-        sources.values().stream().filter(val -> val.getPriority() != 0).forEach(val -> nonDriveSpeeds.plus(val.getOutputSpeeds()));
+        
+        for (SpeedSource source : sources.values()) {
+            if (source.getPriority() != 0) {
+                nonDriveSpeeds = nonDriveSpeeds.plus(source.getOutputSpeeds());
+            }
+        }
+
         ChassisSpeeds tempDriver = getSpeeds("drive");
 
         double finalVx = combineAxis(tempDriver.vxMetersPerSecond, nonDriveSpeeds.vxMetersPerSecond);

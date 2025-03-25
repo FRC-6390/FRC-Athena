@@ -130,10 +130,9 @@ public class RobotVision {
           ));
    }
 
-   public void setRobotOrientation(Rotation2d yaw){
-      Double[] orientation = {yaw.getDegrees(),0d,0d,0d,0d,0d};
-      getLimelights().values().forEach(ll -> ll.setRobotOrientation(orientation));
-      getPhotonVisions().values().forEach(pv -> pv.setRobotOrientation(orientation));
+   public void setRobotOrientation(Pose2d pose){
+      getLimelights().values().forEach(ll -> ll.setRobotOrientation(pose));
+      getPhotonVisions().values().forEach(pv -> pv.setRobotOrientation(pose));
 
    }
 
@@ -150,17 +149,17 @@ public class RobotVision {
    }
 
    public void addPhotonVisionPoses(Consumer<LocalizationData> estimator){
-      getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget() && pv.getConfig().useForLocalization()).forEach((pv) ->  {
+      getPhotonVisions().values().stream().filter(pv -> pv.getConfig().useForLocalization()).forEach((pv) ->  {
             estimator.accept(pv.getLocalizationData());
          }
       );
    }
 
-   public ArrayList<Pose2d> getLocalizationPoses(){
-      ArrayList<Pose2d> poses = getLimelightRobotPoses();
-      poses.addAll(getPhotonVisionPoses());
-      return poses;
-   }
+   // public ArrayList<Pose2d> getLocalizationPoses(){
+   //    ArrayList<Pose2d> poses = getLimelightRobotPoses();
+   //    poses.addAll(getPhotonVisionPoses());
+   //    return poses;
+   // }
 
    public void addLocalizationPoses(Consumer<LocalizationData> estimator){
      addLimelightRobotPoses(estimator);

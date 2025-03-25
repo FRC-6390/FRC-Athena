@@ -91,6 +91,11 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         return Commands.waitUntil(this::atGoalState);
     }
 
+    public Command atAnyStateCommand(@SuppressWarnings("unchecked") E... states) {
+        return Commands.waitUntil(() -> this.atAnyState(states));
+    }
+
+
     public boolean atGoalState() {
         return atStateSupplier.getAsBoolean();
     }
@@ -100,14 +105,16 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     }
 
     public boolean atAnyState(@SuppressWarnings("unchecked") E... states) {
-        return Arrays.asList(states).stream().anyMatch((state) -> atGoalState() && state == goalState);
+        return Arrays.stream(states).anyMatch((state) -> atGoalState() && state == goalState);
     }
 
     public void update() {
-        if (shouldChangeState() && !stateQueue.isEmpty()) {
-            StateQueueEntry<E> entry = stateQueue.poll();
-            goalState = entry.state;
-            changeStateSupplier = entry.condition;
+        if (!stateQueue.isEmpty()) {
+            changeStateSupplier = stateQueue.peek().condition;
+            if (shouldChangeState()) {
+                StateQueueEntry<E> entry = stateQueue.poll();
+                goalState = entry.state;
+            }
         }
     }
 
