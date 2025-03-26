@@ -1,23 +1,30 @@
 package ca.frc6390.athena.mechanisms;
 
+import ca.frc6390.athena.controllers.ElevatorFeedForwardsSendable;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public class ElevatorMechanism extends Mechanism {
 
-    private final ElevatorFeedforward feedforward;
+    private final ElevatorFeedForwardsSendable feedforward;
 
     public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config, ElevatorFeedforward feedforward) {
         super(config);
-        this.feedforward = feedforward;
+        this.feedforward = new ElevatorFeedForwardsSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
         setFeedforwardEnabled(true);
     }
 
     @Override
     public double calculateFeedForward() {
-        double value = feedforward.calculate(getVelocity());
+        double value = feedforward.calculate(getControllerSetpointVelocity());
         return  isUseVoltage() ? value : value / 12d;
+    }
+
+    @Override
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+        tab.add("FeedForwards", feedforward);
+        return super.shuffleboard(tab);
     }
 
     @Override

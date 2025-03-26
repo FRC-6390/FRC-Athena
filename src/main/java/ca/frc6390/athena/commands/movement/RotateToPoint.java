@@ -6,8 +6,8 @@ import edu.wpi.first.math.util.Units;
 
 public class RotateToPoint extends RotateToAngle {
 
-    public RotateToPoint(RobotBase<?> base, double x, double y, boolean relative){
-        super(base, relative);
+    public RotateToPoint(RobotBase<?> base, double x, double y){
+        super(base);
         this.setSupplier((pose) -> Units.radiansToDegrees(Math.atan2(y - pose.getY(), x - pose.getX())));
     }
 

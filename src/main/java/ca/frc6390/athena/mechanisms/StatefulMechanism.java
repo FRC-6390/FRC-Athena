@@ -33,6 +33,12 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
     }
 
     @Override
+    @SuppressWarnings("unchecked")
+    public StatefulMechanism<E> shuffleboard(String tab) {
+        return (StatefulMechanism<E>) super.shuffleboard(tab);
+    }
+
+    @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
         stateCore.shuffleboard(tab);
         return super.shuffleboard(tab);

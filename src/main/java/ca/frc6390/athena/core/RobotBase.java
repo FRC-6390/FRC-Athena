@@ -96,33 +96,24 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
         return this;
     }
 
-    public LimeLight getCameraFacing(double x, double y){
-        return getCameraFacing(x, y, false);
-    }
 
-    public LimeLight getCameraFacing(double x, double y, boolean relative){
-        return getCameraFacing(new Translation2d(x, y), relative);
+    public LimeLight getCameraFacing(double x, double y){
+        return getCameraFacing(new Translation2d(x, y));
     }
 
     public LimeLight getCameraFacing(Translation2d translation2d){
-        return getCameraFacing(translation2d, false);
-    }
-
-    public LimeLight getCameraFacing(Translation2d translation2d, boolean relative){
 
         if (vision == null || localization == null) {
             return null;
         }
     
-        Pose2d pose = relative ? localization.getRelativePose() : localization.getFieldPose();
+        Pose2d pose = localization.getFieldPose();
         Rotation2d targetAngle = Rotation2d.fromRadians(Math.atan2(translation2d.getY() - pose.getY(), translation2d.getX() - pose.getX()));
         
         Rotation2d desiredRelativeAngle = targetAngle.minus(pose.getRotation());
     
         LimeLight bestCamera = null;
         double smallestAngleDiff = Double.MAX_VALUE;
-
-        
 
         for (LimeLight camera : vision.getLimelights().values()) {
             Rotation2d cameraRelativeAngleRad = camera.config.getYawRelativeToForwards();
@@ -135,24 +126,16 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
         return bestCamera;
     }
 
-    public RotateToPoint rotateTo(double x, double y, boolean relative){
-        return new RotateToPoint(this, x, y, relative);
-    }
-
     public RotateToPoint rotateTo(double x, double y){
-        return rotateTo(x,y,false);
+        return new RotateToPoint(this, x, y);
     }
 
     public RotateToAngle rotateTo(double degrees){
-        return rotateTo(degrees, false);
-    }
-
-    public RotateToAngle rotateTo(double degrees, boolean relative){
-        return new RotateToAngle(this, degrees, false);
+        return new RotateToAngle(this, degrees);
     }
 
     public RotateToAngle rotateBy(double degrees){
-        return new RotateToAngle(this, getDrivetrain().getIMU().getYaw().plus(Rotation2d.fromDegrees(degrees)), false);
+        return new RotateToAngle(this, getDrivetrain().getIMU().getYaw().plus(Rotation2d.fromDegrees(degrees)));
     }
 
     public RobotSpeeds getRobotSpeeds(){

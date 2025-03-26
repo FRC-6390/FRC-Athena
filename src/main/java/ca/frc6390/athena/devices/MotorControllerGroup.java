@@ -5,6 +5,7 @@ import java.util.List;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
@@ -52,6 +53,23 @@ public class MotorControllerGroup implements RobotSendableDevice{
         }
     }
 
+    public void setPosition(double position){
+        for (MotorController motorController : controllers) {
+            motorController.setPosition(position);
+        }
+    }
+
+    public void setPID(PIDController pid){
+        for (MotorController motorController : controllers) {
+            motorController.setPID(pid);
+        }
+    }
+
+    public void setPID(double p, double i, double d){
+        for (MotorController motorController : controllers) {
+            motorController.setPID(p,i,d);
+        }
+    }
 
     public void setSpeed(double speed){
         for (MotorController motorController : controllers) {

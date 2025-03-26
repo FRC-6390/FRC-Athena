@@ -19,11 +19,11 @@ public class TankDriveCommand extends Command {
     this.xInput = xInput;
     this.thetaInput = thetaInput;
     addRequirements(driveTrain);
+    driveTrain.setNeutralMode(MotorNeutralMode.Brake);
   }
   
   @Override
   public void initialize() {
-    driveTrain.setNeutralMode(MotorNeutralMode.Brake);
   }
 
   @Override

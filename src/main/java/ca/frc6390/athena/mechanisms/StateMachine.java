@@ -74,6 +74,10 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         return goalState;
     }
 
+    public boolean isGoalState(E state) {
+        return goalState.equals(state);
+    }
+
     public E getNextState() {
         if (!stateQueue.isEmpty()) {
             return stateQueue.peek().state;
@@ -107,7 +111,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     }
 
     public boolean atState(@SuppressWarnings("unchecked") E... states) {
-        return Arrays.stream(states).anyMatch((state) -> atGoalState() && state.equals(goalState));
+        return Arrays.stream(states).anyMatch((state) -> atGoalState() && isGoalState(state));
     }
 
     public void update() {

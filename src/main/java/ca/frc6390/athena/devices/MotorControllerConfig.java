@@ -4,6 +4,7 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 
 import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
+import edu.wpi.first.math.controller.PIDController;
 
 public class MotorControllerConfig {
     
@@ -87,6 +88,7 @@ public class MotorControllerConfig {
     public boolean inverted = false;
     public EncoderConfig encoderConfig;
     public MotorNeutralMode neutralMode = MotorNeutralMode.Coast;
+    public PIDController pid;
 
     public MotorControllerConfig(MotorControllerType type, int id){
         this.id = Math.abs(id);
@@ -124,4 +126,15 @@ public class MotorControllerConfig {
         this.id = id;
         return this;
     }
+
+    public MotorControllerConfig setPid(double p, double i, double d) {
+        return setPid(new PIDController(p, i, d));
+    }
+
+    public MotorControllerConfig setPid(PIDController pid) {
+        this.pid = pid;
+        return this;
+    }
+
+
 }

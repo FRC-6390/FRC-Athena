@@ -12,12 +12,14 @@ import com.revrobotics.REVLibError;
 import com.revrobotics.RelativeEncoder;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.SparkLowLevel.MotorType;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 public class Encoder implements RobotSendableDevice{
@@ -46,7 +48,7 @@ public class Encoder implements RobotSendableDevice{
         setPosition = (val) -> encoder.setPosition(val);
         getVelocity = () -> encoder.getVelocity(true).getValueAsDouble();
         getIsConnected = () -> encoder.isConnected();
-
+        
         CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
         encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 1;
         encoder.getConfigurator().apply(encoderConfig);
@@ -91,7 +93,7 @@ public class Encoder implements RobotSendableDevice{
         return new Encoder(encoder,ddp);
     }
 
-    public static Encoder fromConfig(EncoderConfig config) {
+    public static Encoder fromConfig(EncoderConfig config, MotorController motor) {
 
         if(config == null) return null;
 
@@ -101,9 +103,11 @@ public class Encoder implements RobotSendableDevice{
             case CTRECANcoder:
             return new Encoder(new CANcoder(config.id, config.canbus)).applyConfig(config);
             case REVSparkFlexEncoder:
+                if (motor != null) return Encoder.newREVSparkFlex(new SparkFlex(config.id, MotorType.kBrushless)).applyConfig(config);
                 DriverStation.reportError("Cannot create REVRelativeEncoder without motor, please make encoder using the motor!", null); 
             return null;
             case REVSparkMaxEncoder:
+                if (motor != null) return Encoder.newREVSparkMax(new SparkMax(config.id, MotorType.kBrushless)).applyConfig(config);
                 DriverStation.reportError("Cannot create REVAbsoluteEncoder without motor, please make encoder using the motor!", null); 
             return null;
             case WPILibEncoder:
@@ -112,6 +116,10 @@ public class Encoder implements RobotSendableDevice{
             default:
             return null;
         }
+    }
+
+    public static Encoder fromConfig(EncoderConfig config) {
+        return Encoder.fromConfig(config, null);
     }
 
     public Encoder applyConfig(EncoderConfig config) {
@@ -296,7 +304,8 @@ public class Encoder implements RobotSendableDevice{
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout parentLayout) {
+        ShuffleboardLayout layout = parentLayout.getLayout(getName(), BuiltInLayouts.kList);
         layout.addDouble("Gear Ratio", this::getGearRatio);
         layout.addBoolean("Inverted", this::isInverted);
         layout.addDouble("Conversion", this::getConversion);
@@ -305,12 +314,8 @@ public class Encoder implements RobotSendableDevice{
         layout.addDouble("Rotations", this::getRawValue);
         layout.addDouble("Absolute Position", this::getAbsolutePosition);
         layout.addDouble("Absolute Roation", this::getAbsoluteRotations);
-        layout.addDouble("Raw Velocity", this::getRawVelocity);
         layout.addDouble("Velocity", this::getVelocity);
         layout.addBoolean("Is Connected", this::isConnected);
-        layout.addString("Canbus", this::getCanbus);
-        layout.addInteger("Id", this::getId);
-        layout.addString("Encoder Type", () -> this.getEncoderType().name());
         if(RobotBase.isSimulation()){
             layout.addDouble("simPosition", () -> simPosition);
             layout.addDouble("simVelocity", () -> simVelocity);

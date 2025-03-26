@@ -23,11 +23,11 @@ public class RotateToAngle extends Command{
     private ProfiledPIDController rotationPID;
     private final DelayedOutput delayedOutput;
 
-    public RotateToAngle(RobotBase<?> base, Supplier<Rotation2d> angle, boolean relative){
+    public RotateToAngle(RobotBase<?> base, Supplier<Rotation2d> angle){
         this.speeds = base.getDrivetrain().getRobotSpeeds();
         this.imu = base.getDrivetrain().getIMU();
         this.angle = angle;
-        this.pose = relative ? () -> base.getLocalization().getRelativePose() : () -> base.getLocalization().getFieldPose();
+        this.pose = () -> base.getLocalization().getFieldPose();
 
         this.rotationPID = new ProfiledPIDController(0, 0, 0, new Constraints(0, 0));
         this.rotationPID.enableContinuousInput(-Math.PI, Math.PI);
@@ -35,20 +35,20 @@ public class RotateToAngle extends Command{
         delayedOutput = new DelayedOutput(rotationPID::atSetpoint, 1);
     }
 
-    public RotateToAngle(RobotBase<?> base, Rotation2d angle, boolean relative){
-       this(base, () -> angle, relative);
+    public RotateToAngle(RobotBase<?> base, Rotation2d angle){
+       this(base, () -> angle);
     }
 
-    public RotateToAngle(RobotBase<?> base, DoubleSupplier angle, boolean relative){
-        this(base, () -> Rotation2d.fromDegrees(angle.getAsDouble()), relative);
+    public RotateToAngle(RobotBase<?> base, DoubleSupplier angle){
+        this(base, () -> Rotation2d.fromDegrees(angle.getAsDouble()));
     }
 
-    public RotateToAngle(RobotBase<?> base, double degree, boolean relative){
-        this(base, Rotation2d.fromDegrees(degree), relative);
+    public RotateToAngle(RobotBase<?> base, double degree){
+        this(base, Rotation2d.fromDegrees(degree));
     }
 
-    public RotateToAngle(RobotBase<?> base, boolean relative){
-        this(base, () -> null, relative);
+    public RotateToAngle(RobotBase<?> base){
+        this(base, () -> null);
     }
 
     public RotateToAngle setPID(ProfiledPIDController rotationPID){

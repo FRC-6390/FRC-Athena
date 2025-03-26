@@ -11,14 +11,20 @@ public class SimpleMotorMechanism  extends Mechanism  {
 
     public SimpleMotorMechanism(MechanismConfig<? extends SimpleMotorMechanism> config, SimpleMotorFeedforward feedforward) {
         super(config);
-        this.feedforward = feedforward;
+        this.feedforward = new SimpleMotorFeedforward(feedforward.getKs(),feedforward.getKv(),feedforward.getKa());
         setFeedforwardEnabled(true);
     }
 
     @Override
     public double calculateFeedForward() {
-        double value = feedforward.calculate(getVelocity());
+        double value = feedforward.calculate(getControllerSetpointVelocity());
         return  isUseVoltage() ? value : value / 12d;
+    }
+
+    @Override
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+        tab.add("FeedForwards", feedforward);
+        return super.shuffleboard(tab);
     }
 
     @Override

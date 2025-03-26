@@ -218,7 +218,6 @@ public class SwerveModule implements RobotSendableDevice {
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 2));
-        layout.addDouble("Encoder Rotations", () -> getEncoderPosition().getRotations()).withSize(1, 1).withPosition(1, 1);
         layout.addDouble("Drive Motor Position", () -> getDriveMotorPosition()).withSize(1, 1).withPosition(1, 2);
         
         driveMotor.shuffleboard(layout.getLayout("Drive Motor", BuiltInLayouts.kList));

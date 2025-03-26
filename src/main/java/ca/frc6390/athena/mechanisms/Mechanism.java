@@ -26,7 +26,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private final boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
     private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput;
-    private double setpoint, pidOutput, feedforwardOutput, output, nudge; 
+    private double setpoint, prevSetpoint, pidOutput, feedforwardOutput, output, nudge; 
     private RobotMode prevRobotMode = RobotMode.DISABLE, robotMode = RobotMode.DISABLE;
 
     private enum RobotMode {
@@ -56,6 +56,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }
 
         pidEnabled = pidController != null || profiledPIDController != null;
+    }
+
+    public double calculateMaxFreeSpeed(){
+        double wheelCircumferenceMeters = Math.PI * encoder.getConversion();
+        double motorRPM = 6000; //motors.getControllers()[0].getFreeSpeedRPM();
+        double wheelRPM = motorRPM * encoder.getGearRatio();
+        return wheelCircumferenceMeters * (wheelRPM / 60.0);
     }
 
     public void setVoltage(double voltage){
@@ -111,6 +118,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         return setpoint;
     }
 
+    public double getControllerSetpointVelocity(){
+        return profiledPIDController != null ? profiledPIDController.getSetpoint().velocity : pidController != null ? pidController.getSetpoint() : 0;
+    }
+
+    public double getControllerSetpointPosition(){
+        return profiledPIDController != null ? profiledPIDController.getSetpoint().position : pidController != null ? pidController.getSetpoint() : 0;
+    }
+
+
     public boolean isOverride() {
         return override;
     }
@@ -156,10 +172,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }
 
         if(profiledPIDController != null){
-            profiledPIDController.calculate(encoderPos, getSetpoint() + getNudge());
-            output += profiledPIDController.getSetpoint().velocity;
+            if(prevSetpoint != getSetpoint()) resetPID();
+            output += profiledPIDController.calculate(encoderPos, getSetpoint() + getNudge());
         }
-
+        
         return output;
     }
 
@@ -196,6 +212,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }
 
         this.output = output;
+        this.prevSetpoint = getSetpoint();
 
         if (override){
             return;
@@ -314,7 +331,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
         
         motors.shuffleboard(tab.getLayout("Motors", BuiltInLayouts.kList));
-        if (encoder != null) encoder.shuffleboard(tab.getLayout(encoder.getName(), BuiltInLayouts.kList));
+        if (encoder != null) encoder.shuffleboard(tab.getLayout("Encoder", BuiltInLayouts.kList));
         tab.addBoolean("Emergency Stopped", this::isEmergencyStopped);
         tab.addBoolean("Override", this::isOverride);
         tab.addBoolean("Use Voltage", this::isUseVoltage);
@@ -324,8 +341,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         tab.addBoolean("At Setpoint", this::atSetpoint);
         tab.addDouble("Setpoint", this::getSetpoint);
         tab.addDouble("Nudge", this::getNudge);
-
-        tab.addDouble("Nudge + Setpoint", () -> getNudge() + getSetpoint());
 
         tab.addDouble("PID Output", this::getPidOutput);
         tab.addDouble("Feedforward Output", this::getFeedforwardOutput);
@@ -345,7 +360,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }
 
         if(pidController != null) tab.add("PID Controller", pidController);
-        if(profiledPIDController != null) tab.add("Profiled PID Controller", pidController);
+        if(profiledPIDController != null) tab.add("Profiled PID Controller", profiledPIDController);
 
         return tab;
     }

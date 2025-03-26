@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiFunction;
@@ -267,23 +268,17 @@ public class MechanismConfig<T extends Mechanism> {
         return this;
     }
 
-    public MechanismConfig<T> setStateAction(Enum<?> state, Function<T, Boolean> action) {
-        stateActions.put(state, action);
-        return this;
+    public MechanismConfig<T> setStateAction(Function<T, Boolean> action, Enum<?>... states) {
+        Arrays.stream(states).forEach(state -> stateActions.put(state, action));
+        return this; 
     }
 
-    public MechanismConfig<T> setStateAction(Enum<?> state, Consumer<T> action) {
-        return setStateAction(state, mech -> {
-            action.accept(mech);
-            return false;
-        });
+    public MechanismConfig<T> setStateAction(Consumer<T> action, Enum<?>... states) {
+        return setStateAction(mech -> {action.accept(mech); return false;}, states);
     }
 
-    public MechanismConfig<T> setStateActionSupressMotors(Enum<?> state, Consumer<T> action) {
-        return setStateAction(state, mech -> {
-            action.accept(mech);
-            return true;
-        });
+    public MechanismConfig<T> setStateActionSupressMotors(Consumer<T> action, Enum<?>... states) {
+        return setStateAction(mech -> {action.accept(mech); return true;}, states);
     }
 
     public T build(){

@@ -6,10 +6,13 @@ import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
 
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
+import com.ctre.phoenix6.controls.PositionDutyCycle;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.SparkBase.ControlType;
 import com.revrobotics.spark.SparkBase.PersistMode;
 import com.revrobotics.spark.SparkBase.ResetMode;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
@@ -19,15 +22,17 @@ import com.revrobotics.spark.config.SparkMaxConfig;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorControllerType;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 public class MotorController implements RobotSendableDevice {
 
-    private final DoubleConsumer setSpeed, setVoltage, setCurrentLimit;
+    private final DoubleConsumer setSpeed, setVoltage, setCurrentLimit, setPosition;
     private final BooleanSupplier getIsConnected;
     private final DoubleSupplier getTemperature;
     private final Consumer<MotorNeutralMode> setNeutralMode;
+    private final Consumer<PIDController> setPID;
     private final Encoder encoder;
     private boolean inverted = false;
     private double currentLimit = 0;
@@ -36,7 +41,7 @@ public class MotorController implements RobotSendableDevice {
     private int id;
     private MotorControllerType type;
     private double temperature;
-
+    private PIDController pid;
 
     public MotorController(TalonFX controller){
         this(
@@ -52,11 +57,23 @@ public class MotorController implements RobotSendableDevice {
                 currentConfig.SupplyCurrentLimit = limit;
                 config.withCurrentLimits(currentConfig);
                 controller.getConfigurator().apply(config);
+                // config.Feedback.
             },
             controller::isConnected,
             () -> controller.getDeviceTemp(true).getValueAsDouble(),
+            pid -> {
+                var slot0Configs = new Slot0Configs();
+                slot0Configs.kP = pid.getP();
+                slot0Configs.kI = pid.getI();
+                slot0Configs.kD = pid.getD();
+                controller.getConfigurator().apply(slot0Configs);
+            },
+            val -> {
+                controller.setControl(new PositionDutyCycle(val).withSlot(0));
+            },
             new Encoder(controller)
         );
+
     }
 
     public MotorController(SparkMax controller){
@@ -77,6 +94,16 @@ public class MotorController implements RobotSendableDevice {
             },
             () -> controller.getFaults().can,
             controller::getMotorTemperature,
+            pid -> {
+                SparkMaxConfig config = new SparkMaxConfig();
+                config.smartCurrentLimit(controller.configAccessor.getSmartCurrentLimit());
+                config.idleMode(controller.configAccessor.getIdleMode());
+                config.closedLoop.pid(pid.getP(), pid.getI(), pid.getD());
+                config.closedLoop.iZone(pid.getIZone());
+            },
+            val -> {
+                controller.getClosedLoopController().setReference(val, ControlType.kPosition);
+            },
             Encoder.newREVSparkMax(controller)
         );
     }
@@ -87,6 +114,8 @@ public class MotorController implements RobotSendableDevice {
                 SparkFlexConfig config = new SparkFlexConfig();
                 config.smartCurrentLimit(controller.configAccessor.getSmartCurrentLimit());
                 config.idleMode(mode.asREV());
+                config.closedLoop.pid(controller.configAccessor.closedLoop.getP(), controller.configAccessor.closedLoop.getI(), controller.configAccessor.closedLoop.getD());
+                config.closedLoop.iZone(controller.configAccessor.closedLoop.getIZone());
                 controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
             },
             controller::set,
@@ -95,15 +124,28 @@ public class MotorController implements RobotSendableDevice {
                 SparkFlexConfig config = new SparkFlexConfig();
                 config.smartCurrentLimit((int) limit);
                 config.idleMode(controller.configAccessor.getIdleMode());
+                config.closedLoop.pid(controller.configAccessor.closedLoop.getP(), controller.configAccessor.closedLoop.getI(), controller.configAccessor.closedLoop.getD());
+                config.closedLoop.iZone(controller.configAccessor.closedLoop.getIZone());
                 controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
             },
             () -> controller.getFaults().can,
             controller::getMotorTemperature,
+            pid -> {
+                SparkFlexConfig config = new SparkFlexConfig();
+                config.smartCurrentLimit(controller.configAccessor.getSmartCurrentLimit());
+                config.idleMode(controller.configAccessor.getIdleMode());
+                config.closedLoop.pid(pid.getP(), pid.getI(), pid.getD());
+                config.closedLoop.iZone(pid.getIZone());
+                controller.configure(config, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
+            },
+            val -> {
+                controller.getClosedLoopController().setReference(val, ControlType.kPosition);
+            },
             Encoder.newREVSparkFlex(controller)
         );
     }
 
-    public MotorController(Consumer<MotorNeutralMode> setNeutralMode, DoubleConsumer setSpeed, DoubleConsumer setVoltage, DoubleConsumer setCurrentLimit, BooleanSupplier getIsConnected, DoubleSupplier getTemperature, Encoder encoder) {
+    public MotorController(Consumer<MotorNeutralMode> setNeutralMode, DoubleConsumer setSpeed, DoubleConsumer setVoltage, DoubleConsumer setCurrentLimit, BooleanSupplier getIsConnected, DoubleSupplier getTemperature, Consumer<PIDController> setPID, DoubleConsumer setPosition, Encoder encoder) {
         this.setNeutralMode = setNeutralMode;
         this.setSpeed = setSpeed;
         this.setVoltage = setVoltage;
@@ -111,6 +153,8 @@ public class MotorController implements RobotSendableDevice {
         this.getIsConnected = getIsConnected;
         this.encoder = encoder;
         this.getTemperature = getTemperature;
+        this.setPID = setPID;
+        this.setPosition = setPosition;
     }
 
     public static MotorController newREVSparkFlexBrushed(int id){
@@ -136,7 +180,6 @@ public class MotorController implements RobotSendableDevice {
     public static MotorController newCTRETalonFx(int id){
         return fromConfig(new MotorControllerConfig(MotorControllerType.CTRETalonFX, id));
     }
-
 
     public static MotorController fromConfig(MotorControllerConfig config) {
         switch (config.type) {
@@ -181,6 +224,15 @@ public class MotorController implements RobotSendableDevice {
         return inverted;
     }
 
+    public MotorController setPID(PIDController pid){
+        setPID.accept(pid);
+        return this;
+    }
+
+    public MotorController setPID(double p, double i, double d){
+        return setPID(new PIDController(p, i, d));
+    }
+
     public MotorController setNeutralMode(MotorNeutralMode mode){
         setNeutralMode.accept(mode);
         motorNeutralMode = mode;
@@ -189,6 +241,10 @@ public class MotorController implements RobotSendableDevice {
 
     public Encoder getEncoder() {
         return encoder;
+    }
+
+    public void setPosition(double position) {
+        setPosition.accept(inverted ? -position : position);
     }
 
     public void setSpeed(double speed) {
@@ -271,16 +327,20 @@ public class MotorController implements RobotSendableDevice {
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
-        encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList));
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout parentLayout) {
+        encoder.shuffleboard(parentLayout);
+        ShuffleboardLayout layout = parentLayout.getLayout(getName(), BuiltInLayouts.kList);
         layout.addBoolean("Inverted", this::isInverted);
         layout.addBoolean("Is Connected", this::isConnected);
         layout.addDouble("Current Limit", this::getCurrentLimit);
         layout.addString("Neutral Mode", () -> getNeutralMode().name());
-        layout.addString("Canbus", this::getCanbus);
-        layout.addInteger("Id", this::getId);
-        layout.addString("Motor Controller", () -> this.getMotorControllerType().name());
         layout.addDouble("Tempature", this::getTemperature);
+        if(pid != null){
+            var pidLayout = layout.getLayout("PID", BuiltInLayouts.kList);
+            pidLayout.addDouble("P", () -> pid.getP());
+            pidLayout.addDouble("I", () -> pid.getI());
+            pidLayout.addDouble("D", () -> pid.getD());
+        }
         return layout;
     }
 }

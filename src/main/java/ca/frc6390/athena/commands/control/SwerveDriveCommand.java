@@ -22,11 +22,11 @@ public class SwerveDriveCommand extends Command {
     this.thetaInput = thetaInput;
     this.fieldRelative = fieldRelative;
     addRequirements(driveTrain);
+    driveTrain.setNeutralMode(MotorNeutralMode.Brake);
   }
   
   @Override
   public void initialize() {
-    driveTrain.setNeutralMode(MotorNeutralMode.Brake);
   }
 
   @Override

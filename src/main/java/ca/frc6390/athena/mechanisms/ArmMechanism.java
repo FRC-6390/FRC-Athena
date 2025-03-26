@@ -1,23 +1,30 @@
 package ca.frc6390.athena.mechanisms;
 
+import ca.frc6390.athena.controllers.ArmFeedforwardSendable;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public class ArmMechanism extends Mechanism {
-    private final ArmFeedforward feedforward;
+    private final ArmFeedforwardSendable feedforward;
 
     public ArmMechanism(MechanismConfig<? extends ArmMechanism> config, ArmFeedforward feedforward) {
         super(config);
-        this.feedforward = feedforward;
+        this.feedforward = new ArmFeedforwardSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
         setFeedforwardEnabled(true);
     }
 
     @Override
     public double calculateFeedForward() {
-        double value = feedforward.calculate(getRotation2d().getRadians(), getVelocity());
+        double value = feedforward.calculate(getControllerSetpointPosition(), getControllerSetpointVelocity());
         return  isUseVoltage() ? value : value / 12d;
+    }
+
+    @Override
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+        tab.add("FeedForwards", feedforward);
+        return super.shuffleboard(tab);
     }
 
     @Override
