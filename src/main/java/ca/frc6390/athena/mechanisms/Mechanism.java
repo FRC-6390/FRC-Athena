@@ -25,8 +25,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private final ProfiledPIDController profiledPIDController;
     private final boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
-    private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput;
-    private double setpoint, prevSetpoint, pidOutput, feedforwardOutput, output, nudge; 
+    private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput, customPIDCycle;
+    private double setpoint, prevSetpoint, pidOutput, feedforwardOutput, output, nudge, pidPeriod; 
     private RobotMode prevRobotMode = RobotMode.DISABLE, robotMode = RobotMode.DISABLE;
 
     private enum RobotMode {
@@ -37,10 +37,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     }
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
-        this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage,config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new), config.useSetpointAsOutput);
+        this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage,config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new), config.useSetpointAsOutput, config.pidPeriod);
     }
 
-    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController, ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage, GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput){
+    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController, ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage, GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod){
         this.motors = motors;
         this.encoder = encoder;
         this.pidController = pidController;
@@ -50,6 +50,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         this.override = false;
         this.limitSwitches = limitSwitches;
         this.setpointIsOutput = useSetpointAsOutput;
+        this.pidPeriod = pidPeriod;
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
@@ -147,6 +148,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         return useVoltage;
     }
 
+    public boolean isCustomPIDCycle() {
+        return customPIDCycle;
+    }
+
+    public void setCustomPIDCycle(boolean customPIDCycle) {
+        this.customPIDCycle = customPIDCycle;
+    }
+
     public double calculateFeedForward(){
         return 0;
     }
@@ -193,6 +202,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         this.suppressMotorOutput = suppressMotorOutput;
     }
 
+    public void updatePID(){
+        pidOutput = calculatePID();
+        feedforwardOutput = calculateFeedForward();
+    }
+
     public void update(){
 
         double output = 0;
@@ -201,8 +215,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             emergencyStopped = true;
         }
 
-        pidOutput = calculatePID();
-        feedforwardOutput = calculateFeedForward();
+        if(!customPIDCycle) updatePID();
 
         output = isPidEnabled() ? pidOutput : 0;
         output += isFeedforwardEnabled() ? feedforwardOutput : 0;
@@ -227,7 +240,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             if(genericLimitSwitch.getAsBoolean()){
 
                 if (genericLimitSwitch.isHardstop()){
-                    if(Math.signum(genericLimitSwitch.getBlockDirection()) == output){
+                    if(Math.signum(genericLimitSwitch.getBlockDirection()) == Math.signum(output)){
                         output = 0;
                     }
                 }
@@ -291,6 +304,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
     public double getNudge() {
         return nudge;
+    }
+
+    public double getPidPeriod() {
+        return pidPeriod;
     }
 
     @Override

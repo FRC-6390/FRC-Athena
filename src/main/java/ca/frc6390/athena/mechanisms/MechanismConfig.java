@@ -35,6 +35,7 @@ public class MechanismConfig<T extends Mechanism> {
     public boolean useAbsolute = false;
     public boolean useVoltage = false;
     public boolean useSetpointAsOutput = false;
+    public boolean customPIDCycle = false;
     public Function<MechanismConfig<T>, T> factory = null;
     public ArrayList<GenericLimitSwitchConfig> limitSwitches = new ArrayList<>();
     
@@ -46,6 +47,7 @@ public class MechanismConfig<T extends Mechanism> {
     public double motorCurrentLimit = 40;
     public double tolerance = 0;
     public double stateMachineDelay = 0;
+    public double pidPeriod = 0;
 
     public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
     public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
@@ -279,6 +281,12 @@ public class MechanismConfig<T extends Mechanism> {
 
     public MechanismConfig<T> setStateActionSupressMotors(Consumer<T> action, Enum<?>... states) {
         return setStateAction(mech -> {action.accept(mech); return true;}, states);
+    }
+
+    public MechanismConfig<T> setCustomPIDCycle(boolean customPIDCycle, double period) {
+        this.customPIDCycle = customPIDCycle;
+        this.pidPeriod = period;
+        return this;
     }
 
     public T build(){
