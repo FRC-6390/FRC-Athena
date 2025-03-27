@@ -1,5 +1,6 @@
 package ca.frc6390.athena.core;
 
+import java.util.Arrays;
 import java.util.HashMap;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
@@ -72,8 +73,8 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
         
     }
 
-    public RobotBase<T> registerMechanism(Mechanism mech){
-        mechanisms.put(mech.getName(), mech);
+    public RobotBase<T> registerMechanism(Mechanism... mechs){
+        Arrays.stream(mechs).forEach(mech ->  mechanisms.put(mech.getName(), mech));
         return this;
     }
 
@@ -173,7 +174,7 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
 
     public void registerPIDCycles(TimedRobot robot){
         for (Mechanism mech : mechanisms.values()) {
-            robot.addPeriodic(mech::calculatePID, mech.getPidPeriod());
+            if (mech.isCustomPIDCycle()) robot.addPeriodic(mech::calculatePID, mech.getPidPeriod());
         }
     }
 
