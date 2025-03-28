@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
@@ -109,10 +110,10 @@ public class MotorControllerGroup implements RobotSendableDevice{
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
         
         for (MotorController motorController : controllers) {
-            motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList));
+            motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList), level);
         }
 
         return layout;

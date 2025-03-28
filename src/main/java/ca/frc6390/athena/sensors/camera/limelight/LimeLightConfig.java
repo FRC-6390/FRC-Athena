@@ -7,11 +7,11 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
 
-public record LimeLightConfig(String table, Transform3d cameraRobotSpace, PoseEstimateWithLatencyType localizationEstimator, int[] filteredTags, boolean useForLocalization) implements ConfigurableCamera {
+public record LimeLightConfig(String table, Transform3d cameraRobotSpace, PoseEstimateWithLatencyType localizationEstimator, int[] filteredTags, boolean useForLocalization, double trustDistance) implements ConfigurableCamera {
     private static final String DEFUALT_TABLE = "limelight"; 
 
     public LimeLightConfig(String table){
-        this(table, new Transform3d(), PoseEstimateWithLatencyType.BOT_POSE_MT2_BLUE, new int[]{}, false);
+        this(table, new Transform3d(), PoseEstimateWithLatencyType.BOT_POSE_MT2_BLUE, new int[]{}, false, 2);
     }
 
     public LimeLightConfig(){
@@ -23,23 +23,27 @@ public record LimeLightConfig(String table, Transform3d cameraRobotSpace, PoseEs
     }
 
     public LimeLightConfig setCameraTransform(Transform3d cameraRobotSpace){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization);
+        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization, trustDistance);
     }
 
     public LimeLightConfig setYawRelativeToForwards(double degrees){
-        return new LimeLightConfig(table, new Transform3d(cameraRobotSpace.getTranslation(), new Rotation3d(cameraRobotSpace.getRotation().getX(), cameraRobotSpace.getRotation().getY(), degrees)), localizationEstimator, filteredTags, useForLocalization);
+        return new LimeLightConfig(table, new Transform3d(cameraRobotSpace.getTranslation(), new Rotation3d(cameraRobotSpace.getRotation().getX(), cameraRobotSpace.getRotation().getY(), degrees)), localizationEstimator, filteredTags, useForLocalization, trustDistance);
     }
 
     public LimeLightConfig setPoseEstimateType(PoseEstimateWithLatencyType localizationEstimator){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization);
+        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization, trustDistance);
     }
 
     public LimeLightConfig setLocalizationTagFilter(int... filteredTags){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization);
+        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization, trustDistance);
     }
     
     public LimeLightConfig setUseForLocalization(boolean useForLocalization){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization);
+        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization, trustDistance);
+    }
+
+    public LimeLightConfig setTrustDistance(double trustDistance){
+        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags, useForLocalization, trustDistance);
     }
 
     @Override

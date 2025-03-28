@@ -340,44 +340,55 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     }
 
     @Override
-    public Mechanism shuffleboard(String tab) {
-        return (Mechanism) RobotSendableSystem.super.shuffleboard(tab);
+    public Mechanism shuffleboard(String tab, SendableLevel level) {
+        return (Mechanism) RobotSendableSystem.super.shuffleboard(tab, level);
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         
-        motors.shuffleboard(tab.getLayout("Motors", BuiltInLayouts.kList));
-        if (encoder != null) encoder.shuffleboard(tab.getLayout("Encoder", BuiltInLayouts.kList));
+        motors.shuffleboard(tab.getLayout("Motors", BuiltInLayouts.kList), level);
+        if (encoder != null) encoder.shuffleboard(tab.getLayout("Encoder", BuiltInLayouts.kList), level);
+
+        
         tab.addBoolean("Emergency Stopped", this::isEmergencyStopped);
         tab.addBoolean("Override", this::isOverride);
-        tab.addBoolean("Use Voltage", this::isUseVoltage);
-        tab.addBoolean("Use Absolute", this::isUseAbsolute);
-        tab.addBoolean("Feedforward Enabled", this::isFeedforwardEnabled);
-        tab.addBoolean("PID Enabled", this::isPidEnabled);
+        if(level.equals(SendableLevel.DEBUG)){
+            tab.addBoolean("Use Voltage", this::isUseVoltage);
+            tab.addBoolean("Use Absolute", this::isUseAbsolute);
+            tab.addBoolean("Feedforward Enabled", this::isFeedforwardEnabled);
+            tab.addBoolean("PID Enabled", this::isPidEnabled);
+            tab.addDouble("Nudge", this::getNudge);
+            tab.addDouble("PID Output", this::getPidOutput);
+            tab.addDouble("Feedforward Output", this::getFeedforwardOutput);
+        }
+       
         tab.addBoolean("At Setpoint", this::atSetpoint);
         tab.addDouble("Setpoint", this::getSetpoint);
-        tab.addDouble("Nudge", this::getNudge);
-
-        tab.addDouble("PID Output", this::getPidOutput);
-        tab.addDouble("Feedforward Output", this::getFeedforwardOutput);
         tab.addDouble("Output", this::getOutput);
-        for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
-           genericLimitSwitch.shuffleboard(tab.getLayout(genericLimitSwitch.getPort()+"\\Limitswitch",BuiltInLayouts.kList));  
+        
+        if(level.equals(SendableLevel.DEBUG)){
+            for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
+            genericLimitSwitch.shuffleboard(tab.getLayout(genericLimitSwitch.getPort()+"\\Limitswitch",BuiltInLayouts.kList));  
+            }
         }
+
 
         ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kList);
         {
             commandsLayout.add("Brake Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Brake))).withWidget(BuiltInWidgets.kCommand);
             commandsLayout.add("Coast Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Enable\\Disable PID", new InstantCommand(() -> setPidEnabled(!pidEnabled))).withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Enable\\Disable FeedForward", new InstantCommand(() -> setFeedforwardEnabled(!feedforwardEnabled))).withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Enable\\Disable Override", new InstantCommand(() -> setOverride(!override))).withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Enable\\Disable Emergency Stop", new InstantCommand(() -> setEmergencyStopped(!emergencyStopped))).withWidget(BuiltInWidgets.kCommand);
+            if(level.equals(SendableLevel.DEBUG)){
+                commandsLayout.add("Enable\\Disable PID", new InstantCommand(() -> setPidEnabled(!pidEnabled))).withWidget(BuiltInWidgets.kCommand);
+                commandsLayout.add("Enable\\Disable FeedForward", new InstantCommand(() -> setFeedforwardEnabled(!feedforwardEnabled))).withWidget(BuiltInWidgets.kCommand);
+                commandsLayout.add("Enable\\Disable Override", new InstantCommand(() -> setOverride(!override))).withWidget(BuiltInWidgets.kCommand);
+                commandsLayout.add("Enable\\Disable Emergency Stop", new InstantCommand(() -> setEmergencyStopped(!emergencyStopped))).withWidget(BuiltInWidgets.kCommand);
+            }
         }
-
+        if(level.equals(SendableLevel.DEBUG)){
         if(pidController != null) tab.add("PID Controller", pidController);
         if(profiledPIDController != null) tab.add("Profiled PID Controller", profiledPIDController);
+        }
 
         return tab;
     }

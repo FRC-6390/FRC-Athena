@@ -36,6 +36,7 @@ public class MechanismConfig<T extends Mechanism> {
     public boolean useVoltage = false;
     public boolean useSetpointAsOutput = false;
     public boolean customPIDCycle = false;
+    public boolean pidContinous = false;
     public Function<MechanismConfig<T>, T> factory = null;
     public ArrayList<GenericLimitSwitchConfig> limitSwitches = new ArrayList<>();
     
@@ -48,6 +49,8 @@ public class MechanismConfig<T extends Mechanism> {
     public double tolerance = 0;
     public double stateMachineDelay = 0;
     public double pidPeriod = 0;
+    public double pidIZone = 0;
+    public double continousMin, continousMax;
 
     public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
     public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
@@ -289,6 +292,17 @@ public class MechanismConfig<T extends Mechanism> {
         return this;
     }
 
+    public MechanismConfig<T> setPIDIZone(double pidIZone){
+        this.pidIZone = pidIZone;
+        return this;
+    }
+
+    public MechanismConfig<T> setPIDEnableContinous(double continousMin, double continousMax){
+        this.continousMin = continousMin;
+        this.continousMax = continousMax;
+        return this;
+    }
+
     public T build(){
 
         motors.forEach(
@@ -307,10 +321,18 @@ public class MechanismConfig<T extends Mechanism> {
 
         if(pidController != null){
             pidController.setTolerance(tolerance);
+            pidController.setIZone(pidIZone);
+            if(pidContinous){
+                pidController.enableContinuousInput(continousMin, continousMax);
+            }
         }
 
         if(profiledPIDController != null){
             profiledPIDController.setTolerance(tolerance);
+            profiledPIDController.setIZone(pidIZone);
+            if(pidContinous){
+                profiledPIDController.enableContinuousInput(continousMin, continousMax);
+            }
         }
 
         return factory.apply(this);

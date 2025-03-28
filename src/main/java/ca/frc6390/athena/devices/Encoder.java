@@ -15,6 +15,7 @@ import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -304,17 +305,19 @@ public class Encoder implements RobotSendableDevice{
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout parentLayout) {
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout parentLayout, SendableLevel level) {
         ShuffleboardLayout layout = parentLayout.getLayout(getName(), BuiltInLayouts.kList);
-        layout.addDouble("Gear Ratio", this::getGearRatio);
-        layout.addBoolean("Inverted", this::isInverted);
-        layout.addDouble("Conversion", this::getConversion);
-        layout.addDouble("Conversion Offset", this::getConversionOffset);
+        if(level.equals(SendableLevel.DEBUG)) {
+            layout.addDouble("Velocity", this::getVelocity);
+            layout.addDouble("Gear Ratio", this::getGearRatio);
+            layout.addBoolean("Inverted", this::isInverted);
+            layout.addDouble("Conversion", this::getConversion);
+            layout.addDouble("Conversion Offset", this::getConversionOffset);
+        }
         layout.addDouble("Position", this::getPosition);
         layout.addDouble("Rotations", this::getRawValue);
         layout.addDouble("Absolute Position", this::getAbsolutePosition);
         layout.addDouble("Absolute Roation", this::getAbsoluteRotations);
-        layout.addDouble("Velocity", this::getVelocity);
         layout.addBoolean("Is Connected", this::isConnected);
         if(RobotBase.isSimulation()){
             layout.addDouble("simPosition", () -> simPosition);

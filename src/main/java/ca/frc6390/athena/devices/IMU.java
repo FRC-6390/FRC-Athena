@@ -7,13 +7,15 @@ import com.ctre.phoenix6.hardware.Pigeon2;
 import com.studica.frc.AHRS;
 import com.studica.frc.AHRS.NavXComType;
 
+import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.ADXRS450_Gyro;
 import edu.wpi.first.wpilibj.SPI.Port;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
-public class IMU extends VirtualIMU{
+public class IMU extends VirtualIMU implements RobotSendableDevice{
 
     private final DoubleSupplier getRoll, getPitch, getYaw, getVelX, getVelY, getVelZ;
     private double roll, pitch, yaw, velX, velY, velZ;
@@ -175,17 +177,20 @@ public class IMU extends VirtualIMU{
         }
     }
 
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+    @Override
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
-
-        layout.addDouble("Raw Yaw",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
         layout.addDouble("Yaw",() -> getVirtualAxis("driver").getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
-        layout.addDouble("Roll",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
-        layout.addDouble("Pitch",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
-
-        layout.addDouble("Velocity X",() -> getVelocityX().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withPosition(0, 1);
-        layout.addDouble("Velocity Y",() -> getVelocityY().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 2);
-        layout.addDouble("Velocity Z",() -> getVelocityZ().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 3);
+        layout.addDouble("Raw Yaw",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withPosition(0, 1);
+       
+        if(level.equals(SendableLevel.DEBUG)){
+            layout.addDouble("Roll",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 2);
+            layout.addDouble("Pitch",() -> getYaw().getDegrees()).withWidget(BuiltInWidgets.kGyro).withSize(1, 1).withPosition(0, 3);
+    
+            layout.addDouble("Velocity X",() -> getVelocityX().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withPosition(0, 1);
+            layout.addDouble("Velocity Y",() -> getVelocityY().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 2);
+            layout.addDouble("Velocity Z",() -> getVelocityZ().getDegrees()).withWidget(BuiltInWidgets.kNumberSlider).withSize(1, 1).withPosition(0, 3);    
+        }
         return layout;
     }
 }

@@ -3,6 +3,7 @@ package ca.frc6390.athena.devices;
 import java.util.Arrays;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
@@ -89,10 +90,10 @@ public class EncoderGroup implements RobotSendableDevice{
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
         
         for (Encoder encoder : encoders) {
-            encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList));
+            encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), level);
         }
 
         return layout;

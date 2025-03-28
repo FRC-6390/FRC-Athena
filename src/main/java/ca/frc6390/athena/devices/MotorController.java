@@ -20,6 +20,7 @@ import com.revrobotics.spark.config.SparkFlexConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorControllerType;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import edu.wpi.first.math.controller.PIDController;
@@ -327,14 +328,16 @@ public class MotorController implements RobotSendableDevice {
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout parentLayout) {
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout parentLayout, SendableLevel level) {
         encoder.shuffleboard(parentLayout);
         ShuffleboardLayout layout = parentLayout.getLayout(getName(), BuiltInLayouts.kList);
-        layout.addBoolean("Inverted", this::isInverted);
+        if(level.equals(SendableLevel.DEBUG)){
+            layout.addDouble("Current Limit", this::getCurrentLimit);
+            layout.addString("Neutral Mode", () -> getNeutralMode().name());
+            layout.addDouble("Tempature", this::getTemperature);
+            layout.addBoolean("Inverted", this::isInverted);
+        }
         layout.addBoolean("Is Connected", this::isConnected);
-        layout.addDouble("Current Limit", this::getCurrentLimit);
-        layout.addString("Neutral Mode", () -> getNeutralMode().name());
-        layout.addDouble("Tempature", this::getTemperature);
         if(pid != null){
             var pidLayout = layout.getLayout("PID", BuiltInLayouts.kList);
             pidLayout.addDouble("P", () -> pid.getP());

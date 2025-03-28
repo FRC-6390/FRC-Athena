@@ -22,14 +22,14 @@ public class ArmMechanism extends Mechanism {
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         tab.add("FeedForwards", feedforward);
-        return super.shuffleboard(tab);
+        return super.shuffleboard(tab, level);
     }
 
     @Override
-    public ArmMechanism shuffleboard(String tab) {
-        return (ArmMechanism) super.shuffleboard(tab);
+    public ArmMechanism shuffleboard(String tab, SendableLevel level) {
+        return (ArmMechanism) super.shuffleboard(tab, level);
     }
     
     public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ArmMechanism {
@@ -57,15 +57,15 @@ public class ArmMechanism extends Mechanism {
         }
 
         @Override
-        public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
-            stateCore.shuffleboard(tab);
-            return super.shuffleboard(tab);
+        public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+            stateCore.shuffleboard(tab, level);
+            return super.shuffleboard(tab, level);
         }
 
         @SuppressWarnings("unchecked")
         @Override
-        public StatefulArmMechanism<E> shuffleboard(String tab) {
-            return (StatefulArmMechanism<E>) super.shuffleboard(tab);
+        public StatefulArmMechanism<E> shuffleboard(String tab, SendableLevel level) {
+            return (StatefulArmMechanism<E>) super.shuffleboard(tab, level);
         }
     }
 }

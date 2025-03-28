@@ -165,7 +165,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   }
 
   @Override
-  public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+  public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
 
     ShuffleboardLayout swervelayout = tab.getLayout("Swerve Modules", BuiltInLayouts.kList);
 
@@ -177,14 +177,22 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
 
     getIMU().shuffleboard(tab.getLayout("IMU", BuiltInLayouts.kList));
 
-    ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kList);
-    { 
-      ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kList);
-      chassisLayout.addDouble("X", () -> robotSpeeds.getSpeeds("drive").vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
-      chassisLayout.addDouble("Y", () -> robotSpeeds.getSpeeds("drive").vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
-      chassisLayout.addDouble("Z", () -> robotSpeeds.getSpeeds("drive").omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar);
+    if(level.equals(SendableLevel.DEBUG)){
+      ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kList);
+      { 
+        ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kList);
+        chassisLayout.addDouble("X", () -> robotSpeeds.getSpeeds("drive").vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
+        chassisLayout.addDouble("Y", () -> robotSpeeds.getSpeeds("drive").vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
+        chassisLayout.addDouble("Z", () -> robotSpeeds.getSpeeds("drive").omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar);
+      }
+      ShuffleboardLayout driftCorrectionLayout = tab.getLayout("Drift Correction", BuiltInLayouts.kList);
+      {
+        driftCorrectionLayout.add("Drift Correction", (builder) -> builder.addBooleanProperty("Drift Correction", this::getDriftCorrectionMode, this::setDriftCorrectionMode)).withWidget(BuiltInWidgets.kBooleanBox);
+        driftCorrectionLayout.addDouble("Desired Heading", () -> desiredHeading).withWidget(BuiltInWidgets.kGyro);// might not display properly bc get heading is +-180
+        driftCorrectionLayout.add(driftpid).withWidget(BuiltInWidgets.kPIDController);
+      }
     }
-
+   
     ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kList);
     {
       commandsLayout.add("Reset Heading", new InstantCommand(() -> getIMU().setYaw(0))).withWidget(BuiltInWidgets.kCommand);
@@ -192,12 +200,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
       commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
     }
 
-    ShuffleboardLayout driftCorrectionLayout = tab.getLayout("Drift Correction", BuiltInLayouts.kList);
-    {
-      driftCorrectionLayout.add("Drift Correction", (builder) -> builder.addBooleanProperty("Drift Correction", this::getDriftCorrectionMode, this::setDriftCorrectionMode)).withWidget(BuiltInWidgets.kBooleanBox);
-      driftCorrectionLayout.addDouble("Desired Heading", () -> desiredHeading).withWidget(BuiltInWidgets.kGyro);// might not display properly bc get heading is +-180
-      driftCorrectionLayout.add(driftpid).withWidget(BuiltInWidgets.kPIDController);
-    }
+    
     return tab;
   }
 

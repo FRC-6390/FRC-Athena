@@ -136,19 +136,19 @@ public class RobotVision {
    }
 
    public ArrayList<Pose2d> getLimelightRobotPoses(){
-      return getLimelights().values().stream().filter(ll -> ll.hasValidTarget() && ll.config.useForLocalization()).map(ll -> ll.getPoseEstimate(ll.config.localizationEstimator()).getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
+      return getLimelights().values().stream().filter(ll -> ll.hasValidTarget() && ll.isUseForLocalization()).map(ll -> ll.getPoseEstimate(ll.config.localizationEstimator()).getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
    }
 
    public void addLimelightRobotPoses(Consumer<LocalizationData> estimator){
-      getLimelights().values().stream().filter(ll -> ll.hasValidTarget() && ll.config.useForLocalization()).forEach(ll -> estimator.accept(ll.getLocalizationData()));
+      getLimelights().values().stream().filter(ll -> ll.hasValidTarget() && ll.isUseForLocalization()).forEach(ll -> estimator.accept(ll.getLocalizationData()));
    }
 
    public ArrayList<Pose2d> getPhotonVisionPoses(){
-      return getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget() && pv.getConfig().useForLocalization()).map(pv -> pv.getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
+      return getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget() && pv.isUseForLocalization()).map(pv -> pv.getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
    }
 
    public void addPhotonVisionPoses(Consumer<LocalizationData> estimator){
-      getPhotonVisions().values().stream().filter(pv -> pv.getConfig().useForLocalization()).forEach((pv) ->  {
+      getPhotonVisions().values().stream().filter(pv -> pv.isUseForLocalization()).forEach((pv) ->  {
             estimator.accept(pv.getLocalizationData());
          }
       );
@@ -170,7 +170,7 @@ public class RobotVision {
    }
 
    public void setLocalizationStdDevs(Matrix<N3, N1> singleStdDevs, Matrix<N3, N1> multiStdDevs){
-      getPhotonVisions().values().stream().filter(pv -> pv.getConfig().useForLocalization()).forEach(pv -> pv.setStdDevs(singleStdDevs, multiStdDevs));
-      getLimelights().values().stream().filter(ll -> ll.config.useForLocalization()).forEach(ll -> ll.setStdDevs(singleStdDevs, multiStdDevs));
+      getPhotonVisions().values().stream().filter(pv -> pv.isUseForLocalization()).forEach(pv -> pv.setStdDevs(singleStdDevs, multiStdDevs));
+      getLimelights().values().stream().filter(ll -> ll.isUseForLocalization()).forEach(ll -> ll.setStdDevs(singleStdDevs, multiStdDevs));
    }
 }

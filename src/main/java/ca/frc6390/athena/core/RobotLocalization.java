@@ -293,11 +293,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     // }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         tab.add("Estimator", field).withPosition( 0,0).withSize(4, 3);
-        tab.addDouble("Field X", () -> getFieldPose().getX()).withPosition( 4,2);
-        tab.addDouble("Field Y", () -> getFieldPose().getY()).withPosition( 5,2);
-        tab.addDouble("Field Theta", () -> getFieldPose().getRotation().getDegrees()).withPosition( 4,0).withSize(2, 2);
+
+        if(level.equals(SendableLevel.DEBUG)) {
+            tab.addDouble("Field X", () -> getFieldPose().getX()).withPosition( 4,2);
+            tab.addDouble("Field Y", () -> getFieldPose().getY()).withPosition( 5,2);
+            tab.addDouble("Field Theta", () -> getFieldPose().getRotation().getDegrees()).withPosition( 4,0).withSize(2, 2);
+        }
         // tab.addDouble("Relative X", () -> getRelativePose().getX()).withPosition( 6,2);
         // tab.addDouble("Relative Y", () -> getRelativePose().getY()).withPosition( 7,2);
         // tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withPosition( 6,0).withSize(2, 2);

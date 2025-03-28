@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 
 import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
@@ -129,22 +130,24 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
 
-        layout.add("State Chooser", chooser);
-        layout.add("Set State", new InstantCommand(() -> goalState = chooser.getSelected())).withWidget(BuiltInWidgets.kCommand);
-        layout.add("Queue State", new InstantCommand(() -> queueState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
-        layout.add("Reset Queue", new InstantCommand(() -> resetQueue())).withWidget(BuiltInWidgets.kCommand);
+        if(level.equals(SendableLevel.DEBUG)){
+            layout.add("State Chooser", chooser);
+            layout.add("Set State", new InstantCommand(() -> goalState = chooser.getSelected())).withWidget(BuiltInWidgets.kCommand);
+            layout.add("Queue State", new InstantCommand(() -> queueState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
+            layout.add("Reset Queue", new InstantCommand(() -> resetQueue())).withWidget(BuiltInWidgets.kCommand);
 
+            ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
+            for (E state: goalState.getDeclaringClass().getEnumConstants()){
+                statesLayout.add(state.name(), state.getSetpoint());
+            }
+        }
+    
         layout.addString("Goal State", () -> this.getGoalState().name());
         layout.addString("Next State", () -> this.getNextState().name());
         layout.addString("State Queue", () -> this.getNextStateQueue());
         layout.addBoolean("Should Change State", () -> this.shouldChangeState());
-
-        ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
-        for (E state: goalState.getDeclaringClass().getEnumConstants()){
-            statesLayout.add(state.name(), state.getSetpoint());
-        }
 
         return layout;
     }

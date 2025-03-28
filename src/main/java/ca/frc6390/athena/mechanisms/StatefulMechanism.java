@@ -39,12 +39,16 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
-        stateCore.shuffleboard(tab);
-        return super.shuffleboard(tab);
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+        stateCore.shuffleboard(tab,level);
+        return super.shuffleboard(tab,level);
     }
 
-    
+    @Override
+    @SuppressWarnings("unchecked")
+    public StatefulMechanism<E> shuffleboard(String tab, SendableLevel level) {
+        return (StatefulMechanism<E>) super.shuffleboard(tab, level);
+    }
 
     public static class StatefulMechanismCore<T, E extends Enum<E> & SetpointProvider<Double>> {
         private final StateMachine<Double, E> stateMachine;
@@ -75,8 +79,8 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             return stateMachine;
         }
 
-        public void shuffleboard(ShuffleboardTab tab) {
-            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList));
+        public void shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList), level);
         }
     }
 }

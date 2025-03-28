@@ -22,14 +22,14 @@ public class SimpleMotorMechanism  extends Mechanism  {
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         tab.add("FeedForwards", feedforward);
-        return super.shuffleboard(tab);
+        return super.shuffleboard(tab, level);
     }
 
     @Override
-    public SimpleMotorMechanism shuffleboard(String tab) {
-        return (SimpleMotorMechanism) super.shuffleboard(tab);
+    public SimpleMotorMechanism shuffleboard(String tab, SendableLevel level) {
+        return (SimpleMotorMechanism) super.shuffleboard(tab, level);
     }
     public static class StatefulSimpleMotorMechanism<E extends Enum<E> & SetpointProvider<Double>> extends SimpleMotorMechanism {
     
@@ -55,16 +55,17 @@ public class SimpleMotorMechanism  extends Mechanism  {
             return stateCore.getStateMachine();
         }
 
+        
         @Override
-        public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
-            stateCore.shuffleboard(tab);
-            return super.shuffleboard(tab);
+        public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+            stateCore.shuffleboard(tab, level);
+            return super.shuffleboard(tab, level);
         }
 
         @SuppressWarnings("unchecked")
         @Override
-        public StatefulSimpleMotorMechanism<E> shuffleboard(String tab) {
-            return (StatefulSimpleMotorMechanism<E>) super.shuffleboard(tab);
+        public StatefulSimpleMotorMechanism<E> shuffleboard(String tab, SendableLevel level) {
+            return (StatefulSimpleMotorMechanism<E>) super.shuffleboard(tab, level);
         }
     }
 }

@@ -6,16 +6,31 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public interface RobotSendableSystem {
 
+    public static enum SendableLevel {
+      COMP,
+      DEBUG,
+    }
+
     public interface RobotSendableDevice {
-      ShuffleboardLayout shuffleboard(ShuffleboardLayout layout);
+
+      default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
+        return shuffleboard(layout, SendableLevel.COMP);
+      }
+
+      ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level);
     }
     
     default RobotSendableSystem shuffleboard(String tab) {
-      shuffleboard(Shuffleboard.getTab(tab));
+      shuffleboard(tab, SendableLevel.COMP);
       return this;
     }
 
-    ShuffleboardTab shuffleboard(ShuffleboardTab tab);
+    default RobotSendableSystem shuffleboard(String tab, SendableLevel level) {
+      shuffleboard(Shuffleboard.getTab(tab), SendableLevel.COMP);
+      return this;
+    }
+
+    ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level);
 }
 
 

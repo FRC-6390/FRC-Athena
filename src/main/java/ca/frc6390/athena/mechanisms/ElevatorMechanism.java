@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.controllers.ElevatorFeedForwardsSendable;
+import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
@@ -22,14 +23,14 @@ public class ElevatorMechanism extends Mechanism {
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         tab.add("FeedForwards", feedforward);
-        return super.shuffleboard(tab);
+        return super.shuffleboard(tab, level);
     }
 
     @Override
-    public ElevatorMechanism shuffleboard(String tab) {
-        return (ElevatorMechanism) super.shuffleboard(tab);
+    public ArmMechanism shuffleboard(String tab, SendableLevel level) {
+        return (ArmMechanism) super.shuffleboard(tab, level);
     }
     
     public static class StatefulElevatorMechanism<E extends Enum<E> & StateMachine.SetpointProvider<Double>> extends ElevatorMechanism {
@@ -56,16 +57,17 @@ public class ElevatorMechanism extends Mechanism {
             return stateCore.getStateMachine();
         }
 
+        
         @Override
-        public ShuffleboardTab shuffleboard(ShuffleboardTab tab) {
-            stateCore.shuffleboard(tab);
-            return super.shuffleboard(tab);
+        public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+            stateCore.shuffleboard(tab, level);
+            return super.shuffleboard(tab, level);
         }
 
         @SuppressWarnings("unchecked")
         @Override
-        public StatefulElevatorMechanism<E> shuffleboard(String tab) {
-            return (StatefulElevatorMechanism<E>) super.shuffleboard(tab);
+        public StatefulArmMechanism<E> shuffleboard(String tab, SendableLevel level) {
+            return (StatefulArmMechanism<E>) super.shuffleboard(tab, level);
         }
     }
 

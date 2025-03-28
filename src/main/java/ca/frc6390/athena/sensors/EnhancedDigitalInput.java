@@ -2,6 +2,7 @@ package ca.frc6390.athena.sensors;
 
 import ca.frc6390.athena.commands.RunnableTrigger;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
@@ -42,9 +43,11 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
-        layout.addBoolean("Inverted", this::isInverted);
-        layout.addDouble("Port", this::getPort);
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        if(level.equals(SendableLevel.DEBUG)){ 
+            layout.addBoolean("Inverted", this::isInverted);
+            layout.addDouble("Port", this::getPort);
+        }
         layout.addBoolean("Value", this::getAsBoolean);
         return layout;
     }

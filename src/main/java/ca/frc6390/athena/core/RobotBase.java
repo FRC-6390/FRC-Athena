@@ -24,7 +24,7 @@ import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 
-public class RobotBase<T extends RobotDrivetrain<T>> {
+public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
     
     public record RobotBaseConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain, RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig) {
         
@@ -58,6 +58,7 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
     private final RobotVision vision;
     private final RobotAuto autos;
     private final HashMap<String, Mechanism> mechanisms;
+    
 
     public RobotBase(RobotBaseConfig<T> config){
         drivetrain = config.driveTrain.build();
@@ -175,6 +176,12 @@ public class RobotBase<T extends RobotDrivetrain<T>> {
     public void registerPIDCycles(TimedRobot robot){
         for (Mechanism mech : mechanisms.values()) {
             if (mech.isCustomPIDCycle()) robot.addPeriodic(mech::calculatePID, mech.getPidPeriod());
+        }
+    }
+
+    public void resetPIDs(){
+        for (Mechanism mech : mechanisms.values()) {
+            mech.resetPID();
         }
     }
 

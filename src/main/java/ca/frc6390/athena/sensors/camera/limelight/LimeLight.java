@@ -4,7 +4,6 @@ import java.util.Arrays;
 
 import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import edu.wpi.first.math.Matrix;
-import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -65,6 +64,7 @@ public class LimeLight implements LocalizationCamera{
     public NetworkTableEntry cx1;
     public NetworkTableEntry cy1;
     public NetworkTableEntry rawfiducials;
+    public boolean useForLocalization = false;
 
     public enum LedMode{
         PIPELINE(0),
@@ -272,7 +272,7 @@ public class LimeLight implements LocalizationCamera{
         cx1 = limelightTable.getEntry("cx1");
         cy1 = limelightTable.getEntry("cy1");
         rawfiducials =  limelightTable.getEntry("rawfiducials");
-
+        useForLocalization = config.useForLocalization();
         setFiducialIdFilters(Arrays.stream(config.filteredTags()).mapToDouble(i -> i).toArray());
     }
     
@@ -541,30 +541,32 @@ public class LimeLight implements LocalizationCamera{
 
      private void updateEstimationStdDevs(PoseEstimateWithLatency data) {
         if (data == null) {
-            // No pose input. Default to single-tag std devs
-            curStdDevs = singleTagStdDevs;
-
+            curStdDevs = getSingleStdDev();
         } else {
             // Pose present. Start running Heuristic
-            var estStdDevs = singleTagStdDevs;
             int numTags = data.getTagCount();
             double avgDist = data.getDistToTag();
-
-            if (numTags == 0) { 
-                // No tags visible. Default to single-tag std devs
-                curStdDevs = singleTagStdDevs;
-            } else {
-                // One or more tags visible, run the full heuristic.
-                avgDist /= numTags;
-                // Decrease std devs if multiple targets are visible
-                if (numTags > 1) estStdDevs = multiTagStdDevs;
-                // Increase std devs based on (average) distance
-                if (numTags == 1 && avgDist > 4){
-                   estStdDevs = VecBuilder.fill(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE);
-                }
-                else estStdDevs = estStdDevs.times(1 + (avgDist * avgDist / 30));
-                curStdDevs = estStdDevs;
-            }
+            curStdDevs = recalculateStdDevs(numTags, avgDist, config.trustDistance());
         }
     }
+
+
+     @Override
+     public Matrix<N3, N1> getSingleStdDev() {
+       return singleTagStdDevs;
+     }
+
+
+     @Override
+     public Matrix<N3, N1> getMultiStdDev() {
+       return multiTagStdDevs;
+     }
+
+     public void setUseForLocalization(boolean useForLocalization) {
+         this.useForLocalization = useForLocalization;
+     }
+
+     public boolean isUseForLocalization() {
+         return useForLocalization;
+     }
 }

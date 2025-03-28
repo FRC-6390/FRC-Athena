@@ -8,6 +8,11 @@ public class DelayedOutput implements BooleanSupplier {
     private double delay;
     private double startTime = Double.NaN; // Not started
 
+    public DelayedOutput(BooleanSupplier input) {
+       this(input, 0);
+    }
+
+
     public DelayedOutput(BooleanSupplier input, double delay) {
         this.input = input;
         this.delay = delay;

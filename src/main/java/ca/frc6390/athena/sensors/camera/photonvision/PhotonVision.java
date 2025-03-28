@@ -2,8 +2,6 @@ package ca.frc6390.athena.sensors.camera.photonvision;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
-
 import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonCamera;
 import org.photonvision.PhotonPoseEstimator;
@@ -12,7 +10,6 @@ import org.photonvision.targeting.PhotonTrackedTarget;
 
 import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import edu.wpi.first.math.Matrix;
-import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.numbers.N1;
@@ -29,6 +26,7 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
     private List<PhotonPipelineResult> results;
     private double latency = 0;
     private Matrix<N3, N1> curStdDevs, singleTagStdDevs, multiTagStdDevs;
+    public boolean useForLocalization = false;
 
     public static PhotonVision fromConfig(PhotonVisionConfig config){
         return new PhotonVision(config);
@@ -40,6 +38,7 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
         this.pose = config.cameraRobotSpace();
         this.estimator = new PhotonPoseEstimator(AprilTagFieldLayout.loadField(config.fieldLayout()), config.poseStrategy() , pose);
         estimator.setMultiTagFallbackStrategy(config.poseStrategyFallback());
+        this.useForLocalization = config.useForLocalization();
     }
 
     public PhotonVision(String table, Transform3d pose) {
@@ -66,8 +65,8 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
         }
 
         for (var change : results) {
-            List<PhotonTrackedTarget> filtered = getConfig().filteredTags().size() > 0 ? change.getTargets().stream().filter(t -> getConfig().filteredTags().contains(t.getFiducialId())).collect(Collectors.toList()) : change.getTargets();
-            visionEst = estimator.update(new PhotonPipelineResult(change.metadata, filtered, change.multitagResult));
+            // List<PhotonTrackedTarget> filtered = getConfig().filteredTags().size() > 0 ? change.getTargets().stream().filter(t -> getConfig().filteredTags().contains(t.getFiducialId())).collect(Collectors.toList()) : change.getTargets();
+            visionEst = estimator.update(change);
             updateEstimationStdDevs(visionEst, change.getTargets());
         }
         
@@ -79,8 +78,6 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
         clearResults();
         return null;
     }
-
-
 
     @Override
     public double getLocalizationLatency() {
@@ -108,11 +105,10 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
     private void updateEstimationStdDevs(Optional<EstimatedRobotPose> estimatedPose, List<PhotonTrackedTarget> targets) {
         if (estimatedPose.isEmpty()) {
             // No pose input. Default to single-tag std devs
-            curStdDevs = singleTagStdDevs;
+            curStdDevs = getSingleStdDev();
 
         } else {
             // Pose present. Start running Heuristic
-            var estStdDevs = singleTagStdDevs;
             int numTags = 0;
             double avgDist = 0;
 
@@ -129,21 +125,7 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
                                 .getDistance(estimatedPose.get().estimatedPose.toPose2d().getTranslation());
             }
 
-            if (numTags == 0) { 
-                // No tags visible. Default to single-tag std devs
-                curStdDevs = singleTagStdDevs;
-            } else {
-                // One or more tags visible, run the full heuristic.
-                avgDist /= numTags;
-                // Decrease std devs if multiple targets are visible
-                if (numTags > 1) estStdDevs = multiTagStdDevs;
-                // Increase std devs based on (average) distance
-                if (numTags == 1 && avgDist > 4){
-                   estStdDevs = VecBuilder.fill(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE);
-                }
-                else estStdDevs = estStdDevs.times(1 + (avgDist * avgDist / 30));
-                curStdDevs = estStdDevs;
-            }
+            curStdDevs = recalculateStdDevs(numTags, avgDist, config.trustDistance());
         }
     }
 
@@ -157,6 +139,22 @@ public class PhotonVision extends PhotonCamera implements LocalizationCamera{
         singleTagStdDevs = single;
         multiTagStdDevs = multi;
     }
+
+    @Override
+    public Matrix<N3, N1> getSingleStdDev() {
+        return singleTagStdDevs;
+    }
+
+    @Override
+    public Matrix<N3, N1> getMultiStdDev() {
+        return multiTagStdDevs;
+    }
     
-    
+    public boolean isUseForLocalization() {
+        return useForLocalization;
+    }
+
+    public void setUseForLocalization(boolean useForLocalization) {
+        this.useForLocalization = useForLocalization;
+    }
 }
