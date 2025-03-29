@@ -29,8 +29,8 @@ public class ElevatorMechanism extends Mechanism {
     }
 
     @Override
-    public ArmMechanism shuffleboard(String tab, SendableLevel level) {
-        return (ArmMechanism) super.shuffleboard(tab, level);
+    public ElevatorMechanism shuffleboard(String tab, SendableLevel level) {
+        return (ElevatorMechanism) super.shuffleboard(tab, level);
     }
     
     public static class StatefulElevatorMechanism<E extends Enum<E> & StateMachine.SetpointProvider<Double>> extends ElevatorMechanism {
@@ -66,8 +66,8 @@ public class ElevatorMechanism extends Mechanism {
 
         @SuppressWarnings("unchecked")
         @Override
-        public StatefulArmMechanism<E> shuffleboard(String tab, SendableLevel level) {
-            return (StatefulArmMechanism<E>) super.shuffleboard(tab, level);
+        public StatefulElevatorMechanism<E> shuffleboard(String tab, SendableLevel level) {
+            return (StatefulElevatorMechanism<E>) super.shuffleboard(tab, level);
         }
     }
 

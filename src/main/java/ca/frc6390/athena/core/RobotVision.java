@@ -170,7 +170,7 @@ public class RobotVision {
    }
 
    public void setLocalizationStdDevs(Matrix<N3, N1> singleStdDevs, Matrix<N3, N1> multiStdDevs){
-      getPhotonVisions().values().stream().filter(pv -> pv.isUseForLocalization()).forEach(pv -> pv.setStdDevs(singleStdDevs, multiStdDevs));
-      getLimelights().values().stream().filter(ll -> ll.isUseForLocalization()).forEach(ll -> ll.setStdDevs(singleStdDevs, multiStdDevs));
+      getPhotonVisions().values().stream().forEach(pv -> pv.setStdDevs(singleStdDevs, multiStdDevs));
+      getLimelights().values().stream().forEach(ll -> ll.setStdDevs(singleStdDevs, multiStdDevs));
    }
 }
