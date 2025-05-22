@@ -23,6 +23,7 @@ import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
+import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
@@ -83,13 +84,13 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
     }
 
-    private final PoseEstimator<T> fieldEstimator; //relativeEstimator;
+    private final PoseEstimator<T> fieldEstimator, relativeEstimator;
     private RobotVision vision;
     private final IMU imu;
     private final RobotSpeeds robotSpeeds;
     private final Supplier<T> wheelPositions;
 
-    private Pose2d fieldPose; //relativePose;
+    private Pose2d fieldPose, relativePose;
     private Field2d field;
     private RobotConfig robotConfig;
 
@@ -108,7 +109,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.imu = imu;
         this.wheelPositions = wheelPositions;
         this.fieldPose = new Pose2d();
-        // this.relativePose = new Pose2d();
+        this.relativePose = new Pose2d();
         this.autoDrive = (speeds, feed) ->  robotSpeeds.setSpeeds("auto",speeds);
       
         this.field = new Field2d();
@@ -118,7 +119,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
         
         this.fieldEstimator = fieldEstimator;
-        // this.relativeEstimator = relativeEstimator;
+        this.relativeEstimator = relativeEstimator;
  
         imu.addVirtualAxis("relative", imu::getYaw);
         imu.addVirtualAxis("field", imu::getYaw);
@@ -225,23 +226,23 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         resetFieldPose(new Pose2d(0,0, new Rotation2d(0)));
     }
 
-    // public void resetRelativePose(Pose2d pose) {
-    //     relativeEstimator.resetPosition(pose.getRotation(), wheelPositions.get(), pose);
-    //     imu.setVirtualAxis("relative", pose.getRotation());
-    //     this.relativePose = pose;
-    // }
+    public void resetRelativePose(Pose2d pose) {
+        relativeEstimator.resetPosition(pose.getRotation(), wheelPositions.get(), pose);
+        imu.setVirtualAxis("relative", pose.getRotation());
+        this.relativePose = pose;
+    }
 
-    // public void resetRelativePose(double x, double y) {
-    //     resetRelativePose(new Pose2d(x, y, imu.getVirtualAxis("relative")));
-    // }
+    public void resetRelativePose(double x, double y) {
+        resetRelativePose(new Pose2d(x, y, imu.getVirtualAxis("relative")));
+    }
 
-    // public void resetRelativePose(double x, double y, double r) {
-    //     resetRelativePose(new Pose2d(x, y, new Rotation2d(r)));
-    // }
+    public void resetRelativePose(double x, double y, double r) {
+        resetRelativePose(new Pose2d(x, y, new Rotation2d(r)));
+    }
 
-    // public void resetRelativePose() {
-    //     resetRelativePose(0,0, 0);
-    // }
+    public void resetRelativePose() {
+        resetRelativePose(0,0, 0);
+    }
 
     public void setVisionStd(Matrix<N3, N1> matrix){
         fieldEstimator.setVisionMeasurementStdDevs(matrix);
@@ -271,9 +272,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 }
             });
         }
+
         fieldPose = fieldEstimator.update(imu.getVirtualAxis("field"), wheelPositions.get());
-        // relativePose = relativeEstimator.update(imu.getVirtualAxis("relative"), wheelPositions.get());
+        relativePose = relativeEstimator.update(imu.getVirtualAxis("relative"), wheelPositions.get());
         field.setRobotPose(fieldPose);
+    }
+
+    public FieldObject2d getField2dObject(String id){
+        return field.getObject(id);
     }
 
     public Pose2d getFieldPose(){
@@ -288,9 +294,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.suppressUpdates = suppressUpdates;
     }
 
-    // public Pose2d getRelativePose(){
-    //     return relativePose;
-    // }
+    public Pose2d getRelativePose(){
+        return relativePose;
+    }
 
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
@@ -301,9 +307,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             tab.addDouble("Field Y", () -> getFieldPose().getY()).withPosition( 5,2);
             tab.addDouble("Field Theta", () -> getFieldPose().getRotation().getDegrees()).withPosition( 4,0).withSize(2, 2);
         }
-        // tab.addDouble("Relative X", () -> getRelativePose().getX()).withPosition( 6,2);
-        // tab.addDouble("Relative Y", () -> getRelativePose().getY()).withPosition( 7,2);
-        // tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withPosition( 6,0).withSize(2, 2);
+        tab.addDouble("Relative X", () -> getRelativePose().getX()).withPosition( 6,2);
+        tab.addDouble("Relative Y", () -> getRelativePose().getY()).withPosition( 7,2);
+        tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withPosition( 6,0).withSize(2, 2);
         return tab;
     }
 
