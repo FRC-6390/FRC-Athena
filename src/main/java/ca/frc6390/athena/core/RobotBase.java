@@ -19,6 +19,7 @@ import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -185,4 +186,11 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
         }
     }
 
+    public ChassisSpeeds createRobotRelativeSpeeds(double xSpeed, double ySpeed, double rot){
+        return ChassisSpeeds.fromRobotRelativeSpeeds(new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
+    }
+
+    public ChassisSpeeds createFieldRelativeSpeeds(double xSpeed, double ySpeed, double rot){
+        return ChassisSpeeds.fromFieldRelativeSpeeds(new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
+    }
 }
