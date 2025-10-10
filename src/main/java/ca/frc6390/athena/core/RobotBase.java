@@ -7,6 +7,7 @@ import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
 import ca.frc6390.athena.devices.IMU;
@@ -108,7 +109,7 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
         return vision;
     }
 
-    public RobotBase<T> shuffleboard() {
+     public RobotBase<T> shuffleboard() {
         return shuffleboard("Drivetrain");
     }
 
@@ -116,11 +117,23 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
         return shuffleboard(drive, "Localization");
     }
 
+    public RobotBase<T> shuffleboard(SendableLevel level) {
+        return shuffleboard("Drivetrain", level);
+    }
+
+    public RobotBase<T> shuffleboard(String drive, SendableLevel level) {
+        return shuffleboard(drive, "Localization", level);
+    }
+
     public RobotBase<T> shuffleboard(String drive, String local) {
-        drivetrain.shuffleboard(drive);
+        return shuffleboard(drive, local, SendableLevel.COMP);
+    }
+
+    public RobotBase<T> shuffleboard(String drive, String local, SendableLevel level) {
+        drivetrain.shuffleboard(drive, level);
 
         if(localization != null){
-            localization.shuffleboard(local);
+            localization.shuffleboard(local, level);
         }
 
         return this;

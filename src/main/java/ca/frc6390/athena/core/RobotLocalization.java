@@ -28,6 +28,7 @@ import edu.wpi.first.networktables.GenericEntry;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
@@ -122,8 +123,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private BiConsumer<ChassisSpeeds, DriveFeedforwards> autoDrive;
 
     private boolean suppressUpdates = false;
-    private StructPublisher<Pose2d> shuffleboardPosePublisher;
+    private StructPublisher<Pose2d> fieldPosePublisher;
+    private StructPublisher<Pose2d> relativePosePublisher;
     private ShuffleboardTab activeShuffleboardTab;
+
+    private double visionMaxLatencySeconds = 0.9;
+    private double visionOutlierTranslationMeters = 2.5;
+    private double visionOutlierRotationRadians = Units.degreesToRadians(35.0);
+    private double visionStdDevOutlierMultiplier = 4.0;
+    private double visionStdDevTranslationLimit = 5.0;
+    private double visionStdDevRotationLimit = Units.degreesToRadians(120.0);
+    private boolean hasAcceptedVisionMeasurement = false;
 
     private static class CameraDisplayState {
         final String key;
@@ -192,7 +202,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.autoDrive = (speeds, feed) ->  robotSpeeds.setSpeeds("auto",speeds);
       
         this.field = new Field2d();
-        this.shuffleboardPosePublisher = null;
+        this.fieldPosePublisher = null;
+        this.relativePosePublisher = null;
 
         this.visionEnabled = config.useVision;
         config = config == null ? new RobotLocalizationConfig() : config;
@@ -334,8 +345,108 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return this;
     }
 
+    public RobotLocalization<T> setVisionOutlierThresholds(double translationMeters, double rotationDegrees) {
+        this.visionOutlierTranslationMeters = Math.max(0.0, translationMeters);
+        this.visionOutlierRotationRadians = Units.degreesToRadians(Math.max(0.0, rotationDegrees));
+        return this;
+    }
+
+    public RobotLocalization<T> setVisionStdDevOutlierMultiplier(double multiplier) {
+        if (Double.isFinite(multiplier) && multiplier >= 1.0) {
+            this.visionStdDevOutlierMultiplier = multiplier;
+        }
+        return this;
+    }
+
+    public RobotLocalization<T> setVisionStdDevLimits(double translationMeters, double rotationDegrees) {
+        this.visionStdDevTranslationLimit = Math.max(0.0, translationMeters);
+        this.visionStdDevRotationLimit = Units.degreesToRadians(Math.max(0.0, rotationDegrees));
+        return this;
+    }
+
+    public RobotLocalization<T> setVisionLatencyLimit(double maxLatencySeconds) {
+        if (Double.isFinite(maxLatencySeconds) && maxLatencySeconds >= 0.0) {
+            this.visionMaxLatencySeconds = maxLatencySeconds;
+        }
+        return this;
+    }
+
     public void setAutoDrive(BiConsumer<RobotSpeeds, ChassisSpeeds> autoDrive) {
         this.autoDrive = (speeds, feeds) -> autoDrive.accept(robotSpeeds, speeds);
+    }
+
+    private Matrix<N3, N1> sanitizeVisionStdDevs(Matrix<N3, N1> stdDevs) {
+        if (stdDevs == null) {
+            return null;
+        }
+        double sanitizedX = sanitizeStdDevEntry(stdDevs.get(0, 0), visionStdDevTranslationLimit);
+        double sanitizedY = sanitizeStdDevEntry(stdDevs.get(1, 0), visionStdDevTranslationLimit);
+        double sanitizedTheta = sanitizeStdDevEntry(stdDevs.get(2, 0), visionStdDevRotationLimit);
+        if (Double.isNaN(sanitizedX) || Double.isNaN(sanitizedY) || Double.isNaN(sanitizedTheta)) {
+            return null;
+        }
+        return VecBuilder.fill(sanitizedX, sanitizedY, sanitizedTheta);
+    }
+
+    private double sanitizeStdDevEntry(double value, double maxValue) {
+        double sanitized = Math.abs(value);
+        if (!Double.isFinite(sanitized) || sanitized < STD_EPSILON) {
+            return Double.NaN;
+        }
+        if (maxValue > 0.0 && sanitized >= maxValue) {
+            return Double.NaN;
+        }
+        return sanitized;
+    }
+
+    private boolean shouldApplyVisionMeasurement(LocalizationData data, Matrix<N3, N1> stdDevs) {
+        if (data == null) {
+            return false;
+        }
+        Pose2d visionPose = data.pose();
+        if (!isFinitePose(visionPose)) {
+            return false;
+        }
+        double timestampSeconds = data.latency();
+        if (!Double.isFinite(timestampSeconds)) {
+            return false;
+        }
+        double ageSeconds = Timer.getFPGATimestamp() - timestampSeconds;
+        if (visionMaxLatencySeconds > 0.0) {
+            // Reject frames that are too old or unexpectedly in the future (>100 ms lead).
+            if (ageSeconds > visionMaxLatencySeconds || ageSeconds < -0.1) {
+                return false;
+            }
+        }
+        if (!hasAcceptedVisionMeasurement) {
+            return true;
+        }
+        Pose2d referencePose = fieldPose != null ? fieldPose : new Pose2d();
+        Pose2d delta = visionPose.relativeTo(referencePose);
+        double translationError = delta.getTranslation().getNorm();
+        double rotationError = Math.abs(delta.getRotation().getRadians());
+
+        double translationThreshold = visionOutlierTranslationMeters;
+        double rotationThreshold = visionOutlierRotationRadians;
+        if (stdDevs != null) {
+            double translationStd = Math.max(stdDevs.get(0, 0), stdDevs.get(1, 0));
+            double rotationStd = stdDevs.get(2, 0);
+            if (Double.isFinite(translationStd) && translationStd > STD_EPSILON) {
+                translationThreshold = Math.max(translationThreshold, translationStd * visionStdDevOutlierMultiplier);
+            }
+            if (Double.isFinite(rotationStd) && rotationStd > STD_EPSILON) {
+                rotationThreshold = Math.max(rotationThreshold, rotationStd * visionStdDevOutlierMultiplier);
+            }
+        }
+
+        return translationError <= translationThreshold && rotationError <= rotationThreshold;
+    }
+
+    private static boolean isFinitePose(Pose2d pose) {
+        return pose != null
+                && Double.isFinite(pose.getX())
+                && Double.isFinite(pose.getY())
+                && Double.isFinite(pose.getRotation().getRadians());
     }
 
     private void ensureCameraShuffleboardEntries() {
@@ -422,6 +533,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         fieldEstimator.resetPosition(pose.getRotation(), wheelPositions.get(), pose);
         imu.setVirtualAxis("field", pose.getRotation());
         this.fieldPose = pose;
+        this.hasAcceptedVisionMeasurement = false;
     }
 
     public void resetFieldPose(double x, double y) {
@@ -596,23 +708,32 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             // vision.getLimelights().forEach((table, ll) -> ll.setFiducialIdFilters(Arrays.stream(ll.config.filteredTags()).mapToDouble(i -> i).toArray()));
             // List<Pose2d> poses = vision.getLocalizationPoses();
             // SmartDashboard.putNumber("Localization Poses", poses.size());
-            vision.addLocalizationPoses(data -> {
-                // System.out.println(data);
-                if(data.pose() != null){
-                    if (data.stdDevs() != null){
-                        fieldEstimator.addVisionMeasurement(data.pose(), data.latency(), data.stdDevs());
-                    }else {
-                        fieldEstimator.addVisionMeasurement(data.pose(), data.latency());
-                    }
+            vision.getBestLocalizationData().ifPresent(data -> {
+                Matrix<N3, N1> rawStdDevs = data.stdDevs();
+                Matrix<N3, N1> sanitizedStdDevs = sanitizeVisionStdDevs(rawStdDevs);
+                if (rawStdDevs != null && sanitizedStdDevs == null) {
+                    return;
                 }
+                if (!shouldApplyVisionMeasurement(data, sanitizedStdDevs)) {
+                    return;
+                }
+                if (sanitizedStdDevs != null) {
+                    fieldEstimator.addVisionMeasurement(data.pose(), data.latency(), sanitizedStdDevs);
+                } else {
+                    fieldEstimator.addVisionMeasurement(data.pose(), data.latency());
+                }
+                hasAcceptedVisionMeasurement = true;
             });
         }
 
         fieldPose = fieldEstimator.update(imu.getVirtualAxis("field"), wheelPositions.get());
         relativePose = relativeEstimator.update(imu.getVirtualAxis("relative"), wheelPositions.get());
         field.setRobotPose(fieldPose);
-        if (shuffleboardPosePublisher != null) {
-            shuffleboardPosePublisher.set(fieldPose);
+        if (fieldPosePublisher != null) {
+            fieldPosePublisher.set(fieldPose);
+        }
+        if (relativePosePublisher != null) {
+            relativePosePublisher.set(relativePose);
         }
         updateCameraVisualizations();
     }
@@ -646,12 +767,22 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.activeShuffleboardTab = tab;
         tab.add("Estimator", field).withPosition( 0,0).withSize(4, 3);
 
-        if (shuffleboardPosePublisher == null) {
-            String topic = "/Shuffleboard/" + tab.getTitle() + "/EstimatorPose";
-            shuffleboardPosePublisher = NetworkTableInstance.getDefault()
-                    .getStructTopic(topic, Pose2d.struct)
+        String baseTopic = "/Shuffleboard/" + tab.getTitle();
+
+        if (fieldPosePublisher == null) {
+            String fieldTopic = baseTopic + "/EstimatorPose";
+            fieldPosePublisher = NetworkTableInstance.getDefault()
+                    .getStructTopic(fieldTopic, Pose2d.struct)
                     .publish();
-            shuffleboardPosePublisher.set(fieldPose);
+            fieldPosePublisher.set(fieldPose);
+        }
+
+        if (relativePosePublisher == null) {
+            String relativeTopic = baseTopic + "/RelativePose";
+            relativePosePublisher = NetworkTableInstance.getDefault()
+                    .getStructTopic(relativeTopic, Pose2d.struct)
+                    .publish();
+            relativePosePublisher.set(relativePose);
         }
 
         if(level.equals(SendableLevel.DEBUG)) {

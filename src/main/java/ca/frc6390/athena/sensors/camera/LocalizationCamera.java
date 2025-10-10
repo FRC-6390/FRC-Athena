@@ -38,13 +38,29 @@ import edu.wpi.first.networktables.StructPublisher;
  */
 public class LocalizationCamera {
 
+    /**
+     * Coordinate systems used when translating measurements emitted by the camera.
+     */
     public enum CoordinateSpace {
+        /** Measurements expressed relative to the camera frame (X forward, Y left). */
         CAMERA,
+        /** Measurements expressed relative to the robot frame after applying the camera transform. */
         ROBOT,
+        /** Measurements anchored in the global field frame using the current robot pose. */
         FIELD,
+        /** Measurements expressed relative to the observed tag pose. */
         TAG
     }
 
+    /**
+     * Snapshot of a single target reading produced by the camera vendor implementation.
+     *
+     * @param cameraTranslation target translation in camera space when provided
+     * @param yawDegrees yaw offset from the camera optical axis in degrees
+     * @param distanceMeters direct distance from the camera to the target in meters
+     * @param tagId fiducial identifier associated with the target
+     * @param confidence vendor supplied confidence score in the range {@code [0, 1]}
+     */
     public static record TargetMeasurement(
             Translation2d cameraTranslation,
             Double yawDegrees,
@@ -87,6 +103,11 @@ public class LocalizationCamera {
     private Matrix<N3, N1> singleStdDevs;
     private Matrix<N3, N1> multiStdDevs;
 
+    /**
+     * Creates a new camera wrapper using the supplied vendor configuration.
+     *
+     * @param config provider-specific configuration that exposes the camera capabilities
+     */
     public LocalizationCamera(LocalizationCameraConfig config) {
         this.config = config;
         this.connectedSupplier = wrapBoolean(config.getConnectedSupplier(), true);
@@ -129,10 +150,17 @@ public class LocalizationCamera {
         networkEstimatedPosePublisher.set(new Pose2d());
     }
 
+    /**
+     * Returns the underlying configuration that defines how the camera is integrated.
+     */
     public LocalizationCameraConfig getConfig() {
         return config;
     }
 
+    /**
+     * Runs any periodic hooks, caches vendor measurements, and pushes the estimated pose to
+     * NetworkTables. Returns {@code this} to allow fluent access patterns.
+     */
     public LocalizationCamera update() {
         if (updateHook != null) {
             updateHook.run();
@@ -151,31 +179,56 @@ public class LocalizationCamera {
         return this;
     }
 
+    /**
+     * Indicates whether the camera reports itself as connected.
+     *
+     * @return {@code true} when the vendor feed is reachable
+     */
     public boolean isConnected() {
         return connectedSupplier.getAsBoolean();
     }
 
+    /**
+     * True when the camera is connected and currently reporting a valid target.
+     */
     public boolean hasValidTarget() {
         return isConnected() && hasTargetsSupplier.getAsBoolean();
     }
 
+    /**
+     * Retrieves the pose supplied by the vendor localization pipeline. Triggers a refresh before
+     * reading the measurement.
+     *
+     * @return pose in field coordinates, or an empty pose when the vendor returns {@code null}
+     */
     public Pose2d getLocalizationPose() {
         update();
         Pose2d pose = poseSupplier.get();
         return pose != null ? pose : new Pose2d();
     }
 
+    /**
+     * Returns the vendor reported pipeline latency in seconds.
+     */
     public double getLocalizationLatency() {
         update();
         return latencySupplier.getAsDouble();
     }
 
+    /**
+     * Provides the current robot orientation to the camera processor when supported.
+     *
+     * @param pose robot pose that should align the vendor localization estimate
+     */
     public void setRobotOrientation(Pose2d pose) {
         if (pose != null) {
             orientationConsumer.accept(pose);
         }
     }
 
+    /**
+     * Computes the measurement noise matrix based on the current target count and distance.
+     */
     public Matrix<N3, N1> getLocalizationStdDevs() {
         update();
         int targets = visibleTargetsSupplier.getAsInt();
@@ -183,6 +236,12 @@ public class LocalizationCamera {
         return recalculateStdDevs(targets, avgDistance, config.getTrustDistance());
     }
 
+    /**
+     * Overrides the single and multi-tag standard deviation matrices used when estimating pose.
+     *
+     * @param single single-target standard deviation matrix
+     * @param multi multi-target standard deviation matrix
+     */
     public void setStdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
         if (single != null) {
             singleStdDevs = single;
@@ -192,14 +251,29 @@ public class LocalizationCamera {
         }
     }
 
+    /**
+     * Returns the currently configured single-target standard deviation matrix.
+     */
     public Matrix<N3, N1> getSingleStdDev() {
         return singleStdDevs;
     }
 
+    /**
+     * Returns the currently configured multi-target standard deviation matrix.
+     */
     public Matrix<N3, N1> getMultiStdDev() {
         return multiStdDevs;
     }
 
+    /**
+     * Recalculates the standard deviations based on the number of tags, average distance, and trust
+     * thresholds.
+     *
+     * @param numTags number of visible tags
+     * @param avgDist camera reported average distance in meters
+     * @param trustDistance distance threshold for trusting single-tag results
+     * @return pose covariance diagonal expressed as a {@link Matrix}
+     */
     public Matrix<N3, N1> recalculateStdDevs(int numTags, double avgDist, double trustDistance) {
         if (numTags <= 0) {
             return singleStdDevs;
@@ -219,6 +293,10 @@ public class LocalizationCamera {
         return singleStdDevs.times(scale);
     }
 
+    /**
+     * Convenience wrapper that bundles the latest vendor pose, latency, and covariance into a single
+     * immutable object.
+     */
     public LocalizationData getLocalizationData() {
         update();
         Pose2d pose = poseSupplier.get();
@@ -231,10 +309,18 @@ public class LocalizationCamera {
         return new LocalizationData(pose != null ? pose : new Pose2d(), latency, stdDevs);
     }
 
+    /**
+     * Returns whether this camera currently participates in robot localization.
+     */
     public boolean isUseForLocalization() {
         return config.isUseForLocalization();
     }
 
+    /**
+     * Enables or disables use of the camera for pose estimation.
+     *
+     * @param useForLocalization {@code true} when the camera should contribute to localization
+     */
     public void setUseForLocalization(boolean useForLocalization) {
         config.setUseForLocalization(useForLocalization);
         if (useForLocalization) {
@@ -244,6 +330,15 @@ public class LocalizationCamera {
         }
     }
 
+    /**
+     * Registers a capability implementation that can later be queried through
+     * {@link #capability(LocalizationCameraCapability)}.
+     *
+     * @param capabilityKey capability descriptor
+     * @param implementation object implementing the capability contract
+     * @return this camera for chaining
+     * @throws IllegalArgumentException when the implementation does not match the capability type
+     */
     public LocalizationCamera registerCapability(LocalizationCameraCapability capabilityKey, Object implementation) {
         if (capabilityKey != null && implementation != null) {
             if (!capabilityKey.getType().isInstance(implementation)) {
@@ -258,34 +353,61 @@ public class LocalizationCamera {
         return this;
     }
 
+    /**
+     * Retrieves the registered capability implementation when available.
+     *
+     * @param capabilityKey capability descriptor
+     * @return optional containing the implementation when installed
+     */
     public <T> Optional<T> capability(LocalizationCameraCapability capabilityKey) {
         return capabilityKey.cast(capabilities.get(capabilityKey));
     }
 
+    /**
+     * True when a capability implementation has been registered for the given key.
+     */
     public boolean supports(LocalizationCameraCapability capabilityKey) {
         return capabilities.containsKey(capabilityKey);
     }
 
+    /**
+     * Returns a defensive copy of the roles assigned to this camera instance.
+     */
     public EnumSet<LocalizationCameraConfig.CameraRole> getRoles() {
         return EnumSet.copyOf(roles);
     }
 
+    /**
+     * Vendor reported confidence associated with the current frame.
+     */
     public double getMeasurementConfidence() {
         return confidenceSupplier.getAsDouble();
     }
 
+    /**
+     * Transform from the camera frame into the robot frame.
+     */
     public Transform3d getCameraToRobotTransform() {
         return cameraToRobotTransform;
     }
 
+    /**
+     * Transform from the robot frame into the camera frame.
+     */
     public Transform3d getRobotToCameraTransform() {
         return robotToCameraTransform;
     }
 
+    /**
+     * Horizontal field of view used by UI overlays, in degrees.
+     */
     public double getDisplayHorizontalFovDeg() {
         return displayHorizontalFovDeg;
     }
 
+    /**
+     * Maximum visualization range, in meters, for HUD style displays.
+     */
     public double getDisplayRangeMeters() {
         return displayRangeMeters;
     }
@@ -325,13 +447,19 @@ public class LocalizationCamera {
         return optionalInt(tagIdSupplier);
     }
 
-    /** Returns the camera-to-target translation in camera coordinates. */
+    /**
+     * Returns the camera-to-target translation expressed in camera coordinates, if the vendor
+     * reported enough information to compute it.
+     */
     public Optional<Translation2d> getCameraRelativeTranslation() {
         update();
         return getPrimaryCameraTranslation();
     }
 
-    /** Returns the latest observation using camera space. */
+    /**
+     * Returns the latest observation using {@link CoordinateSpace#CAMERA} coordinates for the
+     * translation component.
+     */
     public Optional<TargetObservation> getLatestObservation() {
         return getLatestObservation(CoordinateSpace.CAMERA, null, null);
     }
@@ -342,6 +470,8 @@ public class LocalizationCamera {
      * @param space target coordinate system
      * @param robotPose robot pose in field space when needed (FIELD/TAG conversions)
      * @param tagPose tag pose in field space when space is TAG
+     * Converts the primary measurement into the requested coordinate system and returns it together
+     * with any localization metadata.
      */
     public Optional<TargetObservation> getLatestObservation(CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
         List<TargetObservation> observations = getObservations(space, robotPose, tagPose);
@@ -351,6 +481,11 @@ public class LocalizationCamera {
     /**
      * Returns all current target observations in the requested coordinate space. The first element is
      * the primary target, matching the behaviour of {@link #getLatestObservation(CoordinateSpace, Pose2d, Pose2d)}.
+     *
+     * @param space coordinate space to convert into
+     * @param robotPose robot pose in field space when required (FIELD/TAG conversions)
+     * @param tagPose tag pose in field space when {@code CoordinateSpace.TAG} is requested
+     * @return ordered list of target observations converted into the requested space
      */
     public List<TargetObservation> getObservations(CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
         update();
@@ -412,7 +547,13 @@ public class LocalizationCamera {
         return observations;
     }
 
-    /** Projects the current target translation into field space. */
+    /**
+     * Projects the latest target translation into the global field frame.
+     *
+     * @param robotPose current field-relative robot pose
+     * @param cameraOffsetMeters override for the camera offset, or {@code null} to use the configured
+     *     transform
+     */
     public Optional<Translation2d> projectToFieldTranslation(Pose2d robotPose, Translation2d cameraOffsetMeters) {
         if (robotPose == null) {
             return Optional.empty();
@@ -425,7 +566,13 @@ public class LocalizationCamera {
         });
     }
 
-    /** Estimates the robot pose using the provided tag pose and current measurement. */
+    /**
+     * Estimates the field-relative robot pose using the supplied tag pose and current measurements.
+     *
+     * @param tagPose known pose of the observed tag in field space
+     * @param cameraOffsetMeters override for the camera offset, or {@code null} to use the configured
+     *     transform
+     */
     public Optional<Pose2d> estimateFieldPoseFromTag(Pose2d tagPose, Translation2d cameraOffsetMeters) {
         if (tagPose == null) {
             return Optional.empty();
@@ -442,7 +589,11 @@ public class LocalizationCamera {
     }
 
     /**
-     * Returns the target translation in the requested coordinate space.
+     * Returns the target translation expressed in the requested coordinate space.
+     *
+     * @param space coordinate space to convert into
+     * @param robotPose robot pose in field space when required for the conversion
+     * @param tagPose tag pose in field space when {@code CoordinateSpace.TAG} is requested
      */
     public Optional<Translation2d> getTargetTranslation(CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
         List<TargetObservation> observations = getObservations(space, robotPose, tagPose);
@@ -533,6 +684,10 @@ public class LocalizationCamera {
         return Optional.of(new Translation2d(x, y));
     }
 
+    /**
+     * Converts a camera-space translation into the requested coordinate system using the available
+     * pose information.
+     */
     private Optional<Translation2d> convertCameraTranslationToSpace(
             Translation2d cameraTranslation, CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
         return switch (space) {
@@ -562,57 +717,135 @@ public class LocalizationCamera {
         };
     }
 
+    /**
+     * Applies the robot-to-camera transform to move a camera translation into robot space.
+     */
     private Translation2d toRobotTranslation(Translation2d cameraTranslation) {
         return toRobotTranslation(cameraTranslation, robotToCameraTranslation);
     }
 
+    /**
+     * Applies the robot-to-camera transform using an optional offset override.
+     */
     private Translation2d toRobotTranslation(Translation2d cameraTranslation, Translation2d offsetOverride) {
         Translation2d rotated = cameraTranslation.rotateBy(cameraYawRelativeToRobot);
         Translation2d cameraOffset = offsetOverride != null ? offsetOverride : robotToCameraTranslation;
         return rotated.plus(cameraOffset);
     }
 
+    /**
+     * Immutable bundle of localization data produced alongside camera measurements.
+     *
+     * @param pose camera supplied robot pose in field space
+     * @param latency seconds of delay between photon capture and usable telemetry
+     * @param stdDevs covariance diagonal representing the vendor estimate quality
+     */
     public static record LocalizationData(Pose2d pose, double latency, Matrix<N3, N1> stdDevs) {}
 
+    /**
+     * Normalized representation of an observed target at a moment in time.
+     *
+     * @param tagId fiducial identifier, or {@code -1} when not reported
+     * @param yawDegrees horizontal angle from the camera optical axis in degrees
+     * @param distanceMeters direct camera-to-target distance in meters
+     * @param translation translation expressed in the chosen {@link CoordinateSpace}
+     * @param space coordinate system used for the translation
+     * @param localizationData additional localization metadata that accompanied the measurement
+     * @param confidence vendor supplied confidence score for this observation
+     */
     public static record TargetObservation(int tagId, double yawDegrees, double distanceMeters,
                                            Translation2d translation, CoordinateSpace space,
                                            LocalizationData localizationData, double confidence) {
+        /**
+         * True when the observation includes a resolved distance measurement.
+         */
         public boolean hasDistance() {
             return !Double.isNaN(distanceMeters);
         }
 
+        /**
+         * True when the observation includes a resolved yaw measurement.
+         */
         public boolean hasYaw() {
             return !Double.isNaN(yawDegrees);
         }
 
+        /**
+         * True when the observation includes a translated position.
+         */
         public boolean hasTranslation() {
             return translation != null;
         }
 
+        /**
+         * Checks whether the observation is expressed in the expected coordinate space.
+         */
         public boolean isSpace(CoordinateSpace expectedSpace) {
             return space == expectedSpace;
         }
 
+        /**
+         * True when the vendor supplied a non-NaN confidence value.
+         */
         public boolean hasConfidence() {
             return !Double.isNaN(confidence);
         }
     }
 
+    /**
+     * Capability that exposes vendor LED controls.
+     */
     public interface LedControl {
+        /**
+         * Updates the LED mode on the camera.
+         *
+         * @param mode desired LED state
+         */
         void setLedMode(LedMode mode);
+
+        /**
+         * Returns the currently configured LED mode.
+         */
         LedMode getLedMode();
     }
 
+    /**
+     * Capability that exposes pipeline switching for cameras that support multiple configurations.
+     */
     public interface PipelineControl {
+        /**
+         * Selects the active pipeline on the camera.
+         *
+         * @param pipeline vendor specific pipeline index
+         */
         void setPipeline(int pipeline);
+
+        /**
+         * Returns the currently active vendor pipeline.
+         */
         int getPipeline();
     }
 
+    /**
+     * Capability that exposes stream configuration options for cameras that support them.
+     */
     public interface StreamControl {
+        /**
+         * Sets how the camera lays out multiple image streams.
+         *
+         * @param mode stream composition mode
+         */
         void setStreamMode(StreamMode mode);
+
+        /**
+         * Returns the currently selected stream mode.
+         */
         StreamMode getStreamMode();
     }
 
+    /**
+     * LED behavior modes supported by the vendor API.
+     */
     public enum LedMode {
         PIPELINE,
         OFF,
@@ -620,6 +853,9 @@ public class LocalizationCamera {
         ON
     }
 
+    /**
+     * Stream layout options supported by the vendor API.
+     */
     public enum StreamMode {
         STANDARD,
         PIP_MAIN,

@@ -26,7 +26,7 @@ public interface RobotSendableSystem {
     }
 
     default RobotSendableSystem shuffleboard(String tab, SendableLevel level) {
-      shuffleboard(Shuffleboard.getTab(tab), SendableLevel.COMP);
+      shuffleboard(Shuffleboard.getTab(tab), level);
       return this;
     }
 

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -19,6 +20,8 @@ import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.SimpleMotorMechanism.StatefulSimpleMotorMechanism;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
+import ca.frc6390.athena.mechanisms.sim.MechanismSimulationConfig;
+import ca.frc6390.athena.mechanisms.sim.MechanismSimulationModel;
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.math.controller.PIDController;
@@ -54,6 +57,11 @@ public class MechanismConfig<T extends Mechanism> {
 
     public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
     public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
+    public MechanismSimulationConfig simulationConfig = null;
+    public ElevatorSimulationParameters elevatorSimulationParameters = null;
+    public ArmSimulationParameters armSimulationParameters = null;
+    public SimpleMotorSimulationParameters simpleMotorSimulationParameters = null;
+    public ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig visualizationConfig = null;
 
     public static MechanismConfig<Mechanism> generic(){
         return custom(Mechanism::new);
@@ -303,6 +311,155 @@ public class MechanismConfig<T extends Mechanism> {
         return this;
     }
 
+    public MechanismConfig<T> setSimulationConfig(MechanismSimulationConfig simulationConfig){
+        this.simulationConfig = simulationConfig;
+        return this;
+    }
+
+    @SuppressWarnings("unchecked")
+    public MechanismConfig<T> setSimulation(Function<T, MechanismSimulationModel> simulationFactory){
+        Objects.requireNonNull(simulationFactory);
+        this.simulationConfig = MechanismSimulationConfig.builder()
+                .withFactory(mechanism -> simulationFactory.apply((T) mechanism))
+                .build();
+        return this;
+    }
+
+    public MechanismConfig<T> setSimulationElevator(ElevatorSimulationParameters parameters) {
+        this.elevatorSimulationParameters = Objects.requireNonNull(parameters);
+        return this;
+    }
+
+    public MechanismConfig<T> setSimulationArm(ArmSimulationParameters parameters) {
+        this.armSimulationParameters = Objects.requireNonNull(parameters);
+        return this;
+    }
+
+    public MechanismConfig<T> setSimulationSimpleMotor(SimpleMotorSimulationParameters parameters) {
+        this.simpleMotorSimulationParameters = Objects.requireNonNull(parameters);
+        return this;
+    }
+
+    public MechanismConfig<T> setVisualizationConfig(ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig visualizationConfig) {
+        this.visualizationConfig = Objects.requireNonNull(visualizationConfig);
+        return this;
+    }
+
+    public static class ElevatorSimulationParameters {
+        public double carriageMassKg = Double.NaN;
+        public double drumRadiusMeters = Double.NaN;
+        public double minHeightMeters = 0.0;
+        public double maxHeightMeters = 2.0;
+        public double startingHeightMeters = 0.0;
+        public boolean simulateGravity = true;
+        public double nominalVoltage = 12.0;
+        public double unitsPerMeterOverride = Double.NaN;
+
+        public ElevatorSimulationParameters setCarriageMassKg(double carriageMassKg) {
+            this.carriageMassKg = carriageMassKg;
+            return this;
+        }
+
+        public ElevatorSimulationParameters setDrumRadiusMeters(double drumRadiusMeters) {
+            this.drumRadiusMeters = drumRadiusMeters;
+            return this;
+        }
+
+        public ElevatorSimulationParameters setRangeMeters(double minHeightMeters, double maxHeightMeters) {
+            this.minHeightMeters = minHeightMeters;
+            this.maxHeightMeters = maxHeightMeters;
+            return this;
+        }
+
+        public ElevatorSimulationParameters setStartingHeightMeters(double startingHeightMeters) {
+            this.startingHeightMeters = startingHeightMeters;
+            return this;
+        }
+
+        public ElevatorSimulationParameters setSimulateGravity(boolean simulateGravity) {
+            this.simulateGravity = simulateGravity;
+            return this;
+        }
+
+        public ElevatorSimulationParameters setNominalVoltage(double nominalVoltage) {
+            this.nominalVoltage = nominalVoltage;
+            return this;
+        }
+
+        public ElevatorSimulationParameters setUnitsPerMeter(double unitsPerMeter) {
+            this.unitsPerMeterOverride = unitsPerMeter;
+            return this;
+        }
+    }
+
+    public static class ArmSimulationParameters {
+        public double momentOfInertia = Double.NaN;
+        public double armLengthMeters = Double.NaN;
+        public double minAngleRadians = -Math.PI;
+        public double maxAngleRadians = Math.PI;
+        public double startingAngleRadians = 0.0;
+        public boolean simulateGravity = true;
+        public double nominalVoltage = 12.0;
+        public double unitsPerRadianOverride = Double.NaN;
+
+        public ArmSimulationParameters setMomentOfInertia(double momentOfInertia) {
+            this.momentOfInertia = momentOfInertia;
+            return this;
+        }
+
+        public ArmSimulationParameters setArmLengthMeters(double armLengthMeters) {
+            this.armLengthMeters = armLengthMeters;
+            return this;
+        }
+
+        public ArmSimulationParameters setAngleRangeRadians(double minAngleRadians, double maxAngleRadians) {
+            this.minAngleRadians = minAngleRadians;
+            this.maxAngleRadians = maxAngleRadians;
+            return this;
+        }
+
+        public ArmSimulationParameters setStartingAngleRadians(double startingAngleRadians) {
+            this.startingAngleRadians = startingAngleRadians;
+            return this;
+        }
+
+        public ArmSimulationParameters setSimulateGravity(boolean simulateGravity) {
+            this.simulateGravity = simulateGravity;
+            return this;
+        }
+
+        public ArmSimulationParameters setNominalVoltage(double nominalVoltage) {
+            this.nominalVoltage = nominalVoltage;
+            return this;
+        }
+
+        public ArmSimulationParameters setUnitsPerRadian(double unitsPerRadian) {
+            this.unitsPerRadianOverride = unitsPerRadian;
+            return this;
+        }
+    }
+
+    public static class SimpleMotorSimulationParameters {
+        public double momentOfInertia = Double.NaN;
+        public double nominalVoltage = 12.0;
+        public double unitsPerRadianOverride = Double.NaN;
+
+        public SimpleMotorSimulationParameters setMomentOfInertia(double momentOfInertia) {
+            this.momentOfInertia = momentOfInertia;
+            return this;
+        }
+
+        public SimpleMotorSimulationParameters setNominalVoltage(double nominalVoltage) {
+            this.nominalVoltage = nominalVoltage;
+            return this;
+        }
+
+        public SimpleMotorSimulationParameters setUnitsPerRadian(double unitsPerRadian) {
+            this.unitsPerRadianOverride = unitsPerRadian;
+            return this;
+        }
+    }
+
     public T build(){
 
         motors.forEach(
@@ -333,6 +490,10 @@ public class MechanismConfig<T extends Mechanism> {
             if(pidContinous){
                 profiledPIDController.enableContinuousInput(continousMin, continousMax);
             }
+        }
+
+        if (simulationConfig != null) {
+            simulationConfig = simulationConfig.bindSourceConfig(this);
         }
 
         return factory.apply(this);

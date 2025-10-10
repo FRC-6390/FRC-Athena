@@ -3,19 +3,28 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.devices.Encoder;
 import ca.frc6390.athena.devices.MotorControllerGroup;
-import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import ca.frc6390.athena.devices.MotorControllerConfig;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
+import ca.frc6390.athena.mechanisms.sim.MechanismSimulationConfig;
+import ca.frc6390.athena.mechanisms.sim.MechanismSimulationModel;
+import ca.frc6390.athena.mechanisms.sim.MechanismVisualization;
+import ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
+import edu.wpi.first.math.geometry.Pose3d;
+import java.util.Map;
 
 public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
@@ -28,6 +37,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput, customPIDCycle;
     private double setpoint, prevSetpoint, pidOutput, feedforwardOutput, output, nudge, pidPeriod; 
     private RobotMode prevRobotMode = RobotMode.DISABLE, robotMode = RobotMode.DISABLE;
+    private final MechanismSimulationModel simulationModel;
+    private final double simulationUpdatePeriodSeconds;
+    private double lastSimulationTimestampSeconds = Double.NaN;
+    private final MechanismVisualization visualization;
 
     private enum RobotMode {
         TELE,
@@ -37,10 +50,32 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     }
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
-        this(MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)), Encoder.fromConfig(config.encoder), config.pidController, config.profiledPIDController, config.useAbsolute, config.useVoltage,config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new), config.useSetpointAsOutput, config.pidPeriod);
+        this(
+            MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)),
+            Encoder.fromConfig(config.encoder),
+            config.pidController,
+            config.profiledPIDController,
+            config.useAbsolute,
+            config.useVoltage,
+            config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new),
+            config.useSetpointAsOutput,
+            config.pidPeriod,
+            config.simulationConfig,
+            config.visualizationConfig
+        );
     }
 
-    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController, ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage, GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod){
+    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
+            ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage,
+            GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod) {
+        this(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, limitSwitches, useSetpointAsOutput, pidPeriod, null, null);
+    }
+
+    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
+            ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage,
+            GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod,
+            MechanismSimulationConfig simulationConfig,
+            MechanismVisualizationConfig visualizationConfig) {
         this.motors = motors;
         this.encoder = encoder;
         this.pidController = pidController;
@@ -57,9 +92,26 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }
 
         pidEnabled = pidController != null || profiledPIDController != null;
+
+        MechanismSimulationModel model = null;
+        double updatePeriod = 0.02;
+        if (simulationConfig != null && RobotBase.isSimulation()) {
+            model = simulationConfig.createSimulation(this);
+            updatePeriod = simulationConfig.updatePeriodSeconds();
+        }
+        this.simulationModel = model;
+        this.simulationUpdatePeriodSeconds = updatePeriod;
+        if (simulationModel != null) {
+            simulationModel.reset();
+            lastSimulationTimestampSeconds = Timer.getFPGATimestamp();
+        }
+        this.visualization = visualizationConfig != null ? new MechanismVisualization(visualizationConfig) : null;
     }
 
     public double calculateMaxFreeSpeed(){
+        if (encoder == null) {
+            return 0;
+        }
         double wheelCircumferenceMeters = Math.PI * encoder.getConversion();
         double motorRPM = 6000; //motors.getControllers()[0].getFreeSpeedRPM();
         double wheelRPM = motorRPM * encoder.getGearRatio();
@@ -310,6 +362,54 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         return pidPeriod;
     }
 
+    public boolean hasSimulation() {
+        return simulationModel != null;
+    }
+
+    public double getSimulationUpdatePeriodSeconds() {
+        return simulationUpdatePeriodSeconds;
+    }
+
+    public void resetSimulation() {
+        if (simulationModel == null) {
+            return;
+        }
+        simulationModel.reset();
+        lastSimulationTimestampSeconds = Timer.getFPGATimestamp();
+    }
+
+    private void advanceSimulation(double nowSeconds) {
+        if (simulationModel == null) {
+            return;
+        }
+
+        if (!Double.isFinite(nowSeconds)) {
+            return;
+        }
+
+        if (Double.isNaN(lastSimulationTimestampSeconds)) {
+            simulationModel.reset();
+            lastSimulationTimestampSeconds = nowSeconds;
+            return;
+        }
+
+        double elapsed = nowSeconds - lastSimulationTimestampSeconds;
+        if (!(elapsed > 0.0)) {
+            elapsed = simulationUpdatePeriodSeconds;
+        } else if (elapsed > 0.2) {
+            elapsed = 0.2;
+        }
+
+        double remaining = elapsed;
+        while (remaining > 1e-9) {
+            double step = Math.min(simulationUpdatePeriodSeconds, remaining);
+            simulationModel.update(step);
+            remaining -= step;
+        }
+
+        lastSimulationTimestampSeconds = nowSeconds;
+    }
+
     @Override
     public void periodic() {
 
@@ -327,16 +427,27 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             resetPID();
         }
 
-        if (encoder != null) encoder.update();
-        motors.update();
+        if (simulationModel != null) {
+            advanceSimulation(Timer.getFPGATimestamp());
+        } else {
+            if (encoder != null) {
+                encoder.update();
+            }
+            motors.update();
+        }
+
         update();
+
+        if (visualization != null) {
+            visualization.update(this);
+        }
 
         prevRobotMode = robotMode;
     }
 
     @Override
     public void simulationPeriodic() {
-        periodic();
+        // Simulation updates are executed within periodic() to keep sensor data fresh before control.
     }
 
     @Override
@@ -353,6 +464,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         
         tab.addBoolean("Emergency Stopped", this::isEmergencyStopped);
         tab.addBoolean("Override", this::isOverride);
+        if (visualization != null) {
+            tab.add("Mechanism2d", visualization.mechanism2d());
+        }
+        if (RobotBase.isSimulation()) {
+            tab.addBoolean("Simulation Enabled", this::hasSimulation);
+            if (level.equals(SendableLevel.DEBUG)) {
+                tab.addDouble("Simulation dt", this::getSimulationUpdatePeriodSeconds);
+            }
+        }
         if(level.equals(SendableLevel.DEBUG)){
             tab.addBoolean("Use Voltage", this::isUseVoltage);
             tab.addBoolean("Use Absolute", this::isUseAbsolute);
@@ -391,5 +511,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         }
 
         return tab;
+    }
+
+    public Mechanism2d getMechanism2d() {
+        return visualization != null ? visualization.mechanism2d() : null;
+    }
+
+    public Map<String, Pose3d> getMechanism3dPoses() {
+        return visualization != null ? visualization.poses() : Map.of();
     }
 }

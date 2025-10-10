@@ -3,6 +3,7 @@ package ca.frc6390.athena.core;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -245,6 +246,36 @@ public class RobotVision {
           .filter(LocalizationCamera::hasValidTarget)
           .map(LocalizationCamera::getLocalizationData)
           .forEach(estimator);
+   }
+
+   public Optional<LocalizationData> getBestLocalizationData() {
+      return cameras.values().stream()
+              .filter(LocalizationCamera::isUseForLocalization)
+              .filter(LocalizationCamera::hasValidTarget)
+              .map(LocalizationCamera::getLocalizationData)
+              .filter(data -> data != null && data.pose() != null)
+              .min(Comparator.comparingDouble(RobotVision::scoreLocalizationData));
+   }
+
+   private static double scoreLocalizationData(LocalizationData data) {
+      double score = 0.0;
+      Matrix<N3, N1> std = data.stdDevs();
+      if (std == null) {
+         return Double.POSITIVE_INFINITY;
+      }
+      double stdX = safeStdDev(std.get(0, 0));
+      double stdY = safeStdDev(std.get(1, 0));
+      double stdTheta = safeStdDev(std.get(2, 0));
+      score += stdX + stdY + stdTheta;
+      return score;
+   }
+
+   private static double safeStdDev(double value) {
+      double sanitized = Math.abs(value);
+      if (Double.isNaN(sanitized) || Double.isInfinite(sanitized)) {
+         return Double.POSITIVE_INFINITY;
+      }
+      return sanitized;
    }
 
    public Set<String> getCameraTables() {
