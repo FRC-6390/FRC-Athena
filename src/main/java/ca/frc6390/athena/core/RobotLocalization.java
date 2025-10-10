@@ -1,5 +1,7 @@
 package ca.frc6390.athena.core;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
@@ -20,14 +22,27 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StructPublisher;
+import edu.wpi.first.networktables.GenericEntry;
+import edu.wpi.first.math.geometry.Transform3d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+import edu.wpi.first.wpilibj.shuffleboard.SimpleWidget;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera.LocalizationData;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera.TargetObservation;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera.CoordinateSpace;
 public class RobotLocalization<T> extends SubsystemBase implements RobotSendableSystem{
     
     public record RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd, double v2XStd, double v2YStda, double v2ThetaStd, PIDConstants translation, PIDConstants rotation, boolean useVision) {
@@ -94,6 +109,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private Field2d field;
     private RobotConfig robotConfig;
 
+    private static final Pose2d ZERO_POSE = new Pose2d();
+    private static final Pose2d[] EMPTY_POSES = new Pose2d[0];
+    private static final double STD_EPSILON = 1e-5;
+
+    private final Map<String, CameraDisplayState> cameraDisplayStates = new HashMap<>();
     private RobotLocalizationConfig localizationConfig;
     private boolean visionEnabled = false;
     private PIDController rotationController, translationController;
@@ -102,6 +122,65 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private BiConsumer<ChassisSpeeds, DriveFeedforwards> autoDrive;
 
     private boolean suppressUpdates = false;
+    private StructPublisher<Pose2d> shuffleboardPosePublisher;
+    private ShuffleboardTab activeShuffleboardTab;
+
+    private static class CameraDisplayState {
+        final String key;
+        final GenericEntry showCameraPoseEntry;
+        final GenericEntry showTagLinesEntry;
+        final GenericEntry showEstimatedPoseEntry;
+        final GenericEntry useForLocalizationEntry;
+        final GenericEntry trustDistanceEntry;
+        final GenericEntry singleStdXEntry;
+        final GenericEntry singleStdYEntry;
+        final GenericEntry singleStdThetaDegEntry;
+        final GenericEntry multiStdXEntry;
+        final GenericEntry multiStdYEntry;
+        final GenericEntry multiStdThetaDegEntry;
+        final FieldObject2d cameraPoseObject;
+        final FieldObject2d estimatedPoseObject;
+        final FieldObject2d tagLineObject;
+        final StructPublisher<Pose2d> cameraPosePublisher;
+        final StructPublisher<Pose2d> estimatedPosePublisher;
+
+        CameraDisplayState(
+                String key,
+                GenericEntry showCameraPoseEntry,
+                GenericEntry showTagLinesEntry,
+                GenericEntry showEstimatedPoseEntry,
+                GenericEntry useForLocalizationEntry,
+                GenericEntry trustDistanceEntry,
+                GenericEntry singleStdXEntry,
+                GenericEntry singleStdYEntry,
+                GenericEntry singleStdThetaDegEntry,
+                GenericEntry multiStdXEntry,
+                GenericEntry multiStdYEntry,
+                GenericEntry multiStdThetaDegEntry,
+                FieldObject2d cameraPoseObject,
+                FieldObject2d estimatedPoseObject,
+                FieldObject2d tagLineObject,
+                StructPublisher<Pose2d> cameraPosePublisher,
+                StructPublisher<Pose2d> estimatedPosePublisher) {
+            this.key = key;
+            this.showCameraPoseEntry = showCameraPoseEntry;
+            this.showTagLinesEntry = showTagLinesEntry;
+            this.showEstimatedPoseEntry = showEstimatedPoseEntry;
+            this.useForLocalizationEntry = useForLocalizationEntry;
+            this.trustDistanceEntry = trustDistanceEntry;
+            this.singleStdXEntry = singleStdXEntry;
+            this.singleStdYEntry = singleStdYEntry;
+            this.singleStdThetaDegEntry = singleStdThetaDegEntry;
+            this.multiStdXEntry = multiStdXEntry;
+            this.multiStdYEntry = multiStdYEntry;
+            this.multiStdThetaDegEntry = multiStdThetaDegEntry;
+            this.cameraPoseObject = cameraPoseObject;
+            this.estimatedPoseObject = estimatedPoseObject;
+            this.tagLineObject = tagLineObject;
+            this.cameraPosePublisher = cameraPosePublisher;
+            this.estimatedPosePublisher = estimatedPosePublisher;
+        }
+    }
 
     public RobotLocalization(PoseEstimator<T> fieldEstimator, PoseEstimator<T> relativeEstimator, RobotLocalizationConfig config, RobotSpeeds robotSpeeds, IMU imu, Supplier<T> wheelPositions) {
         this.localizationConfig = config;
@@ -113,6 +192,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.autoDrive = (speeds, feed) ->  robotSpeeds.setSpeeds("auto",speeds);
       
         this.field = new Field2d();
+        this.shuffleboardPosePublisher = null;
 
         this.visionEnabled = config.useVision;
         config = config == null ? new RobotLocalizationConfig() : config;
@@ -131,6 +211,117 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }  
     }
 
+    private CameraDisplayState createCameraDisplayState(String key, LocalizationCamera camera) {
+        if (activeShuffleboardTab == null) {
+            return null;
+        }
+        ShuffleboardLayout cameraLayout = activeShuffleboardTab.getLayout("Camera/" + key, BuiltInLayouts.kGrid);
+
+        ShuffleboardLayout toggleLayout =
+                cameraLayout.getLayout("Display Toggles", BuiltInLayouts.kList)
+                        .withSize(2, 4)
+                        .withPosition(0, 0);
+
+        SimpleWidget showPoseWidget = toggleLayout.add("Show Camera Pose", true).withWidget(BuiltInWidgets.kToggleSwitch);
+        GenericEntry showCameraPoseEntry = showPoseWidget.getEntry();
+
+        SimpleWidget showLinesWidget = toggleLayout.add("Show Tag Lines", true).withWidget(BuiltInWidgets.kToggleSwitch);
+        GenericEntry showTagLinesEntry = showLinesWidget.getEntry();
+
+        SimpleWidget showEstimateWidget = toggleLayout.add("Show Estimated Pose", false).withWidget(BuiltInWidgets.kToggleSwitch);
+        GenericEntry showEstimatedPoseEntry = showEstimateWidget.getEntry();
+
+        boolean defaultUseForLocalization = camera.isUseForLocalization();
+        SimpleWidget useForLocalizationWidget =
+                toggleLayout.add("Use For Localization", defaultUseForLocalization)
+                        .withWidget(BuiltInWidgets.kToggleSwitch);
+        GenericEntry useForLocalizationEntry = useForLocalizationWidget.getEntry();
+
+        ShuffleboardLayout tuningLayout =
+                cameraLayout.getLayout("Tuning", BuiltInLayouts.kGrid)
+                        .withSize(4, 4)
+                        .withPosition(2, 0);
+
+        double trustDistance = camera.getConfig().getTrustDistance();
+        GenericEntry trustDistanceEntry =
+                tuningLayout.add("Trust Distance (m)", trustDistance)
+                        .withWidget(BuiltInWidgets.kNumberSlider)
+                        .withProperties(Map.of("min", 0.0, "max", 10.0, "block increment", 0.05))
+                        .getEntry();
+
+        double singleStdX = camera.getSingleStdDev().get(0, 0);
+        double singleStdY = camera.getSingleStdDev().get(1, 0);
+        double singleStdThetaDeg = Units.radiansToDegrees(camera.getSingleStdDev().get(2, 0));
+        ShuffleboardLayout singleStdLayout =
+                tuningLayout.getLayout("Single Tag Std", BuiltInLayouts.kList);
+        GenericEntry singleStdXEntry =
+                singleStdLayout.add("X (m)", singleStdX)
+                        .withWidget(BuiltInWidgets.kTextView)
+                        .getEntry();
+        GenericEntry singleStdYEntry =
+                singleStdLayout.add("Y (m)", singleStdY)
+                        .withWidget(BuiltInWidgets.kTextView)
+                        .getEntry();
+        GenericEntry singleStdThetaDegEntry =
+                singleStdLayout.add("Theta (deg)", singleStdThetaDeg)
+                        .withWidget(BuiltInWidgets.kTextView)
+                        .getEntry();
+
+        double multiStdX = camera.getMultiStdDev().get(0, 0);
+        double multiStdY = camera.getMultiStdDev().get(1, 0);
+        double multiStdThetaDeg = Units.radiansToDegrees(camera.getMultiStdDev().get(2, 0));
+        ShuffleboardLayout multiStdLayout =
+                tuningLayout.getLayout("Multi Tag Std", BuiltInLayouts.kList);
+        GenericEntry multiStdXEntry =
+                multiStdLayout.add("X (m)", multiStdX)
+                        .withWidget(BuiltInWidgets.kTextView)
+                        .getEntry();
+        GenericEntry multiStdYEntry =
+                multiStdLayout.add("Y (m)", multiStdY)
+                        .withWidget(BuiltInWidgets.kTextView)
+                        .getEntry();
+        GenericEntry multiStdThetaDegEntry =
+                multiStdLayout.add("Theta (deg)", multiStdThetaDeg)
+                        .withWidget(BuiltInWidgets.kTextView)
+                        .getEntry();
+
+        FieldObject2d cameraPoseObject = field.getObject("CameraPose/" + key);
+        FieldObject2d estimatedPoseObject = field.getObject("CameraEstimate/" + key);
+        FieldObject2d tagLineObject = field.getObject("CameraTagLine/" + key);
+        cameraPoseObject.setPoses(EMPTY_POSES);
+        estimatedPoseObject.setPoses(EMPTY_POSES);
+        tagLineObject.setPoses(EMPTY_POSES);
+
+        String baseTopic = "/Shuffleboard/" + activeShuffleboardTab.getTitle() + "/Camera/" + key;
+        StructPublisher<Pose2d> cameraPosePublisher = NetworkTableInstance.getDefault()
+                .getStructTopic(baseTopic + "/CameraPose", Pose2d.struct)
+                .publish();
+        cameraPosePublisher.set(ZERO_POSE);
+        StructPublisher<Pose2d> estimatedPosePublisher = NetworkTableInstance.getDefault()
+                .getStructTopic(baseTopic + "/EstimatedPose", Pose2d.struct)
+                .publish();
+        estimatedPosePublisher.set(ZERO_POSE);
+
+        return new CameraDisplayState(
+                key,
+                showCameraPoseEntry,
+                showTagLinesEntry,
+                showEstimatedPoseEntry,
+                useForLocalizationEntry,
+                trustDistanceEntry,
+                singleStdXEntry,
+                singleStdYEntry,
+                singleStdThetaDegEntry,
+                multiStdXEntry,
+                multiStdYEntry,
+                multiStdThetaDegEntry,
+                cameraPoseObject,
+                estimatedPoseObject,
+                tagLineObject,
+                cameraPosePublisher,
+                estimatedPosePublisher);
+    }
+
     public RobotLocalization<T> enableVisionForLocalization(boolean visionEnabled){
         this.visionEnabled = visionEnabled;
         return this;
@@ -139,11 +330,30 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     public RobotLocalization<T> setRobotVision(RobotVision vision){
         this.vision = vision;
         vision.setLocalizationStdDevs(localizationConfig.getVisionStd(), localizationConfig.getVisionMultitagStd());
+        ensureCameraShuffleboardEntries();
         return this;
     }
 
     public void setAutoDrive(BiConsumer<RobotSpeeds, ChassisSpeeds> autoDrive) {
         this.autoDrive = (speeds, feeds) -> autoDrive.accept(robotSpeeds, speeds);
+    }
+
+    private void ensureCameraShuffleboardEntries() {
+        if (vision == null || activeShuffleboardTab == null) {
+            return;
+        }
+        Map<String, LocalizationCamera> cameras = vision.getCameras();
+        for (Map.Entry<String, LocalizationCamera> entry : cameras.entrySet()) {
+            cameraDisplayStates.computeIfAbsent(entry.getKey(), key -> createCameraDisplayState(key, entry.getValue()));
+        }
+        cameraDisplayStates.entrySet().removeIf(stateEntry -> {
+            if (!cameras.containsKey(stateEntry.getKey())) {
+                stateEntry.getValue().cameraPosePublisher.close();
+                stateEntry.getValue().estimatedPosePublisher.close();
+                return true;
+            }
+            return false;
+        });
     }
 
     public RobotLocalization<T> configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants){
@@ -252,6 +462,131 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         setVisionStd(VecBuilder.fill(x,y,Units.degreesToRadians(theta)));
     }
 
+    private static double sanitizeStdDev(double value) {
+        if (Double.isNaN(value) || value < STD_EPSILON) {
+            return STD_EPSILON;
+        }
+        return value;
+    }
+
+    private void applyCameraConfigUpdates(CameraDisplayState state, LocalizationCamera camera) {
+        boolean desiredUse = state.useForLocalizationEntry.getBoolean(camera.isUseForLocalization());
+        if (desiredUse != camera.isUseForLocalization()) {
+            if (vision != null) {
+                vision.setUseForLocalization(state.key, desiredUse);
+            } else {
+                camera.setUseForLocalization(desiredUse);
+            }
+        }
+
+        double currentTrust = camera.getConfig().getTrustDistance();
+        double desiredTrust = state.trustDistanceEntry.getDouble(currentTrust);
+        if (Math.abs(desiredTrust - currentTrust) > STD_EPSILON) {
+            camera.getConfig().setTrustDistance(Math.max(0.0, desiredTrust));
+        }
+
+        Matrix<N3, N1> singleStd = camera.getSingleStdDev();
+        double desiredSingleX = sanitizeStdDev(state.singleStdXEntry.getDouble(singleStd.get(0, 0)));
+        double desiredSingleY = sanitizeStdDev(state.singleStdYEntry.getDouble(singleStd.get(1, 0)));
+        double desiredSingleThetaDeg =
+                state.singleStdThetaDegEntry.getDouble(Units.radiansToDegrees(singleStd.get(2, 0)));
+        double desiredSingleThetaRad = Units.degreesToRadians(desiredSingleThetaDeg);
+        if (Math.abs(desiredSingleX - singleStd.get(0, 0)) > STD_EPSILON
+                || Math.abs(desiredSingleY - singleStd.get(1, 0)) > STD_EPSILON
+                || Math.abs(desiredSingleThetaRad - singleStd.get(2, 0)) > Units.degreesToRadians(0.01)) {
+            Matrix<N3, N1> updatedSingle = VecBuilder.fill(desiredSingleX, desiredSingleY, desiredSingleThetaRad);
+            camera.getConfig().setSingleStdDevs(updatedSingle);
+            camera.setStdDevs(updatedSingle, null);
+        }
+
+        Matrix<N3, N1> multiStd = camera.getMultiStdDev();
+        double desiredMultiX = sanitizeStdDev(state.multiStdXEntry.getDouble(multiStd.get(0, 0)));
+        double desiredMultiY = sanitizeStdDev(state.multiStdYEntry.getDouble(multiStd.get(1, 0)));
+        double desiredMultiThetaDeg =
+                state.multiStdThetaDegEntry.getDouble(Units.radiansToDegrees(multiStd.get(2, 0)));
+        double desiredMultiThetaRad = Units.degreesToRadians(desiredMultiThetaDeg);
+        if (Math.abs(desiredMultiX - multiStd.get(0, 0)) > STD_EPSILON
+                || Math.abs(desiredMultiY - multiStd.get(1, 0)) > STD_EPSILON
+                || Math.abs(desiredMultiThetaRad - multiStd.get(2, 0)) > Units.degreesToRadians(0.01)) {
+            Matrix<N3, N1> updatedMulti = VecBuilder.fill(desiredMultiX, desiredMultiY, desiredMultiThetaRad);
+            camera.getConfig().setMultiStdDevs(updatedMulti);
+            camera.setStdDevs(null, updatedMulti);
+        }
+    }
+
+    private Pose2d computeCameraFieldPose(LocalizationCamera camera) {
+        Transform3d cameraToRobot = camera.getConfig().getCameraToRobotTransform();
+        Transform3d robotToCamera = cameraToRobot.inverse();
+        Translation2d offset = new Translation2d(robotToCamera.getX(), robotToCamera.getY())
+                .rotateBy(fieldPose.getRotation());
+        Rotation2d cameraRotation = fieldPose
+                .getRotation()
+                .plus(Rotation2d.fromRadians(cameraToRobot.getRotation().getZ()));
+        return new Pose2d(fieldPose.getTranslation().plus(offset), cameraRotation);
+    }
+
+    private void updateCameraPose(CameraDisplayState state, Pose2d cameraPose) {
+        boolean show = state.showCameraPoseEntry.getBoolean(true);
+        if (show && cameraPose != null) {
+            state.cameraPoseObject.setPose(cameraPose);
+        } else {
+            state.cameraPoseObject.setPoses(EMPTY_POSES);
+        }
+        state.cameraPosePublisher.set(cameraPose != null ? cameraPose : ZERO_POSE);
+    }
+
+    private void updateEstimatedPose(CameraDisplayState state, LocalizationCamera camera) {
+        boolean show = state.showEstimatedPoseEntry.getBoolean(false);
+        Pose2d estimatePose =
+                camera.hasValidTarget() ? camera.getLocalizationPose() : null;
+        if (show && estimatePose != null) {
+            state.estimatedPoseObject.setPose(estimatePose);
+        } else {
+            state.estimatedPoseObject.setPoses(EMPTY_POSES);
+        }
+        state.estimatedPosePublisher.set(estimatePose != null ? estimatePose : ZERO_POSE);
+    }
+
+    private void updateTagLines(CameraDisplayState state, LocalizationCamera camera, Pose2d cameraPose) {
+        boolean show = state.showTagLinesEntry.getBoolean(true);
+        if (!show || cameraPose == null) {
+            state.tagLineObject.setPoses(EMPTY_POSES);
+            return;
+        }
+        TargetObservation observation =
+                camera.getLatestObservation(CoordinateSpace.FIELD, fieldPose, null).orElse(null);
+        if (observation == null || !observation.hasTranslation()) {
+            state.tagLineObject.setPoses(EMPTY_POSES);
+            return;
+        }
+        Translation2d targetFieldTranslation = observation.translation();
+        Pose2d tagPose = new Pose2d(targetFieldTranslation, new Rotation2d());
+        state.tagLineObject.setPoses(cameraPose, tagPose);
+    }
+
+    private void updateCameraVisualizations() {
+        if (vision == null) {
+            return;
+        }
+        ensureCameraShuffleboardEntries();
+        for (CameraDisplayState state : cameraDisplayStates.values()) {
+            LocalizationCamera camera = vision.getCamera(state.key);
+            if (camera == null) {
+                state.cameraPoseObject.setPoses(EMPTY_POSES);
+                state.estimatedPoseObject.setPoses(EMPTY_POSES);
+                state.tagLineObject.setPoses(EMPTY_POSES);
+                state.cameraPosePublisher.set(ZERO_POSE);
+                state.estimatedPosePublisher.set(ZERO_POSE);
+                continue;
+            }
+            applyCameraConfigUpdates(state, camera);
+            Pose2d cameraPose = computeCameraFieldPose(camera);
+            updateCameraPose(state, cameraPose);
+            updateEstimatedPose(state, camera);
+            updateTagLines(state, camera, cameraPose);
+        }
+    }
+
     public void update() {
         
         if(suppressUpdates) return;
@@ -276,6 +611,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         fieldPose = fieldEstimator.update(imu.getVirtualAxis("field"), wheelPositions.get());
         relativePose = relativeEstimator.update(imu.getVirtualAxis("relative"), wheelPositions.get());
         field.setRobotPose(fieldPose);
+        if (shuffleboardPosePublisher != null) {
+            shuffleboardPosePublisher.set(fieldPose);
+        }
+        updateCameraVisualizations();
     }
 
     public FieldObject2d getField2dObject(String id){
@@ -298,9 +637,22 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return relativePose;
     }
 
+    public Field2d getField2d() {
+        return field;
+    }
+
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+        this.activeShuffleboardTab = tab;
         tab.add("Estimator", field).withPosition( 0,0).withSize(4, 3);
+
+        if (shuffleboardPosePublisher == null) {
+            String topic = "/Shuffleboard/" + tab.getTitle() + "/EstimatorPose";
+            shuffleboardPosePublisher = NetworkTableInstance.getDefault()
+                    .getStructTopic(topic, Pose2d.struct)
+                    .publish();
+            shuffleboardPosePublisher.set(fieldPose);
+        }
 
         if(level.equals(SendableLevel.DEBUG)) {
             tab.addDouble("Field X", () -> getFieldPose().getX()).withPosition( 4,2);
@@ -310,6 +662,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         tab.addDouble("Relative X", () -> getRelativePose().getX()).withPosition( 6,2);
         tab.addDouble("Relative Y", () -> getRelativePose().getY()).withPosition( 7,2);
         tab.addDouble("Relative Theta", () -> getRelativePose().getRotation().getDegrees()).withPosition( 6,0).withSize(2, 2);
+        ensureCameraShuffleboardEntries();
         return tab;
     }
 

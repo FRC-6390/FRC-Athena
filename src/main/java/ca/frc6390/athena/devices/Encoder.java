@@ -276,8 +276,22 @@ public class Encoder implements RobotSendableDevice{
         position = inverted ? -simPosition : simPosition;
         velocity = inverted ? -simVelocity : simVelocity;
         absolutePosition = position - Math.floor(position);
-        
+
         return this;
+    }
+
+    public void setSimulatedPosition(double rotations) {
+        this.simPosition = rotations;
+        position = inverted ? -simPosition : simPosition;
+        absolutePosition = position - Math.floor(position);
+    }
+
+    public void setSimulatedState(double rotations, double velocity) {
+        this.simPosition = rotations;
+        this.simVelocity = velocity;
+        position = inverted ? -simPosition : simPosition;
+        this.velocity = inverted ? -simVelocity : simVelocity;
+        absolutePosition = position - Math.floor(position);
     }
 
     public void setRotations(double rotations){

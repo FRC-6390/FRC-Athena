@@ -11,6 +11,8 @@ import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.RobotLocalization;
 import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
+import ca.frc6390.athena.drivetrains.swerve.sim.SwerveDrivetrainSimulation;
+import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -21,10 +23,12 @@ import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -39,6 +43,10 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   public IMU imu;
   public RobotSpeeds robotSpeeds;
   private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault().getStructArrayTopic("/SwerveStates", SwerveModuleState.struct).publish();
+  private SwerveDrivetrainSimulation simulation;
+  private Field2d simulationField;
+  private double lastSimulationTimestamp = -1;
+  private ChassisSpeeds lastCommandedSpeeds = new ChassisSpeeds();
   
   public SwerveDrivetrain(IMU imu, SwerveModuleConfig... modules) {
 
@@ -51,14 +59,17 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
     swerveModules = new SwerveModule[modules.length];
     Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
     double maxVelocity = 0;
+    double maxModuleRadius = 0;
     for (int i = 0; i < modules.length; i++) {
       swerveModules[i] = new SwerveModule(modules[i]);
       maxVelocity = modules[i].maxSpeedMetersPerSecond();
       moduleLocations[i] = swerveModules[i].getModuleLocation();
+      maxModuleRadius = Math.max(maxModuleRadius, moduleLocations[i].getNorm());
     }
 
     kinematics = new SwerveDriveKinematics(moduleLocations);
-    robotSpeeds = new RobotSpeeds(maxVelocity, maxVelocity);
+    double maxAngularVelocity = maxModuleRadius > 1e-6 ? maxVelocity / maxModuleRadius : maxVelocity;
+    robotSpeeds = new RobotSpeeds(maxVelocity, maxAngularVelocity);
     getIMU().addVirtualAxis("drift", () -> getIMU().getYaw());
     getIMU().setVirtualAxis("drift", getIMU().getVirtualAxis("driver"));
     desiredHeading = getIMU().getVirtualAxis("drift").getRadians();
@@ -151,7 +162,40 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
 
     SwerveDriveKinematics.desaturateWheelSpeeds(states, getRobotSpeeds().getMaxVelocity());
 
-    setModuleStates(states);    
+    setModuleStates(states);   
+
+    lastCommandedSpeeds = new ChassisSpeeds(
+        speed.vxMetersPerSecond,
+        speed.vyMetersPerSecond,
+        speed.omegaRadiansPerSecond
+    );
+  }
+
+  public SwerveDrivetrain configureSimulation(SwerveSimulationConfig config) {
+    if (!edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
+      return this;
+    }
+    simulation = new SwerveDrivetrainSimulation(this, config);
+    if (simulationField == null) {
+      simulationField = new Field2d();
+    }
+    simulationField.setRobotPose(new Pose2d());
+    lastSimulationTimestamp = -1;
+    return this;
+  }
+
+  public boolean hasSimulation() {
+    return simulation != null;
+  }
+
+  public Pose2d getSimulatedPose() {
+    return simulation != null ? simulation.getPose() : new Pose2d();
+  }
+
+  public void resetSimulationPose(Pose2d pose) {
+    if (simulation != null) {
+      simulation.resetPose(pose);
+    }
   }
 
   @Override
@@ -200,7 +244,10 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
       commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
     }
 
-    
+    if (simulationField != null) {
+      tab.add("Sim Pose", simulationField).withWidget(BuiltInWidgets.kField);
+    }
+
     return tab;
   }
 
@@ -211,7 +258,18 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
 
   @Override
   public void simulationPeriodic() {
-      update();
+      if (simulation != null) {
+        double now = Timer.getFPGATimestamp();
+        if (lastSimulationTimestamp < 0) {
+          lastSimulationTimestamp = now;
+        }
+        double dt = now - lastSimulationTimestamp;
+        lastSimulationTimestamp = now;
+        simulation.update(dt > 0 ? dt : 0.02, lastCommandedSpeeds);
+        if (simulationField != null) {
+          simulationField.setRobotPose(simulation.getPose());
+        }
+      }
   }
 
   @Override

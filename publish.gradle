@@ -5,8 +5,70 @@ apply plugin: 'maven-publish'
 // Common Variables & Config
 // -----------------------------------------------------------------------------
 ext.licenseFile = files("$rootDir/LICENSE.txt")
-def pubVersion = project.hasProperty('version') ? project.property('version') : '2025.6.2'
-def frcYear = project.hasProperty('frcYear') ? project.property('frcYear') : '2025'
+def athenaJsonFile = file("$projectDir/FRC6390-Athena.json")
+def defaultVersion = '2025.6.2'
+
+def computeAutoVersion = {
+    if (!athenaJsonFile.exists()) {
+        return defaultVersion
+    }
+
+    try {
+        def jsonContent = new groovy.json.JsonSlurper().parse(athenaJsonFile)
+        def existingVersion = jsonContent?.version?.toString()
+        def parts = existingVersion?.tokenize('.')
+
+        if (parts?.size() == 3) {
+            try {
+                def patch = parts[2].toInteger() + 1
+                return "${parts[0]}.${parts[1]}.${patch}"
+            } catch (NumberFormatException ignored) {
+                // Fall through to default
+            }
+        }
+    } catch (Exception ignored) {
+        // Fall through to default
+    }
+
+    return defaultVersion
+}
+
+def providedVersion = project.hasProperty('version') ? project.property('version')?.toString() : null
+def useProvidedVersion = providedVersion && providedVersion != org.gradle.api.Project.DEFAULT_VERSION && providedVersion.trim()
+
+def pubVersion = useProvidedVersion ? providedVersion : computeAutoVersion()
+if (useProvidedVersion) {
+    logger.lifecycle("Using provided Athena version ${pubVersion}")
+} else {
+    logger.lifecycle("Auto-incremented Athena version to ${pubVersion}")
+}
+
+def computeFrcYear = {
+    if (project.hasProperty('wpilibYear')) {
+        return project.property('wpilibYear').toString()
+    }
+
+    def wpilibVersionCandidate = null
+    if (project.hasProperty('wpilibVersion')) {
+        wpilibVersionCandidate = project.property('wpilibVersion')?.toString()
+    } else if (project.ext.has('wpilibVersion')) {
+        wpilibVersionCandidate = project.ext.wpilibVersion?.toString()
+    }
+
+    if (wpilibVersionCandidate) {
+        def matcher = (wpilibVersionCandidate =~ /(20\d{2})/)
+        if (matcher.find()) {
+            return matcher.group(1)
+        }
+    }
+
+    return '2025'
+}
+
+def frcYear = project.hasProperty('frcYear') ? project.property('frcYear') : computeFrcYear()
+if (!project.hasProperty('frcYear')) {
+    logger.lifecycle("Resolved FRC year to ${frcYear} from WPILib version")
+}
 
 // Group/Artifact used below and for updating JSON
 def artifactGroupId = 'ca.frc6390.athena'
@@ -28,11 +90,11 @@ def vendordepsFolder = file("$wpilibFolder/vendordeps")
 def mavenFolder = file("$wpilibFolder/maven")
 def outputsFolder = file("$buildDir/outputs")
 def versionFile = file("$outputsFolder/version.txt")
-def athenaJsonFile = file("$projectDir/FRC6390-Athena.json")
 def localRepoDir = file("$buildDir/repos/releases")
 
 // Publish mode can be: 'local', 'online', 'all'
 def publishMode = project.hasProperty('publishMode') ? project.property('publishMode') : 'all'
+logger.lifecycle("Athena build configuration -> version: ${pubVersion}, frcYear: ${frcYear}, publishMode: ${publishMode}, wpilibFolder: ${wpilibFolder}")
 
 // -----------------------------------------------------------------------------
 // Tasks: outputVersions, updateAthenaJson, copy tasks
@@ -46,9 +108,11 @@ task outputVersions() {
     doFirst {
         buildDir.mkdir()
         outputsFolder.mkdir()
+        logger.lifecycle("Preparing Athena outputs in ${outputsFolder} (version ${pubVersion})")
     }
 
     doLast {
+        logger.lifecycle("Recording Athena version ${pubVersion} to ${versionFile}")
         versionFile.write(pubVersion)
     }
 }

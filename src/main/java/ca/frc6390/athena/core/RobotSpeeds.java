@@ -128,7 +128,11 @@ public class RobotSpeeds {
 
     public ChassisSpeeds getSpeedsAtPriorityLevel(int priority) {
         ChassisSpeeds speeds = new ChassisSpeeds();
-        sources.values().stream().filter(val -> val.getPriority() == priority).forEach(val -> speeds.plus(val.getOutputSpeeds()));
+        for (SpeedSource source : sources.values()) {
+            if (source.getPriority() == priority) {
+                speeds = speeds.plus(source.getOutputSpeeds());
+            }
+        }
         return speeds;
     }
 

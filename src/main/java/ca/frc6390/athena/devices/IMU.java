@@ -20,6 +20,13 @@ public class IMU extends VirtualIMU implements RobotSendableDevice{
     private final DoubleSupplier getRoll, getPitch, getYaw, getVelX, getVelY, getVelZ;
     private double roll, pitch, yaw, velX, velY, velZ;
     private boolean inverted = false;
+    private boolean useSimulatedReadings = false;
+    private Rotation2d simRoll = new Rotation2d();
+    private Rotation2d simPitch = new Rotation2d();
+    private Rotation2d simYaw = new Rotation2d();
+    private Rotation2d simVelX = new Rotation2d();
+    private Rotation2d simVelY = new Rotation2d();
+    private Rotation2d simVelZ = new Rotation2d();
 
     public enum IMUType{
         CTREPigeon2,
@@ -135,12 +142,40 @@ public class IMU extends VirtualIMU implements RobotSendableDevice{
     }
 
     public void update(){
+       if (edu.wpi.first.wpilibj.RobotBase.isSimulation() && useSimulatedReadings) {
+           roll = simRoll.getDegrees();
+           pitch = simPitch.getDegrees();
+           yaw = simYaw.getDegrees();
+           velX = simVelX.getDegrees();
+           velY = simVelY.getDegrees();
+           velZ = simVelZ.getDegrees();
+           return;
+       }
+
        roll =  inverted ? -getRoll.getAsDouble() : getRoll.getAsDouble();
        pitch = inverted ? -getPitch.getAsDouble() : getPitch.getAsDouble();
        yaw = inverted ? -getYaw.getAsDouble() : getYaw.getAsDouble();
        velX = inverted ? -getVelX.getAsDouble() : getVelX.getAsDouble();
        velY = inverted ? -getVelY.getAsDouble() : getVelY.getAsDouble();
        velZ = inverted ? -getVelZ.getAsDouble() : getVelZ.getAsDouble();
+    }
+
+    public void setSimulatedReadings(Rotation2d yaw, Rotation2d pitch, Rotation2d roll, Rotation2d velX, Rotation2d velY, Rotation2d velZ) {
+        this.simYaw = yaw;
+        this.simPitch = pitch;
+        this.simRoll = roll;
+        this.simVelX = velX;
+        this.simVelY = velY;
+        this.simVelZ = velZ;
+        this.useSimulatedReadings = true;
+    }
+
+    public void setSimulatedHeading(Rotation2d yaw, Rotation2d angularVelocityZ) {
+        setSimulatedReadings(yaw, new Rotation2d(), new Rotation2d(), new Rotation2d(), new Rotation2d(), angularVelocityZ);
+    }
+
+    public void disableSimulatedReadings() {
+        this.useSimulatedReadings = false;
     }
 
     public IMU applyConfig(IMUConfig config){

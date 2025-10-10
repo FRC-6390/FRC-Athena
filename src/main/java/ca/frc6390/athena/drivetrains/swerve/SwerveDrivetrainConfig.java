@@ -9,6 +9,7 @@ import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.IMU.IMUConfig;
 import ca.frc6390.athena.devices.IMU.IMUType;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
+import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Translation2d;
 
@@ -28,10 +29,12 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     private boolean encoderInverted = false;
     private boolean driveInverted = false;
     private PIDController rotationPID = null;
-    private double currentLimit = 80;
+    private double driveCurrentLimit = 80;
+    private double steerCurrentLimit = 40;
     private double[] encoderOffsets = {0,0,0,0};
     private String canbus = "rio";
     private Translation2d[] locations = null;
+    private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
 
     public static SwerveDrivetrainConfig defualt(Translation2d[] locations){
         return new SwerveDrivetrainConfig().setModuleLocations(locations);
@@ -159,9 +162,21 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     }
     
     public SwerveDrivetrainConfig setCurrentLimit(double currentLimit){
-        this.currentLimit = currentLimit;
+        setDriveCurrentLimit(currentLimit);
+        setSteerCurrentLimit(currentLimit);
         return this;
     } 
+
+    public SwerveDrivetrainConfig setDriveCurrentLimit(double currentLimit){
+        this.driveCurrentLimit = currentLimit;
+        return this;
+    } 
+
+    public SwerveDrivetrainConfig setSteerCurrentLimit(double currentLimit){
+        this.steerCurrentLimit = currentLimit;
+        return this;
+    } 
+
 
     public SwerveDrivetrainConfig setEncoderOffset(double... encoderOffsets){
         this.encoderOffsets = encoderOffsets;
@@ -184,6 +199,11 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
 
     public SwerveDrivetrainConfig setModuleLocations(double trackWidth){
         return setModuleLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, trackWidth));
+    }
+
+    public SwerveDrivetrainConfig setSimulationConfig(SwerveSimulationConfig simulationConfig) {
+        this.simulationConfig = simulationConfig;
+        return this;
     }
 
 
@@ -216,7 +236,8 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
                                     .setEncoderInverted(encoderInverted)
                                     .setSteerInverted(steerInverted)
                                     .setDriveInverted(driveInverted)
-                                    .setCurrentLimit(currentLimit)
+                                    .setSteerCurrentLimit(steerCurrentLimit)
+                                    .setDriveCurrentLimit(driveCurrentLimit)
                                     .setOffset(encoderOffsets[i])
                                     .setCanbus(canbus)
                                     .setLocation(locations[i]);
@@ -228,6 +249,10 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         imu = imu.setId(gryoId).setCanbus(canbus);
 
         SwerveDrivetrain dt = new SwerveDrivetrain(IMU.fromConfig(imu), modules);
+
+        if (edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
+            dt.configureSimulation(simulationConfig != null ? simulationConfig : SwerveSimulationConfig.defaults());
+        }
 
         if (driftPID != null){
             dt.setDriftCorrectionPID(driftPID);

@@ -3,10 +3,16 @@ package ca.frc6390.athena.sensors.camera.limelight;
 import java.util.Arrays;
 
 import ca.frc6390.athena.sensors.camera.LocalizationCamera;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera.PipelineControl;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera.StreamControl;
+import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig;
+import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
+import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.networktables.NetworkTable;
@@ -14,7 +20,7 @@ import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.Timer;
 
-public class LimeLight implements LocalizationCamera{
+public class LimeLight {
     public LimeLightConfig config;
     private NetworkTable limelightTable;
     public NetworkTableEntry tv;
@@ -65,6 +71,45 @@ public class LimeLight implements LocalizationCamera{
     public NetworkTableEntry cy1;
     public NetworkTableEntry rawfiducials;
     public boolean useForLocalization = false;
+
+    private final LocalizationCamera localizationCamera;
+    private LocalizationSnapshot latestSnapshot = LocalizationSnapshot.empty();
+    private static final double DEFAULT_HORIZONTAL_FOV_DEG = 63.3;
+
+    private static final class LocalizationSnapshot {
+        private final Pose2d pose;
+        private final double latencySeconds;
+        private final int visibleTargets;
+        private final double averageDistanceMeters;
+
+        private LocalizationSnapshot(
+                Pose2d pose, double latencySeconds, int visibleTargets, double averageDistanceMeters) {
+            this.pose = pose;
+            this.latencySeconds = latencySeconds;
+            this.visibleTargets = visibleTargets;
+            this.averageDistanceMeters = averageDistanceMeters;
+        }
+
+        public static LocalizationSnapshot empty() {
+            return new LocalizationSnapshot(new Pose2d(), 0.0, 0, Double.MAX_VALUE);
+        }
+
+        public Pose2d pose() {
+            return pose;
+        }
+
+        public double latencySeconds() {
+            return latencySeconds;
+        }
+
+        public int visibleTargets() {
+            return visibleTargets;
+        }
+
+        public double averageDistanceMeters() {
+            return averageDistanceMeters;
+        }
+    }
 
     public enum LedMode{
         PIPELINE(0),
@@ -274,6 +319,149 @@ public class LimeLight implements LocalizationCamera{
         rawfiducials =  limelightTable.getEntry("rawfiducials");
         useForLocalization = config.useForLocalization();
         setFiducialIdFilters(Arrays.stream(config.filteredTags()).mapToDouble(i -> i).toArray());
+        applyCameraTransformToNetworkTables(config.cameraRobotSpace());
+        refreshLocalizationSnapshot();
+        localizationCamera = createLocalizationCamera();
+    }
+
+    private LocalizationCamera createLocalizationCamera() {
+        LocalizationCameraConfig cameraConfig =
+                new LocalizationCameraConfig(config.getTable(), config.getSoftware())
+                        .setUseForLocalization(config.useForLocalization())
+                        .setTrustDistance(config.trustDistance())
+                        .setHasTargetsSupplier(this::hasValidTarget)
+                        .setPoseSupplier(this::supplyLocalizationPose)
+                        .setLatencySupplier(this::supplyLocalizationLatency)
+                        .setVisibleTargetsSupplier(this::supplyVisibleTargets)
+                        .setAverageDistanceSupplier(this::supplyAverageDistance)
+                        .setOrientationConsumer(this::setRobotOrientation)
+                        .setUpdateHook(this::refreshLocalizationSnapshot)
+                        .setRobotToCameraTransform(config.cameraRobotSpace())
+                        .setDisplayHorizontalFov(DEFAULT_HORIZONTAL_FOV_DEG)
+                        .setDisplayRangeMeters(Math.max(config.trustDistance(), 2.0))
+                        .setConfidenceSupplier(config::confidence)
+                        .setTargetYawSupplier(() -> hasValidTarget() ? getTargetHorizontalOffset() : Double.NaN)
+                        .setTargetPitchSupplier(() -> hasValidTarget() ? getTargetVerticalOffset() : Double.NaN)
+                        .setTagDistanceSupplier(this::supplyPrimaryTagDistance)
+                        .setTagIdSupplier(this::supplyPrimaryTagId)
+                        .setRoles(config.roles());
+
+        LocalizationCamera camera = new LocalizationCamera(cameraConfig);
+        camera.registerCapability(LocalizationCameraCapability.LIMELIGHT, this);
+        camera.registerCapability(LocalizationCameraCapability.LED, new LimelightLedCapability());
+        camera.registerCapability(LocalizationCameraCapability.PIPELINE, new LimelightPipelineCapability());
+        camera.registerCapability(LocalizationCameraCapability.STREAM, new LimelightStreamCapability());
+        return camera;
+    }
+
+    private void refreshLocalizationSnapshot() {
+        PoseEstimateWithLatency estimate = getPoseEstimate(config.localizationEstimator());
+        if (estimate == null) {
+            latestSnapshot = LocalizationSnapshot.empty();
+            return;
+        }
+        Pose2d pose = estimate.getLocalizationPose();
+        double latencySeconds = Timer.getFPGATimestamp() - (estimate.getLatency() / 1000.0);
+        int tagCount = estimate.getTagCount();
+        double distance = estimate.getDistToTag();
+        latestSnapshot = new LocalizationSnapshot(pose, latencySeconds, tagCount, distance);
+    }
+
+    private Pose2d supplyLocalizationPose() {
+        return latestSnapshot.pose();
+    }
+
+    private double supplyLocalizationLatency() {
+        return latestSnapshot.latencySeconds();
+    }
+
+    private int supplyVisibleTargets() {
+        return latestSnapshot.visibleTargets();
+    }
+
+    private double supplyAverageDistance() {
+        return latestSnapshot.averageDistanceMeters();
+    }
+
+    private double supplyPrimaryTagDistance() {
+        return latestSnapshot.visibleTargets() > 0
+                ? latestSnapshot.averageDistanceMeters()
+                : Double.NaN;
+    }
+
+    private int supplyPrimaryTagId() {
+        return hasValidTarget() ? (int) getAprilTagID() : -1;
+    }
+
+    private class LimelightLedCapability implements LocalizationCamera.LedControl {
+
+        @Override
+        public void setLedMode(LocalizationCamera.LedMode mode) {
+            LimeLight.this.setLedMode(toVendorLedMode(mode));
+        }
+
+        @Override
+        public LocalizationCamera.LedMode getLedMode() {
+            return toGenericLedMode(LimeLight.this.getLedMode());
+        }
+    }
+
+    private class LimelightPipelineCapability implements PipelineControl {
+        @Override
+        public void setPipeline(int pipeline) {
+            LimeLight.this.setPipeline(pipeline);
+        }
+
+        @Override
+        public int getPipeline() {
+            return (int) LimeLight.this.getPipeline();
+        }
+    }
+
+    private class LimelightStreamCapability implements StreamControl {
+        @Override
+        public void setStreamMode(LocalizationCamera.StreamMode mode) {
+            LimeLight.this.setStream(toVendorStreamMode(mode));
+        }
+
+        @Override
+        public LocalizationCamera.StreamMode getStreamMode() {
+            return toGenericStreamMode(LimeLight.this.getStreamMode());
+        }
+    }
+
+    private static LocalizationCamera.LedMode toGenericLedMode(LedMode mode) {
+        return switch (mode) {
+            case PIPELINE -> LocalizationCamera.LedMode.PIPELINE;
+            case OFF -> LocalizationCamera.LedMode.OFF;
+            case BLINK -> LocalizationCamera.LedMode.BLINK;
+            case ON -> LocalizationCamera.LedMode.ON;
+        };
+    }
+
+    private static LedMode toVendorLedMode(LocalizationCamera.LedMode mode) {
+        return switch (mode) {
+            case PIPELINE -> LedMode.PIPELINE;
+            case OFF -> LedMode.OFF;
+            case BLINK -> LedMode.BLINK;
+            case ON -> LedMode.ON;
+        };
+    }
+
+    private static LocalizationCamera.StreamMode toGenericStreamMode(StreamMode mode) {
+        return switch (mode) {
+            case STANDARD -> LocalizationCamera.StreamMode.STANDARD;
+            case PIP_MAIN -> LocalizationCamera.StreamMode.PIP_MAIN;
+            case PIP_SECONDARY -> LocalizationCamera.StreamMode.PIP_SECONDARY;
+        };
+    }
+
+    private static StreamMode toVendorStreamMode(LocalizationCamera.StreamMode mode) {
+        return switch (mode) {
+            case STANDARD -> StreamMode.STANDARD;
+            case PIP_MAIN -> StreamMode.PIP_MAIN;
+            case PIP_SECONDARY -> StreamMode.PIP_SECONDARY;
+        };
     }
     
     
@@ -446,6 +634,16 @@ public class LimeLight implements LocalizationCamera{
         ledMode.setNumber(mode.get());
     }
 
+    public LedMode getLedMode() {
+        int raw = (int) ledMode.getDouble(LedMode.PIPELINE.get());
+        for (LedMode value : LedMode.values()) {
+            if (value.get() == raw) {
+                return value;
+            }
+        }
+        return LedMode.PIPELINE;
+    }
+
     /**
      *  Sets limelight’s operation mode
      */
@@ -458,6 +656,16 @@ public class LimeLight implements LocalizationCamera{
      */
     public void setStream(StreamMode mode){
         stream.setNumber(mode.get());
+    }
+
+    public StreamMode getStreamMode() {
+        int raw = (int) stream.getDouble(StreamMode.STANDARD.get());
+        for (StreamMode value : StreamMode.values()) {
+            if (value.get() == raw) {
+                return value;
+            }
+        }
+        return StreamMode.STANDARD;
     }
 
      /**
@@ -502,20 +710,29 @@ public class LimeLight implements LocalizationCamera{
         camerapose_robotspace_set.setDoubleArray(pose);
     }
 
+    private void applyCameraTransformToNetworkTables(Transform3d transform) {
+        if (transform == null) return;
+        Double[] pose = new Double[] {
+            transform.getX(),
+            transform.getY(),
+            transform.getZ(),
+            Math.toDegrees(transform.getRotation().getX()),
+            Math.toDegrees(transform.getRotation().getY()),
+            Math.toDegrees(transform.getRotation().getZ())
+        };
+        setCameraPoseRobotSpace(pose);
+    }
+
     public void setRobotOrientation(Pose2d pose){
         robot_orientation_set.setDoubleArray(new Double[] {pose.getRotation().getDegrees(),0d,0d,0d,0d,0d});
     }
 
-    @Override
     public double getLocalizationLatency() {
-        return  Timer.getFPGATimestamp() - (getPoseEstimate(config.localizationEstimator()).getLatency()/1000.0); 
+        return localizationCamera.getLocalizationLatency();
     }
 
-    @Override
     public Pose2d getLocalizationPose() {
-        PoseEstimateWithLatency pose = getPoseEstimate(config.localizationEstimator());
-        updateEstimationStdDevs(pose);
-        return pose.getLocalizationPose(); 
+        return localizationCamera.getLocalizationPose();
     }
 
     public void setFiducialIdFilters(double[] array){
@@ -526,47 +743,31 @@ public class LimeLight implements LocalizationCamera{
         return fiducial_id_filters_set.getDoubleArray(new Double[]{});
     }
 
-    Matrix<N3, N1> curStdDevs, singleTagStdDevs, multiTagStdDevs;
-
-    @Override
     public Matrix<N3, N1> getLocalizationStdDevs() {
-        return curStdDevs;
+        return localizationCamera.getLocalizationStdDevs();
     }
     
-    @Override
     public void setStdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
-        this.singleTagStdDevs = single;
-        this.multiTagStdDevs = multi;
+        localizationCamera.setStdDevs(single, multi);
     }
 
-     private void updateEstimationStdDevs(PoseEstimateWithLatency data) {
-        if (data == null) {
-            curStdDevs = getSingleStdDev();
-        } else {
-            // Pose present. Start running Heuristic
-            int numTags = data.getTagCount();
-            double avgDist = data.getDistToTag();
-            curStdDevs = recalculateStdDevs(numTags, avgDist, config.trustDistance());
-        }
+    public Matrix<N3, N1> getSingleStdDev() {
+        return localizationCamera.getSingleStdDev();
     }
 
+    public Matrix<N3, N1> getMultiStdDev() {
+        return localizationCamera.getMultiStdDev();
+    }
+    public LocalizationCamera getLocalizationCamera() {
+        return localizationCamera;
+    }
 
-     @Override
-     public Matrix<N3, N1> getSingleStdDev() {
-       return singleTagStdDevs;
-     }
+    public void setUseForLocalization(boolean useForLocalization) {
+        this.useForLocalization = useForLocalization;
+        localizationCamera.setUseForLocalization(useForLocalization);
+    }
 
-
-     @Override
-     public Matrix<N3, N1> getMultiStdDev() {
-       return multiTagStdDevs;
-     }
-
-     public void setUseForLocalization(boolean useForLocalization) {
-         this.useForLocalization = useForLocalization;
-     }
-
-     public boolean isUseForLocalization() {
-         return useForLocalization;
-     }
+    public boolean isUseForLocalization() {
+        return useForLocalization;
+    }
 }

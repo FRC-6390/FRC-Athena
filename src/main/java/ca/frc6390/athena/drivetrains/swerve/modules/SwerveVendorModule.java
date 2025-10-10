@@ -5,6 +5,7 @@ import ca.frc6390.athena.devices.EncoderConfig;
 import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 import ca.frc6390.athena.devices.MotorController;
 import ca.frc6390.athena.devices.MotorControllerConfig;
+import ca.frc6390.athena.drivetrains.swerve.SwerveModule;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -58,7 +59,7 @@ public interface SwerveVendorModule {
 
             MotorControllerConfig steerMotorController = new MotorControllerConfig(steerMotor.getMotorControllerType(), steer).setEncoderConfig(new EncoderConfig().setGearRatio(getSteerGearRatio()));
 
-            SwerveModuleConfig moduleConfig = new SwerveModuleConfig(location, getWheelDiameter(), getFreeSpeed(driveMotor), driveMotorController, steerMotorController, null);
+            SwerveModuleConfig moduleConfig = new SwerveModuleConfig(location, getWheelDiameter(), getFreeSpeed(driveMotor), driveMotorController, steerMotorController, null, steerMotorController.encoderConfig, SwerveModule.SwerveModuleSimConfig.fromMotors(driveMotor, steerMotor));
            
             return moduleConfig;
         }

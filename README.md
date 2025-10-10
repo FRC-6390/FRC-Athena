@@ -6,11 +6,13 @@
 export $(cat .env | xargs)
  ```
 
- ```bash
- ./gradlew publish -PpublishMode=local -PfrcYear=2025 -Pversion=2025.9.11 #Publish local to wpilib folder
+```bash
+ ./gradlew publish -PpublishMode=local # version/year auto-resolve
  ```
 
  ```bash
 export $(cat .env | xargs)
- ./gradlew publish -PpublishMode=online -PfrcYear=2025 -Pversion=2025.9.11 #Publish to online
+ ./gradlew publish -PpublishMode=online # version/year auto-resolve
  ```
+
+To publish with a specific version, append `-Pversion=<major.minor.patch>` to override the automatic increment. To pin the FRC season manually, append `-PfrcYear=<season>`.

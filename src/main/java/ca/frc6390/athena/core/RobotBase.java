@@ -8,6 +8,7 @@ import ca.frc6390.athena.commands.movement.RotateToPoint;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
+import ca.frc6390.athena.core.sim.RobotVisionSim;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrainConfig;
@@ -15,11 +16,14 @@ import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrainConfig;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
+import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -57,6 +61,8 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
     private final RobotDrivetrain<T> drivetrain;
     private final RobotLocalization<?> localization;
     private final RobotVision vision;
+    private RobotVisionSim visionSim;
+    private Notifier visionSimNotifier;
     private final RobotAuto autos;
     private final HashMap<String, Mechanism> mechanisms;
     
@@ -72,7 +78,17 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
             localization.setRobotVision(vision);
             localization.configureChoreo(drivetrain);
         }
-        
+
+        if (vision != null && edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
+            AprilTagFieldLayout layout = vision.deriveSimulationLayout();
+            visionSim = vision.createSimulation(layout);
+            visionSimNotifier = new Notifier(() -> {
+                Pose2d pose = localization != null ? localization.getFieldPose() : new Pose2d();
+                visionSim.update(pose);
+            });
+            visionSimNotifier.startPeriodic(0.02);
+        }
+
     }
 
     public RobotBase<T> registerMechanism(Mechanism... mechs){
@@ -129,12 +145,17 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
         LimeLight bestCamera = null;
         double smallestAngleDiff = Double.MAX_VALUE;
 
-        for (LimeLight camera : vision.getLimelights().values()) {
-            Rotation2d cameraRelativeAngleRad = camera.config.getYawRelativeToForwards();
+        for (var entry : vision.getCameras().entrySet()) {
+            java.util.Optional<LimeLight> optionalLimeLight = vision.getCameraCapability(entry.getKey(), LocalizationCameraCapability.LIMELIGHT);
+            if (optionalLimeLight.isEmpty()) continue;
+
+            LimeLight limeLight = optionalLimeLight.get();
+            Rotation2d cameraRelativeAngleRad =
+                    Rotation2d.fromRadians(limeLight.config.cameraRobotSpace().getRotation().getZ());
             double angleDiff = Math.abs(desiredRelativeAngle.minus(cameraRelativeAngleRad).getDegrees());
             if (angleDiff < smallestAngleDiff) {
                 smallestAngleDiff = angleDiff;
-                bestCamera = camera;
+                bestCamera = limeLight;
             }
         }
         return bestCamera;

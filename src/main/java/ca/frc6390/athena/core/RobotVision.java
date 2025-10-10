@@ -2,22 +2,35 @@ package ca.frc6390.athena.core;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
+import java.util.function.Function;
 
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCamera.LocalizationData;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera.CoordinateSpace;
+import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
+import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig;
+import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLightConfig;
 import ca.frc6390.athena.sensors.camera.photonvision.PhotonVision;
 import ca.frc6390.athena.sensors.camera.photonvision.PhotonVisionConfig;
+import ca.frc6390.athena.core.sim.RobotVisionSim;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import edu.wpi.first.apriltag.AprilTagFields;
 
 public class RobotVision {
    
@@ -75,17 +88,34 @@ public class RobotVision {
       }
    }
 
-   private final HashMap<String, Object> cameras;
+   private final RobotVisionConfig config;
+   private final HashMap<String, LocalizationCamera> cameras;
+   private final EnumMap<CameraRole, List<LocalizationCamera>> camerasByRole;
+   private final HashMap<String, PhotonVision> photonVisionCameras;
+   private final HashMap<String, LimeLight> limeLightCameras;
 
    public RobotVision(RobotVisionConfig config) {
+      this.config = config;
       this.cameras = new HashMap<>();
+      this.camerasByRole = new EnumMap<>(CameraRole.class);
+      this.photonVisionCameras = new HashMap<>();
+      this.limeLightCameras = new HashMap<>();
+
+      boolean simulation = edu.wpi.first.wpilibj.RobotBase.isSimulation();
 
       for (LimeLightConfig c : config.limelight) {
-         cameras.put(c.getTable(), new LimeLight(c));
+         if (simulation) {
+            PhotonVision simPhoton = new PhotonVision(c.toSimulationPhotonConfig());
+            registerCamera(c.getTable(), simPhoton.getLocalizationCamera(), simPhoton, null);
+         } else {
+            LimeLight limeLight = new LimeLight(c);
+            registerCamera(c.getTable(), limeLight.getLocalizationCamera(), null, limeLight);
+         }
       }
 
       for (PhotonVisionConfig c : config.photon) {
-         cameras.put(c.getTable(), new PhotonVision(c));
+         PhotonVision photonVision = new PhotonVision(c);
+         registerCamera(c.getTable(), photonVision.getLocalizationCamera(), photonVision, null);
       }
    }
 
@@ -93,84 +123,231 @@ public class RobotVision {
       return new RobotVision(config);
    }
 
-   public LimeLight getLimelight(String key) {
-      Object c = cameras.get(key);
+   public LocalizationCamera getCamera(String key) {
+      return cameras.get(key);
+   }
 
-      if (c instanceof LimeLight){
-         return (LimeLight) c;
+   public RobotVisionSim createSimulation(AprilTagFieldLayout layout) {
+      return new RobotVisionSim(this, layout);
+   }
+
+   public AprilTagFieldLayout deriveSimulationLayout() {
+      for (PhotonVisionConfig pv : config.photon()) {
+         if (pv != null && pv.fieldLayout() != null) {
+            try {
+               return AprilTagFieldLayout.loadField(pv.fieldLayout());
+            } catch (Exception ignored) {
+            }
+         }
       }
-      return null;
-   }
-
-   public PhotonVision getPhotonVision(String key) {
-      Object c = cameras.get(key);
-
-      if (c instanceof PhotonVision){
-         return (PhotonVision) c;
+      try {
+         return AprilTagFieldLayout.loadField(AprilTagFields.k2025ReefscapeWelded);
+      } catch (Exception e) {
+         throw new RuntimeException("Failed to load default AprilTag layout", e);
       }
-      return null;
    }
 
-   public Map<String, LimeLight> getLimelights() {
-      return cameras.entrySet().stream()
-          .filter(e -> e.getValue() instanceof LimeLight)
-          .collect(Collectors.toMap(
-              Map.Entry::getKey,
-              e -> (LimeLight) e.getValue()
-          ));
+   public Map<String, LocalizationCamera> getCameras() {
+      return Collections.unmodifiableMap(cameras);
    }
 
-   public Map<String, PhotonVision> getPhotonVisions() {
-      return cameras.entrySet().stream()
-          .filter(e -> e.getValue() instanceof PhotonVision)
-          .collect(Collectors.toMap(
-              Map.Entry::getKey,
-              e -> (PhotonVision) e.getValue()
-          ));
+   public void setUseForLocalization(String key, boolean enabled) {
+      LocalizationCamera camera = cameras.get(key);
+      if (camera == null) {
+         return;
+      }
+      camera.setUseForLocalization(enabled);
+      getLimeLightCamera(key).ifPresent(lime -> lime.setUseForLocalization(enabled));
+      getPhotonVisionCamera(key).ifPresent(pv -> pv.setUseForLocalization(enabled));
+      refreshCameraRoles(camera);
+   }
+
+   public Optional<PhotonVision> getPhotonVisionCamera(String key) {
+      return Optional.ofNullable(photonVisionCameras.get(key));
+   }
+
+   public Optional<LimeLight> getLimeLightCamera(String key) {
+      return Optional.ofNullable(limeLightCameras.get(key));
+   }
+
+   public Map<CameraRole, List<LocalizationCamera>> getCamerasByRole() {
+      EnumMap<CameraRole, List<LocalizationCamera>> copy = new EnumMap<>(CameraRole.class);
+      camerasByRole.forEach((role, list) -> copy.put(role, Collections.unmodifiableList(list)));
+      return Collections.unmodifiableMap(copy);
+   }
+
+   public List<LocalizationCamera> getCamerasForRole(CameraRole role) {
+      return camerasByRole.containsKey(role)
+              ? Collections.unmodifiableList(camerasByRole.get(role))
+              : Collections.emptyList();
+   }
+
+   public Optional<LocalizationCamera> getFirstCameraWithRole(CameraRole role) {
+      return camerasByRole.containsKey(role) && !camerasByRole.get(role).isEmpty()
+              ? Optional.of(camerasByRole.get(role).get(0))
+              : Optional.empty();
+   }
+
+   public <T> Optional<T> getCameraCapability(String key, LocalizationCameraCapability capability) {
+      LocalizationCamera camera = cameras.get(key);
+      if (camera == null) {
+         return Optional.empty();
+      }
+      return camera.capability(capability);
+   }
+
+   public Optional<LocalizationCamera.TargetObservation> getCameraObservation(String key, CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
+      LocalizationCamera camera = cameras.get(key);
+      if (camera == null) {
+         return Optional.empty();
+      }
+      return camera.getLatestObservation(space, robotPose, tagPose);
+   }
+
+   public Optional<Translation2d> getCameraTranslation(String key, CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
+      LocalizationCamera camera = cameras.get(key);
+      if (camera == null) {
+         return Optional.empty();
+      }
+      return camera.getTargetTranslation(space, robotPose, tagPose);
+   }
+
+   public Optional<LocalizationCamera.TargetObservation> getBestObservation(CoordinateSpace space, Pose2d robotPose, Function<Integer, Pose2d> tagPoseLookup) {
+      return selectBestObservation(cameras.values(), space, robotPose, tagPoseLookup);
+   }
+
+    public Optional<LocalizationCamera.TargetObservation> getBestObservationForRole(CameraRole role, CoordinateSpace space,
+          Pose2d robotPose, Function<Integer, Pose2d> tagPoseLookup) {
+      List<LocalizationCamera> roleCameras = camerasByRole.get(role);
+      if (roleCameras == null || roleCameras.isEmpty()) {
+         return Optional.empty();
+      }
+      return selectBestObservation(roleCameras, space, robotPose, tagPoseLookup);
    }
 
    public void setRobotOrientation(Pose2d pose){
-      getLimelights().values().forEach(ll -> ll.setRobotOrientation(pose));
-      getPhotonVisions().values().forEach(pv -> pv.setRobotOrientation(pose));
-
+      cameras.values().forEach(camera -> camera.setRobotOrientation(pose));
    }
 
-   public ArrayList<Pose2d> getLimelightRobotPoses(){
-      return getLimelights().values().stream().filter(ll -> ll.hasValidTarget() && ll.isUseForLocalization()).map(ll -> ll.getPoseEstimate(ll.config.localizationEstimator()).getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
+   public ArrayList<Pose2d> getCameraLocalizationPoses(){
+      ArrayList<Pose2d> poses = new ArrayList<>();
+      cameras.values().stream()
+          .filter(LocalizationCamera::isUseForLocalization)
+          .filter(LocalizationCamera::hasValidTarget)
+          .map(LocalizationCamera::getLocalizationPose)
+          .forEach(poses::add);
+      return poses;
    }
-
-   public void addLimelightRobotPoses(Consumer<LocalizationData> estimator){
-      getLimelights().values().stream().filter(ll -> ll.hasValidTarget() && ll.isUseForLocalization()).forEach(ll -> estimator.accept(ll.getLocalizationData()));
-   }
-
-   public ArrayList<Pose2d> getPhotonVisionPoses(){
-      return getPhotonVisions().values().stream().filter(pv -> pv.hasValidTarget() && pv.isUseForLocalization()).map(pv -> pv.getLocalizationPose()).collect(Collectors.toCollection(ArrayList::new));
-   }
-
-   public void addPhotonVisionPoses(Consumer<LocalizationData> estimator){
-      getPhotonVisions().values().stream().filter(pv -> pv.isUseForLocalization()).forEach((pv) ->  {
-            estimator.accept(pv.getLocalizationData());
-         }
-      );
-   }
-
-   // public ArrayList<Pose2d> getLocalizationPoses(){
-   //    ArrayList<Pose2d> poses = getLimelightRobotPoses();
-   //    poses.addAll(getPhotonVisionPoses());
-   //    return poses;
-   // }
 
    public void addLocalizationPoses(Consumer<LocalizationData> estimator){
-     addLimelightRobotPoses(estimator);
-     addPhotonVisionPoses(estimator);
+      cameras.values().stream()
+          .filter(LocalizationCamera::isUseForLocalization)
+          .filter(LocalizationCamera::hasValidTarget)
+          .map(LocalizationCamera::getLocalizationData)
+          .forEach(estimator);
    }
 
    public Set<String> getCameraTables() {
-      return cameras.keySet();
+      return Set.copyOf(cameras.keySet());
    }
 
    public void setLocalizationStdDevs(Matrix<N3, N1> singleStdDevs, Matrix<N3, N1> multiStdDevs){
-      getPhotonVisions().values().stream().forEach(pv -> pv.setStdDevs(singleStdDevs, multiStdDevs));
-      getLimelights().values().stream().forEach(ll -> ll.setStdDevs(singleStdDevs, multiStdDevs));
+      cameras.values().forEach(camera -> camera.setStdDevs(singleStdDevs, multiStdDevs));
+   }
+
+   private Optional<LocalizationCamera.TargetObservation> selectBestObservation(Iterable<LocalizationCamera> cameraIterable,
+         CoordinateSpace space, Pose2d robotPose, Function<Integer, Pose2d> tagPoseLookup) {
+      LocalizationCamera.TargetObservation best = null;
+      for (LocalizationCamera camera : cameraIterable) {
+         Optional<LocalizationCamera.TargetObservation> baseObservation = camera.getLatestObservation(CoordinateSpace.CAMERA, robotPose, null);
+         if (baseObservation.isEmpty()) continue;
+
+         LocalizationCamera.TargetObservation base = baseObservation.get();
+         Pose2d tagPose = null;
+         if (space == CoordinateSpace.TAG) {
+            if (tagPoseLookup == null) continue;
+            tagPose = tagPoseLookup.apply(base.tagId());
+            if (tagPose == null) continue;
+         } else if (space != CoordinateSpace.CAMERA && space != CoordinateSpace.ROBOT && space != CoordinateSpace.FIELD) {
+            continue;
+         }
+
+         Translation2d translation;
+         if (space == CoordinateSpace.CAMERA) {
+            translation = base.translation();
+            if (translation == null) {
+               continue;
+            }
+         } else {
+            translation = camera.getTargetTranslation(space, robotPose, tagPose).orElse(null);
+            if (translation == null) {
+               continue;
+            }
+         }
+
+         LocalizationCamera.TargetObservation transformed = new LocalizationCamera.TargetObservation(
+                 base.tagId(),
+                 base.yawDegrees(),
+                 base.distanceMeters(),
+                 translation,
+                 space,
+                 base.localizationData(),
+                 base.confidence());
+
+         best = pickBetterObservation(best, transformed);
+      }
+      return Optional.ofNullable(best);
+   }
+
+   private LocalizationCamera.TargetObservation pickBetterObservation(LocalizationCamera.TargetObservation current,
+         LocalizationCamera.TargetObservation candidate) {
+      if (candidate == null) {
+         return current;
+      }
+      if (current == null) {
+         return candidate;
+      }
+
+      double currentConfidence = current.hasConfidence() ? current.confidence() : 0.0;
+      double candidateConfidence = candidate.hasConfidence() ? candidate.confidence() : 0.0;
+      if (candidateConfidence > currentConfidence + 1e-9) {
+         return candidate;
+      }
+      if (currentConfidence > candidateConfidence + 1e-9) {
+         return current;
+      }
+
+      double currentDistance = current.hasDistance() ? Math.abs(current.distanceMeters()) : Double.POSITIVE_INFINITY;
+      double candidateDistance = candidate.hasDistance() ? Math.abs(candidate.distanceMeters()) : Double.POSITIVE_INFINITY;
+      if (candidateDistance < currentDistance) {
+         return candidate;
+      }
+
+      double currentMagnitude = current.hasTranslation() ? current.translation().getNorm() : Double.POSITIVE_INFINITY;
+      double candidateMagnitude = candidate.hasTranslation() ? candidate.translation().getNorm() : Double.POSITIVE_INFINITY;
+      if (candidateMagnitude < currentMagnitude) {
+         return candidate;
+      }
+      return current;
+   }
+
+   private void registerCamera(String key, LocalizationCamera camera, PhotonVision photonVision, LimeLight limeLight) {
+      cameras.put(key, camera);
+      if (photonVision != null) {
+         photonVisionCameras.put(key, photonVision);
+      }
+      if (limeLight != null) {
+         limeLightCameras.put(key, limeLight);
+      }
+      refreshCameraRoles(camera);
+   }
+
+   private void refreshCameraRoles(LocalizationCamera camera) {
+      for (List<LocalizationCamera> list : camerasByRole.values()) {
+         list.remove(camera);
+      }
+      for (CameraRole role : camera.getRoles()) {
+         camerasByRole.computeIfAbsent(role, __ -> new ArrayList<>()).add(camera);
+      }
    }
 }

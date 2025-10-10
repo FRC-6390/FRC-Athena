@@ -7,10 +7,10 @@ import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotBase;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
-import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateType;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatencyType;
+import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
@@ -46,7 +46,8 @@ public class TagAlignmentBase extends Command {
     this.thetaController = base.getAutos().getThetaController();
 
     this.robotSpeeds = base.getDrivetrain().getRobotSpeeds();
-    this.camera = base.getVision().getLimelight(table);
+    java.util.Optional<LimeLight> limelightCapability = base.getVision().getCameraCapability(table, LocalizationCameraCapability.LIMELIGHT);
+    this.camera = limelightCapability.orElseThrow(() -> new IllegalArgumentException("No Limelight camera registered for table: " + table));
    }
 
 
@@ -140,5 +141,3 @@ public class TagAlignmentBase extends Command {
         return endCommand.getAsBoolean() || noTag.getAsBoolean();
    }
 }
-
-
