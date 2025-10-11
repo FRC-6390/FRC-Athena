@@ -56,6 +56,10 @@ public class ArmMechanism extends Mechanism {
             return stateCore.getStateMachine();
         }
 
+        public void setStateGraph(StateGraph<E> stateGraph) {
+            stateCore.setStateGraph(stateGraph);
+        }
+
         @Override
         public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
             stateCore.shuffleboard(tab, level);
@@ -69,6 +73,5 @@ public class ArmMechanism extends Mechanism {
         }
     }
 }
-
 
 

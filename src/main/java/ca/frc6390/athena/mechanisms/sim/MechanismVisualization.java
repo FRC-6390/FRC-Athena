@@ -21,6 +21,8 @@ public final class MechanismVisualization {
     private final Map<String, MechanismLigament2d> ligaments = new HashMap<>();
     private final Map<String, Object> graphObjects = new HashMap<>();
     private final Map<String, Pose3d> poses = new HashMap<>();
+    // Preserve absolute heading for each ligament so descendants can stay aligned with their parent.
+    private final Map<String, Double> absoluteAngles = new HashMap<>();
 
     public MechanismVisualization(MechanismVisualizationConfig config) {
         this.config = Objects.requireNonNull(config);
@@ -59,6 +61,8 @@ public final class MechanismVisualization {
         root2d.setPosition(rootPose.getX(), rootPose.getY());
         poses.clear();
         poses.put(config.rootName(), rootPose);
+        absoluteAngles.clear();
+        absoluteAngles.put(config.rootName(), 0.0);
 
         for (MechanismVisualizationConfig.Node node : config.nodes()) {
             Pose3d parentPose = poses.getOrDefault(node.parent(), rootPose);
@@ -74,9 +78,12 @@ public final class MechanismVisualization {
                 double dx = absolute.getX() - parentPose.getX();
                 double dy = absolute.getY() - parentPose.getY();
                 double length = Math.hypot(dx, dy);
-                double angle = Math.toDegrees(Math.atan2(dy, dx));
+                double angleAbsolute = Math.toDegrees(Math.atan2(dy, dx));
+                double parentAngle = absoluteAngles.getOrDefault(node.parent(), 0.0);
+                double angleRelative = angleAbsolute - parentAngle;
                 ligament.setLength(length);
-                ligament.setAngle(angle);
+                ligament.setAngle(angleRelative);
+                absoluteAngles.put(node.name(), angleAbsolute);
             }
         }
     }

@@ -13,6 +13,27 @@ public class ElevatorMechanism extends Mechanism {
         super(ElevatorMechanismVisualization.prepare(config));
         this.feedforward = new ElevatorFeedForwardsSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
         setFeedforwardEnabled(true);
+        if (config.elevatorSimulationParameters != null) {
+            MechanismConfig.ElevatorSimulationParameters params = config.elevatorSimulationParameters;
+            double min = params.minHeightMeters;
+            double max = params.maxHeightMeters;
+            double unitsPerMeter = params.unitsPerMeterOverride;
+            if (Double.isFinite(unitsPerMeter) && Math.abs(unitsPerMeter) > 1e-9) {
+                min *= unitsPerMeter;
+                max *= unitsPerMeter;
+            } else {
+                min = Double.NaN;
+                max = Double.NaN;
+            }
+            if (Double.isFinite(min) && Double.isFinite(max) && max != min) {
+                if (max < min) {
+                    double tmp = min;
+                    min = max;
+                    max = tmp;
+                }
+                MechanismTravelRange.registerKnownRange(this, min, max);
+            }
+        }
     }
 
     @Override
@@ -54,6 +75,10 @@ public class ElevatorMechanism extends Mechanism {
 
         public StateMachine<Double, E> getStateMachine() {
             return stateCore.getStateMachine();
+        }
+
+        public void setStateGraph(StateGraph<E> stateGraph) {
+            stateCore.setStateGraph(stateGraph);
         }
 
         

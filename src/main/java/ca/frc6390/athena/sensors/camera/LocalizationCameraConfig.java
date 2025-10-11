@@ -57,6 +57,7 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     private Supplier<List<LocalizationCamera.TargetMeasurement>> targetMeasurementsSupplier = List::of;
     private double displayHorizontalFovDeg = Double.NaN;
     private double displayRangeMeters = Double.NaN;
+    private boolean publishPoseTopic;
 
     /**
      * Creates a configuration bound to a specific NetworkTables table and camera software stack.
@@ -301,6 +302,19 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     public LocalizationCameraConfig setDisplayRangeMeters(double rangeMeters) {
         this.displayRangeMeters = rangeMeters;
         return this;
+    }
+
+    /**
+     * Enables publishing an estimated pose topic for dashboards. Disabled by default to avoid
+     * creating stray NetworkTables paths.
+     */
+    public LocalizationCameraConfig setPublishPoseTopic(boolean enabled) {
+        this.publishPoseTopic = enabled;
+        return this;
+    }
+
+    public boolean isPublishPoseTopicEnabled() {
+        return publishPoseTopic;
     }
 
     /**

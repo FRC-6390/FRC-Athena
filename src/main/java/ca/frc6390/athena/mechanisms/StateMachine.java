@@ -2,6 +2,8 @@ package ca.frc6390.athena.mechanisms;
 
 import java.util.Arrays;
 import java.util.LinkedList;
+import java.util.List;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
@@ -39,6 +41,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     private BooleanSupplier changeStateSupplier;
     private final SendableChooser<E> chooser = new SendableChooser<>();
     private final Queue<StateQueueEntry<E>> stateQueue = new LinkedList<>();
+    private StateGraph<E> stateGraph;
 
     public StateMachine(E initialState, BooleanSupplier atStateSupplier){
         chooser.setDefaultOption(initialState.name(), initialState);
@@ -61,6 +64,55 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
 
     public void queueState(E state, BooleanSupplier condition) {
         stateQueue.add(new StateQueueEntry<>(state, condition));
+    }
+
+    public void setStateGraph(StateGraph<E> stateGraph) {
+        this.stateGraph = stateGraph;
+    }
+
+    public StateGraph<E> getStateGraph() {
+        return stateGraph;
+    }
+
+    public void requestState(E target) {
+        requestState(target, false);
+    }
+
+    public void requestState(E target, boolean append) {
+        Objects.requireNonNull(target, "target");
+        if (!append) {
+            resetQueue();
+        }
+        E start = append ? tailState() : goalState;
+        for (E next : expandPath(start, target)) {
+            queueState(next, edgeGuard(start, next));
+            start = next;
+        }
+    }
+
+    @SafeVarargs
+    public final void requestStates(boolean append, E... targets) {
+        Objects.requireNonNull(targets, "targets");
+        if (!append) {
+            resetQueue();
+        }
+        E start = append ? tailState() : goalState;
+        for (E target : targets) {
+            Objects.requireNonNull(target, "targets cannot contain null entries.");
+            if (start.equals(target)) {
+                continue;
+            }
+            for (E next : expandPath(start, target)) {
+                queueState(next, edgeGuard(start, next));
+                start = next;
+            }
+            start = target;
+        }
+    }
+
+    @SafeVarargs
+    public final void requestStates(E... targets) {
+        requestStates(false, targets);
     }
 
     public BooleanSupplier getChangeStateSupplier(){
@@ -97,6 +149,36 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
 
     public void resetQueue(){
         stateQueue.clear();
+    }
+
+    private E tailState() {
+        @SuppressWarnings("unchecked")
+        LinkedList<StateQueueEntry<E>> list = (LinkedList<StateQueueEntry<E>>) stateQueue;
+        if (list.isEmpty()) {
+            return goalState;
+        }
+        return list.peekLast().state;
+    }
+
+    private List<E> expandPath(E start, E target) {
+        if (stateGraph == null) {
+            if (start.equals(target)) {
+                return List.of();
+            }
+            return List.of(target);
+        }
+        List<E> expanded = stateGraph.expand(start, target);
+        if (expanded.isEmpty() && !start.equals(target)) {
+            return List.of(target);
+        }
+        return expanded;
+    }
+
+    private BooleanSupplier edgeGuard(E from, E to) {
+        if (stateGraph == null) {
+            return StateGraph.Guards.always();
+        }
+        return stateGraph.guardFor(from, to);
     }
 
     public Command waitUntilAtGoal() {

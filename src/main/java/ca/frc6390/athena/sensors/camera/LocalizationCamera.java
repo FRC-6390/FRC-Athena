@@ -172,11 +172,15 @@ public class LocalizationCamera {
         this.singleStdDevs = config.getSingleStdDevs();
         this.multiStdDevs = config.getMultiTagStdDevs();
         capabilities.putAll(config.capabilities());
-        String ntBase = "/Vision/Cameras/" + config.getTable();
-        networkEstimatedPosePublisher = NetworkTableInstance.getDefault()
-                .getStructTopic(ntBase + "/EstimatedPose", Pose2d.struct)
-                .publish();
-        networkEstimatedPosePublisher.set(new Pose2d());
+        StructPublisher<Pose2d> posePublisher = null;
+        if (config.isPublishPoseTopicEnabled()) {
+            String ntBase = "/Shuffleboard/Vision/Cameras/" + config.getTable();
+            posePublisher = NetworkTableInstance.getDefault()
+                    .getStructTopic(ntBase + "/EstimatedPose", Pose2d.struct)
+                    .publish();
+            posePublisher.set(new Pose2d());
+        }
+        networkEstimatedPosePublisher = posePublisher;
     }
 
     /**
@@ -204,7 +208,9 @@ public class LocalizationCamera {
                 targetMeasurementsSupplier != null ? targetMeasurementsSupplier.get() : List.of();
         measurementCache = measurements != null ? List.copyOf(measurements) : List.of();
         Pose2d estimatedPose = poseSupplier.get();
-        networkEstimatedPosePublisher.set(estimatedPose != null ? estimatedPose : new Pose2d());
+        if (networkEstimatedPosePublisher != null) {
+            networkEstimatedPosePublisher.set(estimatedPose != null ? estimatedPose : new Pose2d());
+        }
         return this;
     }
 

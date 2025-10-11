@@ -55,6 +55,10 @@ public class SimpleMotorMechanism  extends Mechanism  {
             return stateCore.getStateMachine();
         }
 
+        public void setStateGraph(StateGraph<E> stateGraph) {
+            stateCore.setStateGraph(stateGraph);
+        }
+
         
         @Override
         public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {

@@ -45,7 +45,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   public double desiredHeading, driftActivationSpeed;
   public IMU imu;
   public RobotSpeeds robotSpeeds;
-  private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault().getStructArrayTopic("/SwerveStates", SwerveModuleState.struct).publish();
+  private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault().getStructArrayTopic("/Drivetrain/SwerveStates", SwerveModuleState.struct).publish();
   private SwerveDrivetrainSimulation simulation;
   private Field2d simulationField;
   private double lastSimulationTimestamp = -1;

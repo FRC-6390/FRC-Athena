@@ -12,7 +12,7 @@ import edu.wpi.first.wpilibj.Timer;
 
 final class RobotLocalizationPersistence {
 
-    private static final String PERSISTENCE_PREFIX = "RobotLocalization/";
+    private static final String PERSISTENCE_PREFIX = "Shuffleboard/Localization/Save Data/";
     private static final String PREF_FIELD_X = PERSISTENCE_PREFIX + "FieldPoseX";
     private static final String PREF_FIELD_Y = PERSISTENCE_PREFIX + "FieldPoseY";
     private static final String PREF_FIELD_Z = PERSISTENCE_PREFIX + "FieldPoseZ";

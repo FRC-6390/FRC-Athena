@@ -110,7 +110,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             simulationModel.reset();
             lastSimulationTimestampSeconds = Timer.getFPGATimestamp();
         }
-        this.visualization = visualizationConfig != null ? new MechanismVisualization(visualizationConfig) : null;
+        MechanismVisualizationConfig resolvedVisualizationConfig =
+                visualizationConfig != null ? visualizationConfig : MechanismDefaultVisualization.create();
+        this.visualization = resolvedVisualizationConfig != null ? new MechanismVisualization(resolvedVisualizationConfig) : null;
         if (RobotBase.isSimulation()) {
             if (sensorSimulationConfig != null) {
                 this.sensorSimulation = MechanismSensorSimulation.fromConfig(this, sensorSimulationConfig);

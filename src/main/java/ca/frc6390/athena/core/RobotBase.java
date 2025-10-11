@@ -102,6 +102,8 @@ public class RobotBase<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void robotInit() {
+        configureAutos(autos);
+        ensureAutoChooserPublished();
         onRobotInit();
         registerPIDCycles();
     }
@@ -219,9 +221,14 @@ public class RobotBase<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     protected void onSimulationPeriodic() {}
 
+    /**
+     * Hook for registering autonomous routines and named commands.
+     * Called once during {@link #robotInit()} after all subsystems are constructed.
+     */
+    protected void configureAutos(RobotAuto auto) {}
+
     protected Command createAutonomousCommand() {
-        SendableChooser<Command> chooser = autos.getAutoChooser();
-        return chooser != null ? chooser.getSelected() : null;
+        return autos.buildSelectedCommand().orElse(null);
     }
 
     private void scheduleAutonomousCommand() {
@@ -369,18 +376,38 @@ public class RobotBase<T extends RobotDrivetrain<T>> extends TimedRobot {
         return drivetrain.getIMU();
     }
 
-    public RobotBase<T> registerPathPlannerAuto(String... auto) {
-        autos.registerPathplannerAuto(auto);
-        return this;
+    public SendableChooser<Command> registerAutoChooser(RobotAuto.AutoKey defaultAuto) {
+        SendableChooser<Command> chooser = autos.createCommandChooser(defaultAuto);
+        SmartDashboard.putData("Auto Chooser", chooser);
+        return chooser;
+    }
+
+    public SendableChooser<RobotAuto.AutoRoutine> registerAutoRoutineChooser(RobotAuto.AutoKey defaultAuto) {
+        SendableChooser<RobotAuto.AutoRoutine> chooser = autos.createChooser(defaultAuto);
+        SmartDashboard.putData("Auto Routine Chooser", chooser);
+        return chooser;
+    }
+
+    public SendableChooser<RobotAuto.AutoRoutine> registerAutoRoutineChooser(String defaultAuto) {
+        return registerAutoRoutineChooser(RobotAuto.AutoKey.of(defaultAuto));
     }
 
     public SendableChooser<Command> registerAutoChooser(String defualtAuto) {
-        SmartDashboard.putData("Auto Chooser", autos.getSendableChooser(defualtAuto));
-        return autos.getAutoChooser();
+        return registerAutoChooser(RobotAuto.AutoKey.of(defualtAuto));
     }
 
     public RobotAuto getAutos() {
         return autos;
+    }
+
+    private void ensureAutoChooserPublished() {
+        if (autos.getAutoChooser() != null || autos.getCommandChooser() != null) {
+            return;
+        }
+        autos.getAutos().stream()
+                .findFirst()
+                .map(RobotAuto.AutoRoutine::key)
+                .ifPresent(this::registerAutoChooser);
     }
 
     public void registerPIDCycles() {

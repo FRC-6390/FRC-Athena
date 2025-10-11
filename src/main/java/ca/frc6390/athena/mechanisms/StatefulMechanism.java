@@ -32,6 +32,10 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         return stateCore.getStateMachine();
     }
 
+    public void setStateGraph(StateGraph<E> stateGraph) {
+        stateCore.setStateGraph(stateGraph);
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public StatefulMechanism<E> shuffleboard(String tab) {
@@ -79,10 +83,13 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             return stateMachine;
         }
 
+        public void setStateGraph(StateGraph<E> stateGraph) {
+            stateMachine.setStateGraph(stateGraph);
+        }
+
         public void shuffleboard(ShuffleboardTab tab, SendableLevel level) {
             stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList), level);
         }
     }
 }
-
 

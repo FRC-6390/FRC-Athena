@@ -90,6 +90,8 @@ public class MechanismConfig<T extends Mechanism> {
     public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
     /** Optional per-state callbacks that run when the mechanism state machine enters the state. */
     public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
+    /** Optional transition graph that defines required intermediate states and guards. */
+    public StateGraph<?> stateGraph = null;
     /** Simulation model description used when running in simulation environments. */
     public MechanismSimulationConfig simulationConfig = null;
     /** Cached elevator-specific simulation hints provided through {@link #setSimulationElevator}. */
@@ -667,6 +669,20 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Attaches a {@link StateGraph} that enumerates allowed transitions and guards between states.
+     * Only applies when the built mechanism extends {@link StatefulMechanism}.
+     *
+     * @param stateGraph transition graph shared by the mechanism's state machine
+     * @param <E> enum backing the state machine
+     * @return this config for chaining
+     */
+    @SuppressWarnings("unchecked")
+    public <E extends Enum<E>> MechanismConfig<T> setStateGraph(StateGraph<E> stateGraph){
+        this.stateGraph = Objects.requireNonNull(stateGraph, "stateGraph");
+        return this;
+    }
+
+    /**
      * Registers a callback that runs whenever the state machine enters any of the supplied states.
      * Returning {@code true} from the callback suppresses motor output for that loop iteration.
      *
@@ -1150,6 +1166,14 @@ public class MechanismConfig<T extends Mechanism> {
             simulationConfig = simulationConfig.bindSourceConfig(this);
         }
 
-        return factory.apply(this);
+        T mechanism = factory.apply(this);
+
+        if (stateGraph != null && mechanism instanceof StatefulMechanism<?> statefulMechanism) {
+            @SuppressWarnings({"rawtypes", "unchecked"})
+            StatefulMechanism stateful = (StatefulMechanism) statefulMechanism;
+            stateful.setStateGraph((StateGraph) stateGraph);
+        }
+
+        return mechanism;
     }
 }
