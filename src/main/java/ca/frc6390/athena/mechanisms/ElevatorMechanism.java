@@ -1,7 +1,6 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.controllers.ElevatorFeedForwardsSendable;
-import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
@@ -11,7 +10,7 @@ public class ElevatorMechanism extends Mechanism {
     private final ElevatorFeedForwardsSendable feedforward;
 
     public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config, ElevatorFeedforward feedforward) {
-        super(config);
+        super(ElevatorMechanismVisualization.prepare(config));
         this.feedforward = new ElevatorFeedForwardsSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
         setFeedforwardEnabled(true);
     }
@@ -48,9 +47,9 @@ public class ElevatorMechanism extends Mechanism {
         }
 
         @Override
-        public void periodic() {
+        public void update() {
             setSuppressMotorOutput(!stateCore.update(this));
-            super.update();   
+            super.update();
         }
 
         public StateMachine<Double, E> getStateMachine() {

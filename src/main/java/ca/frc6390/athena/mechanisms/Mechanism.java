@@ -6,6 +6,8 @@ import ca.frc6390.athena.devices.MotorControllerGroup;
 import ca.frc6390.athena.devices.MotorControllerConfig;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
+import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulation;
+import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulationConfig;
 import ca.frc6390.athena.mechanisms.sim.MechanismSimulationConfig;
 import ca.frc6390.athena.mechanisms.sim.MechanismSimulationModel;
 import ca.frc6390.athena.mechanisms.sim.MechanismVisualization;
@@ -41,6 +43,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private final double simulationUpdatePeriodSeconds;
     private double lastSimulationTimestampSeconds = Double.NaN;
     private final MechanismVisualization visualization;
+    private final MechanismSensorSimulation sensorSimulation;
 
     private enum RobotMode {
         TELE,
@@ -61,21 +64,23 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             config.useSetpointAsOutput,
             config.pidPeriod,
             config.simulationConfig,
-            config.visualizationConfig
+            config.visualizationConfig,
+            config.sensorSimulationConfig
         );
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
             ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage,
             GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod) {
-        this(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, limitSwitches, useSetpointAsOutput, pidPeriod, null, null);
+        this(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, limitSwitches, useSetpointAsOutput, pidPeriod, null, null, null);
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
             ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage,
             GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod,
             MechanismSimulationConfig simulationConfig,
-            MechanismVisualizationConfig visualizationConfig) {
+            MechanismVisualizationConfig visualizationConfig,
+            MechanismSensorSimulationConfig sensorSimulationConfig) {
         this.motors = motors;
         this.encoder = encoder;
         this.pidController = pidController;
@@ -106,6 +111,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             lastSimulationTimestampSeconds = Timer.getFPGATimestamp();
         }
         this.visualization = visualizationConfig != null ? new MechanismVisualization(visualizationConfig) : null;
+        if (RobotBase.isSimulation()) {
+            if (sensorSimulationConfig != null) {
+                this.sensorSimulation = MechanismSensorSimulation.fromConfig(this, sensorSimulationConfig);
+            } else {
+                this.sensorSimulation = MechanismSensorSimulation.forLimitSwitches(this);
+            }
+        } else {
+            this.sensorSimulation = MechanismSensorSimulation.empty();
+        }
     }
 
     public double calculateMaxFreeSpeed(){
@@ -436,6 +450,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             motors.update();
         }
 
+        sensorSimulation.update(this);
+
         update();
 
         if (visualization != null) {
@@ -489,10 +505,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         
         if(level.equals(SendableLevel.DEBUG)){
             for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
-            genericLimitSwitch.shuffleboard(tab.getLayout(genericLimitSwitch.getPort()+"\\Limitswitch",BuiltInLayouts.kList));  
+                ShuffleboardLayout limitLayout =
+                        tab.getLayout(genericLimitSwitch.getPort()+"\\Limitswitch",BuiltInLayouts.kList);
+                genericLimitSwitch.shuffleboard(limitLayout);  
+                sensorSimulation.decorateSensorLayout(genericLimitSwitch, limitLayout, level);
             }
         }
-
 
         ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kList);
         {
@@ -506,8 +524,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             }
         }
         if(level.equals(SendableLevel.DEBUG)){
-        if(pidController != null) tab.add("PID Controller", pidController);
-        if(profiledPIDController != null) tab.add("Profiled PID Controller", profiledPIDController);
+            if(pidController != null) tab.add("PID Controller", pidController);
+            if(profiledPIDController != null) tab.add("Profiled PID Controller", profiledPIDController);
         }
 
         return tab;

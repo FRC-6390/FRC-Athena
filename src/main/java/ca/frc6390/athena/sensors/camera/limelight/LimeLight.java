@@ -10,6 +10,7 @@ import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Transform3d;
@@ -78,24 +79,30 @@ public class LimeLight {
 
     private static final class LocalizationSnapshot {
         private final Pose2d pose;
+        private final Pose3d pose3d;
         private final double latencySeconds;
         private final int visibleTargets;
         private final double averageDistanceMeters;
 
         private LocalizationSnapshot(
-                Pose2d pose, double latencySeconds, int visibleTargets, double averageDistanceMeters) {
+                Pose2d pose, Pose3d pose3d, double latencySeconds, int visibleTargets, double averageDistanceMeters) {
             this.pose = pose;
+            this.pose3d = pose3d;
             this.latencySeconds = latencySeconds;
             this.visibleTargets = visibleTargets;
             this.averageDistanceMeters = averageDistanceMeters;
         }
 
         public static LocalizationSnapshot empty() {
-            return new LocalizationSnapshot(new Pose2d(), 0.0, 0, Double.MAX_VALUE);
+            return new LocalizationSnapshot(new Pose2d(), new Pose3d(), 0.0, 0, Double.MAX_VALUE);
         }
 
         public Pose2d pose() {
             return pose;
+        }
+
+        public Pose3d pose3d() {
+            return pose3d;
         }
 
         public double latencySeconds() {
@@ -331,6 +338,7 @@ public class LimeLight {
                         .setTrustDistance(config.trustDistance())
                         .setHasTargetsSupplier(this::hasValidTarget)
                         .setPoseSupplier(this::supplyLocalizationPose)
+                        .setPose3dSupplier(this::supplyLocalizationPose3d)
                         .setLatencySupplier(this::supplyLocalizationLatency)
                         .setVisibleTargetsSupplier(this::supplyVisibleTargets)
                         .setAverageDistanceSupplier(this::supplyAverageDistance)
@@ -364,11 +372,15 @@ public class LimeLight {
         double latencySeconds = Timer.getFPGATimestamp() - (estimate.getLatency() / 1000.0);
         int tagCount = estimate.getTagCount();
         double distance = estimate.getDistToTag();
-        latestSnapshot = new LocalizationSnapshot(pose, latencySeconds, tagCount, distance);
+        latestSnapshot = new LocalizationSnapshot(pose, new Pose3d(pose), latencySeconds, tagCount, distance);
     }
 
     private Pose2d supplyLocalizationPose() {
         return latestSnapshot.pose();
+    }
+
+    private Pose3d supplyLocalizationPose3d() {
+        return latestSnapshot.pose3d();
     }
 
     private double supplyLocalizationLatency() {

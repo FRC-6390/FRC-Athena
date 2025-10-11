@@ -54,6 +54,11 @@ public final class MechanismSimulationConfig {
         return new Builder();
     }
 
+    /**
+     * Internal hook used by {@link MechanismConfig#build()} so the simulation config can read the
+     * original mechanism builder parameters (motor list, encoder gearing, etc.). Users should not
+     * call this directly.
+     */
     public MechanismSimulationConfig bindSourceConfig(MechanismConfig<?> sourceConfig) {
         this.sourceConfig = sourceConfig;
         return this;
@@ -122,6 +127,14 @@ public final class MechanismSimulationConfig {
     /**
      * Helper for constructing an {@link ElevatorMechanism} simulation using {@link ElevatorSim}.
      */
+    /**
+     * Creates an elevator-suitable simulation config. Supply optional physical parameters via the
+     * builder; any missing values will fall back on the mechanism configuration (motor gearing,
+     * encoder conversion) or reasonable defaults.
+     *
+     * @param params optional physical parameters for the elevator model
+     * @return simulation configuration
+     */
     public static MechanismSimulationConfig elevator(ElevatorParameters params) {
         Objects.requireNonNull(params);
         final MechanismSimulationConfig[] holder = new MechanismSimulationConfig[1];
@@ -184,6 +197,13 @@ public final class MechanismSimulationConfig {
 
     /**
      * Helper for constructing a {@link ArmMechanism} simulation using {@link SingleJointedArmSim}.
+     */
+    /**
+     * Creates a rotary-joint simulation config (single-axis arm/wrist/turret). Missing values are
+     * inferred from the mechanism setup when possible.
+     *
+     * @param params optional physical parameters for the arm model
+     * @return simulation configuration
      */
     public static MechanismSimulationConfig arm(ArmParameters params) {
         Objects.requireNonNull(params);
@@ -248,8 +268,15 @@ public final class MechanismSimulationConfig {
     /**
      * Helper for constructing a {@link SimpleMotorMechanism} simulation using {@link FlywheelSim}.
      */
+    /**
+     * Creates a generic simple-motor simulation (flywheel/roller). Uses mechanism motor data for
+     * the motor model and supports optional overrides like inertia or units-per-radian.
+     *
+     * @param params optional physical parameters for the simple-motor model
+     * @return simulation configuration
+     */
     public static MechanismSimulationConfig simpleMotor(SimpleMotorParameters params) {
-        Objects.requireNonNull(params);
+    Objects.requireNonNull(params);
         final MechanismSimulationConfig[] holder = new MechanismSimulationConfig[1];
         MechanismSimulationConfig config = new MechanismSimulationConfig(
                 mechanism -> {
@@ -299,16 +326,33 @@ public final class MechanismSimulationConfig {
         private Builder() {
         }
 
+        /**
+         * Supplies the factory that produces a simulation model for the mechanism instance.
+         *
+         * @param factory function that creates a {@link MechanismSimulationModel}
+         * @return this builder for chaining
+         */
         public Builder withFactory(Function<Mechanism, MechanismSimulationModel> factory) {
             this.factory = Objects.requireNonNull(factory);
             return this;
         }
 
+        /**
+         * Sets the update period used when stepping the simulation model.
+         *
+         * @param updatePeriodSeconds loop period in seconds
+         * @return this builder for chaining
+         */
         public Builder withUpdatePeriodSeconds(double updatePeriodSeconds) {
             this.updatePeriodSeconds = updatePeriodSeconds;
             return this;
         }
 
+        /**
+         * Builds the immutable {@link MechanismSimulationConfig}.
+         *
+         * @return constructed simulation configuration
+         */
         public MechanismSimulationConfig build() {
             return new MechanismSimulationConfig(
                     Objects.requireNonNull(factory, "Simulation factory must be provided"),
@@ -395,56 +439,122 @@ public final class MechanismSimulationConfig {
         private ElevatorParameters() {
         }
 
+        /**
+         * Creates a new parameter builder for elevator simulations.
+         *
+         * @return new parameter instance
+         */
         public static ElevatorParameters create() {
             return new ElevatorParameters();
         }
 
+        /**
+         * Overrides the effective gearing between the motor and elevator carriage.
+         *
+         * @param gearing motor rotations per carriage rotation
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters gearing(double gearing) {
             this.gearing = gearing;
             return this;
         }
 
+        /**
+         * Sets the elevator carriage mass used in the physics model.
+         *
+         * @param carriageMassKg mass in kilograms
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters carriageMassKg(double carriageMassKg) {
             this.carriageMassKg = carriageMassKg;
             return this;
         }
 
+        /**
+         * Sets the drum/cable radius in meters.
+         *
+         * @param drumRadiusMeters radius in meters
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters drumRadiusMeters(double drumRadiusMeters) {
             this.drumRadiusMeters = drumRadiusMeters;
             return this;
         }
 
+        /**
+         * Sets the travel constraints for the elevator carriage.
+         *
+         * @param minHeight minimum height in meters
+         * @param maxHeight maximum height in meters
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters heightLimits(double minHeight, double maxHeight) {
             this.minHeightMeters = minHeight;
             this.maxHeightMeters = maxHeight;
             return this;
         }
 
+        /**
+         * Enables or disables gravity in the simulation.
+         *
+         * @param simulateGravity true to simulate gravity
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters simulateGravity(boolean simulateGravity) {
             this.simulateGravity = simulateGravity;
             return this;
         }
 
+        /**
+         * Sets the elevator carriage starting height.
+         *
+         * @param startingHeightMeters starting height in meters
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters startingHeight(double startingHeightMeters) {
             this.startingHeightMeters = startingHeightMeters;
             return this;
         }
 
+        /**
+         * Overrides the conversion from encoder units to meters.
+         *
+         * @param unitsPerMeter encoder units per meter of travel
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters unitsPerMeter(double unitsPerMeter) {
             this.unitsPerMeter = unitsPerMeter;
             return this;
         }
 
+        /**
+         * Sets the nominal battery voltage that bounds the simulated output.
+         *
+         * @param nominalVoltage voltage in volts
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters nominalVoltage(double nominalVoltage) {
             this.nominalVoltage = nominalVoltage;
             return this;
         }
 
+        /**
+         * Substitutes a specific {@link DCMotor} model instead of deriving one from the mechanism.
+         *
+         * @param motor motor model to use
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters withMotorOverride(DCMotor motor) {
             this.motorOverride = Objects.requireNonNull(motor);
             return this;
         }
 
+        /**
+         * Sets the simulation update period for the generated model.
+         *
+         * @param updatePeriodSeconds loop period in seconds
+         * @return this parameter builder for chaining
+         */
         public ElevatorParameters updatePeriodSeconds(double updatePeriodSeconds) {
             this.updatePeriodSeconds = updatePeriodSeconds;
             return this;
@@ -467,56 +577,122 @@ public final class MechanismSimulationConfig {
         private ArmParameters() {
         }
 
+        /**
+         * Creates a new parameter builder for single-jointed arm simulations.
+         *
+         * @return new parameter instance
+         */
         public static ArmParameters create() {
             return new ArmParameters();
         }
 
+        /**
+         * Overrides the effective motor-to-arm gearing.
+         *
+         * @param gearing motor rotations per arm rotation
+         * @return this parameter builder for chaining
+         */
         public ArmParameters gearing(double gearing) {
             this.gearing = gearing;
             return this;
         }
 
+        /**
+         * Sets the arm's moment of inertia about the pivot.
+         *
+         * @param momentOfInertia inertia in kg·m^2
+         * @return this parameter builder for chaining
+         */
         public ArmParameters momentOfInertia(double momentOfInertia) {
             this.momentOfInertia = momentOfInertia;
             return this;
         }
 
+        /**
+         * Sets the arm length from pivot to end effector.
+         *
+         * @param armLengthMeters length in meters
+         * @return this parameter builder for chaining
+         */
         public ArmParameters armLengthMeters(double armLengthMeters) {
             this.armLengthMeters = armLengthMeters;
             return this;
         }
 
+        /**
+         * Sets the allowable angular travel range.
+         *
+         * @param minAngleRadians minimum angle in radians
+         * @param maxAngleRadians maximum angle in radians
+         * @return this parameter builder for chaining
+         */
         public ArmParameters angleLimits(double minAngleRadians, double maxAngleRadians) {
             this.minAngleRadians = minAngleRadians;
             this.maxAngleRadians = maxAngleRadians;
             return this;
         }
 
+        /**
+         * Enables or disables gravity torque in the simulation.
+         *
+         * @param simulateGravity true to include gravity
+         * @return this parameter builder for chaining
+         */
         public ArmParameters simulateGravity(boolean simulateGravity) {
             this.simulateGravity = simulateGravity;
             return this;
         }
 
+        /**
+         * Sets the starting arm angle for the simulation.
+         *
+         * @param startingAngleRadians starting angle in radians
+         * @return this parameter builder for chaining
+         */
         public ArmParameters startingAngle(double startingAngleRadians) {
             this.startingAngleRadians = startingAngleRadians;
             return this;
         }
 
+        /**
+         * Overrides the conversion from encoder units to radians.
+         *
+         * @param unitsPerRadian encoder units per radian
+         * @return this parameter builder for chaining
+         */
         public ArmParameters unitsPerRadian(double unitsPerRadian) {
             this.unitsPerRadian = unitsPerRadian;
             return this;
         }
 
+        /**
+         * Sets the nominal battery voltage that bounds the simulated output.
+         *
+         * @param nominalVoltage voltage in volts
+         * @return this parameter builder for chaining
+         */
         public ArmParameters nominalVoltage(double nominalVoltage) {
             this.nominalVoltage = nominalVoltage;
             return this;
         }
 
+        /**
+         * Substitutes a specific {@link DCMotor} model instead of deriving one from the mechanism.
+         *
+         * @param motor motor model to use
+         * @return this parameter builder for chaining
+         */
         public ArmParameters withMotorOverride(DCMotor motor) {
             this.motorOverride = Objects.requireNonNull(motor);
             return this;
         }
 
+        /**
+         * Sets the simulation update period for the generated model.
+         *
+         * @param updatePeriodSeconds loop period in seconds
+         * @return this parameter builder for chaining
+         */
         public ArmParameters updatePeriodSeconds(double updatePeriodSeconds) {
             this.updatePeriodSeconds = updatePeriodSeconds;
             return this;
@@ -534,35 +710,76 @@ public final class MechanismSimulationConfig {
         private SimpleMotorParameters() {
         }
 
+        /**
+         * Creates a new parameter builder for roller/flywheel simulations.
+         *
+         * @return new parameter instance
+         */
         public static SimpleMotorParameters create() {
             return new SimpleMotorParameters();
         }
 
+        /**
+         * Overrides the effective motor-to-output gearing.
+         *
+         * @param gearing motor rotations per output rotation
+         * @return this parameter builder for chaining
+         */
         public SimpleMotorParameters gearing(double gearing) {
             this.gearing = gearing;
             return this;
         }
 
+        /**
+         * Sets the inertia of the rotating system.
+         *
+         * @param momentOfInertia inertia in kg·m^2
+         * @return this parameter builder for chaining
+         */
         public SimpleMotorParameters momentOfInertia(double momentOfInertia) {
             this.momentOfInertia = momentOfInertia;
             return this;
         }
 
+        /**
+         * Overrides the conversion from encoder units to radians.
+         *
+         * @param unitsPerRadian encoder units per radian
+         * @return this parameter builder for chaining
+         */
         public SimpleMotorParameters unitsPerRadian(double unitsPerRadian) {
             this.unitsPerRadian = unitsPerRadian;
             return this;
         }
 
+        /**
+         * Sets the nominal battery voltage that bounds the simulated output.
+         *
+         * @param nominalVoltage voltage in volts
+         * @return this parameter builder for chaining
+         */
         public SimpleMotorParameters nominalVoltage(double nominalVoltage) {
             this.nominalVoltage = nominalVoltage;
             return this;
         }
 
+        /**
+         * Substitutes a specific {@link DCMotor} model instead of deriving one from the mechanism.
+         *
+         * @param motor motor model to use
+         * @return this parameter builder for chaining
+         */
         public SimpleMotorParameters withMotorOverride(DCMotor motor) {
             this.motorOverride = Objects.requireNonNull(motor);
             return this;
         }
 
+        /**
+         * Sets the simulation update period for the generated model.
+         *
+         * @param updatePeriodSeconds loop period in seconds
+         * @return this parameter builder for chaining
+         */
         public SimpleMotorParameters updatePeriodSeconds(double updatePeriodSeconds) {
             this.updatePeriodSeconds = updatePeriodSeconds;
             return this;

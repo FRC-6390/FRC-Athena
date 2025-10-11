@@ -51,6 +51,10 @@ public final class SuperstructureConfig<E extends Enum<E> & SuperstructureState<
         return context;
     }
 
+    /**
+     * Creates a new builder for the supplied superstructure state enum. The enum must implement
+     * {@link SuperstructureState} so it can configure individual mechanism goals.
+     */
     public static <E extends Enum<E> & SuperstructureState<C>, C extends SuperstructureContext>
     Builder<E, C> builder(Class<E> stateClass) {
         return new Builder<>(stateClass);
@@ -67,27 +71,50 @@ public final class SuperstructureConfig<E extends Enum<E> & SuperstructureState<
             this.stateClass = Objects.requireNonNull(stateClass);
         }
 
+        /**
+         * Provides a concrete context instance that will be shared with all superstructure states.
+         */
         public Builder<E, C> withContext(C context) {
             this.contextSupplier = () -> Objects.requireNonNull(context);
             return this;
         }
 
+        /**
+         * Provides a supplier that lazily constructs the superstructure context during {@link #build()}.
+         */
         public Builder<E, C> withContext(Supplier<C> contextSupplier) {
             this.contextSupplier = () -> Objects.requireNonNull(contextSupplier.get());
             return this;
         }
 
+        /**
+         * Sets the initial macro state used when the superstructure starts up.
+         */
         public Builder<E, C> initialState(E state) {
             this.initialState = Objects.requireNonNull(state);
             return this;
         }
 
+        /**
+         * Registers a mechanism that participates in the superstructure. The supplied state machine's
+         * enum must implement {@link SetpointProvider} so superstructure states can command it.
+         *
+         * @param key unique name for the mechanism binding (used within the context)
+         * @param stateMachine the mechanism's state machine instance
+         */
         public <M extends Enum<M> & SetpointProvider<?>> Builder<E, C> withMechanism(
                 String key, StateMachine<?, M> stateMachine) {
             mechanisms.put(key, new SuperstructureMechanismBinding<>(stateMachine));
             return this;
         }
 
+        /**
+         * Finalizes the configuration, instantiates the context, and precomputes all state
+         * definitions by calling {@link SuperstructureState#configure}. Also registers the states
+         * with the global {@link SuperstructureStateRegistry}.
+         *
+         * @throws IllegalStateException if any required pieces (mechanism, initial state, context) are missing
+         */
         public SuperstructureConfig<E, C> build() {
             if (mechanisms.isEmpty()) {
                 throw new IllegalStateException("At least one mechanism must be registered.");

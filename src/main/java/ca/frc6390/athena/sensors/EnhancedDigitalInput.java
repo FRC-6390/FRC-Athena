@@ -4,11 +4,14 @@ import ca.frc6390.athena.commands.RunnableTrigger;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import edu.wpi.first.wpilibj.DigitalInput;
+import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+import edu.wpi.first.wpilibj.simulation.DIOSim;
 
 public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendableDevice{
 
     private final DigitalInput input;
+    private final DIOSim dioSim;
     private boolean inverted;
 
     public EnhancedDigitalInput(int channel) {
@@ -24,6 +27,7 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
         super(() -> inverted ? !input.get() : input.get());
         this.inverted = inverted;
         this.input = input;
+        this.dioSim = RobotBase.isSimulation() ? new DIOSim(input) : null;
     }
 
     public void close(){
@@ -36,6 +40,25 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
 
     public boolean isInverted() {
         return inverted;
+    }
+
+    public boolean supportsSimulation() {
+        return dioSim != null;
+    }
+
+    public void setSimulatedRawValue(boolean value) {
+        if (dioSim == null) {
+            return;
+        }
+        dioSim.setValue(value);
+    }
+
+    public void setSimulatedTriggered(boolean triggered) {
+        if (dioSim == null) {
+            return;
+        }
+        boolean raw = inverted ? !triggered : triggered;
+        dioSim.setValue(raw);
     }
 
     public int getPort(){

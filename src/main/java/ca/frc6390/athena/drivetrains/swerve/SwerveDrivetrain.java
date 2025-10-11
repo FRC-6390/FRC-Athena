@@ -8,14 +8,17 @@ import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotDrivetrain;
-import ca.frc6390.athena.core.RobotLocalization;
-import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
+import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
+import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator3d;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
@@ -279,10 +282,52 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
 
   @Override
   public RobotLocalization<SwerveModulePosition[]> localization(RobotLocalizationConfig config) {
-    
-    SwerveDrivePoseEstimator f = new SwerveDrivePoseEstimator(kinematics, imu.getYaw(), getPositions(), new Pose2d(), config.getStd(), config.getVisionStd());
-    SwerveDrivePoseEstimator r = new SwerveDrivePoseEstimator(kinematics, imu.getYaw(), getPositions(), new Pose2d(), config.getStd(), config.getVisionStd());
+    RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defualt();
+    if (effectiveConfig.poseSpace() == RobotLocalizationConfig.PoseSpace.THREE_D) {
+      Rotation3d gyroRotation = getImuRotation3d();
+      SwerveDrivePoseEstimator3d fieldEstimator =
+              new SwerveDrivePoseEstimator3d(
+                      kinematics,
+                      gyroRotation,
+                      getPositions(),
+                      new Pose3d(),
+                      effectiveConfig.getStd3d(),
+                      effectiveConfig.getVisionStd3d());
+      SwerveDrivePoseEstimator3d relativeEstimator =
+              new SwerveDrivePoseEstimator3d(
+                      kinematics,
+                      gyroRotation,
+                      getPositions(),
+                      new Pose3d(),
+                      effectiveConfig.getStd3d(),
+                      effectiveConfig.getVisionStd3d());
+      return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, robotSpeeds, imu, this::getPositions);
+    }
 
-    return new RobotLocalization<SwerveModulePosition[]>(f, r, config, robotSpeeds, imu, this::getPositions);
+    SwerveDrivePoseEstimator fieldEstimator =
+            new SwerveDrivePoseEstimator(
+                    kinematics,
+                    imu.getYaw(),
+                    getPositions(),
+                    new Pose2d(),
+                    effectiveConfig.getStd(),
+                    effectiveConfig.getVisionStd());
+    SwerveDrivePoseEstimator relativeEstimator =
+            new SwerveDrivePoseEstimator(
+                    kinematics,
+                    imu.getYaw(),
+                    getPositions(),
+                    new Pose2d(),
+                    effectiveConfig.getStd(),
+                    effectiveConfig.getVisionStd());
+
+    return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, robotSpeeds, imu, this::getPositions);
+  }
+
+  private Rotation3d getImuRotation3d() {
+    return new Rotation3d(
+            imu.getRoll().getRadians(),
+            imu.getPitch().getRadians(),
+            imu.getYaw().getRadians());
   }
 }

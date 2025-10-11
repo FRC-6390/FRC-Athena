@@ -4,15 +4,18 @@ import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.commands.control.TankDriveCommand;
 import ca.frc6390.athena.core.RobotDrivetrain;
-import ca.frc6390.athena.core.RobotLocalization;
-import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
+import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.devices.EncoderGroup;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorControllerGroup;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator;
+import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator3d;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.DifferentialDriveKinematics;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelPositions;
@@ -104,15 +107,62 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     }
 
     public DifferentialDriveWheelPositions getPositions(){
-        return new DifferentialDriveWheelPositions(leftEncoders.getPosition(), rightEncoders.getPosition());
+     return new DifferentialDriveWheelPositions(leftEncoders.getPosition(), rightEncoders.getPosition());
     }
 
      @Override
     public RobotLocalization<DifferentialDriveWheelPositions> localization(RobotLocalizationConfig config) {
-        
-        DifferentialDrivePoseEstimator f = new DifferentialDrivePoseEstimator(kinematics, imu.getYaw(), getPositions().leftMeters, getPositions().rightMeters, new Pose2d(), config.getStd(), config.getVisionStd());
-        DifferentialDrivePoseEstimator r = new DifferentialDrivePoseEstimator(kinematics, imu.getYaw(), getPositions().leftMeters, getPositions().rightMeters, new Pose2d(), config.getStd(), config.getVisionStd());
+        RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defualt();
+        DifferentialDriveWheelPositions positions = getPositions();
+        if (effectiveConfig.poseSpace() == RobotLocalizationConfig.PoseSpace.THREE_D) {
+            Rotation3d gyroRotation = getImuRotation3d();
+            DifferentialDrivePoseEstimator3d fieldEstimator =
+                    new DifferentialDrivePoseEstimator3d(
+                            kinematics,
+                            gyroRotation,
+                            positions.leftMeters,
+                            positions.rightMeters,
+                            new Pose3d(),
+                            effectiveConfig.getStd3d(),
+                            effectiveConfig.getVisionStd3d());
+            DifferentialDrivePoseEstimator3d relativeEstimator =
+                    new DifferentialDrivePoseEstimator3d(
+                            kinematics,
+                            gyroRotation,
+                            positions.leftMeters,
+                            positions.rightMeters,
+                            new Pose3d(),
+                            effectiveConfig.getStd3d(),
+                            effectiveConfig.getVisionStd3d());
+            return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, getRobotSpeeds(), imu, this::getPositions);
+        }
 
-        return new RobotLocalization<DifferentialDriveWheelPositions>(f, r, config, getRobotSpeeds(), imu, this::getPositions);
+        DifferentialDrivePoseEstimator fieldEstimator =
+                new DifferentialDrivePoseEstimator(
+                        kinematics,
+                        imu.getYaw(),
+                        positions.leftMeters,
+                        positions.rightMeters,
+                        new Pose2d(),
+                        effectiveConfig.getStd(),
+                        effectiveConfig.getVisionStd());
+        DifferentialDrivePoseEstimator relativeEstimator =
+                new DifferentialDrivePoseEstimator(
+                        kinematics,
+                        imu.getYaw(),
+                        positions.leftMeters,
+                        positions.rightMeters,
+                        new Pose2d(),
+                        effectiveConfig.getStd(),
+                        effectiveConfig.getVisionStd());
+
+        return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, getRobotSpeeds(), imu, this::getPositions);
+    }
+
+    private Rotation3d getImuRotation3d() {
+        return new Rotation3d(
+                imu.getRoll().getRadians(),
+                imu.getPitch().getRadians(),
+                imu.getYaw().getRadians());
     }
 }

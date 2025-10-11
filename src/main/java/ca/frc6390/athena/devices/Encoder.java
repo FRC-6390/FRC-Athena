@@ -242,7 +242,7 @@ public class Encoder implements RobotSendableDevice{
      * Get the velocity in rotations of the encoder with gearRatio and offset applied
      */
     public double getRate() {
-        return velocity * gearRatio + offset;
+        return velocity * gearRatio;
     }
 
      /**
@@ -263,35 +263,39 @@ public class Encoder implements RobotSendableDevice{
         return this;
     }
 
-    private double simPosition = 0;
-    private double simVelocity = 0;
+    private double toStored(double raw) {
+        return inverted ? -raw : raw;
+    }
 
-    public void setSimulatedVelocity(double velocity) {
-        this.simVelocity = velocity;
+    private double toRaw(double stored) {
+        return inverted ? -stored : stored;
+    }
+
+    private void updateSimulatedAbsoluteFromRaw(double rawRotations) {
+        double fractional = rawRotations - Math.floor(rawRotations);
+        absolutePosition = toStored(fractional);
+    }
+
+    public void setSimulatedVelocity(double rotationsPerSecond) {
+        velocity = toStored(rotationsPerSecond);
     }
 
     public Encoder simulatedUpdate(double dt) {
-        simPosition += simVelocity * dt;
-
-        position = inverted ? -simPosition : simPosition;
-        velocity = inverted ? -simVelocity : simVelocity;
-        absolutePosition = position - Math.floor(position);
-
+        double rawRotations = toRaw(position);
+        double rawVelocity = toRaw(velocity);
+        rawRotations += rawVelocity * dt;
+        setSimulatedState(rawRotations, rawVelocity);
         return this;
     }
 
     public void setSimulatedPosition(double rotations) {
-        this.simPosition = rotations;
-        position = inverted ? -simPosition : simPosition;
-        absolutePosition = position - Math.floor(position);
+        position = toStored(rotations);
+        updateSimulatedAbsoluteFromRaw(rotations);
     }
 
     public void setSimulatedState(double rotations, double velocity) {
-        this.simPosition = rotations;
-        this.simVelocity = velocity;
-        position = inverted ? -simPosition : simPosition;
-        this.velocity = inverted ? -simVelocity : simVelocity;
-        absolutePosition = position - Math.floor(position);
+        setSimulatedPosition(rotations);
+        setSimulatedVelocity(velocity);
     }
 
     public void setRotations(double rotations){
@@ -333,10 +337,6 @@ public class Encoder implements RobotSendableDevice{
         layout.addDouble("Absolute Position", this::getAbsolutePosition);
         layout.addDouble("Absolute Roation", this::getAbsoluteRotations);
         layout.addBoolean("Is Connected", this::isConnected);
-        if(RobotBase.isSimulation()){
-            layout.addDouble("simPosition", () -> simPosition);
-            layout.addDouble("simVelocity", () -> simVelocity);
-        }
         return layout;
     }
 }

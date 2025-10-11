@@ -24,6 +24,7 @@ import java.util.function.Supplier;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -43,13 +44,39 @@ public class LocalizationCamera {
      */
     public enum CoordinateSpace {
         /** Measurements expressed relative to the camera frame (X forward, Y left). */
-        CAMERA,
+        CAMERA(false, false),
         /** Measurements expressed relative to the robot frame after applying the camera transform. */
-        ROBOT,
-        /** Measurements anchored in the global field frame using the current robot pose. */
-        FIELD,
+        ROBOT(false, false),
+        /**
+         * Measurements anchored in the global field frame. If no robot pose override is supplied the
+         * camera's own estimated pose will be used when available.
+         */
+        FIELD(true, false),
         /** Measurements expressed relative to the observed tag pose. */
-        TAG
+        TAG(false, true);
+
+        private final boolean acceptsRobotPose;
+        private final boolean requiresTagPose;
+
+        CoordinateSpace(boolean acceptsRobotPose, boolean requiresTagPose) {
+            this.acceptsRobotPose = acceptsRobotPose;
+            this.requiresTagPose = requiresTagPose;
+        }
+
+        /**
+         * True when callers may supply a field-relative robot pose to influence the conversion. When
+         * {@code false} any supplied pose is ignored.
+         */
+        public boolean acceptsRobotPose() {
+            return acceptsRobotPose;
+        }
+
+        /**
+         * True when callers must supply a tag pose expressed in field coordinates for conversions.
+         */
+        public boolean requiresTagPose() {
+            return requiresTagPose;
+        }
     }
 
     /**
@@ -72,6 +99,7 @@ public class LocalizationCamera {
     private final BooleanSupplier connectedSupplier;
     private final BooleanSupplier hasTargetsSupplier;
     private final Supplier<Pose2d> poseSupplier;
+    private final Supplier<Pose3d> pose3dSupplier;
     private final DoubleSupplier latencySupplier;
     private final IntSupplier visibleTargetsSupplier;
     private final DoubleSupplier averageDistanceSupplier;
@@ -113,6 +141,7 @@ public class LocalizationCamera {
         this.connectedSupplier = wrapBoolean(config.getConnectedSupplier(), true);
         this.hasTargetsSupplier = wrapBoolean(config.getHasTargetsSupplier(), false);
         this.poseSupplier = wrapSupplier(config.getPoseSupplier(), Pose2d::new);
+        this.pose3dSupplier = wrapSupplier(config.getPose3dSupplier(), Pose3d::new);
         this.latencySupplier = wrapDouble(config.getLatencySupplier(), 0.0);
         this.visibleTargetsSupplier = wrapInt(config.getVisibleTargetsSupplier(), 0);
         this.averageDistanceSupplier = wrapDouble(config.getAverageDistanceSupplier(), Double.MAX_VALUE);
@@ -300,13 +329,16 @@ public class LocalizationCamera {
     public LocalizationData getLocalizationData() {
         update();
         Pose2d pose = poseSupplier.get();
+        Pose3d pose3d = pose3dSupplier.get();
         double latency = latencySupplier.getAsDouble();
         Matrix<N3, N1> stdDevs =
                 recalculateStdDevs(
                         visibleTargetsSupplier.getAsInt(),
                         averageDistanceSupplier.getAsDouble(),
                         config.getTrustDistance());
-        return new LocalizationData(pose != null ? pose : new Pose2d(), latency, stdDevs);
+        Pose2d safePose = pose != null ? pose : new Pose2d();
+        Pose3d safePose3d = pose3d != null ? pose3d : new Pose3d(safePose);
+        return new LocalizationData(safePose, safePose3d, latency, stdDevs);
     }
 
     /**
@@ -465,6 +497,29 @@ public class LocalizationCamera {
     }
 
     /**
+     * Returns the latest observation in the requested coordinate space, relying on internal pose
+     * estimates when explicit poses are not required. For {@link CoordinateSpace#FIELD} conversions the
+     * camera's estimated pose is used when available.
+     *
+     * @param space target coordinate system
+     */
+    public Optional<TargetObservation> getLatestObservation(CoordinateSpace space) {
+        return getLatestObservation(space, null, null);
+    }
+
+    /**
+     * Returns the latest observation in the requested coordinate space using the supplied robot pose
+     * when needed. Use {@link #getLatestObservation(CoordinateSpace, Pose2d, Pose2d)} when a tag pose
+     * is also required.
+     *
+     * @param space target coordinate system
+     * @param robotPose robot pose in field space when required (FIELD conversions)
+     */
+    public Optional<TargetObservation> getLatestObservation(CoordinateSpace space, Pose2d robotPose) {
+        return getLatestObservation(space, robotPose, null);
+    }
+
+    /**
      * Returns the latest observation in the requested coordinate space.
      *
      * @param space target coordinate system
@@ -503,8 +558,12 @@ public class LocalizationCamera {
                         visibleTargetsSupplier.getAsInt(),
                         averageDistanceSupplier.getAsDouble(),
                         config.getTrustDistance());
+        Pose2d vendorPose = poseSupplier.get();
+        Pose2d safePose = vendorPose != null ? vendorPose : new Pose2d();
+        Pose3d vendorPose3d = pose3dSupplier.get();
+        Pose3d safePose3d = vendorPose3d != null ? vendorPose3d : new Pose3d(safePose);
         LocalizationData data =
-                new LocalizationData(poseSupplier.get(), latencySupplier.getAsDouble(), stdDevs);
+                new LocalizationData(safePose, safePose3d, latencySupplier.getAsDouble(), stdDevs);
         double defaultConfidence = getMeasurementConfidence();
 
         List<TargetObservation> observations = new ArrayList<>(measurements.size());
@@ -512,7 +571,9 @@ public class LocalizationCamera {
             Optional<Translation2d> cameraTranslationOpt = cameraTranslationFromMeasurement(measurement);
             Optional<Translation2d> translatedOpt =
                     cameraTranslationOpt.flatMap(
-                            ct -> convertCameraTranslationToSpace(ct, space, robotPose, tagPose));
+                            ct ->
+                                    convertCameraTranslationToSpace(
+                                            ct, space, robotPose, vendorPose, tagPose));
             Translation2d translated = translatedOpt.orElse(null);
 
             double yaw =
@@ -545,6 +606,25 @@ public class LocalizationCamera {
         }
 
         return observations;
+    }
+
+    /**
+     * Convenience overload of {@link #getObservations(CoordinateSpace, Pose2d, Pose2d)} that uses the
+     * camera's current pose estimate when explicit poses are optional for the requested space.
+     */
+    public List<TargetObservation> getObservations(CoordinateSpace space) {
+        return getObservations(space, null, null);
+    }
+
+    /**
+     * Convenience overload of {@link #getObservations(CoordinateSpace, Pose2d, Pose2d)} for coordinate
+     * systems that only require the robot pose (e.g. {@link CoordinateSpace#FIELD}).
+     *
+     * @param space target coordinate system
+     * @param robotPose robot pose in field space when required
+     */
+    public List<TargetObservation> getObservations(CoordinateSpace space, Pose2d robotPose) {
+        return getObservations(space, robotPose, null);
     }
 
     /**
@@ -601,6 +681,29 @@ public class LocalizationCamera {
             return Optional.empty();
         }
         return Optional.ofNullable(observations.get(0).translation());
+    }
+
+    /**
+     * Convenience overload of {@link #getTargetTranslation(CoordinateSpace, Pose2d, Pose2d)} that
+     * relies solely on the data required for the chosen coordinate space, falling back to the camera's
+     * estimated pose when appropriate.
+     *
+     * @param space target coordinate system
+     */
+    public Optional<Translation2d> getTargetTranslation(CoordinateSpace space) {
+        return getTargetTranslation(space, null, null);
+    }
+
+    /**
+     * Convenience overload of {@link #getTargetTranslation(CoordinateSpace, Pose2d, Pose2d)} that
+     * accepts only the robot pose when that is the only additional information required for the
+     * conversion.
+     *
+     * @param space target coordinate system
+     * @param robotPose robot pose in field space when required
+     */
+    public Optional<Translation2d> getTargetTranslation(CoordinateSpace space, Pose2d robotPose) {
+        return getTargetTranslation(space, robotPose, null);
     }
 
     private Optional<Translation2d> getPrimaryCameraTranslation() {
@@ -689,18 +792,23 @@ public class LocalizationCamera {
      * pose information.
      */
     private Optional<Translation2d> convertCameraTranslationToSpace(
-            Translation2d cameraTranslation, CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
+            Translation2d cameraTranslation,
+            CoordinateSpace space,
+            Pose2d robotPose,
+            Pose2d fallbackRobotPose,
+            Pose2d tagPose) {
         return switch (space) {
             case CAMERA -> Optional.of(cameraTranslation);
             case ROBOT -> Optional.of(toRobotTranslation(cameraTranslation));
             case FIELD -> {
-                if (robotPose == null) {
+                Pose2d resolvedPose = robotPose != null ? robotPose : fallbackRobotPose;
+                if (resolvedPose == null) {
                     yield Optional.empty();
                 }
                 Translation2d robotRelative = toRobotTranslation(cameraTranslation);
                 yield Optional.of(
-                        robotPose.getTranslation()
-                                .plus(robotRelative.rotateBy(robotPose.getRotation())));
+                        resolvedPose.getTranslation()
+                                .plus(robotRelative.rotateBy(resolvedPose.getRotation())));
             }
             case TAG -> {
                 if (tagPose == null) {
@@ -736,11 +844,18 @@ public class LocalizationCamera {
     /**
      * Immutable bundle of localization data produced alongside camera measurements.
      *
-     * @param pose camera supplied robot pose in field space
+     * @param pose2d camera supplied robot pose in field space
+     * @param pose3d camera supplied robot pose in 3D field space
      * @param latency seconds of delay between photon capture and usable telemetry
      * @param stdDevs covariance diagonal representing the vendor estimate quality
      */
-    public static record LocalizationData(Pose2d pose, double latency, Matrix<N3, N1> stdDevs) {}
+    public static record LocalizationData(Pose2d pose2d, Pose3d pose3d, double latency, Matrix<N3, N1> stdDevs) {
+        public LocalizationData {
+            pose2d = pose2d != null ? pose2d : new Pose2d();
+            pose3d = pose3d != null ? pose3d : new Pose3d(pose2d);
+        }
+
+    }
 
     /**
      * Normalized representation of an observed target at a moment in time.

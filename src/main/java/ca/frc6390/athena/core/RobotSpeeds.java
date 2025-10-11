@@ -193,9 +193,17 @@ public class RobotSpeeds {
             return autoFeedbackAxis;
         }
 
-        // If driver axis and autoFeedback axis have the same sign, sum them
-        if (Math.signum(driverAxis) == Math.signum(autoFeedbackAxis)) {
-            return driverAxis + autoFeedbackAxis;
+        double driverSign = Math.signum(driverAxis);
+        double feedbackSign = Math.signum(autoFeedbackAxis);
+
+        if (feedbackSign == 0.0) {
+            return driverAxis;
+        }
+
+        if (driverSign == feedbackSign) {
+            double dominant = Math.max(Math.abs(driverAxis), Math.abs(autoFeedbackAxis));
+            // Use the larger magnitude so assistive control cannot spike the commanded speed
+            return Math.copySign(dominant, driverAxis);
         }
 
         // Otherwise, if they're in conflict, driver wins

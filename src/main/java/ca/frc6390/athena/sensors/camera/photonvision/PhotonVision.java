@@ -17,6 +17,7 @@ import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
@@ -41,24 +42,30 @@ public class PhotonVision extends PhotonCamera {
 
     private static final class LocalizationSnapshot {
         private final Pose2d pose;
+        private final Pose3d pose3d;
         private final double latencySeconds;
         private final int visibleTargets;
         private final double totalDistanceMeters;
 
         private LocalizationSnapshot(
-                Pose2d pose, double latencySeconds, int visibleTargets, double totalDistanceMeters) {
+                Pose2d pose, Pose3d pose3d, double latencySeconds, int visibleTargets, double totalDistanceMeters) {
             this.pose = pose;
+            this.pose3d = pose3d;
             this.latencySeconds = latencySeconds;
             this.visibleTargets = visibleTargets;
             this.totalDistanceMeters = totalDistanceMeters;
         }
 
         static LocalizationSnapshot empty() {
-            return new LocalizationSnapshot(new Pose2d(), 0.0, 0, Double.MAX_VALUE);
+            return new LocalizationSnapshot(new Pose2d(), new Pose3d(), 0.0, 0, Double.MAX_VALUE);
         }
 
         Pose2d pose() {
             return pose;
+        }
+
+        Pose3d pose3d() {
+            return pose3d;
         }
 
         double latencySeconds() {
@@ -110,6 +117,7 @@ public class PhotonVision extends PhotonCamera {
                         .setConnectedSupplier(this::isConnected)
                         .setHasTargetsSupplier(this::computeHasTargets)
                         .setPoseSupplier(this::supplyLocalizationPose)
+                        .setPose3dSupplier(this::supplyLocalizationPose3d)
                         .setLatencySupplier(this::supplyLocalizationLatency)
                         .setVisibleTargetsSupplier(this::supplyVisibleTargets)
                         .setAverageDistanceSupplier(this::supplyAverageDistance)
@@ -177,9 +185,10 @@ public class PhotonVision extends PhotonCamera {
         if (visionEst.isPresent()) {
             EstimatedRobotPose estimate = visionEst.get();
             DistanceObservation stats = calculateDistanceStats(estimate, lastTargets);
-        latestSnapshot =
+            latestSnapshot =
                     new LocalizationSnapshot(
                             estimate.estimatedPose.toPose2d(),
+                            estimate.estimatedPose,
                             estimate.timestampSeconds,
                             stats.tagCount(),
                             stats.totalDistanceMeters());
@@ -274,6 +283,10 @@ public class PhotonVision extends PhotonCamera {
 
     private Pose2d supplyLocalizationPose() {
         return latestSnapshot.pose();
+    }
+
+    private Pose3d supplyLocalizationPose3d() {
+        return latestSnapshot.pose3d();
     }
 
     private double supplyLocalizationLatency() {

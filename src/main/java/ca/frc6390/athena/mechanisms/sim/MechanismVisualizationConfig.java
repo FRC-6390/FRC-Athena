@@ -9,6 +9,7 @@ import java.util.function.Function;
 
 import ca.frc6390.athena.mechanisms.Mechanism;
 import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.wpilibj.util.Color8Bit;
 
 /**
  * Declarative description of a mechanism's visualization hierarchy. Each node defines a relative
@@ -16,9 +17,15 @@ import edu.wpi.first.math.geometry.Pose3d;
  */
 public final class MechanismVisualizationConfig {
 
+    /**
+     * Represents a visualization node. Each node has a unique name, a parent (root or another node),
+     * and a supplier that returns its pose relative to the parent when rendered.
+     */
     public record Node(String name,
                        String parent,
-                       Function<Mechanism, Pose3d> relativePoseSupplier) {
+                       Function<Mechanism, Pose3d> relativePoseSupplier,
+                       Color8Bit color,
+                       double lineWeight) {
     }
 
     private final String rootName;
@@ -58,32 +65,81 @@ public final class MechanismVisualizationConfig {
             this.rootName = Objects.requireNonNull(rootName);
         }
 
+        /**
+         * Supplies a dynamic pose for the root node. Called every loop with the mechanism instance.
+         */
         public Builder withRootPose(Function<Mechanism, Pose3d> poseSupplier) {
             this.rootPoseSupplier = Objects.requireNonNull(poseSupplier);
             return this;
         }
 
+        /**
+         * Sets a static pose for the root node.
+         */
         public Builder withStaticRootPose(Pose3d pose) {
             return withRootPose(mech -> pose);
         }
 
+        /**
+         * Adds a visualization node with a dynamic relative pose. The parent must be defined first.
+         *
+         * @param name unique node name
+         * @param parent parent node name or the root name
+         * @param relativePoseSupplier pose supplier evaluated relative to the parent
+         */
         public Builder addNode(String name,
                                String parent,
                                Function<Mechanism, Pose3d> relativePoseSupplier) {
+            return addNode(name, parent, relativePoseSupplier, null, Double.NaN);
+        }
+
+        public Builder addNode(String name,
+                               String parent,
+                               Function<Mechanism, Pose3d> relativePoseSupplier,
+                               Color8Bit color) {
+            return addNode(name, parent, relativePoseSupplier, color, Double.NaN);
+        }
+
+        public Builder addNode(String name,
+                               String parent,
+                               Function<Mechanism, Pose3d> relativePoseSupplier,
+                               Color8Bit color,
+                               double lineWeight) {
             Objects.requireNonNull(name);
             Objects.requireNonNull(parent);
             Objects.requireNonNull(relativePoseSupplier);
             if (!parent.equals(rootName) && !nodes.containsKey(parent)) {
                 throw new IllegalArgumentException("Parent node " + parent + " must be defined before " + name);
             }
-            nodes.put(name, new Node(name, parent, relativePoseSupplier));
+            nodes.put(name, new Node(name, parent, relativePoseSupplier, color, lineWeight));
             return this;
         }
 
+        /**
+         * Adds a visualization node with a fixed offset relative to its parent.
+         */
         public Builder addStaticNode(String name, String parent, Pose3d relativePose) {
             return addNode(name, parent, mech -> relativePose);
         }
 
+        public Builder addStaticNode(String name,
+                                     String parent,
+                                     Pose3d relativePose,
+                                     Color8Bit color) {
+            return addNode(name, parent, mech -> relativePose, color);
+        }
+
+        public Builder addStaticNode(String name,
+                                     String parent,
+                                     Pose3d relativePose,
+                                     Color8Bit color,
+                                     double lineWeight) {
+            return addNode(name, parent, mech -> relativePose, color, lineWeight);
+        }
+
+        /**
+         * Builds the immutable visualization configuration containing all registered nodes.
+         */
         public MechanismVisualizationConfig build() {
             return new MechanismVisualizationConfig(rootName, rootPoseSupplier, new ArrayList<>(nodes.values()));
         }

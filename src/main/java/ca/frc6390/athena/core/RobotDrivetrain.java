@@ -4,7 +4,8 @@ import java.util.Map;
 import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.controllers.EnhancedXboxController;
-import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
+import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;

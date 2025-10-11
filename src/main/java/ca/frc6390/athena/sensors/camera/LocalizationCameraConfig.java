@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.numbers.N1;
@@ -30,6 +31,7 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     private BooleanSupplier connectedSupplier = () -> true;
     private BooleanSupplier hasTargetsSupplier = () -> false;
     private Supplier<Pose2d> poseSupplier = Pose2d::new;
+    private Supplier<Pose3d> pose3dSupplier = Pose3d::new;
     private DoubleSupplier latencySupplier = () -> 0.0;
     private IntSupplier visibleTargetsSupplier = () -> 0;
     private DoubleSupplier averageDistanceSupplier = () -> Double.MAX_VALUE;
@@ -56,61 +58,109 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     private double displayHorizontalFovDeg = Double.NaN;
     private double displayRangeMeters = Double.NaN;
 
+    /**
+     * Creates a configuration bound to a specific NetworkTables table and camera software stack.
+     *
+     * @param table NetworkTables table name used by the camera
+     * @param software software family (PhotonVision, Limelight, etc.)
+     */
     public LocalizationCameraConfig(String table, CameraSoftware software) {
         this.table = table;
         this.software = software;
     }
 
+    /**
+     * Supplies a connectivity predicate so dashboards can reflect whether the camera is online.
+     */
     public LocalizationCameraConfig setConnectedSupplier(BooleanSupplier supplier) {
         this.connectedSupplier = supplier != null ? supplier : () -> true;
         return this;
     }
 
+    /**
+     * Supplies a predicate that reports whether the camera currently sees viable targets.
+     */
     public LocalizationCameraConfig setHasTargetsSupplier(BooleanSupplier supplier) {
         this.hasTargetsSupplier = supplier != null ? supplier : () -> false;
         return this;
     }
 
+    /**
+     * Supplies the 2D pose estimate reported by the camera.
+     */
     public LocalizationCameraConfig setPoseSupplier(Supplier<Pose2d> supplier) {
         this.poseSupplier = supplier != null ? supplier : Pose2d::new;
         return this;
     }
 
+    /**
+     * Supplies the full 3D pose estimate reported by the camera.
+     */
+    public LocalizationCameraConfig setPose3dSupplier(Supplier<Pose3d> supplier) {
+        this.pose3dSupplier = supplier != null ? supplier : Pose3d::new;
+        return this;
+    }
+
+    /**
+     * Supplies the latency (seconds) between image capture and pose estimation.
+     */
     public LocalizationCameraConfig setLatencySupplier(DoubleSupplier supplier) {
         this.latencySupplier = supplier != null ? supplier : () -> 0.0;
         return this;
     }
 
+    /**
+     * Supplies the number of fiducial targets currently visible.
+     */
     public LocalizationCameraConfig setVisibleTargetsSupplier(IntSupplier supplier) {
         this.visibleTargetsSupplier = supplier != null ? supplier : () -> 0;
         return this;
     }
 
+    /**
+     * Supplies the average distance (meters) from the camera to all detected targets.
+     */
     public LocalizationCameraConfig setAverageDistanceSupplier(DoubleSupplier supplier) {
         this.averageDistanceSupplier = supplier != null ? supplier : () -> Double.MAX_VALUE;
         return this;
     }
 
+    /**
+     * Provides a callback that accepts a new robot orientation when the camera pipeline refines it.
+     */
     public LocalizationCameraConfig setOrientationConsumer(Consumer<Pose2d> consumer) {
         this.orientationConsumer = consumer != null ? consumer : pose -> {};
         return this;
     }
 
+    /**
+     * Supplies an alternate orientation estimate that can be merged with the camera pose.
+     */
     public LocalizationCameraConfig setOrientationSupplier(Supplier<Pose2d> supplier) {
         this.orientationSupplier = supplier;
         return this;
     }
 
+    /**
+     * Registers a hook that runs after the camera updates its internal data structures.
+     */
     public LocalizationCameraConfig setUpdateHook(Runnable hook) {
         this.updateHook = hook;
         return this;
     }
 
+    /**
+     * Flags whether this camera should contribute to robot pose estimation.
+     */
     public LocalizationCameraConfig setUseForLocalization(boolean useForLocalization) {
         this.useForLocalization = useForLocalization;
         return this;
     }
 
+    /**
+     * Sets the maximum distance (meters) at which vision measurements are trusted without scaling
+     * their uncertainty.
+     */
     public LocalizationCameraConfig setTrustDistance(double trustDistance) {
         this.trustDistance = trustDistance;
         if (Double.isNaN(displayRangeMeters) || displayRangeMeters <= 0.0) {
@@ -119,16 +169,26 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
         return this;
     }
 
+    /**
+     * Supplies the single-tag measurement standard deviations (x, y, theta).
+     */
     public LocalizationCameraConfig setSingleStdDevs(Matrix<N3, N1> singleStdDevs) {
         this.singleStdDevs = singleStdDevs != null ? singleStdDevs : this.singleStdDevs;
         return this;
     }
 
+    /**
+     * Supplies the multi-tag measurement standard deviations (x, y, theta).
+     */
     public LocalizationCameraConfig setMultiStdDevs(Matrix<N3, N1> multiStdDevs) {
         this.multiStdDevs = multiStdDevs != null ? multiStdDevs : this.multiStdDevs;
         return this;
     }
 
+    /**
+     * Sets the camera-to-robot translation using a planar offset (meters). Rotation and height
+     * components remain unchanged.
+     */
     public LocalizationCameraConfig setCameraToRobotTranslation(Translation2d translation) {
         Translation2d value = translation != null ? translation : new Translation2d();
         robotToCameraTransform = new Transform3d(
@@ -140,6 +200,9 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
         return this;
     }
 
+    /**
+     * Sets the transform from robot origin to camera origin directly.
+     */
     public LocalizationCameraConfig setRobotToCameraTransform(Transform3d transform) {
         Transform3d value = transform != null ? transform : new Transform3d();
         this.robotToCameraTransform = value;
@@ -147,6 +210,9 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
         return this;
     }
 
+    /**
+     * Sets the transform from camera origin to robot origin directly.
+     */
     public LocalizationCameraConfig setCameraToRobotTransform(Transform3d transform) {
         Transform3d value = transform != null ? transform : new Transform3d();
         this.cameraToRobotTransform = value;
@@ -154,21 +220,33 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
         return this;
     }
 
+    /**
+     * Supplies the yaw (horizontal offset) to the best target in degrees.
+     */
     public LocalizationCameraConfig setTargetYawSupplier(DoubleSupplier supplier) {
         this.targetYawSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
 
+    /**
+     * Supplies the pitch (vertical offset) to the best target in degrees.
+     */
     public LocalizationCameraConfig setTargetPitchSupplier(DoubleSupplier supplier) {
         this.targetPitchSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
 
+    /**
+     * Supplies the overall confidence value [0, 1] returned by the camera pipeline.
+     */
     public LocalizationCameraConfig setConfidenceSupplier(DoubleSupplier supplier) {
         this.confidenceSupplier = supplier != null ? supplier : () -> 1.0;
         return this;
     }
 
+    /**
+     * Adds an operational role for the camera (aiming, localization, driver camera, etc.).
+     */
     public LocalizationCameraConfig addRole(CameraRole role) {
         if (role != null) {
             roles.add(role);
@@ -176,37 +254,60 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
         return this;
     }
 
+    /**
+     * Replaces the camera's role set entirely.
+     */
     public LocalizationCameraConfig setRoles(EnumSet<CameraRole> roles) {
         this.roles = roles != null ? EnumSet.copyOf(roles) : EnumSet.noneOf(CameraRole.class);
         return this;
     }
 
+    /**
+     * Supplies the distance (meters) to the best tag, if available.
+     */
     public LocalizationCameraConfig setTagDistanceSupplier(DoubleSupplier supplier) {
         this.targetDistanceSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
 
+    /**
+     * Supplies the ID of the best tag being tracked (-1 when none).
+     */
     public LocalizationCameraConfig setTagIdSupplier(IntSupplier supplier) {
         this.tagIdSupplier = supplier != null ? supplier : () -> -1;
         return this;
     }
 
+    /**
+     * Supplies the full list of per-target measurements returned by the camera.
+     */
     public LocalizationCameraConfig setTargetMeasurementsSupplier(
             Supplier<List<LocalizationCamera.TargetMeasurement>> supplier) {
         this.targetMeasurementsSupplier = supplier != null ? supplier : List::of;
         return this;
     }
 
+    /**
+     * Sets the horizontal field of view (degrees) used by dashboards to scale overlays.
+     */
     public LocalizationCameraConfig setDisplayHorizontalFov(double degrees) {
         this.displayHorizontalFovDeg = degrees;
         return this;
     }
 
+    /**
+     * Sets the render range (meters) used by dashboards for front-panel visualization.
+     */
     public LocalizationCameraConfig setDisplayRangeMeters(double rangeMeters) {
         this.displayRangeMeters = rangeMeters;
         return this;
     }
 
+    /**
+     * Registers a camera-specific capability object that can be queried later by the wrapper.
+     *
+     * @throws IllegalArgumentException if the capability instance does not match the expected type
+     */
     public LocalizationCameraConfig addCapability(LocalizationCameraCapability capabilityKey, Object capability) {
         if (capabilityKey != null && capability != null) {
             if (!capabilityKey.getType().isInstance(capability)) {
@@ -231,6 +332,10 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
 
     public Supplier<Pose2d> getPoseSupplier() {
         return poseSupplier;
+    }
+
+    public Supplier<Pose3d> getPose3dSupplier() {
+        return pose3dSupplier;
     }
 
     public DoubleSupplier getLatencySupplier() {

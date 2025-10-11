@@ -10,6 +10,7 @@ import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.wpilibj.smartdashboard.MechanismLigament2d;
 import edu.wpi.first.wpilibj.smartdashboard.MechanismRoot2d;
+import edu.wpi.first.wpilibj.util.Color8Bit;
 
 /** Maintains 2D and 3D visualization state for a mechanism. */
 public final class MechanismVisualization {
@@ -40,6 +41,13 @@ public final class MechanismVisualization {
             }
             ligaments.put(node.name(), ligament);
             graphObjects.put(node.name(), ligament);
+            Color8Bit color = node.color();
+            if (color != null) {
+                ligament.setColor(color);
+            }
+            if (!Double.isNaN(node.lineWeight())) {
+                ligament.setLineWeight(node.lineWeight());
+            }
         }
     }
 

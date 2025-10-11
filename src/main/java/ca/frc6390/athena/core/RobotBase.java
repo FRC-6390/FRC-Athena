@@ -2,13 +2,16 @@ package ca.frc6390.athena.core;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
-import ca.frc6390.athena.core.RobotLocalization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
+import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
@@ -29,32 +32,35 @@ import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 
-public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
-    
-    public record RobotBaseConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain, RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig) {
-        
-        public static RobotBaseConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config){
-            return new RobotBaseConfig<>(config, null, null);
-        }
-        
-        public static RobotBaseConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config){
-            return new RobotBaseConfig<>(config, null, null);
+public class RobotBase<T extends RobotDrivetrain<T>> extends TimedRobot {
+
+    public record RobotBaseConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
+            RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig) {
+
+        public static RobotBaseConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
+            return new RobotBaseConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt());
         }
 
-        public RobotBaseConfig<T> setLocalization(RobotLocalizationConfig localizationConfig){
+        public static RobotBaseConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
+            return new RobotBaseConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt());
+        }
+
+        public RobotBaseConfig<T> setLocalization(RobotLocalizationConfig localizationConfig) {
             return new RobotBaseConfig<>(driveTrain, localizationConfig, visionConfig);
         }
 
-        public RobotBaseConfig<T> setVision(RobotVisionConfig visionConfig){
+        public RobotBaseConfig<T> setVision(RobotVisionConfig visionConfig) {
             return new RobotBaseConfig<>(driveTrain, localizationConfig, visionConfig);
         }
 
-        public RobotBaseConfig<T> setVision(ConfigurableCamera... cameras){
-            return new RobotBaseConfig<>(driveTrain, localizationConfig, RobotVisionConfig.defualt().addCameras(cameras));
+        public RobotBaseConfig<T> setVision(ConfigurableCamera... cameras) {
+            return new RobotBaseConfig<>(driveTrain, localizationConfig,
+                    RobotVisionConfig.defualt().addCameras(cameras));
         }
 
-        public RobotBase<T> create(){
+        public RobotBase<T> create() {
             return new RobotBase<>(this);
         }
     }
@@ -66,16 +72,19 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
     private Notifier visionSimNotifier;
     private final RobotAuto autos;
     private final HashMap<String, Mechanism> mechanisms;
-    
+    private final Set<Mechanism> scheduledCustomPidMechanisms;
+    private Command autonomousCommand;
 
-    public RobotBase(RobotBaseConfig<T> config){
+    public RobotBase(RobotBaseConfig<T> config) {
         drivetrain = config.driveTrain.build();
-        localization = config.localizationConfig != null ? drivetrain.localization(config.localizationConfig()) : null;
-        vision = config.visionConfig != null ? RobotVision.fromConfig(config.visionConfig) : null; 
+        localization = drivetrain.localization(config.localizationConfig());
+        vision = RobotVision.fromConfig(config.visionConfig);
         autos = new RobotAuto();
         mechanisms = new HashMap<>();
+        scheduledCustomPidMechanisms = new HashSet<>();
+        autonomousCommand = null;
 
-        if(localization != null && vision != null){
+        if (localization != null && vision != null) {
             localization.setRobotVision(vision);
             localization.configureChoreo(drivetrain);
         }
@@ -89,19 +98,176 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
             });
             visionSimNotifier.startPeriodic(0.02);
         }
-
     }
 
-    public RobotBase<T> registerMechanism(Mechanism... mechs){
-        Arrays.stream(mechs).forEach(mech ->  mechanisms.put(mech.getName(), mech));
+    @Override
+    public final void robotInit() {
+        onRobotInit();
+        registerPIDCycles();
+    }
+
+    @Override
+    public final void robotPeriodic() {
+        CommandScheduler.getInstance().run();
+        onRobotPeriodic();
+    }
+
+    @Override
+    public final void autonomousInit() {
+        scheduleAutonomousCommand();
+        onAutonomousInit();
+    }
+
+    @Override
+    public final void autonomousExit() {
+        onAutonomousExit();
+    }
+
+    @Override
+    public final void autonomousPeriodic() {
+        onAutonomousPeriodic();
+    }
+
+    @Override
+    public final void teleopInit() {
+        cancelAutonomousCommand();
+        onTeleopInit();
+    }
+
+    @Override
+    public final void teleopExit() {
+        onTeleopExit();
+    }
+
+    @Override
+    public final void teleopPeriodic() {
+        onTeleopPeriodic();
+    }
+
+    @Override
+    public final void disabledInit() {
+        cancelAutonomousCommand();
+        onDisabledInit();
+    }
+
+    @Override
+    public final void disabledExit() {
+        onDisabledExit();
+    }
+
+    @Override
+    public final void disabledPeriodic() {
+        onDisabledPeriodic();
+    }
+
+    @Override
+    public final void testInit() {
+        CommandScheduler.getInstance().cancelAll();
+        cancelAutonomousCommand();
+        onTestInit();
+    }
+
+    @Override
+    public final void testExit() {
+        onTestExit();
+    }
+
+    @Override
+    public final void testPeriodic() {
+        onTestPeriodic();
+    }
+
+    @Override
+    public final void simulationInit() {
+        onSimulationInit();
+    }
+
+    @Override
+    public final void simulationPeriodic() {
+        onSimulationPeriodic();
+    }
+
+    protected void onRobotInit() {}
+
+    protected void onRobotPeriodic() {}
+
+    protected void onAutonomousInit() {}
+
+    protected void onAutonomousExit() {}
+
+    protected void onAutonomousPeriodic() {}
+
+    protected void onTeleopInit() {}
+
+    protected void onTeleopExit() {}
+
+    protected void onTeleopPeriodic() {}
+
+    protected void onDisabledInit() {}
+
+    protected void onDisabledExit() {}
+
+    protected void onDisabledPeriodic() {}
+
+    protected void onTestInit() {}
+
+    protected void onTestExit() {}
+
+    protected void onTestPeriodic() {}
+
+    protected void onSimulationInit() {}
+
+    protected void onSimulationPeriodic() {}
+
+    protected Command createAutonomousCommand() {
+        SendableChooser<Command> chooser = autos.getAutoChooser();
+        return chooser != null ? chooser.getSelected() : null;
+    }
+
+    private void scheduleAutonomousCommand() {
+        cancelAutonomousCommand();
+        Command selected = createAutonomousCommand();
+        if (selected != null) {
+            CommandScheduler.getInstance().schedule(selected);
+            autonomousCommand = selected;
+        }
+    }
+
+    private void cancelAutonomousCommand() {
+        if (autonomousCommand != null) {
+            autonomousCommand.cancel();
+            autonomousCommand = null;
+        }
+        getDrivetrain().getRobotSpeeds().stopSpeeds("auto");
+    }
+
+    private void scheduleCustomPidCycle(Mechanism mechanism) {
+        if (!mechanism.isCustomPIDCycle()) {
+            return;
+        }
+        if (!scheduledCustomPidMechanisms.add(mechanism)) {
+            return;
+        }
+        double period = mechanism.getPidPeriod();
+        if (!(period > 0.0)) {
+            period = 0.02;
+        }
+        addPeriodic(mechanism::updatePID, period);
+    }
+
+    public RobotBase<T> registerMechanism(Mechanism... mechs) {
+        Arrays.stream(mechs).forEach(mech -> {
+            mechanisms.put(mech.getName(), mech);
+            scheduleCustomPidCycle(mech);
+        });
         return this;
     }
 
-    public RobotLocalization<?> getLocalization(){
+    public RobotLocalization<?> getLocalization() {
         return localization;
     }
 
-    public T getDrivetrain(){
+    public T getDrivetrain() {
         return drivetrain.get();
     }
 
@@ -109,7 +275,7 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
         return vision;
     }
 
-     public RobotBase<T> shuffleboard() {
+    public RobotBase<T> shuffleboard() {
         return shuffleboard("Drivetrain");
     }
 
@@ -132,35 +298,42 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
     public RobotBase<T> shuffleboard(String drive, String local, SendableLevel level) {
         drivetrain.shuffleboard(drive, level);
 
-        if(localization != null){
+        if (localization != null) {
             localization.shuffleboard(local, level);
+        }
+
+        if (vision != null) {
+            vision.shuffleboard("Robot Vision", level);
         }
 
         return this;
     }
 
-
-    public LimeLight getCameraFacing(double x, double y){
+    public LimeLight getCameraFacing(double x, double y) {
         return getCameraFacing(new Translation2d(x, y));
     }
 
-    public LimeLight getCameraFacing(Translation2d translation2d){
+    public LimeLight getCameraFacing(Translation2d translation2d) {
 
         if (vision == null || localization == null) {
             return null;
         }
-    
+
         Pose2d pose = localization.getFieldPose();
-        Rotation2d targetAngle = Rotation2d.fromRadians(Math.atan2(translation2d.getY() - pose.getY(), translation2d.getX() - pose.getX()));
-        
+        Rotation2d targetAngle = Rotation2d.fromRadians(
+                Math.atan2(translation2d.getY() - pose.getY(), translation2d.getX() - pose.getX()));
+
         Rotation2d desiredRelativeAngle = targetAngle.minus(pose.getRotation());
-    
+
         LimeLight bestCamera = null;
         double smallestAngleDiff = Double.MAX_VALUE;
 
         for (var entry : vision.getCameras().entrySet()) {
-            java.util.Optional<LimeLight> optionalLimeLight = vision.getCameraCapability(entry.getKey(), LocalizationCameraCapability.LIMELIGHT);
-            if (optionalLimeLight.isEmpty()) continue;
+            java.util.Optional<LimeLight> optionalLimeLight =
+                    vision.getCameraCapability(entry.getKey(), LocalizationCameraCapability.LIMELIGHT);
+            if (optionalLimeLight.isEmpty()) {
+                continue;
+            }
 
             LimeLight limeLight = optionalLimeLight.get();
             Rotation2d cameraRelativeAngleRad =
@@ -174,57 +347,59 @@ public class RobotBase<T extends RobotDrivetrain<T>> { //extends TimedRobot {
         return bestCamera;
     }
 
-    public RotateToPoint rotateTo(double x, double y){
+    public RotateToPoint rotateTo(double x, double y) {
         return new RotateToPoint(this, x, y);
     }
 
-    public RotateToAngle rotateTo(double degrees){
+    public RotateToAngle rotateTo(double degrees) {
         return new RotateToAngle(this, degrees);
     }
 
-    public RotateToAngle rotateBy(double degrees){
-        return new RotateToAngle(this, getDrivetrain().getIMU().getYaw().plus(Rotation2d.fromDegrees(degrees)));
+    public RotateToAngle rotateBy(double degrees) {
+        return new RotateToAngle(
+                this,
+                getDrivetrain().getIMU().getYaw().plus(Rotation2d.fromDegrees(degrees)));
     }
 
-    public RobotSpeeds getRobotSpeeds(){
+    public RobotSpeeds getRobotSpeeds() {
         return drivetrain.getRobotSpeeds();
     }
 
-    public IMU getIMU(){
+    public IMU getIMU() {
         return drivetrain.getIMU();
     }
 
-    public RobotBase<T> registerPathPlannerAuto(String... auto){
+    public RobotBase<T> registerPathPlannerAuto(String... auto) {
         autos.registerPathplannerAuto(auto);
         return this;
     }
 
-    public SendableChooser<Command> registerAutoChooser(String defualtAuto){
+    public SendableChooser<Command> registerAutoChooser(String defualtAuto) {
         SmartDashboard.putData("Auto Chooser", autos.getSendableChooser(defualtAuto));
         return autos.getAutoChooser();
     }
 
-    public RobotAuto getAutos(){
+    public RobotAuto getAutos() {
         return autos;
     }
 
-    public void registerPIDCycles(TimedRobot robot){
-        for (Mechanism mech : mechanisms.values()) {
-            if (mech.isCustomPIDCycle()) robot.addPeriodic(mech::calculatePID, mech.getPidPeriod());
-        }
+    public void registerPIDCycles() {
+        mechanisms.values().forEach(this::scheduleCustomPidCycle);
     }
 
-    public void resetPIDs(){
+    public void resetPIDs() {
         for (Mechanism mech : mechanisms.values()) {
             mech.resetPID();
         }
     }
 
-    public ChassisSpeeds createRobotRelativeSpeeds(double xSpeed, double ySpeed, double rot){
-        return ChassisSpeeds.fromRobotRelativeSpeeds(new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
+    public ChassisSpeeds createRobotRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
+        return ChassisSpeeds.fromRobotRelativeSpeeds(
+                new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
     }
 
-    public ChassisSpeeds createFieldRelativeSpeeds(double xSpeed, double ySpeed, double rot){
-        return ChassisSpeeds.fromFieldRelativeSpeeds(new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
+    public ChassisSpeeds createFieldRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
+        return ChassisSpeeds.fromFieldRelativeSpeeds(
+                new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
     }
 }

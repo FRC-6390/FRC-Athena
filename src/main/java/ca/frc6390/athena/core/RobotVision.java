@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCamera.LocalizationData;
@@ -32,8 +33,9 @@ import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.apriltag.AprilTagFields;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
-public class RobotVision {
+public class RobotVision implements RobotSendableSystem {
    
    public record RobotVisionConfig(ArrayList<LimeLightConfig> limelight, ArrayList<PhotonVisionConfig> photon) {
 
@@ -94,7 +96,8 @@ public class RobotVision {
    private final EnumMap<CameraRole, List<LocalizationCamera>> camerasByRole;
    private final HashMap<String, PhotonVision> photonVisionCameras;
    private final HashMap<String, LimeLight> limeLightCameras;
-
+   private RobotLocalization<?> localization;
+   
    public RobotVision(RobotVisionConfig config) {
       this.config = config;
       this.cameras = new HashMap<>();
@@ -161,6 +164,10 @@ public class RobotVision {
       getLimeLightCamera(key).ifPresent(lime -> lime.setUseForLocalization(enabled));
       getPhotonVisionCamera(key).ifPresent(pv -> pv.setUseForLocalization(enabled));
       refreshCameraRoles(camera);
+   }
+
+   public void attachLocalization(RobotLocalization<?> localization) {
+      this.localization = localization;
    }
 
    public Optional<PhotonVision> getPhotonVisionCamera(String key) {
@@ -251,9 +258,9 @@ public class RobotVision {
    public Optional<LocalizationData> getBestLocalizationData() {
       return cameras.values().stream()
               .filter(LocalizationCamera::isUseForLocalization)
-              .filter(LocalizationCamera::hasValidTarget)
-              .map(LocalizationCamera::getLocalizationData)
-              .filter(data -> data != null && data.pose() != null)
+          .filter(LocalizationCamera::hasValidTarget)
+          .map(LocalizationCamera::getLocalizationData)
+          .filter(data -> data != null && data.pose2d() != null)
               .min(Comparator.comparingDouble(RobotVision::scoreLocalizationData));
    }
 
@@ -380,5 +387,16 @@ public class RobotVision {
       for (CameraRole role : camera.getRoles()) {
          camerasByRole.computeIfAbsent(role, __ -> new ArrayList<>()).add(camera);
       }
+   }
+
+   @Override
+   public ShuffleboardTab shuffleboard(ShuffleboardTab tab, RobotSendableSystem.SendableLevel level) {
+      if (localization != null) {
+         localization.registerVisionShuffleboardTab(tab);
+         tab.add("Vision Field", localization.getVisionField2d())
+                 .withPosition(0, 0)
+                 .withSize(4, 3);
+      }
+      return tab;
    }
 }

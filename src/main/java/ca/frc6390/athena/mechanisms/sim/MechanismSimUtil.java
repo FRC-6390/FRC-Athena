@@ -33,7 +33,7 @@ public final class MechanismSimUtil {
         double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
 
         double rawPosition = ((position + conversionOffset) / safeConversion + offset) / safeGearRatio;
-        double rawVelocity = ((velocity / safeConversion) - offset) / safeGearRatio;
+        double rawVelocity = (velocity / safeConversion) / safeGearRatio;
 
         if (!Double.isFinite(rawPosition)) {
             rawPosition = 0.0;
