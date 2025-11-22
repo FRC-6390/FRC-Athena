@@ -59,11 +59,38 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     }
 
     public void queueState(E state) {
-        queueState(state, () -> true);
+        queueState(state, StateGraph.Guards.always());
     }
 
     public void queueState(E state, BooleanSupplier condition) {
-        stateQueue.add(new StateQueueEntry<>(state, condition));
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(condition, "condition");
+
+        if (stateGraph == null) {
+            enqueue(state, condition);
+            return;
+        }
+
+        E start = tailState();
+        List<E> path = expandPath(start, state);
+        if (path.isEmpty() && !start.equals(state)) {
+            path = List.of(state);
+        }
+
+        if (path.isEmpty()) {
+            enqueue(state, condition);
+            return;
+        }
+
+        for (int i = 0; i < path.size(); i++) {
+            E next = path.get(i);
+            BooleanSupplier guard = edgeGuard(start, next);
+            if (i == path.size() - 1) {
+                guard = StateGraph.Guards.allOf(guard, condition);
+            }
+            enqueue(next, guard);
+            start = next;
+        }
     }
 
     public void setStateGraph(StateGraph<E> stateGraph) {
@@ -179,6 +206,10 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
             return StateGraph.Guards.always();
         }
         return stateGraph.guardFor(from, to);
+    }
+
+    private void enqueue(E state, BooleanSupplier condition) {
+        stateQueue.add(new StateQueueEntry<>(state, condition));
     }
 
     public Command waitUntilAtGoal() {

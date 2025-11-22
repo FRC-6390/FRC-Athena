@@ -264,6 +264,15 @@ public class RobotVision implements RobotSendableSystem {
               .min(Comparator.comparingDouble(RobotVision::scoreLocalizationData));
    }
 
+   public Optional<LocalizationCamera.VisionMeasurement> getBestVisionMeasurement() {
+      return cameras.values().stream()
+              .filter(LocalizationCamera::isUseForLocalization)
+              .map(LocalizationCamera::getLatestVisionMeasurement)
+              .flatMap(Optional::stream)
+              .filter(measurement -> measurement.pose2d() != null)
+              .min(Comparator.comparingDouble(RobotVision::scoreVisionMeasurement));
+   }
+
    private static double scoreLocalizationData(LocalizationData data) {
       double score = 0.0;
       Matrix<N3, N1> std = data.stdDevs();
@@ -285,6 +294,17 @@ public class RobotVision implements RobotSendableSystem {
       return sanitized;
    }
 
+   private static double scoreVisionMeasurement(LocalizationCamera.VisionMeasurement measurement) {
+      Matrix<N3, N1> std = measurement.stdDevs();
+      if (std == null) {
+         return Double.POSITIVE_INFINITY;
+      }
+      double stdX = safeStdDev(std.get(0, 0));
+      double stdY = safeStdDev(std.get(1, 0));
+      double stdTheta = safeStdDev(std.get(2, 0));
+      return stdX + stdY + stdTheta;
+   }
+
    public Set<String> getCameraTables() {
       return Set.copyOf(cameras.keySet());
    }
@@ -302,11 +322,9 @@ public class RobotVision implements RobotSendableSystem {
 
          LocalizationCamera.TargetObservation base = baseObservation.get();
          Pose2d tagPose = null;
-         if (space == CoordinateSpace.TAG) {
-            if (tagPoseLookup == null) continue;
+         if (space == CoordinateSpace.TAG && tagPoseLookup != null) {
             tagPose = tagPoseLookup.apply(base.tagId());
-            if (tagPose == null) continue;
-         } else if (space != CoordinateSpace.CAMERA && space != CoordinateSpace.ROBOT && space != CoordinateSpace.FIELD) {
+         } else if (space != CoordinateSpace.CAMERA && space != CoordinateSpace.ROBOT && space != CoordinateSpace.FIELD && space != CoordinateSpace.TAG) {
             continue;
          }
 

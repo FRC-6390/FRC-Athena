@@ -30,6 +30,7 @@ public class PhotonVision extends PhotonCamera {
     private final Transform3d pose;
     private final PhotonVisionConfig config;
     private final PhotonPoseEstimator estimator;
+    private final AprilTagFieldLayout fieldLayout;
     private List<PhotonPipelineResult> results;
     private boolean useForLocalization;
     private final LocalizationCamera localizationCamera;
@@ -91,11 +92,8 @@ public class PhotonVision extends PhotonCamera {
         super(config.table());
         this.config = config;
         this.pose = config.cameraRobotSpace();
-        this.estimator =
-                new PhotonPoseEstimator(
-                        AprilTagFieldLayout.loadField(config.fieldLayout()),
-                        config.poseStrategy(),
-                        pose);
+        this.fieldLayout = AprilTagFieldLayout.loadField(config.fieldLayout());
+        this.estimator = new PhotonPoseEstimator(fieldLayout, config.poseStrategy(), pose);
         estimator.setMultiTagFallbackStrategy(config.poseStrategyFallback());
         this.useForLocalization = config.useForLocalization();
         this.localizationCamera = createLocalizationCamera();
@@ -132,7 +130,8 @@ public class PhotonVision extends PhotonCamera {
                         .setTargetYawSupplier(this::supplyTargetYaw)
                         .setTagDistanceSupplier(this::supplyTargetDistance)
                         .setTagIdSupplier(this::supplyTargetId)
-                        .setTargetMeasurementsSupplier(this::supplyTargetMeasurements);
+                        .setTargetMeasurementsSupplier(this::supplyTargetMeasurements)
+                        .setFieldLayout(fieldLayout);
         return new LocalizationCamera(cameraConfig).registerCapability(LocalizationCameraCapability.PHOTON_VISION, this);
     }
 

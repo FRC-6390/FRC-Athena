@@ -7,9 +7,11 @@ import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -58,6 +60,7 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     private double displayHorizontalFovDeg = Double.NaN;
     private double displayRangeMeters = Double.NaN;
     private boolean publishPoseTopic;
+    private IntFunction<Pose2d> tagPoseResolver = id -> null;
 
     /**
      * Creates a configuration bound to a specific NetworkTables table and camera software stack.
@@ -123,6 +126,30 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
      */
     public LocalizationCameraConfig setAverageDistanceSupplier(DoubleSupplier supplier) {
         this.averageDistanceSupplier = supplier != null ? supplier : () -> Double.MAX_VALUE;
+        return this;
+    }
+
+    /**
+     * Supplies a resolver that returns the field-relative pose for the provided tag identifier.
+     *
+     * @param resolver callback mapping fiducial IDs to poses, or {@code null} to disable auto lookup
+     */
+    public LocalizationCameraConfig setTagPoseResolver(IntFunction<Pose2d> resolver) {
+        this.tagPoseResolver = resolver;
+        return this;
+    }
+
+    /**
+     * Installs a resolver that looks up tag poses from the supplied {@link AprilTagFieldLayout}.
+     *
+     * @param layout field layout used to translate tag identifiers into poses
+     */
+    public LocalizationCameraConfig setFieldLayout(AprilTagFieldLayout layout) {
+        if (layout == null) {
+            this.tagPoseResolver = id -> null;
+        } else {
+            this.tagPoseResolver = id -> layout.getTagPose(id).map(Pose3d::toPose2d).orElse(null);
+        }
         return this;
     }
 
@@ -362,6 +389,10 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
 
     public DoubleSupplier getAverageDistanceSupplier() {
         return averageDistanceSupplier;
+    }
+
+    public IntFunction<Pose2d> getTagPoseResolver() {
+        return tagPoseResolver;
     }
 
     public Consumer<Pose2d> getOrientationConsumer() {

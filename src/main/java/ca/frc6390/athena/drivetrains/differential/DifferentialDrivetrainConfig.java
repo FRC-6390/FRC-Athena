@@ -14,6 +14,7 @@ import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
 import ca.frc6390.athena.devices.IMU.IMUConfig;
 import ca.frc6390.athena.devices.IMU.IMUType;
 import ca.frc6390.athena.devices.MotorController.Motor;
+import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
 
 /**
  * Builder for {@link DifferentialDrivetrain} instances. Captures the motor/encoder layout, CAN IDs,
@@ -50,6 +51,8 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     private double gearRatio = 1;
     /** Physical wheel diameter used for distance conversions (meters). */
     private double wheelDiameterMeters = 1;
+    /** Optional physics model used when running drivetrain simulation. */
+    private DifferentialSimulationConfig simulationConfig = DifferentialSimulationConfig.defaults();
 
     /**
      * Creates a baseline configuration using the provided IMU and track width.
@@ -163,6 +166,15 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      */
     public DifferentialDrivetrainConfig setWheelDiameter(double wheelDiameterMeters){
         this.wheelDiameterMeters = wheelDiameterMeters;
+        return this;
+    }
+
+    /**
+     * Supplies a custom simulation configuration. Provide {@code null} to disable drivetrain
+     * simulation.
+     */
+    public DifferentialDrivetrainConfig setSimulationConfig(DifferentialSimulationConfig simulationConfig){
+        this.simulationConfig = simulationConfig;
         return this;
     }
 
@@ -329,6 +341,19 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         }
 
         DifferentialDrivetrain dt = new DifferentialDrivetrain(imu == null ? null : IMU.fromConfig(imu), maxVelocity, trackWidth, lm, rm);
+
+        if (simulationConfig != null) {
+            double simulationGearRatio = gearRatio;
+            if (simulationGearRatio > 0 && simulationGearRatio < 1.0) {
+                simulationGearRatio = 1.0 / simulationGearRatio;
+            }
+            DifferentialSimulationConfig resolvedSimulation = simulationConfig.resolve(
+                    trackWidth,
+                    simulationGearRatio,
+                    wheelDiameterMeters,
+                    leftMotors != null ? leftMotors.length : 1);
+            dt.configureSimulation(resolvedSimulation);
+        }
 
         // if (driftPID != null){
         //     dt.setDriftCorrectionPID(driftPID);

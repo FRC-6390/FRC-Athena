@@ -39,7 +39,6 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.math.numbers.N4;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.LocalizationData;
 
 public class RobotLocalization<T> extends SubsystemBase implements RobotSendableSystem{
 
@@ -254,15 +253,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return sanitized;
     }
 
-    private boolean shouldApplyVisionMeasurement(LocalizationData data, Matrix<N3, N1> stdDevs) {
-        if (data == null) {
-            return false;
-        }
-        Pose2d visionPose = data.pose2d();
+    private boolean shouldApplyVisionMeasurement(Pose2d visionPose, double timestampSeconds, Matrix<N3, N1> stdDevs) {
         if (!isFinitePose(visionPose)) {
             return false;
         }
-        double timestampSeconds = data.latency();
         if (!Double.isFinite(timestampSeconds)) {
             return false;
         }
@@ -558,33 +552,35 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
         if (vision != null && visionEnabled) {
             vision.setRobotOrientation(fieldPose);
-            vision.getBestLocalizationData().ifPresent(data -> {
-                Matrix<N3, N1> rawStdDevs = data.stdDevs();
+            vision.getBestVisionMeasurement().ifPresent(measurement -> {
+                Matrix<N3, N1> rawStdDevs = measurement.stdDevs();
                 Matrix<N3, N1> sanitizedStdDevs = sanitizeVisionStdDevs(rawStdDevs);
                 if (rawStdDevs != null && sanitizedStdDevs == null) {
                     return;
                 }
-                if (!shouldApplyVisionMeasurement(data, sanitizedStdDevs)) {
+                Pose2d measurementPose = measurement.pose2d();
+                double timestampSeconds = measurement.timestampSeconds();
+                if (!shouldApplyVisionMeasurement(measurementPose, timestampSeconds, sanitizedStdDevs)) {
                     return;
                 }
                 Matrix<N3, N1> adjustedStdDevs2d =
-                        adjustVisionStdDevsForDisagreement(sanitizedStdDevs, data.pose2d());
+                        adjustVisionStdDevsForDisagreement(sanitizedStdDevs, measurementPose);
                 if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
                     Matrix<N4, N1> adjustedStdDevs3d = expandStdDevsTo3d(adjustedStdDevs2d);
                     if (adjustedStdDevs3d != null) {
-                        fieldEstimator3d.addVisionMeasurement(data.pose3d(), data.latency(), adjustedStdDevs3d);
+                        fieldEstimator3d.addVisionMeasurement(measurement.pose3d(), timestampSeconds, adjustedStdDevs3d);
                     } else {
-                        fieldEstimator3d.addVisionMeasurement(data.pose3d(), data.latency());
+                        fieldEstimator3d.addVisionMeasurement(measurement.pose3d(), timestampSeconds);
                     }
                 } else {
                     if (adjustedStdDevs2d != null) {
-                        fieldEstimator2d.addVisionMeasurement(data.pose2d(), data.latency(), adjustedStdDevs2d);
+                        fieldEstimator2d.addVisionMeasurement(measurementPose, timestampSeconds, adjustedStdDevs2d);
                     } else {
-                        fieldEstimator2d.addVisionMeasurement(data.pose2d(), data.latency());
+                        fieldEstimator2d.addVisionMeasurement(measurementPose, timestampSeconds);
                     }
                 }
                 hasAcceptedVisionMeasurement = true;
-                lastVisionMeasurementTimestamp = data.latency();
+                lastVisionMeasurementTimestamp = timestampSeconds;
             });
         }
 

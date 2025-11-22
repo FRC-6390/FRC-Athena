@@ -8,6 +8,7 @@ import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatencyType;
 import ca.frc6390.athena.sensors.camera.photonvision.PhotonVisionConfig;
+import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
 
@@ -20,6 +21,7 @@ public record LimeLightConfig(
         Transform3d cameraRobotSpace,
         PoseEstimateWithLatencyType localizationEstimator,
         int[] filteredTags,
+        AprilTagFields fieldLayout,
         boolean useForLocalization,
         double trustDistance,
         EnumSet<CameraRole> roles,
@@ -30,13 +32,23 @@ public record LimeLightConfig(
         cameraRobotSpace = sanitizeTransform(cameraRobotSpace);
         filteredTags = filteredTags != null ? Arrays.copyOf(filteredTags, filteredTags.length) : new int[]{};
         roles = roles != null ? copyRoles(roles) : EnumSet.noneOf(CameraRole.class);
+        fieldLayout = fieldLayout != null ? fieldLayout : AprilTagFields.k2025ReefscapeWelded;
     }
 
     /**
      * Creates a configuration pointing to the specified NetworkTables table.
      */
     public LimeLightConfig(String table){
-        this(table, new Transform3d(), PoseEstimateWithLatencyType.BOT_POSE_MT2_BLUE, new int[]{}, false, 2, EnumSet.noneOf(CameraRole.class), 1.0);
+        this(
+                table,
+                new Transform3d(),
+                PoseEstimateWithLatencyType.BOT_POSE_MT2_BLUE,
+                new int[]{},
+                AprilTagFields.k2025ReefscapeWelded,
+                false,
+                2,
+                EnumSet.noneOf(CameraRole.class),
+                1.0);
     }
 
     /**
@@ -57,35 +69,96 @@ public record LimeLightConfig(
      * Returns a copy of this configuration with an updated camera transform.
      */
     public LimeLightConfig setCameraTransform(Transform3d cameraRobotSpace){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, copyTags(filteredTags), useForLocalization, trustDistance, copyRoles(roles), confidence);
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copyRoles(roles),
+                confidence);
     }
 
     /**
      * Returns a copy of this configuration with a different pose estimation strategy.
      */
     public LimeLightConfig setPoseEstimateType(PoseEstimateWithLatencyType localizationEstimator){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, copyTags(filteredTags), useForLocalization, trustDistance, copyRoles(roles), confidence);
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copyRoles(roles),
+                confidence);
     }
 
     /**
      * Returns a copy of this configuration with a filtered tag list used for localization.
      */
     public LimeLightConfig setLocalizationTagFilter(int... filteredTags){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, filteredTags != null ? Arrays.copyOf(filteredTags, filteredTags.length) : new int[]{}, useForLocalization, trustDistance, copyRoles(roles), confidence);
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                filteredTags != null ? Arrays.copyOf(filteredTags, filteredTags.length) : new int[]{},
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copyRoles(roles),
+                confidence);
+    }
+
+    /**
+     * Returns a copy with an updated underlying AprilTag field layout.
+     */
+    public LimeLightConfig setFieldLayout(AprilTagFields fieldLayout) {
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copyRoles(roles),
+                confidence);
     }
     
     /**
      * Returns a copy that toggles whether Limelight measurements feed localization.
      */
     public LimeLightConfig setUseForLocalization(boolean useForLocalization){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, copyTags(filteredTags), useForLocalization, trustDistance, copyRoles(roles), confidence);
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copyRoles(roles),
+                confidence);
     }
 
     /**
      * Returns a copy with an updated trust distance (meters).
      */
     public LimeLightConfig setTrustDistance(double trustDistance){
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, copyTags(filteredTags), useForLocalization, trustDistance, copyRoles(roles), confidence);
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copyRoles(roles),
+                confidence);
     }
 
     /**
@@ -96,7 +169,16 @@ public record LimeLightConfig(
         if (role != null) {
             newRoles.add(role);
         }
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, copyTags(filteredTags), useForLocalization, trustDistance, newRoles, confidence);
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                newRoles,
+                confidence);
     }
 
     /**
@@ -104,14 +186,32 @@ public record LimeLightConfig(
      */
     public LimeLightConfig setRoles(EnumSet<CameraRole> newRoles) {
         EnumSet<CameraRole> copy = newRoles != null ? copyRoles(newRoles) : EnumSet.noneOf(CameraRole.class);
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, copyTags(filteredTags), useForLocalization, trustDistance, copy, confidence);
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copy,
+                confidence);
     }
 
     /**
      * Returns a copy with an updated pipeline confidence [0, 1].
      */
     public LimeLightConfig setConfidence(double confidence) {
-        return new LimeLightConfig(table, cameraRobotSpace, localizationEstimator, copyTags(filteredTags), useForLocalization, trustDistance, copyRoles(roles), confidence);
+        return new LimeLightConfig(
+                table,
+                cameraRobotSpace,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copyRoles(roles),
+                confidence);
     }
 
     @Override
@@ -128,7 +228,16 @@ public record LimeLightConfig(
      * Returns a copy with the robot-space camera transform replaced.
      */
     public LimeLightConfig setCameraRobotSpace(Transform3d transform) {
-        return new LimeLightConfig(table, transform, localizationEstimator, copyTags(filteredTags), useForLocalization, trustDistance, copyRoles(roles), confidence);
+        return new LimeLightConfig(
+                table,
+                transform,
+                localizationEstimator,
+                copyTags(filteredTags),
+                fieldLayout,
+                useForLocalization,
+                trustDistance,
+                copyRoles(roles),
+                confidence);
     }
 
     /**
@@ -140,7 +249,8 @@ public record LimeLightConfig(
                 .setTrustDistance(trustDistance)
                 .setUseForLocalization(useForLocalization)
                 .setConfidence(confidence)
-                .setRoles(copyRoles(roles));
+                .setRoles(copyRoles(roles))
+                .setFieldLayout(fieldLayout);
 
         if (filteredTags != null && filteredTags.length > 0) {
             Integer[] tagArray = Arrays.stream(filteredTags).boxed().toArray(Integer[]::new);

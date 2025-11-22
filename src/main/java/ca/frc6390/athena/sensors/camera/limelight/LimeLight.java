@@ -8,6 +8,7 @@ import ca.frc6390.athena.sensors.camera.LocalizationCamera.StreamControl;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
@@ -74,6 +75,7 @@ public class LimeLight {
     public boolean useForLocalization = false;
 
     private final LocalizationCamera localizationCamera;
+    private final AprilTagFieldLayout fieldLayout;
     private LocalizationSnapshot latestSnapshot = LocalizationSnapshot.empty();
     private static final double DEFAULT_HORIZONTAL_FOV_DEG = 63.3;
 
@@ -275,10 +277,19 @@ public class LimeLight {
 
     public LimeLight(LimeLightConfig config){
         this.config = config;
+        AprilTagFieldLayout layout;
+        try {
+            layout = AprilTagFieldLayout.loadField(config.fieldLayout());
+        } catch (Exception e) {
+            layout = null;
+        }
+        this.fieldLayout = layout;
         limelightTable = NetworkTableInstance.getDefault().getTable(config.table());
         tv = limelightTable.getEntry("tv");
         tx = limelightTable.getEntry("tx");
         ty = limelightTable.getEntry("ty");
+        txnc = limelightTable.getEntry("txnc");
+        tync = limelightTable.getEntry("tync");
         ta = limelightTable.getEntry("ta");
         crosshairs = limelightTable.getEntry("crosshairs");
         t2d = limelightTable.getEntry("t2d");
@@ -348,11 +359,12 @@ public class LimeLight {
                         .setDisplayHorizontalFov(DEFAULT_HORIZONTAL_FOV_DEG)
                         .setDisplayRangeMeters(Math.max(config.trustDistance(), 2.0))
                         .setConfidenceSupplier(config::confidence)
-                        .setTargetYawSupplier(() -> hasValidTarget() ? getTargetHorizontalOffset() : Double.NaN)
-                        .setTargetPitchSupplier(() -> hasValidTarget() ? getTargetVerticalOffset() : Double.NaN)
+                        .setTargetYawSupplier(this::supplyTargetYaw)
+                        .setTargetPitchSupplier(this::supplyTargetPitch)
                         .setTagDistanceSupplier(this::supplyPrimaryTagDistance)
                         .setTagIdSupplier(this::supplyPrimaryTagId)
-                        .setRoles(config.roles());
+                        .setRoles(config.roles())
+                        .setFieldLayout(fieldLayout);
 
         LocalizationCamera camera = new LocalizationCamera(cameraConfig);
         camera.registerCapability(LocalizationCameraCapability.LIMELIGHT, this);
@@ -395,6 +407,22 @@ public class LimeLight {
         return latestSnapshot.averageDistanceMeters();
     }
 
+    private double supplyTargetYaw() {
+        if (!hasValidTarget()) {
+            return Double.NaN;
+        }
+        double yaw = getCrosshairIndependentYaw();
+        return Double.isFinite(yaw) ? yaw : getTargetHorizontalOffset();
+    }
+
+    private double supplyTargetPitch() {
+        if (!hasValidTarget()) {
+            return Double.NaN;
+        }
+        double pitch = getCrosshairIndependentPitch();
+        return Double.isFinite(pitch) ? pitch : getTargetVerticalOffset();
+    }
+
     private double supplyPrimaryTagDistance() {
         return latestSnapshot.visibleTargets() > 0
                 ? latestSnapshot.averageDistanceMeters()
@@ -403,6 +431,58 @@ public class LimeLight {
 
     private int supplyPrimaryTagId() {
         return hasValidTarget() ? (int) getAprilTagID() : -1;
+    }
+
+    private double getCrosshairIndependentYaw() {
+        double yaw = txnc != null ? txnc.getDouble(Double.NaN) : Double.NaN;
+        if (Double.isFinite(yaw)) {
+            return yaw;
+        }
+        return calculateYawFromCameraSpace(getTargetPoseCameraSpace());
+    }
+
+    private double getCrosshairIndependentPitch() {
+        double pitch = tync != null ? tync.getDouble(Double.NaN) : Double.NaN;
+        if (Double.isFinite(pitch)) {
+            return pitch;
+        }
+        return calculatePitchFromCameraSpace(getTargetPoseCameraSpace());
+    }
+
+    private Double[] getTargetPoseCameraSpace() {
+        PoseEstimate estimate = getPoseEstimate(PoseEstimateType.TARGET_POSE_CAMERA_SPACE);
+        if (estimate == null) {
+            return null;
+        }
+        Double[] raw = estimate.getRaw();
+        if (raw == null || raw.length < 6) {
+            return null;
+        }
+        return raw;
+    }
+
+    private double calculateYawFromCameraSpace(Double[] targetPose) {
+        if (targetPose == null) {
+            return Double.NaN;
+        }
+        double x = targetPose[0];
+        double y = targetPose[1];
+        if (!Double.isFinite(x) || !Double.isFinite(y)) {
+            return Double.NaN;
+        }
+        return Math.toDegrees(Math.atan2(y, x));
+    }
+
+    private double calculatePitchFromCameraSpace(Double[] targetPose) {
+        if (targetPose == null) {
+            return Double.NaN;
+        }
+        double x = targetPose[0];
+        double z = targetPose[2];
+        if (!Double.isFinite(x) || !Double.isFinite(z)) {
+            return Double.NaN;
+        }
+        return Math.toDegrees(Math.atan2(z, x));
     }
 
     private class LimelightLedCapability implements LocalizationCamera.LedControl {

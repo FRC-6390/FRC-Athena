@@ -18,6 +18,7 @@ import java.util.OptionalInt;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
@@ -30,8 +31,10 @@ import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
+import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructPublisher;
+import edu.wpi.first.wpilibj.Timer;
 
 /**
  * Unified wrapper around vendor-specific vision cameras. Works similarly to {@code MotorController}
@@ -95,6 +98,8 @@ public class LocalizationCamera {
             int tagId,
             Double confidence) {}
 
+    private static final double LATENCY_TIMESTAMP_THRESHOLD_SECONDS = 5.0;
+
     private final LocalizationCameraConfig config;
     private final BooleanSupplier connectedSupplier;
     private final BooleanSupplier hasTargetsSupplier;
@@ -122,6 +127,7 @@ public class LocalizationCamera {
     private final EnumMap<LocalizationCameraCapability, Object> capabilities =
             new EnumMap<>(LocalizationCameraCapability.class);
     private final StructPublisher<Pose2d> networkEstimatedPosePublisher;
+    private final IntFunction<Pose2d> tagPoseResolver;
 
     private double cachedDistanceMeters = Double.NaN;
     private double cachedYawDegrees = Double.NaN;
@@ -162,6 +168,8 @@ public class LocalizationCamera {
                 Rotation2d.fromRadians(robotToCameraTransform.getRotation().getZ());
         this.displayHorizontalFovDeg = config.getDisplayHorizontalFov();
         this.displayRangeMeters = config.getDisplayRangeMeters();
+        IntFunction<Pose2d> resolver = config.getTagPoseResolver();
+        this.tagPoseResolver = resolver != null ? resolver : id -> null;
         EnumSet<LocalizationCameraConfig.CameraRole> configRoles = config.getRoles();
         this.roles = configRoles.isEmpty()
                 ? EnumSet.noneOf(LocalizationCameraConfig.CameraRole.class)
@@ -334,6 +342,10 @@ public class LocalizationCamera {
      */
     public LocalizationData getLocalizationData() {
         update();
+        return createLocalizationData();
+    }
+
+    private LocalizationData createLocalizationData() {
         Pose2d pose = poseSupplier.get();
         Pose3d pose3d = pose3dSupplier.get();
         double latency = latencySupplier.getAsDouble();
@@ -345,6 +357,88 @@ public class LocalizationCamera {
         Pose2d safePose = pose != null ? pose : new Pose2d();
         Pose3d safePose3d = pose3d != null ? pose3d : new Pose3d(safePose);
         return new LocalizationData(safePose, safePose3d, latency, stdDevs);
+    }
+
+    /**
+     * Builds a timestamped vision measurement using the provided capture timestamp.
+     *
+     * @param captureTimestampSeconds timestamp (typically {@link Timer#getFPGATimestamp()}) after latency compensation
+     * @return optional wrapping a measurement when a valid target is present
+     */
+    public Optional<VisionMeasurement> getVisionMeasurement(double captureTimestampSeconds) {
+        update();
+        if (!hasValidTarget()) {
+            return Optional.empty();
+        }
+        if (Double.isNaN(captureTimestampSeconds) || Double.isInfinite(captureTimestampSeconds)) {
+            return Optional.empty();
+        }
+        LocalizationData data = createLocalizationData();
+        return buildVisionMeasurement(data, captureTimestampSeconds);
+    }
+
+    /**
+     * Builds a timestamped vision measurement using {@link Timer#getFPGATimestamp()}.
+     *
+     * @return optional wrapping a measurement when a valid target is present
+     */
+    public Optional<VisionMeasurement> getLatestVisionMeasurement() {
+        return getVisionMeasurement(Timer.getFPGATimestamp());
+    }
+
+    /**
+     * Pushes the latest measurement into the provided estimator when one is available.
+     *
+     * @param estimator pose estimator that should consume the measurement
+     * @return {@code true} when a measurement was produced and forwarded
+     */
+    public boolean addVisionMeasurement(SwerveDrivePoseEstimator estimator) {
+        return addVisionMeasurement(estimator, Timer.getFPGATimestamp());
+    }
+
+    /**
+     * Pushes a measurement stamped with the supplied timestamp into the estimator when available.
+     *
+     * @param estimator pose estimator that should consume the measurement
+     * @param captureTimestampSeconds timestamp to associate with the measurement
+     * @return {@code true} when a measurement was produced and forwarded
+     */
+    public boolean addVisionMeasurement(SwerveDrivePoseEstimator estimator, double captureTimestampSeconds) {
+        Optional<VisionMeasurement> measurement = getVisionMeasurement(captureTimestampSeconds);
+        measurement.ifPresent(m -> m.addTo(estimator));
+        return measurement.isPresent();
+    }
+
+    private Optional<VisionMeasurement> buildVisionMeasurement(LocalizationData data, double captureTimestampSeconds) {
+        if (data == null) {
+            return Optional.empty();
+        }
+        double rawLatency = data.latency();
+        if (Double.isNaN(rawLatency) || Double.isInfinite(rawLatency)) {
+            return Optional.empty();
+        }
+
+        double timestampSeconds;
+        double latencySeconds;
+        if (rawLatency > LATENCY_TIMESTAMP_THRESHOLD_SECONDS) {
+            timestampSeconds = rawLatency;
+            latencySeconds = Math.max(0.0, captureTimestampSeconds - timestampSeconds);
+        } else {
+            latencySeconds = Math.max(0.0, rawLatency);
+            timestampSeconds = Math.max(0.0, captureTimestampSeconds - latencySeconds);
+        }
+
+        if (Double.isNaN(timestampSeconds) || Double.isInfinite(timestampSeconds)) {
+            return Optional.empty();
+        }
+
+        return Optional.of(
+                new VisionMeasurement(
+                        data.pose2d(),
+                        data.pose3d(),
+                        timestampSeconds,
+                        latencySeconds,
+                        data.stdDevs()));
     }
 
     /**
@@ -579,7 +673,7 @@ public class LocalizationCamera {
                     cameraTranslationOpt.flatMap(
                             ct ->
                                     convertCameraTranslationToSpace(
-                                            ct, space, robotPose, vendorPose, tagPose));
+                                            ct, space, robotPose, vendorPose, tagPose, measurement.tagId()));
             Translation2d translated = translatedOpt.orElse(null);
 
             double yaw =
@@ -672,6 +766,31 @@ public class LocalizationCamera {
             Translation2d robotTranslation = tagPose.getTranslation().minus(robotToTagField);
             return new Pose2d(robotTranslation, robotRotation);
         });
+    }
+
+    /**
+     * Estimates the field-relative robot pose using the supplied tag identifier and current measurements.
+     *
+     * @param tagId identifier of the observed tag
+     * @return estimated robot pose when the resolver can produce the tag pose
+     */
+    public Optional<Pose2d> estimateFieldPoseFromTag(int tagId) {
+        return estimateFieldPoseFromTag(tagId, null);
+    }
+
+    /**
+     * Estimates the field-relative robot pose using the supplied tag identifier and current measurements.
+     *
+     * @param tagId identifier of the observed tag
+     * @param cameraOffsetMeters override for the camera offset, or {@code null} to use the configured transform
+     * @return estimated robot pose when the resolver can produce the tag pose
+     */
+    public Optional<Pose2d> estimateFieldPoseFromTag(int tagId, Translation2d cameraOffsetMeters) {
+        Pose2d resolvedTagPose = resolveTagPose(tagId, null);
+        if (resolvedTagPose == null) {
+            return Optional.empty();
+        }
+        return estimateFieldPoseFromTag(resolvedTagPose, cameraOffsetMeters);
     }
 
     /**
@@ -802,7 +921,8 @@ public class LocalizationCamera {
             CoordinateSpace space,
             Pose2d robotPose,
             Pose2d fallbackRobotPose,
-            Pose2d tagPose) {
+            Pose2d tagPose,
+            int tagId) {
         return switch (space) {
             case CAMERA -> Optional.of(cameraTranslation);
             case ROBOT -> Optional.of(toRobotTranslation(cameraTranslation));
@@ -817,18 +937,33 @@ public class LocalizationCamera {
                                 .plus(robotRelative.rotateBy(resolvedPose.getRotation())));
             }
             case TAG -> {
-                if (tagPose == null) {
+                Pose2d resolvedTagPose = resolveTagPose(tagId, tagPose);
+                if (resolvedTagPose == null) {
                     yield Optional.empty();
                 }
                 Optional<Pose2d> robotPoseEstimate =
-                        estimateFieldPoseFromTag(tagPose, robotToCameraTranslation);
+                        estimateFieldPoseFromTag(resolvedTagPose, robotToCameraTranslation);
                 if (robotPoseEstimate.isEmpty()) {
                     yield Optional.empty();
                 }
-                Pose2d robotInTag = robotPoseEstimate.get().relativeTo(tagPose);
+                Pose2d robotInTag = robotPoseEstimate.get().relativeTo(resolvedTagPose);
                 yield Optional.of(robotInTag.getTranslation());
             }
         };
+    }
+
+    private Pose2d resolveTagPose(int tagId, Pose2d explicitTagPose) {
+        if (explicitTagPose != null) {
+            return explicitTagPose;
+        }
+        if (tagId < 0 || tagPoseResolver == null) {
+            return null;
+        }
+        try {
+            return tagPoseResolver.apply(tagId);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     /**
@@ -910,6 +1045,37 @@ public class LocalizationCamera {
          */
         public boolean hasConfidence() {
             return !Double.isNaN(confidence);
+        }
+    }
+
+    /**
+     * Timestamped pose estimate ready to be fed directly into WPILib pose estimators.
+     *
+     * @param pose2d field-relative 2D pose
+     * @param pose3d field-relative 3D pose
+     * @param timestampSeconds capture time expressed in seconds
+     * @param latencySeconds estimated pipeline latency in seconds
+     * @param stdDevs covariance diagonal describing measurement noise
+     */
+    public static record VisionMeasurement(
+            Pose2d pose2d,
+            Pose3d pose3d,
+            double timestampSeconds,
+            double latencySeconds,
+            Matrix<N3, N1> stdDevs) {
+        public VisionMeasurement {
+            pose2d = pose2d != null ? pose2d : new Pose2d();
+            pose3d = pose3d != null ? pose3d : new Pose3d(pose2d);
+            latencySeconds = Double.isNaN(latencySeconds) ? 0.0 : latencySeconds;
+        }
+
+        /**
+         * Feeds this measurement into a {@link SwerveDrivePoseEstimator}.
+         */
+        public void addTo(SwerveDrivePoseEstimator estimator) {
+            if (estimator != null) {
+                estimator.addVisionMeasurement(pose2d, timestampSeconds, stdDevs);
+            }
         }
     }
 

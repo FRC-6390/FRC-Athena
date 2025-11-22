@@ -32,3 +32,70 @@ robot.registerAutoChooser("LeftAuto");
 ```
 
 Everything works directly with strings; if you prefer enums, implement `RobotAuto.NamedCommandKey` / `RobotAuto.AutoKey` and reuse these helpers. Once the first auto is added, named-command registration locks to prevent missing dependencies. Use `setStartingPose()` for extra metadata, and call `registerAutoRoutineChooser(...)` if you want the raw routine objects on Shuffleboard.
+
+## Localization Camera Auto Align
+Use the `AlignAndDriveToTagCommand` to close the loop on robot-relative translations produced by any configured localization camera. Supply tuned PID controllers, the desired standoff pose (as a `Pose2d`), a tolerance pose, and clamp limits to make the command suit your drivetrain. The command always targets one or more specific camera tables, so pass the NetworkTables names you want it to consume.
+
+```java
+PIDController xController = new PIDController(1.6, 0.0, 0.0);
+PIDController yController = new PIDController(1.6, 0.0, 0.0);
+PIDController headingController = new PIDController(0.04, 0.0, 0.001);
+
+Command autoAlign = new AlignAndDriveToTagCommand(
+        robot,
+        xController,
+        yController,
+        headingController,
+        new Pose2d(Units.inchesToMeters(18.0), 0.0, new Rotation2d()), // hold 18" off the tag
+        new Pose2d(0.03, 0.03, Rotation2d.fromDegrees(2.5)), // per-axis tolerance
+        2.0,                          // clamp translation speed
+        3.0,                          // clamp rotation speed
+        3.0,                          // optional timeout
+        "limelight-front");
+
+robot.getAutos().registerNamedCommand("AutoAlignToTag", autoAlign);
+```
+
+You can restrict the command to particular cameras or roles when needed:
+
+```java
+EnumSet<LocalizationCameraConfig.CameraRole> preferredRoles =
+        EnumSet.of(LocalizationCameraConfig.CameraRole.ALIGNMENT);
+Set<String> cameraTables = Set.of("limelight-left", "photon-front");
+
+Command filteredAlign = new AlignAndDriveToTagCommand(
+        robot,
+        xController,
+        yController,
+        headingController,
+        new Pose2d(Units.inchesToMeters(18.0), 0.0, new Rotation2d()),
+        new Pose2d(0.03, 0.03, Rotation2d.fromDegrees(2.5)),
+        2.0,
+        3.0,
+        3.0,
+        cameraTables,
+        preferredRoles);
+```
+
+Tune the controller gains/tolerances to match your drivetrain and sensor noise profile. The command stops driving when all three controllers report on-target or when the timeout elapses.
+
+## Stateful Mechanisms
+`MechanismConfig.stateful*` builders now accept a `StateGraph` so you can declare required transition states and guard conditions in one place. The graph expands any `requestState(...)` call into the full path and injects boolean predicates that must pass before each hop:
+
+```java
+BooleanSupplier armClear = arm::atSafeAngle;
+BooleanSupplier elevatorClear = elevator::atSafeHeight;
+
+StateGraph<SuperState> graph = StateGraph
+        .create(SuperState.class)
+        .path(SuperState.STOW, SuperState.CLEARANCE, SuperState.SCORE_HIGH)
+        .guardPath(StateGraph.Guards.allOf(armClear, elevatorClear),
+                   SuperState.STOW, SuperState.CLEARANCE);
+
+MechanismConfig.statefulGeneric(SuperState.STOW)
+        .setStateGraph(graph)
+        .setStateAction(superstructure::zeroSensors, SuperState.STOW)
+        .build();
+```
+
+At runtime request goals declaratively: `superstructure.getStateMachine().requestState(SuperState.SCORE_HIGH);` or continue using `queueState(...)`—the graph expands either call, inserts any intermediate states, and waits on the attached guards before each hop. See `src/main/java/ca/frc6390/athena/mechanisms/examples/ExampleSuperstructure.java` for a complete mock-up.

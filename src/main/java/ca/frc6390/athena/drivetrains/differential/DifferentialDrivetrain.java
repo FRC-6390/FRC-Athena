@@ -4,6 +4,7 @@ import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.commands.control.TankDriveCommand;
 import ca.frc6390.athena.core.RobotDrivetrain;
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotSpeeds;
@@ -11,6 +12,8 @@ import ca.frc6390.athena.devices.EncoderGroup;
 import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.devices.MotorControllerGroup;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import ca.frc6390.athena.drivetrains.differential.sim.DifferentialDrivetrainSimulation;
+import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator3d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -19,7 +22,12 @@ import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.DifferentialDriveKinematics;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelPositions;
+import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
@@ -31,6 +39,11 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     private final DifferentialDrive drive;
     private final MotorControllerGroup leftMotors, rightMotors;
     private final EncoderGroup leftEncoders, rightEncoders;
+    private DifferentialDrivetrainSimulation simulation;
+    private Field2d simulationField;
+    private double lastSimulationTimestamp = -1;
+    private double lastLeftCommand = 0;
+    private double lastRightCommand = 0;
 
     public DifferentialDrivetrain(IMU imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors){
        this(imu, maxVelocity, trackwidth, leftMotors, rightMotors, leftMotors.getEncoderGroup(), rightMotors.getEncoderGroup());
@@ -46,7 +59,7 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         this.rightEncoders = rightEncoders;
         this.leftEncoders = leftEncoders;
 
-        this.drive = new DifferentialDrive(leftMotors::setSpeed, rightMotors::setSpeed);
+        this.drive = new DifferentialDrive(this::setLeftOutput, this::setRightOutput);
         this.kinematics = new DifferentialDriveKinematics(trackwidth);
     }
 
@@ -68,11 +81,19 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
 
     @Override
     public void update() {
-        imu.update();
+        if (imu != null) {
+            imu.update();
+        }
         leftMotors.update();
         rightMotors.update();
-        leftEncoders.update();
-        rightEncoders.update();
+        if (simulation == null) {
+            if (leftEncoders != null) {
+                leftEncoders.update();
+            }
+            if (rightEncoders != null) {
+                rightEncoders.update();
+            }
+        }
         
         ChassisSpeeds speeds = getRobotSpeeds().calculate();
         drive.arcadeDrive(speeds.vxMetersPerSecond, speeds.omegaRadiansPerSecond);
@@ -102,12 +123,30 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     }
 
     @Override
+    public void simulationPeriodic() {
+        if (simulation != null) {
+            double now = Timer.getFPGATimestamp();
+            if (lastSimulationTimestamp < 0) {
+                lastSimulationTimestamp = now;
+            }
+            double dt = now - lastSimulationTimestamp;
+            lastSimulationTimestamp = now;
+            simulation.update(dt > 0 ? dt : 0.02, lastLeftCommand, lastRightCommand);
+            if (simulationField != null) {
+                simulationField.setRobotPose(simulation.getPose());
+            }
+        }
+    }
+
+    @Override
     public DifferentialDrivetrain get() {
         return this;
     }
 
     public DifferentialDriveWheelPositions getPositions(){
-     return new DifferentialDriveWheelPositions(leftEncoders.getPosition(), rightEncoders.getPosition());
+     double leftPosition = leftEncoders != null ? leftEncoders.getPosition() : 0;
+     double rightPosition = rightEncoders != null ? rightEncoders.getPosition() : 0;
+     return new DifferentialDriveWheelPositions(leftPosition, rightPosition);
     }
 
      @Override
@@ -159,10 +198,57 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, getRobotSpeeds(), imu, this::getPositions);
     }
 
+    @Override
+    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+        RobotDrivetrain.super.shuffleboard(tab, level);
+        if (simulationField != null) {
+            tab.add("Sim Pose", simulationField).withWidget(BuiltInWidgets.kField);
+        }
+        return tab;
+    }
+
+    public DifferentialDrivetrain configureSimulation(DifferentialSimulationConfig config) {
+        if (!RobotBase.isSimulation()) {
+            return this;
+        }
+        simulation = new DifferentialDrivetrainSimulation(this, config, leftEncoders, rightEncoders);
+        if (simulationField == null) {
+            simulationField = new Field2d();
+        }
+        simulationField.setRobotPose(simulation.getPose());
+        lastSimulationTimestamp = -1;
+        return this;
+    }
+
+    public boolean hasSimulation() {
+        return simulation != null;
+    }
+
+    public Pose2d getSimulatedPose() {
+        return simulation != null ? simulation.getPose() : new Pose2d();
+    }
+
+    public void resetSimulationPose(Pose2d pose) {
+        if (simulation != null) {
+            simulation.resetPose(pose);
+        }
+    }
+
     private Rotation3d getImuRotation3d() {
         return new Rotation3d(
                 imu.getRoll().getRadians(),
                 imu.getPitch().getRadians(),
                 imu.getYaw().getRadians());
     }
+
+    private void setLeftOutput(double output) {
+        lastLeftCommand = output;
+        leftMotors.setSpeed(output);
+    }
+
+    private void setRightOutput(double output) {
+        lastRightCommand = output;
+        rightMotors.setSpeed(output);
+    }
+
 }
