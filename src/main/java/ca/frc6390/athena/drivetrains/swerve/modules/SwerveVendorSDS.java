@@ -4,6 +4,40 @@ import edu.wpi.first.math.util.Units;
 
 public class SwerveVendorSDS {
 
+    public static enum MK3 implements SwerveVendorModule {
+        STANDARD(1d / 8.16d, 12.8, 1),
+        FAST(1d / 6.86d, 12.8, 1);
+
+        private final double driveGearRatio, rotationGearRatio, encoderGearRatio, wheelDiameter;
+
+        MK3(double driveGearRatio, double rotationGearRatio, double encoderGearRatio) {
+            this.driveGearRatio = driveGearRatio;
+            this.rotationGearRatio = rotationGearRatio;
+            this.encoderGearRatio = encoderGearRatio;
+            this.wheelDiameter = Units.inchesToMeters(4);
+        }
+
+        @Override
+        public double getDriveGearRatio() {
+            return driveGearRatio;
+        }
+
+        @Override
+        public double getSteerGearRatio() {
+            return rotationGearRatio;
+        }
+
+        @Override
+        public double getEncoderGearRatio() {
+            return encoderGearRatio;
+        }
+
+        @Override
+        public double getWheelDiameter() {
+            return wheelDiameter;
+        }
+    }
+
     public static enum MK4 implements SwerveVendorModule {
         L1(1d / 8.14d, 12.8, 1),
         L2(1d / 6.75d, 12.8, 1),

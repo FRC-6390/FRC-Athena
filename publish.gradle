@@ -285,6 +285,13 @@ tasks.matching { it != cleanReleaseRepo }.all {
     it.dependsOn cleanReleaseRepo
 }
 
+def mavenUsername = System.getenv("MAVEN_USERNAME") ?: System.getenv("USERNAME")
+def mavenPassword = System.getenv("MAVEN_PASSWORD") ?: System.getenv("MAVEN_KEY") ?: System.getenv("GITHUB_TOKEN")
+
+if ((publishMode == 'online' || publishMode == 'all') && (!mavenUsername || !mavenPassword)) {
+    throw new GradleException("Missing Maven credentials. Set MAVEN_USERNAME/MAVEN_PASSWORD or USERNAME/MAVEN_KEY before publishing online.")
+}
+
 publishing {
     // Repositories
     repositories {
@@ -301,8 +308,8 @@ publishing {
                 name = "FRC-Athena-GitHub"
                 url = "https://maven.pkg.github.com/FRC-6390/FRC-Athena"
                 credentials {
-                    username = System.getenv("MAVEN_USERNAME")
-                    password = System.getenv("MAVEN_PASSWORD")
+                    username = mavenUsername
+                    password = mavenPassword
                 }
             }
         }
