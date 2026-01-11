@@ -34,34 +34,34 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 
-public class RobotBase<T extends RobotDrivetrain<T>> extends TimedRobot {
+public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
-    public record RobotBaseConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
+    public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig) {
 
-        public static RobotBaseConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
-            return new RobotBaseConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt());
+        public static RobotCoreConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
+            return new RobotCoreConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt());
         }
 
-        public static RobotBaseConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
-            return new RobotBaseConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt());
+        public static RobotCoreConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
+            return new RobotCoreConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt());
         }
 
-        public RobotBaseConfig<T> setLocalization(RobotLocalizationConfig localizationConfig) {
-            return new RobotBaseConfig<>(driveTrain, localizationConfig, visionConfig);
+        public RobotCoreConfig<T> setLocalization(RobotLocalizationConfig localizationConfig) {
+            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig);
         }
 
-        public RobotBaseConfig<T> setVision(RobotVisionConfig visionConfig) {
-            return new RobotBaseConfig<>(driveTrain, localizationConfig, visionConfig);
+        public RobotCoreConfig<T> setVision(RobotVisionConfig visionConfig) {
+            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig);
         }
 
-        public RobotBaseConfig<T> setVision(ConfigurableCamera... cameras) {
-            return new RobotBaseConfig<>(driveTrain, localizationConfig,
+        public RobotCoreConfig<T> setVision(ConfigurableCamera... cameras) {
+            return new RobotCoreConfig<>(driveTrain, localizationConfig,
                     RobotVisionConfig.defualt().addCameras(cameras));
         }
 
-        public RobotBase<T> create() {
-            return new RobotBase<>(this);
+        public RobotCore<T> create() {
+            return new RobotCore<>(this);
         }
     }
 
@@ -75,7 +75,7 @@ public class RobotBase<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final Set<Mechanism> scheduledCustomPidMechanisms;
     private Command autonomousCommand;
 
-    public RobotBase(RobotBaseConfig<T> config) {
+    public RobotCore(RobotCoreConfig<T> config) {
         drivetrain = config.driveTrain.build();
         localization = drivetrain.localization(config.localizationConfig());
         vision = RobotVision.fromConfig(config.visionConfig);
@@ -262,7 +262,7 @@ public class RobotBase<T extends RobotDrivetrain<T>> extends TimedRobot {
         addPeriodic(mechanism::updatePID, period);
     }
 
-    public RobotBase<T> registerMechanism(Mechanism... mechs) {
+    public RobotCore<T> registerMechanism(Mechanism... mechs) {
         Arrays.stream(mechs).forEach(mech -> {
             mechanisms.put(mech.getName(), mech);
             scheduleCustomPidCycle(mech);
@@ -282,27 +282,27 @@ public class RobotBase<T extends RobotDrivetrain<T>> extends TimedRobot {
         return vision;
     }
 
-    public RobotBase<T> shuffleboard() {
+    public RobotCore<T> shuffleboard() {
         return shuffleboard("Drivetrain");
     }
 
-    public RobotBase<T> shuffleboard(String drive) {
+    public RobotCore<T> shuffleboard(String drive) {
         return shuffleboard(drive, "Localization");
     }
 
-    public RobotBase<T> shuffleboard(SendableLevel level) {
+    public RobotCore<T> shuffleboard(SendableLevel level) {
         return shuffleboard("Drivetrain", level);
     }
 
-    public RobotBase<T> shuffleboard(String drive, SendableLevel level) {
+    public RobotCore<T> shuffleboard(String drive, SendableLevel level) {
         return shuffleboard(drive, "Localization", level);
     }
 
-    public RobotBase<T> shuffleboard(String drive, String local) {
+    public RobotCore<T> shuffleboard(String drive, String local) {
         return shuffleboard(drive, local, SendableLevel.COMP);
     }
 
-    public RobotBase<T> shuffleboard(String drive, String local, SendableLevel level) {
+    public RobotCore<T> shuffleboard(String drive, String local, SendableLevel level) {
         drivetrain.shuffleboard(drive, level);
 
         if (localization != null) {

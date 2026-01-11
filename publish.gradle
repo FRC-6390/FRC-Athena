@@ -62,7 +62,7 @@ def computeFrcYear = {
         }
     }
 
-    return '2025'
+    return '2026'
 }
 
 def frcYear = project.hasProperty('frcYear') ? project.property('frcYear') : computeFrcYear()
@@ -93,7 +93,7 @@ def versionFile = file("$outputsFolder/version.txt")
 def localRepoDir = file("$buildDir/repos/releases")
 
 // Publish mode can be: 'local', 'online', 'all'
-def publishMode = project.hasProperty('publishMode') ? project.property('publishMode') : 'all'
+def publishMode = project.hasProperty('publishMode') ? project.property('publishMode') : 'local'
 logger.lifecycle("Athena build configuration -> version: ${pubVersion}, frcYear: ${frcYear}, publishMode: ${publishMode}, wpilibFolder: ${wpilibFolder}")
 
 // -----------------------------------------------------------------------------

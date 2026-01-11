@@ -1,0 +1,11 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation project(':athena-core')
+    implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.apriltag:apriltag-java:${rootProject.ext.wpilibVersion}"
+    implementation 'org.photonvision:photonlib-java:v2025.2.1'
+}

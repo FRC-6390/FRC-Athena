@@ -1,0 +1,13 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    // Core stays vendor-free; shared interfaces and bridges live here.
+    implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.apriltag:apriltag-java:${rootProject.ext.wpilibVersion}"
+    implementation 'com.pathplanner.lib:PathplannerLib-java:2025.1.1'
+    implementation 'choreo:ChoreoLib-java:2025.0.3'
+    implementation 'org.photonvision:photonlib-java:v2025.2.1'
+}

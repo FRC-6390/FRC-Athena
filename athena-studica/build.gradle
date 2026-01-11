@@ -1,0 +1,8 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation project(':athena-core')
+    implementation 'com.studica.frc:Studica-java:2025.0.1'
+}

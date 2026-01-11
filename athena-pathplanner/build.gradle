@@ -1,0 +1,17 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation project(':athena-core')
+    implementation project(':')
+    implementation project(':athena-photonvision')
+    implementation project(':athena-limelight')
+    implementation project(':athena-ctre')
+    implementation project(':athena-rev')
+    implementation project(':athena-studica')
+    implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
+    implementation 'com.pathplanner.lib:PathplannerLib-java:2025.1.1'
+    implementation 'choreo:ChoreoLib-java:2025.0.3'
+}

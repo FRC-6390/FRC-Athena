@@ -1,0 +1,10 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation project(':athena-core')
+    implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
+    implementation 'com.ctre.phoenix6:wpiapi-java:25.1.0'
+}

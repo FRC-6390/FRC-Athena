@@ -5,7 +5,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.controllers.DelayedOutput;
-import ca.frc6390.athena.core.RobotBase;
+import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.devices.IMU;
 import edu.wpi.first.math.controller.ProfiledPIDController;
@@ -23,7 +23,7 @@ public class RotateToAngle extends Command{
     private ProfiledPIDController rotationPID;
     private final DelayedOutput delayedOutput;
 
-    public RotateToAngle(RobotBase<?> base, Supplier<Rotation2d> angle){
+    public RotateToAngle(RobotCore<?> base, Supplier<Rotation2d> angle){
         this.speeds = base.getDrivetrain().getRobotSpeeds();
         this.imu = base.getDrivetrain().getIMU();
         this.angle = angle;
@@ -35,19 +35,19 @@ public class RotateToAngle extends Command{
         delayedOutput = new DelayedOutput(rotationPID::atSetpoint, 1);
     }
 
-    public RotateToAngle(RobotBase<?> base, Rotation2d angle){
+    public RotateToAngle(RobotCore<?> base, Rotation2d angle){
        this(base, () -> angle);
     }
 
-    public RotateToAngle(RobotBase<?> base, DoubleSupplier angle){
+    public RotateToAngle(RobotCore<?> base, DoubleSupplier angle){
         this(base, () -> Rotation2d.fromDegrees(angle.getAsDouble()));
     }
 
-    public RotateToAngle(RobotBase<?> base, double degree){
+    public RotateToAngle(RobotCore<?> base, double degree){
         this(base, Rotation2d.fromDegrees(degree));
     }
 
-    public RotateToAngle(RobotBase<?> base){
+    public RotateToAngle(RobotCore<?> base){
         this(base, () -> null);
     }
 

@@ -3,12 +3,12 @@ plugins {
   id 'java'
   id 'google-test'
   id 'edu.wpi.first.wpilib.repositories.WPILibRepositoriesPlugin' version '2025.0'
-  id 'edu.wpi.first.NativeUtils' version '2025.9.0'
+  id 'edu.wpi.first.NativeUtils' version '2026.0.0'
   id 'edu.wpi.first.GradleJni' version '1.1.0'
   id 'edu.wpi.first.GradleVsCode' version '2.1.0'
 }
 
-ext.wpilibVersion = "2025.+"
+ext.wpilibVersion = "2026.+"
 
 java {
     sourceCompatibility = "17"
@@ -40,6 +40,7 @@ apply from: 'config.gradle'
 
 // Apply Java configuration
 dependencies {
+    implementation project(':athena-core')
     implementation "edu.wpi.first.cscore:cscore-java:$wpilibVersion"
     implementation "edu.wpi.first.cameraserver:cameraserver-java:$wpilibVersion"
     implementation "edu.wpi.first.ntcore:ntcore-java:$wpilibVersion"
@@ -54,7 +55,7 @@ dependencies {
     implementation "com.fasterxml.jackson.core:jackson-annotations:2.15.2"
     implementation "com.fasterxml.jackson.core:jackson-core:2.15.2"
     implementation "com.fasterxml.jackson.core:jackson-databind:2.15.2"
-    implementation 'edu.wpi.first.thirdparty.frc2025.opencv:opencv-java:4.10.0-2'
+    implementation 'edu.wpi.first.thirdparty.frc2025.opencv:opencv-java:4.10.0-3'
 
     implementation 'org.photonvision:photonlib-java:v2025.2.1'
     implementation 'org.photonvision:photontargeting-java:v2025.2.1'

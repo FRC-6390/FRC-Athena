@@ -2,5 +2,18 @@ pluginManagement {
     repositories {
         mavenLocal()
         gradlePluginPortal()
+        maven { url 'https://frcmaven.wpi.edu/artifactory/release' }
+        maven { url 'https://frcmaven.wpi.edu/artifactory/development' }
     }
 }
+
+rootProject.name = 'FRC-Athena'
+
+include 'athena-core'
+include 'athena-ctre'
+include 'athena-rev'
+include 'athena-photonvision'
+include 'athena-limelight'
+include 'athena-pathplanner'
+include 'athena-choreo'
+include 'athena-studica'

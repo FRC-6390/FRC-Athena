@@ -24,6 +24,8 @@ import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorControllerType;
 import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.system.plant.DCMotor;
+import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
@@ -298,7 +300,8 @@ public class MotorController implements RobotSendableDevice {
         return temperature;
     }
 
-    public enum Motor {
+    public enum Motor implements ca.frc6390.athena.sim.MotorSimType {
+        KRAKEN_X44(MotorControllerType.CTRETalonFX,7532),
         KRAKEN_X60_FOC(MotorControllerType.CTRETalonFX, 5800),
         KRAKEN_X60(MotorControllerType.CTRETalonFX,6000),
         FALCON_500_FOC(MotorControllerType.CTRETalonFX,6080),
@@ -324,6 +327,21 @@ public class MotorController implements RobotSendableDevice {
 
         public MotorControllerConfig config(int id){
             return getMotorControllerType().config(id);
+        }
+
+        @Override
+        public DCMotor createSimMotor(int count) {
+            int resolvedCount = Math.max(1, count);
+            return switch (this) {
+                case KRAKEN_X44 -> new DCMotor(12, 4.05, 275, 1.4,
+                        Units.rotationsPerMinuteToRadiansPerSecond(7532), resolvedCount);
+                case KRAKEN_X60_FOC -> DCMotor.getKrakenX60Foc(resolvedCount);
+                case KRAKEN_X60 -> DCMotor.getKrakenX60(resolvedCount);
+                case FALCON_500_FOC -> DCMotor.getFalcon500Foc(resolvedCount);
+                case FALCON_500 -> DCMotor.getFalcon500(resolvedCount);
+                case NEO_V1 -> DCMotor.getNEO(resolvedCount);
+                case NEO_VORTEX -> DCMotor.getNeoVortex(resolvedCount);
+            };
         }
     }
 
