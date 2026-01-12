@@ -1,0 +1,38 @@
+{
+    "fileName": "FRC6390-Athena-REV.json",
+    "name": "FRC6390 Athena REV",
+    "version": "2025.16.118",
+    "frcYear": "2026",
+    "uuid": "b0e5a07b-6a34-4e2f-b9a8-4eac7e95c621",
+    "mavenUrls": [
+        "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
+    ],
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-REV.json",
+    "javaDependencies": [
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-rev",
+            "version": "2025.16.118"
+        }
+    ],
+    "requires": [
+        {
+            "uuid": "1f3b1e19-0f9f-4f37-9f13-6a2b0b3764cb",
+            "errorMessage": "Athena REV requires Athena Core. Please add the FRC6390-Athena-Core vendordep",
+            "offlineFileName": "FRC6390-Athena-Core.json",
+            "onlineUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json"
+        },
+        {
+            "uuid": "3f48eb8c-50fe-43a6-9cb7-44c86353c4cb",
+            "errorMessage": "Athena REV requires REVLib.  Please add the REVLib vendordep",
+            "offlineFileName": "REVLib.json",
+            "onlineUrl": "https://software-metadata.revrobotics.com/REVLib-2025.json"
+        }
+    ],
+    "jniDependencies": [
+        
+    ],
+    "cppDependencies": [
+        
+    ]
+}

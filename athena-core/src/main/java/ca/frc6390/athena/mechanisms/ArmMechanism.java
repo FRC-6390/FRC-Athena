@@ -32,7 +32,7 @@ public class ArmMechanism extends Mechanism {
         return (ArmMechanism) super.shuffleboard(tab, level);
     }
     
-    public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ArmMechanism {
+    public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ArmMechanism implements StatefulLike<E> {
 
         private final StatefulMechanismCore<StatefulArmMechanism<E>, E> stateCore;
 
@@ -52,6 +52,7 @@ public class ArmMechanism extends Mechanism {
             super.update();
         }
 
+        @Override
         public StateMachine<Double, E> getStateMachine() {
             return stateCore.getStateMachine();
         }
@@ -73,5 +74,4 @@ public class ArmMechanism extends Mechanism {
         }
     }
 }
-
 

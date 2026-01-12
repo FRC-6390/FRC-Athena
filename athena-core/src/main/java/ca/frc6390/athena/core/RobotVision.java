@@ -12,8 +12,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.ServiceLoader;
 
 import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.sensors.camera.CameraProvider;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCamera.LocalizationData;
@@ -21,10 +23,6 @@ import ca.frc6390.athena.sensors.camera.LocalizationCamera.CoordinateSpace;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
-import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
-import ca.frc6390.athena.sensors.camera.limelight.LimeLightConfig;
-import ca.frc6390.athena.sensors.camera.photonvision.PhotonVision;
-import ca.frc6390.athena.sensors.camera.photonvision.PhotonVisionConfig;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -36,53 +34,26 @@ import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public class RobotVision implements RobotSendableSystem {
+   private static final List<CameraProvider> CAMERA_PROVIDERS = ServiceLoader
+           .load(CameraProvider.class)
+           .stream()
+           .map(ServiceLoader.Provider::get)
+           .toList();
    
-   public record RobotVisionConfig(ArrayList<LimeLightConfig> limelight, ArrayList<PhotonVisionConfig> photon) {
+   public record RobotVisionConfig(ArrayList<ConfigurableCamera> cameras) {
 
       public static RobotVisionConfig defualt(){
-         return new RobotVisionConfig(new ArrayList<>(), new ArrayList<>());
-      }
-
-      public RobotVisionConfig addLimeLight(LimeLightConfig config){
-         limelight.add(config);
-         return this;
-      }
-
-      public RobotVisionConfig addLimeLights(LimeLightConfig... config){
-         limelight.addAll(Arrays.asList(config));
-         return this;
-      }
-
-      public RobotVisionConfig addPhotonVisions(PhotonVisionConfig... config){
-         photon.addAll(Arrays.asList(config));
-         return this;
-      }
-
-      public RobotVisionConfig addPhotonVision(PhotonVisionConfig config){
-         photon.add(config);
-         return this;
+         return new RobotVisionConfig(new ArrayList<>());
       }
 
       @SafeVarargs
       public final <T extends ConfigurableCamera> RobotVisionConfig addCameras(T... configs){
-         
-         for (ConfigurableCamera c : configs) {
-            addCamera(c);
-         }
-
+         cameras.addAll(Arrays.asList(configs));
          return this;
       }
 
       public <T extends ConfigurableCamera> RobotVisionConfig addCamera(T config){
-       
-         if (config instanceof LimeLightConfig){
-            limelight.add((LimeLightConfig)config);
-         }
-
-         if (config instanceof PhotonVisionConfig){
-            photon.add((PhotonVisionConfig)config);
-         }
-
+         cameras.add(config);
          return this;
       }
 
@@ -94,32 +65,22 @@ public class RobotVision implements RobotSendableSystem {
    private final RobotVisionConfig config;
    private final HashMap<String, LocalizationCamera> cameras;
    private final EnumMap<CameraRole, List<LocalizationCamera>> camerasByRole;
-   private final HashMap<String, PhotonVision> photonVisionCameras;
-   private final HashMap<String, LimeLight> limeLightCameras;
+   private final HashMap<String, Object> vendorCameras;
    private RobotLocalization<?> localization;
    
    public RobotVision(RobotVisionConfig config) {
       this.config = config;
       this.cameras = new HashMap<>();
       this.camerasByRole = new EnumMap<>(CameraRole.class);
-      this.photonVisionCameras = new HashMap<>();
-      this.limeLightCameras = new HashMap<>();
+      this.vendorCameras = new HashMap<>();
 
       boolean simulation = edu.wpi.first.wpilibj.RobotBase.isSimulation();
 
-      for (LimeLightConfig c : config.limelight) {
-         if (simulation) {
-            PhotonVision simPhoton = new PhotonVision(c.toSimulationPhotonConfig());
-            registerCamera(c.getTable(), simPhoton.getLocalizationCamera(), simPhoton, null);
-         } else {
-            LimeLight limeLight = new LimeLight(c);
-            registerCamera(c.getTable(), limeLight.getLocalizationCamera(), null, limeLight);
+      for (ConfigurableCamera cameraConfig : config.cameras) {
+         LocalizationCamera camera = createCamera(cameraConfig, simulation);
+         if (camera != null) {
+            registerCamera(cameraConfig.getTable(), camera, null);
          }
-      }
-
-      for (PhotonVisionConfig c : config.photon) {
-         PhotonVision photonVision = new PhotonVision(c);
-         registerCamera(c.getTable(), photonVision.getLocalizationCamera(), photonVision, null);
       }
    }
 
@@ -136,14 +97,6 @@ public class RobotVision implements RobotSendableSystem {
    }
 
    public AprilTagFieldLayout deriveSimulationLayout() {
-      for (PhotonVisionConfig pv : config.photon()) {
-         if (pv != null && pv.fieldLayout() != null) {
-            try {
-               return AprilTagFieldLayout.loadField(pv.fieldLayout());
-            } catch (Exception ignored) {
-            }
-         }
-      }
       try {
          return AprilTagFieldLayout.loadField(AprilTagFields.k2025ReefscapeWelded);
       } catch (Exception e) {
@@ -161,21 +114,11 @@ public class RobotVision implements RobotSendableSystem {
          return;
       }
       camera.setUseForLocalization(enabled);
-      getLimeLightCamera(key).ifPresent(lime -> lime.setUseForLocalization(enabled));
-      getPhotonVisionCamera(key).ifPresent(pv -> pv.setUseForLocalization(enabled));
       refreshCameraRoles(camera);
    }
 
    public void attachLocalization(RobotLocalization<?> localization) {
       this.localization = localization;
-   }
-
-   public Optional<PhotonVision> getPhotonVisionCamera(String key) {
-      return Optional.ofNullable(photonVisionCameras.get(key));
-   }
-
-   public Optional<LimeLight> getLimeLightCamera(String key) {
-      return Optional.ofNullable(limeLightCameras.get(key));
    }
 
    public Map<CameraRole, List<LocalizationCamera>> getCamerasByRole() {
@@ -387,15 +330,21 @@ public class RobotVision implements RobotSendableSystem {
       return current;
    }
 
-   private void registerCamera(String key, LocalizationCamera camera, PhotonVision photonVision, LimeLight limeLight) {
+   private void registerCamera(String key, LocalizationCamera camera, Object vendorInstance) {
       cameras.put(key, camera);
-      if (photonVision != null) {
-         photonVisionCameras.put(key, photonVision);
-      }
-      if (limeLight != null) {
-         limeLightCameras.put(key, limeLight);
+      if (vendorInstance != null) {
+         vendorCameras.put(key, vendorInstance);
       }
       refreshCameraRoles(camera);
+   }
+
+   private LocalizationCamera createCamera(ConfigurableCamera config, boolean simulation) {
+      for (CameraProvider provider : CAMERA_PROVIDERS) {
+         if (provider.supports(config)) {
+            return provider.create(config, simulation);
+         }
+      }
+      return null;
    }
 
    private void refreshCameraRoles(LocalizationCamera camera) {

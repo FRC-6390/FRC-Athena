@@ -23,7 +23,8 @@ public class SwerveSimulationConfig {
      * Returns a baseline configuration that matches the team's reference robot.
      */
     public static SwerveSimulationConfig defaults() {
-        return new SwerveSimulationConfig(58.0, 6.0, 1.3, 12.0);
+        // Defaults tuned for more realistic accel in sim; override per-robot with actual values.
+        return new SwerveSimulationConfig(58.0, 6.0, 0.7, 10.5);
     }
 
     /**

@@ -1,6 +1,6 @@
 package ca.frc6390.athena.mechanisms.sim;
 
-import ca.frc6390.athena.devices.Encoder;
+import ca.frc6390.athena.hardware.encoder.Encoder;
 
 /**
  * Utility helpers for converting between simulation units and the library's {@link Encoder} units.

@@ -1,6 +1,5 @@
 package ca.frc6390.athena.core;
 
-import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -10,21 +9,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import org.json.simple.parser.ParseException;
-
-import com.pathplanner.lib.auto.AutoBuilder;
-import com.pathplanner.lib.auto.NamedCommands;
-import com.pathplanner.lib.commands.PathPlannerAuto;
-import com.pathplanner.lib.path.PathPlannerPath;
-import com.pathplanner.lib.util.FileVersionException;
-
+import ca.frc6390.athena.core.auto.AutoBackends;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 
 /**
@@ -165,7 +156,9 @@ public class RobotAuto {
             throw new IllegalArgumentException("Named command already registered: " + id);
         }
         namedCommandSuppliers.put(id, supplier);
-        NamedCommands.registerCommand(id, Commands.deferredProxy(supplier));
+        AutoBackends.forSource(AutoSource.PATH_PLANNER).ifPresentOrElse(
+                backend -> backend.registerNamedCommand(id, () -> Commands.deferredProxy(supplier)),
+                () -> DriverStation.reportWarning("Path planner backend not available; named command '" + id + "' not bound to vendor API.", false));
         return this;
     }
 
@@ -352,22 +345,24 @@ public class RobotAuto {
     public static AutoRoutine pathPlanner(AutoKey key, String autoName) {
         Objects.requireNonNull(key, "key");
         String reference = autoName != null ? autoName : key.id();
-        Supplier<Command> factory = () -> new PathPlannerAuto(reference);
+        Supplier<Command> factory = () -> AutoBackends.forSource(AutoSource.PATH_PLANNER)
+                .flatMap(backend -> backend.buildAuto(AutoSource.PATH_PLANNER, reference))
+                .orElseGet(() -> {
+                    DriverStation.reportError("Path planner backend missing; auto \"" + reference + "\" unavailable.", false);
+                    return Commands.none();
+                });
         return new AutoRoutine(key, AutoSource.PATH_PLANNER, reference, factory, new Pose2d());
     }
 
     public static AutoRoutine choreo(AutoKey key, String trajectoryName) {
         Objects.requireNonNull(key, "key");
         String reference = trajectoryName != null ? trajectoryName : key.id();
-        Supplier<Command> factory = () -> {
-            try {
-                PathPlannerPath path = PathPlannerPath.fromChoreoTrajectory(reference);
-                return AutoBuilder.followPath(path);
-            } catch (FileVersionException | IOException | ParseException ex) {
-                DriverStation.reportError("Could not load Choreo auto \"" + reference + "\"", ex.getStackTrace());
-                return Commands.none();
-            }
-        };
+        Supplier<Command> factory = () -> AutoBackends.forSource(AutoSource.CHOREO)
+                .flatMap(backend -> backend.buildAuto(AutoSource.CHOREO, reference))
+                .orElseGet(() -> {
+                    DriverStation.reportError("Choreo backend missing; auto \"" + reference + "\" unavailable.", false);
+                    return Commands.none();
+                });
         return new AutoRoutine(key, AutoSource.CHOREO, reference, factory, new Pose2d());
     }
 

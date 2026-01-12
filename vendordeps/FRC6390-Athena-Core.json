@@ -1,0 +1,27 @@
+{
+    "fileName": "FRC6390-Athena-Core.json",
+    "name": "FRC6390 Athena Core",
+    "version": "2025.16.118",
+    "frcYear": "2026",
+    "uuid": "1f3b1e19-0f9f-4f37-9f13-6a2b0b3764cb",
+    "mavenUrls": [
+        "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
+    ],
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json",
+    "javaDependencies": [
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-core",
+            "version": "2025.16.118"
+        }
+    ],
+    "requires": [
+        
+    ],
+    "jniDependencies": [
+        
+    ],
+    "cppDependencies": [
+        
+    ]
+}

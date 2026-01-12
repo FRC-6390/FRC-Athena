@@ -1,0 +1,37 @@
+{
+    "fileName": "FRC6390-Athena-PhotonVision.json",
+    "name": "FRC6390 Athena PhotonVision",
+    "version": "2025.16.118",
+    "frcYear": "2026",
+    "uuid": "f0ab7d3a-6bfb-4c2b-8e3f-4a201215b688",
+    "mavenUrls": [
+        "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
+    ],
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-PhotonVision.json",
+    "javaDependencies": [
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-photonvision",
+            "version": "2025.16.118"
+        }
+    ],
+    "requires": [
+        {
+            "uuid": "1f3b1e19-0f9f-4f37-9f13-6a2b0b3764cb",
+            "errorMessage": "Athena PhotonVision requires Athena Core. Please add the FRC6390-Athena-Core vendordep",
+            "offlineFileName": "FRC6390-Athena-Core.json",
+            "onlineUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json"
+        },
+        {
+            "uuid": "515fe07e-bfc6-11fa-b3de-0242ac130004",
+            "errorMessage": "Athena PhotonVision requires PhotonLib. Please add the PhotonLib vendordep",
+            "onlineUrl": "https://maven.photonvision.org/repository/internal/org/photonvision/photonlib-json/1.0/photonlib-json-1.0.json"
+        }
+    ],
+    "jniDependencies": [
+        
+    ],
+    "cppDependencies": [
+        
+    ]
+}

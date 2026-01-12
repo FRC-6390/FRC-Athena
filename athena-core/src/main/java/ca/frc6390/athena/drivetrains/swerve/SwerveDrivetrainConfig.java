@@ -5,9 +5,11 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.EncoderIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.SteerIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs;
-import ca.frc6390.athena.devices.IMU;
-import ca.frc6390.athena.devices.IMU.IMUConfig;
-import ca.frc6390.athena.devices.IMU.IMUType;
+import ca.frc6390.athena.hardware.imu.AthenaImu;
+import ca.frc6390.athena.hardware.imu.Imu;
+import ca.frc6390.athena.hardware.imu.ImuConfig;
+import ca.frc6390.athena.hardware.imu.VirtualImu;
+import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
 import edu.wpi.first.math.controller.PIDController;
@@ -21,7 +23,7 @@ import edu.wpi.first.math.geometry.Translation2d;
 public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrivetrain> {
     
     /** Optional IMU configuration that provides field-centric heading. */
-    private IMUConfig imu = null;
+    private ImuConfig imu = null;
     /** Per-module hardware configuration (drive/steer motors, encoders). */
     private SwerveModuleConfig[] modules = null;
     /** PID controller used to counter uncommanded drift while driving straight. */
@@ -114,8 +116,8 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
      * @param imu IMU type installed on the robot
      * @param inverted true if yaw should be inverted
      */
-    public SwerveDrivetrainConfig setIMU(IMUType imu, boolean inverted){
-        this.imu = new IMUConfig(imu).setInverted(inverted);
+    public SwerveDrivetrainConfig setIMU(AthenaImu imu, boolean inverted){
+        this.imu = new ImuConfig(imu.resolve(), DrivetrainIDs.SWERVE_CHASSIS_STANDARD.getGyro()).setInverted(inverted);
         return this;
     }
 
@@ -400,7 +402,8 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         } 
         imu = imu.setId(gryoId).setCanbus(canbus);
 
-        SwerveDrivetrain dt = new SwerveDrivetrain(IMU.fromConfig(imu), modules);
+        Imu resolvedImu = imu == null ? null : new VirtualImu(HardwareFactories.imu(imu));
+        SwerveDrivetrain dt = new SwerveDrivetrain(resolvedImu, modules);
 
         if (edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
             dt.configureSimulation(simulationConfig != null ? simulationConfig : SwerveSimulationConfig.defaults());

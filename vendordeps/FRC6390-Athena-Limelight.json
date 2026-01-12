@@ -1,0 +1,32 @@
+{
+    "fileName": "FRC6390-Athena-Limelight.json",
+    "name": "FRC6390 Athena Limelight",
+    "version": "2025.16.118",
+    "frcYear": "2026",
+    "uuid": "2bce0b98-1373-4c4c-8b53-04637a9550d5",
+    "mavenUrls": [
+        "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
+    ],
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Limelight.json",
+    "javaDependencies": [
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-limelight",
+            "version": "2025.16.118"
+        }
+    ],
+    "requires": [
+        {
+            "uuid": "1f3b1e19-0f9f-4f37-9f13-6a2b0b3764cb",
+            "errorMessage": "Athena Limelight requires Athena Core. Please add the FRC6390-Athena-Core vendordep",
+            "offlineFileName": "FRC6390-Athena-Core.json",
+            "onlineUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json"
+        }
+    ],
+    "jniDependencies": [
+        
+    ],
+    "cppDependencies": [
+        
+    ]
+}

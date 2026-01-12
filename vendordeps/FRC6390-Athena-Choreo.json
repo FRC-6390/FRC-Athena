@@ -1,0 +1,37 @@
+{
+    "fileName": "FRC6390-Athena-Choreo.json",
+    "name": "FRC6390 Athena Choreo",
+    "version": "2025.16.118",
+    "frcYear": "2026",
+    "uuid": "f8e0c33c-8f11-4d7d-9e3f-3de8792b3b49",
+    "mavenUrls": [
+        "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
+    ],
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Choreo.json",
+    "javaDependencies": [
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-choreo",
+            "version": "2025.16.118"
+        }
+    ],
+    "requires": [
+        {
+            "uuid": "1f3b1e19-0f9f-4f37-9f13-6a2b0b3764cb",
+            "errorMessage": "Athena Choreo requires Athena Core. Please add the FRC6390-Athena-Core vendordep",
+            "offlineFileName": "FRC6390-Athena-Core.json",
+            "onlineUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json"
+        },
+        {
+            "uuid": "b5e23f0a-dac9-4ad2-8dd6-02767c520aca",
+            "errorMessage": "Athena Choreo requires ChoreoLib. Please add the ChoreoLib vendordep",
+            "onlineUrl": "https://lib.choreo.autos/dep/ChoreoLib2025.json"
+        }
+    ],
+    "jniDependencies": [
+        
+    ],
+    "cppDependencies": [
+        
+    ]
+}

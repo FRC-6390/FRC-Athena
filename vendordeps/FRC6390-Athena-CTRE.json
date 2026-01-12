@@ -1,0 +1,38 @@
+{
+    "fileName": "FRC6390-Athena-CTRE.json",
+    "name": "FRC6390 Athena CTRE",
+    "version": "2025.16.118",
+    "frcYear": "2026",
+    "uuid": "5f9b64e1-d3d7-4f5f-9b8f-3de54aa32ce3",
+    "mavenUrls": [
+        "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
+    ],
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-CTRE.json",
+    "javaDependencies": [
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-ctre",
+            "version": "2025.16.118"
+        }
+    ],
+    "requires": [
+        {
+            "uuid": "1f3b1e19-0f9f-4f37-9f13-6a2b0b3764cb",
+            "errorMessage": "Athena CTRE requires Athena Core. Please add the FRC6390-Athena-Core vendordep",
+            "offlineFileName": "FRC6390-Athena-Core.json",
+            "onlineUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json"
+        },
+        {
+            "uuid": "e995de00-2c64-4df5-8831-c1441420ff19",
+            "errorMessage": "Athena CTRE requires Phoenix 6. Please add the Phoenix 6 vendordep",
+            "offlineFileName": "Phoenix6-frc2025-latest.json",
+            "onlineUrl": "https://maven.ctr-electronics.com/release/com/ctre/phoenix6/latest/Phoenix6-frc2025-latest.json"
+        }
+    ],
+    "jniDependencies": [
+        
+    ],
+    "cppDependencies": [
+        
+    ]
+}

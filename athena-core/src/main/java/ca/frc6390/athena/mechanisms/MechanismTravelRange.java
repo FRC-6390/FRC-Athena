@@ -10,7 +10,7 @@ import java.util.WeakHashMap;
  * interval. When limit switches specify explicit bounds, those are treated as fixed travel limits.
  * Otherwise the tracker learns extrema over time with sensible fallbacks for initial values.
  */
-final class MechanismTravelRange {
+public final class MechanismTravelRange {
 
     private MechanismTravelRange() {
         /* utility */
@@ -18,12 +18,12 @@ final class MechanismTravelRange {
 
     private static final WeakHashMap<Mechanism, State> STATE_MAP = new WeakHashMap<>();
 
-    static double normalize(Mechanism mechanism, double value) {
+    public static double normalize(Mechanism mechanism, double value) {
         Objects.requireNonNull(mechanism);
         return stateFor(mechanism).normalize(mechanism, value);
     }
 
-    static void registerKnownRange(Mechanism mechanism, double min, double max) {
+    public static void registerKnownRange(Mechanism mechanism, double min, double max) {
         if (!(max > min)) {
             return;
         }

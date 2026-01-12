@@ -1,7 +1,6 @@
 package ca.frc6390.athena.core.localization;
 
-import com.pathplanner.lib.config.PIDConstants;
-
+import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.util.Units;
@@ -22,8 +21,8 @@ public record RobotLocalizationConfig(
         double zStd,
         double vZStd,
         double v2ZStd,
-        PIDConstants translation,
-        PIDConstants rotation,
+        HolonomicPidConstants translation,
+        HolonomicPidConstants rotation,
         boolean useVision,
         PoseSpace poseSpace) {
 
@@ -46,8 +45,8 @@ public record RobotLocalizationConfig(
                 xStd,
                 vXStd,
                 vXStd,
-                new PIDConstants(0),
-                new PIDConstants(0),
+                new HolonomicPidConstants(0, 0, 0),
+                new HolonomicPidConstants(0, 0, 0),
                 true,
                 PoseSpace.TWO_D);
     }
@@ -69,10 +68,10 @@ public record RobotLocalizationConfig(
     }
 
     public RobotLocalizationConfig setAutoPlannerPID(double tP, double tI, double tD, double rP, double rI, double rD){
-        return setAutoPlannerPID(new PIDConstants(tP, tI, tD), new PIDConstants(rP, rI, rD));
+        return setAutoPlannerPID(new HolonomicPidConstants(tP, tI, tD), new HolonomicPidConstants(rP, rI, rD));
     }
 
-    public RobotLocalizationConfig setAutoPlannerPID(PIDConstants translation, PIDConstants rotation){
+    public RobotLocalizationConfig setAutoPlannerPID(HolonomicPidConstants translation, HolonomicPidConstants rotation){
         return new RobotLocalizationConfig(
                 xStd,
                 yStd,

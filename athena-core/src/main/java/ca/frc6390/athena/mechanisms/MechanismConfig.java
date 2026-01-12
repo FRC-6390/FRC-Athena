@@ -9,16 +9,19 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import ca.frc6390.athena.devices.EncoderConfig;
-import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
-import ca.frc6390.athena.devices.MotorController.Motor;
-import ca.frc6390.athena.devices.MotorControllerConfig;
-import ca.frc6390.athena.devices.MotorControllerConfig.MotorControllerType;
-import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
+import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import ca.frc6390.athena.hardware.encoder.EncoderType;
+import ca.frc6390.athena.hardware.motor.AthenaMotor;
+import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.hardware.motor.MotorControllerType;
+import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import ca.frc6390.athena.hardware.motor.MotorRegistry;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-import ca.frc6390.athena.mechanisms.SimpleMotorMechanism.StatefulSimpleMotorMechanism;
+import ca.frc6390.athena.mechanisms.TurretMechanism;
+import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
 import ca.frc6390.athena.mechanisms.sim.MechanismSimulationConfig;
 import ca.frc6390.athena.mechanisms.sim.MechanismSimulationModel;
@@ -203,45 +206,45 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Builds a stateful simple-motor configuration (turret/flywheel) with feedforward support.
+     * Builds a stateful turret configuration (simple motor with continuous rotation) with feedforward support.
      *
      * @param feedforward feedforward model tuned for the mechanism
      * @param initialState starting state for the state machine
      * @param <E> state enum type that provides setpoints
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulSimpleMotorMechanism<E>> statefulTurret(SimpleMotorFeedforward feedforward, E initialState) {
-        return custom(config -> new StatefulSimpleMotorMechanism<>(config, feedforward, initialState));
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(SimpleMotorFeedforward feedforward, E initialState) {
+        return custom(config -> new StatefulTurretMechanism<>(config, feedforward, initialState));
     }
 
     /**
-     * Builds a stateful simple-motor configuration backed by a caller-supplied factory.
+     * Builds a stateful turret configuration backed by a caller-supplied factory.
      *
      * @param feedforward feedforward model to pass through to the factory
      * @param factory constructor logic for the concrete mechanism
      * @param <E> state enum type that provides setpoints
      * @param <T> concrete mechanism type created by the factory
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulSimpleMotorMechanism<E>> MechanismConfig<T> statefulTurret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulTurretMechanism<E>> MechanismConfig<T> statefulTurret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
         return custom(factory);
     }
 
     /**
-     * Creates a simple-motor configuration that yields a {@link SimpleMotorMechanism}.
+     * Creates a turret configuration that yields a {@link TurretMechanism}.
      *
      * @param feedforward feedforward model tuned for the mechanism
      */
-    public static MechanismConfig<SimpleMotorMechanism> turret(SimpleMotorFeedforward feedforward) {
-        return custom(config -> new SimpleMotorMechanism(config, feedforward));
+    public static MechanismConfig<TurretMechanism> turret(SimpleMotorFeedforward feedforward) {
+        return custom(config -> new TurretMechanism(config, feedforward));
     }
 
     /**
-     * Creates a simple-motor configuration backed by a caller-supplied factory.
+     * Creates a turret configuration backed by a caller-supplied factory.
      *
      * @param feedforward feedforward model to pass through to the factory
      * @param factory constructor logic for the concrete mechanism
      * @param <T> concrete mechanism type created by the factory
      */
-    public static <T extends SimpleMotorMechanism> MechanismConfig<T> turret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+    public static <T extends TurretMechanism> MechanismConfig<T> turret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
         return custom(factory);
     }
 
@@ -300,6 +303,18 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Registers a motor controller using a team-facing {@link AthenaMotor} entry, which resolves to
+     * the correct vendor-specific controller type through the hardware registry.
+     *
+     * @param motor logical motor entry (Falcon, Kraken, NEO, etc.)
+     * @param id CAN ID of the controller on the configured bus (negative to mark inverted)
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> addMotor(AthenaMotor motor, int id) {
+        return addMotor(motor.resolveController(), id);
+    }
+
+    /**
      * Registers multiple motor controllers of the same type in one call.
      *
      * @param type motor controller platform for all supplied IDs
@@ -315,25 +330,15 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Registers a motor controller using the convenience {@link Motor} enum.
+     * Registers multiple controllers by logical motor type, mirroring
+     * {@link #addMotors(MotorControllerType, int...)} while keeping caller code vendor-agnostic.
      *
-     * @param type logical motor type exposed by the {@link Motor} enum
-     * @param id CAN ID of the controller
+     * @param motor logical motor entry (Falcon, Kraken, NEO, etc.)
+     * @param ids CAN IDs to register; negative IDs mark inversion
      * @return this config for chaining
      */
-    public MechanismConfig<T> addMotor(Motor type, int id){
-        return addMotor(new MotorControllerConfig(type.getMotorControllerType(), id));
-    }
-
-    /**
-     * Registers multiple motor controllers using the convenience {@link Motor} enum.
-     *
-     * @param type logical motor type exposed by the {@link Motor} enum
-     * @param ids CAN IDs of the controllers
-     * @return this config for chaining
-     */
-    public MechanismConfig<T> addMotors(Motor type, int... ids){
-        return addMotors(type.getMotorControllerType(), ids);
+    public MechanismConfig<T> addMotors(AthenaMotor motor, int... ids) {
+        return addMotors(motor.resolveController(), ids);
     }
 
     /**
@@ -356,6 +361,18 @@ public class MechanismConfig<T extends Mechanism> {
      */
     public MechanismConfig<T> setEncoder(EncoderType type, int id){
         return setEncoder(EncoderConfig.type(type, id));
+    }
+
+    /**
+     * Creates and registers an encoder configuration from a logical {@link AthenaEncoder}, keeping
+     * mechanism configuration vendor-agnostic at call sites.
+     *
+     * @param encoder logical encoder entry
+     * @param id primary identifier (CAN ID, DIO port, etc.)
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> setEncoder(AthenaEncoder encoder, int id) {
+        return setEncoder(encoder.resolve(), id);
     }
 
     /**
@@ -1166,6 +1183,9 @@ public class MechanismConfig<T extends Mechanism> {
             simulationConfig = simulationConfig.bindSourceConfig(this);
         }
 
+        validateMotorTypesForHardware();
+        validateMotorTypesForSimulation();
+
         T mechanism = factory.apply(this);
 
         if (stateGraph != null && mechanism instanceof StatefulMechanism<?> statefulMechanism) {
@@ -1175,5 +1195,45 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         return mechanism;
+    }
+
+    /**
+     * Ensures each configured motor type is registered for hardware use. This surfaces missing
+     * vendor modules early instead of failing silently at runtime.
+     */
+    private void validateMotorTypesForHardware() {
+        if (motors == null || motors.isEmpty()) {
+            return;
+        }
+        motors.forEach(config -> {
+            if (config.type == null) {
+                throw new IllegalStateException("Motor controller config is missing a type");
+            }
+            // Throws with a clear message if the vendor module is absent.
+            MotorRegistry.get().motor(config.type.getKey());
+        });
+    }
+
+    /**
+     * Ensures each configured motor type can be mapped to a simulation model whenever simulation
+     * metadata is present. This prevents silent fallbacks to placeholder motors.
+     */
+    private void validateMotorTypesForSimulation() {
+        boolean simEnabled = simulationConfig != null
+                || elevatorSimulationParameters != null
+                || armSimulationParameters != null
+                || simpleMotorSimulationParameters != null;
+        if (!simEnabled) {
+            return;
+        }
+        if (motors == null || motors.isEmpty()) {
+            throw new IllegalStateException("Simulation requires at least one motor controller to be configured");
+        }
+        motors.forEach(config -> {
+            if (config.type == null) {
+                throw new IllegalStateException("Motor controller config is missing a type");
+            }
+            MechanismSimulationConfig.requireSupportedMotorSim(config.type);
+        });
     }
 }

@@ -1,11 +1,11 @@
 package ca.frc6390.athena.drivetrains.swerve.sim;
 
-import ca.frc6390.athena.devices.Encoder;
-import ca.frc6390.athena.devices.MotorController;
-import ca.frc6390.athena.devices.MotorControllerConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleSimConfig;
+import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.motor.MotorController;
+import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.sim.MotorSimType;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -97,16 +97,8 @@ public class SwerveModuleSimulation {
             return motor.createSimMotor(1);
         }
 
-        if (config == null) {
-            return DCMotor.getFalcon500(1);
-        }
-
-        return switch (config.type) {
-            case CTRETalonFX -> DCMotor.getFalcon500(1);
-            case REVSparkFlexBrushless -> DCMotor.getNeoVortex(1);
-            case REVSparkMaxBrushless -> DCMotor.getNEO(1);
-            case REVSparkFlexBrushed, REVSparkMaxBrushed -> DCMotor.getCIM(1);
-        };
+        // Fallback to a generic motor model if type is unknown.
+        return DCMotor.getFalcon500(1);
     }
 
     public void update(double dtSeconds) {
@@ -135,18 +127,13 @@ public class SwerveModuleSimulation {
     public void applyToSensors() {
         if (driveEncoder != null) {
             double wheelRotations = wheelCircumference > 1e-6 ? wheelPositionMeters / wheelCircumference : 0;
-            double motorRotations = Math.abs(driveOutputPerMotorRotation) > 1e-6
-                    ? wheelRotations / driveOutputPerMotorRotation
-                    : wheelRotations;
-
             double wheelVelocityRotationsPerSecond = wheelCircumference > 1e-6
                     ? wheelVelocityMetersPerSecond / wheelCircumference
                     : 0;
-            double motorVelocity = Math.abs(driveOutputPerMotorRotation) > 1e-6
-                    ? wheelVelocityRotationsPerSecond / driveOutputPerMotorRotation
-                    : wheelVelocityRotationsPerSecond;
 
-            driveEncoder.setSimulatedState(motorRotations, motorVelocity);
+            // Simulate encoder in wheel rotations so conversion factors (usually set to wheel circumference)
+            // produce correct linear distances.
+            driveEncoder.setSimulatedState(wheelRotations, wheelVelocityRotationsPerSecond);
         }
 
         if (steerEncoder != null) {

@@ -4,8 +4,6 @@ import java.util.Arrays;
 import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.core.RobotSpeeds;
-import ca.frc6390.athena.devices.IMU;
-import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.localization.RobotLocalization;
@@ -13,6 +11,8 @@ import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
+import ca.frc6390.athena.hardware.imu.Imu;
+import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator3d;
@@ -43,7 +43,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   public PIDController driftpid;
   public boolean enableDriftCorrection, fieldRelative;
   public double desiredHeading, driftActivationSpeed;
-  public IMU imu;
+  public Imu imu;
   public RobotSpeeds robotSpeeds;
   private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault().getStructArrayTopic("/Drivetrain/SwerveStates", SwerveModuleState.struct).publish();
   private SwerveDrivetrainSimulation simulation;
@@ -51,7 +51,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   private double lastSimulationTimestamp = -1;
   private ChassisSpeeds lastCommandedSpeeds = new ChassisSpeeds();
   
-  public SwerveDrivetrain(IMU imu, SwerveModuleConfig... modules) {
+  public SwerveDrivetrain(Imu imu, SwerveModuleConfig... modules) {
 
     this.imu = imu;
 
@@ -132,7 +132,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   }
 
   @Override
-  public IMU getIMU() {
+  public Imu getIMU() {
       return imu;
   }
 

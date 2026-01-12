@@ -13,15 +13,16 @@ import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
-import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrainConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrainConfig;
+import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.mechanisms.Mechanism;
+import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
+import ca.frc6390.athena.mechanisms.RegisterableMechanism;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
-import ca.frc6390.athena.sensors.camera.limelight.LimeLight;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -270,6 +271,22 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return this;
     }
 
+    /**
+     * Registers all child mechanisms contained within the given superstructures.
+     */
+    public RobotCore<T> registerMechanism(SuperstructureMechanism<?, ?>... supers) {
+        Arrays.stream(supers).forEach(s -> registerMechanism(s.getMechanisms().all().toArray(Mechanism[]::new)));
+        return this;
+    }
+
+    /**
+     * Registers any registerable mechanism (plain or composite).
+     */
+    public RobotCore<T> registerMechanism(RegisterableMechanism... entries) {
+        Arrays.stream(entries).forEach(entry -> registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new)));
+        return this;
+    }
+
     public RobotLocalization<?> getLocalization() {
         return localization;
     }
@@ -316,44 +333,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return this;
     }
 
-    public LimeLight getCameraFacing(double x, double y) {
-        return getCameraFacing(new Translation2d(x, y));
-    }
-
-    public LimeLight getCameraFacing(Translation2d translation2d) {
-
-        if (vision == null || localization == null) {
-            return null;
-        }
-
-        Pose2d pose = localization.getFieldPose();
-        Rotation2d targetAngle = Rotation2d.fromRadians(
-                Math.atan2(translation2d.getY() - pose.getY(), translation2d.getX() - pose.getX()));
-
-        Rotation2d desiredRelativeAngle = targetAngle.minus(pose.getRotation());
-
-        LimeLight bestCamera = null;
-        double smallestAngleDiff = Double.MAX_VALUE;
-
-        for (var entry : vision.getCameras().entrySet()) {
-            java.util.Optional<LimeLight> optionalLimeLight =
-                    vision.getCameraCapability(entry.getKey(), LocalizationCameraCapability.LIMELIGHT);
-            if (optionalLimeLight.isEmpty()) {
-                continue;
-            }
-
-            LimeLight limeLight = optionalLimeLight.get();
-            Rotation2d cameraRelativeAngleRad =
-                    Rotation2d.fromRadians(limeLight.config.cameraRobotSpace().getRotation().getZ());
-            double angleDiff = Math.abs(desiredRelativeAngle.minus(cameraRelativeAngleRad).getDegrees());
-            if (angleDiff < smallestAngleDiff) {
-                smallestAngleDiff = angleDiff;
-                bestCamera = limeLight;
-            }
-        }
-        return bestCamera;
-    }
-
     public RotateToPoint rotateTo(double x, double y) {
         return new RotateToPoint(this, x, y);
     }
@@ -372,7 +351,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return drivetrain.getRobotSpeeds();
     }
 
-    public IMU getIMU() {
+    public Imu getIMU() {
         return drivetrain.getIMU();
     }
 

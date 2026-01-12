@@ -2,12 +2,13 @@ package ca.frc6390.athena.drivetrains.swerve;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
-import ca.frc6390.athena.devices.Encoder;
-import ca.frc6390.athena.devices.EncoderConfig;
-import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
-import ca.frc6390.athena.devices.MotorController;
-import ca.frc6390.athena.devices.MotorControllerConfig;
-import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import ca.frc6390.athena.hardware.encoder.EncoderType;
+import ca.frc6390.athena.hardware.motor.MotorController;
+import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.sim.MotorSimType;
 
 import java.util.Map;
@@ -21,6 +22,7 @@ import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 public class SwerveModule implements RobotSendableDevice {
     
@@ -28,6 +30,8 @@ public class SwerveModule implements RobotSendableDevice {
     private final MotorController driveMotor;
     private final MotorController rotationMotor;
     private final Encoder encoder;
+    private final Encoder driveEncoder;
+    private final Encoder steerEncoder;
     private final PIDController rotationPidController;
     private final double startUpOffset;
     private double lastDriveCommand = 0;
@@ -77,7 +81,8 @@ public class SwerveModule implements RobotSendableDevice {
         }
 
         public SwerveModuleConfig setEncoder(EncoderType encoder){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder().setEncoderType(encoder), sim);
+            EncoderConfig cfg = encoder() != null ? encoder().setType(encoder) : EncoderConfig.type(encoder, 0);
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, cfg, sim);
         }
 
         public SwerveModuleConfig setOffset(double offset){
@@ -89,15 +94,15 @@ public class SwerveModule implements RobotSendableDevice {
         }
 
         public SwerveModuleConfig setDriveID(int id){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setID(id), rotationMotor, rotationPID, encoder, sim); 
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setId(id), rotationMotor, rotationPID, encoder, sim); 
         }
 
         public SwerveModuleConfig setSteerID(int id){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor.setID(id), rotationPID, encoder, sim); 
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor.setId(id), rotationPID, encoder, sim); 
         }
 
         public SwerveModuleConfig setEncoderID(int id){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setID(id), sim); 
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setId(id), sim); 
         }
 
         public SwerveModuleConfig setDriveInverted(boolean inverted){
@@ -173,11 +178,13 @@ public class SwerveModule implements RobotSendableDevice {
         rotationPidController.enableContinuousInput(-Math.PI, Math.PI);
 
         // MOTOR INITIALIZATION
-        driveMotor = MotorController.fromConfig(config.driveMotor);
+        driveMotor = HardwareFactories.motor(config.driveMotor);
 
-        rotationMotor = MotorController.fromConfig(config.rotationMotor);
+        rotationMotor = HardwareFactories.motor(config.rotationMotor);
 
-        encoder = Encoder.fromConfig(config.encoder);
+        encoder = HardwareFactories.encoder(config.encoder);
+        driveEncoder = driveMotor.getEncoder();
+        steerEncoder = rotationMotor.getEncoder();
 
         resetEncoders();
         setNeutralMode(MotorNeutralMode.Brake);
@@ -185,7 +192,7 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     public double getDriveMotorVelocity() {
-        return driveMotor.getEncoder().getVelocity();
+        return driveEncoder != null ? driveEncoder.getVelocity() : 0.0;
     }
 
     public Translation2d getModuleLocation() {
@@ -193,7 +200,7 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     public double getDriveMotorPosition() {
-        return driveMotor.getEncoder().getPosition();
+        return driveEncoder != null ? driveEncoder.getPosition() : 0.0;
     }
 
     public Rotation2d getEncoderPosition() {
@@ -221,8 +228,16 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     public void resetEncoders() {
-        driveMotor.getEncoder().setPosition(0);
-        rotationMotor.getEncoder().setPosition(encoder.getAbsolutePosition());
+        if (driveEncoder != null) {
+            driveEncoder.setPosition(0);
+        } else {
+            DriverStation.reportWarning("Drive encoder not configured for swerve module; position reset skipped.", false);
+        }
+        if (steerEncoder != null) {
+            steerEncoder.setPosition(encoder.getAbsolutePosition());
+        } else {
+            DriverStation.reportWarning("Steer encoder not configured for swerve module; position reset skipped.", false);
+        }
     }
 
     public SwerveModuleState getState() {

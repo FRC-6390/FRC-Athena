@@ -1,11 +1,11 @@
 package ca.frc6390.athena.drivetrains.differential.sim;
 
-import ca.frc6390.athena.devices.Encoder;
-import ca.frc6390.athena.devices.EncoderGroup;
-import ca.frc6390.athena.devices.IMU;
 import ca.frc6390.athena.sim.Motor;
 import ca.frc6390.athena.sim.MotorSimType;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
+import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderGroup;
+import ca.frc6390.athena.hardware.imu.Imu;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -25,7 +25,7 @@ public class DifferentialDrivetrainSimulation {
     private final DifferentialDrivetrainSim sim;
     private final EncoderGroup leftEncoders;
     private final EncoderGroup rightEncoders;
-    private final IMU imu;
+    private final Imu imu;
 
     public DifferentialDrivetrainSimulation(DifferentialDrivetrain drivetrain,
                                             DifferentialSimulationConfig config,

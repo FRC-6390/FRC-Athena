@@ -5,8 +5,66 @@ apply plugin: 'maven-publish'
 // Common Variables & Config
 // -----------------------------------------------------------------------------
 ext.licenseFile = files("$rootDir/LICENSE.txt")
-def athenaJsonFile = file("$projectDir/FRC6390-Athena.json")
+def athenaJsonFile = file("$projectDir/vendordeps/FRC6390-Athena-Core.json")
 def defaultVersion = '2025.6.2'
+def vendordepDescriptors = [
+    [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-Core.json"),
+        name      : "FRC6390 Athena Core",
+        artifactId: 'athena-core',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json",
+        uuid      : "1f3b1e19-0f9f-4f37-9f13-6a2b0b3764cb"
+    ],
+    [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-CTRE.json"),
+        name      : "FRC6390 Athena CTRE",
+        artifactId: 'athena-ctre',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-CTRE.json",
+        uuid      : "5f9b64e1-d3d7-4f5f-9b8f-3de54aa32ce3"
+    ],
+    [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-REV.json"),
+        name      : "FRC6390 Athena REV",
+        artifactId: 'athena-rev',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-REV.json",
+        uuid      : "b0e5a07b-6a34-4e2f-b9a8-4eac7e95c621"
+    ],
+    [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-PhotonVision.json"),
+        name      : "FRC6390 Athena PhotonVision",
+        artifactId: 'athena-photonvision',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-PhotonVision.json",
+        uuid      : "f0ab7d3a-6bfb-4c2b-8e3f-4a201215b688"
+    ],
+    [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-Limelight.json"),
+        name      : "FRC6390 Athena Limelight",
+        artifactId: 'athena-limelight',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Limelight.json",
+        uuid      : "2bce0b98-1373-4c4c-8b53-04637a9550d5"
+    ],
+    [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-Pathplanner.json"),
+        name      : "FRC6390 Athena Pathplanner",
+        artifactId: 'athena-pathplanner',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Pathplanner.json",
+        uuid      : "8e35b9f3-0f7d-4d52-90fc-7dbd06c7c2b0"
+    ],
+    [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-Choreo.json"),
+        name      : "FRC6390 Athena Choreo",
+        artifactId: 'athena-choreo',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Choreo.json",
+        uuid      : "f8e0c33c-8f11-4d7d-9e3f-3de8792b3b49"
+    ],
+    [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-Studica.json"),
+        name      : "FRC6390 Athena Studica",
+        artifactId: 'athena-studica',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Studica.json",
+        uuid      : "c4a4b4b9-737b-45be-9468-5d5df2c1d6ab"
+    ],
+]
 
 def computeAutoVersion = {
     if (!athenaJsonFile.exists()) {
@@ -74,6 +132,11 @@ if (!project.hasProperty('frcYear')) {
 def artifactGroupId = 'ca.frc6390.athena'
 def baseArtifactId = 'competition-java'
 
+allprojects {
+    group = artifactGroupId
+    version = pubVersion
+}
+
 // Detect OS for WPILib folder
 def osName = System.getProperty("os.name").toLowerCase()
 def wpilibFolder
@@ -117,33 +180,104 @@ task outputVersions() {
     }
 }
 
+// Ensure every subproject builds with Java 17 and publishes a sources jar
+subprojects {
+    apply plugin: 'maven-publish'
+    plugins.withId('java') {
+        java {
+            sourceCompatibility = JavaVersion.VERSION_17
+            targetCompatibility = JavaVersion.VERSION_17
+        }
+
+        tasks.register('subprojectSourcesJar', Jar) {
+            archiveClassifier = 'sources'
+            from sourceSets.main.allSource
+            dependsOn classes
+        }
+
+        publishing {
+            repositories {
+                if (publishMode == 'local' || publishMode == 'all') {
+                    maven {
+                        name = "localRepo"
+                        url = localRepoDir
+                    }
+                }
+                if (publishMode == 'online' || publishMode == 'all') {
+                    maven {
+                        name = "FRC-Athena-GitHub"
+                        url = "https://maven.pkg.github.com/FRC-6390/FRC-Athena"
+                        credentials {
+                            username = mavenUsername
+                            password = mavenPassword
+                        }
+                    }
+                }
+            }
+
+            publications {
+                mavenJava(MavenPublication) {
+                    from components.java
+                    artifact tasks.named('subprojectSourcesJar')
+                    groupId = artifactGroupId
+                    artifactId = project.name
+                    version = pubVersion
+                }
+            }
+        }
+
+        // Capture subproject outputs for artifact collection
+        rootProject.copyAllOutputs.dependsOn tasks.named('jar'), tasks.named('subprojectSourcesJar')
+        rootProject.copyAllOutputs.from(tasks.named('jar').map { it.archiveFile })
+        rootProject.copyAllOutputs.from(tasks.named('subprojectSourcesJar').map { it.archiveFile })
+    }
+}
+
 task updateAthenaJson {
-    description = 'Updates the FRC6390-Athena.json file with the correct version, frcYear, and javaDependencies[0]'
+    description = 'Updates vendordep JSON files with the correct version, frcYear, and javaDependencies'
     group = 'Publishing'
-    inputs.file athenaJsonFile
-    outputs.file file("$outputsFolder/FRC6390-Athena.json")
+    inputs.files vendordepDescriptors.collect { it.file }
+    outputs.dir outputsFolder
 
     doLast {
-        def jsonContent = new groovy.json.JsonSlurper().parse(athenaJsonFile)
-        // top-level version/frcYear
-        jsonContent.version = pubVersion
+        vendordepDescriptors.each { desc ->
+            if (!desc.file.exists()) {
+                throw new GradleException("Missing vendordep template: ${desc.file}")
+            }
+            def jsonContent = new groovy.json.JsonSlurper().parse(desc.file)
+            jsonContent.version = pubVersion
         jsonContent.frcYear = frcYear
-
-        // Only update javaDependencies[0]
-        // (Assumes the array and index [0] exist in your JSON!)
-        jsonContent.javaDependencies[0].version = pubVersion
-        jsonContent.javaDependencies[0].groupId = artifactGroupId
-        jsonContent.javaDependencies[0].artifactId = baseArtifactId
-
-        def updatedJson = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(jsonContent))
-        athenaJsonFile.write(updatedJson)
+        jsonContent.fileName = desc.file.name
+        jsonContent.name = desc.name
+        jsonContent.jsonUrl = desc.jsonUrl
+        jsonContent.uuid = desc.uuid
+        jsonContent.javaDependencies = [[
+            groupId: artifactGroupId,
+            artifactId: desc.artifactId,
+            version: pubVersion
+        ]]
+            if (!jsonContent.mavenUrls || jsonContent.mavenUrls.isEmpty()) {
+                jsonContent.mavenUrls = ["https://maven.frc6390.ca/FRC-6390/FRC-Athena"]
+            }
+            def updatedJson = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(jsonContent))
+            desc.file.parentFile.mkdirs()
+            desc.file.write(updatedJson)
+        }
     }
 }
 
 task copyToWpilib(type: Copy) {
     description = 'Copies local Maven artifacts + updated JSON to WPILib folder'
     group = 'Publishing'
-    dependsOn updateAthenaJson
+    dependsOn updateAthenaJson,
+            ':athena-core:publishMavenJavaPublicationToLocalRepoRepository',
+            ':athena-ctre:publishMavenJavaPublicationToLocalRepoRepository',
+            ':athena-rev:publishMavenJavaPublicationToLocalRepoRepository',
+            ':athena-photonvision:publishMavenJavaPublicationToLocalRepoRepository',
+            ':athena-limelight:publishMavenJavaPublicationToLocalRepoRepository',
+            ':athena-pathplanner:publishMavenJavaPublicationToLocalRepoRepository',
+            ':athena-choreo:publishMavenJavaPublicationToLocalRepoRepository',
+            ':athena-studica:publishMavenJavaPublicationToLocalRepoRepository'
     onlyIf { publishMode == 'local' || publishMode == 'all' }
     from localRepoDir
     into mavenFolder
@@ -156,10 +290,10 @@ task copyToWpilib(type: Copy) {
 }
 
 task copyJsonToVendordeps(type: Copy) {
-    description = 'Copies the updated FRC6390-Athena.json file to the vendordeps folder'
+    description = 'Copies the updated vendordep JSON files to the wpilib vendordeps folder'
     group = 'Publishing'
     dependsOn updateAthenaJson
-    from file("$athenaJsonFile")
+    from vendordepDescriptors.collect { it.file }
     into vendordepsFolder
 }
 
@@ -179,6 +313,12 @@ task copyAllOutputs(type: Copy) {
     destinationDir file("$buildDir/allOutputs")
     from versionFile
     dependsOn outputVersions
+}
+
+tasks.register('buildAllModules') {
+    description = 'Builds all subprojects so publication has outputs.'
+    group = 'Build'
+    dependsOn subprojects.collect { it.path + ":build" }
 }
 
 // Utility extension to attach build artifacts to copyAllOutputs
@@ -234,12 +374,13 @@ addTaskToCopyAllOutputs(outputJar)
 build.dependsOn outputVersions
 build.dependsOn copyAllOutputs
 build.dependsOn updateAthenaJson
-build.dependsOn copyToWpilib
-build.dependsOn copyJsonToVendordeps
 build.dependsOn sourcesJar
 build.dependsOn outputJar
 build.dependsOn outputSourcesJar
+build.dependsOn buildAllModules
 libraryBuild.dependsOn build
+copyToWpilib.mustRunAfter publishToMavenLocal
+copyJsonToVendordeps.mustRunAfter publishToMavenLocal
 
 // -----------------------------------------------------------------------------
 // Publishing Tasks
@@ -249,8 +390,6 @@ task publishLocal {
     group = 'Publishing'
     description = 'Publishes artifacts locally and copies them to the WPILib folder.'
     dependsOn publishToMavenLocal
-    dependsOn copyToWpilib
-    dependsOn copyJsonToVendordeps
 }
 
 // task publishOnline {
@@ -265,6 +404,10 @@ if (publishMode == 'local') {
 } else if (publishMode == 'online') {
 } else {
     publish.dependsOn publishLocal
+}
+
+tasks.matching { it.name == 'publish' }.configureEach {
+    finalizedBy(copyJsonToVendordeps, copyToWpilib)
 }
 
 // -----------------------------------------------------------------------------

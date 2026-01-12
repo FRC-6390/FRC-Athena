@@ -7,5 +7,9 @@ dependencies {
     implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.apriltag:apriltag-java:${rootProject.ext.wpilibVersion}"
-    implementation 'org.photonvision:photonlib-java:v2025.2.1'
+    implementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.ext.wpilibVersion}"
+    implementation "org.photonvision:photonlib-java:${rootProject.ext.athenaVersions.photonlib}"
+    implementation "org.photonvision:photontargeting-java:${rootProject.ext.athenaVersions.photontargeting}"
+    implementation "com.fasterxml.jackson.core:jackson-annotations:${rootProject.ext.athenaVersions.jackson}"
 }

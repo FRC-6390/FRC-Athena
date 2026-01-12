@@ -4,5 +4,10 @@ plugins {
 
 dependencies {
     implementation project(':athena-core')
-    implementation 'com.studica.frc:Studica-java:2025.0.1'
+    implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.ext.wpilibVersion}"
+    implementation "com.studica.frc:Studica-java:${rootProject.ext.athenaVersions.studica}"
 }

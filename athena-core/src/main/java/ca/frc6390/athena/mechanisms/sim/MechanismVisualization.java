@@ -16,6 +16,7 @@ import edu.wpi.first.wpilibj.util.Color8Bit;
 public final class MechanismVisualization {
 
     private final MechanismVisualizationConfig config;
+    private Pose3d externalRootPose;
     private final Mechanism2d mechanism2d;
     private final MechanismRoot2d root2d;
     private final Map<String, MechanismLigament2d> ligaments = new HashMap<>();
@@ -54,7 +55,7 @@ public final class MechanismVisualization {
     }
 
     public void update(Mechanism mechanism) {
-        Pose3d rootPose = config.rootPoseSupplier().apply(mechanism);
+        Pose3d rootPose = externalRootPose != null ? externalRootPose : config.rootPoseSupplier().apply(mechanism);
         if (rootPose == null) {
             rootPose = new Pose3d();
         }
@@ -94,5 +95,13 @@ public final class MechanismVisualization {
 
     public Map<String, Pose3d> poses() {
         return Map.copyOf(poses);
+    }
+
+    /**
+     * Overrides the root pose for visualization (useful when chaining mechanisms together).
+     * Pass {@code null} to clear and fall back to the configured supplier.
+     */
+    public void setExternalRootPose(Pose3d pose) {
+        this.externalRootPose = pose;
     }
 }

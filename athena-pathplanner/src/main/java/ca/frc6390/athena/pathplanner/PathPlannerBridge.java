@@ -1,5 +1,7 @@
 package ca.frc6390.athena.pathplanner;
 
+import java.io.IOException;
+import org.json.simple.parser.ParseException;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -71,7 +73,11 @@ public final class PathPlannerBridge {
     }
 
     public static PathPlannerPath loadPath(String name) {
-        return PathPlannerPath.fromPathFile(name);
+        try {
+            return PathPlannerPath.fromPathFile(name);
+        } catch (IOException | ParseException ex) {
+            throw new RuntimeException("Failed to load pathplanner path: " + name, ex);
+        }
     }
 
     public static Command followPath(PathPlannerPath path) {

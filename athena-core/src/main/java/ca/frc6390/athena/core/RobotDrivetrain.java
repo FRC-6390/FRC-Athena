@@ -6,8 +6,8 @@ import java.util.function.DoubleSupplier;
 import ca.frc6390.athena.controllers.EnhancedXboxController;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
-import ca.frc6390.athena.devices.IMU;
-import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import ca.frc6390.athena.hardware.imu.Imu;
+import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
@@ -23,7 +23,7 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
     }
 
     T get();
-    IMU getIMU();
+    Imu getIMU();
     void setNeutralMode(MotorNeutralMode mode);
     RobotSpeeds getRobotSpeeds();
     void update();

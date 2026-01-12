@@ -8,9 +8,9 @@ import edu.wpi.first.math.system.plant.DCMotor;
 public enum Motor implements MotorSimType {
     CIM(count -> DCMotor.getCIM(count)),
     MINI_CIM(count -> DCMotor.getMiniCIM(count)),
-    BAG(count -> DCMotor.getBAG(count)),
-    RS_775(count -> DCMotor.getRS775(count)),
-    PRO_775(count -> DCMotor.get775Pro(count));
+    BAG(count -> DCMotor.getCIM(count)),
+    RS_775(count -> DCMotor.getCIM(count)),
+    PRO_775(count -> DCMotor.getCIM(count));
 
     private final MotorSimType factory;
 

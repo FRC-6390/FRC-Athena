@@ -5,6 +5,7 @@ import ca.frc6390.athena.drivetrains.swerve.SwerveModule;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Twist2d;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
@@ -15,6 +16,7 @@ public class SwerveDrivetrainSimulation {
     private final SwerveSimulationConfig config;
     private final SwerveModuleSimulation[] moduleSimulations;
     private Pose2d pose = new Pose2d();
+    private ChassisSpeeds lastChassisSpeeds = new ChassisSpeeds();
 
     public SwerveDrivetrainSimulation(SwerveDrivetrain drivetrain, SwerveSimulationConfig config) {
         this.drivetrain = drivetrain;
@@ -43,6 +45,40 @@ public class SwerveDrivetrainSimulation {
         double vy = measured.vyMetersPerSecond;
         double omega = measured.omegaRadiansPerSecond;
 
+        // Apply traction-limited acceleration to avoid unrealistic jumps in sim.
+        double tractionScale = 0.5; // conservative to better match practice carpet behavior
+        double maxAccel = Math.max(0.0, tractionScale * config.getWheelCoefficientOfFriction() * 9.81); // m/s^2
+        double maxDelta = maxAccel * dtSeconds;
+        double dvx = vx - lastChassisSpeeds.vxMetersPerSecond;
+        double dvy = vy - lastChassisSpeeds.vyMetersPerSecond;
+        double deltaNorm = Math.hypot(dvx, dvy);
+        if (deltaNorm > maxDelta && deltaNorm > 1e-6) {
+            double scale = maxDelta / deltaNorm;
+            vx = lastChassisSpeeds.vxMetersPerSecond + dvx * scale;
+            vy = lastChassisSpeeds.vyMetersPerSecond + dvy * scale;
+        }
+
+        double maxVelCapability = drivetrain.getRobotSpeeds().getMaxVelocity();
+        double maxOmegaCapability = drivetrain.getRobotSpeeds().getMaxAngularVelocity();
+        double effectiveRadius = (maxOmegaCapability > 1e-6) ? (maxVelCapability / maxOmegaCapability) : 1.0;
+        double maxOmegaAccel = effectiveRadius > 1e-6 ? maxAccel / effectiveRadius : maxAccel;
+        double domega = omega - lastChassisSpeeds.omegaRadiansPerSecond;
+        double maxDeltaOmega = maxOmegaAccel * dtSeconds;
+        omega = lastChassisSpeeds.omegaRadiansPerSecond + MathUtil.clamp(domega, -maxDeltaOmega, maxDeltaOmega);
+
+        // Clamp simulated chassis speeds to the drivetrain capability to prevent runaway motion in sim.
+        if (Double.isFinite(maxVelCapability) && maxVelCapability > 1e-6) {
+            double norm = Math.hypot(vx, vy);
+            if (norm > maxVelCapability) {
+                double scale = maxVelCapability / norm;
+                vx *= scale;
+                vy *= scale;
+            }
+        }
+        if (Double.isFinite(maxOmegaCapability) && maxOmegaCapability > 1e-6) {
+            omega = Math.copySign(Math.min(Math.abs(omega), maxOmegaCapability), omega);
+        }
+
         if (referenceSpeeds != null) {
             omega = referenceSpeeds.omegaRadiansPerSecond;
         }
@@ -55,6 +91,7 @@ public class SwerveDrivetrainSimulation {
                 chassisSpeeds.omegaRadiansPerSecond * dtSeconds);
 
         pose = pose.exp(twist);
+        lastChassisSpeeds = chassisSpeeds;
 
         drivetrain.getIMU().setSimulatedHeading(pose.getRotation(), Rotation2d.fromRadians(chassisSpeeds.omegaRadiansPerSecond));
         return chassisSpeeds;

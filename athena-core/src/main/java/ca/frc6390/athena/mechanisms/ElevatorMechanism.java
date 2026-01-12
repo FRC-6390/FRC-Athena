@@ -53,7 +53,7 @@ public class ElevatorMechanism extends Mechanism {
         return (ElevatorMechanism) super.shuffleboard(tab, level);
     }
     
-    public static class StatefulElevatorMechanism<E extends Enum<E> & StateMachine.SetpointProvider<Double>> extends ElevatorMechanism {
+    public static class StatefulElevatorMechanism<E extends Enum<E> & StateMachine.SetpointProvider<Double>> extends ElevatorMechanism implements StatefulLike<E> {
 
         private final StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateCore;
 
@@ -73,6 +73,7 @@ public class ElevatorMechanism extends Mechanism {
             super.update();
         }
 
+        @Override
         public StateMachine<Double, E> getStateMachine() {
             return stateCore.getStateMachine();
         }

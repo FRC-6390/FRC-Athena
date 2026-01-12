@@ -2,14 +2,14 @@ package ca.frc6390.athena.commands.movement;
 
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.RobotSpeeds;
-import ca.frc6390.athena.devices.IMU;
+import ca.frc6390.athena.hardware.imu.Imu;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.wpilibj2.command.Command;
 
 public class TranslateToPoint extends Command{
 
     private final RobotSpeeds speeds;
-    private final IMU imu;
+    private final Imu imu;
     private PIDController translationPID;
 
     public TranslateToPoint(RobotDrivetrain<?> drivetrain, double x, double y){

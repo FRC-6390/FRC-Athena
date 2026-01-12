@@ -7,7 +7,6 @@ import java.util.EnumSet;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatencyType;
-import ca.frc6390.athena.sensors.camera.photonvision.PhotonVisionConfig;
 import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
@@ -238,29 +237,6 @@ public record LimeLightConfig(
                 trustDistance,
                 copyRoles(roles),
                 confidence);
-    }
-
-    /**
-     * Builds a {@link PhotonVisionConfig} with equivalent parameters for use in simulation.
-     */
-    public PhotonVisionConfig toSimulationPhotonConfig() {
-        PhotonVisionConfig config = PhotonVisionConfig.table(table)
-                .setCameraRobotSpace(cameraRobotSpace)
-                .setTrustDistance(trustDistance)
-                .setUseForLocalization(useForLocalization)
-                .setConfidence(confidence)
-                .setRoles(copyRoles(roles))
-                .setFieldLayout(fieldLayout);
-
-        if (filteredTags != null && filteredTags.length > 0) {
-            Integer[] tagArray = Arrays.stream(filteredTags).boxed().toArray(Integer[]::new);
-            config = config.setLocalizationTagFilter(tagArray);
-        }
-        // Approximate Limelight FOV/resolution for simulation
-        return config
-                .setSimFov(63.3, 49.7)
-                .setSimResolution(960, 720)
-                .setSimMaxTargets(10);
     }
 
     private static EnumSet<CameraRole> copyRoles(EnumSet<CameraRole> roles) {

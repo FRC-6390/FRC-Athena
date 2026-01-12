@@ -1,3 +1,5 @@
+import org.gradle.accessors.dm.LibrariesForLibs
+
 plugins {
   id 'cpp'
   id 'java'
@@ -8,7 +10,21 @@ plugins {
   id 'edu.wpi.first.GradleVsCode' version '2.1.0'
 }
 
-ext.wpilibVersion = "2026.+"
+def libs = project.extensions.getByType(LibrariesForLibs)
+ext.athenaVersions = [
+  wpilib        : libs.versions.wpilib.get(),
+  photonlib     : libs.versions.photonlib.get(),
+  photontargeting: libs.versions.photontargeting.get(),
+  ctre          : libs.versions.ctre.get(),
+  pathplanner   : libs.versions.pathplanner.get(),
+  choreo        : libs.versions.choreo.get(),
+  rev           : libs.versions.rev.get(),
+  studica       : libs.versions.studica.get(),
+  jackson       : libs.versions.jackson.get(),
+  ejml          : libs.versions.ejml.get(),
+  opencv        : libs.versions.opencv.get(),
+]
+ext.wpilibVersion = athenaVersions.wpilib
 
 java {
     sourceCompatibility = "17"
@@ -16,23 +32,26 @@ java {
 }
 
 
-repositories {
-  mavenLocal()
-  mavenCentral()
-  maven { url 'https://maven.ctr-electronics.com/release/' }
-  maven { url 'https://maven.revrobotics.com/' }
-  maven { url 'https://3015rangerrobotics.github.io/pathplannerlib/repo'}
-  maven { url 'https://lib.choreo.autos/dep'}
-  maven { url 'https://maven.photonvision.org/repository/internal' }
-  maven { url 'https://maven.photonvision.org/repository/snapshots' }
-  maven { url 'https://dev.studica.com/maven/release/2025/' }
-
+allprojects {
+  repositories {
+    mavenLocal()
+    mavenCentral()
+    maven { url 'https://maven.ctr-electronics.com/release/' }
+    maven { url 'https://maven.revrobotics.com/' }
+    maven { url 'https://3015rangerrobotics.github.io/pathplannerlib/repo'}
+    maven { url 'https://lib.choreo.autos/dep'}
+    maven { url 'https://maven.photonvision.org/repository/internal' }
+    maven { url 'https://maven.photonvision.org/repository/snapshots' }
+    maven { url 'https://dev.studica.com/maven/release/2025/' }
+  }
 }
 
-if (project.hasProperty('releaseMode')) {
-  wpilibRepositories.addAllReleaseRepositories(project)
-} else {
-  wpilibRepositories.addAllDevelopmentRepositories(project)
+allprojects { proj ->
+  if (rootProject.hasProperty('releaseMode')) {
+    wpilibRepositories.addAllReleaseRepositories(proj)
+  } else {
+    wpilibRepositories.addAllDevelopmentRepositories(proj)
+  }
 }
 
 // Apply C++ configuration
@@ -41,29 +60,29 @@ apply from: 'config.gradle'
 // Apply Java configuration
 dependencies {
     implementation project(':athena-core')
-    implementation "edu.wpi.first.cscore:cscore-java:$wpilibVersion"
-    implementation "edu.wpi.first.cameraserver:cameraserver-java:$wpilibVersion"
-    implementation "edu.wpi.first.ntcore:ntcore-java:$wpilibVersion"
-    implementation "edu.wpi.first.wpilibj:wpilibj-java:$wpilibVersion"
-    implementation "edu.wpi.first.wpiutil:wpiutil-java:$wpilibVersion"
-    implementation "edu.wpi.first.wpimath:wpimath-java:$wpilibVersion"
-    implementation "edu.wpi.first.apriltag:apriltag-java:$wpilibVersion"
-    implementation "edu.wpi.first.wpiunits:wpiunits-java:$wpilibVersion"
-    implementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:$wpilibVersion"
-    implementation "edu.wpi.first.hal:hal-java:$wpilibVersion"
-    implementation "org.ejml:ejml-simple:0.43.1"
-    implementation "com.fasterxml.jackson.core:jackson-annotations:2.15.2"
-    implementation "com.fasterxml.jackson.core:jackson-core:2.15.2"
-    implementation "com.fasterxml.jackson.core:jackson-databind:2.15.2"
-    implementation 'edu.wpi.first.thirdparty.frc2025.opencv:opencv-java:4.10.0-3'
+    implementation "edu.wpi.first.cscore:cscore-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.cameraserver:cameraserver-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.ntcore:ntcore-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.wpilibj:wpilibj-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.wpiutil:wpiutil-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.wpimath:wpimath-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.apriltag:apriltag-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.wpiunits:wpiunits-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${athenaVersions.wpilib}"
+    implementation "edu.wpi.first.hal:hal-java:${athenaVersions.wpilib}"
+    implementation "org.ejml:ejml-simple:${athenaVersions.ejml}"
+    implementation "com.fasterxml.jackson.core:jackson-annotations:${athenaVersions.jackson}"
+    implementation "com.fasterxml.jackson.core:jackson-core:${athenaVersions.jackson}"
+    implementation "com.fasterxml.jackson.core:jackson-databind:${athenaVersions.jackson}"
+    implementation "edu.wpi.first.thirdparty.frc2025.opencv:opencv-java:${athenaVersions.opencv}"
 
-    implementation 'org.photonvision:photonlib-java:v2025.2.1'
-    implementation 'org.photonvision:photontargeting-java:v2025.2.1'
-    implementation 'com.ctre.phoenix6:wpiapi-java:25.1.0'
-    implementation 'com.pathplanner.lib:PathplannerLib-java:2025.1.1'
-    implementation 'com.revrobotics.frc:REVLib-java:2025.0.0'
-    implementation 'choreo:ChoreoLib-java:2025.0.3'
-    implementation 'com.studica.frc:Studica-java:2025.0.1'
+    implementation "org.photonvision:photonlib-java:${athenaVersions.photonlib}"
+    implementation "org.photonvision:photontargeting-java:${athenaVersions.photontargeting}"
+    implementation "com.ctre.phoenix6:wpiapi-java:${athenaVersions.ctre}"
+    implementation "com.pathplanner.lib:PathplannerLib-java:${athenaVersions.pathplanner}"
+    implementation "com.revrobotics.frc:REVLib-java:${athenaVersions.rev}"
+    implementation "choreo:ChoreoLib-java:${athenaVersions.choreo}"
+    implementation "com.studica.frc:Studica-java:${athenaVersions.studica}"
 }
 
 // Set up exports properly

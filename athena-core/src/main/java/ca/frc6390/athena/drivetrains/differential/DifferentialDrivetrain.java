@@ -8,12 +8,12 @@ import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotSpeeds;
-import ca.frc6390.athena.devices.EncoderGroup;
-import ca.frc6390.athena.devices.IMU;
-import ca.frc6390.athena.devices.MotorControllerGroup;
-import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
+import ca.frc6390.athena.hardware.encoder.EncoderGroup;
+import ca.frc6390.athena.hardware.imu.Imu;
+import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
+import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator3d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -34,7 +34,7 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivetrain<DifferentialDrivetrain> {
 
     private final RobotSpeeds robotSpeeds;
-    private final IMU imu;
+    private final Imu imu;
     private final DifferentialDriveKinematics kinematics;
     private final DifferentialDrive drive;
     private final MotorControllerGroup leftMotors, rightMotors;
@@ -45,11 +45,11 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     private double lastLeftCommand = 0;
     private double lastRightCommand = 0;
 
-    public DifferentialDrivetrain(IMU imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors){
+    public DifferentialDrivetrain(Imu imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors){
        this(imu, maxVelocity, trackwidth, leftMotors, rightMotors, leftMotors.getEncoderGroup(), rightMotors.getEncoderGroup());
     }
 
-    public DifferentialDrivetrain(IMU imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors, EncoderGroup leftEncoders, EncoderGroup rightEncoders){
+    public DifferentialDrivetrain(Imu imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors, EncoderGroup leftEncoders, EncoderGroup rightEncoders){
         this.imu = imu;
         robotSpeeds = new RobotSpeeds(maxVelocity, maxVelocity);
 
@@ -64,7 +64,7 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     }
 
     @Override
-    public IMU getIMU() {
+    public Imu getIMU() {
         return imu;
     }
 

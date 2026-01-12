@@ -8,7 +8,7 @@ import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
-public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> extends Mechanism {
+public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> extends Mechanism implements StatefulLike<E> {
         
     private final StatefulMechanismCore<StatefulMechanism<E>, E> stateCore;
 
@@ -28,6 +28,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         super.update();
     }
 
+    @Override
     public StateMachine<Double, E> getStateMachine() {
         return stateCore.getStateMachine();
     }
@@ -92,4 +93,3 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         }
     }
 }
-

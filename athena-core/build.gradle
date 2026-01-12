@@ -7,7 +7,12 @@ dependencies {
     implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.apriltag:apriltag-java:${rootProject.ext.wpilibVersion}"
-    implementation 'com.pathplanner.lib:PathplannerLib-java:2025.1.1'
-    implementation 'choreo:ChoreoLib-java:2025.0.3'
-    implementation 'org.photonvision:photonlib-java:v2025.2.1'
+    implementation "edu.wpi.first.cscore:cscore-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.ext.wpilibVersion}"
+    implementation "com.fasterxml.jackson.core:jackson-annotations:${rootProject.ext.athenaVersions.jackson}"
+    implementation "com.fasterxml.jackson.core:jackson-core:${rootProject.ext.athenaVersions.jackson}"
+    implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.athenaVersions.jackson}"
 }

@@ -1,10 +1,12 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
-import ca.frc6390.athena.devices.Encoder;
-import ca.frc6390.athena.devices.MotorControllerGroup;
-import ca.frc6390.athena.devices.MotorControllerConfig;
-import ca.frc6390.athena.devices.MotorControllerConfig.MotorNeutralMode;
+import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
+import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulation;
 import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulationConfig;
@@ -28,7 +30,7 @@ import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import java.util.Map;
 
-public class Mechanism extends SubsystemBase implements RobotSendableSystem{
+public class Mechanism extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism{
 
     private final MotorControllerGroup motors;
     private final Encoder encoder;
@@ -44,6 +46,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     private double lastSimulationTimestampSeconds = Double.NaN;
     private final MechanismVisualization visualization;
     private final MechanismSensorSimulation sensorSimulation;
+    private Pose3d visualizationRootOverride;
 
     private enum RobotMode {
         TELE,
@@ -55,7 +58,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
     public Mechanism(MechanismConfig<? extends Mechanism> config){
         this(
             MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)),
-            Encoder.fromConfig(config.encoder),
+            config.encoder != null ? HardwareFactories.encoder(config.encoder) : null,
             config.pidController,
             config.profiledPIDController,
             config.useAbsolute,
@@ -73,6 +76,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage,
             GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod) {
         this(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, limitSwitches, useSetpointAsOutput, pidPeriod, null, null, null);
+    }
+
+    @Override
+    public java.util.List<Mechanism> flattenForRegistration() {
+        return java.util.List.of(this);
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
@@ -111,7 +119,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
             lastSimulationTimestampSeconds = Timer.getFPGATimestamp();
         }
         MechanismVisualizationConfig resolvedVisualizationConfig =
-                visualizationConfig != null ? visualizationConfig : MechanismDefaultVisualization.create();
+                visualizationConfig != null ? visualizationConfig : MechanismVisualizationDefaults.forMechanism(this);
         this.visualization = resolvedVisualizationConfig != null ? new MechanismVisualization(resolvedVisualizationConfig) : null;
         if (RobotBase.isSimulation()) {
             if (sensorSimulationConfig != null) {
@@ -457,6 +465,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
         update();
 
         if (visualization != null) {
+            visualization.setExternalRootPose(visualizationRootOverride);
             visualization.update(this);
         }
 
@@ -539,5 +548,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem{
 
     public Map<String, Pose3d> getMechanism3dPoses() {
         return visualization != null ? visualization.poses() : Map.of();
+    }
+
+    /**
+     * Overrides the root pose used for visualization. Pass {@code null} to clear and fall back
+     * to the configured root pose supplier.
+     */
+    public void setVisualizationRootOverride(Pose3d pose) {
+        this.visualizationRootOverride = pose;
     }
 }

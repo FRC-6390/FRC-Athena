@@ -1,21 +1,22 @@
 package ca.frc6390.athena.core.localization;
 
+import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
-import com.pathplanner.lib.auto.AutoBuilder;
-import com.pathplanner.lib.commands.FollowPathCommand;
-import com.pathplanner.lib.config.PIDConstants;
-import com.pathplanner.lib.config.RobotConfig;
-import com.pathplanner.lib.controllers.PPHolonomicDriveController;
-import com.pathplanner.lib.util.DriveFeedforwards;
-
+import ca.frc6390.athena.core.RobotAuto;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotVision;
-import ca.frc6390.athena.devices.IMU;
-import choreo.auto.AutoFactory;
+import ca.frc6390.athena.core.auto.AutoBackend;
+import ca.frc6390.athena.core.auto.AutoBackends;
+import ca.frc6390.athena.core.auto.ChoreoAutoFactory;
+import ca.frc6390.athena.core.auto.ChoreoBinding;
+import ca.frc6390.athena.core.auto.HolonomicDriveBinding;
+import ca.frc6390.athena.core.auto.HolonomicFeedforward;
+import ca.frc6390.athena.core.auto.HolonomicPidConstants;
+import ca.frc6390.athena.hardware.imu.Imu;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
@@ -34,9 +35,9 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.math.numbers.N4;
@@ -46,22 +47,20 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private final PoseEstimator<T> fieldEstimator2d, relativeEstimator2d;
     private final PoseEstimator3d<T> fieldEstimator3d, relativeEstimator3d;
     private RobotVision vision;
-    private final IMU imu;
+    private final Imu imu;
     private final RobotSpeeds robotSpeeds;
     private final Supplier<T> wheelPositions;
 
     private Pose2d fieldPose, relativePose;
     private Pose3d fieldPose3d, relativePose3d;
     private Field2d field;
-    private RobotConfig robotConfig;
     private static final double STD_EPSILON = 1e-5;
 
     private RobotLocalizationConfig localizationConfig;
     private boolean visionEnabled = false;
-    private PIDController rotationController, translationController;
-    private AutoFactory factory;
+    private ChoreoAutoFactory choreoFactory;
 
-    private BiConsumer<ChassisSpeeds, DriveFeedforwards> autoDrive;
+    private BiConsumer<ChassisSpeeds, HolonomicFeedforward> autoDrive;
 
     private boolean suppressUpdates = false;
     private StructPublisher<Pose2d> fieldPosePublisher;
@@ -89,7 +88,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             PoseEstimator<T> relativeEstimator,
             RobotLocalizationConfig config,
             RobotSpeeds robotSpeeds,
-            IMU imu,
+            Imu imu,
             Supplier<T> wheelPositions) {
         this(
                 fieldEstimator,
@@ -107,7 +106,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             PoseEstimator3d<T> relativeEstimator,
             RobotLocalizationConfig config,
             RobotSpeeds robotSpeeds,
-            IMU imu,
+            Imu imu,
             Supplier<T> wheelPositions) {
         this(
                 null,
@@ -127,7 +126,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             PoseEstimator3d<T> relativeEstimator3d,
             RobotLocalizationConfig config,
             RobotSpeeds robotSpeeds,
-            IMU imu,
+            Imu imu,
             Supplier<T> wheelPositions) {
         config = config == null ? new RobotLocalizationConfig() : config;
         this.localizationConfig = config;
@@ -384,69 +383,75 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return new Rotation3d(roll.getRadians(), pitch.getRadians(), yaw.getRadians());
     }
 
-    public RobotLocalization<T> configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants){
+    public RobotLocalization<T> configurePathPlanner(HolonomicPidConstants translationConstants, HolonomicPidConstants rotationConstants){
       return configurePathPlanner(translationConstants, rotationConstants, autoDrive);
     }
 
-    public RobotLocalization<T> configurePathPlanner(PIDConstants translationConstants, PIDConstants rotationConstants, BiConsumer<ChassisSpeeds, DriveFeedforwards> output){
-        try{
-            robotConfig = RobotConfig.fromGUISettings();  
-        }catch(Exception e){
-            DriverStation.reportWarning("Failed to load PathPlanner config and configure AutoBuilder", e.getStackTrace());
-            return this;
-        }
-        AutoBuilder.configure(
-            this::getFieldPose, 
-            this::resetFieldPose, 
-            () -> robotSpeeds.getSpeeds("drive"), 
-            output, 
-            new PPHolonomicDriveController(
-            translationConstants,
-            rotationConstants
-            ),
-            robotConfig,
-            () -> {
-                var alliance = DriverStation.getAlliance();
-                if (alliance.isPresent()) {
-                    return alliance.get() == DriverStation.Alliance.Red;
-                }
-                return false;
-            }            
-      );
-      CommandScheduler.getInstance().schedule(FollowPathCommand.warmupCommand());
+    public RobotLocalization<T> configurePathPlanner(HolonomicPidConstants translationConstants, HolonomicPidConstants rotationConstants, BiConsumer<ChassisSpeeds, HolonomicFeedforward> output){
+        AutoBackends.forSource(RobotAuto.AutoSource.PATH_PLANNER).ifPresentOrElse(backend -> {
+            HolonomicDriveBinding binding = new HolonomicDriveBinding(
+                    this::getFieldPose,
+                    this::resetFieldPose,
+                    () -> robotSpeeds.getSpeeds("drive"),
+                    output,
+                    translationConstants,
+                    rotationConstants,
+                    () -> DriverStation.getAlliance().map(a -> a == DriverStation.Alliance.Red).orElse(false));
+
+            boolean configured = backend.configureHolonomic(binding);
+            backend.warmupCommand(RobotAuto.AutoSource.PATH_PLANNER)
+                    .ifPresent(CommandScheduler.getInstance()::schedule);
+            if (!configured) {
+                DriverStation.reportWarning("Auto backend failed to configure holonomic path following.", false);
+            }
+        }, () -> DriverStation.reportWarning("No auto backend found for PATH_PLANNER; skipping configuration.", false));
       return this;
     }
 
     public RobotLocalization<T> configureChoreo(Subsystem drivetrain){
-        PIDConstants rotationConstants = localizationConfig.rotation();
-        PIDConstants translationConstants = localizationConfig.translation();
+        HolonomicPidConstants rotationConstants = localizationConfig.rotation();
+        HolonomicPidConstants translationConstants = localizationConfig.translation();
 
-        rotationController = new PIDController(rotationConstants.kP, rotationConstants.kI, rotationConstants.kD);
-        rotationController.setIZone(rotationConstants.iZone);
+        PIDController rotationController = new PIDController(rotationConstants.kP(), rotationConstants.kI(), rotationConstants.kD());
+        rotationController.setIZone(rotationConstants.iZone());
 
-        translationController = new PIDController(translationConstants.kP, translationConstants.kI, translationConstants.kD);
-        translationController.setIZone(translationConstants.iZone);
+        PIDController translationController = new PIDController(translationConstants.kP(), translationConstants.kI(), translationConstants.kD());
+        translationController.setIZone(translationConstants.iZone());
 
-        factory = new AutoFactory(this::getFieldPose, this::resetFieldPose, 
-        (sample) -> {
-            Pose2d botpose = getFieldPose();
-            Pose2d trajpose = sample.getPose();
-            
-            ChassisSpeeds speeds = sample.getChassisSpeeds();
+        ChoreoBinding binding = new ChoreoBinding(
+                translationConstants,
+                rotationConstants,
+                this::getFieldPose,
+                this::resetFieldPose,
+                (desiredPose, desiredSpeeds) -> {
+                    Pose2d botpose = getFieldPose();
+                    ChassisSpeeds speeds = new ChassisSpeeds(desiredSpeeds.vxMetersPerSecond,
+                            desiredSpeeds.vyMetersPerSecond,
+                            desiredSpeeds.omegaRadiansPerSecond);
 
-            speeds.vxMetersPerSecond = translationController.calculate(botpose.getX(), trajpose.getX());
-            speeds.vyMetersPerSecond = translationController.calculate(botpose.getY(), trajpose.getY());
-            speeds.omegaRadiansPerSecond = rotationController.calculate(botpose.getRotation().getRadians(), trajpose.getRotation().getRadians());
+                    speeds.vxMetersPerSecond = translationController.calculate(botpose.getX(), desiredPose.getX());
+                    speeds.vyMetersPerSecond = translationController.calculate(botpose.getY(), desiredPose.getY());
+                    speeds.omegaRadiansPerSecond = rotationController.calculate(botpose.getRotation().getRadians(), desiredPose.getRotation().getRadians());
 
-            robotSpeeds.setSpeeds("auto", speeds);
-        }, 
-        true,
-        drivetrain);
+                    robotSpeeds.setSpeeds("auto", speeds);
+                },
+                true,
+                drivetrain);
+
+        AutoBackends.forSource(RobotAuto.AutoSource.CHOREO).ifPresentOrElse(backend -> {
+            Optional<ChoreoAutoFactory> factory = backend.createChoreoFactory(binding);
+            if (factory.isPresent()) {
+                choreoFactory = factory.get();
+            } else {
+                DriverStation.reportWarning("Choreo backend is present but did not provide a factory.", false);
+            }
+        }, () -> DriverStation.reportWarning("No auto backend found for CHOREO; skipping configuration.", false));
+
       return this;
     }
 
-    public AutoFactory getChoreoAutoFactory(){
-        return factory;
+    public Optional<ChoreoAutoFactory> getChoreoAutoFactory(){
+        return Optional.ofNullable(choreoFactory);
     }
 
     public void resetFieldPose(Pose2d pose) {

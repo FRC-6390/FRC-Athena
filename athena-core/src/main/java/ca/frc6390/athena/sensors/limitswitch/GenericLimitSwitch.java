@@ -1,25 +1,44 @@
 package ca.frc6390.athena.sensors.limitswitch;
 
 import ca.frc6390.athena.sensors.EnhancedDigitalInput;
+import ca.frc6390.athena.controllers.DelayedOutput;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+import java.util.function.BooleanSupplier;
 public class GenericLimitSwitch extends EnhancedDigitalInput {
 
-    public record GenericLimitSwitchConfig(int id, boolean inverted, double position, boolean isHardstop, int blockDirection) {
+    public record GenericLimitSwitchConfig(int id, boolean inverted, double position, boolean isHardstop, int blockDirection, String name, double delaySeconds) {
 
         public static GenericLimitSwitchConfig create(int id){
-            return new GenericLimitSwitchConfig(Math.abs(id) ,id<0,  Double.NaN, false, 0);
+            return new GenericLimitSwitchConfig(Math.abs(id) ,id<0,  Double.NaN, false, 0, null, 0);
         }
 
         public GenericLimitSwitchConfig setPosition(double position){
-            return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection);
+            return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
         }
 
         public GenericLimitSwitchConfig setHardstop(boolean isHardstop, int blockDirection){
-            return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection);
+            return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
+        }
+
+        public GenericLimitSwitchConfig setName(String name){
+            return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
+        }
+
+        public GenericLimitSwitchConfig setDelay(double delaySeconds){
+            return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
         }
 
         public GenericLimitSwitch create(){
             return new GenericLimitSwitch(id, inverted).applyConfig(this);
+        }
+
+        public BooleanSupplier toSupplier(){
+            GenericLimitSwitch sensor = create();
+            BooleanSupplier raw = sensor::getAsBoolean;
+            if (delaySeconds > 0) {
+                return new DelayedOutput(raw, delaySeconds);
+            }
+            return raw;
         }
 
     }

@@ -7,7 +7,7 @@ import java.util.function.Supplier;
 import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotSpeeds;
-import ca.frc6390.athena.devices.IMU;
+import ca.frc6390.athena.hardware.imu.Imu;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -17,7 +17,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 public class RotateToAngle extends Command{
 
     private final RobotSpeeds speeds;
-    private final IMU imu;
+    private final Imu imu;
     private final Supplier<Pose2d> pose;
     private Supplier<Rotation2d> angle;
     private ProfiledPIDController rotationPID;

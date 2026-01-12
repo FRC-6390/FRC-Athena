@@ -1,5 +1,8 @@
-# VENDOR DEP
-`https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/FRC6390-Athena.json`
+# Vendordeps
+Use the module-specific vendordeps from the `vendordeps/` folder (e.g., Core, CTRE, REV, PhotonVision, Limelight, Pathplanner, Choreo, Studica). Each JSON lives at:
+```
+https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/<file>.json
+```
 
 # Publishing
 ```bash

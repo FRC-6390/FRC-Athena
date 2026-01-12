@@ -1,0 +1,37 @@
+{
+    "fileName": "FRC6390-Athena-Pathplanner.json",
+    "name": "FRC6390 Athena Pathplanner",
+    "version": "2025.16.118",
+    "frcYear": "2026",
+    "uuid": "8e35b9f3-0f7d-4d52-90fc-7dbd06c7c2b0",
+    "mavenUrls": [
+        "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
+    ],
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Pathplanner.json",
+    "javaDependencies": [
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-pathplanner",
+            "version": "2025.16.118"
+        }
+    ],
+    "requires": [
+        {
+            "uuid": "1f3b1e19-0f9f-4f37-9f13-6a2b0b3764cb",
+            "errorMessage": "Athena Pathplanner requires Athena Core. Please add the FRC6390-Athena-Core vendordep",
+            "offlineFileName": "FRC6390-Athena-Core.json",
+            "onlineUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json"
+        },
+        {
+            "uuid": "1b42324f-17c6-4875-8e77-1c312bc8c786",
+            "errorMessage": "Athena Pathplanner requires PathplannerLib. Please add the PathplannerLib vendordep",
+            "onlineUrl": "https://3015rangerrobotics.github.io/pathplannerlib/PathplannerLib.json"
+        }
+    ],
+    "jniDependencies": [
+        
+    ],
+    "cppDependencies": [
+        
+    ]
+}

@@ -3,12 +3,13 @@ package ca.frc6390.athena.mechanisms.sim;
 import java.util.Objects;
 import java.util.function.Function;
 
-import ca.frc6390.athena.devices.MotorController;
-import ca.frc6390.athena.devices.MotorControllerGroup;
-import ca.frc6390.athena.devices.MotorControllerConfig.MotorControllerType;
+import ca.frc6390.athena.hardware.motor.MotorController;
+import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
+import ca.frc6390.athena.hardware.motor.MotorControllerType;
 import ca.frc6390.athena.mechanisms.ArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism;
 import ca.frc6390.athena.mechanisms.Mechanism;
+import ca.frc6390.athena.mechanisms.MechanismTravelRange;
 import ca.frc6390.athena.mechanisms.SimpleMotorMechanism;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
 import edu.wpi.first.math.MathUtil;
@@ -188,7 +189,7 @@ public final class MechanismSimulationConfig {
                             maxHeight,
                             simulateGravity,
                             startingHeight);
-                    return new ElevatorModel(elevator, sim, unitsPerMeter, nominalVoltage);
+                    return new ElevatorModel(elevator, sim, unitsPerMeter, nominalVoltage, minHeight, maxHeight);
                 },
                 params.updatePeriodSeconds);
         holder[0] = config;
@@ -258,7 +259,7 @@ public final class MechanismSimulationConfig {
                             maxAngle,
                             simulateGravity,
                             startingAngle);
-                    return new ArmModel(arm, sim, unitsPerRadian, nominalVoltage);
+                    return new ArmModel(arm, sim, unitsPerRadian, nominalVoltage, minAngle, maxAngle);
                 },
                 params.updatePeriodSeconds);
         holder[0] = config;
@@ -360,22 +361,31 @@ public final class MechanismSimulationConfig {
         }
     }
 
+    /**
+     * Validates that the given motor type can be mapped to a simulation model.
+     *
+     * @param type motor controller type to validate
+     */
+    public static void requireSupportedMotorSim(MotorControllerType type) {
+        motorFromType(Objects.requireNonNull(type, "Motor type is required for simulation"), 1);
+    }
+
     private static DCMotor resolveMotor(Mechanism mechanism, DCMotor override) {
         if (override != null) {
             return override;
         }
         if (mechanism == null) {
-            return fallbackMotor(1);
+            throw new IllegalStateException("Cannot derive simulation motor without a mechanism reference");
         }
 
         MotorControllerGroup group = mechanism.getMotorGroup();
         if (group == null) {
-            return fallbackMotor(1);
+            throw new IllegalStateException("Cannot derive simulation motor without a motor group");
         }
 
         MotorController[] controllers = group.getControllers();
         if (controllers == null || controllers.length == 0) {
-            return fallbackMotor(1);
+            throw new IllegalStateException("Simulation motor derivation requires at least one motor controller");
         }
 
         MotorControllerType baseType = null;
@@ -399,28 +409,35 @@ public final class MechanismSimulationConfig {
         }
 
         if (motorCount <= 0) {
-            return fallbackMotor(1);
+            throw new IllegalStateException("Simulation motor derivation requires at least one motor controller");
         }
 
         if (baseType == null || mixedTypes) {
-            return fallbackMotor(motorCount);
+            throw new IllegalStateException("Simulation motor derivation requires a consistent motor controller type");
         }
 
         return motorFromType(baseType, motorCount);
     }
 
-    private static DCMotor fallbackMotor(int motorCount) {
-        return DCMotor.getFalcon500(Math.max(1, motorCount));
-    }
-
     private static DCMotor motorFromType(MotorControllerType type, int motorCount) {
         int count = Math.max(1, motorCount);
-        return switch (type) {
-            case CTRETalonFX -> DCMotor.getFalcon500(count);
-            case REVSparkFlexBrushless -> DCMotor.getNeoVortex(count);
-            case REVSparkMaxBrushless -> DCMotor.getNEO(count);
-            case REVSparkFlexBrushed, REVSparkMaxBrushed -> DCMotor.getCIM(count);
-        };
+        String key = type.getKey();
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("Motor controller type is missing a key for simulation mapping");
+        }
+        if (key.startsWith("ctre:talonfx")) {
+            return DCMotor.getFalcon500(count);
+        }
+        if (key.startsWith("rev:sparkmax")) {
+            return DCMotor.getNEO(count);
+        }
+        if (key.startsWith("rev:sparkflex")) {
+            return DCMotor.getNeoVortex(count);
+        }
+
+        throw new IllegalArgumentException(
+                "No simulation motor mapping for controller type '" + key
+                        + "'. Provide a DCMotor override in the simulation parameters or map the type here.");
     }
 
     public static final class ElevatorParameters {
@@ -792,23 +809,34 @@ public final class MechanismSimulationConfig {
         private final ElevatorSim sim;
         private final double unitsPerMeter;
         private final double nominalVoltage;
+        private final double minHeightMeters;
+        private final double maxHeightMeters;
 
         ElevatorModel(ElevatorMechanism mechanism,
                       ElevatorSim sim,
                       double unitsPerMeter,
-                      double nominalVoltage) {
+                      double nominalVoltage,
+                      double minHeightMeters,
+                      double maxHeightMeters) {
             this.mechanism = mechanism;
             this.sim = sim;
             this.unitsPerMeter = unitsPerMeter;
             this.nominalVoltage = Math.abs(nominalVoltage);
+            this.minHeightMeters = minHeightMeters;
+            this.maxHeightMeters = maxHeightMeters;
+            MechanismTravelRange.registerKnownRange(
+                    mechanism,
+                    minHeightMeters * unitsPerMeter,
+                    maxHeightMeters * unitsPerMeter);
             reset();
         }
 
         @Override
         public void reset() {
+            double height = clamp(sim.getPositionMeters());
             MechanismSimUtil.applyEncoderState(
                     mechanism.getEncoder(),
-                    sim.getPositionMeters() * unitsPerMeter,
+                    height * unitsPerMeter,
                     sim.getVelocityMetersPerSecond() * unitsPerMeter);
         }
 
@@ -820,10 +848,15 @@ public final class MechanismSimulationConfig {
             sim.setInputVoltage(voltage);
             sim.update(dtSeconds);
 
+            double height = clamp(sim.getPositionMeters());
             MechanismSimUtil.applyEncoderState(
                     mechanism.getEncoder(),
-                    sim.getPositionMeters() * unitsPerMeter,
+                    height * unitsPerMeter,
                     sim.getVelocityMetersPerSecond() * unitsPerMeter);
+        }
+
+        private double clamp(double height) {
+            return MathUtil.clamp(height, minHeightMeters, maxHeightMeters);
         }
     }
 
@@ -833,23 +866,34 @@ public final class MechanismSimulationConfig {
         private final SingleJointedArmSim sim;
         private final double unitsPerRadian;
         private final double nominalVoltage;
+        private final double minAngleRad;
+        private final double maxAngleRad;
 
         ArmModel(ArmMechanism mechanism,
                  SingleJointedArmSim sim,
                  double unitsPerRadian,
-                 double nominalVoltage) {
+                 double nominalVoltage,
+                 double minAngleRad,
+                 double maxAngleRad) {
             this.mechanism = mechanism;
             this.sim = sim;
             this.unitsPerRadian = unitsPerRadian;
             this.nominalVoltage = Math.abs(nominalVoltage);
+            this.minAngleRad = minAngleRad;
+            this.maxAngleRad = maxAngleRad;
+            MechanismTravelRange.registerKnownRange(
+                    mechanism,
+                    minAngleRad * unitsPerRadian,
+                    maxAngleRad * unitsPerRadian);
             reset();
         }
 
         @Override
         public void reset() {
+            double angle = clamp(sim.getAngleRads());
             MechanismSimUtil.applyEncoderState(
                     mechanism.getEncoder(),
-                    sim.getAngleRads() * unitsPerRadian,
+                    angle * unitsPerRadian,
                     sim.getVelocityRadPerSec() * unitsPerRadian);
         }
 
@@ -861,10 +905,15 @@ public final class MechanismSimulationConfig {
             sim.setInputVoltage(voltage);
             sim.update(dtSeconds);
 
+            double angle = clamp(sim.getAngleRads());
             MechanismSimUtil.applyEncoderState(
                     mechanism.getEncoder(),
-                    sim.getAngleRads() * unitsPerRadian,
+                    angle * unitsPerRadian,
                     sim.getVelocityRadPerSec() * unitsPerRadian);
+        }
+
+        private double clamp(double angle) {
+            return MathUtil.clamp(angle, minAngleRad, maxAngleRad);
         }
     }
 

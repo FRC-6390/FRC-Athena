@@ -5,15 +5,18 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.EncoderIDs;
-import ca.frc6390.athena.devices.EncoderConfig;
-import ca.frc6390.athena.devices.EncoderGroup;
-import ca.frc6390.athena.devices.IMU;
-import ca.frc6390.athena.devices.MotorControllerConfig;
-import ca.frc6390.athena.devices.MotorControllerGroup;
-import ca.frc6390.athena.devices.EncoderConfig.EncoderType;
-import ca.frc6390.athena.devices.IMU.IMUConfig;
-import ca.frc6390.athena.devices.IMU.IMUType;
-import ca.frc6390.athena.devices.MotorController.Motor;
+import ca.frc6390.athena.hardware.imu.AthenaImu;
+import ca.frc6390.athena.hardware.motor.AthenaMotor;
+import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import ca.frc6390.athena.hardware.encoder.EncoderType;
+import ca.frc6390.athena.hardware.imu.Imu;
+import ca.frc6390.athena.hardware.imu.ImuConfig;
+import ca.frc6390.athena.hardware.motor.MotorController;
+import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
+import ca.frc6390.athena.hardware.encoder.EncoderGroup;
+import ca.frc6390.athena.hardware.imu.VirtualImu;
+import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
 
 /**
@@ -28,7 +31,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     private double trackWidth;
     //DEFUALT VALUES
     /** IMU configuration used to provide heading. */
-    private IMUConfig imu = null;
+    private ImuConfig imu = null;
     /** Motor configurations for the left drivetrain side. */
     private MotorControllerConfig[] leftMotors, rightMotors;
     /** Encoder configurations for the left and right drivetrain sides. */
@@ -61,7 +64,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      * @param inverted true if yaw output should be inverted
      * @param trackWidth distance between left/right wheel centers in meters
      */
-    public static DifferentialDrivetrainConfig defualt(IMUType type, boolean inverted, double trackWidth){
+    public static DifferentialDrivetrainConfig defualt(AthenaImu type, boolean inverted, double trackWidth){
         return new DifferentialDrivetrainConfig().setIMU(type, inverted).setTrackWidth(trackWidth);
     }
 
@@ -71,15 +74,15 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      * @param type IMU platform installed on the robot
      * @param trackWidth distance between left/right wheel centers in meters
      */
-    public static DifferentialDrivetrainConfig defualt(IMUType type, double trackWidth){
+    public static DifferentialDrivetrainConfig defualt(AthenaImu type, double trackWidth){
         return new DifferentialDrivetrainConfig().setIMU(type, false).setTrackWidth(trackWidth);
     }
 
     /**
      * Declares the IMU used by the drivetrain and whether its heading is inverted.
      */
-    public DifferentialDrivetrainConfig setIMU(IMUType imu, boolean inverted){
-        this.imu = new IMUConfig(imu).setInverted(inverted);
+    public DifferentialDrivetrainConfig setIMU(AthenaImu imu, boolean inverted){
+        this.imu = new ImuConfig(imu.resolve(), DrivetrainIDs.DUAL_MOTOR_DIFFERENTIAL.getGyro()).setInverted(inverted);
         return this;
     }
 
@@ -95,16 +98,16 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      * Configures left-side motors using the provided {@link Motor} helper and CAN IDs. Negative IDs
      * invert that motor.
      */
-    public DifferentialDrivetrainConfig setLeftMotors(Motor motor, int... ids){
-        return setLeftMotors(Arrays.stream(ids).mapToObj(id -> motor.getMotorControllerType().config(id)).toArray(MotorControllerConfig[]::new));        
+    public DifferentialDrivetrainConfig setLeftMotors(AthenaMotor motor, int... ids){
+        return setLeftMotors(Arrays.stream(ids).mapToObj(id -> new MotorControllerConfig(motor.resolveController(), id)).toArray(MotorControllerConfig[]::new));        
     }
 
     /**
      * Configures right-side motors using the provided {@link Motor} helper and CAN IDs. Negative IDs
      * invert that motor.
      */
-    public DifferentialDrivetrainConfig setRightMotors(Motor motor, int... ids){
-        return setRightMotors(Arrays.stream(ids).mapToObj(id -> motor.getMotorControllerType().config(id)).toArray(MotorControllerConfig[]::new));        
+    public DifferentialDrivetrainConfig setRightMotors(AthenaMotor motor, int... ids){
+        return setRightMotors(Arrays.stream(ids).mapToObj(id -> new MotorControllerConfig(motor.resolveController(), id)).toArray(MotorControllerConfig[]::new));        
     }
 
     /**
@@ -288,7 +291,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     public DifferentialDrivetrain build() {
        
         for (int i = 0; i < leftMotors.length; i++) {
-            leftMotors[i] = leftMotors[i].setID(driveIds[i])
+            leftMotors[i] = leftMotors[i].setId(driveIds[i])
                                     .setInverted(driveInverted)
                                     .setCurrentLimit(currentLimit)
                                     .setCanbus(canbus)
@@ -296,7 +299,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         } 
 
         for (int i = 0; i < rightMotors.length; i++) {
-            rightMotors[i] = rightMotors[i].setID(driveIds[i+leftMotors.length])
+            rightMotors[i] = rightMotors[i].setId(driveIds[i+leftMotors.length])
                                     .setInverted(driveInverted)
                                     .setCurrentLimit(currentLimit)
                                     .setCanbus(canbus)
@@ -305,7 +308,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
 
         if(leftEncoders != null) {
             for (int i = 0; i < leftEncoders.length; i++) {
-                leftEncoders[i] = leftEncoders[i].setID(encoderIds[i])
+                leftEncoders[i] = leftEncoders[i].setId(encoderIds[i])
                                         .setInverted(encoderInverted)
                                         .setCanbus(canbus)
                                         .setGearRatio(gearRatio)
@@ -317,7 +320,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         if(rightEncoders != null) {
             int leftlen = leftEncoders != null ? leftEncoders.length : 0;
             for (int i = 0; i < rightEncoders.length; i++) {
-                rightEncoders[i] = rightEncoders[i].setID(encoderIds[i+leftlen])
+                rightEncoders[i] = rightEncoders[i].setId(encoderIds[i+leftlen])
                                         .setInverted(encoderInverted)
                                         .setCanbus(canbus)
                                         .setGearRatio(gearRatio)
@@ -326,21 +329,31 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
             } 
         }
 
-        if(imu != null){
+        if (leftMotors == null || rightMotors == null) {
+            throw new Error("Both left and right motor configurations must be provided.");
+        }
+
+        if (imu != null) {
             imu = imu.setCanbus(canbus);
         }
 
-        MotorControllerGroup lm = new MotorControllerGroup(leftMotors);
-        if (leftEncoders != null){
+        MotorController[] leftControllers =
+                Arrays.stream(leftMotors).map(HardwareFactories::motor).toArray(MotorController[]::new);
+        MotorController[] rightControllers =
+                Arrays.stream(rightMotors).map(HardwareFactories::motor).toArray(MotorController[]::new);
+
+        MotorControllerGroup lm = new MotorControllerGroup(leftControllers);
+        if (leftEncoders != null) {
             lm.setEncoders(EncoderGroup.fromConfigs(leftEncoders));
         }
 
-        MotorControllerGroup rm = new MotorControllerGroup(rightMotors);
-        if (rightEncoders != null){
+        MotorControllerGroup rm = new MotorControllerGroup(rightControllers);
+        if (rightEncoders != null) {
             rm.setEncoders(EncoderGroup.fromConfigs(rightEncoders));
         }
 
-        DifferentialDrivetrain dt = new DifferentialDrivetrain(imu == null ? null : IMU.fromConfig(imu), maxVelocity, trackWidth, lm, rm);
+        Imu resolvedImu = imu == null ? null : new VirtualImu(HardwareFactories.imu(imu));
+        DifferentialDrivetrain dt = new DifferentialDrivetrain(resolvedImu, maxVelocity, trackWidth, lm, rm);
 
         if (simulationConfig != null) {
             double simulationGearRatio = gearRatio;
