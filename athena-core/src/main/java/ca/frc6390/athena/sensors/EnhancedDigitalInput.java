@@ -1,8 +1,10 @@
 package ca.frc6390.athena.sensors;
 
 import ca.frc6390.athena.commands.RunnableTrigger;
+import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
+import java.util.concurrent.atomic.AtomicBoolean;
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
@@ -12,7 +14,8 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
 
     private final DigitalInput input;
     private final DIOSim dioSim;
-    private boolean inverted;
+    private final AtomicBoolean inverted;
+    private final DelayedOutput delayedOutput;
 
     public EnhancedDigitalInput(int channel) {
         this(channel, false);
@@ -22,11 +25,28 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
         this(new DigitalInput(channel), inverted);
     }
 
+    public EnhancedDigitalInput(int channel, boolean inverted, double delaySeconds) {
+        this(new DigitalInput(channel), inverted, delaySeconds);
+    }
 
     public EnhancedDigitalInput(DigitalInput input, boolean inverted) {
-        super(() -> inverted ? !input.get() : input.get());
-        this.inverted = inverted;
+        this(input, inverted, 0);
+    }
+
+    public EnhancedDigitalInput(DigitalInput input, boolean inverted, double delaySeconds) {
+        this(input, createInversionFlag(inverted), delaySeconds);
+    }
+
+    private EnhancedDigitalInput(DigitalInput input, AtomicBoolean inverted, double delaySeconds) {
+        this(input, inverted, new DelayedOutput(() -> readRaw(input, inverted), delaySeconds));
+    }
+
+    private EnhancedDigitalInput(DigitalInput input, AtomicBoolean inverted,
+                                 DelayedOutput delayedOutput) {
+        super(delayedOutput);
         this.input = input;
+        this.inverted = inverted;
+        this.delayedOutput = delayedOutput;
         this.dioSim = RobotBase.isSimulation() ? new DIOSim(input) : null;
     }
 
@@ -35,11 +55,20 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
     }
 
     public void setInverted(boolean inverted) {
-        this.inverted = inverted;
+        this.inverted.set(inverted);
     }
 
     public boolean isInverted() {
-        return inverted;
+        return inverted.get();
+    }
+
+    public EnhancedDigitalInput setDelay(double delaySeconds) {
+        delayedOutput.setDelay(delaySeconds);
+        return this;
+    }
+
+    public boolean getRawValue() {
+        return readRaw(input, inverted);
     }
 
     public boolean supportsSimulation() {
@@ -57,7 +86,7 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
         if (dioSim == null) {
             return;
         }
-        boolean raw = inverted ? !triggered : triggered;
+        boolean raw = inverted.get() ? !triggered : triggered;
         dioSim.setValue(raw);
     }
 
@@ -73,5 +102,14 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
         }
         layout.addBoolean("Value", this::getAsBoolean);
         return layout;
+    }
+
+    private static boolean readRaw(DigitalInput input, AtomicBoolean inverted) {
+        boolean value = input.get();
+        return inverted.get() ? !value : value;
+    }
+
+    private static AtomicBoolean createInversionFlag(boolean inverted) {
+        return new AtomicBoolean(inverted);
     }
 }

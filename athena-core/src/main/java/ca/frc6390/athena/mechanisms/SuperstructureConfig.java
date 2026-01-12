@@ -14,7 +14,6 @@ import edu.wpi.first.math.geometry.Pose3d;
 import ca.frc6390.athena.mechanisms.StatefulLike;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
-import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 
 /**
  * Declarative builder for a superstructure that coordinates multiple stateful mechanisms.
@@ -250,12 +249,21 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         }
 
         /**
+         * Adds a named input sourced from a limit switch configuration. Any provided key will be
+         * used even if the config has its own name.
+         */
+        public Builder<S, SP> addInput(String key, GenericLimitSwitchConfig config) {
+            Objects.requireNonNull(config, "config");
+            return addInput(key, config.setName(key).toSupplier());
+        }
+
+        /**
          * Adds a limit switch as an input. If the config has a name, it will be used as the key unless
          * a key is provided.
          */
         public Builder<S, SP> addInput(GenericLimitSwitchConfig config) {
             String key = config.name() != null ? config.name() : ("dio-" + config.id());
-            inputs.put(key, GenericLimitSwitch.fromConfig(config)::getAsBoolean);
+            inputs.put(key, config.toSupplier());
             return this;
         }
 

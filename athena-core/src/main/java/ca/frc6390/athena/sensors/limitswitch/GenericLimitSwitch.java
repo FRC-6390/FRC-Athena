@@ -1,7 +1,6 @@
 package ca.frc6390.athena.sensors.limitswitch;
 
 import ca.frc6390.athena.sensors.EnhancedDigitalInput;
-import ca.frc6390.athena.controllers.DelayedOutput;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import java.util.function.BooleanSupplier;
 public class GenericLimitSwitch extends EnhancedDigitalInput {
@@ -34,11 +33,8 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
 
         public BooleanSupplier toSupplier(){
             GenericLimitSwitch sensor = create();
-            BooleanSupplier raw = sensor::getAsBoolean;
-            if (delaySeconds > 0) {
-                return new DelayedOutput(raw, delaySeconds);
-            }
-            return raw;
+            sensor.setDelay(delaySeconds);
+            return sensor::getAsBoolean;
         }
 
     }
@@ -67,6 +63,7 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
         setPosition(config.position);
         setHardstop(config.isHardstop);
         setBlockDirection(config.blockDirection);
+        setDelay(config.delaySeconds);
         return this;
     }
 
