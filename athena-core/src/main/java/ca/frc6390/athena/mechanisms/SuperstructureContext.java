@@ -18,6 +18,11 @@ public interface SuperstructureContext<SP> {
     <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> SuperstructureMechanism<CS, CSP> superstructure(Function<SP, CS> mapper);
 
     /**
+     * Returns a typed accessor for child mechanisms and nested superstructures.
+     */
+    SuperstructureMechanismsView<SP> getMechanisms();
+
+    /**
      * Returns the value of a named external input (added via the superstructure config).
      */
     boolean input(String key);

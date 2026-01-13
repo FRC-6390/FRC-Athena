@@ -1,7 +1,7 @@
 {
     "fileName": "FRC6390-Athena-Studica.json",
     "name": "FRC6390 Athena Studica",
-    "version": "2025.16.118",
+    "version": "2025.16.123",
     "frcYear": "2026",
     "uuid": "c4a4b4b9-737b-45be-9468-5d5df2c1d6ab",
     "mavenUrls": [
@@ -12,7 +12,7 @@
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "athena-studica",
-            "version": "2025.16.118"
+            "version": "2025.16.123"
         }
     ],
     "requires": [

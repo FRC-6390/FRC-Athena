@@ -119,7 +119,7 @@ public final class ExampleCompositeSuperstructure {
 
         // Superstructure config mirrors the legacy sequencing.
         SuperstructureConfig<SuperState, SuperTuple> config =
-                SuperstructureConfig.<SuperState, SuperTuple>builder(SuperState.Home)
+                new SuperstructureConfig<>(SuperState.Home)
                 .addMech(elevator, SuperTuple::elev)
                 .addMech(eff, SuperTuple::eff)
                 // Guards similar to old class:
@@ -143,8 +143,7 @@ public final class ExampleCompositeSuperstructure {
                         double z = elevMech.getPosition();
                         return new Pose3d(0.0, 0.0, z, new Rotation3d());
                     });
-                })
-                .buildConfig();
+                });
 
         return config.build();
     }

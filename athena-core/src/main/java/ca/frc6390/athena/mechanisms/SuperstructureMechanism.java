@@ -15,12 +15,11 @@ import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import java.util.ArrayList;
-import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 
 /**
  * Composite mechanism that coordinates multiple stateful mechanisms using a superstate enum.
- * Guards reference child mechanisms via {@link SuperstructureContext#mechanism(Function)} using
- * the same mapper supplied to the builder.
+ * Guards reference child mechanisms via {@link SuperstructureContext#getMechanisms()} using
+ * the same mapper supplied to the config.
  */
 public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
 
@@ -203,8 +202,9 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             return new Mechanisms();
         }
 
-        public final class Mechanisms {
+        public final class Mechanisms implements SuperstructureMechanismsView<SP> {
             @SuppressWarnings("unchecked")
+            @Override
             public <E extends Enum<E> & SetpointProvider<Double>> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
             Mechanism mech = context.mechanism(mapper);
             if (mech instanceof StatefulArmMechanism<?>) {
@@ -214,6 +214,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
 
         @SuppressWarnings("unchecked")
+        @Override
         public <E extends Enum<E> & SetpointProvider<Double>> ElevatorMechanism.StatefulElevatorMechanism<E> elevator(Function<SP, E> mapper) {
             Mechanism mech = context.mechanism(mapper);
             if (mech instanceof ElevatorMechanism.StatefulElevatorMechanism<?>) {
@@ -223,6 +224,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
 
         @SuppressWarnings("unchecked")
+        @Override
         public <E extends Enum<E> & SetpointProvider<Double>> TurretMechanism.StatefulTurretMechanism<E> turret(Function<SP, E> mapper) {
             Mechanism mech = context.mechanism(mapper);
             if (mech instanceof TurretMechanism.StatefulTurretMechanism<?>) {
@@ -232,15 +234,18 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
 
         @SuppressWarnings("unchecked")
+        @Override
         public <E extends Enum<E> & SetpointProvider<Double>> StatefulMechanism<E> generic(Function<SP, E> mapper) {
             return context.mechanism(mapper);
         }
 
+        @Override
         public boolean input(String key) {
             java.util.function.BooleanSupplier supplier = inputs.get(key);
             return supplier != null && supplier.getAsBoolean();
         }
 
+        @Override
         public java.util.function.BooleanSupplier inputSupplier(String key) {
             java.util.function.BooleanSupplier supplier = inputs.get(key);
             if (supplier == null) {
@@ -252,6 +257,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         /**
          * Returns the flattened list of all child mechanisms (including nested).
          */
+        @Override
         public List<Mechanism> all() {
             List<Mechanism> list = new ArrayList<>();
             flattenMechanisms(list, SuperstructureMechanism.this);
@@ -261,6 +267,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         /**
          * Returns a nested superstructure resolved via the same mapper used in the parent config.
          */
+        @Override
         public <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> SuperstructureMechanism<CS, CSP> superstructure(
                 Function<SP, CS> mapper) {
             return SuperstructureMechanism.this.context.superstructure(mapper);
@@ -272,6 +279,11 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return getMechanisms().all();
     }
 
+    public boolean input(String key) {
+        java.util.function.BooleanSupplier supplier = inputs.get(key);
+        return supplier != null && supplier.getAsBoolean();
+    }
+
     public java.util.function.BooleanSupplier inputSupplier(String key) {
         java.util.function.BooleanSupplier supplier = inputs.get(key);
         if (supplier == null) {
@@ -281,7 +293,6 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     }
 
     private final class SuperstructureContextImpl implements SuperstructureContext<SP> {
-
         @Override
         public SP setpoint() {
             return stateMachine.getGoalStateSetpoint();
@@ -341,9 +352,15 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
 
         @Override
+        public SuperstructureMechanismsView<SP> getMechanisms() {
+            return SuperstructureMechanism.this.getMechanisms();
+        }
+
+        @Override
         public boolean input(String key) {
             java.util.function.BooleanSupplier supplier = inputs.get(key);
             return supplier != null && supplier.getAsBoolean();
         }
+
     }
 }
