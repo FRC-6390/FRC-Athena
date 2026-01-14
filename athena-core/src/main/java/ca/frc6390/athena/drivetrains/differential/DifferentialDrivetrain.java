@@ -210,21 +210,18 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         if (driveFeedforwardEnabled && driveFeedforward != null) {
             DifferentialDriveWheelSpeeds wheelSpeeds = kinematics.toWheelSpeeds(speeds);
             double now = Timer.getFPGATimestamp();
-            double leftAccel = 0.0;
-            double rightAccel = 0.0;
-            if (Double.isFinite(lastFeedforwardTimestampSeconds)) {
-                double dt = now - lastFeedforwardTimestampSeconds;
-                if (dt > 1e-6) {
-                    leftAccel = (wheelSpeeds.leftMetersPerSecond - lastLeftSetpointMetersPerSecond) / dt;
-                    rightAccel = (wheelSpeeds.rightMetersPerSecond - lastRightSetpointMetersPerSecond) / dt;
-                }
-            }
+            double leftCurrent = Double.isFinite(lastFeedforwardTimestampSeconds)
+                    ? lastLeftSetpointMetersPerSecond
+                    : wheelSpeeds.leftMetersPerSecond;
+            double rightCurrent = Double.isFinite(lastFeedforwardTimestampSeconds)
+                    ? lastRightSetpointMetersPerSecond
+                    : wheelSpeeds.rightMetersPerSecond;
             lastFeedforwardTimestampSeconds = now;
             lastLeftSetpointMetersPerSecond = wheelSpeeds.leftMetersPerSecond;
             lastRightSetpointMetersPerSecond = wheelSpeeds.rightMetersPerSecond;
 
-            double leftVolts = driveFeedforward.calculate(wheelSpeeds.leftMetersPerSecond, leftAccel);
-            double rightVolts = driveFeedforward.calculate(wheelSpeeds.rightMetersPerSecond, rightAccel);
+            double leftVolts = driveFeedforward.calculateWithVelocities(leftCurrent, wheelSpeeds.leftMetersPerSecond);
+            double rightVolts = driveFeedforward.calculateWithVelocities(rightCurrent, wheelSpeeds.rightMetersPerSecond);
             setLeftVoltage(leftVolts);
             setRightVoltage(rightVolts);
             drive.feed();

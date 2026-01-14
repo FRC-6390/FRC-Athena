@@ -2,11 +2,14 @@ package ca.frc6390.athena.ctre.motor;
 
 import java.util.function.Consumer;
 
+import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.PositionDutyCycle;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.InvertedValue;
 
 import ca.frc6390.athena.ctre.encoder.CtreEncoder;
 import ca.frc6390.athena.ctre.encoder.CtreEncoderType;
@@ -64,7 +67,7 @@ public class CtreMotorController implements MotorController {
             throw new IllegalArgumentException("CTRE motor controller config required");
         }
 
-        TalonFX talon = new TalonFX(config.id, config.canbus);
+        TalonFX talon = new TalonFX(config.id, resolveCanBus(config.canbus));
         EncoderConfig encoderCfg = config.encoderConfig;
         if (encoderCfg == null) {
             encoderCfg = new EncoderConfig()
@@ -90,10 +93,18 @@ public class CtreMotorController implements MotorController {
         CtreMotorController controller = new CtreMotorController(talon, config, encoder);
         controller.setCurrentLimit(config.currentLimit);
         controller.setNeutralMode(config.neutralMode);
+        controller.setInverted(config.inverted);
         if (config.pid != null) {
             controller.setPid(config.pid);
         }
         return controller;
+    }
+
+    private static CANBus resolveCanBus(String canbus) {
+        if (canbus == null || canbus.isBlank()) {
+            return new CANBus();
+        }
+        return new CANBus(canbus);
     }
 
     @Override
@@ -164,7 +175,11 @@ public class CtreMotorController implements MotorController {
     @Override
     public void setInverted(boolean inverted) {
         config.inverted = inverted;
-        controller.setInverted(inverted);
+        MotorOutputConfigs outputConfigs = new MotorOutputConfigs();
+        outputConfigs.Inverted = inverted
+                ? InvertedValue.Clockwise_Positive
+                : InvertedValue.CounterClockwise_Positive;
+        controller.getConfigurator().apply(outputConfigs);
     }
 
     @Override

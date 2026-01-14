@@ -1,5 +1,6 @@
 package ca.frc6390.athena.ctre.encoder;
 
+import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.configs.CANcoderConfiguration;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -60,7 +61,7 @@ public class CtreEncoder implements Encoder {
         CtreEncoderType type = (CtreEncoderType) config.type;
         switch (type) {
             case CANCODER -> {
-                CANcoder encoder = new CANcoder(config.id, config.canbus);
+                CANcoder encoder = new CANcoder(config.id, resolveCanBus(config.canbus));
                 encoder.getConfigurator().apply(new CANcoderConfiguration());
                 return new CtreEncoder(encoder, config);
             }
@@ -72,6 +73,13 @@ public class CtreEncoder implements Encoder {
             }
             default -> throw new IllegalArgumentException("Unsupported CTRE encoder type: " + type);
         }
+    }
+
+    private static CANBus resolveCanBus(String canbus) {
+        if (canbus == null || canbus.isBlank()) {
+            return new CANBus();
+        }
+        return new CANBus(canbus);
     }
 
     @Override

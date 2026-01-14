@@ -356,7 +356,8 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
      * @param guard predicate that must be true for the transition to occur
      * @return this config for chaining
      */
-    public SuperstructureConfig<S, SP> addConstraint(
+    @SafeVarargs
+    public final SuperstructureConfig<S, SP> addConstraint(
             S state,
             Predicate<SuperstructureContext<SP>> guard,
             S... transitionStates) {

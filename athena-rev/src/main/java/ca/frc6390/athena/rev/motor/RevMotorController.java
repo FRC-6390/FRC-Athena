@@ -3,9 +3,9 @@ package ca.frc6390.athena.rev.motor;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
+import com.revrobotics.PersistMode;
+import com.revrobotics.ResetMode;
 import com.revrobotics.spark.SparkBase.ControlType;
-import com.revrobotics.spark.SparkBase.PersistMode;
-import com.revrobotics.spark.SparkBase.ResetMode;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
@@ -107,7 +107,7 @@ public class RevMotorController implements MotorController {
                     update.smartCurrentLimit((int) Math.round(limit));
                     controller.configure(update, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
                 },
-                val -> controller.getClosedLoopController().setReference(val, ControlType.kPosition),
+                val -> controller.getClosedLoopController().setSetpoint(val, ControlType.kPosition),
                 mode -> {
                     SparkMaxConfig update = new SparkMaxConfig();
                     update.idleMode(mode == MotorNeutralMode.Brake
@@ -148,7 +148,7 @@ public class RevMotorController implements MotorController {
                     update.smartCurrentLimit((int) Math.round(limit));
                     controller.configure(update, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
                 },
-                val -> controller.getClosedLoopController().setReference(val, ControlType.kPosition),
+                val -> controller.getClosedLoopController().setSetpoint(val, ControlType.kPosition),
                 mode -> {
                     SparkFlexConfig update = new SparkFlexConfig();
                     update.idleMode(mode == MotorNeutralMode.Brake

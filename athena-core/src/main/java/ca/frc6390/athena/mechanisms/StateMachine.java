@@ -216,7 +216,8 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         return Commands.waitUntil(this::atGoalState);
     }
 
-    public Command waitUntil(@SuppressWarnings("unchecked") E... states) {
+    @SafeVarargs
+    public final Command waitUntil(E... states) {
         return Commands.waitUntil(() -> this.atState(states));
     }
 
@@ -224,7 +225,8 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         return atGoalDelayedOutput.getAsBoolean();
     }
 
-    public boolean atState(@SuppressWarnings("unchecked") E... states) {
+    @SafeVarargs
+    public final boolean atState(E... states) {
         return Arrays.stream(states).anyMatch((state) -> atGoalState() && isGoalState(state));
     }
 

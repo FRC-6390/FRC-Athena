@@ -332,8 +332,7 @@ public class SwerveModule implements RobotSendableDevice {
         state.optimize(getState().angle);
         state.speedMetersPerSecond *= state.angle.minus(encoder.getRotation2d()).getCos();
         if (driveFeedforwardEnabled && driveFeedforward != null) {
-            double acceleration = calculateSetpointAcceleration(state.speedMetersPerSecond);
-            double driveVolts = driveFeedforward.calculate(state.speedMetersPerSecond, acceleration);
+            double driveVolts = calculateFeedforwardVolts(state.speedMetersPerSecond);
             setDriveMotorVoltage(driveVolts);
         } else {
             setDriveMotor(state.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
@@ -387,20 +386,14 @@ public class SwerveModule implements RobotSendableDevice {
         return nominalVoltage;
     }
 
-    private double calculateSetpointAcceleration(double targetSpeedMetersPerSecond) {
+    private double calculateFeedforwardVolts(double targetSpeedMetersPerSecond) {
         double now = Timer.getFPGATimestamp();
-        if (!Double.isFinite(lastSetpointTimestampSeconds)) {
-            lastSetpointTimestampSeconds = now;
-            lastSetpointSpeedMetersPerSecond = targetSpeedMetersPerSecond;
-            return 0.0;
-        }
-        double dt = now - lastSetpointTimestampSeconds;
+        double currentSpeed = Double.isFinite(lastSetpointTimestampSeconds)
+                ? lastSetpointSpeedMetersPerSecond
+                : targetSpeedMetersPerSecond;
         lastSetpointTimestampSeconds = now;
-        double acceleration = dt > 1e-6
-                ? (targetSpeedMetersPerSecond - lastSetpointSpeedMetersPerSecond) / dt
-                : 0.0;
         lastSetpointSpeedMetersPerSecond = targetSpeedMetersPerSecond;
-        return acceleration;
+        return driveFeedforward.calculateWithVelocities(currentSpeed, targetSpeedMetersPerSecond);
     }
 
     @Override

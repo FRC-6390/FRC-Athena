@@ -32,6 +32,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         final Function<SP, E> mapper;
         final Class<?> stateType;
 
+        @SuppressWarnings("unchecked")
         <M extends Enum<M> & SetpointProvider<Double>> Child(Mechanism mechanism, Function<SP, M> mapper, Class<M> stateType) {
             this.mechanism = mechanism;
             this.superstructure = null;

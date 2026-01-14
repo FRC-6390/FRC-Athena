@@ -8,5 +8,6 @@ dependencies {
     implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.ext.wpilibVersion}"
+    implementation "com.fasterxml.jackson.core:jackson-annotations:${rootProject.ext.athenaVersions.jackson}"
     implementation "com.ctre.phoenix6:wpiapi-java:${rootProject.ext.athenaVersions.ctre}"
 }

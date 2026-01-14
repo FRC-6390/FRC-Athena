@@ -98,6 +98,7 @@ public class PathPlannerAutoBackend implements AutoBackend {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public Optional<ChoreoAutoFactory> createChoreoFactory(ChoreoBinding binding) {
         if (binding == null) {
             return Optional.empty();

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.ctre.imu;
 
+import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.hardware.Pigeon2;
 
 import ca.frc6390.athena.hardware.imu.Imu;
@@ -25,7 +26,7 @@ public class CtreImu implements Imu {
             throw new IllegalArgumentException("CTRE IMU config required");
         }
 
-        Pigeon2 pigeon = new Pigeon2(config.id, config.canbus);
+        Pigeon2 pigeon = new Pigeon2(config.id, resolveCanBus(config.canbus));
         return new CtreImu(pigeon, config);
     }
 
@@ -56,5 +57,12 @@ public class CtreImu implements Imu {
 
     private double direction() {
         return inverted ? -1.0 : 1.0;
+    }
+
+    private static CANBus resolveCanBus(String canbus) {
+        if (canbus == null || canbus.isBlank()) {
+            return new CANBus();
+        }
+        return new CANBus(canbus);
     }
 }

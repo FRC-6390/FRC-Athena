@@ -1,7 +1,7 @@
 {
     "fileName": "FRC6390-Athena-Studica.json",
     "name": "FRC6390 Athena Studica",
-    "version": "2025.16.177",
+    "version": "2026.0.0",
     "frcYear": "2026",
     "uuid": "c4a4b4b9-737b-45be-9468-5d5df2c1d6ab",
     "mavenUrls": [
@@ -12,7 +12,7 @@
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "athena-studica",
-            "version": "2025.16.177"
+            "version": "2026.0.0"
         }
     ],
     "requires": [
@@ -25,7 +25,7 @@
         {
             "uuid": "cb311d09-36e9-4143-a032-55bb2b94443b",
             "errorMessage": "Athena Studica requires Studica. Please add the Studica vendordep",
-            "onlineUrl": "https://dev.studica.com/releases/2026/Studica-2026.0.0.json"
+            "onlineUrl": "https://dev.studica.com/releases/2025/Studica-2025.0.1.json"
         }
     ],
     "jniDependencies": [

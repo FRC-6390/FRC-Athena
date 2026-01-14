@@ -1396,9 +1396,7 @@ public class MechanismConfig<T extends Mechanism> {
         T mechanism = factory.apply(this);
 
         if (stateGraph != null && mechanism instanceof StatefulMechanism<?> statefulMechanism) {
-            @SuppressWarnings({"rawtypes", "unchecked"})
-            StatefulMechanism stateful = (StatefulMechanism) statefulMechanism;
-            stateful.setStateGraph((StateGraph) stateGraph);
+            applyStateGraph(statefulMechanism, stateGraph);
         }
 
         return mechanism;
@@ -1419,6 +1417,15 @@ public class MechanismConfig<T extends Mechanism> {
             // Throws with a clear message if the vendor module is absent.
             MotorRegistry.get().motor(config.type.getKey());
         });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <E extends Enum<E> & StateMachine.SetpointProvider<Double>> void applyStateGraph(
+            StatefulMechanism<?> statefulMechanism,
+            StateGraph<?> stateGraph) {
+        StatefulMechanism<E> typedMechanism = (StatefulMechanism<E>) statefulMechanism;
+        StateGraph<E> typedGraph = (StateGraph<E>) stateGraph;
+        typedMechanism.setStateGraph(typedGraph);
     }
 
     /**

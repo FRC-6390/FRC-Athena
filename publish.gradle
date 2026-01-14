@@ -6,7 +6,7 @@ apply plugin: 'maven-publish'
 // -----------------------------------------------------------------------------
 ext.licenseFile = files("$rootDir/LICENSE.txt")
 def athenaJsonFile = file("$projectDir/vendordeps/FRC6390-Athena-Core.json")
-def defaultVersion = '2025.6.2'
+def defaultVersion = '2026.0.0'
 def vendordepDescriptors = [
     [
         file      : file("$projectDir/vendordeps/FRC6390-Athena-Core.json"),
