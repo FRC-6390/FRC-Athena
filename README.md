@@ -34,6 +34,65 @@ autos.registerChoreoAuto("RightAuto", "CompRightSide");
 robot.registerAutoChooser("LeftAuto");
 ```
 
+To chain or branch autos, use the sequence/branch helpers. Choreo split trajectories can be referenced with a `.index` suffix (e.g., `CompRightSide.1`) when registering the auto:
+
+```java
+autos.registerChoreoAuto("RightAuto.1", "CompRightSide.1");
+autos.registerAutoSequence("TwoPiece", "RightAuto", "RightAuto.1");
+autos.registerAutoBranch("TwoPieceOrLeave", hasNoteSupplier, "TwoPiece", "Leave");
+```
+
+For more complex logic (branching + interrupts), build an `AutoPlan` and register it:
+
+```java
+AutoPlan plan = AutoPlan.sequence(
+        AutoPlan.step("RightAuto"),
+        AutoPlan.branch(hasNoteSupplier, AutoPlan.step("RightAuto.1"), AutoPlan.step("Leave")));
+
+AutoPlan bailout = AutoPlan.interrupt(plan, shouldAbortSupplier, AutoPlan.step("Abort"));
+autos.registerAutoPlan("TwoPieceOrLeave", bailout);
+```
+
+AutoPlan steps can reset odometry explicitly:
+
+```java
+AutoPlan plan = AutoPlan.sequence(
+        AutoPlan.step("RightAuto", true),
+        AutoPlan.step("RightAuto", 1, new Pose2d(1.0, 2.0, Rotation2d.fromDegrees(180))));
+```
+
+AutoPlans can also mix in custom commands:
+
+```java
+AutoPlan plan = AutoPlan.sequence(
+        AutoPlan.step("RightAuto"),
+        AutoPlan.command(trackTargetCommand),
+        AutoPlan.step("RightAuto", 1));
+```
+
+AutoPlans support parallel, race, and deadline groups:
+
+```java
+AutoPlan plan = AutoPlan.sequence(
+        AutoPlan.deadline(
+                AutoPlan.step("RightAuto"),
+                AutoPlan.command(spinUpShooter)),
+        AutoPlan.race(
+                AutoPlan.command(feedNoteCommand),
+                AutoPlan.command(waitForBeamBreak)),
+        AutoPlan.parallel(
+                AutoPlan.step("RightAuto", 1),
+                AutoPlan.command(keepAimingCommand)));
+```
+
+AutoPlans can wrap steps with timeouts or end conditions:
+
+```java
+AutoPlan plan = AutoPlan.sequence(
+        AutoPlan.withTimeout(AutoPlan.step("RightAuto"), 2.5),
+        AutoPlan.until(AutoPlan.command(trackTargetCommand), hasTagSupplier));
+```
+
 Everything works directly with strings; if you prefer enums, implement `RobotAuto.NamedCommandKey` / `RobotAuto.AutoKey` and reuse these helpers. Once the first auto is added, named-command registration locks to prevent missing dependencies. Use `setStartingPose()` for extra metadata, and call `registerAutoRoutineChooser(...)` if you want the raw routine objects on Shuffleboard.
 
 ## Localization Camera Auto Align

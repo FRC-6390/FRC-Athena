@@ -11,12 +11,18 @@ public class SwerveSimulationConfig {
     private final double robotMomentOfInertia;
     private final double wheelCoefficientOfFriction;
     private final double nominalVoltage;
+    private final double maxSpeedScale;
 
-    private SwerveSimulationConfig(double robotMassKg, double robotMomentOfInertia, double wheelCoefficientOfFriction, double nominalVoltage) {
+    private SwerveSimulationConfig(double robotMassKg,
+                                   double robotMomentOfInertia,
+                                   double wheelCoefficientOfFriction,
+                                   double nominalVoltage,
+                                   double maxSpeedScale) {
         this.robotMassKg = robotMassKg;
         this.robotMomentOfInertia = robotMomentOfInertia;
         this.wheelCoefficientOfFriction = wheelCoefficientOfFriction;
         this.nominalVoltage = nominalVoltage;
+        this.maxSpeedScale = maxSpeedScale;
     }
 
     /**
@@ -24,7 +30,7 @@ public class SwerveSimulationConfig {
      */
     public static SwerveSimulationConfig defaults() {
         // Defaults tuned for more realistic accel in sim; override per-robot with actual values.
-        return new SwerveSimulationConfig(58.0, 6.0, 0.7, 10.5);
+        return new SwerveSimulationConfig(58.0, 6.0, 0.7, 10.5, 1.0);
     }
 
     /**
@@ -33,7 +39,7 @@ public class SwerveSimulationConfig {
      * @param robotMassKg chassis mass in kilograms
      */
     public SwerveSimulationConfig withRobotMassKg(double robotMassKg) {
-        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage);
+        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage, maxSpeedScale);
     }
 
     /**
@@ -42,7 +48,7 @@ public class SwerveSimulationConfig {
      * @param robotMomentOfInertia yaw inertia about the vertical axis (kg·m²)
      */
     public SwerveSimulationConfig withRobotMomentOfInertia(double robotMomentOfInertia) {
-        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage);
+        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage, maxSpeedScale);
     }
 
     /**
@@ -51,7 +57,7 @@ public class SwerveSimulationConfig {
      * @param wheelCoefficientOfFriction friction coefficient to apply to each module
      */
     public SwerveSimulationConfig withWheelCoefficientOfFriction(double wheelCoefficientOfFriction) {
-        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage);
+        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage, maxSpeedScale);
     }
 
     /**
@@ -60,7 +66,17 @@ public class SwerveSimulationConfig {
      * @param nominalVoltage battery voltage used to clamp drive commands
      */
     public SwerveSimulationConfig withNominalVoltage(double nominalVoltage) {
-        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage);
+        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage, maxSpeedScale);
+    }
+
+    /**
+     * Returns a copy of this configuration with a scalar applied to the simulated maximum speed
+     * (useful when sim feels too fast vs. real hardware).
+     *
+     * @param maxSpeedScale scale factor applied to linear/rotational limits (1.0 = unchanged)
+     */
+    public SwerveSimulationConfig withMaxSpeedScale(double maxSpeedScale) {
+        return new SwerveSimulationConfig(robotMassKg, robotMomentOfInertia, wheelCoefficientOfFriction, nominalVoltage, maxSpeedScale);
     }
 
     /** Chassis mass in kilograms. */
@@ -81,5 +97,10 @@ public class SwerveSimulationConfig {
     /** Nominal battery voltage used to clamp simulated motor commands. */
     public double getNominalVoltage() {
         return nominalVoltage;
+    }
+
+    /** Scale factor applied to simulated max linear/rotational speed limits. */
+    public double getMaxSpeedScale() {
+        return maxSpeedScale;
     }
 }

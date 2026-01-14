@@ -75,6 +75,13 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
 
     default void setSimulatedState(double rotations, double velocity) {}
 
+    /**
+     * Returns true when this encoder updates its readings from simulated state setters.
+     */
+    default boolean supportsSimulation() {
+        return false;
+    }
+
     // Additional helpers
     default edu.wpi.first.math.geometry.Rotation2d getRotation2d() {
         return edu.wpi.first.math.geometry.Rotation2d.fromRotations(getRotations());

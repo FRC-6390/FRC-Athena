@@ -7,21 +7,22 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.math.geometry.Pose3d;
-import ca.frc6390.athena.mechanisms.StatefulLike;
-import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
+import ca.frc6390.athena.mechanisms.Mechanism;
 
 /**
  * Declarative config for a superstructure that coordinates multiple stateful mechanisms.
  * Callers map each superstate setpoint to the child mechanism state via a mapper function
- * (for example, {@code addMechanism(ELEVATOR_CONFIG, SuperTuple::elev)}). Guards can reference
- * the child mechanisms through {@link SuperstructureContext#getMechanisms()} without
- * naming them explicitly.
+ * (for example, {@code addMechanism(ELEVATOR_CONFIG, SuperTuple::elev)}). Constraints can
+ * reference the child mechanisms through {@link SuperstructureContext#getMechanisms()} without
+ * naming them explicitly, and can optionally insert transition states before a guarded state.
  *
  * @param <S> superstate enum type
  * @param <SP> setpoint tuple returned by the superstate enum
@@ -31,9 +32,13 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     public S initialState;
     public double stateMachineDelaySeconds = 0.0;
     public List<ChildFactory<SP>> childConfigs = new ArrayList<>();
-    public Map<S, Predicate<SuperstructureContext<SP>>> guards = new HashMap<>();
+    public Map<S, Constraint<S, SP>> constraints = new HashMap<>();
     public List<Attachment<SP, ?>> attachments = new ArrayList<>();
     public Map<String, BooleanSupplier> inputs = new HashMap<>();
+    public Map<String, DoubleSupplier> doubleInputs = new HashMap<>();
+    public Map<String, Supplier<?>> objectInputs = new HashMap<>();
+    public Map<S, List<Binding<SP>>> bindings = new HashMap<>();
+    public List<Binding<SP>> alwaysBindings = new ArrayList<>();
     private final SP initialSetpoint;
 
     public SuperstructureConfig(S initialState) {
@@ -50,7 +55,17 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         for (ChildFactory<SP> child : childConfigs) {
             builtChildren.add(child.build());
         }
-        return new SuperstructureMechanism<>(initialState, stateMachineDelaySeconds, builtChildren, guards, attachments, inputs);
+        return new SuperstructureMechanism<>(
+                initialState,
+                stateMachineDelaySeconds,
+                builtChildren,
+                mergedConstraints(),
+                attachments,
+                inputs,
+                doubleInputs,
+                objectInputs,
+                mergedBindings(),
+                mergedAlwaysBindings());
     }
 
     /**
@@ -63,7 +78,52 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         for (ChildFactory<SP> child : childConfigs) {
             builtChildren.add(child.build());
         }
-        return new SuperstructureMechanism<>(initialState, stateMachineDelaySeconds, builtChildren, guards, attachments, merged);
+        return new SuperstructureMechanism<>(
+                initialState,
+                stateMachineDelaySeconds,
+                builtChildren,
+                mergedConstraints(),
+                attachments,
+                merged,
+                doubleInputs,
+                objectInputs,
+                mergedBindings(),
+                mergedAlwaysBindings());
+    }
+
+    /**
+     * Builds a superstructure with additional/overridden inputs supplied at build time.
+     */
+    public SuperstructureMechanism<S, SP> build(Map<String, BooleanSupplier> booleanOverrides,
+                                               Map<String, DoubleSupplier> doubleOverrides,
+                                               Map<String, Supplier<?>> objectOverrides) {
+        Map<String, BooleanSupplier> mergedBooleans = new HashMap<>(inputs);
+        if (booleanOverrides != null) {
+            mergedBooleans.putAll(booleanOverrides);
+        }
+        Map<String, DoubleSupplier> mergedDoubles = new HashMap<>(doubleInputs);
+        if (doubleOverrides != null) {
+            mergedDoubles.putAll(doubleOverrides);
+        }
+        Map<String, Supplier<?>> mergedObjects = new HashMap<>(objectInputs);
+        if (objectOverrides != null) {
+            mergedObjects.putAll(objectOverrides);
+        }
+        List<SuperstructureMechanism.Child<SP, ?>> builtChildren = new ArrayList<>();
+        for (ChildFactory<SP> child : childConfigs) {
+            builtChildren.add(child.build());
+        }
+        return new SuperstructureMechanism<>(
+                initialState,
+                stateMachineDelaySeconds,
+                builtChildren,
+                mergedConstraints(),
+                attachments,
+                mergedBooleans,
+                mergedDoubles,
+                mergedObjects,
+                mergedBindings(),
+                mergedAlwaysBindings());
     }
 
     /**
@@ -135,6 +195,28 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     }
 
     /**
+     * Adds an already-constructed stateful mechanism that implements {@link StatefulLike}.
+     *
+     * @param mechanism existing mechanism instance
+     * @param mapper maps the supertuple to the child mechanism's state enum
+     * @param <E> child mechanism state enum type
+     * @param <T> mechanism type
+     * @return this config for chaining
+     */
+    public <E extends Enum<E> & SetpointProvider<Double>, T extends Mechanism & StatefulLike<E>> SuperstructureConfig<S, SP> addExistingMech(
+            T mechanism,
+            Function<SP, E> mapper) {
+
+        Objects.requireNonNull(mechanism, "mechanism");
+        Objects.requireNonNull(mapper, "mapper");
+
+        E sample = mapper.apply(initialSetpoint);
+        Class<E> stateType = sample != null ? sample.getDeclaringClass() : null;
+        childConfigs.add(() -> new SuperstructureMechanism.Child<>(mechanism, mapper, stateType));
+        return this;
+    }
+
+    /**
      * Adds an already-constructed stateful mechanism using the addMechanism syntax.
      *
      * @param mechanism existing mechanism instance
@@ -144,6 +226,15 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
      */
     public <E extends Enum<E> & SetpointProvider<Double>> SuperstructureConfig<S, SP> addExistingMechanism(
             StatefulMechanism<E> mechanism,
+            Function<SP, E> mapper) {
+        return addExistingMech(mechanism, mapper);
+    }
+
+    /**
+     * Adds an already-constructed stateful mechanism using the addMechanism syntax.
+     */
+    public <E extends Enum<E> & SetpointProvider<Double>, T extends Mechanism & StatefulLike<E>> SuperstructureConfig<S, SP> addExistingMechanism(
+            T mechanism,
             Function<SP, E> mapper) {
         return addExistingMech(mechanism, mapper);
     }
@@ -256,16 +347,25 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     }
 
     /**
-     * Adds a guard for a specific superstate. The guard can inspect child mechanisms through
+     * Adds a constraint for a specific superstate. The guard can inspect child mechanisms through
      * {@link SuperstructureContext#getMechanisms()} using the same mapper passed to
-     * {@link #addMech(MechanismConfig, Function)}.
+     * {@link #addMech(MechanismConfig, Function)}. If transition states are provided and the guard
+     * is not satisfied when the state is queued, the transition states are queued first.
      *
-     * @param state superstate to guard
+     * @param state superstate to constrain
      * @param guard predicate that must be true for the transition to occur
      * @return this config for chaining
      */
-    public SuperstructureConfig<S, SP> addGuard(S state, Predicate<SuperstructureContext<SP>> guard) {
-        guards.put(Objects.requireNonNull(state, "state"), Objects.requireNonNull(guard, "guard"));
+    public SuperstructureConfig<S, SP> addConstraint(
+            S state,
+            Predicate<SuperstructureContext<SP>> guard,
+            S... transitionStates) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(guard, "guard");
+        List<S> transitions = transitionStates == null ? List.of() : List.of(transitionStates);
+        transitions.forEach(t -> Objects.requireNonNull(t, "transitionStates cannot contain null"));
+        Constraint<S, SP> constraint = new Constraint<>(guard, transitions);
+        constraints.put(state, constraint);
         return this;
     }
 
@@ -276,7 +376,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
      * Example:
      * <pre>
      *   .setSimulation(sim -> sim.attach(SuperTuple::arm,
-     *       ctx -> new Pose3d(0, 0, ctx.mechanism(SuperTuple::elev).getPositionMeters(), new Rotation3d())))
+     *       ctx -> new Pose3d(0, 0, ctx.getMechanisms().generic(SuperTuple::elev).getPositionMeters(), new Rotation3d())))
      * </pre>
      *
      * @param configurer callback that adds attachments
@@ -290,10 +390,33 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     }
 
     /**
-     * Adds a named external input (BooleanSupplier) that can be read in guards via {@link SuperstructureContext#input(String)}.
+     * Adds a named external input (BooleanSupplier) that can be read in constraints via {@link SuperstructureContext#input(String)}.
      */
     public SuperstructureConfig<S, SP> addInput(String key, BooleanSupplier supplier) {
         inputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+        return this;
+    }
+
+    /**
+     * Adds a named boolean input (alias for {@link #addInput(String, BooleanSupplier)}).
+     */
+    public SuperstructureConfig<S, SP> addBooleanInput(String key, BooleanSupplier supplier) {
+        return addInput(key, supplier);
+    }
+
+    /**
+     * Adds a named double input that can be read via {@link SuperstructureContext#doubleInput(String)}.
+     */
+    public SuperstructureConfig<S, SP> addDoubleInput(String key, DoubleSupplier supplier) {
+        doubleInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+        return this;
+    }
+
+    /**
+     * Adds a named object input that can be read via {@link SuperstructureContext#objectInput(String, Class)}.
+     */
+    public SuperstructureConfig<S, SP> addObjectInput(String key, Supplier<?> supplier) {
+        objectInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
         return this;
     }
 
@@ -329,24 +452,98 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
             Function<SuperstructureContext<SP>, Pose3d> poseSupplier) {
         Objects.requireNonNull(childMapper, "childMapper");
         Objects.requireNonNull(poseSupplier, "poseSupplier");
-        attachments.add(new Attachment<>(childMapper, poseSupplier));
+        attachments.add(Attachment.forMapper(childMapper, poseSupplier));
         return this;
     }
+
+    /**
+     * Registers a hook that runs every loop while the specified superstates are active.
+     */
+    @SafeVarargs
+    public final SuperstructureConfig<S, SP> addOnStateHook(Binding<SP> binding, S... states) {
+        Objects.requireNonNull(binding, "binding");
+        if (states == null || states.length == 0) {
+            alwaysBindings.add(binding);
+            return this;
+        }
+        for (S state : states) {
+            Objects.requireNonNull(state, "states cannot contain null");
+            bindings.computeIfAbsent(state, key -> new ArrayList<>()).add(binding);
+        }
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs every loop regardless of the active superstate.
+     */
+    public SuperstructureConfig<S, SP> addOnStateHook(Binding<SP> binding) {
+        Objects.requireNonNull(binding, "binding");
+        alwaysBindings.add(binding);
+        return this;
+    }
+
 
     @FunctionalInterface
     private interface ChildFactory<SP> {
         SuperstructureMechanism.Child<SP, ?> build();
     }
 
+    @FunctionalInterface
+    public interface Binding<SP> {
+        void apply(SuperstructureContext<SP> context);
+    }
+
+
     static final class Attachment<SP, E extends Enum<E> & SetpointProvider<Double>> {
         final Function<SP, E> childMapper;
+        final Function<SuperstructureContext<SP>, Mechanism> resolver;
         final Function<SuperstructureContext<SP>, edu.wpi.first.math.geometry.Pose3d> poseSupplier;
 
-        Attachment(Function<SP, E> childMapper,
-                   Function<SuperstructureContext<SP>, edu.wpi.first.math.geometry.Pose3d> poseSupplier) {
+        private Attachment(Function<SP, E> childMapper,
+                            Function<SuperstructureContext<SP>, Mechanism> resolver,
+                            Function<SuperstructureContext<SP>, edu.wpi.first.math.geometry.Pose3d> poseSupplier) {
             this.childMapper = childMapper;
+            this.resolver = resolver;
             this.poseSupplier = poseSupplier;
         }
+
+        static <SP, E extends Enum<E> & SetpointProvider<Double>> Attachment<SP, E> forMapper(
+                Function<SP, E> childMapper,
+                Function<SuperstructureContext<SP>, edu.wpi.first.math.geometry.Pose3d> poseSupplier) {
+            return new Attachment<>(childMapper, null, poseSupplier);
+        }
+
+        static <SP, E extends Enum<E> & SetpointProvider<Double>> Attachment<SP, E> forResolver(
+                Function<SuperstructureContext<SP>, Mechanism> resolver,
+                Function<SuperstructureContext<SP>, edu.wpi.first.math.geometry.Pose3d> poseSupplier) {
+            return new Attachment<>(null, resolver, poseSupplier);
+        }
+    }
+
+    public static final class Constraint<S, SP> {
+        final Predicate<SuperstructureContext<SP>> guard;
+        final List<S> transitionStates;
+
+        Constraint(Predicate<SuperstructureContext<SP>> guard, List<S> transitionStates) {
+            this.guard = Objects.requireNonNull(guard, "guard");
+            this.transitionStates = List.copyOf(Objects.requireNonNull(transitionStates, "transitionStates"));
+        }
+    }
+
+    private Map<S, Constraint<S, SP>> mergedConstraints() {
+        return new HashMap<>(constraints);
+    }
+
+    private Map<S, List<Binding<SP>>> mergedBindings() {
+        Map<S, List<Binding<SP>>> merged = new HashMap<>();
+        for (Map.Entry<S, List<Binding<SP>>> entry : bindings.entrySet()) {
+            merged.put(entry.getKey(), List.copyOf(entry.getValue()));
+        }
+        return merged;
+    }
+
+    private List<Binding<SP>> mergedAlwaysBindings() {
+        return List.copyOf(alwaysBindings);
     }
 
     /**
@@ -366,7 +563,22 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
                 Function<SuperstructureContext<SP>, Pose3d> poseSupplier) {
             Objects.requireNonNull(childMapper, "childMapper");
             Objects.requireNonNull(poseSupplier, "poseSupplier");
-            attachments.add(new Attachment<>(childMapper, poseSupplier));
+            attachments.add(Attachment.forMapper(childMapper, poseSupplier));
+            return this;
+        }
+
+        /**
+         * Anchors a child mechanism's visualization root using a resolver that can reach nested mechanisms.
+         *
+         * @param resolver resolves the mechanism to anchor
+         * @param poseSupplier computes the desired pose using the superstructure context
+         */
+        public SimulationBuilder<SP> attachResolved(
+                Function<SuperstructureContext<SP>, Mechanism> resolver,
+                Function<SuperstructureContext<SP>, Pose3d> poseSupplier) {
+            Objects.requireNonNull(resolver, "resolver");
+            Objects.requireNonNull(poseSupplier, "poseSupplier");
+            attachments.add(Attachment.forResolver(resolver, poseSupplier));
             return this;
         }
     }

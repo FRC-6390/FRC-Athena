@@ -3,11 +3,15 @@ package ca.frc6390.athena.mechanisms;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
@@ -20,6 +24,8 @@ import ca.frc6390.athena.hardware.motor.MotorRegistry;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
+import ca.frc6390.athena.mechanisms.FlywheelMechanism;
+import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 import ca.frc6390.athena.mechanisms.TurretMechanism;
 import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
@@ -57,6 +63,8 @@ public class MechanismConfig<T extends Mechanism> {
     public boolean useVoltage = false;
     /** When true, bypasses PID and writes the requested setpoint straight to the motor output. */
     public boolean useSetpointAsOutput = false;
+    /** When true, PID compares velocity instead of position. */
+    public boolean pidUseVelocity = false;
     /** Enables a user-specified control-loop period instead of WPILib's default loop timing. */
     public boolean customPIDCycle = false;
     /** Enables continuous PID input for cyclical mechanisms (turrets, wheels, etc.). */
@@ -88,11 +96,25 @@ public class MechanismConfig<T extends Mechanism> {
     public double pidIZone = 0;
     /** Continuous input minimum bound used when {@link #pidContinous} is set. */
     public double continousMin, continousMax;
+    /** Optional minimum bound for mechanism setpoints. */
+    public double minBound = Double.NaN;
+    /** Optional maximum bound for mechanism setpoints. */
+    public double maxBound = Double.NaN;
 
     /** Neutral motor behavior applied to all controllers (coast vs. brake). */
     public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
     /** Optional per-state callbacks that run when the mechanism state machine enters the state. */
     public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
+    /** Optional state hooks that run every loop while a state is active. */
+    public Map<Enum<?>, List<MechanismBinding<T, ?>>> stateHooks = new HashMap<>();
+    /** Optional hooks that run every loop regardless of the active state. */
+    public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
+    /** Optional boolean inputs exposed to state hooks. */
+    public Map<String, BooleanSupplier> inputs = new HashMap<>();
+    /** Optional double inputs exposed to state hooks. */
+    public Map<String, DoubleSupplier> doubleInputs = new HashMap<>();
+    /** Optional object inputs exposed to state hooks. */
+    public Map<String, Supplier<?>> objectInputs = new HashMap<>();
     /** Optional transition graph that defines required intermediate states and guards. */
     public StateGraph<?> stateGraph = null;
     /** Simulation model description used when running in simulation environments. */
@@ -105,6 +127,8 @@ public class MechanismConfig<T extends Mechanism> {
     public SimpleMotorSimulationParameters simpleMotorSimulationParameters = null;
     /** Optional visualization metadata consumed by the mechanism visualizer. */
     public ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig visualizationConfig = null;
+    /** Optional field-heading visualization config for turret mechanisms. */
+    public Supplier<TurretMechanism.FieldHeadingVisualization> turretHeadingVisualization = null;
     /** Optional sensor simulation configuration used to generate virtual readings. */
     public MechanismSensorSimulationConfig sensorSimulationConfig = null;
 
@@ -229,6 +253,24 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Builds a stateful flywheel configuration with feedforward support.
+     *
+     * @param feedforward feedforward model tuned for the flywheel
+     * @param initialState starting state for the state machine
+     * @param <E> state enum type that provides setpoints
+     */
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulFlywheelMechanism<E>> statefulFlywheel(SimpleMotorFeedforward feedforward, E initialState) {
+        return custom(config -> new StatefulFlywheelMechanism<>(config, feedforward, initialState));
+    }
+
+    /**
+     * Builds a stateful flywheel configuration backed by a caller-supplied factory.
+     */
+    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulFlywheelMechanism<E>> MechanismConfig<T> statefulFlywheel(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+        return custom(factory);
+    }
+
+    /**
      * Creates a turret configuration that yields a {@link TurretMechanism}.
      *
      * @param feedforward feedforward model tuned for the mechanism
@@ -245,6 +287,22 @@ public class MechanismConfig<T extends Mechanism> {
      * @param <T> concrete mechanism type created by the factory
      */
     public static <T extends TurretMechanism> MechanismConfig<T> turret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
+        return custom(factory);
+    }
+
+    /**
+     * Creates a flywheel configuration that yields a {@link FlywheelMechanism}.
+     *
+     * @param feedforward feedforward model tuned for the flywheel
+     */
+    public static MechanismConfig<FlywheelMechanism> flywheel(SimpleMotorFeedforward feedforward) {
+        return custom(config -> new FlywheelMechanism(config, feedforward));
+    }
+
+    /**
+     * Creates a flywheel configuration backed by a caller-supplied factory.
+     */
+    public static <T extends FlywheelMechanism> MechanismConfig<T> flywheel(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
         return custom(factory);
     }
 
@@ -605,6 +663,17 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Uses velocity as the PID measurement instead of position.
+     *
+     * @param useVelocity true to close the loop on velocity
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> setPidUseVelocity(boolean useVelocity) {
+        this.pidUseVelocity = useVelocity;
+        return this;
+    }
+
+    /**
      * Adds a lower travel limit switch with a soft-stop position.
      *
      * @param id device identifier
@@ -686,6 +755,30 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Clamps all setpoints to the provided bounds.
+     *
+     * @param min minimum setpoint value
+     * @param max maximum setpoint value
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> setBounds(double min, double max) {
+        this.minBound = min;
+        this.maxBound = max;
+        return this;
+    }
+
+    /**
+     * Clears any configured setpoint bounds.
+     *
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> clearBounds() {
+        this.minBound = Double.NaN;
+        this.maxBound = Double.NaN;
+        return this;
+    }
+
+    /**
      * Attaches a {@link StateGraph} that enumerates allowed transitions and guards between states.
      * Only applies when the built mechanism extends {@link StatefulMechanism}.
      *
@@ -697,6 +790,71 @@ public class MechanismConfig<T extends Mechanism> {
     public <E extends Enum<E>> MechanismConfig<T> setStateGraph(StateGraph<E> stateGraph){
         this.stateGraph = Objects.requireNonNull(stateGraph, "stateGraph");
         return this;
+    }
+
+    /**
+     * Adds a named external boolean input for state hooks.
+     */
+    public MechanismConfig<T> addInput(String key, BooleanSupplier supplier) {
+        inputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+        return this;
+    }
+
+    /**
+     * Adds a named boolean input (alias for {@link #addInput(String, BooleanSupplier)}).
+     */
+    public MechanismConfig<T> addBooleanInput(String key, BooleanSupplier supplier) {
+        return addInput(key, supplier);
+    }
+
+    /**
+     * Adds a named double input for state hooks.
+     */
+    public MechanismConfig<T> addDoubleInput(String key, DoubleSupplier supplier) {
+        doubleInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+        return this;
+    }
+
+    /**
+     * Adds a named object input for state hooks.
+     */
+    public MechanismConfig<T> addObjectInput(String key, Supplier<?> supplier) {
+        objectInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs every loop while the supplied states are active.
+     */
+    @SafeVarargs
+    public final <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<T> addOnStateHook(
+            MechanismBinding<T, E> binding,
+            E... states) {
+        Objects.requireNonNull(binding, "binding");
+        if (states == null || states.length == 0) {
+            alwaysHooks.add(binding);
+            return this;
+        }
+        for (E state : states) {
+            Objects.requireNonNull(state, "states cannot contain null");
+            stateHooks.computeIfAbsent(state, key -> new ArrayList<>()).add(binding);
+        }
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs every loop regardless of the active state.
+     */
+    public <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<T> addOnStateHook(
+            MechanismBinding<T, E> binding) {
+        Objects.requireNonNull(binding, "binding");
+        alwaysHooks.add(binding);
+        return this;
+    }
+
+    @FunctionalInterface
+    public interface MechanismBinding<M extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
+        void apply(MechanismContext<M, E> context);
     }
 
     /**
@@ -847,6 +1005,14 @@ public class MechanismConfig<T extends Mechanism> {
         return this;
     }
 
+    /**
+     * Supplies a field-heading visualization for turret mechanisms (Field2d line for AdvantageScope).
+     */
+    public MechanismConfig<T> setTurretHeadingVisualization(Supplier<TurretMechanism.FieldHeadingVisualization> supplier) {
+        this.turretHeadingVisualization = Objects.requireNonNull(supplier, "supplier");
+        return this;
+    }
+
     public static class ElevatorSimulationParameters {
         /** Optional carriage mass in kilograms. */
         public double carriageMassKg = Double.NaN;
@@ -947,6 +1113,8 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public static class ArmSimulationParameters {
+        /** Optional motor-to-arm gear reduction (motor rotations per arm rotation). */
+        public double motorReduction = Double.NaN;
         /** Optional moment of inertia around pivot, in kg·m^2. */
         public double momentOfInertia = Double.NaN;
         /** Optional link length in meters from pivot to end-effector. */
@@ -963,6 +1131,17 @@ public class MechanismConfig<T extends Mechanism> {
         public double nominalVoltage = 12.0;
         /** Optional override to convert encoder units to radians. */
         public double unitsPerRadianOverride = Double.NaN;
+
+        /**
+         * Overrides the motor-to-arm gearing used by the sim model.
+         *
+         * @param motorReduction motor rotations per arm rotation
+         * @return this parameter builder for chaining
+         */
+        public ArmSimulationParameters setMotorReduction(double motorReduction) {
+            this.motorReduction = motorReduction;
+            return this;
+        }
 
         /**
          * Sets the simulated arm's moment of inertia about the pivot.
@@ -1155,6 +1334,9 @@ public class MechanismConfig<T extends Mechanism> {
 
                 if (!Double.isNaN(armSimulationParameters.momentOfInertia)) {
                     params.momentOfInertia(armSimulationParameters.momentOfInertia);
+                }
+                if (!Double.isNaN(armSimulationParameters.motorReduction)) {
+                    params.gearing(armSimulationParameters.motorReduction);
                 }
                 if (!Double.isNaN(armSimulationParameters.armLengthMeters)) {
                     params.armLengthMeters(armSimulationParameters.armLengthMeters);

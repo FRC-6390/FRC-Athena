@@ -46,11 +46,15 @@ public class SwerveDrivetrainSimulation {
         double omega = measured.omegaRadiansPerSecond;
 
         // Apply traction-limited acceleration to avoid unrealistic jumps in sim.
-        double tractionScale = 0.5; // conservative to better match practice carpet behavior
-        double maxAccel = Math.max(0.0, tractionScale * config.getWheelCoefficientOfFriction() * 9.81); // m/s^2
-        double maxDelta = maxAccel * dtSeconds;
+        double tractionScaleAccel = 0.5; // conservative to better match practice carpet behavior
+        double tractionScaleDecel = 1.0; // allow stronger braking than acceleration
+        double maxAccel = Math.max(0.0, tractionScaleAccel * config.getWheelCoefficientOfFriction() * 9.81); // m/s^2
+        double maxDecel = Math.max(0.0, tractionScaleDecel * config.getWheelCoefficientOfFriction() * 9.81); // m/s^2
         double dvx = vx - lastChassisSpeeds.vxMetersPerSecond;
         double dvy = vy - lastChassisSpeeds.vyMetersPerSecond;
+        double lastSpeedNorm = Math.hypot(lastChassisSpeeds.vxMetersPerSecond, lastChassisSpeeds.vyMetersPerSecond);
+        double decelDot = dvx * lastChassisSpeeds.vxMetersPerSecond + dvy * lastChassisSpeeds.vyMetersPerSecond;
+        double maxDelta = (lastSpeedNorm > 1e-6 && decelDot < 0.0) ? maxDecel * dtSeconds : maxAccel * dtSeconds;
         double deltaNorm = Math.hypot(dvx, dvy);
         if (deltaNorm > maxDelta && deltaNorm > 1e-6) {
             double scale = maxDelta / deltaNorm;
@@ -60,10 +64,19 @@ public class SwerveDrivetrainSimulation {
 
         double maxVelCapability = drivetrain.getRobotSpeeds().getMaxVelocity();
         double maxOmegaCapability = drivetrain.getRobotSpeeds().getMaxAngularVelocity();
+        double speedScale = config.getMaxSpeedScale();
+        if (!Double.isFinite(speedScale) || speedScale <= 0.0) {
+            speedScale = 1.0;
+        }
+        maxVelCapability *= speedScale;
+        maxOmegaCapability *= speedScale;
         double effectiveRadius = (maxOmegaCapability > 1e-6) ? (maxVelCapability / maxOmegaCapability) : 1.0;
         double maxOmegaAccel = effectiveRadius > 1e-6 ? maxAccel / effectiveRadius : maxAccel;
+        double maxOmegaDecel = effectiveRadius > 1e-6 ? maxDecel / effectiveRadius : maxDecel;
         double domega = omega - lastChassisSpeeds.omegaRadiansPerSecond;
-        double maxDeltaOmega = maxOmegaAccel * dtSeconds;
+        double maxDeltaOmega = Math.abs(lastChassisSpeeds.omegaRadiansPerSecond) > 1e-6 && domega * lastChassisSpeeds.omegaRadiansPerSecond < 0.0
+                ? maxOmegaDecel * dtSeconds
+                : maxOmegaAccel * dtSeconds;
         omega = lastChassisSpeeds.omegaRadiansPerSecond + MathUtil.clamp(domega, -maxDeltaOmega, maxDeltaOmega);
 
         // Clamp simulated chassis speeds to the drivetrain capability to prevent runaway motion in sim.
@@ -77,10 +90,6 @@ public class SwerveDrivetrainSimulation {
         }
         if (Double.isFinite(maxOmegaCapability) && maxOmegaCapability > 1e-6) {
             omega = Math.copySign(Math.min(Math.abs(omega), maxOmegaCapability), omega);
-        }
-
-        if (referenceSpeeds != null) {
-            omega = referenceSpeeds.omegaRadiansPerSecond;
         }
 
         ChassisSpeeds chassisSpeeds = new ChassisSpeeds(vx, vy, omega);

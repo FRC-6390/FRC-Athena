@@ -3,6 +3,9 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.controllers.ArmFeedforwardSendable;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
+import java.util.function.BooleanSupplier;
+import java.util.function.DoubleSupplier;
+
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
@@ -38,7 +41,8 @@ public class ArmMechanism extends Mechanism {
 
         public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config, ArmFeedforward feedforward, E initialState) {
             super(config, feedforward);
-            stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.stateMachineDelay, config.stateActions);
+            stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.stateMachineDelay,
+                    config.stateActions, config.stateHooks, config.alwaysHooks, config.inputs, config.doubleInputs, config.objectInputs);
         }
 
         @Override
@@ -46,9 +50,25 @@ public class ArmMechanism extends Mechanism {
             return stateCore.getSetpoint();
         }
 
+        public void setSetpointOverride(DoubleSupplier override) {
+            stateCore.setSetpointOverride(override);
+        }
+
+        public void clearSetpointOverride() {
+            stateCore.clearSetpointOverride();
+        }
+
+        public void setOutputSuppressor(BooleanSupplier suppressor) {
+            stateCore.setOutputSuppressor(suppressor);
+        }
+
+        public void clearOutputSuppressor() {
+            stateCore.clearOutputSuppressor();
+        }
+
         @Override
         public void update() {
-            setSuppressMotorOutput(!stateCore.update(this));
+            setSuppressMotorOutput(stateCore.update(this));
             super.update();
         }
 
@@ -74,4 +94,3 @@ public class ArmMechanism extends Mechanism {
         }
     }
 }
-

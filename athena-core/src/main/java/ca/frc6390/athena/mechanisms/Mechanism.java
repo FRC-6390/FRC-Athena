@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
+import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
@@ -15,6 +16,7 @@ import ca.frc6390.athena.mechanisms.sim.MechanismSimulationModel;
 import ca.frc6390.athena.mechanisms.sim.MechanismVisualization;
 import ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -46,7 +48,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double lastSimulationTimestampSeconds = Double.NaN;
     private final MechanismVisualization visualization;
     private final MechanismSensorSimulation sensorSimulation;
+    private boolean boundsEnabled = false;
+    private double minBound = Double.NaN;
+    private double maxBound = Double.NaN;
     private Pose3d visualizationRootOverride;
+    private boolean simEncoderOverride;
+    private double simEncoderPosition;
+    private double simEncoderVelocity;
+    private boolean manualOutputActive;
+    private double manualOutput;
+    private boolean manualOutputIsVoltage;
+    private RobotCore<?> robotCore;
 
     private enum RobotMode {
         TELE,
@@ -70,6 +82,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             config.visualizationConfig,
             config.sensorSimulationConfig
         );
+        setBounds(config.minBound, config.maxBound);
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
@@ -132,6 +145,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
+    public void setRobotCore(RobotCore<?> robotCore) {
+        this.robotCore = robotCore;
+    }
+
+    public RobotCore<?> getRobotCore() {
+        return robotCore;
+    }
+
     public double calculateMaxFreeSpeed(){
         if (encoder == null) {
             return 0;
@@ -143,10 +164,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public void setVoltage(double voltage){
+        recordManualOutput(voltage, true);
         motors.setVoltage(voltage);
     }
 
     public void setSpeed(double speed){
+        recordManualOutput(speed, false);
         motors.setSpeed(speed);
     }
 
@@ -173,11 +196,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public double getPosition(){
+        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
+            return simEncoderPosition;
+        }
         if (encoder == null) return 0;
         return useAbsolute ? getEncoder().getAbsolutePosition() : getEncoder().getPosition();
     }
 
     public double getVelocity(){
+        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
+            return simEncoderVelocity;
+        }
         if (encoder == null) return 0;
         return getEncoder().getVelocity();
     }
@@ -188,11 +217,43 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public void setSetpoint(double setpoint){
-        this.setpoint = setpoint;
+        this.setpoint = applyBounds(setpoint);
     }
 
     public double getSetpoint(){
         return setpoint;
+    }
+
+    /**
+     * Clamps all setpoints to the provided bounds.
+     */
+    public Mechanism setBounds(double min, double max) {
+        if (Double.isFinite(min) && Double.isFinite(max) && max > min) {
+            this.minBound = min;
+            this.maxBound = max;
+            this.boundsEnabled = true;
+            MechanismTravelRange.registerKnownRange(this, min, max);
+        } else {
+            clearBounds();
+        }
+        return this;
+    }
+
+    /**
+     * Clears any configured setpoint bounds.
+     */
+    public Mechanism clearBounds() {
+        this.boundsEnabled = false;
+        this.minBound = Double.NaN;
+        this.maxBound = Double.NaN;
+        return this;
+    }
+
+    private double applyBounds(double value) {
+        if (!boundsEnabled) {
+            return value;
+        }
+        return MathUtil.clamp(value, minBound, maxBound);
     }
 
     public double getControllerSetpointVelocity(){
@@ -201,6 +262,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public double getControllerSetpointPosition(){
         return profiledPIDController != null ? profiledPIDController.getSetpoint().position : pidController != null ? pidController.getSetpoint() : 0;
+    }
+
+    /**
+     * Measurement used by PID loops. Defaults to position; mechanisms may override.
+     */
+    protected double getPidMeasurement() {
+        return getPosition();
     }
 
 
@@ -214,6 +282,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public void setOverride(boolean override) {
         this.override = override;
+        if (override) {
+            manualOutputActive = false;
+            manualOutput = 0.0;
+            manualOutputIsVoltage = false;
+        }
     }
 
     public boolean isUseAbsolute() {
@@ -221,6 +294,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public boolean isUseVoltage() {
+        return useVoltage;
+    }
+
+    public boolean isOutputVoltage() {
+        if (override && manualOutputActive) {
+            return manualOutputIsVoltage;
+        }
         return useVoltage;
     }
 
@@ -250,7 +330,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public double calculatePID(){
         double output = 0;
-        double encoderPos = getPosition();
+        double encoderPos = getPidMeasurement();
 
         if (pidController != null){
             output += pidController.calculate(encoderPos, getSetpoint() + getNudge());
@@ -371,11 +451,23 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public double getOutput() {
+        if (override) {
+            return manualOutputActive ? manualOutput : 0.0;
+        }
         return output;
     }
 
     public void setNudge(double nudge){
         this.nudge = nudge;
+    }
+
+    private void recordManualOutput(double output, boolean outputIsVoltage) {
+        if (!override) {
+            return;
+        }
+        manualOutputActive = true;
+        manualOutput = output;
+        manualOutputIsVoltage = outputIsVoltage;
     }
 
     public double getNudge() {
@@ -484,59 +576,87 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        
-        motors.shuffleboard(tab.getLayout("Motors", BuiltInLayouts.kList), level);
-        if (encoder != null) encoder.shuffleboard(tab.getLayout("Encoder", BuiltInLayouts.kList), level);
+        ShuffleboardLayout motorsLayout = tab.getLayout("Motors", BuiltInLayouts.kList);
+        motors.shuffleboard(motorsLayout, level);
 
-        
-        tab.addBoolean("Emergency Stopped", this::isEmergencyStopped);
-        tab.addBoolean("Override", this::isOverride);
-        if (visualization != null) {
-            tab.add("Mechanism2d", visualization.mechanism2d());
+        if (encoder != null) {
+            ShuffleboardLayout encoderLayout = tab.getLayout("Encoders", BuiltInLayouts.kList);
+            encoder.shuffleboard(encoderLayout, level);
         }
+
+        ShuffleboardLayout statusLayout = tab.getLayout("Status", BuiltInLayouts.kList);
+        statusLayout.addBoolean("Emergency Stopped", this::isEmergencyStopped);
+        statusLayout.addBoolean("Override", this::isOverride);
+        statusLayout.addBoolean("At Setpoint", this::atSetpoint);
+
+        ShuffleboardLayout setpointLayout = tab.getLayout("Setpoints", BuiltInLayouts.kList);
+        setpointLayout.addDouble("Setpoint", this::getSetpoint);
+        if (level.equals(SendableLevel.DEBUG)) {
+            setpointLayout.addDouble("Nudge", this::getNudge);
+        }
+
+        ShuffleboardLayout outputLayout = tab.getLayout("Outputs", BuiltInLayouts.kList);
+        outputLayout.addDouble("Output", this::getOutput);
+        if (level.equals(SendableLevel.DEBUG)) {
+            outputLayout.addDouble("PID Output", this::getPidOutput);
+            outputLayout.addDouble("Feedforward Output", this::getFeedforwardOutput);
+        }
+
+        if (visualization != null) {
+            ShuffleboardLayout visualizationLayout = tab.getLayout("Visualization", BuiltInLayouts.kList);
+            visualizationLayout.add("Mechanism2d", visualization.mechanism2d());
+        }
+
         if (RobotBase.isSimulation()) {
-            tab.addBoolean("Simulation Enabled", this::hasSimulation);
+            ShuffleboardLayout simulationLayout = tab.getLayout("Simulation", BuiltInLayouts.kList);
+            simulationLayout.addBoolean("Simulation Enabled", this::hasSimulation);
             if (level.equals(SendableLevel.DEBUG)) {
-                tab.addDouble("Simulation dt", this::getSimulationUpdatePeriodSeconds);
+                simulationLayout.addDouble("Simulation dt", this::getSimulationUpdatePeriodSeconds);
             }
         }
-        if(level.equals(SendableLevel.DEBUG)){
-            tab.addBoolean("Use Voltage", this::isUseVoltage);
-            tab.addBoolean("Use Absolute", this::isUseAbsolute);
-            tab.addBoolean("Feedforward Enabled", this::isFeedforwardEnabled);
-            tab.addBoolean("PID Enabled", this::isPidEnabled);
-            tab.addDouble("Nudge", this::getNudge);
-            tab.addDouble("PID Output", this::getPidOutput);
-            tab.addDouble("Feedforward Output", this::getFeedforwardOutput);
+
+        if (level.equals(SendableLevel.DEBUG)) {
+            ShuffleboardLayout configLayout = tab.getLayout("Config", BuiltInLayouts.kList);
+            configLayout.addBoolean("Use Voltage", this::isUseVoltage);
+            configLayout.addBoolean("Use Absolute", this::isUseAbsolute);
+            configLayout.addBoolean("Feedforward Enabled", this::isFeedforwardEnabled);
+            configLayout.addBoolean("PID Enabled", this::isPidEnabled);
         }
-       
-        tab.addBoolean("At Setpoint", this::atSetpoint);
-        tab.addDouble("Setpoint", this::getSetpoint);
-        tab.addDouble("Output", this::getOutput);
-        
-        if(level.equals(SendableLevel.DEBUG)){
+
+        if (level.equals(SendableLevel.DEBUG)) {
+            ShuffleboardLayout limitsLayout = tab.getLayout("Limit Switches", BuiltInLayouts.kList);
             for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
                 ShuffleboardLayout limitLayout =
-                        tab.getLayout(genericLimitSwitch.getPort()+"\\Limitswitch",BuiltInLayouts.kList);
-                genericLimitSwitch.shuffleboard(limitLayout);  
+                        limitsLayout.getLayout("DIO " + genericLimitSwitch.getPort(), BuiltInLayouts.kList);
+                genericLimitSwitch.shuffleboard(limitLayout);
                 sensorSimulation.decorateSensorLayout(genericLimitSwitch, limitLayout, level);
             }
         }
 
-        ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kList);
-        {
-            commandsLayout.add("Brake Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Brake))).withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Coast Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
-            if(level.equals(SendableLevel.DEBUG)){
-                commandsLayout.add("Enable\\Disable PID", new InstantCommand(() -> setPidEnabled(!pidEnabled))).withWidget(BuiltInWidgets.kCommand);
-                commandsLayout.add("Enable\\Disable FeedForward", new InstantCommand(() -> setFeedforwardEnabled(!feedforwardEnabled))).withWidget(BuiltInWidgets.kCommand);
-                commandsLayout.add("Enable\\Disable Override", new InstantCommand(() -> setOverride(!override))).withWidget(BuiltInWidgets.kCommand);
-                commandsLayout.add("Enable\\Disable Emergency Stop", new InstantCommand(() -> setEmergencyStopped(!emergencyStopped))).withWidget(BuiltInWidgets.kCommand);
-            }
+        ShuffleboardLayout commandsLayout = tab.getLayout("Commands", BuiltInLayouts.kList);
+        commandsLayout.add("Brake Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Brake)))
+                .withWidget(BuiltInWidgets.kCommand);
+        commandsLayout.add("Coast Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Coast)))
+                .withWidget(BuiltInWidgets.kCommand);
+        if (level.equals(SendableLevel.DEBUG)) {
+            commandsLayout.add("Enable/Disable PID", new InstantCommand(() -> setPidEnabled(!pidEnabled)))
+                    .withWidget(BuiltInWidgets.kCommand);
+            commandsLayout.add("Enable/Disable FeedForward", new InstantCommand(() -> setFeedforwardEnabled(!feedforwardEnabled)))
+                    .withWidget(BuiltInWidgets.kCommand);
+            commandsLayout.add("Enable/Disable Override", new InstantCommand(() -> setOverride(!override)))
+                    .withWidget(BuiltInWidgets.kCommand);
+            commandsLayout.add("Enable/Disable Emergency Stop", new InstantCommand(() -> setEmergencyStopped(!emergencyStopped)))
+                    .withWidget(BuiltInWidgets.kCommand);
         }
-        if(level.equals(SendableLevel.DEBUG)){
-            if(pidController != null) tab.add("PID Controller", pidController);
-            if(profiledPIDController != null) tab.add("Profiled PID Controller", profiledPIDController);
+
+        if (level.equals(SendableLevel.DEBUG)) {
+            ShuffleboardLayout controllersLayout = tab.getLayout("Controllers", BuiltInLayouts.kList);
+            if (pidController != null) {
+                controllersLayout.add("PID Controller", pidController);
+            }
+            if (profiledPIDController != null) {
+                controllersLayout.add("Profiled PID Controller", profiledPIDController);
+            }
         }
 
         return tab;
@@ -550,11 +670,22 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return visualization != null ? visualization.poses() : Map.of();
     }
 
+
     /**
      * Overrides the root pose used for visualization. Pass {@code null} to clear and fall back
      * to the configured root pose supplier.
      */
     public void setVisualizationRootOverride(Pose3d pose) {
         this.visualizationRootOverride = pose;
+    }
+
+    public void setSimulatedEncoderState(double position, double velocity) {
+        this.simEncoderOverride = true;
+        this.simEncoderPosition = position;
+        this.simEncoderVelocity = velocity;
+    }
+
+    public void clearSimulatedEncoderState() {
+        this.simEncoderOverride = false;
     }
 }

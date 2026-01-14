@@ -216,6 +216,15 @@ public class RobotVision implements RobotSendableSystem {
               .min(Comparator.comparingDouble(RobotVision::scoreVisionMeasurement));
    }
 
+   public List<LocalizationCamera.VisionMeasurement> getVisionMeasurements() {
+      return cameras.values().stream()
+              .filter(LocalizationCamera::isUseForLocalization)
+              .map(LocalizationCamera::getLatestVisionMeasurement)
+              .flatMap(Optional::stream)
+              .filter(measurement -> measurement.pose2d() != null)
+              .toList();
+   }
+
    private static double scoreLocalizationData(LocalizationData data) {
       double score = 0.0;
       Matrix<N3, N1> std = data.stdDevs();

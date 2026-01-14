@@ -23,42 +23,50 @@ import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanism;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
+import ca.frc6390.athena.logging.TelemetryRegistry;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.Commands;
 
 public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
-            RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig) {
+            RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
+            boolean autoInitResetEnabled) {
 
         public static RobotCoreConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
-            return new RobotCoreConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt());
+            return new RobotCoreConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt(), true);
         }
 
         public static RobotCoreConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
-            return new RobotCoreConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt());
+            return new RobotCoreConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt(), true);
         }
 
         public RobotCoreConfig<T> setLocalization(RobotLocalizationConfig localizationConfig) {
-            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig);
+            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig, autoInitResetEnabled);
         }
 
         public RobotCoreConfig<T> setVision(RobotVisionConfig visionConfig) {
-            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig);
+            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig, autoInitResetEnabled);
         }
 
         public RobotCoreConfig<T> setVision(ConfigurableCamera... cameras) {
             return new RobotCoreConfig<>(driveTrain, localizationConfig,
-                    RobotVisionConfig.defualt().addCameras(cameras));
+                    RobotVisionConfig.defualt().addCameras(cameras), autoInitResetEnabled);
+        }
+
+        public RobotCoreConfig<T> setAutoInitResetEnabled(boolean enabled) {
+            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig, enabled);
         }
 
         public RobotCore<T> create() {
@@ -75,6 +83,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final HashMap<String, Mechanism> mechanisms;
     private final Set<Mechanism> scheduledCustomPidMechanisms;
     private Command autonomousCommand;
+    private final TelemetryRegistry telemetry;
+    private boolean autoInitResetEnabled;
+    private NetworkTableEntry autoInitResetEntry;
 
     public RobotCore(RobotCoreConfig<T> config) {
         drivetrain = config.driveTrain.build();
@@ -84,10 +95,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         mechanisms = new HashMap<>();
         scheduledCustomPidMechanisms = new HashSet<>();
         autonomousCommand = null;
+        telemetry = TelemetryRegistry.createDefault("Telemetry");
+        autoInitResetEnabled = config.autoInitResetEnabled();
 
         if (localization != null && vision != null) {
             localization.setRobotVision(vision);
             localization.configureChoreo(drivetrain);
+        }
+        if (localization != null) {
+            autos.setAutoPlanResetter(pose -> Commands.runOnce(() -> localization.resetFieldPose(pose)));
         }
 
         if (vision != null && edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
@@ -112,11 +128,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void robotPeriodic() {
         CommandScheduler.getInstance().run();
+        telemetry.tick();
         onRobotPeriodic();
     }
 
     @Override
     public final void autonomousInit() {
+        drivetrain.getRobotSpeeds().setSpeedSourceState("drive", false);
+        drivetrain.getRobotSpeeds().stopSpeeds("drive");
+        resetAutoInitPoseIfConfigured();
         scheduleAutonomousCommand();
         onAutonomousInit();
     }
@@ -128,12 +148,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void autonomousPeriodic() {
+        if (autonomousCommand != null
+                && !CommandScheduler.getInstance().isScheduled(autonomousCommand)) {
+            drivetrain.getRobotSpeeds().stopSpeeds("auto");
+        }
         onAutonomousPeriodic();
     }
 
     @Override
     public final void teleopInit() {
         cancelAutonomousCommand();
+        drivetrain.getRobotSpeeds().setSpeedSourceState("drive", true);
+        drivetrain.getRobotSpeeds().stopSpeeds("auto");
         onTeleopInit();
     }
 
@@ -150,6 +176,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void disabledInit() {
         cancelAutonomousCommand();
+        drivetrain.getRobotSpeeds().setSpeedSourceState("drive", true);
+        drivetrain.getRobotSpeeds().stopSpeeds("auto");
         onDisabledInit();
     }
 
@@ -193,6 +221,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     protected void onRobotInit() {}
 
     protected void onRobotPeriodic() {}
+
+    public RobotCore<T> setAutoInitResetEnabled(boolean enabled) {
+        autoInitResetEnabled = enabled;
+        if (autoInitResetEntry != null) {
+            autoInitResetEntry.setBoolean(enabled);
+        }
+        return this;
+    }
+
+    public TelemetryRegistry telemetry() {
+        return telemetry;
+    }
 
     protected void onAutonomousInit() {}
 
@@ -266,6 +306,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public RobotCore<T> registerMechanism(Mechanism... mechs) {
         Arrays.stream(mechs).forEach(mech -> {
             mechanisms.put(mech.getName(), mech);
+            mech.setRobotCore(this);
             scheduleCustomPidCycle(mech);
         });
         return this;
@@ -407,5 +448,27 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public ChassisSpeeds createFieldRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
         return ChassisSpeeds.fromFieldRelativeSpeeds(
                 new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
+    }
+
+    private boolean isAutoInitResetEnabled() {
+        if (autoInitResetEntry == null) {
+            autoInitResetEntry = SmartDashboard.getEntry("Auto/Reset Odometry On Init");
+            autoInitResetEntry.setBoolean(autoInitResetEnabled);
+        }
+        return autoInitResetEntry.getBoolean(autoInitResetEnabled);
+    }
+
+    private void resetAutoInitPoseIfConfigured() {
+        if (localization == null) {
+            return;
+        }
+        autos.getSelectedAuto().ifPresent(routine -> {
+            Boolean override = routine.autoInitResetOverride();
+            boolean shouldReset = override != null ? override : isAutoInitResetEnabled();
+            if (!shouldReset || !routine.hasStartingPose()) {
+                return;
+            }
+            localization.resetFieldPose(routine.startingPose());
+        });
     }
 }

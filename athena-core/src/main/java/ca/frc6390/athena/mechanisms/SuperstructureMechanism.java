@@ -3,12 +3,14 @@ package ca.frc6390.athena.mechanisms;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.DoubleSupplier;
 import java.util.function.Function;
-import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
+import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
@@ -18,7 +20,7 @@ import java.util.ArrayList;
 
 /**
  * Composite mechanism that coordinates multiple stateful mechanisms using a superstate enum.
- * Guards reference child mechanisms via {@link SuperstructureContext#getMechanisms()} using
+ * Constraints reference child mechanisms via {@link SuperstructureContext#getMechanisms()} using
  * the same mapper supplied to the config.
  */
 public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
@@ -59,22 +61,34 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
     private final StateMachine<SP, S> stateMachine;
     private final List<Child<SP, ?>> children;
-    private final Map<S, Predicate<SuperstructureContext<SP>>> guards;
+    private final Map<S, SuperstructureConfig.Constraint<S, SP>> constraints;
     private final List<SuperstructureConfig.Attachment<SP, ?>> attachments;
     private final Map<String, java.util.function.BooleanSupplier> inputs;
+    private final Map<String, DoubleSupplier> doubleInputs;
+    private final Map<String, Supplier<?>> objectInputs;
+    private final Map<S, List<SuperstructureConfig.Binding<SP>>> bindings;
+    private final List<SuperstructureConfig.Binding<SP>> alwaysBindings;
     private final SuperstructureContextImpl context;
     private S prevState;
 
     SuperstructureMechanism(S initialState,
                             double stateMachineDelaySeconds,
                             List<Child<SP, ?>> children,
-                            Map<S, Predicate<SuperstructureContext<SP>>> guards,
+                            Map<S, SuperstructureConfig.Constraint<S, SP>> constraints,
                             List<SuperstructureConfig.Attachment<SP, ?>> attachments,
-                            Map<String, java.util.function.BooleanSupplier> inputs) {
+                            Map<String, java.util.function.BooleanSupplier> inputs,
+                            Map<String, DoubleSupplier> doubleInputs,
+                            Map<String, Supplier<?>> objectInputs,
+                            Map<S, List<SuperstructureConfig.Binding<SP>>> bindings,
+                            List<SuperstructureConfig.Binding<SP>> alwaysBindings) {
         this.children = children;
-        this.guards = guards;
+        this.constraints = constraints;
         this.attachments = attachments;
         this.inputs = inputs;
+        this.doubleInputs = doubleInputs;
+        this.objectInputs = objectInputs;
+        this.bindings = bindings;
+        this.alwaysBindings = alwaysBindings;
         this.stateMachine = new StateMachine<>(initialState, this::childrenAtGoals);
         this.stateMachine.setAtStateDelay(stateMachineDelaySeconds);
         this.context = new SuperstructureContextImpl();
@@ -90,11 +104,21 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     }
 
     /**
-     * Queues a superstate, applying its guard if present.
+     * Queues a superstate, applying its constraint if present.
      */
     public void queueState(S state) {
-        Predicate<SuperstructureContext<SP>> guard = guards.getOrDefault(state, ctx -> true);
-        stateMachine.queueState(state, () -> guard.test(context));
+        SuperstructureConfig.Constraint<S, SP> constraint = constraints.get(state);
+        if (constraint == null) {
+            stateMachine.queueState(state);
+            return;
+        }
+        java.util.function.BooleanSupplier guard = () -> constraint.guard.test(context);
+        if (!constraint.transitionStates.isEmpty() && !guard.getAsBoolean()) {
+            for (S transition : constraint.transitionStates) {
+                stateMachine.queueState(transition);
+            }
+        }
+        stateMachine.queueState(state, guard);
     }
 
     /**
@@ -127,6 +151,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             applySetpoints(stateMachine.getGoalStateSetpoint());
             prevState = current;
         }
+        applyBindings(current);
     }
 
     private void applyAttachments() {
@@ -135,12 +160,36 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
     }
 
+    private void applyBindings(S state) {
+        for (SuperstructureConfig.Binding<SP> binding : alwaysBindings) {
+            binding.apply(context);
+        }
+        List<SuperstructureConfig.Binding<SP>> stateBindings = bindings.get(state);
+        if (stateBindings == null) {
+            return;
+        }
+        for (SuperstructureConfig.Binding<SP> binding : stateBindings) {
+            binding.apply(context);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private <E extends Enum<E> & SetpointProvider<Double>> void setAttachmentPose(SuperstructureConfig.Attachment<SP, E> attachment) {
         try {
-            StatefulMechanism<E> child = context.mechanism(attachment.childMapper);
+            Mechanism mech = null;
+            if (attachment.resolver != null) {
+                mech = attachment.resolver.apply(context);
+            } else if (attachment.childMapper != null) {
+                StatefulLike<E> child = context.mechanism(attachment.childMapper);
+                if (child instanceof Mechanism resolved) {
+                    mech = resolved;
+                }
+            }
+            if (mech == null) {
+                return;
+            }
             var pose = attachment.poseSupplier.apply(context);
-            child.setVisualizationRootOverride(pose);
+            mech.setVisualizationRootOverride(pose);
         } catch (Exception ignored) {
             // If the mapper does not resolve, skip silently.
         }
@@ -206,7 +255,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             @SuppressWarnings("unchecked")
             @Override
             public <E extends Enum<E> & SetpointProvider<Double>> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
-            Mechanism mech = context.mechanism(mapper);
+            StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof StatefulArmMechanism<?>) {
                 return (StatefulArmMechanism<E>) mech;
             }
@@ -216,7 +265,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         @SuppressWarnings("unchecked")
         @Override
         public <E extends Enum<E> & SetpointProvider<Double>> ElevatorMechanism.StatefulElevatorMechanism<E> elevator(Function<SP, E> mapper) {
-            Mechanism mech = context.mechanism(mapper);
+            StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof ElevatorMechanism.StatefulElevatorMechanism<?>) {
                 return (ElevatorMechanism.StatefulElevatorMechanism<E>) mech;
             }
@@ -226,7 +275,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         @SuppressWarnings("unchecked")
         @Override
         public <E extends Enum<E> & SetpointProvider<Double>> TurretMechanism.StatefulTurretMechanism<E> turret(Function<SP, E> mapper) {
-            Mechanism mech = context.mechanism(mapper);
+            StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof TurretMechanism.StatefulTurretMechanism<?>) {
                 return (TurretMechanism.StatefulTurretMechanism<E>) mech;
             }
@@ -235,8 +284,22 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
         @SuppressWarnings("unchecked")
         @Override
+        public <E extends Enum<E> & SetpointProvider<Double>> StatefulFlywheelMechanism<E> flywheel(Function<SP, E> mapper) {
+            StatefulLike<E> mech = context.mechanism(mapper);
+            if (mech instanceof StatefulFlywheelMechanism<?>) {
+                return (StatefulFlywheelMechanism<E>) mech;
+            }
+            throw new IllegalArgumentException("Mapper does not resolve to a flywheel mechanism");
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
         public <E extends Enum<E> & SetpointProvider<Double>> StatefulMechanism<E> generic(Function<SP, E> mapper) {
-            return context.mechanism(mapper);
+            StatefulLike<E> mech = context.mechanism(mapper);
+            if (mech instanceof StatefulMechanism<?>) {
+                return (StatefulMechanism<E>) mech;
+            }
+            throw new IllegalArgumentException("Mapper does not resolve to a generic mechanism");
         }
 
         @Override
@@ -252,6 +315,26 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                 throw new IllegalArgumentException("No input found for key " + key);
             }
             return supplier;
+        }
+
+        @Override
+        public double doubleInput(String key) {
+            return SuperstructureMechanism.this.doubleInput(key);
+        }
+
+        @Override
+        public DoubleSupplier doubleInputSupplier(String key) {
+            return SuperstructureMechanism.this.doubleInputSupplier(key);
+        }
+
+        @Override
+        public <T> T objectInput(String key, Class<T> type) {
+            return SuperstructureMechanism.this.objectInput(key, type);
+        }
+
+        @Override
+        public <T> Supplier<T> objectInputSupplier(String key, Class<T> type) {
+            return SuperstructureMechanism.this.objectInputSupplier(key, type);
         }
 
         /**
@@ -292,6 +375,42 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return supplier;
     }
 
+    public double doubleInput(String key) {
+        DoubleSupplier supplier = doubleInputs.get(key);
+        return supplier != null ? supplier.getAsDouble() : Double.NaN;
+    }
+
+    public DoubleSupplier doubleInputSupplier(String key) {
+        DoubleSupplier supplier = doubleInputs.get(key);
+        if (supplier == null) {
+            throw new IllegalArgumentException("No double input found for key " + key);
+        }
+        return supplier;
+    }
+
+    public <T> T objectInput(String key, Class<T> type) {
+        Supplier<?> supplier = objectInputs.get(key);
+        if (supplier == null) {
+            return null;
+        }
+        Object value = supplier.get();
+        if (value == null) {
+            return null;
+        }
+        if (!type.isInstance(value)) {
+            throw new IllegalArgumentException("Input '" + key + "' is not of type " + type.getSimpleName());
+        }
+        return type.cast(value);
+    }
+
+    public <T> Supplier<T> objectInputSupplier(String key, Class<T> type) {
+        Supplier<?> supplier = objectInputs.get(key);
+        if (supplier == null) {
+            throw new IllegalArgumentException("No object input found for key " + key);
+        }
+        return () -> objectInput(key, type);
+    }
+
     private final class SuperstructureContextImpl implements SuperstructureContext<SP> {
         @Override
         public SP setpoint() {
@@ -300,7 +419,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
         @Override
         @SuppressWarnings("unchecked")
-        public <E extends Enum<E> & SetpointProvider<Double>> StatefulMechanism<E> mechanism(Function<SP, E> mapper) {
+        public <E extends Enum<E> & SetpointProvider<Double>> StatefulLike<E> mechanism(Function<SP, E> mapper) {
             Class<?> desiredType = null;
             SP setpoint = setpoint();
             if (setpoint != null) {
@@ -315,10 +434,10 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                     continue;
                 }
                 if (child.mapper == mapper || child.mapper.getClass().equals(mapper.getClass())) {
-                    return (StatefulMechanism<E>) child.mechanism;
+                    return (StatefulLike<E>) child.mechanism;
                 }
                 if (desiredType != null && desiredType.equals(child.stateType)) {
-                    return (StatefulMechanism<E>) child.mechanism;
+                    return (StatefulLike<E>) child.mechanism;
                 }
             }
             throw new IllegalArgumentException("No child mechanism found for mapper");
@@ -360,6 +479,39 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         public boolean input(String key) {
             java.util.function.BooleanSupplier supplier = inputs.get(key);
             return supplier != null && supplier.getAsBoolean();
+        }
+
+        @Override
+        public double doubleInput(String key) {
+            return SuperstructureMechanism.this.doubleInput(key);
+        }
+
+        @Override
+        public DoubleSupplier doubleInputSupplier(String key) {
+            return SuperstructureMechanism.this.doubleInputSupplier(key);
+        }
+
+        @Override
+        public <T> T objectInput(String key, Class<T> type) {
+            return SuperstructureMechanism.this.objectInput(key, type);
+        }
+
+        @Override
+        public <T> Supplier<T> objectInputSupplier(String key, Class<T> type) {
+            return SuperstructureMechanism.this.objectInputSupplier(key, type);
+        }
+
+        @Override
+        public <E extends Enum<E> & SetpointProvider<Double>> double mappedSetpoint(Function<SP, E> mapper) {
+            SP setpoint = setpoint();
+            if (setpoint == null) {
+                return Double.NaN;
+            }
+            E state = mapper.apply(setpoint);
+            if (state == null) {
+                return Double.NaN;
+            }
+            return state.getSetpoint();
         }
 
     }

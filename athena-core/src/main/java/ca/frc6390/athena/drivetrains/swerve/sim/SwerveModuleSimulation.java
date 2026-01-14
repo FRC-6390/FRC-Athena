@@ -6,6 +6,7 @@ import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleSimConfig;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.mechanisms.sim.MechanismSimUtil;
 import ca.frc6390.athena.sim.MotorSimType;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -126,39 +127,20 @@ public class SwerveModuleSimulation {
 
     public void applyToSensors() {
         if (driveEncoder != null) {
-            double wheelRotations = wheelCircumference > 1e-6 ? wheelPositionMeters / wheelCircumference : 0;
-            double wheelVelocityRotationsPerSecond = wheelCircumference > 1e-6
-                    ? wheelVelocityMetersPerSecond / wheelCircumference
-                    : 0;
-
-            // Simulate encoder in wheel rotations so conversion factors (usually set to wheel circumference)
-            // produce correct linear distances.
-            driveEncoder.setSimulatedState(wheelRotations, wheelVelocityRotationsPerSecond);
+            // Encoder conversion/gear ratio live in the config; feed linear distance and let the encoder map to raw.
+            MechanismSimUtil.applyEncoderState(driveEncoder, wheelPositionMeters, wheelVelocityMetersPerSecond);
         }
 
         if (steerEncoder != null) {
             double moduleRotations = steerAngleRadians / (2.0 * Math.PI);
-            double encoderRotations = Math.abs(encoderOutputPerRotation) > 1e-6
-                    ? moduleRotations / encoderOutputPerRotation
-                    : moduleRotations;
-            double encoderVelocity = steerAngularVelocity / (2.0 * Math.PI);
-            encoderVelocity = Math.abs(encoderOutputPerRotation) > 1e-6
-                    ? encoderVelocity / encoderOutputPerRotation
-                    : encoderVelocity;
-
-            steerEncoder.setSimulatedState(encoderRotations, encoderVelocity);
+            double moduleVelocityRotationsPerSecond = steerAngularVelocity / (2.0 * Math.PI);
+            MechanismSimUtil.applyEncoderState(steerEncoder, moduleRotations, moduleVelocityRotationsPerSecond);
         }
 
         if (steerMotorEncoder != null) {
             double moduleRotations = steerAngleRadians / (2.0 * Math.PI);
-            double motorRotations = Math.abs(rotationMotorOutputPerMotorRotation) > 1e-6
-                    ? moduleRotations / rotationMotorOutputPerMotorRotation
-                    : moduleRotations;
-            double motorVelocity = steerAngularVelocity / (2.0 * Math.PI);
-            motorVelocity = Math.abs(rotationMotorOutputPerMotorRotation) > 1e-6
-                    ? motorVelocity / rotationMotorOutputPerMotorRotation
-                    : motorVelocity;
-            steerMotorEncoder.setSimulatedState(motorRotations, motorVelocity);
+            double moduleVelocityRotationsPerSecond = steerAngularVelocity / (2.0 * Math.PI);
+            MechanismSimUtil.applyEncoderState(steerMotorEncoder, moduleRotations, moduleVelocityRotationsPerSecond);
         }
     }
 

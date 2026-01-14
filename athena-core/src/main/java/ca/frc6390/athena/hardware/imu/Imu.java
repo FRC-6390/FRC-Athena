@@ -25,6 +25,18 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     default Rotation2d getVelocityY() { return new Rotation2d(); }
     default Rotation2d getVelocityZ() { return new Rotation2d(); }
 
+    // Optional linear acceleration accessors (default to zero)
+    default double getAccelX() { return 0.0; }
+    default double getAccelY() { return 0.0; }
+    default double getAccelZ() { return 0.0; }
+
+    // Optional max speed tracking helpers (default to no-op)
+    default double getMaxLinearSpeed() { return 0.0; }
+    default double getMaxRadialSpeed() { return 0.0; }
+    default double getMaxSpeedWindowSeconds() { return 5.0; }
+    default void setMaxSpeedWindowSeconds(double windowSeconds) {}
+    default void resetMaxSpeedWindow() {}
+
     // Optional heading reset hook (default no-op)
     default void setYaw(Rotation2d yaw) {}
     default void setYaw(double yawDegrees) { setYaw(Rotation2d.fromDegrees(yawDegrees)); }

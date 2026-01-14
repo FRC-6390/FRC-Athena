@@ -253,7 +253,14 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
 
             ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
             for (E state: goalState.getDeclaringClass().getEnumConstants()){
-                statesLayout.add(state.name(), state.getSetpoint());
+                Object setpoint = state.getSetpoint();
+                if (setpoint instanceof Number number) {
+                    statesLayout.addNumber(state.name(), number::doubleValue);
+                } else if (setpoint instanceof Boolean bool) {
+                    statesLayout.addBoolean(state.name(), () -> bool);
+                } else {
+                    statesLayout.addString(state.name(), () -> String.valueOf(setpoint));
+                }
             }
         }
     

@@ -13,7 +13,7 @@ import edu.wpi.first.math.util.Units;
 /**
  * End-to-end example showing how to express a superstructure (elevator + end effector)
  * using the new SuperstructureConfig API. The superstates mirror the old-style class:
- * L1-L4, Align/Home, Intaking, Score, Algae variants, etc. Guards enforce sequencing,
+ * L1-L4, Align/Home, Intaking, Score, Algae variants, etc. Constraints enforce sequencing,
  * and the end effector visualization is anchored to the elevator carriage for sim.
  *
  * This example is self-contained: it builds the child mechanisms, applies state graphs,
@@ -68,34 +68,37 @@ public final class ExampleCompositeSuperstructure {
     public record SuperTuple(EndEffectorState eff, ElevatorState elev) {}
 
     public enum SuperState implements SetpointProvider<SuperTuple> {
-        AlgaeHigh(new SuperTuple(EndEffectorState.AlgaeHigh, ElevatorState.AlgaeHigh)),
-        AlgaeLow(new SuperTuple(EndEffectorState.AlgaeLow, ElevatorState.AlgaeLow)),
-        ScoreAlgae(new SuperTuple(EndEffectorState.Score, ElevatorState.L4)),
-        AlgaeSpit(new SuperTuple(EndEffectorState.Score, null)),
+        AlgaeHigh(EndEffectorState.AlgaeHigh, ElevatorState.AlgaeHigh),
+        AlgaeLow(EndEffectorState.AlgaeLow, ElevatorState.AlgaeLow),
+        ScoreAlgae(EndEffectorState.Score, ElevatorState.L4),
+        AlgaeSpit(EndEffectorState.Score),
 
-        L4(new SuperTuple(EndEffectorState.L4, ElevatorState.L4)),
-        L3(new SuperTuple(EndEffectorState.L3, ElevatorState.L3)),
-        L2(new SuperTuple(EndEffectorState.L2, ElevatorState.L2)),
-        L1(new SuperTuple(EndEffectorState.L1, ElevatorState.L1)),
+        L4(EndEffectorState.L4, ElevatorState.L4),
+        L3(EndEffectorState.L3, ElevatorState.L3),
+        L2(EndEffectorState.L2, ElevatorState.L2),
+        L1(EndEffectorState.L1, ElevatorState.L1),
 
-        StartConfiguration(new SuperTuple(EndEffectorState.StartConfiguration, ElevatorState.HomeReset)),
-        Align(new SuperTuple(EndEffectorState.Home, ElevatorState.Aligning)),
-        Home(new SuperTuple(EndEffectorState.Home, ElevatorState.HomeReset)),
-        HomePID(new SuperTuple(EndEffectorState.Home, ElevatorState.HomePID)),
-        Stopped(new SuperTuple(EndEffectorState.Stop, null)),
-        Score(new SuperTuple(EndEffectorState.Score, null)),
-        Intaking(new SuperTuple(EndEffectorState.Intaking, ElevatorState.Intaking));
+        StartConfiguration(EndEffectorState.StartConfiguration, ElevatorState.HomeReset),
+        Align(EndEffectorState.Home, ElevatorState.Aligning),
+        Home(EndEffectorState.Home, ElevatorState.HomeReset),
+        HomePID(EndEffectorState.Home, ElevatorState.HomePID),
+        Stopped(EndEffectorState.Stop),
+        Score(EndEffectorState.Score),
+        Intaking(EndEffectorState.Intaking, ElevatorState.Intaking);
 
         private final SuperTuple tuple;
-        SuperState(SuperTuple tuple) { this.tuple = tuple; }
+        SuperState(EndEffectorState eff) { this(eff, null); }
+        SuperState(EndEffectorState eff, ElevatorState elev) {
+            this.tuple = new SuperTuple(eff, elev);
+        }
         @Override public SuperTuple getSetpoint() { return tuple; }
     }
 
     /**
-     * Builds a fully-wired superstructure with guards and sim attachments.
+     * Builds a fully-wired superstructure with constraints and sim attachments.
      * - Child mechanisms use setpoint-as-output for simplicity; replace with PID/FF as needed.
      * - StateGraphs on the children enforce straight-line travel order.
-     * - Guards on the superstructure align with the legacy sequencing (stow before intake, etc.).
+     * - Constraints on the superstructure align with the legacy sequencing (stow before intake, etc.).
      */
     public static SuperstructureMechanism<SuperState, SuperTuple> buildSuperstructure() {
         // Elevator config (stub PID/FF; replace with tuned values + motors/encoders).
@@ -122,24 +125,25 @@ public final class ExampleCompositeSuperstructure {
                 new SuperstructureConfig<>(SuperState.Home)
                 .addMech(elevator, SuperTuple::elev)
                 .addMech(eff, SuperTuple::eff)
-                // Guards similar to old class:
-                // - Stow before intaking from high states
-                .addGuard(SuperState.Intaking,
-                        ctx -> ctx.mechanism(SuperTuple::elev).getStateMachine().atState(ElevatorState.Intaking)
-                                || ctx.mechanism(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home))
+                // Constraints similar to old class:
+                // - Stow before intaking from high states (queue Home first if not clear)
+                .addConstraint(SuperState.Intaking,
+                        ctx -> ctx.getMechanisms().generic(SuperTuple::elev).getStateMachine().atState(ElevatorState.Intaking)
+                                || ctx.getMechanisms().generic(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home),
+                        SuperState.Home)
                 // - Keep end effector home before lifting to high nodes
-                .addGuard(SuperState.L3,
-                        ctx -> ctx.mechanism(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home, EndEffectorState.L3))
-                .addGuard(SuperState.L4,
-                        ctx -> ctx.mechanism(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home, EndEffectorState.L4))
+                .addConstraint(SuperState.L3,
+                        ctx -> ctx.getMechanisms().generic(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home, EndEffectorState.L3))
+                .addConstraint(SuperState.L4,
+                        ctx -> ctx.getMechanisms().generic(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home, EndEffectorState.L4))
                 // - Score waits for both children to be at goal
-                .addGuard(SuperState.Score,
-                        ctx -> ctx.mechanism(SuperTuple::elev).getStateMachine().atGoalState()
-                                && ctx.mechanism(SuperTuple::eff).getStateMachine().atGoalState())
+                .addConstraint(SuperState.Score,
+                        ctx -> ctx.getMechanisms().generic(SuperTuple::elev).getStateMachine().atGoalState()
+                                && ctx.getMechanisms().generic(SuperTuple::eff).getStateMachine().atGoalState())
                 .setSimulation(sim -> {
                     // Anchor end effector visualization to the elevator carriage height.
                     sim.attach(SuperTuple::eff, ctx -> {
-                        var elevMech = ctx.mechanism(SuperTuple::elev);
+                        var elevMech = ctx.getMechanisms().generic(SuperTuple::elev);
                         double z = elevMech.getPosition();
                         return new Pose3d(0.0, 0.0, z, new Rotation3d());
                     });

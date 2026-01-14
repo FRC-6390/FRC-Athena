@@ -181,6 +181,13 @@ final class RobotLocalizationCameraManager {
                         .withWidget(BuiltInWidgets.kToggleSwitch);
         GenericEntry showEstimatedPoseEntry = showEstimateWidget.getEntry();
 
+        ShuffleboardLayout localizationToggleLayout =
+                localizationTab.getLayout("Localization Cameras", BuiltInLayouts.kList);
+        SimpleWidget localizationToggleWidget =
+                localizationToggleLayout.add("Use " + key, defaultUseForLocalization)
+                        .withWidget(BuiltInWidgets.kToggleSwitch);
+        GenericEntry localizationToggleEntry = localizationToggleWidget.getEntry();
+
         FieldObject2d cameraPoseObject = visionField.getObject("CameraPose/" + key);
         FieldObject2d estimatedPoseObject = field.getObject("CameraEstimate/" + key);
         FieldObject2d tagLineObject = visionField.getObject("CameraTagLine/" + key);
@@ -207,6 +214,7 @@ final class RobotLocalizationCameraManager {
                 showTagLinesEntry,
                 showEstimatedPoseEntry,
                 useForLocalizationEntry,
+                localizationToggleEntry,
                 trustDistanceEntry,
                 singleStdXEntry,
                 singleStdYEntry,
@@ -222,13 +230,22 @@ final class RobotLocalizationCameraManager {
     }
 
     private void applyCameraConfigUpdates(CameraDisplayState state, LocalizationCamera camera, RobotVision vision) {
-        boolean desiredUse = state.useForLocalizationEntry.getBoolean(camera.isUseForLocalization());
+        boolean currentUse = camera.isUseForLocalization();
+        boolean desiredUse = state.localizationToggleEntry != null
+                ? state.localizationToggleEntry.getBoolean(currentUse)
+                : state.useForLocalizationEntry.getBoolean(currentUse);
         if (desiredUse != camera.isUseForLocalization()) {
             if (vision != null) {
                 vision.setUseForLocalization(state.key, desiredUse);
             } else {
                 camera.setUseForLocalization(desiredUse);
             }
+        }
+        if (state.useForLocalizationEntry != null) {
+            state.useForLocalizationEntry.setBoolean(desiredUse);
+        }
+        if (state.localizationToggleEntry != null) {
+            state.localizationToggleEntry.setBoolean(desiredUse);
         }
 
         double currentTrust = camera.getConfig().getTrustDistance();
@@ -333,6 +350,7 @@ final class RobotLocalizationCameraManager {
         final GenericEntry showTagLinesEntry;
         final GenericEntry showEstimatedPoseEntry;
         final GenericEntry useForLocalizationEntry;
+        final GenericEntry localizationToggleEntry;
         final GenericEntry trustDistanceEntry;
         final GenericEntry singleStdXEntry;
         final GenericEntry singleStdYEntry;
@@ -352,6 +370,7 @@ final class RobotLocalizationCameraManager {
                 GenericEntry showTagLinesEntry,
                 GenericEntry showEstimatedPoseEntry,
                 GenericEntry useForLocalizationEntry,
+                GenericEntry localizationToggleEntry,
                 GenericEntry trustDistanceEntry,
                 GenericEntry singleStdXEntry,
                 GenericEntry singleStdYEntry,
@@ -369,6 +388,7 @@ final class RobotLocalizationCameraManager {
             this.showTagLinesEntry = showTagLinesEntry;
             this.showEstimatedPoseEntry = showEstimatedPoseEntry;
             this.useForLocalizationEntry = useForLocalizationEntry;
+            this.localizationToggleEntry = localizationToggleEntry;
             this.trustDistanceEntry = trustDistanceEntry;
             this.singleStdXEntry = singleStdXEntry;
             this.singleStdYEntry = singleStdYEntry;

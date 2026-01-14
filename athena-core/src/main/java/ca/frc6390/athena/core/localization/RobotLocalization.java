@@ -1,5 +1,10 @@
 package ca.frc6390.athena.core.localization;
 
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
@@ -17,6 +22,7 @@ import ca.frc6390.athena.core.auto.HolonomicDriveBinding;
 import ca.frc6390.athena.core.auto.HolonomicFeedforward;
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import ca.frc6390.athena.hardware.imu.Imu;
+import ca.frc6390.athena.sensors.camera.LocalizationCamera;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
@@ -26,15 +32,24 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Transform2d;
+import edu.wpi.first.math.geometry.Transform3d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.StructPublisher;
+import edu.wpi.first.networktables.GenericEntry;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -67,6 +82,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private StructPublisher<Pose2d> relativePosePublisher;
     private StructPublisher<Pose3d> fieldPose3dPublisher;
     private StructPublisher<Pose3d> relativePose3dPublisher;
+    private NetworkTable backendTable;
+    private NetworkTableEntry backendOverrideEnabledEntry;
+    private NetworkTableEntry backendSlipStrategyEntry;
+    private NetworkTableEntry backendImuStrategyEntry;
+    private NetworkTableEntry backendVisionStrategyEntry;
 
     private double visionMaxLatencySeconds = 0.9;
     private double visionOutlierTranslationMeters = 2.5;
@@ -78,6 +98,39 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private double minVisionUpdateSeparationSeconds = 0.02;
     private double lastVisionMeasurementTimestamp = Double.NEGATIVE_INFINITY;
     private final RobotLocalizationConfig.PoseSpace poseSpace;
+    private final Map<String, VirtualPose2d> virtualPoses2d = new HashMap<>();
+    private final Map<String, VirtualPose3d> virtualPoses3d = new HashMap<>();
+    private long virtualPoseRevision = 0;
+    private boolean slipActive = false;
+    private double slipActiveUntilSeconds = Double.NEGATIVE_INFINITY;
+    private double lastUpdateTimestamp = Double.NaN;
+    private Pose2d lastFieldPoseForSlip = new Pose2d();
+    private Translation2d lastFieldVelocityForSlip = new Translation2d();
+    private double poseJumpGuardUntilSeconds = Double.NEGATIVE_INFINITY;
+    private Pose2d lastHealthPose = new Pose2d();
+    private double lastHealthTimestamp = Double.NaN;
+    private double lastPoseJumpMeters = 0.0;
+    private double driftRateMetersPerSec = 0.0;
+    private int visionMeasurementCount = 0;
+    private int visionMeasurementAccepted = 0;
+    private static final int VISION_ACCEPT_WINDOW = 50;
+    private final boolean[] visionAcceptWindow = new boolean[VISION_ACCEPT_WINDOW];
+    private int visionAcceptIndex = 0;
+    private int visionAcceptCount = 0;
+    private int visionAcceptAccepted = 0;
+    private double visionAcceptRateWindow = 0.0;
+    private GenericEntry poseJumpEntry;
+    private GenericEntry driftRateEntry;
+    private GenericEntry visionAcceptanceEntry;
+    private GenericEntry slipActiveEntry;
+    private NetworkTableEntry poseJumpNtEntry;
+    private NetworkTableEntry driftRateNtEntry;
+    private NetworkTableEntry visionAcceptanceNtEntry;
+    private NetworkTableEntry slipActiveNtEntry;
+    private GenericEntry backendOverrideToggleEntry;
+    private SendableChooser<RobotLocalizationConfig.BackendConfig.SlipStrategy> backendSlipStrategyChooser;
+    private SendableChooser<RobotLocalizationConfig.BackendConfig.ImuStrategy> backendImuStrategyChooser;
+    private SendableChooser<RobotLocalizationConfig.BackendConfig.VisionStrategy> backendVisionStrategyChooser;
 
     private final RobotLocalizationPersistence persistence;
     private final RobotLocalizationCameraManager cameraManager;
@@ -161,20 +214,22 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             throw new IllegalArgumentException("2D localization requires PoseEstimator instances.");
         }
 
-        this.visionEnabled = config.useVision();
+        this.visionEnabled = config.isVisionEnabled();
 
         imu.addVirtualAxis("relative", imu::getYaw);
         imu.addVirtualAxis("field", imu::getYaw);
         imu.setVirtualAxis("relative", new Rotation2d());
         imu.setVirtualAxis("field", new Rotation2d());
 
-        if (config.rotation() != null && config.translation() != null) {
+        if (config.rotation() != null && config.translation() != null
+                && AutoBackends.forSource(RobotAuto.AutoSource.PATH_PLANNER).isPresent()) {
             configurePathPlanner(config.translation(), config.rotation());
         }
 
         this.persistence = new RobotLocalizationPersistence(this.poseSpace);
         persistence.updateSnapshot(fieldPose, fieldPose3d, imu.getVirtualAxis("driver"));
         loadPersistentState();
+        initBackendOverrides();
     }
 
     public RobotLocalization<T> enableVisionForLocalization(boolean visionEnabled){
@@ -377,10 +432,95 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private Rotation3d getRotation3d(String axisId) {
-        Rotation2d yaw = imu.getVirtualAxis(axisId);
+        Rotation2d yaw = getYaw(axisId);
         Rotation2d roll = imu.getRoll();
         Rotation2d pitch = imu.getPitch();
         return new Rotation3d(roll.getRadians(), pitch.getRadians(), yaw.getRadians());
+    }
+
+    private Rotation2d getYaw(String axisId) {
+        RobotLocalizationConfig.BackendConfig backend = localizationConfig.backend();
+        if (backend != null && backend.imuStrategy() == RobotLocalizationConfig.BackendConfig.ImuStrategy.RAW_YAW) {
+            return imu.getYaw();
+        }
+        return imu.getVirtualAxis(axisId);
+    }
+
+    private RobotLocalizationConfig.BackendConfig backendConfig() {
+        RobotLocalizationConfig.BackendConfig base =
+                localizationConfig != null ? localizationConfig.backend() : RobotLocalizationConfig.BackendConfig.defualt();
+        if (backendOverrideEnabledEntry != null && backendOverrideEnabledEntry.getBoolean(false)) {
+            return applyBackendOverride(base);
+        }
+        return base;
+    }
+
+    private boolean isVisionEnabled() {
+        return backendConfig().resolveVisionEnabled(visionEnabled);
+    }
+
+    private void initBackendOverrides() {
+        backendTable = NetworkTableInstance.getDefault().getTable("Athena/Localization/Backend");
+        backendOverrideEnabledEntry = backendTable.getEntry("EnableOverride");
+        backendSlipStrategyEntry = backendTable.getEntry("SlipStrategy");
+        backendImuStrategyEntry = backendTable.getEntry("ImuStrategy");
+        backendVisionStrategyEntry = backendTable.getEntry("VisionStrategy");
+
+        backendOverrideEnabledEntry.setBoolean(false);
+        RobotLocalizationConfig.BackendConfig base = backendConfig();
+        backendSlipStrategyEntry.setString(base.slipStrategy().name());
+        backendImuStrategyEntry.setString(base.imuStrategy().name());
+        backendVisionStrategyEntry.setString(base.visionStrategy().name());
+    }
+
+    private void syncBackendOverridesFromShuffleboard() {
+        if (backendOverrideEnabledEntry == null || backendOverrideToggleEntry == null) {
+            return;
+        }
+        backendOverrideEnabledEntry.setBoolean(backendOverrideToggleEntry.getBoolean(false));
+        if (backendSlipStrategyEntry != null && backendSlipStrategyChooser != null) {
+            RobotLocalizationConfig.BackendConfig.SlipStrategy selected = backendSlipStrategyChooser.getSelected();
+            if (selected != null) {
+                backendSlipStrategyEntry.setString(selected.name());
+            }
+        }
+        if (backendImuStrategyEntry != null && backendImuStrategyChooser != null) {
+            RobotLocalizationConfig.BackendConfig.ImuStrategy selected = backendImuStrategyChooser.getSelected();
+            if (selected != null) {
+                backendImuStrategyEntry.setString(selected.name());
+            }
+        }
+        if (backendVisionStrategyEntry != null && backendVisionStrategyChooser != null) {
+            RobotLocalizationConfig.BackendConfig.VisionStrategy selected = backendVisionStrategyChooser.getSelected();
+            if (selected != null) {
+                backendVisionStrategyEntry.setString(selected.name());
+            }
+        }
+    }
+
+    private RobotLocalizationConfig.BackendConfig applyBackendOverride(RobotLocalizationConfig.BackendConfig base) {
+        RobotLocalizationConfig.BackendConfig.SlipStrategy slipStrategy =
+                parseEnum(backendSlipStrategyEntry.getString(base.slipStrategy().name()), base.slipStrategy());
+        RobotLocalizationConfig.BackendConfig.ImuStrategy imuStrategy =
+                parseEnum(backendImuStrategyEntry.getString(base.imuStrategy().name()), base.imuStrategy());
+        RobotLocalizationConfig.BackendConfig.VisionStrategy visionStrategy =
+                parseEnum(backendVisionStrategyEntry.getString(base.visionStrategy().name()), base.visionStrategy());
+
+        return base
+                .withSlipStrategy(slipStrategy)
+                .withImuStrategy(imuStrategy)
+                .withVisionStrategy(visionStrategy);
+    }
+
+    private static <E extends Enum<E>> E parseEnum(String value, E fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            return Enum.valueOf(fallback.getDeclaringClass(), value.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            return fallback;
+        }
     }
 
     public RobotLocalization<T> configurePathPlanner(HolonomicPidConstants translationConstants, HolonomicPidConstants rotationConstants){
@@ -414,6 +554,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
         PIDController rotationController = new PIDController(rotationConstants.kP(), rotationConstants.kI(), rotationConstants.kD());
         rotationController.setIZone(rotationConstants.iZone());
+        rotationController.enableContinuousInput(-Math.PI, Math.PI);
 
         PIDController translationController = new PIDController(translationConstants.kP(), translationConstants.kI(), translationConstants.kD());
         translationController.setIZone(translationConstants.iZone());
@@ -425,15 +566,21 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 this::resetFieldPose,
                 (desiredPose, desiredSpeeds) -> {
                     Pose2d botpose = getFieldPose();
-                    ChassisSpeeds speeds = new ChassisSpeeds(desiredSpeeds.vxMetersPerSecond,
+                    ChassisSpeeds fieldSpeeds = new ChassisSpeeds(desiredSpeeds.vxMetersPerSecond,
                             desiredSpeeds.vyMetersPerSecond,
                             desiredSpeeds.omegaRadiansPerSecond);
 
-                    speeds.vxMetersPerSecond = translationController.calculate(botpose.getX(), desiredPose.getX());
-                    speeds.vyMetersPerSecond = translationController.calculate(botpose.getY(), desiredPose.getY());
-                    speeds.omegaRadiansPerSecond = rotationController.calculate(botpose.getRotation().getRadians(), desiredPose.getRotation().getRadians());
+                    fieldSpeeds.vxMetersPerSecond = translationController.calculate(botpose.getX(), desiredPose.getX());
+                    fieldSpeeds.vyMetersPerSecond = translationController.calculate(botpose.getY(), desiredPose.getY());
+                    fieldSpeeds.omegaRadiansPerSecond = rotationController.calculate(
+                            botpose.getRotation().getRadians(),
+                            desiredPose.getRotation().getRadians());
 
-                    robotSpeeds.setSpeeds("auto", speeds);
+                    ChassisSpeeds robotRelative = ChassisSpeeds.fromFieldRelativeSpeeds(
+                            fieldSpeeds,
+                            botpose.getRotation());
+
+                    robotSpeeds.setSpeeds("auto", robotRelative);
                 },
                 true,
                 drivetrain);
@@ -465,6 +612,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.fieldPose3d = new Pose3d(pose);
         this.hasAcceptedVisionMeasurement = false;
         this.lastVisionMeasurementTimestamp = Double.NEGATIVE_INFINITY;
+        advanceVirtualPoseRevision();
         persistRobotState(true);
     }
 
@@ -483,6 +631,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.fieldPose = pose2d;
         this.hasAcceptedVisionMeasurement = false;
         this.lastVisionMeasurementTimestamp = Double.NEGATIVE_INFINITY;
+        advanceVirtualPoseRevision();
         persistRobotState(true);
     }
 
@@ -507,6 +656,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         imu.setVirtualAxis("relative", pose.getRotation());
         this.relativePose = pose;
         this.relativePose3d = new Pose3d(pose);
+        advanceVirtualPoseRevision();
     }
 
     public void resetRelativePose(Pose3d pose) {
@@ -522,6 +672,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         imu.setVirtualAxis("relative", pose2d.getRotation());
         this.relativePose3d = pose;
         this.relativePose = pose2d;
+        advanceVirtualPoseRevision();
     }
 
     public void resetRelativePose(double x, double y) {
@@ -555,39 +706,26 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (suppressUpdates) {
             return;
         }
+        syncBackendOverridesFromShuffleboard();
 
-        if (vision != null && visionEnabled) {
+        if (vision != null && isVisionEnabled()) {
             vision.setRobotOrientation(fieldPose);
-            vision.getBestVisionMeasurement().ifPresent(measurement -> {
-                Matrix<N3, N1> rawStdDevs = measurement.stdDevs();
-                Matrix<N3, N1> sanitizedStdDevs = sanitizeVisionStdDevs(rawStdDevs);
-                if (rawStdDevs != null && sanitizedStdDevs == null) {
-                    return;
-                }
-                Pose2d measurementPose = measurement.pose2d();
-                double timestampSeconds = measurement.timestampSeconds();
-                if (!shouldApplyVisionMeasurement(measurementPose, timestampSeconds, sanitizedStdDevs)) {
-                    return;
-                }
-                Matrix<N3, N1> adjustedStdDevs2d =
-                        adjustVisionStdDevsForDisagreement(sanitizedStdDevs, measurementPose);
-                if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
-                    Matrix<N4, N1> adjustedStdDevs3d = expandStdDevsTo3d(adjustedStdDevs2d);
-                    if (adjustedStdDevs3d != null) {
-                        fieldEstimator3d.addVisionMeasurement(measurement.pose3d(), timestampSeconds, adjustedStdDevs3d);
-                    } else {
-                        fieldEstimator3d.addVisionMeasurement(measurement.pose3d(), timestampSeconds);
+            RobotLocalizationConfig.BackendConfig backend = backendConfig();
+            if (backend.useMultiVision()) {
+                fuseVisionMeasurements(vision.getVisionMeasurements(), backend).ifPresent(measurement -> {
+                    if (applyVisionMeasurement(measurement)) {
+                        hasAcceptedVisionMeasurement = true;
+                        lastVisionMeasurementTimestamp = measurement.timestampSeconds();
                     }
-                } else {
-                    if (adjustedStdDevs2d != null) {
-                        fieldEstimator2d.addVisionMeasurement(measurementPose, timestampSeconds, adjustedStdDevs2d);
-                    } else {
-                        fieldEstimator2d.addVisionMeasurement(measurementPose, timestampSeconds);
+                });
+            } else {
+                vision.getBestVisionMeasurement().ifPresent(measurement -> {
+                    if (applyVisionMeasurement(measurement)) {
+                        hasAcceptedVisionMeasurement = true;
+                        lastVisionMeasurementTimestamp = measurement.timestampSeconds();
                     }
-                }
-                hasAcceptedVisionMeasurement = true;
-                lastVisionMeasurementTimestamp = timestampSeconds;
-            });
+                });
+            }
         }
 
         if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
@@ -598,13 +736,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             relativePose3d = relativeEstimator3d.update(relativeRotation, wheelPositions.get());
             relativePose = relativePose3d.toPose2d();
         } else {
-            fieldPose = fieldEstimator2d.update(imu.getVirtualAxis("field"), wheelPositions.get());
+            fieldPose = fieldEstimator2d.update(getYaw("field"), wheelPositions.get());
             fieldPose3d = new Pose3d(fieldPose);
-            relativePose = relativeEstimator2d.update(imu.getVirtualAxis("relative"), wheelPositions.get());
+            relativePose = relativeEstimator2d.update(getYaw("relative"), wheelPositions.get());
             relativePose3d = new Pose3d(relativePose);
         }
 
         field.setRobotPose(fieldPose);
+        updateHealthMetrics();
         if (fieldPosePublisher != null) {
             fieldPosePublisher.set(fieldPose);
         }
@@ -618,7 +757,134 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             relativePose3dPublisher.set(relativePose3d);
         }
         cameraManager.updateCameraVisualizations(vision, fieldPose);
+        updateSlipState();
+        advanceVirtualPoseRevision();
         persistRobotState(false);
+    }
+
+    private void updateHealthMetrics() {
+        ensureHealthNetworkEntries();
+        double now = Timer.getFPGATimestamp();
+        if (Double.isFinite(lastHealthTimestamp)) {
+            double dt = now - lastHealthTimestamp;
+            if (dt > 0.0) {
+                lastPoseJumpMeters = fieldPose.getTranslation().getDistance(lastHealthPose.getTranslation());
+                driftRateMetersPerSec = lastPoseJumpMeters / dt;
+            }
+        }
+        lastHealthPose = fieldPose;
+        lastHealthTimestamp = now;
+
+        double acceptanceRate = visionAcceptRateWindow;
+        if (poseJumpEntry != null) {
+            poseJumpEntry.setDouble(lastPoseJumpMeters);
+        }
+        if (poseJumpNtEntry != null) {
+            poseJumpNtEntry.setDouble(lastPoseJumpMeters);
+        }
+        if (driftRateEntry != null) {
+            driftRateEntry.setDouble(driftRateMetersPerSec);
+        }
+        if (driftRateNtEntry != null) {
+            driftRateNtEntry.setDouble(driftRateMetersPerSec);
+        }
+        if (visionAcceptanceEntry != null) {
+            visionAcceptanceEntry.setDouble(acceptanceRate);
+        }
+        if (visionAcceptanceNtEntry != null) {
+            visionAcceptanceNtEntry.setDouble(acceptanceRate);
+        }
+        if (slipActiveEntry != null) {
+            slipActiveEntry.setBoolean(slipActive);
+        }
+        if (slipActiveNtEntry != null) {
+            slipActiveNtEntry.setBoolean(slipActive);
+        }
+    }
+
+    private void updateSlipState() {
+        RobotLocalizationConfig.BackendConfig backend = backendConfig();
+        double now = Timer.getFPGATimestamp();
+        if (Double.isFinite(lastUpdateTimestamp)) {
+            double dt = now - lastUpdateTimestamp;
+            if (dt > 0.0) {
+                Rotation2d imuYawRate = imu.getVelocityZ();
+                double imuYawRateRad = imuYawRate != null ? imuYawRate.getRadians() : Double.NaN;
+                double estimatedYawRate =
+                        fieldPose.getRotation()
+                                .minus(lastFieldPoseForSlip.getRotation())
+                                .getRadians() / dt;
+                double yawRateRad = Double.isFinite(imuYawRateRad) ? imuYawRateRad : estimatedYawRate;
+                double disagreement = Math.abs(yawRateRad - estimatedYawRate);
+                boolean yawSlip =
+                        Math.abs(yawRateRad) > backend.slipYawRateThreshold()
+                                && disagreement > backend.slipYawRateDisagreement();
+
+                Translation2d deltaTranslation =
+                        fieldPose.getTranslation().minus(lastFieldPoseForSlip.getTranslation());
+                Translation2d odomVelocity = deltaTranslation.times(1.0 / dt);
+                Translation2d odomAccel = odomVelocity.minus(lastFieldVelocityForSlip).times(1.0 / dt);
+                double odomAccelMag = odomAccel.getNorm();
+                double imuAccelMag =
+                        Math.hypot(imu.getAccelX(), imu.getAccelY());
+                boolean accelSlip =
+                        Double.isFinite(imuAccelMag)
+                                && imuAccelMag > backend.slipAccelThreshold()
+                                && Math.abs(imuAccelMag - odomAccelMag) > backend.slipAccelDisagreement();
+
+                if (yawSlip || accelSlip) {
+                    slipActiveUntilSeconds = now + backend.slipHoldSeconds();
+                }
+                lastFieldVelocityForSlip = odomVelocity;
+            }
+        }
+        slipActive = now <= slipActiveUntilSeconds;
+        lastUpdateTimestamp = now;
+        lastFieldPoseForSlip = fieldPose;
+    }
+
+    public void addVirtualPose(String name, Supplier<Pose2d> supplier) {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(supplier, "supplier");
+        virtualPoses2d.put(name, new VirtualPose2d(supplier));
+    }
+
+    public void addVirtualPose3d(String name, Supplier<Pose3d> supplier) {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(supplier, "supplier");
+        virtualPoses3d.put(name, new VirtualPose3d(supplier));
+    }
+
+    public Pose2d getVirtualPose(String name) {
+        VirtualPose2d virtualPose = virtualPoses2d.get(name);
+        return virtualPose != null ? virtualPose.get(virtualPoseRevision) : new Pose2d();
+    }
+
+    public Pose3d getVirtualPose3d(String name) {
+        VirtualPose3d virtualPose = virtualPoses3d.get(name);
+        return virtualPose != null ? virtualPose.get(virtualPoseRevision) : new Pose3d();
+    }
+
+    public void setVirtualPose(String name, Pose2d pose) {
+        VirtualPose2d virtualPose = virtualPoses2d.get(name);
+        if (virtualPose != null && pose != null) {
+            virtualPose.set(pose, virtualPoseRevision);
+        }
+    }
+
+    public void setVirtualPose3d(String name, Pose3d pose) {
+        VirtualPose3d virtualPose = virtualPoses3d.get(name);
+        if (virtualPose != null && pose != null) {
+            virtualPose.set(pose, virtualPoseRevision);
+        }
+    }
+
+    public void invalidateVirtualPoses() {
+        advanceVirtualPoseRevision();
+    }
+
+    private void advanceVirtualPoseRevision() {
+        virtualPoseRevision++;
     }
 
     public FieldObject2d getField2dObject(String id){
@@ -705,8 +971,86 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (level == SendableLevel.DEBUG) {
             // Debug-specific struct publishers are already configured above.
         }
+        if (poseJumpEntry == null) {
+            var healthLayout = tab.getLayout("Localization Health", BuiltInLayouts.kList);
+            poseJumpEntry = healthLayout.add("Pose Jump (m)", lastPoseJumpMeters)
+                    .withWidget(BuiltInWidgets.kTextView)
+                    .getEntry();
+            driftRateEntry = healthLayout.add("Drift Rate (m/s)", driftRateMetersPerSec)
+                    .withWidget(BuiltInWidgets.kTextView)
+                    .getEntry();
+            visionAcceptanceEntry = healthLayout.add("Vision Accept Rate", 0.0)
+                    .withWidget(BuiltInWidgets.kTextView)
+                    .getEntry();
+            slipActiveEntry = healthLayout.add("Slip Active", slipActive)
+                    .withWidget(BuiltInWidgets.kBooleanBox)
+                    .getEntry();
+        }
+        if (backendOverrideToggleEntry == null && backendOverrideEnabledEntry != null) {
+            var backendLayout = tab.getLayout("Localization Backend", BuiltInLayouts.kList);
+            backendOverrideToggleEntry = backendLayout.add(
+                            "Override Enabled", backendOverrideEnabledEntry.getBoolean(false))
+                    .withWidget(BuiltInWidgets.kToggleSwitch)
+                    .getEntry();
+            ensureBackendChoosers(backendConfig());
+            backendLayout.add("Slip Strategy", backendSlipStrategyChooser)
+                    .withWidget(BuiltInWidgets.kComboBoxChooser);
+            backendLayout.add("IMU Strategy", backendImuStrategyChooser)
+                    .withWidget(BuiltInWidgets.kComboBoxChooser);
+            backendLayout.add("Vision Strategy", backendVisionStrategyChooser)
+                    .withWidget(BuiltInWidgets.kComboBoxChooser);
+        }
         cameraManager.ensureCameraShuffleboardEntries(vision);
         return tab;
+    }
+
+    private void ensureHealthNetworkEntries() {
+        if (poseJumpNtEntry != null) {
+            return;
+        }
+        NetworkTable healthTable = NetworkTableInstance.getDefault().getTable("Athena/Localization/Health");
+        poseJumpNtEntry = healthTable.getEntry("PoseJumpMeters");
+        driftRateNtEntry = healthTable.getEntry("DriftRateMetersPerSec");
+        visionAcceptanceNtEntry = healthTable.getEntry("VisionAcceptRate");
+        slipActiveNtEntry = healthTable.getEntry("SlipActive");
+    }
+
+    private void ensureBackendChoosers(RobotLocalizationConfig.BackendConfig base) {
+        RobotLocalizationConfig.BackendConfig resolved =
+                base != null ? base : RobotLocalizationConfig.BackendConfig.defualt();
+        if (backendSlipStrategyChooser == null) {
+            backendSlipStrategyChooser = new SendableChooser<>();
+            for (RobotLocalizationConfig.BackendConfig.SlipStrategy strategy :
+                    RobotLocalizationConfig.BackendConfig.SlipStrategy.values()) {
+                if (strategy == resolved.slipStrategy()) {
+                    backendSlipStrategyChooser.setDefaultOption(strategy.name(), strategy);
+                } else {
+                    backendSlipStrategyChooser.addOption(strategy.name(), strategy);
+                }
+            }
+        }
+        if (backendImuStrategyChooser == null) {
+            backendImuStrategyChooser = new SendableChooser<>();
+            for (RobotLocalizationConfig.BackendConfig.ImuStrategy strategy :
+                    RobotLocalizationConfig.BackendConfig.ImuStrategy.values()) {
+                if (strategy == resolved.imuStrategy()) {
+                    backendImuStrategyChooser.setDefaultOption(strategy.name(), strategy);
+                } else {
+                    backendImuStrategyChooser.addOption(strategy.name(), strategy);
+                }
+            }
+        }
+        if (backendVisionStrategyChooser == null) {
+            backendVisionStrategyChooser = new SendableChooser<>();
+            for (RobotLocalizationConfig.BackendConfig.VisionStrategy strategy :
+                    RobotLocalizationConfig.BackendConfig.VisionStrategy.values()) {
+                if (strategy == resolved.visionStrategy()) {
+                    backendVisionStrategyChooser.setDefaultOption(strategy.name(), strategy);
+                } else {
+                    backendVisionStrategyChooser.addOption(strategy.name(), strategy);
+                }
+            }
+        }
     }
 
     @Override
@@ -714,4 +1058,297 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
        update();
     }
 
-} 
+    private boolean applyVisionMeasurement(LocalizationCamera.VisionMeasurement measurement) {
+        if (measurement == null) {
+            return false;
+        }
+        visionMeasurementCount++;
+        boolean accepted = false;
+        Matrix<N3, N1> rawStdDevs = measurement.stdDevs();
+        Matrix<N3, N1> sanitizedStdDevs = sanitizeVisionStdDevs(rawStdDevs);
+        if (rawStdDevs != null && sanitizedStdDevs == null) {
+            recordVisionSample(false);
+            return false;
+        }
+        Pose2d measurementPose = measurement.pose2d();
+        if (!passesPoseJumpGuard(measurementPose, false)) {
+            recordVisionSample(false);
+            return false;
+        }
+        double timestampSeconds = measurement.timestampSeconds();
+        if (!shouldApplyVisionMeasurement(measurementPose, timestampSeconds, sanitizedStdDevs)) {
+            recordVisionSample(false);
+            return false;
+        }
+        Matrix<N3, N1> adjustedStdDevs2d =
+                adjustVisionStdDevsForDisagreement(sanitizedStdDevs, measurementPose);
+        if (slipActive) {
+            double scale = backendConfig().slipVisionStdDevScale();
+            if (scale > 0.0 && scale < 1.0) {
+                adjustedStdDevs2d = scaleStdDevs(adjustedStdDevs2d, scale);
+            }
+        }
+        if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
+            Matrix<N4, N1> adjustedStdDevs3d = expandStdDevsTo3d(adjustedStdDevs2d);
+            Pose3d measurementPose3d = measurement.pose3d() != null
+                    ? measurement.pose3d()
+                    : new Pose3d(measurementPose);
+            if (adjustedStdDevs3d != null) {
+                fieldEstimator3d.addVisionMeasurement(measurementPose3d, timestampSeconds, adjustedStdDevs3d);
+            } else {
+                fieldEstimator3d.addVisionMeasurement(measurementPose3d, timestampSeconds);
+            }
+        } else {
+            if (adjustedStdDevs2d != null) {
+                fieldEstimator2d.addVisionMeasurement(measurementPose, timestampSeconds, adjustedStdDevs2d);
+            } else {
+                fieldEstimator2d.addVisionMeasurement(measurementPose, timestampSeconds);
+            }
+        }
+        accepted = true;
+        recordVisionSample(true);
+        visionMeasurementAccepted++;
+        return true;
+    }
+
+    private boolean passesPoseJumpGuard(Pose2d measurementPose, boolean hasAgreement) {
+        RobotLocalizationConfig.BackendConfig backend = backendConfig();
+        double now = Timer.getFPGATimestamp();
+        if (!hasAgreement && now < poseJumpGuardUntilSeconds) {
+            return false;
+        }
+        double threshold = backend.poseJumpMeters();
+        if (threshold <= 0.0) {
+            return true;
+        }
+        Pose2d referencePose = fieldPose != null ? fieldPose : new Pose2d();
+        double distance = measurementPose.getTranslation().getDistance(referencePose.getTranslation());
+        if (!hasAgreement && distance > threshold) {
+            poseJumpGuardUntilSeconds = now + backend.poseJumpHoldSeconds();
+            return false;
+        }
+        return true;
+    }
+
+    private void recordVisionSample(boolean accepted) {
+        if (visionAcceptCount < VISION_ACCEPT_WINDOW) {
+            visionAcceptCount++;
+        } else if (visionAcceptWindow[visionAcceptIndex]) {
+            visionAcceptAccepted--;
+        }
+        visionAcceptWindow[visionAcceptIndex] = accepted;
+        if (accepted) {
+            visionAcceptAccepted++;
+        }
+        visionAcceptIndex = (visionAcceptIndex + 1) % VISION_ACCEPT_WINDOW;
+        visionAcceptRateWindow =
+                visionAcceptCount > 0 ? (double) visionAcceptAccepted / visionAcceptCount : 0.0;
+    }
+
+    private Matrix<N3, N1> scaleStdDevs(Matrix<N3, N1> stdDevs, double scale) {
+        if (stdDevs == null) {
+            return null;
+        }
+        return VecBuilder.fill(
+                stdDevs.get(0, 0) * scale,
+                stdDevs.get(1, 0) * scale,
+                stdDevs.get(2, 0) * scale);
+    }
+
+    private Optional<LocalizationCamera.VisionMeasurement> fuseVisionMeasurements(
+            List<LocalizationCamera.VisionMeasurement> measurements,
+            RobotLocalizationConfig.BackendConfig backend) {
+        if (measurements == null || measurements.isEmpty()) {
+            return Optional.empty();
+        }
+        boolean hasAgreement = hasPoseAgreement(measurements, backend.poseJumpAgreementMeters());
+        measurements.sort(Comparator.comparingDouble(LocalizationCamera.VisionMeasurement::timestampSeconds));
+        double latestTimestamp = measurements.get(measurements.size() - 1).timestampSeconds();
+        double maxSeparation = backend.visionFusionMaxSeparationSeconds();
+        double minWeight = backend.visionFusionMinWeight();
+
+        double sumWeight = 0.0;
+        double sumX = 0.0;
+        double sumY = 0.0;
+        double sumCos = 0.0;
+        double sumSin = 0.0;
+        double sumTimestamp = 0.0;
+        double sumLatency = 0.0;
+        double sumConfidence = 0.0;
+        double sumDistance = 0.0;
+        double sumStdX2 = 0.0;
+        double sumStdY2 = 0.0;
+        double sumStdTheta2 = 0.0;
+
+        for (LocalizationCamera.VisionMeasurement measurement : measurements) {
+            if (latestTimestamp - measurement.timestampSeconds() > maxSeparation) {
+                continue;
+            }
+            Matrix<N3, N1> stdDevs = sanitizeVisionStdDevs(measurement.stdDevs());
+            double baseWeight = 1.0;
+            if (stdDevs != null) {
+                double stdX = Math.max(stdDevs.get(0, 0), STD_EPSILON);
+                double stdY = Math.max(stdDevs.get(1, 0), STD_EPSILON);
+                double stdTheta = Math.max(stdDevs.get(2, 0), STD_EPSILON);
+                baseWeight = 1.0 / (stdX + stdY + stdTheta);
+            }
+            double confidence = measurement.confidence();
+            double confidenceWeight = Double.isFinite(confidence)
+                    ? Math.pow(Math.max(0.0, Math.min(1.0, confidence)), backend.visionFusionConfidenceExponent())
+                    : 1.0;
+            double latencyWeight = 1.0;
+            if (backend.visionFusionLatencyWeight() > 0.0) {
+                latencyWeight = 1.0 / (1.0 + measurement.latencySeconds() * backend.visionFusionLatencyWeight());
+            }
+            double distanceWeight = 1.0;
+            if (backend.visionFusionDistanceWeight() > 0.0 && Double.isFinite(measurement.distanceMeters())) {
+                distanceWeight = 1.0 / (1.0 + measurement.distanceMeters() * backend.visionFusionDistanceWeight());
+            }
+            double weight = baseWeight * confidenceWeight * latencyWeight * distanceWeight;
+            if (!Double.isFinite(weight) || weight < minWeight) {
+                continue;
+            }
+
+            Pose2d pose = measurement.pose2d();
+            double theta = pose.getRotation().getRadians();
+            sumWeight += weight;
+            sumX += pose.getX() * weight;
+            sumY += pose.getY() * weight;
+            sumCos += Math.cos(theta) * weight;
+            sumSin += Math.sin(theta) * weight;
+            sumTimestamp += measurement.timestampSeconds() * weight;
+            sumLatency += measurement.latencySeconds() * weight;
+            sumConfidence += (Double.isFinite(confidence) ? confidence : 1.0) * weight;
+            sumDistance += (Double.isFinite(measurement.distanceMeters()) ? measurement.distanceMeters() : 0.0) * weight;
+            if (stdDevs != null) {
+                sumStdX2 += stdDevs.get(0, 0) * stdDevs.get(0, 0) * weight;
+                sumStdY2 += stdDevs.get(1, 0) * stdDevs.get(1, 0) * weight;
+                sumStdTheta2 += stdDevs.get(2, 0) * stdDevs.get(2, 0) * weight;
+            }
+        }
+
+        if (sumWeight <= 0.0) {
+            return Optional.empty();
+        }
+
+        Pose2d fusedPose = new Pose2d(
+                sumX / sumWeight,
+                sumY / sumWeight,
+                new Rotation2d(Math.atan2(sumSin / sumWeight, sumCos / sumWeight)));
+        if (!passesPoseJumpGuard(fusedPose, hasAgreement)) {
+            return Optional.empty();
+        }
+        double fusedTimestamp = sumTimestamp / sumWeight;
+        double fusedLatency = sumLatency / sumWeight;
+        double fusedConfidence = sumConfidence / sumWeight;
+        double fusedDistance = sumDistance / sumWeight;
+
+        Matrix<N3, N1> fusedStdDevs = null;
+        if (sumStdX2 > 0.0 || sumStdY2 > 0.0 || sumStdTheta2 > 0.0) {
+            fusedStdDevs = VecBuilder.fill(
+                    Math.sqrt(sumStdX2 / sumWeight),
+                    Math.sqrt(sumStdY2 / sumWeight),
+                    Math.sqrt(sumStdTheta2 / sumWeight));
+        }
+
+        return Optional.of(new LocalizationCamera.VisionMeasurement(
+                fusedPose,
+                new Pose3d(fusedPose),
+                fusedTimestamp,
+                fusedLatency,
+                fusedStdDevs,
+                fusedConfidence,
+                fusedDistance));
+    }
+
+    private boolean hasPoseAgreement(
+            List<LocalizationCamera.VisionMeasurement> measurements,
+            double agreementMeters) {
+        if (measurements == null || measurements.size() < 2 || agreementMeters <= 0.0) {
+            return false;
+        }
+        for (int i = 0; i < measurements.size(); i++) {
+            Pose2d poseA = measurements.get(i).pose2d();
+            if (poseA == null) {
+                continue;
+            }
+            for (int j = i + 1; j < measurements.size(); j++) {
+                Pose2d poseB = measurements.get(j).pose2d();
+                if (poseB == null) {
+                    continue;
+                }
+                double distance =
+                        poseA.getTranslation().getDistance(poseB.getTranslation());
+                if (distance <= agreementMeters) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static final class VirtualPose2d {
+        private final Supplier<Pose2d> baseSupplier;
+        private Transform2d offset = new Transform2d();
+        private Pose2d cachedPose = new Pose2d();
+        private long cachedRevision = Long.MIN_VALUE;
+
+        private VirtualPose2d(Supplier<Pose2d> baseSupplier) {
+            this.baseSupplier = baseSupplier;
+        }
+
+        private Pose2d get(long revision) {
+            if (cachedRevision != revision) {
+                Pose2d base = safePose(baseSupplier.get());
+                cachedPose = base.transformBy(offset);
+                cachedRevision = revision;
+            }
+            return cachedPose;
+        }
+
+        private void set(Pose2d desiredPose, long revision) {
+            Pose2d base = safePose(baseSupplier.get());
+            Pose2d safeDesired = safePose(desiredPose);
+            offset = new Transform2d(base, safeDesired);
+            cachedPose = safeDesired;
+            cachedRevision = revision;
+        }
+
+        private static Pose2d safePose(Pose2d pose) {
+            return pose != null ? pose : new Pose2d();
+        }
+    }
+
+    private static final class VirtualPose3d {
+        private final Supplier<Pose3d> baseSupplier;
+        private Transform3d offset = new Transform3d();
+        private Pose3d cachedPose = new Pose3d();
+        private long cachedRevision = Long.MIN_VALUE;
+
+        private VirtualPose3d(Supplier<Pose3d> baseSupplier) {
+            this.baseSupplier = baseSupplier;
+        }
+
+        private Pose3d get(long revision) {
+            if (cachedRevision != revision) {
+                Pose3d base = safePose(baseSupplier.get());
+                cachedPose = base.transformBy(offset);
+                cachedRevision = revision;
+            }
+            return cachedPose;
+        }
+
+        private void set(Pose3d desiredPose, long revision) {
+            Pose3d base = safePose(baseSupplier.get());
+            Pose3d safeDesired = safePose(desiredPose);
+            offset = new Transform3d(base, safeDesired);
+            cachedPose = safeDesired;
+            cachedRevision = revision;
+        }
+
+        private static Pose3d safePose(Pose3d pose) {
+            return pose != null ? pose : new Pose3d();
+        }
+    }
+
+}

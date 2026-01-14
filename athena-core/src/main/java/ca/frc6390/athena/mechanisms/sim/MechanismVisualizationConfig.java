@@ -9,6 +9,8 @@ import java.util.function.Function;
 
 import ca.frc6390.athena.mechanisms.Mechanism;
 import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.wpilibj.util.Color;
 import edu.wpi.first.wpilibj.util.Color8Bit;
 
 /**
@@ -27,6 +29,12 @@ public final class MechanismVisualizationConfig {
                        Color8Bit color,
                        double lineWeight) {
     }
+
+    private static final double DEFAULT_VECTOR_LINE_LENGTH_METERS = 0.22;
+    private static final double DEFAULT_VECTOR_LINE_WEIGHT = 4.0;
+    private static final double DEFAULT_VECTOR_LINE_HEADING_OFFSET_RAD = 0.0;
+    private static final String VECTOR_LINE_SUFFIX = "VectorLine";
+    private static final Color8Bit DEFAULT_VECTOR_LINE_COLOR = new Color8Bit(Color.kOrange);
 
     private final String rootName;
     private final Function<Mechanism, Pose3d> rootPoseSupplier;
@@ -60,6 +68,7 @@ public final class MechanismVisualizationConfig {
         private final String rootName;
         private Function<Mechanism, Pose3d> rootPoseSupplier = mech -> new Pose3d();
         private final Map<String, Node> nodes = new LinkedHashMap<>();
+        private boolean vectorLineEnabled = false;
 
         private Builder(String rootName) {
             this.rootName = Objects.requireNonNull(rootName);
@@ -138,10 +147,58 @@ public final class MechanismVisualizationConfig {
         }
 
         /**
+         * Adds a vector line that points along the mechanism's current rotation.
+         */
+        public Builder useVectorLine(boolean enabled) {
+            this.vectorLineEnabled = enabled;
+            return this;
+        }
+
+        /**
          * Builds the immutable visualization configuration containing all registered nodes.
          */
         public MechanismVisualizationConfig build() {
+            if (vectorLineEnabled) {
+                String vectorLineName = rootName + VECTOR_LINE_SUFFIX;
+                if (!nodes.containsKey(vectorLineName)) {
+                    addNode(
+                            vectorLineName,
+                            rootName,
+                            mech -> vectorLinePose(mech, DEFAULT_VECTOR_LINE_LENGTH_METERS, DEFAULT_VECTOR_LINE_HEADING_OFFSET_RAD),
+                            DEFAULT_VECTOR_LINE_COLOR,
+                            DEFAULT_VECTOR_LINE_WEIGHT);
+                }
+            }
             return new MechanismVisualizationConfig(rootName, rootPoseSupplier, new ArrayList<>(nodes.values()));
         }
+    }
+
+    private static Pose3d vectorLinePose(Mechanism mechanism, double lengthMeters, double headingOffsetRad) {
+        if (mechanism == null || !Double.isFinite(lengthMeters) || lengthMeters <= 0.0) {
+            return Pose3d.kZero;
+        }
+        double angle = toRadians(mechanism, mechanism.getPosition()) + headingOffsetRad;
+        if (!Double.isFinite(angle)) {
+            return Pose3d.kZero;
+        }
+        double x = lengthMeters * Math.cos(angle);
+        double y = lengthMeters * Math.sin(angle);
+        return new Pose3d(x, y, 0.0, new Rotation3d());
+    }
+
+    private static double toRadians(Mechanism mechanism, double value) {
+        if (mechanism != null && mechanism.getEncoder() != null) {
+            double conversion = mechanism.getEncoder().getConversion();
+            if (Math.abs(conversion - 360.0) < 1e-3) {
+                return Math.toRadians(value);
+            }
+            if (Math.abs(conversion - (2.0 * Math.PI)) < 1e-3) {
+                return value;
+            }
+        }
+        if (Math.abs(value) > 2.0 * Math.PI) {
+            return Math.toRadians(value);
+        }
+        return value;
     }
 }

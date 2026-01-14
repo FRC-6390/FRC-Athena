@@ -182,7 +182,7 @@ public class LocalizationCamera {
         capabilities.putAll(config.capabilities());
         StructPublisher<Pose2d> posePublisher = null;
         if (config.isPublishPoseTopicEnabled()) {
-            String ntBase = "/Shuffleboard/Vision/Cameras/" + config.getTable();
+            String ntBase = "/Shuffleboard/Athena/Vision/Cameras/" + config.getTable();
             posePublisher = NetworkTableInstance.getDefault()
                     .getStructTopic(ntBase + "/EstimatedPose", Pose2d.struct)
                     .publish();
@@ -431,6 +431,18 @@ public class LocalizationCamera {
         if (Double.isNaN(timestampSeconds) || Double.isInfinite(timestampSeconds)) {
             return Optional.empty();
         }
+        double maxLatencySeconds = config.getMaxLatencySeconds();
+        if (Double.isFinite(maxLatencySeconds) && maxLatencySeconds > 0.0 && latencySeconds > maxLatencySeconds) {
+            return Optional.empty();
+        }
+
+        Matrix<N3, N1> adjustedStdDevs =
+                scaleStdDevs(
+                        data.stdDevs(),
+                        getMeasurementConfidence(),
+                        getMeasurementDistance(),
+                        latencySeconds,
+                        visibleTargetsSupplier.getAsInt());
 
         return Optional.of(
                 new VisionMeasurement(
@@ -438,7 +450,46 @@ public class LocalizationCamera {
                         data.pose3d(),
                         timestampSeconds,
                         latencySeconds,
-                        data.stdDevs()));
+                        adjustedStdDevs,
+                        getMeasurementConfidence(),
+                        getMeasurementDistance()));
+    }
+
+    private Matrix<N3, N1> scaleStdDevs(
+            Matrix<N3, N1> stdDevs,
+            double confidence,
+            double distanceMeters,
+            double latencySeconds,
+            int visibleTargets) {
+        if (stdDevs == null) {
+            return null;
+        }
+        double scale = 1.0;
+        double confidenceExponent = config.getStdDevConfidenceExponent();
+        if (confidenceExponent > 0.0 && Double.isFinite(confidence)) {
+            double clamped = Math.max(0.05, Math.min(1.0, confidence));
+            scale /= Math.pow(clamped, confidenceExponent);
+        }
+        double latencyWeight = config.getStdDevLatencyWeight();
+        if (latencyWeight > 0.0 && Double.isFinite(latencySeconds)) {
+            scale *= (1.0 + latencyWeight * latencySeconds);
+        }
+        double distanceWeight = config.getStdDevDistanceWeight();
+        if (distanceWeight > 0.0 && Double.isFinite(distanceMeters)) {
+            scale *= (1.0 + distanceWeight * distanceMeters);
+        }
+        double tagCountWeight = config.getStdDevTagCountWeight();
+        if (tagCountWeight > 0.0 && visibleTargets > 1) {
+            scale /= (1.0 + tagCountWeight * (visibleTargets - 1));
+        }
+        double minScale = config.getStdDevMinScale();
+        if (Double.isFinite(minScale) && minScale > 0.0) {
+            scale = Math.max(minScale, scale);
+        }
+        return VecBuilder.fill(
+                stdDevs.get(0, 0) * scale,
+                stdDevs.get(1, 0) * scale,
+                stdDevs.get(2, 0) * scale);
     }
 
     /**
@@ -514,6 +565,15 @@ public class LocalizationCamera {
      */
     public double getMeasurementConfidence() {
         return confidenceSupplier.getAsDouble();
+    }
+
+    private double getMeasurementDistance() {
+        double distance = targetDistanceSupplier.getAsDouble();
+        if (!Double.isNaN(distance) && Double.isFinite(distance)) {
+            return distance;
+        }
+        double averageDistance = averageDistanceSupplier.getAsDouble();
+        return Double.isFinite(averageDistance) ? averageDistance : Double.NaN;
     }
 
     /**
@@ -1056,17 +1116,27 @@ public class LocalizationCamera {
      * @param timestampSeconds capture time expressed in seconds
      * @param latencySeconds estimated pipeline latency in seconds
      * @param stdDevs covariance diagonal describing measurement noise
+     * @param confidence vendor confidence in the range {@code [0, 1]}
+     * @param distanceMeters estimated camera-to-target distance in meters
      */
     public static record VisionMeasurement(
             Pose2d pose2d,
             Pose3d pose3d,
             double timestampSeconds,
             double latencySeconds,
-            Matrix<N3, N1> stdDevs) {
+            Matrix<N3, N1> stdDevs,
+            double confidence,
+            double distanceMeters) {
         public VisionMeasurement {
             pose2d = pose2d != null ? pose2d : new Pose2d();
             pose3d = pose3d != null ? pose3d : new Pose3d(pose2d);
             latencySeconds = Double.isNaN(latencySeconds) ? 0.0 : latencySeconds;
+            if (!Double.isFinite(confidence)) {
+                confidence = Double.NaN;
+            }
+            if (!Double.isFinite(distanceMeters)) {
+                distanceMeters = Double.NaN;
+            }
         }
 
         /**

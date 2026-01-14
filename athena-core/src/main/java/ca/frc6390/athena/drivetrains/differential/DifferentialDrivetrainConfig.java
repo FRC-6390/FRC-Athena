@@ -18,6 +18,7 @@ import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.imu.VirtualImu;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 
 /**
  * Builder for {@link DifferentialDrivetrain} instances. Captures the motor/encoder layout, CAN IDs,
@@ -56,6 +57,10 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     private double wheelDiameterMeters = 1;
     /** Optional physics model used when running drivetrain simulation. */
     private DifferentialSimulationConfig simulationConfig = DifferentialSimulationConfig.defaults();
+    /** Optional drive feedforward used to command wheel velocities as voltages. */
+    private SimpleMotorFeedforward driveFeedforward = null;
+    /** Whether the configured drive feedforward is enabled. */
+    private boolean driveFeedforwardEnabled = true;
 
     /**
      * Creates a baseline configuration using the provided IMU and track width.
@@ -169,6 +174,29 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      */
     public DifferentialDrivetrainConfig setWheelDiameter(double wheelDiameterMeters){
         this.wheelDiameterMeters = wheelDiameterMeters;
+        return this;
+    }
+
+    /**
+     * Provides drive feedforward gains used to compute voltage setpoints.
+     */
+    public DifferentialDrivetrainConfig setDriveFeedforward(SimpleMotorFeedforward feedforward) {
+        this.driveFeedforward = feedforward;
+        return this;
+    }
+
+    /**
+     * Convenience helper to configure drive feedforward gains.
+     */
+    public DifferentialDrivetrainConfig setDriveFeedforward(double kS, double kV, double kA) {
+        return setDriveFeedforward(new SimpleMotorFeedforward(kS, kV, kA));
+    }
+
+    /**
+     * Enables or disables the configured drive feedforward.
+     */
+    public DifferentialDrivetrainConfig setDriveFeedforwardEnabled(boolean enabled) {
+        this.driveFeedforwardEnabled = enabled;
         return this;
     }
 
@@ -354,6 +382,11 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
 
         Imu resolvedImu = imu == null ? null : new VirtualImu(HardwareFactories.imu(imu));
         DifferentialDrivetrain dt = new DifferentialDrivetrain(resolvedImu, maxVelocity, trackWidth, lm, rm);
+
+        if (driveFeedforward != null) {
+            dt.setDriveFeedforward(driveFeedforward);
+            dt.setDriveFeedforwardEnabled(driveFeedforwardEnabled);
+        }
 
         if (simulationConfig != null) {
             double simulationGearRatio = gearRatio;

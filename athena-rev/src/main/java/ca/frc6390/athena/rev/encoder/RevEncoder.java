@@ -19,6 +19,8 @@ public class RevEncoder implements Encoder {
     private final AbsoluteEncoder absolute;
     private double conversion = 1.0;
     private double offset = 0.0;
+    private double conversionOffset = 0.0;
+    private double gearRatio = 1.0;
     private boolean inverted = false;
     private double simPosition = 0.0;
     private double simVelocity = 0.0;
@@ -27,6 +29,18 @@ public class RevEncoder implements Encoder {
         this.relative = relative;
         this.absolute = absolute;
         this.config = config;
+        applyConfig(config);
+    }
+
+    private void applyConfig(EncoderConfig config) {
+        if (config == null) {
+            return;
+        }
+        this.conversion = config.conversion;
+        this.conversionOffset = config.conversionOffset;
+        this.offset = config.offset;
+        this.gearRatio = config.gearRatio;
+        this.inverted = config.inverted;
     }
 
     public static RevEncoder fromConfig(EncoderConfig config) {
@@ -52,32 +66,36 @@ public class RevEncoder implements Encoder {
     public double getPosition() {
         double direction = inverted ? -1.0 : 1.0;
         if (RobotBase.isSimulation()) {
-            return direction * (simPosition + offset) * conversion;
+            return direction * ((simPosition * gearRatio + offset) * conversion - conversionOffset);
         }
         if (absolute != null) {
-            return direction * (absolute.getPosition() + offset) * conversion;
+            double rawPosition = absolute.getPosition();
+            return direction * ((rawPosition * gearRatio + offset) * conversion - conversionOffset);
         }
-        return direction * (relative.getPosition() + offset) * conversion;
+        double rawPosition = relative.getPosition();
+        return direction * ((rawPosition * gearRatio + offset) * conversion - conversionOffset);
     }
 
     @Override
     public double getVelocity() {
         double direction = inverted ? -1.0 : 1.0;
         if (RobotBase.isSimulation()) {
-            return direction * simVelocity * conversion;
+            return direction * simVelocity * gearRatio * conversion;
         }
         if (absolute != null) {
-            return direction * absolute.getVelocity() * conversion;
+            return direction * absolute.getVelocity() * gearRatio * conversion;
         }
-        return direction * relative.getVelocity() * conversion;
+        return direction * relative.getVelocity() * gearRatio * conversion;
     }
 
     @Override
     public void setPosition(double position) {
-        double raw = conversion != 0.0 ? (position / conversion) - offset : 0.0;
+        double safeConversion = conversion != 0.0 ? conversion : 1.0;
+        double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
+        double raw = ((position + conversionOffset) / safeConversion - offset) / safeGearRatio;
         relative.setPosition(raw);
         if (RobotBase.isSimulation()) {
-            simPosition = position;
+            simPosition = raw;
         }
     }
 
@@ -89,6 +107,36 @@ public class RevEncoder implements Encoder {
     @Override
     public void setConversion(double conversion) {
         this.conversion = conversion;
+    }
+
+    @Override
+    public double getConversion() {
+        return conversion;
+    }
+
+    @Override
+    public double getConversionOffset() {
+        return conversionOffset;
+    }
+
+    @Override
+    public double getOffset() {
+        return offset;
+    }
+
+    @Override
+    public double getGearRatio() {
+        return gearRatio;
+    }
+
+    @Override
+    public void setGearRatio(double gearRatio) {
+        this.gearRatio = gearRatio;
+    }
+
+    @Override
+    public void setConversionOffset(double conversionOffset) {
+        this.conversionOffset = conversionOffset;
     }
 
     @Override
@@ -110,6 +158,11 @@ public class RevEncoder implements Encoder {
     public void setSimulatedState(double rotations, double velocity) {
         simPosition = rotations;
         simVelocity = velocity;
+    }
+
+    @Override
+    public boolean supportsSimulation() {
+        return true;
     }
 
     @Override

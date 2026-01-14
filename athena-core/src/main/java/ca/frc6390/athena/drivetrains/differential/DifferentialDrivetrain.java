@@ -8,12 +8,15 @@ import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotSpeeds;
+import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator3d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -22,7 +25,9 @@ import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.DifferentialDriveKinematics;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelPositions;
+import edu.wpi.first.math.kinematics.DifferentialDriveWheelSpeeds;
 import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
@@ -44,6 +49,12 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     private double lastSimulationTimestamp = -1;
     private double lastLeftCommand = 0;
     private double lastRightCommand = 0;
+    private SimpleMotorFeedForwardsSendable driveFeedforward;
+    private boolean driveFeedforwardEnabled = false;
+    private double nominalVoltage = 12.0;
+    private double lastFeedforwardTimestampSeconds = Double.NaN;
+    private double lastLeftSetpointMetersPerSecond = 0.0;
+    private double lastRightSetpointMetersPerSecond = 0.0;
 
     public DifferentialDrivetrain(Imu imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors){
        this(imu, maxVelocity, trackwidth, leftMotors, rightMotors, leftMotors.getEncoderGroup(), rightMotors.getEncoderGroup());
@@ -79,6 +90,35 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         return robotSpeeds;
     }
 
+    public DifferentialDrivetrain setDriveFeedforward(SimpleMotorFeedforward feedforward) {
+        if (feedforward == null) {
+            driveFeedforward = null;
+            setDriveFeedforwardEnabled(false);
+            return this;
+        }
+        driveFeedforward = new SimpleMotorFeedForwardsSendable(
+                feedforward.getKs(),
+                feedforward.getKv(),
+                feedforward.getKa());
+        setDriveFeedforwardEnabled(true);
+        return this;
+    }
+
+    public void setDriveFeedforwardEnabled(boolean enabled) {
+        driveFeedforwardEnabled = driveFeedforward != null && enabled;
+        if (!driveFeedforwardEnabled) {
+            resetFeedforwardState();
+        }
+    }
+
+    public boolean isDriveFeedforwardEnabled() {
+        return driveFeedforwardEnabled;
+    }
+
+    public boolean hasDriveFeedforward() {
+        return driveFeedforward != null;
+    }
+
     @Override
     public void update() {
         if (imu != null) {
@@ -96,7 +136,30 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         }
         
         ChassisSpeeds speeds = getRobotSpeeds().calculate();
-        drive.arcadeDrive(speeds.vxMetersPerSecond, speeds.omegaRadiansPerSecond);
+        if (driveFeedforwardEnabled && driveFeedforward != null) {
+            DifferentialDriveWheelSpeeds wheelSpeeds = kinematics.toWheelSpeeds(speeds);
+            double now = Timer.getFPGATimestamp();
+            double leftAccel = 0.0;
+            double rightAccel = 0.0;
+            if (Double.isFinite(lastFeedforwardTimestampSeconds)) {
+                double dt = now - lastFeedforwardTimestampSeconds;
+                if (dt > 1e-6) {
+                    leftAccel = (wheelSpeeds.leftMetersPerSecond - lastLeftSetpointMetersPerSecond) / dt;
+                    rightAccel = (wheelSpeeds.rightMetersPerSecond - lastRightSetpointMetersPerSecond) / dt;
+                }
+            }
+            lastFeedforwardTimestampSeconds = now;
+            lastLeftSetpointMetersPerSecond = wheelSpeeds.leftMetersPerSecond;
+            lastRightSetpointMetersPerSecond = wheelSpeeds.rightMetersPerSecond;
+
+            double leftVolts = driveFeedforward.calculate(wheelSpeeds.leftMetersPerSecond, leftAccel);
+            double rightVolts = driveFeedforward.calculate(wheelSpeeds.rightMetersPerSecond, rightAccel);
+            setLeftVoltage(leftVolts);
+            setRightVoltage(rightVolts);
+            drive.feed();
+        } else {
+            drive.arcadeDrive(speeds.vxMetersPerSecond, speeds.omegaRadiansPerSecond);
+        }
     }
 
     public Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier thetaInput){
@@ -201,6 +264,11 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         RobotDrivetrain.super.shuffleboard(tab, level);
+        if (driveFeedforward != null && level.equals(SendableLevel.DEBUG)) {
+            tab.add("Drive Feedforward", driveFeedforward);
+            tab.add("Drive Feedforward Enabled",
+                    (builder) -> builder.addBooleanProperty("Enabled", this::isDriveFeedforwardEnabled, this::setDriveFeedforwardEnabled));
+        }
         if (simulationField != null) {
             tab.add("Sim Pose", simulationField).withWidget(BuiltInWidgets.kField);
         }
@@ -212,6 +280,9 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
             return this;
         }
         simulation = new DifferentialDrivetrainSimulation(this, config, leftEncoders, rightEncoders);
+        if (config != null) {
+            nominalVoltage = config.getNominalVoltage();
+        }
         if (simulationField == null) {
             simulationField = new Field2d();
         }
@@ -249,6 +320,37 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     private void setRightOutput(double output) {
         lastRightCommand = output;
         rightMotors.setSpeed(output);
+    }
+
+    private void setLeftVoltage(double volts) {
+        double voltageLimit = getVoltageLimit();
+        double clamped = MathUtil.clamp(volts, -voltageLimit, voltageLimit);
+        lastLeftCommand = MathUtil.clamp(clamped / voltageLimit, -1.0, 1.0);
+        leftMotors.setVoltage(clamped);
+    }
+
+    private void setRightVoltage(double volts) {
+        double voltageLimit = getVoltageLimit();
+        double clamped = MathUtil.clamp(volts, -voltageLimit, voltageLimit);
+        lastRightCommand = MathUtil.clamp(clamped / voltageLimit, -1.0, 1.0);
+        rightMotors.setVoltage(clamped);
+    }
+
+    private double getVoltageLimit() {
+        if (RobotBase.isSimulation()) {
+            return nominalVoltage;
+        }
+        double battery = RobotController.getBatteryVoltage();
+        if (Double.isFinite(battery) && battery > 1e-3) {
+            return battery;
+        }
+        return nominalVoltage;
+    }
+
+    private void resetFeedforwardState() {
+        lastFeedforwardTimestampSeconds = Double.NaN;
+        lastLeftSetpointMetersPerSecond = 0.0;
+        lastRightSetpointMetersPerSecond = 0.0;
     }
 
 }

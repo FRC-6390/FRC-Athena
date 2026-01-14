@@ -5,15 +5,18 @@ import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
+import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
+import ca.frc6390.athena.odometry.SlipCompensatingSwerveDrivePoseEstimator;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator3d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -27,6 +30,7 @@ import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
@@ -50,6 +54,9 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   private Field2d simulationField;
   private double lastSimulationTimestamp = -1;
   private ChassisSpeeds lastCommandedSpeeds = new ChassisSpeeds();
+  private SimpleMotorFeedForwardsSendable driveFeedforward;
+  private boolean driveFeedforwardEnabled = false;
+  private double nominalVoltage = 12.0;
   
   public SwerveDrivetrain(Imu imu, SwerveModuleConfig... modules) {
 
@@ -62,12 +69,23 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
     swerveModules = new SwerveModule[modules.length];
     Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
     double maxVelocity = 0;
+    double minVelocity = Double.POSITIVE_INFINITY;
     double maxModuleRadius = 0;
     for (int i = 0; i < modules.length; i++) {
       swerveModules[i] = new SwerveModule(modules[i]);
-      maxVelocity = modules[i].maxSpeedMetersPerSecond();
+      double moduleMax = modules[i].maxSpeedMetersPerSecond();
+      maxVelocity = Math.max(maxVelocity, moduleMax);
+      minVelocity = Math.min(minVelocity, moduleMax);
       moduleLocations[i] = swerveModules[i].getModuleLocation();
       maxModuleRadius = Math.max(maxModuleRadius, moduleLocations[i].getNorm());
+    }
+
+    if (minVelocity < Double.POSITIVE_INFINITY && maxVelocity > 1e-6
+        && (maxVelocity - minVelocity) / maxVelocity > 0.05) {
+      DriverStation.reportWarning(
+          "Swerve modules report different max speeds; limiting drivetrain max speed to the slowest module.",
+          false);
+      maxVelocity = minVelocity;
     }
 
     kinematics = new SwerveDriveKinematics(moduleLocations);
@@ -76,6 +94,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
     getIMU().addVirtualAxis("drift", () -> getIMU().getYaw());
     getIMU().setVirtualAxis("drift", getIMU().getVirtualAxis("driver"));
     desiredHeading = getIMU().getVirtualAxis("drift").getRadians();
+    setNominalVoltage(nominalVoltage);
     
   }
 
@@ -131,6 +150,35 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
       this.fieldRelative = fieldRelative;
   }
 
+  public SwerveDrivetrain setDriveFeedforward(SimpleMotorFeedforward feedforward) {
+    if (feedforward == null) {
+      driveFeedforward = null;
+      setDriveFeedforwardEnabled(false);
+      Arrays.stream(swerveModules).forEach(module -> module.setDriveFeedforward(null));
+      return this;
+    }
+    driveFeedforward = new SimpleMotorFeedForwardsSendable(
+        feedforward.getKs(),
+        feedforward.getKv(),
+        feedforward.getKa());
+    Arrays.stream(swerveModules).forEach(module -> module.setDriveFeedforward(driveFeedforward));
+    setDriveFeedforwardEnabled(true);
+    return this;
+  }
+
+  public void setDriveFeedforwardEnabled(boolean enabled) {
+    driveFeedforwardEnabled = driveFeedforward != null && enabled;
+    Arrays.stream(swerveModules).forEach(module -> module.setDriveFeedforwardEnabled(driveFeedforwardEnabled));
+  }
+
+  public boolean isDriveFeedforwardEnabled() {
+    return driveFeedforwardEnabled;
+  }
+
+  public boolean hasDriveFeedforward() {
+    return driveFeedforward != null;
+  }
+
   @Override
   public Imu getIMU() {
       return imu;
@@ -179,6 +227,9 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
       return this;
     }
     simulation = new SwerveDrivetrainSimulation(this, config);
+    if (config != null) {
+      setNominalVoltage(config.getNominalVoltage());
+    }
     if (simulationField == null) {
       simulationField = new Field2d();
     }
@@ -237,6 +288,12 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
         driftCorrectionLayout.add("Drift Correction", (builder) -> builder.addBooleanProperty("Drift Correction", this::getDriftCorrectionMode, this::setDriftCorrectionMode)).withWidget(BuiltInWidgets.kBooleanBox);
         driftCorrectionLayout.addDouble("Desired Heading", () -> desiredHeading).withWidget(BuiltInWidgets.kGyro);// might not display properly bc get heading is +-180
         driftCorrectionLayout.add(driftpid).withWidget(BuiltInWidgets.kPIDController);
+      }
+      if (driveFeedforward != null) {
+        ShuffleboardLayout feedforwardLayout = tab.getLayout("Drive Feedforward", BuiltInLayouts.kList);
+        feedforwardLayout.add("Feedforward", driveFeedforward);
+        feedforwardLayout.add("Enabled",
+            (builder) -> builder.addBooleanProperty("Enabled", this::isDriveFeedforwardEnabled, this::setDriveFeedforwardEnabled));
       }
     }
    
@@ -304,6 +361,30 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
       return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, robotSpeeds, imu, this::getPositions);
     }
 
+    RobotLocalizationConfig.BackendConfig backend = effectiveConfig.backend();
+    if (backend != null
+            && backend.slipStrategy() == RobotLocalizationConfig.BackendConfig.SlipStrategy.SWERVE_VARIANCE) {
+      SlipCompensatingSwerveDrivePoseEstimator fieldEstimator =
+              new SlipCompensatingSwerveDrivePoseEstimator(
+                      kinematics,
+                      imu.getYaw(),
+                      getPositions(),
+                      new Pose2d(),
+                      effectiveConfig.getStd(),
+                      effectiveConfig.getVisionStd());
+      SlipCompensatingSwerveDrivePoseEstimator relativeEstimator =
+              new SlipCompensatingSwerveDrivePoseEstimator(
+                      kinematics,
+                      imu.getYaw(),
+                      getPositions(),
+                      new Pose2d(),
+                      effectiveConfig.getStd(),
+                      effectiveConfig.getVisionStd());
+      fieldEstimator.setSlipThreshold(backend.slipThreshold());
+      relativeEstimator.setSlipThreshold(backend.slipThreshold());
+      return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, robotSpeeds, imu, this::getPositions);
+    }
+
     SwerveDrivePoseEstimator fieldEstimator =
             new SwerveDrivePoseEstimator(
                     kinematics,
@@ -329,5 +410,12 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
             imu.getRoll().getRadians(),
             imu.getPitch().getRadians(),
             imu.getYaw().getRadians());
+  }
+
+  private void setNominalVoltage(double nominalVoltage) {
+    if (Double.isFinite(nominalVoltage) && nominalVoltage > 1e-3) {
+      this.nominalVoltage = nominalVoltage;
+      Arrays.stream(swerveModules).forEach(module -> module.setNominalVoltage(nominalVoltage));
+    }
   }
 }

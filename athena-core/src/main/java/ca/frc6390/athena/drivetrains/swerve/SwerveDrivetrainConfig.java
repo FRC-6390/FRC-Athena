@@ -12,6 +12,7 @@ import ca.frc6390.athena.hardware.imu.VirtualImu;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Translation2d;
 
@@ -48,6 +49,10 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     private boolean driveInverted = false;
     /** PID controller that maintains heading when commanded setpoints demand rotation. */
     private PIDController rotationPID = null;
+    /** Optional drive feedforward used to command wheel velocities as voltages. */
+    private SimpleMotorFeedforward driveFeedforward = null;
+    /** Whether the configured drive feedforward is enabled. */
+    private boolean driveFeedforwardEnabled = true;
     /** Drive-side current limit applied per motor (amps). */
     private double driveCurrentLimit = 80;
     /** Steer-side current limit applied per motor (amps). */
@@ -273,6 +278,29 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         this.rotationPID = rotationPID;
         return this;
     }
+
+    /**
+     * Provides drive feedforward gains used to compute voltage setpoints.
+     */
+    public SwerveDrivetrainConfig setDriveFeedforward(SimpleMotorFeedforward feedforward) {
+        this.driveFeedforward = feedforward;
+        return this;
+    }
+
+    /**
+     * Convenience helper to configure drive feedforward gains.
+     */
+    public SwerveDrivetrainConfig setDriveFeedforward(double kS, double kV, double kA) {
+        return setDriveFeedforward(new SimpleMotorFeedforward(kS, kV, kA));
+    }
+
+    /**
+     * Enables or disables the configured drive feedforward.
+     */
+    public SwerveDrivetrainConfig setDriveFeedforwardEnabled(boolean enabled) {
+        this.driveFeedforwardEnabled = enabled;
+        return this;
+    }
     
     /**
      * Applies the same current limit to both drive and steer motors.
@@ -404,6 +432,11 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
 
         Imu resolvedImu = imu == null ? null : new VirtualImu(HardwareFactories.imu(imu));
         SwerveDrivetrain dt = new SwerveDrivetrain(resolvedImu, modules);
+
+        if (driveFeedforward != null) {
+            dt.setDriveFeedforward(driveFeedforward);
+            dt.setDriveFeedforwardEnabled(driveFeedforwardEnabled);
+        }
 
         if (edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
             dt.configureSimulation(simulationConfig != null ? simulationConfig : SwerveSimulationConfig.defaults());

@@ -1,25 +1,40 @@
 package ca.frc6390.athena.hardware.imu;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+import edu.wpi.first.wpilibj2.command.InstantCommand;
 
 /**
  * Decorates a concrete {@link Imu} with virtual-axis support to preserve legacy heading helpers
  * while routing all sensor reads through the new vendordep-backed IMU implementations.
  */
 public class VirtualImu implements Imu {
+    private static final double DEFAULT_MAX_SPEED_WINDOW_SECONDS = 5.0;
+    private static final double MIN_MAX_SPEED_WINDOW_SECONDS = 0.02;
+
     private final Imu delegate;
     private final Map<String, VirtualAxis> virtualAxes = new HashMap<>();
     private boolean useSimulatedReadings = false;
+    private boolean inverted = false;
     private Rotation2d simRoll = new Rotation2d();
     private Rotation2d simPitch = new Rotation2d();
     private Rotation2d simYaw = new Rotation2d();
     private Rotation2d simVelX = new Rotation2d();
     private Rotation2d simVelY = new Rotation2d();
     private Rotation2d simVelZ = new Rotation2d();
+    private final Deque<SpeedSample> maxSpeedSamples = new ArrayDeque<>();
+    private double maxSpeedWindowSeconds = DEFAULT_MAX_SPEED_WINDOW_SECONDS;
+    private double maxLinearSpeed = 0.0;
+    private double maxRadialSpeed = 0.0;
 
     private static class VirtualAxis {
         private final Supplier<Rotation2d> supplier;
@@ -44,47 +59,62 @@ public class VirtualImu implements Imu {
 
     public VirtualImu(Imu delegate) {
         this.delegate = delegate;
-        addVirtualAxis("driver", delegate::getYaw);
+        addVirtualAxis("driver", this::getYaw);
+        ImuConfig config = delegate.getConfig();
+        this.inverted = config != null && config.inverted;
+    }
+
+    private static class SpeedSample {
+        private final double timestampSeconds;
+        private final double linearSpeed;
+        private final double radialSpeed;
+
+        private SpeedSample(double timestampSeconds, double linearSpeed, double radialSpeed) {
+            this.timestampSeconds = timestampSeconds;
+            this.linearSpeed = linearSpeed;
+            this.radialSpeed = radialSpeed;
+        }
     }
 
     @Override
     public Rotation2d getRoll() {
-        return useSimulatedReadings ? simRoll : delegate.getRoll();
+        return useSimulatedReadings ? applySimInversion(simRoll) : delegate.getRoll();
     }
 
     @Override
     public Rotation2d getPitch() {
-        return useSimulatedReadings ? simPitch : delegate.getPitch();
+        return useSimulatedReadings ? applySimInversion(simPitch) : delegate.getPitch();
     }
 
     @Override
     public Rotation2d getYaw() {
-        return useSimulatedReadings ? simYaw : delegate.getYaw();
+        return useSimulatedReadings ? applySimInversion(simYaw) : delegate.getYaw();
     }
 
     @Override
     public Rotation2d getVelocityX() {
-        return useSimulatedReadings ? simVelX : delegate.getVelocityX();
+        return useSimulatedReadings ? applySimInversion(simVelX) : delegate.getVelocityX();
     }
 
     @Override
     public Rotation2d getVelocityY() {
-        return useSimulatedReadings ? simVelY : delegate.getVelocityY();
+        return useSimulatedReadings ? applySimInversion(simVelY) : delegate.getVelocityY();
     }
 
     @Override
     public Rotation2d getVelocityZ() {
-        return useSimulatedReadings ? simVelZ : delegate.getVelocityZ();
+        return useSimulatedReadings ? applySimInversion(simVelZ) : delegate.getVelocityZ();
     }
 
     @Override
     public void setInverted(boolean inverted) {
+        this.inverted = inverted;
         delegate.setInverted(inverted);
     }
 
     @Override
     public boolean isInverted() {
-        return delegate.isInverted();
+        return inverted;
     }
 
     @Override
@@ -128,11 +158,19 @@ public class VirtualImu implements Imu {
         }
     }
 
+    private Rotation2d applySimInversion(Rotation2d value) {
+        if (!inverted) {
+            return value;
+        }
+        return Rotation2d.fromRadians(-value.getRadians());
+    }
+
     @Override
     public void update() {
         if (!useSimulatedReadings) {
             delegate.update();
         }
+        updateMaxSpeedTracking();
     }
 
     @Override
@@ -160,5 +198,100 @@ public class VirtualImu implements Imu {
     @Override
     public ImuConfig getConfig() {
         return delegate.getConfig();
+    }
+
+    @Override
+    public double getMaxLinearSpeed() {
+        return maxLinearSpeed;
+    }
+
+    @Override
+    public double getMaxRadialSpeed() {
+        return maxRadialSpeed;
+    }
+
+    @Override
+    public double getMaxSpeedWindowSeconds() {
+        return maxSpeedWindowSeconds;
+    }
+
+    @Override
+    public void setMaxSpeedWindowSeconds(double windowSeconds) {
+        if (!Double.isFinite(windowSeconds)) {
+            return;
+        }
+        maxSpeedWindowSeconds = Math.max(windowSeconds, MIN_MAX_SPEED_WINDOW_SECONDS);
+        pruneMaxSpeedSamples(Timer.getFPGATimestamp());
+        recomputeMaxSpeeds();
+    }
+
+    @Override
+    public void resetMaxSpeedWindow() {
+        maxSpeedSamples.clear();
+        maxLinearSpeed = 0.0;
+        maxRadialSpeed = 0.0;
+    }
+
+    @Override
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        layout.addDouble("Max Linear Speed", this::getMaxLinearSpeed);
+        layout.addDouble("Max Radial Speed", this::getMaxRadialSpeed);
+        layout.add("Max Speed Window (s)",
+                builder -> builder.addDoubleProperty(
+                        "Max Speed Window (s)",
+                        this::getMaxSpeedWindowSeconds,
+                        this::setMaxSpeedWindowSeconds));
+        layout.add("Reset Max Speeds", new InstantCommand(this::resetMaxSpeedWindow))
+                .withWidget(BuiltInWidgets.kCommand);
+        return layout;
+    }
+
+    private void updateMaxSpeedTracking() {
+        if (!Double.isFinite(maxSpeedWindowSeconds) || maxSpeedWindowSeconds <= 0.0) {
+            return;
+        }
+        double now = Timer.getFPGATimestamp();
+        double linearSpeed = computeLinearSpeed();
+        double radialSpeed = computeRadialSpeed();
+        maxSpeedSamples.addLast(new SpeedSample(now, linearSpeed, radialSpeed));
+        pruneMaxSpeedSamples(now);
+        recomputeMaxSpeeds();
+    }
+
+    private void pruneMaxSpeedSamples(double nowSeconds) {
+        double cutoff = nowSeconds - maxSpeedWindowSeconds;
+        while (!maxSpeedSamples.isEmpty() && maxSpeedSamples.peekFirst().timestampSeconds < cutoff) {
+            maxSpeedSamples.removeFirst();
+        }
+    }
+
+    private void recomputeMaxSpeeds() {
+        double maxLinear = 0.0;
+        double maxRadial = 0.0;
+        for (SpeedSample sample : maxSpeedSamples) {
+            if (sample.linearSpeed > maxLinear) {
+                maxLinear = sample.linearSpeed;
+            }
+            if (sample.radialSpeed > maxRadial) {
+                maxRadial = sample.radialSpeed;
+            }
+        }
+        maxLinearSpeed = maxLinear;
+        maxRadialSpeed = maxRadial;
+    }
+
+    private double computeLinearSpeed() {
+        Rotation2d velX = getVelocityX();
+        Rotation2d velY = getVelocityY();
+        double vx = velX != null ? velX.getRadians() : 0.0;
+        double vy = velY != null ? velY.getRadians() : 0.0;
+        double speed = Math.hypot(vx, vy);
+        return Double.isFinite(speed) ? speed : 0.0;
+    }
+
+    private double computeRadialSpeed() {
+        Rotation2d velZ = getVelocityZ();
+        double omega = velZ != null ? Math.abs(velZ.getRadians()) : 0.0;
+        return Double.isFinite(omega) ? omega : 0.0;
     }
 }

@@ -61,6 +61,12 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     private double displayRangeMeters = Double.NaN;
     private boolean publishPoseTopic;
     private IntFunction<Pose2d> tagPoseResolver = id -> null;
+    private double maxLatencySeconds = Double.POSITIVE_INFINITY;
+    private double stdDevConfidenceExponent = 0.0;
+    private double stdDevLatencyWeight = 0.0;
+    private double stdDevDistanceWeight = 0.0;
+    private double stdDevTagCountWeight = 0.0;
+    private double stdDevMinScale = 0.2;
 
     /**
      * Creates a configuration bound to a specific NetworkTables table and camera software stack.
@@ -110,6 +116,55 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
      */
     public LocalizationCameraConfig setLatencySupplier(DoubleSupplier supplier) {
         this.latencySupplier = supplier != null ? supplier : () -> 0.0;
+        return this;
+    }
+
+    /**
+     * Sets the maximum latency (seconds) to accept for localization measurements.
+     * Use a non-positive value to disable gating.
+     */
+    public LocalizationCameraConfig setMaxLatencySeconds(double maxLatencySeconds) {
+        this.maxLatencySeconds = maxLatencySeconds;
+        return this;
+    }
+
+    /**
+     * Scales pose std devs using the camera confidence (power curve). Zero disables scaling.
+     */
+    public LocalizationCameraConfig setStdDevConfidenceExponent(double exponent) {
+        this.stdDevConfidenceExponent = exponent;
+        return this;
+    }
+
+    /**
+     * Scales pose std devs using (1 + weight * latencySeconds). Zero disables scaling.
+     */
+    public LocalizationCameraConfig setStdDevLatencyWeight(double weight) {
+        this.stdDevLatencyWeight = weight;
+        return this;
+    }
+
+    /**
+     * Scales pose std devs using (1 + weight * distanceMeters). Zero disables scaling.
+     */
+    public LocalizationCameraConfig setStdDevDistanceWeight(double weight) {
+        this.stdDevDistanceWeight = weight;
+        return this;
+    }
+
+    /**
+     * Scales pose std devs using (1 + weight * (visibleTargets - 1)) in the denominator. Zero disables scaling.
+     */
+    public LocalizationCameraConfig setStdDevTagCountWeight(double weight) {
+        this.stdDevTagCountWeight = weight;
+        return this;
+    }
+
+    /**
+     * Sets the minimum scale applied to std devs after dynamic adjustments.
+     */
+    public LocalizationCameraConfig setStdDevMinScale(double minScale) {
+        this.stdDevMinScale = minScale;
         return this;
     }
 
@@ -465,6 +520,30 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
 
     public DoubleSupplier getConfidenceSupplier() {
         return confidenceSupplier;
+    }
+
+    public double getMaxLatencySeconds() {
+        return maxLatencySeconds;
+    }
+
+    public double getStdDevConfidenceExponent() {
+        return stdDevConfidenceExponent;
+    }
+
+    public double getStdDevLatencyWeight() {
+        return stdDevLatencyWeight;
+    }
+
+    public double getStdDevDistanceWeight() {
+        return stdDevDistanceWeight;
+    }
+
+    public double getStdDevTagCountWeight() {
+        return stdDevTagCountWeight;
+    }
+
+    public double getStdDevMinScale() {
+        return stdDevMinScale;
     }
 
     public EnumSet<CameraRole> getRoles() {

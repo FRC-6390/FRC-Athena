@@ -76,6 +76,21 @@ public final class MechanismSimulationConfig {
         return Math.abs(1.0 / ratio);
     }
 
+    private static double applyMotorInversion(Mechanism mechanism, double output) {
+        if (mechanism == null) {
+            return output;
+        }
+        MotorControllerGroup group = mechanism.getMotorGroup();
+        if (group == null) {
+            return output;
+        }
+        MotorController[] controllers = group.getControllers();
+        if (controllers == null || controllers.length == 0) {
+            return output;
+        }
+        return controllers[0].isInverted() ? -output : output;
+    }
+
     private double deriveDrumRadiusMeters() {
         if (sourceConfig == null) {
             return 0.02;
@@ -835,22 +850,22 @@ public final class MechanismSimulationConfig {
         public void reset() {
             double height = clamp(sim.getPositionMeters());
             MechanismSimUtil.applyEncoderState(
-                    mechanism.getEncoder(),
+                    mechanism,
                     height * unitsPerMeter,
                     sim.getVelocityMetersPerSecond() * unitsPerMeter);
         }
 
         @Override
         public void update(double dtSeconds) {
-            double output = mechanism.getOutput();
-            double voltage = mechanism.isUseVoltage() ? output : output * nominalVoltage;
+            double output = applyMotorInversion(mechanism, mechanism.getOutput());
+            double voltage = mechanism.isOutputVoltage() ? output : output * nominalVoltage;
             voltage = MathUtil.clamp(voltage, -nominalVoltage, nominalVoltage);
             sim.setInputVoltage(voltage);
             sim.update(dtSeconds);
 
             double height = clamp(sim.getPositionMeters());
             MechanismSimUtil.applyEncoderState(
-                    mechanism.getEncoder(),
+                    mechanism,
                     height * unitsPerMeter,
                     sim.getVelocityMetersPerSecond() * unitsPerMeter);
         }
@@ -892,22 +907,22 @@ public final class MechanismSimulationConfig {
         public void reset() {
             double angle = clamp(sim.getAngleRads());
             MechanismSimUtil.applyEncoderState(
-                    mechanism.getEncoder(),
+                    mechanism,
                     angle * unitsPerRadian,
                     sim.getVelocityRadPerSec() * unitsPerRadian);
         }
 
         @Override
         public void update(double dtSeconds) {
-            double output = mechanism.getOutput();
-            double voltage = mechanism.isUseVoltage() ? output : output * nominalVoltage;
+            double output = applyMotorInversion(mechanism, mechanism.getOutput());
+            double voltage = mechanism.isOutputVoltage() ? output : output * nominalVoltage;
             voltage = MathUtil.clamp(voltage, -nominalVoltage, nominalVoltage);
             sim.setInputVoltage(voltage);
             sim.update(dtSeconds);
 
             double angle = clamp(sim.getAngleRads());
             MechanismSimUtil.applyEncoderState(
-                    mechanism.getEncoder(),
+                    mechanism,
                     angle * unitsPerRadian,
                     sim.getVelocityRadPerSec() * unitsPerRadian);
         }
@@ -942,15 +957,15 @@ public final class MechanismSimulationConfig {
             simulatedAngleRad = 0.0;
             lastAngularVelocityRadPerSec = sim.getAngularVelocityRadPerSec();
             MechanismSimUtil.applyEncoderState(
-                    mechanism.getEncoder(),
+                    mechanism,
                     simulatedAngleRad * unitsPerRadian,
                     lastAngularVelocityRadPerSec * unitsPerRadian);
         }
 
         @Override
         public void update(double dtSeconds) {
-            double output = mechanism.getOutput();
-            double voltage = mechanism.isUseVoltage() ? output : output * nominalVoltage;
+            double output = applyMotorInversion(mechanism, mechanism.getOutput());
+            double voltage = mechanism.isOutputVoltage() ? output : output * nominalVoltage;
             voltage = MathUtil.clamp(voltage, -nominalVoltage, nominalVoltage);
             double clampedDt = dtSeconds;
             if (clampedDt < 0.0) {
@@ -964,7 +979,7 @@ public final class MechanismSimulationConfig {
             lastAngularVelocityRadPerSec = currentVelocity;
 
             MechanismSimUtil.applyEncoderState(
-                    mechanism.getEncoder(),
+                    mechanism,
                     simulatedAngleRad * unitsPerRadian,
                     currentVelocity * unitsPerRadian);
         }

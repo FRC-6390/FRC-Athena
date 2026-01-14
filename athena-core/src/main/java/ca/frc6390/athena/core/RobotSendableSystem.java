@@ -6,6 +6,8 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public interface RobotSendableSystem {
 
+    String SHUFFLEBOARD_ROOT = "Athena";
+
     public static enum SendableLevel {
       COMP,
       DEBUG,
@@ -26,12 +28,21 @@ public interface RobotSendableSystem {
     }
 
     default RobotSendableSystem shuffleboard(String tab, SendableLevel level) {
-      shuffleboard(Shuffleboard.getTab(tab), level);
+      shuffleboard(Shuffleboard.getTab(resolveShuffleboardTab(tab)), level);
       return this;
     }
 
     ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level);
-}
 
+    private static String resolveShuffleboardTab(String tab) {
+      if (tab == null || tab.isBlank()) {
+        return SHUFFLEBOARD_ROOT;
+      }
+      if (tab.equals(SHUFFLEBOARD_ROOT) || tab.startsWith(SHUFFLEBOARD_ROOT + "/")) {
+        return tab;
+      }
+      return SHUFFLEBOARD_ROOT + "/" + tab;
+    }
+}
 
 
