@@ -91,6 +91,15 @@ def computeAutoVersion = {
     return defaultVersion
 }
 
+def mavenUsername = project.findProperty('mavenUsername')
+        ?: System.getenv('MAVEN_USERNAME')
+        ?: System.getenv('USERNAME')
+        ?: System.getenv('GITHUB_ACTOR')
+def mavenPassword = project.findProperty('mavenPassword')
+        ?: System.getenv('MAVEN_PASSWORD')
+        ?: System.getenv('MAVEN_KEY')
+        ?: System.getenv('GITHUB_TOKEN')
+
 def providedVersion = project.hasProperty('version') ? project.property('version')?.toString() : null
 def useProvidedVersion = providedVersion && providedVersion != org.gradle.api.Project.DEFAULT_VERSION && providedVersion.trim()
 
@@ -158,6 +167,9 @@ def localRepoDir = file("$buildDir/repos/releases")
 // Publish mode can be: 'local', 'online', 'all'
 def publishMode = project.hasProperty('publishMode') ? project.property('publishMode') : 'local'
 logger.lifecycle("Athena build configuration -> version: ${pubVersion}, frcYear: ${frcYear}, publishMode: ${publishMode}, wpilibFolder: ${wpilibFolder}")
+if ((publishMode == 'online' || publishMode == 'all') && (!mavenUsername || !mavenPassword)) {
+    throw new GradleException("Missing publish credentials. Provide -PmavenUsername/-PmavenPassword or MAVEN_USERNAME/MAVEN_PASSWORD (or GITHUB_ACTOR/GITHUB_TOKEN).")
+}
 
 // -----------------------------------------------------------------------------
 // Tasks: outputVersions, updateAthenaJson, copy tasks
@@ -269,15 +281,7 @@ task updateAthenaJson {
 task copyToWpilib(type: Copy) {
     description = 'Copies local Maven artifacts + updated JSON to WPILib folder'
     group = 'Publishing'
-    dependsOn updateAthenaJson,
-            ':athena-core:publishMavenJavaPublicationToLocalRepoRepository',
-            ':athena-ctre:publishMavenJavaPublicationToLocalRepoRepository',
-            ':athena-rev:publishMavenJavaPublicationToLocalRepoRepository',
-            ':athena-photonvision:publishMavenJavaPublicationToLocalRepoRepository',
-            ':athena-limelight:publishMavenJavaPublicationToLocalRepoRepository',
-            ':athena-pathplanner:publishMavenJavaPublicationToLocalRepoRepository',
-            ':athena-choreo:publishMavenJavaPublicationToLocalRepoRepository',
-            ':athena-studica:publishMavenJavaPublicationToLocalRepoRepository'
+    dependsOn updateAthenaJson
     onlyIf { publishMode == 'local' || publishMode == 'all' }
     from localRepoDir
     into mavenFolder
@@ -332,40 +336,7 @@ ext.addTaskToCopyAllOutputs = { theTask ->
 // Jar tasks & artifacts
 // -----------------------------------------------------------------------------
 
-// We'll build a small naming convention with these
-def driverZipBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-driver_CLS"
-def zipBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-cpp_CLS"
-def javaBaseName = "_GROUP_ca_frc6390_athean_ID_${baseArtifactId}-java_CLS"
-
-// Source jar
-task sourcesJar(type: Jar, dependsOn: classes) {
-    archiveClassifier = 'sources'
-    from sourceSets.main.allSource
-}
-
-// Jars for publication
-task outputJar(type: Jar, dependsOn: classes) {
-    archiveBaseName = javaBaseName
-    destinationDirectory = outputsFolder
-    from sourceSets.main.output
-}
-
-task outputSourcesJar(type: Jar, dependsOn: classes) {
-    archiveBaseName = javaBaseName
-    destinationDirectory = outputsFolder
-    archiveClassifier = 'sources'
-    from sourceSets.main.allSource
-}
-
-artifacts {
-    archives sourcesJar
-    archives outputJar
-    archives outputSourcesJar
-}
-
-// Tie new jars into copyAllOutputs
-addTaskToCopyAllOutputs(outputSourcesJar)
-addTaskToCopyAllOutputs(outputJar)
+// Root competition artifacts are no longer published; subprojects provide all published jars.
 
 // -----------------------------------------------------------------------------
 // Wire up build dependencies
@@ -374,9 +345,6 @@ addTaskToCopyAllOutputs(outputJar)
 build.dependsOn outputVersions
 build.dependsOn copyAllOutputs
 build.dependsOn updateAthenaJson
-build.dependsOn sourcesJar
-build.dependsOn outputJar
-build.dependsOn outputSourcesJar
 build.dependsOn buildAllModules
 libraryBuild.dependsOn build
 copyToWpilib.mustRunAfter publishToMavenLocal
@@ -426,13 +394,6 @@ task cleanReleaseRepo(type: Delete) {
 // Force all tasks (except the cleaner itself) to run after cleaning
 tasks.matching { it != cleanReleaseRepo }.all {
     it.dependsOn cleanReleaseRepo
-}
-
-def mavenUsername = System.getenv("MAVEN_USERNAME") ?: System.getenv("USERNAME")
-def mavenPassword = System.getenv("MAVEN_PASSWORD") ?: System.getenv("MAVEN_KEY") ?: System.getenv("GITHUB_TOKEN")
-
-if ((publishMode == 'online' || publishMode == 'all') && (!mavenUsername || !mavenPassword)) {
-    throw new GradleException("Missing Maven credentials. Set MAVEN_USERNAME/MAVEN_PASSWORD or USERNAME/MAVEN_KEY before publishing online.")
 }
 
 publishing {
