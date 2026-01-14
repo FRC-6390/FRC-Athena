@@ -262,6 +262,10 @@ public class SwerveModule implements RobotSendableDevice {
         driveMotor.setSpeed(speed);
     }
 
+    public void setDriveVoltage(double volts) {
+        setDriveMotorVoltage(volts);
+    }
+
     private void setDriveMotorVoltage(double volts) {
         double voltageLimit = getVoltageLimit();
         double clamped = MathUtil.clamp(volts, -voltageLimit, voltageLimit);
@@ -272,6 +276,13 @@ public class SwerveModule implements RobotSendableDevice {
     public void setRotationMotor(double speed) {
         lastSteerCommand = speed;
         rotationMotor.setSpeed(speed);
+    }
+
+    public void setSteerAngle(Rotation2d angle) {
+        setRotationMotor(
+                rotationPidController.calculate(
+                        MathUtil.angleModulus(getEncoderPosition().getRadians()),
+                        angle.getRadians()));
     }
 
     public double getDriveCommandPercent() {

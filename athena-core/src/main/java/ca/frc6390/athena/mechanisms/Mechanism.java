@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanisms;
 
+import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.hardware.encoder.Encoder;
@@ -18,19 +19,25 @@ import ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.ProfiledPIDController;
+import edu.wpi.first.math.trajectory.TrapezoidProfile;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.units.measure.Voltage;
+import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import java.util.Map;
+import java.util.Set;
 
 public class Mechanism extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism{
 
@@ -40,6 +47,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final ProfiledPIDController profiledPIDController;
     private final boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
+    private static final String MOTION_AXIS_ID = "axis";
+    private final MotionLimits motionLimits;
+    private final TrapezoidProfile.Constraints baseProfiledConstraints;
     private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput, customPIDCycle;
     private double setpoint, prevSetpoint, pidOutput, feedforwardOutput, output, nudge, pidPeriod; 
     private RobotMode prevRobotMode = RobotMode.DISABLE, robotMode = RobotMode.DISABLE;
@@ -59,6 +69,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double manualOutput;
     private boolean manualOutputIsVoltage;
     private RobotCore<?> robotCore;
+    private SysIdRoutine sysIdRoutine;
+    private double sysIdRampRateVoltsPerSecond = 1.0;
+    private double sysIdStepVoltage = 7.0;
+    private double sysIdTimeoutSeconds = 10.0;
+    private double sysIdLastVoltage = 0.0;
+    private boolean sysIdActive = false;
+    private boolean sysIdPreviousOverride = false;
 
     private enum RobotMode {
         TELE,
@@ -83,6 +100,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             config.sensorSimulationConfig
         );
         setBounds(config.minBound, config.maxBound);
+        setMotionLimits(config.motionLimits);
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
@@ -112,10 +130,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.limitSwitches = limitSwitches;
         this.setpointIsOutput = useSetpointAsOutput;
         this.pidPeriod = pidPeriod;
+        this.motionLimits = new MotionLimits();
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
         }
+        this.baseProfiledConstraints =
+                profiledPIDController != null ? profiledPIDController.getConstraints() : null;
 
         pidEnabled = pidController != null || profiledPIDController != null;
 
@@ -145,12 +166,76 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
+    public MotionLimits getMotionLimits() {
+        return motionLimits;
+    }
+
+    public Mechanism setMotionLimits(MotionLimits.AxisLimits limits) {
+        motionLimits.setBaseAxisLimits(MOTION_AXIS_ID, limits);
+        return this;
+    }
+
+    public Mechanism setMotionLimits(double maxVelocity, double maxAcceleration) {
+        return setMotionLimits(new MotionLimits.AxisLimits(maxVelocity, maxAcceleration));
+    }
+
+    public Mechanism registerMotionLimitsProvider(MotionLimits.AxisLimitsProvider provider) {
+        if (provider != null) {
+            motionLimits.registerAxisProvider(MOTION_AXIS_ID, provider);
+        }
+        return this;
+    }
+
+    public MotionLimits.AxisLimits resolveMotionLimits() {
+        return motionLimits.resolveAxisLimits(MOTION_AXIS_ID);
+    }
+
     public void setRobotCore(RobotCore<?> robotCore) {
         this.robotCore = robotCore;
     }
 
     public RobotCore<?> getRobotCore() {
         return robotCore;
+    }
+
+    public double getSysIdRampRateVoltsPerSecond() {
+        return sysIdRampRateVoltsPerSecond;
+    }
+
+    public void setSysIdRampRateVoltsPerSecond(double rampRate) {
+        if (!Double.isFinite(rampRate) || rampRate <= 0.0) {
+            return;
+        }
+        sysIdRampRateVoltsPerSecond = rampRate;
+        invalidateSysIdRoutine();
+    }
+
+    public double getSysIdStepVoltage() {
+        return sysIdStepVoltage;
+    }
+
+    public void setSysIdStepVoltage(double stepVoltage) {
+        if (!Double.isFinite(stepVoltage) || stepVoltage <= 0.0) {
+            return;
+        }
+        sysIdStepVoltage = stepVoltage;
+        invalidateSysIdRoutine();
+    }
+
+    public double getSysIdTimeoutSeconds() {
+        return sysIdTimeoutSeconds;
+    }
+
+    public void setSysIdTimeoutSeconds(double timeoutSeconds) {
+        if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0.0) {
+            return;
+        }
+        sysIdTimeoutSeconds = timeoutSeconds;
+        invalidateSysIdRoutine();
+    }
+
+    public boolean isSysIdActive() {
+        return sysIdActive;
     }
 
     public double calculateMaxFreeSpeed(){
@@ -331,6 +416,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     public double calculatePID(){
         double output = 0;
         double encoderPos = getPidMeasurement();
+        applyMotionLimits();
 
         if (pidController != null){
             output += pidController.calculate(encoderPos, getSetpoint() + getNudge());
@@ -342,6 +428,38 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
         
         return output;
+    }
+
+    private void applyMotionLimits() {
+        if (profiledPIDController == null || baseProfiledConstraints == null) {
+            return;
+        }
+        MotionLimits.AxisLimits limits = resolveMotionLimits();
+        double maxVel = baseProfiledConstraints.maxVelocity;
+        double maxAccel = baseProfiledConstraints.maxAcceleration;
+        if (limits != null) {
+            if (limits.maxVelocity() > 0.0) {
+                if (Double.isFinite(maxVel) && maxVel > 0.0) {
+                    maxVel = Math.min(maxVel, limits.maxVelocity());
+                } else {
+                    maxVel = limits.maxVelocity();
+                }
+            }
+            if (limits.maxAcceleration() > 0.0) {
+                if (Double.isFinite(maxAccel) && maxAccel > 0.0) {
+                    maxAccel = Math.min(maxAccel, limits.maxAcceleration());
+                } else {
+                    maxAccel = limits.maxAcceleration();
+                }
+            }
+        }
+        if (!Double.isFinite(maxVel) || maxVel <= 0.0) {
+            maxVel = baseProfiledConstraints.maxVelocity;
+        }
+        if (!Double.isFinite(maxAccel) || maxAccel <= 0.0) {
+            maxAccel = baseProfiledConstraints.maxAcceleration;
+        }
+        profiledPIDController.setConstraints(new TrapezoidProfile.Constraints(maxVel, maxAccel));
     }
 
     private void outputMotor(double output) {
@@ -649,6 +767,23 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     .withWidget(BuiltInWidgets.kCommand);
         }
 
+        ShuffleboardLayout sysIdLayout = tab.getLayout("SysId", BuiltInLayouts.kList);
+        sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
+                .withWidget(BuiltInWidgets.kCommand);
+        sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
+                .withWidget(BuiltInWidgets.kCommand);
+        sysIdLayout.add("Dynamic Forward", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))
+                .withWidget(BuiltInWidgets.kCommand);
+        sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
+                .withWidget(BuiltInWidgets.kCommand);
+        sysIdLayout.add("Ramp Rate (V/s)",
+                builder -> builder.addDoubleProperty("Ramp Rate (V/s)", this::getSysIdRampRateVoltsPerSecond, this::setSysIdRampRateVoltsPerSecond));
+        sysIdLayout.add("Step Voltage (V)",
+                builder -> builder.addDoubleProperty("Step Voltage (V)", this::getSysIdStepVoltage, this::setSysIdStepVoltage));
+        sysIdLayout.add("Timeout (s)",
+                builder -> builder.addDoubleProperty("Timeout (s)", this::getSysIdTimeoutSeconds, this::setSysIdTimeoutSeconds));
+        sysIdLayout.addBoolean("Active", this::isSysIdActive).withWidget(BuiltInWidgets.kBooleanBox);
+
         if (level.equals(SendableLevel.DEBUG)) {
             ShuffleboardLayout controllersLayout = tab.getLayout("Controllers", BuiltInLayouts.kList);
             if (pidController != null) {
@@ -687,5 +822,62 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public void clearSimulatedEncoderState() {
         this.simEncoderOverride = false;
+    }
+
+    private SysIdRoutine getSysIdRoutine() {
+        if (sysIdRoutine == null) {
+            sysIdRoutine = new SysIdRoutine(
+                    new SysIdRoutine.Config(
+                            edu.wpi.first.units.Units.Volts.of(sysIdRampRateVoltsPerSecond).per(edu.wpi.first.units.Units.Second),
+                            edu.wpi.first.units.Units.Volts.of(sysIdStepVoltage),
+                            edu.wpi.first.units.Units.Seconds.of(sysIdTimeoutSeconds)),
+                    new SysIdRoutine.Mechanism(this::applySysIdVoltage, this::logSysIdData, this, getName()));
+        }
+        return sysIdRoutine;
+    }
+
+    private void invalidateSysIdRoutine() {
+        sysIdRoutine = null;
+    }
+
+    private void applySysIdVoltage(Voltage voltage) {
+        sysIdLastVoltage = voltage.in(edu.wpi.first.units.Units.Volts);
+        setVoltage(sysIdLastVoltage);
+    }
+
+    private void logSysIdData(SysIdRoutineLog log) {
+        double position = encoder != null ? getPosition() : 0.0;
+        double velocity = encoder != null ? getVelocity() : 0.0;
+        log.motor(getName())
+                .voltage(edu.wpi.first.units.Units.Volts.of(sysIdLastVoltage))
+                .value("position", position, "units")
+                .value("velocity", velocity, "units/s");
+    }
+
+    private void startSysId() {
+        sysIdActive = true;
+        sysIdPreviousOverride = override;
+        setOverride(true);
+    }
+
+    private void stopSysId() {
+        sysIdActive = false;
+        setOverride(sysIdPreviousOverride);
+        motors.stopMotors();
+    }
+
+    private edu.wpi.first.wpilibj2.command.Command sysIdCommand(java.util.function.Supplier<edu.wpi.first.wpilibj2.command.Command> supplier) {
+        return Commands.defer(
+                () -> Commands.either(
+                        wrapSysIdCommand(supplier.get()),
+                        Commands.runOnce(() -> DriverStation.reportWarning("SysId commands require Test mode.", false)),
+                        DriverStation::isTest),
+                Set.of(this));
+    }
+
+    private edu.wpi.first.wpilibj2.command.Command wrapSysIdCommand(edu.wpi.first.wpilibj2.command.Command base) {
+        return Commands.runOnce(this::startSysId)
+                .andThen(base)
+                .finallyDo(this::stopSysId);
     }
 }

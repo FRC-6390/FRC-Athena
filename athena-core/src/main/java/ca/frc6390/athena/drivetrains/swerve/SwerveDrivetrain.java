@@ -1,8 +1,11 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
 import java.util.Arrays;
+import java.util.Set;
 import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
+import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
@@ -15,12 +18,15 @@ import ca.frc6390.athena.drivetrains.swerve.sim.SwerveDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
+import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator3d;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
@@ -31,13 +37,18 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<SwerveDrivetrain> {
@@ -49,14 +60,24 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   public double desiredHeading, driftActivationSpeed;
   public Imu imu;
   public RobotSpeeds robotSpeeds;
+  private final MotionLimits motionLimits;
   private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault().getStructArrayTopic("/Drivetrain/SwerveStates", SwerveModuleState.struct).publish();
   private SwerveDrivetrainSimulation simulation;
   private Field2d simulationField;
   private double lastSimulationTimestamp = -1;
   private ChassisSpeeds lastCommandedSpeeds = new ChassisSpeeds();
+  private ChassisSpeeds lastLimitedSpeeds = new ChassisSpeeds();
+  private double lastMotionLimitTimestampSeconds = Double.NaN;
   private SimpleMotorFeedForwardsSendable driveFeedforward;
   private boolean driveFeedforwardEnabled = false;
   private double nominalVoltage = 12.0;
+  private SysIdRoutine sysIdRoutine;
+  private double sysIdRampRateVoltsPerSecond = 1.0;
+  private double sysIdStepVoltage = 7.0;
+  private double sysIdTimeoutSeconds = 10.0;
+  private double sysIdLastVoltage = 0.0;
+  private boolean sysIdActive = false;
+  private final Rotation2d sysIdSteerAngle = new Rotation2d();
   
   public SwerveDrivetrain(Imu imu, SwerveModuleConfig... modules) {
 
@@ -91,6 +112,8 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
     kinematics = new SwerveDriveKinematics(moduleLocations);
     double maxAngularVelocity = maxModuleRadius > 1e-6 ? maxVelocity / maxModuleRadius : maxVelocity;
     robotSpeeds = new RobotSpeeds(maxVelocity, maxAngularVelocity);
+    motionLimits = new MotionLimits()
+        .setBaseDriveLimits(MotionLimits.DriveLimits.fromRobotSpeeds(robotSpeeds));
     getIMU().addVirtualAxis("drift", () -> getIMU().getYaw());
     getIMU().setVirtualAxis("drift", getIMU().getVirtualAxis("driver"));
     desiredHeading = getIMU().getVirtualAxis("drift").getRadians();
@@ -179,6 +202,46 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
     return driveFeedforward != null;
   }
 
+  public double getSysIdRampRateVoltsPerSecond() {
+    return sysIdRampRateVoltsPerSecond;
+  }
+
+  public void setSysIdRampRateVoltsPerSecond(double rampRate) {
+    if (!Double.isFinite(rampRate) || rampRate <= 0.0) {
+      return;
+    }
+    sysIdRampRateVoltsPerSecond = rampRate;
+    invalidateSysIdRoutine();
+  }
+
+  public double getSysIdStepVoltage() {
+    return sysIdStepVoltage;
+  }
+
+  public void setSysIdStepVoltage(double stepVoltage) {
+    if (!Double.isFinite(stepVoltage) || stepVoltage <= 0.0) {
+      return;
+    }
+    sysIdStepVoltage = stepVoltage;
+    invalidateSysIdRoutine();
+  }
+
+  public double getSysIdTimeoutSeconds() {
+    return sysIdTimeoutSeconds;
+  }
+
+  public void setSysIdTimeoutSeconds(double timeoutSeconds) {
+    if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0.0) {
+      return;
+    }
+    sysIdTimeoutSeconds = timeoutSeconds;
+    invalidateSysIdRoutine();
+  }
+
+  public boolean isSysIdActive() {
+    return sysIdActive;
+  }
+
   @Override
   public Imu getIMU() {
       return imu;
@@ -198,14 +261,27 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   }
 
   @Override
+  public MotionLimits getMotionLimits() {
+    return motionLimits;
+  }
+
+  @Override
   public void update() {
     imu.update();
     
+    if (sysIdActive) {
+      for (SwerveModule module : swerveModules) {
+        module.refresh();
+      }
+      return;
+    }
+
     ChassisSpeeds speed = robotSpeeds.calculate();
 
     if (enableDriftCorrection) {
       speed.omegaRadiansPerSecond += driftCorrection(speed);
     }
+    speed = applyMotionLimits(speed);
 
     SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
 
@@ -303,6 +379,23 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
       commandsLayout.add("Brake Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Brake))).withWidget(BuiltInWidgets.kCommand);
       commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
     }
+
+    ShuffleboardLayout sysIdLayout = tab.getLayout("SysId", BuiltInLayouts.kList);
+    sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
+        .withWidget(BuiltInWidgets.kCommand);
+    sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
+        .withWidget(BuiltInWidgets.kCommand);
+    sysIdLayout.add("Dynamic Forward", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))
+        .withWidget(BuiltInWidgets.kCommand);
+    sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
+        .withWidget(BuiltInWidgets.kCommand);
+    sysIdLayout.add("Ramp Rate (V/s)",
+        builder -> builder.addDoubleProperty("Ramp Rate (V/s)", this::getSysIdRampRateVoltsPerSecond, this::setSysIdRampRateVoltsPerSecond));
+    sysIdLayout.add("Step Voltage (V)",
+        builder -> builder.addDoubleProperty("Step Voltage (V)", this::getSysIdStepVoltage, this::setSysIdStepVoltage));
+    sysIdLayout.add("Timeout (s)",
+        builder -> builder.addDoubleProperty("Timeout (s)", this::getSysIdTimeoutSeconds, this::setSysIdTimeoutSeconds));
+    sysIdLayout.addBoolean("Active", this::isSysIdActive).withWidget(BuiltInWidgets.kBooleanBox);
 
     if (simulationField != null) {
       tab.add("Sim Pose", simulationField).withWidget(BuiltInWidgets.kField);
@@ -412,10 +505,155 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
             imu.getYaw().getRadians());
   }
 
+  private SysIdRoutine getSysIdRoutine() {
+    if (sysIdRoutine == null) {
+      sysIdRoutine = new SysIdRoutine(
+          new SysIdRoutine.Config(
+              edu.wpi.first.units.Units.Volts.of(sysIdRampRateVoltsPerSecond).per(edu.wpi.first.units.Units.Second),
+              edu.wpi.first.units.Units.Volts.of(sysIdStepVoltage),
+              edu.wpi.first.units.Units.Seconds.of(sysIdTimeoutSeconds)),
+          new SysIdRoutine.Mechanism(this::applySysIdVoltage, this::logSysIdData, this, getName()));
+    }
+    return sysIdRoutine;
+  }
+
+  private void invalidateSysIdRoutine() {
+    sysIdRoutine = null;
+  }
+
+  private void applySysIdVoltage(Voltage voltage) {
+    double requested = voltage.in(edu.wpi.first.units.Units.Volts);
+    double voltageLimit = getVoltageLimit();
+    double applied = MathUtil.clamp(requested, -voltageLimit, voltageLimit);
+    sysIdLastVoltage = applied;
+    for (SwerveModule module : swerveModules) {
+      module.setSteerAngle(sysIdSteerAngle);
+      module.setDriveVoltage(applied);
+    }
+  }
+
+  private void logSysIdData(SysIdRoutineLog log) {
+    for (int i = 0; i < swerveModules.length; i++) {
+      SwerveModule module = swerveModules[i];
+      log.motor("module-" + i)
+          .voltage(edu.wpi.first.units.Units.Volts.of(sysIdLastVoltage))
+          .linearPosition(edu.wpi.first.units.Units.Meters.of(module.getDriveMotorPosition()))
+          .linearVelocity(edu.wpi.first.units.Units.MetersPerSecond.of(module.getDriveMotorVelocity()));
+    }
+  }
+
+  private void startSysId() {
+    sysIdActive = true;
+    robotSpeeds.stopSpeeds("drive");
+    robotSpeeds.stopSpeeds("auto");
+    robotSpeeds.stopSpeeds("feedback");
+  }
+
+  private void stopSysId() {
+    sysIdActive = false;
+    lastCommandedSpeeds = new ChassisSpeeds();
+    for (SwerveModule module : swerveModules) {
+      module.stop();
+    }
+  }
+
+  private Command sysIdCommand(Supplier<Command> supplier) {
+    return Commands.defer(
+        () -> Commands.either(
+            wrapSysIdCommand(supplier.get()),
+            Commands.runOnce(() -> DriverStation.reportWarning("SysId commands require Test mode.", false)),
+            DriverStation::isTest),
+        Set.of(this));
+  }
+
+  private Command wrapSysIdCommand(Command base) {
+    return Commands.runOnce(this::startSysId)
+        .andThen(base)
+        .finallyDo(this::stopSysId);
+  }
+
+  private double getVoltageLimit() {
+    if (RobotBase.isSimulation()) {
+      return nominalVoltage;
+    }
+    double battery = RobotController.getBatteryVoltage();
+    if (Double.isFinite(battery) && battery > 1e-3) {
+      return battery;
+    }
+    return nominalVoltage;
+  }
+
   private void setNominalVoltage(double nominalVoltage) {
     if (Double.isFinite(nominalVoltage) && nominalVoltage > 1e-3) {
       this.nominalVoltage = nominalVoltage;
       Arrays.stream(swerveModules).forEach(module -> module.setNominalVoltage(nominalVoltage));
     }
+  }
+
+  private MotionLimits.DriveLimits resolveDriveLimits() {
+    MotionLimits.DriveLimits limits = motionLimits.resolveDriveLimits();
+    return limits != null ? limits : MotionLimits.DriveLimits.none();
+  }
+
+  private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds) {
+    MotionLimits.DriveLimits limits = resolveDriveLimits();
+    ChassisSpeeds limited = limitVelocity(speeds, limits);
+    limited = limitAcceleration(limited, limits, Timer.getFPGATimestamp());
+    lastLimitedSpeeds = limited;
+    return limited;
+  }
+
+  private ChassisSpeeds limitVelocity(ChassisSpeeds speeds, MotionLimits.DriveLimits limits) {
+    double vx = speeds.vxMetersPerSecond;
+    double vy = speeds.vyMetersPerSecond;
+    double omega = speeds.omegaRadiansPerSecond;
+    if (limits.maxLinearVelocity() > 0.0) {
+      double linear = Math.hypot(vx, vy);
+      if (linear > limits.maxLinearVelocity()) {
+        double scale = limits.maxLinearVelocity() / linear;
+        vx *= scale;
+        vy *= scale;
+      }
+    }
+    if (limits.maxAngularVelocity() > 0.0) {
+      omega = MathUtil.clamp(omega, -limits.maxAngularVelocity(), limits.maxAngularVelocity());
+    }
+    return new ChassisSpeeds(vx, vy, omega);
+  }
+
+  private ChassisSpeeds limitAcceleration(ChassisSpeeds speeds, MotionLimits.DriveLimits limits, double nowSeconds) {
+    if (!Double.isFinite(lastMotionLimitTimestampSeconds)) {
+      lastMotionLimitTimestampSeconds = nowSeconds;
+      return speeds;
+    }
+    double dt = nowSeconds - lastMotionLimitTimestampSeconds;
+    lastMotionLimitTimestampSeconds = nowSeconds;
+    if (dt <= 0.0) {
+      return speeds;
+    }
+    double maxLinearDelta = limits.maxLinearAcceleration() > 0.0
+        ? limits.maxLinearAcceleration() * dt
+        : Double.POSITIVE_INFINITY;
+    double maxAngularDelta = limits.maxAngularAcceleration() > 0.0
+        ? limits.maxAngularAcceleration() * dt
+        : Double.POSITIVE_INFINITY;
+    double vx = limitDelta(speeds.vxMetersPerSecond, lastLimitedSpeeds.vxMetersPerSecond, maxLinearDelta);
+    double vy = limitDelta(speeds.vyMetersPerSecond, lastLimitedSpeeds.vyMetersPerSecond, maxLinearDelta);
+    double omega = limitDelta(speeds.omegaRadiansPerSecond, lastLimitedSpeeds.omegaRadiansPerSecond, maxAngularDelta);
+    return new ChassisSpeeds(vx, vy, omega);
+  }
+
+  private double limitDelta(double value, double lastValue, double maxDelta) {
+    if (!Double.isFinite(maxDelta)) {
+      return value;
+    }
+    double delta = value - lastValue;
+    if (delta > maxDelta) {
+      return lastValue + maxDelta;
+    }
+    if (delta < -maxDelta) {
+      return lastValue - maxDelta;
+    }
+    return value;
   }
 }

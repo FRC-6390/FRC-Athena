@@ -387,6 +387,18 @@ public class RobotAuto {
         return Optional.ofNullable(chooser).map(SendableChooser::getSelected);
     }
 
+    public Optional<List<Pose2d>> getSelectedAutoPoses() {
+        return getSelectedAuto().flatMap(this::getAutoPoses);
+    }
+
+    public Optional<List<Pose2d>> getAutoPoses(AutoRoutine routine) {
+        if (routine == null || routine.source() == AutoSource.CUSTOM) {
+            return Optional.empty();
+        }
+        return AutoBackends.forSource(routine.source())
+                .flatMap(backend -> backend.getAutoPoses(routine.source(), routine.reference()));
+    }
+
     public Optional<Command> buildSelectedCommand() {
         if (commandChooser != null) {
             return Optional.ofNullable(commandChooser.getSelected());

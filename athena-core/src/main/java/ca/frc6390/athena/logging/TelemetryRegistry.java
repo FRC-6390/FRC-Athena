@@ -11,9 +11,11 @@ import edu.wpi.first.wpilibj.DriverStation;
 
 public final class TelemetryRegistry {
     private static final String DEFAULT_PREFIX = "Athena";
+    private static final int DEFAULT_PERIOD_MS = 100;
     private final TelemetrySink diskSink;
     private final TelemetrySink shuffleboardSink;
     private final List<Entry> entries;
+    private final int defaultPeriodMs;
 
     private static final class Entry {
         private final String key;
@@ -52,16 +54,34 @@ public final class TelemetryRegistry {
     }
 
     public TelemetryRegistry(TelemetrySink diskSink, TelemetrySink shuffleboardSink) {
+        this(diskSink, shuffleboardSink, DEFAULT_PERIOD_MS);
+    }
+
+    public TelemetryRegistry(TelemetrySink diskSink, TelemetrySink shuffleboardSink, int defaultPeriodMs) {
         this.diskSink = diskSink;
         this.shuffleboardSink = shuffleboardSink;
         this.entries = new ArrayList<>();
+        this.defaultPeriodMs = defaultPeriodMs > 0 ? defaultPeriodMs : DEFAULT_PERIOD_MS;
     }
 
     public static TelemetryRegistry createDefault(String shuffleboardTab) {
-        TelemetrySink shuffleboardSink = new MirrorTelemetrySink(
-                new ShuffleboardTelemetrySink(shuffleboardTab),
-                new NetworkTableTelemetrySink("Telemetry"));
-        return new TelemetryRegistry(new DataLogTelemetrySink(DEFAULT_PREFIX), shuffleboardSink);
+        return create(TelemetryConfig.defualt().setShuffleboardTab(shuffleboardTab));
+    }
+
+    public static TelemetryRegistry create(TelemetryConfig config) {
+        TelemetryConfig resolved = config != null ? config : TelemetryConfig.defualt();
+        TelemetrySink disk = resolved.isDiskEnabled()
+                ? new DataLogTelemetrySink(resolved.diskPrefix())
+                : null;
+        TelemetrySink shuffleboard = null;
+        if (resolved.isShuffleboardEnabled()) {
+            TelemetrySink primary = new ShuffleboardTelemetrySink(resolved.shuffleboardTab());
+            TelemetrySink mirror = resolved.isNetworkTablesEnabled()
+                    ? new NetworkTableTelemetrySink(resolved.networkTablePrefix())
+                    : null;
+            shuffleboard = new MirrorTelemetrySink(primary, mirror);
+        }
+        return new TelemetryRegistry(disk, shuffleboard, resolved.defaultPeriodMs());
     }
 
     public void register(Object target) {
@@ -173,8 +193,9 @@ public final class TelemetryRegistry {
         TelemetryOutput shuffleboardOutput = shouldLogToShuffleboard(telemetry)
                 ? shuffleboardSink.create(key, valueType, initialValue)
                 : null;
+        int periodMs = telemetry.periodMs() > 0 ? telemetry.periodMs() : defaultPeriodMs;
         entries.add(new Entry(key, valueType, diskOutput, shuffleboardOutput, supplier,
-                Math.max(telemetry.periodMs(), 0), telemetry.epsilon(), initialValue));
+                periodMs, telemetry.epsilon(), initialValue));
     }
 
     private boolean shouldLogToDisk(Telemetry telemetry) {
@@ -308,5 +329,76 @@ public final class TelemetryRegistry {
 
     static long[] toLongArray(int[] values) {
         return Arrays.stream(values).asLongStream().toArray();
+    }
+
+    public record TelemetryConfig(
+            int defaultPeriodMs,
+            boolean diskEnabled,
+            boolean shuffleboardEnabled,
+            boolean networkTablesEnabled,
+            String shuffleboardTab,
+            String diskPrefix,
+            String networkTablePrefix) {
+
+        public static TelemetryConfig defualt() {
+            return new TelemetryConfig(
+                    DEFAULT_PERIOD_MS,
+                    true,
+                    true,
+                    true,
+                    "Telemetry",
+                    DEFAULT_PREFIX,
+                    "Telemetry");
+        }
+
+        public TelemetryConfig setDefaultPeriodMs(int defaultPeriodMs) {
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, networkTablesEnabled,
+                    shuffleboardTab, diskPrefix, networkTablePrefix);
+        }
+
+        public TelemetryConfig setDiskEnabled(boolean enabled) {
+            return new TelemetryConfig(defaultPeriodMs, enabled, shuffleboardEnabled, networkTablesEnabled,
+                    shuffleboardTab, diskPrefix, networkTablePrefix);
+        }
+
+        public TelemetryConfig setShuffleboardEnabled(boolean enabled) {
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, enabled, networkTablesEnabled,
+                    shuffleboardTab, diskPrefix, networkTablePrefix);
+        }
+
+        public TelemetryConfig setNetworkTablesEnabled(boolean enabled) {
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, enabled,
+                    shuffleboardTab, diskPrefix, networkTablePrefix);
+        }
+
+        public TelemetryConfig setShuffleboardTab(String tab) {
+            String resolved = tab != null && !tab.isBlank() ? tab : "Telemetry";
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, networkTablesEnabled,
+                    resolved, diskPrefix, networkTablePrefix);
+        }
+
+        public TelemetryConfig setDiskPrefix(String prefix) {
+            String resolved = prefix != null && !prefix.isBlank() ? prefix : DEFAULT_PREFIX;
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, networkTablesEnabled,
+                    shuffleboardTab, resolved, networkTablePrefix);
+        }
+
+        public TelemetryConfig setNetworkTablePrefix(String prefix) {
+            String resolved = prefix != null && !prefix.isBlank() ? prefix : "Telemetry";
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, networkTablesEnabled,
+                    shuffleboardTab, diskPrefix, resolved);
+        }
+
+        public boolean isDiskEnabled() {
+            return diskEnabled;
+        }
+
+        public boolean isShuffleboardEnabled() {
+            return shuffleboardEnabled;
+        }
+
+        public boolean isNetworkTablesEnabled() {
+            return networkTablesEnabled;
+        }
     }
 }

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.core.localization;
 
+import java.lang.reflect.Field;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -50,6 +51,7 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -135,6 +137,25 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private final RobotLocalizationPersistence persistence;
     private final RobotLocalizationCameraManager cameraManager;
     private boolean restoringPersistentState = false;
+    private final Matrix<N3, N1> baseStateStdDevs2d;
+    private final Matrix<N4, N1> baseStateStdDevs3d;
+    private double processStdDevScale = 1.0;
+    private boolean processStdDevUpdateFailed = false;
+    private static Field poseEstimatorQField;
+    private static Field poseEstimator3dQField;
+    private FieldObject2d plannedPathObject;
+    private FieldObject2d actualPathObject;
+    private final java.util.List<Pose2d> actualPathPoses = new java.util.ArrayList<>();
+    private double actualPathSpacingMeters = 0.1;
+    private double actualPathMinIntervalSeconds = 0.1;
+    private int actualPathMaxPoints = 600;
+    private double plannedPathSpacingMeters = 0.2;
+    private Double fieldLengthMetersOverride = null;
+    private Double fieldWidthMetersOverride = null;
+    private double lastActualPathTimestamp = Double.NEGATIVE_INFINITY;
+    private Pose2d lastActualPathPose = new Pose2d();
+    private String lastPlannedAutoId;
+    private boolean fieldPublished;
 
     public RobotLocalization(
             PoseEstimator<T> fieldEstimator,
@@ -187,6 +208,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.robotSpeeds = robotSpeeds;
         this.imu = imu;
         this.wheelPositions = wheelPositions;
+        this.baseStateStdDevs2d = config.getStd2d();
+        this.baseStateStdDevs3d = config.getStd3d();
         this.fieldPose = new Pose2d();
         this.relativePose = new Pose2d();
         this.fieldPose3d = new Pose3d(fieldPose);
@@ -198,6 +221,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.relativePosePublisher = null;
         this.fieldPose3dPublisher = null;
         this.relativePose3dPublisher = null;
+        this.plannedPathObject = field.getObject("AutoPlan");
+        this.actualPathObject = field.getObject("ActualPath");
         this.cameraManager = new RobotLocalizationCameraManager(STD_EPSILON, field);
 
         this.fieldEstimator2d = fieldEstimator2d;
@@ -743,6 +768,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
 
         field.setRobotPose(fieldPose);
+        updateActualPath();
+        publishFieldOnce();
         updateHealthMetrics();
         if (fieldPosePublisher != null) {
             fieldPosePublisher.set(fieldPose);
@@ -760,6 +787,206 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         updateSlipState();
         advanceVirtualPoseRevision();
         persistRobotState(false);
+    }
+
+    public void updateAutoVisualization(RobotAuto autos) {
+        if (autos == null) {
+            clearPlannedPath();
+            return;
+        }
+        String selectedId = autos.getSelectedAuto()
+                .map(routine -> routine.key().id())
+                .orElse(null);
+        if (Objects.equals(selectedId, lastPlannedAutoId) && !isPlannedPathEmpty()) {
+            return;
+        }
+        lastPlannedAutoId = selectedId;
+        autos.getSelectedAutoPoses()
+                .filter(list -> !list.isEmpty())
+                .ifPresentOrElse(this::setPlannedPath, this::clearPlannedPath);
+    }
+
+    public void setPlannedPath(java.util.List<Pose2d> poses) {
+        if (plannedPathObject == null) {
+            plannedPathObject = field.getObject("AutoPlan");
+        }
+        if (poses == null || poses.isEmpty()) {
+            plannedPathObject.setPoses(java.util.List.of());
+            return;
+        }
+        java.util.List<Pose2d> resolved = applyAllianceFlip(poses);
+        resolved = downsamplePoses(resolved, plannedPathSpacingMeters);
+        plannedPathObject.setPoses(resolved);
+    }
+
+    public void clearPlannedPath() {
+        if (plannedPathObject == null) {
+            plannedPathObject = field.getObject("AutoPlan");
+        }
+        plannedPathObject.setPoses(java.util.List.of());
+    }
+
+    public void resetActualPath() {
+        actualPathPoses.clear();
+        lastActualPathPose = new Pose2d();
+        lastActualPathTimestamp = Double.NEGATIVE_INFINITY;
+        if (actualPathObject == null) {
+            actualPathObject = field.getObject("ActualPath");
+        }
+        actualPathObject.setPoses(java.util.List.of());
+    }
+
+    public void setPlannedPathSpacingMeters(double spacingMeters) {
+        if (Double.isFinite(spacingMeters) && spacingMeters > 0.0) {
+            plannedPathSpacingMeters = spacingMeters;
+        }
+    }
+
+    public void setFieldDimensionsMeters(double lengthMeters, double widthMeters) {
+        if (Double.isFinite(lengthMeters) && lengthMeters > 0.0) {
+            fieldLengthMetersOverride = lengthMeters;
+        }
+        if (Double.isFinite(widthMeters) && widthMeters > 0.0) {
+            fieldWidthMetersOverride = widthMeters;
+        }
+    }
+
+    public void setActualPathSpacingMeters(double spacingMeters) {
+        if (Double.isFinite(spacingMeters) && spacingMeters > 0.0) {
+            actualPathSpacingMeters = spacingMeters;
+        }
+    }
+
+    public void setActualPathMinIntervalSeconds(double minIntervalSeconds) {
+        if (Double.isFinite(minIntervalSeconds) && minIntervalSeconds >= 0.0) {
+            actualPathMinIntervalSeconds = minIntervalSeconds;
+        }
+    }
+
+    public void setActualPathMaxPoints(int maxPoints) {
+        if (maxPoints > 0) {
+            actualPathMaxPoints = maxPoints;
+        }
+    }
+
+    private void updateActualPath() {
+        if (fieldPose == null) {
+            return;
+        }
+        double now = Timer.getFPGATimestamp();
+        if (actualPathPoses.isEmpty()) {
+            appendActualPose(fieldPose, now);
+            return;
+        }
+        double distance = fieldPose.getTranslation().getDistance(lastActualPathPose.getTranslation());
+        if (distance < actualPathSpacingMeters
+                && now - lastActualPathTimestamp < actualPathMinIntervalSeconds) {
+            return;
+        }
+        appendActualPose(fieldPose, now);
+    }
+
+    private void appendActualPose(Pose2d pose, double timestampSeconds) {
+        if (actualPathObject == null) {
+            actualPathObject = field.getObject("ActualPath");
+        }
+        actualPathPoses.add(pose);
+        if (actualPathPoses.size() > actualPathMaxPoints) {
+            actualPathPoses.remove(0);
+        }
+        lastActualPathPose = pose;
+        lastActualPathTimestamp = timestampSeconds;
+        actualPathObject.setPoses(actualPathPoses);
+    }
+
+    private boolean isPlannedPathEmpty() {
+        return plannedPathObject == null
+                || plannedPathObject.getPoses() == null
+                || plannedPathObject.getPoses().isEmpty();
+    }
+
+    private void publishFieldOnce() {
+        if (fieldPublished) {
+            return;
+        }
+        SmartDashboard.putData("Field", field);
+        fieldPublished = true;
+    }
+
+    private java.util.List<Pose2d> applyAllianceFlip(java.util.List<Pose2d> poses) {
+        if (poses == null || poses.isEmpty()) {
+            return java.util.List.of();
+        }
+        boolean isRed =
+                DriverStation.getAlliance().map(a -> a == DriverStation.Alliance.Red).orElse(false);
+        if (!isRed) {
+            return poses;
+        }
+        double fieldLength = resolveFieldLengthMeters();
+        double fieldWidth = resolveFieldWidthMeters();
+        java.util.List<Pose2d> flipped = new java.util.ArrayList<>(poses.size());
+        for (Pose2d pose : poses) {
+            if (pose == null) {
+                continue;
+            }
+            double x = fieldLength - pose.getX();
+            double y = fieldWidth - pose.getY();
+            Rotation2d rotation = pose.getRotation().plus(Rotation2d.fromDegrees(180.0));
+            flipped.add(new Pose2d(x, y, rotation));
+        }
+        return flipped;
+    }
+
+    private double resolveFieldLengthMeters() {
+        if (fieldLengthMetersOverride != null) {
+            return fieldLengthMetersOverride;
+        }
+        if (vision != null) {
+            for (LocalizationCamera camera : vision.getCameras().values()) {
+                var layout = camera != null ? camera.getConfig().getFieldLayout() : null;
+                if (layout != null) {
+                    return layout.getFieldLength();
+                }
+            }
+        }
+        return 16.54;
+    }
+
+    private double resolveFieldWidthMeters() {
+        if (fieldWidthMetersOverride != null) {
+            return fieldWidthMetersOverride;
+        }
+        if (vision != null) {
+            for (LocalizationCamera camera : vision.getCameras().values()) {
+                var layout = camera != null ? camera.getConfig().getFieldLayout() : null;
+                if (layout != null) {
+                    return layout.getFieldWidth();
+                }
+            }
+        }
+        return 8.21;
+    }
+
+    private static java.util.List<Pose2d> downsamplePoses(java.util.List<Pose2d> poses, double spacingMeters) {
+        if (poses == null || poses.isEmpty()) {
+            return java.util.List.of();
+        }
+        if (!Double.isFinite(spacingMeters) || spacingMeters <= 0.0) {
+            return poses;
+        }
+        java.util.List<Pose2d> result = new java.util.ArrayList<>();
+        Pose2d last = null;
+        for (Pose2d pose : poses) {
+            if (pose == null) {
+                continue;
+            }
+            if (last == null
+                    || pose.getTranslation().getDistance(last.getTranslation()) >= spacingMeters) {
+                result.add(pose);
+                last = pose;
+            }
+        }
+        return result;
     }
 
     private void updateHealthMetrics() {
@@ -841,6 +1068,95 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         slipActive = now <= slipActiveUntilSeconds;
         lastUpdateTimestamp = now;
         lastFieldPoseForSlip = fieldPose;
+        updateProcessStdDevScale(slipActive);
+    }
+
+    private void updateProcessStdDevScale(boolean slipActive) {
+        if (processStdDevUpdateFailed) {
+            return;
+        }
+        RobotLocalizationConfig.BackendConfig backend = backendConfig();
+        double targetScale = slipActive ? backend.slipProcessStdDevScale() : 1.0;
+        if (!Double.isFinite(targetScale) || targetScale <= 0.0) {
+            targetScale = 1.0;
+        }
+        if (Math.abs(targetScale - processStdDevScale) < 1e-3) {
+            return;
+        }
+        processStdDevScale = targetScale;
+        if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
+            applyProcessStdDevs(fieldEstimator3d, baseStateStdDevs3d, targetScale);
+            applyProcessStdDevs(relativeEstimator3d, baseStateStdDevs3d, targetScale);
+            refreshVisionStdDevs3d();
+        } else {
+            applyProcessStdDevs(fieldEstimator2d, baseStateStdDevs2d, targetScale);
+            applyProcessStdDevs(relativeEstimator2d, baseStateStdDevs2d, targetScale);
+            refreshVisionStdDevs2d();
+        }
+    }
+
+    private void refreshVisionStdDevs2d() {
+        Matrix<N3, N1> std = localizationConfig.getVisionStd2d();
+        if (fieldEstimator2d != null) {
+            fieldEstimator2d.setVisionMeasurementStdDevs(std);
+        }
+        if (relativeEstimator2d != null) {
+            relativeEstimator2d.setVisionMeasurementStdDevs(std);
+        }
+    }
+
+    private void refreshVisionStdDevs3d() {
+        Matrix<N4, N1> std = localizationConfig.getVisionStd3d();
+        if (fieldEstimator3d != null) {
+            fieldEstimator3d.setVisionMeasurementStdDevs(std);
+        }
+        if (relativeEstimator3d != null) {
+            relativeEstimator3d.setVisionMeasurementStdDevs(std);
+        }
+    }
+
+    private void applyProcessStdDevs(PoseEstimator<?> estimator, Matrix<N3, N1> base, double scale) {
+        if (estimator == null || base == null || processStdDevUpdateFailed) {
+            return;
+        }
+        try {
+            Field field = poseEstimatorQField;
+            if (field == null) {
+                field = PoseEstimator.class.getDeclaredField("m_q");
+                field.setAccessible(true);
+                poseEstimatorQField = field;
+            }
+            Matrix<?, ?> q = (Matrix<?, ?>) field.get(estimator);
+            for (int i = 0; i < 3; i++) {
+                double value = base.get(i, 0) * scale;
+                q.set(i, 0, value * value);
+            }
+        } catch (ReflectiveOperationException | RuntimeException ex) {
+            processStdDevUpdateFailed = true;
+            DriverStation.reportWarning("Failed to update pose estimator process noise: " + ex.getMessage(), false);
+        }
+    }
+
+    private void applyProcessStdDevs(PoseEstimator3d<?> estimator, Matrix<N4, N1> base, double scale) {
+        if (estimator == null || base == null || processStdDevUpdateFailed) {
+            return;
+        }
+        try {
+            Field field = poseEstimator3dQField;
+            if (field == null) {
+                field = PoseEstimator3d.class.getDeclaredField("m_q");
+                field.setAccessible(true);
+                poseEstimator3dQField = field;
+            }
+            Matrix<?, ?> q = (Matrix<?, ?>) field.get(estimator);
+            for (int i = 0; i < 4; i++) {
+                double value = base.get(i, 0) * scale;
+                q.set(i, 0, value * value);
+            }
+        } catch (ReflectiveOperationException | RuntimeException ex) {
+            processStdDevUpdateFailed = true;
+            DriverStation.reportWarning("Failed to update pose estimator process noise: " + ex.getMessage(), false);
+        }
     }
 
     public void addVirtualPose(String name, Supplier<Pose2d> supplier) {
@@ -893,6 +1209,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public Pose2d getFieldPose(){
         return fieldPose;
+    }
+
+    public RobotLocalizationConfig getLocalizationConfig() {
+        return localizationConfig;
     }
 
     public Pose3d getFieldPose3d() {
@@ -1204,7 +1524,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             if (backend.visionFusionDistanceWeight() > 0.0 && Double.isFinite(measurement.distanceMeters())) {
                 distanceWeight = 1.0 / (1.0 + measurement.distanceMeters() * backend.visionFusionDistanceWeight());
             }
-            double weight = baseWeight * confidenceWeight * latencyWeight * distanceWeight;
+            double cameraWeight = measurement.weightMultiplier();
+            if (!Double.isFinite(cameraWeight) || cameraWeight <= 0.0) {
+                cameraWeight = 1.0;
+            }
+            double weight = baseWeight * confidenceWeight * latencyWeight * distanceWeight * cameraWeight;
             if (!Double.isFinite(weight) || weight < minWeight) {
                 continue;
             }
@@ -1258,7 +1582,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 fusedLatency,
                 fusedStdDevs,
                 fusedConfidence,
-                fusedDistance));
+                fusedDistance,
+                1.0));
     }
 
     private boolean hasPoseAgreement(

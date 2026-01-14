@@ -115,6 +115,9 @@ public class LocalizationCamera {
     private final DoubleSupplier targetPitchSupplier;
     private final DoubleSupplier targetDistanceSupplier;
     private final IntSupplier tagIdSupplier;
+    private final DoubleSupplier poseAmbiguitySupplier;
+    private final DoubleSupplier cameraPitchSupplier;
+    private final DoubleSupplier cameraRollSupplier;
     private final DoubleSupplier confidenceSupplier;
     private final Supplier<List<TargetMeasurement>> targetMeasurementsSupplier;
     private final Transform3d robotToCameraTransform;
@@ -123,6 +126,7 @@ public class LocalizationCamera {
     private final Rotation2d cameraYawRelativeToRobot;
     private final double displayHorizontalFovDeg;
     private final double displayRangeMeters;
+    private final double visionWeightMultiplier;
     private final EnumSet<LocalizationCameraConfig.CameraRole> roles;
     private final EnumMap<LocalizationCameraCapability, Object> capabilities =
             new EnumMap<>(LocalizationCameraCapability.class);
@@ -158,6 +162,9 @@ public class LocalizationCamera {
         this.targetPitchSupplier = wrapDouble(config.getTargetPitchSupplier(), Double.NaN);
         this.targetDistanceSupplier = wrapDouble(config.getTagDistanceSupplier(), Double.NaN);
         this.tagIdSupplier = wrapInt(config.getTagIdSupplier(), -1);
+        this.poseAmbiguitySupplier = wrapDouble(config.getPoseAmbiguitySupplier(), Double.NaN);
+        this.cameraPitchSupplier = wrapDouble(config.getCameraPitchSupplier(), Double.NaN);
+        this.cameraRollSupplier = wrapDouble(config.getCameraRollSupplier(), Double.NaN);
         this.confidenceSupplier = wrapDouble(config.getConfidenceSupplier(), 1.0);
         this.targetMeasurementsSupplier = config.getTargetMeasurementsSupplier();
         this.robotToCameraTransform = config.getRobotToCameraTransform();
@@ -168,6 +175,7 @@ public class LocalizationCamera {
                 Rotation2d.fromRadians(robotToCameraTransform.getRotation().getZ());
         this.displayHorizontalFovDeg = config.getDisplayHorizontalFov();
         this.displayRangeMeters = config.getDisplayRangeMeters();
+        this.visionWeightMultiplier = sanitizeWeight(config.getVisionWeightMultiplier());
         IntFunction<Pose2d> resolver = config.getTagPoseResolver();
         this.tagPoseResolver = resolver != null ? resolver : id -> null;
         EnumSet<LocalizationCameraConfig.CameraRole> configRoles = config.getRoles();
@@ -442,7 +450,10 @@ public class LocalizationCamera {
                         getMeasurementConfidence(),
                         getMeasurementDistance(),
                         latencySeconds,
-                        visibleTargetsSupplier.getAsInt());
+                        visibleTargetsSupplier.getAsInt(),
+                        getMeasurementAmbiguity(),
+                        getCameraPitchDegrees(),
+                        getCameraRollDegrees());
 
         return Optional.of(
                 new VisionMeasurement(
@@ -452,7 +463,8 @@ public class LocalizationCamera {
                         latencySeconds,
                         adjustedStdDevs,
                         getMeasurementConfidence(),
-                        getMeasurementDistance()));
+                        getMeasurementDistance(),
+                        visionWeightMultiplier));
     }
 
     private Matrix<N3, N1> scaleStdDevs(
@@ -460,11 +472,18 @@ public class LocalizationCamera {
             double confidence,
             double distanceMeters,
             double latencySeconds,
-            int visibleTargets) {
+            int visibleTargets,
+            double ambiguity,
+            double cameraPitchDegrees,
+            double cameraRollDegrees) {
         if (stdDevs == null) {
             return null;
         }
         double scale = 1.0;
+        double baseScale = config.getStdDevBaseScale();
+        if (Double.isFinite(baseScale) && baseScale > 0.0) {
+            scale *= baseScale;
+        }
         double confidenceExponent = config.getStdDevConfidenceExponent();
         if (confidenceExponent > 0.0 && Double.isFinite(confidence)) {
             double clamped = Math.max(0.05, Math.min(1.0, confidence));
@@ -481,6 +500,18 @@ public class LocalizationCamera {
         double tagCountWeight = config.getStdDevTagCountWeight();
         if (tagCountWeight > 0.0 && visibleTargets > 1) {
             scale /= (1.0 + tagCountWeight * (visibleTargets - 1));
+        }
+        double ambiguityWeight = config.getStdDevAmbiguityWeight();
+        if (ambiguityWeight > 0.0 && Double.isFinite(ambiguity)) {
+            scale *= (1.0 + ambiguityWeight * Math.max(0.0, ambiguity));
+        }
+        double pitchWeight = config.getStdDevPitchWeight();
+        if (pitchWeight > 0.0 && Double.isFinite(cameraPitchDegrees)) {
+            scale *= (1.0 + pitchWeight * Math.abs(cameraPitchDegrees));
+        }
+        double rollWeight = config.getStdDevRollWeight();
+        if (rollWeight > 0.0 && Double.isFinite(cameraRollDegrees)) {
+            scale *= (1.0 + rollWeight * Math.abs(cameraRollDegrees));
         }
         double minScale = config.getStdDevMinScale();
         if (Double.isFinite(minScale) && minScale > 0.0) {
@@ -567,6 +598,27 @@ public class LocalizationCamera {
         return confidenceSupplier.getAsDouble();
     }
 
+    /**
+     * Vendor reported pose ambiguity for the current frame.
+     */
+    public double getMeasurementAmbiguity() {
+        return poseAmbiguitySupplier.getAsDouble();
+    }
+
+    /**
+     * Camera pitch in degrees when supplied by the integration.
+     */
+    public double getCameraPitchDegrees() {
+        return cameraPitchSupplier.getAsDouble();
+    }
+
+    /**
+     * Camera roll in degrees when supplied by the integration.
+     */
+    public double getCameraRollDegrees() {
+        return cameraRollSupplier.getAsDouble();
+    }
+
     private double getMeasurementDistance() {
         double distance = targetDistanceSupplier.getAsDouble();
         if (!Double.isNaN(distance) && Double.isFinite(distance)) {
@@ -588,6 +640,36 @@ public class LocalizationCamera {
      */
     public Transform3d getRobotToCameraTransform() {
         return robotToCameraTransform;
+    }
+
+    public LocalizationCamera setStdDevAmbiguityWeight(double weight) {
+        config.setStdDevAmbiguityWeight(weight);
+        return this;
+    }
+
+    public LocalizationCamera setStdDevDistanceWeight(double weight) {
+        config.setStdDevDistanceWeight(weight);
+        return this;
+    }
+
+    public LocalizationCamera setStdDevLatencyWeight(double weight) {
+        config.setStdDevLatencyWeight(weight);
+        return this;
+    }
+
+    public LocalizationCamera setStdDevPitchWeight(double weight) {
+        config.setStdDevPitchWeight(weight);
+        return this;
+    }
+
+    public LocalizationCamera setStdDevRollWeight(double weight) {
+        config.setStdDevRollWeight(weight);
+        return this;
+    }
+
+    public LocalizationCamera setVisionWeightMultiplier(double weight) {
+        config.setVisionWeightMultiplier(weight);
+        return this;
     }
 
     /**
@@ -1118,6 +1200,7 @@ public class LocalizationCamera {
      * @param stdDevs covariance diagonal describing measurement noise
      * @param confidence vendor confidence in the range {@code [0, 1]}
      * @param distanceMeters estimated camera-to-target distance in meters
+     * @param weightMultiplier per-camera weight multiplier for fusion
      */
     public static record VisionMeasurement(
             Pose2d pose2d,
@@ -1126,7 +1209,8 @@ public class LocalizationCamera {
             double latencySeconds,
             Matrix<N3, N1> stdDevs,
             double confidence,
-            double distanceMeters) {
+            double distanceMeters,
+            double weightMultiplier) {
         public VisionMeasurement {
             pose2d = pose2d != null ? pose2d : new Pose2d();
             pose3d = pose3d != null ? pose3d : new Pose3d(pose2d);
@@ -1136,6 +1220,9 @@ public class LocalizationCamera {
             }
             if (!Double.isFinite(distanceMeters)) {
                 distanceMeters = Double.NaN;
+            }
+            if (!Double.isFinite(weightMultiplier) || weightMultiplier <= 0.0) {
+                weightMultiplier = 1.0;
             }
         }
 
@@ -1147,6 +1234,10 @@ public class LocalizationCamera {
                 estimator.addVisionMeasurement(pose2d, timestampSeconds, stdDevs);
             }
         }
+    }
+
+    private static double sanitizeWeight(double weight) {
+        return Double.isFinite(weight) && weight > 0.0 ? weight : 1.0;
     }
 
     /**

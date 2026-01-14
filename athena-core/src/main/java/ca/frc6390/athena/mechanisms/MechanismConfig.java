@@ -13,6 +13,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.encoder.EncoderType;
@@ -100,6 +101,8 @@ public class MechanismConfig<T extends Mechanism> {
     public double minBound = Double.NaN;
     /** Optional maximum bound for mechanism setpoints. */
     public double maxBound = Double.NaN;
+    /** Optional motion limits applied to profiled PID constraints (max velocity/acceleration). */
+    public MotionLimits.AxisLimits motionLimits = null;
 
     /** Neutral motor behavior applied to all controllers (coast vs. brake). */
     public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
@@ -504,6 +507,28 @@ public class MechanismConfig<T extends Mechanism> {
     public MechanismConfig<T> setProfiledPID(ProfiledPIDController profiledPIDController){
         this.profiledPIDController = profiledPIDController;
         return this;
+    }
+
+    /**
+     * Sets the base motion limits used to clamp profiled PID constraints.
+     *
+     * @param limits max velocity/acceleration caps for this mechanism
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> setMotionLimits(MotionLimits.AxisLimits limits) {
+        this.motionLimits = limits;
+        return this;
+    }
+
+    /**
+     * Sets the base motion limits used to clamp profiled PID constraints.
+     *
+     * @param maxVelocity maximum velocity
+     * @param maxAcceleration maximum acceleration
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> setMotionLimits(double maxVelocity, double maxAcceleration) {
+        return setMotionLimits(new MotionLimits.AxisLimits(maxVelocity, maxAcceleration));
     }
 
     /**

@@ -1,5 +1,7 @@
 package ca.frc6390.athena.choreo;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -11,11 +13,14 @@ import ca.frc6390.athena.core.RobotAuto;
 import ca.frc6390.athena.core.auto.AutoBackend;
 import ca.frc6390.athena.core.auto.ChoreoAutoFactory;
 import ca.frc6390.athena.core.auto.ChoreoBinding;
+import choreo.Choreo;
 import choreo.auto.AutoFactory;
 import choreo.auto.AutoRoutine;
 import choreo.auto.AutoTrajectory;
 import choreo.trajectory.TrajectorySample;
+import choreo.trajectory.Trajectory;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -110,6 +115,27 @@ public class ChoreoAutoBackend implements AutoBackend {
         stopFollower = () -> binding.follower().accept(binding.poseSupplier().get(), new ChassisSpeeds());
         bindNamedCommands(autoFactory);
         return Optional.of(createdFactory);
+    }
+
+    @Override
+    public Optional<List<Pose2d>> getAutoPoses(RobotAuto.AutoSource source, String reference) {
+        if (source != RobotAuto.AutoSource.CHOREO || reference == null || reference.isBlank()) {
+            return Optional.empty();
+        }
+        TrajectoryRef ref = TrajectoryRef.parse(reference);
+        Optional<? extends Trajectory<?>> trajectoryOpt = Choreo.loadTrajectory(ref.name());
+        if (trajectoryOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        Trajectory<?> trajectory = trajectoryOpt.get();
+        if (ref.splitIndex().isPresent()) {
+            trajectory = trajectory.getSplit(ref.splitIndex().getAsInt()).orElse(null);
+        }
+        if (trajectory == null) {
+            return Optional.empty();
+        }
+        Pose2d[] poses = trajectory.getPoses();
+        return poses != null ? Optional.of(Arrays.asList(poses)) : Optional.empty();
     }
 
     private void bindNamedCommands(AutoFactory factory) {

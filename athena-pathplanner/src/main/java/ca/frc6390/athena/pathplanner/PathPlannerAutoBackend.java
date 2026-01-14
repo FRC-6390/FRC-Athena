@@ -1,7 +1,10 @@
 package ca.frc6390.athena.pathplanner;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Supplier;
 
 import org.json.simple.parser.ParseException;
@@ -25,6 +28,7 @@ import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.path.PathPlannerPath;
 import com.pathplanner.lib.util.FileVersionException;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -121,6 +125,40 @@ public class PathPlannerAutoBackend implements AutoBackend {
         });
     }
 
+    @Override
+    public Optional<List<Pose2d>> getAutoPoses(RobotAuto.AutoSource source, String reference) {
+        if (reference == null || reference.isBlank()) {
+            return Optional.empty();
+        }
+        if (source == RobotAuto.AutoSource.PATH_PLANNER) {
+            try {
+                List<PathPlannerPath> paths = PathPlannerAuto.getPathGroupFromAutoFile(reference);
+                return Optional.of(flattenPathPoses(paths));
+            } catch (IOException | ParseException ex) {
+                try {
+                    PathPlannerPath path = PathPlannerPath.fromPathFile(reference);
+                    return Optional.of(path.getPathPoses());
+                } catch (IOException | ParseException | FileVersionException pathEx) {
+                    DriverStation.reportWarning(
+                            "Failed to load PathPlanner auto poses for \"" + reference + "\"", pathEx.getStackTrace());
+                }
+            }
+        }
+        if (source == RobotAuto.AutoSource.CHOREO) {
+            try {
+                ChoreoRef ref = ChoreoRef.parse(reference);
+                PathPlannerPath path = ref.index().isPresent()
+                        ? PathPlannerPath.fromChoreoTrajectory(ref.name(), ref.index().getAsInt())
+                        : PathPlannerPath.fromChoreoTrajectory(ref.name());
+                return Optional.of(path.getPathPoses());
+            } catch (IOException | ParseException | FileVersionException ex) {
+                DriverStation.reportWarning(
+                        "Failed to load Choreo poses for \"" + reference + "\"", ex.getStackTrace());
+            }
+        }
+        return Optional.empty();
+    }
+
     private static PIDConstants toPid(HolonomicPidConstants pid) {
         return new PIDConstants(pid.kP(), pid.kI(), pid.kD(), pid.iZone());
     }
@@ -130,5 +168,46 @@ public class PathPlannerAutoBackend implements AutoBackend {
             ChassisSpeeds desiredSpeeds = sample.getChassisSpeeds();
             binding.follower().accept(sample.getPose(), desiredSpeeds);
         };
+    }
+
+    private static List<Pose2d> flattenPathPoses(List<PathPlannerPath> paths) {
+        if (paths == null || paths.isEmpty()) {
+            return List.of();
+        }
+        List<Pose2d> poses = new ArrayList<>();
+        for (PathPlannerPath path : paths) {
+            if (path == null) {
+                continue;
+            }
+            List<Pose2d> pathPoses = path.getPathPoses();
+            if (pathPoses == null || pathPoses.isEmpty()) {
+                continue;
+            }
+            if (poses.isEmpty()) {
+                poses.addAll(pathPoses);
+            } else {
+                poses.addAll(pathPoses.subList(1, pathPoses.size()));
+            }
+        }
+        return poses;
+    }
+
+    private record ChoreoRef(String name, OptionalInt index) {
+        private static ChoreoRef parse(String reference) {
+            if (reference == null) {
+                return new ChoreoRef("", OptionalInt.empty());
+            }
+            int dot = reference.lastIndexOf('.');
+            if (dot <= 0 || dot == reference.length() - 1) {
+                return new ChoreoRef(reference, OptionalInt.empty());
+            }
+            String maybeIndex = reference.substring(dot + 1);
+            try {
+                int idx = Integer.parseInt(maybeIndex);
+                return new ChoreoRef(reference.substring(0, dot), OptionalInt.of(idx));
+            } catch (NumberFormatException ex) {
+                return new ChoreoRef(reference, OptionalInt.empty());
+            }
+        }
     }
 }

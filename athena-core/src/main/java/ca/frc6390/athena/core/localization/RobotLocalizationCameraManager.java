@@ -29,7 +29,7 @@ import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 final class RobotLocalizationCameraManager {
 
     private static final Pose2d ZERO_POSE = new Pose2d();
-    private static final Pose2d[] EMPTY_POSES = new Pose2d[0];
+    private static final java.util.List<Pose2d> EMPTY_POSES = java.util.List.of();
 
     private final double stdEpsilon;
     private final Field2d field;

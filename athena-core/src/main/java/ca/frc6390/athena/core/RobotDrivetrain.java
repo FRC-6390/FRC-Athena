@@ -25,6 +25,7 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
     T get();
     Imu getIMU();
     void setNeutralMode(MotorNeutralMode mode);
+    MotionLimits getMotionLimits();
     RobotSpeeds getRobotSpeeds();
     void update();
     Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);

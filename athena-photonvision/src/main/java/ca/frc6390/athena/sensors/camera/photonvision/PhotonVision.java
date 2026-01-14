@@ -18,6 +18,7 @@ import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -40,6 +41,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
     private double lastTargetPitchDegrees = Double.NaN;
     private double lastTargetDistanceMeters = Double.NaN;
     private int lastTargetId = -1;
+    private double lastPoseAmbiguity = Double.NaN;
+    private double lastCameraPitchDegrees = Double.NaN;
+    private double lastCameraRollDegrees = Double.NaN;
     private List<LocalizationCamera.TargetMeasurement> latestMeasurements = List.of();
 
     private static final class LocalizationSnapshot {
@@ -131,6 +135,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
                         .setTargetYawSupplier(this::supplyTargetYaw)
                         .setTagDistanceSupplier(this::supplyTargetDistance)
                         .setTagIdSupplier(this::supplyTargetId)
+                        .setPoseAmbiguitySupplier(this::supplyPoseAmbiguity)
+                        .setCameraPitchSupplier(this::supplyCameraPitch)
+                        .setCameraRollSupplier(this::supplyCameraRoll)
                         .setTargetMeasurementsSupplier(this::supplyTargetMeasurements)
                         .setFieldLayout(fieldLayout);
         return new LocalizationCamera(cameraConfig).registerCapability(LocalizationCameraCapability.PHOTON_VISION, this);
@@ -144,6 +151,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
             lastTargetPitchDegrees = Double.NaN;
             lastTargetDistanceMeters = Double.NaN;
             lastTargetId = -1;
+            lastPoseAmbiguity = Double.NaN;
+            lastCameraPitchDegrees = Double.NaN;
+            lastCameraRollDegrees = Double.NaN;
             latestSnapshot = LocalizationSnapshot.empty();
             latestMeasurements = List.of();
             clearResults();
@@ -152,6 +162,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
 
         if (results == null || results.isEmpty()) {
             latestMeasurements = List.of();
+            lastPoseAmbiguity = Double.NaN;
+            lastCameraPitchDegrees = Double.NaN;
+            lastCameraRollDegrees = Double.NaN;
             clearResults();
             return;
         }
@@ -160,6 +173,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         lastTargetPitchDegrees = Double.NaN;
         lastTargetDistanceMeters = Double.NaN;
         lastTargetId = -1;
+        lastPoseAmbiguity = Double.NaN;
+        lastCameraPitchDegrees = Double.NaN;
+        lastCameraRollDegrees = Double.NaN;
 
         Optional<EstimatedRobotPose> visionEst = Optional.empty();
         List<PhotonTrackedTarget> lastTargets = List.of();
@@ -178,6 +194,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
                     if (bestTransform != null) {
                         lastTargetDistanceMeters = bestTransform.getTranslation().getNorm();
                     }
+                    lastPoseAmbiguity = bestTarget.getPoseAmbiguity();
                 }
             }
         }
@@ -185,6 +202,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         if (visionEst.isPresent()) {
             EstimatedRobotPose estimate = visionEst.get();
             DistanceObservation stats = calculateDistanceStats(estimate, lastTargets);
+            Rotation3d rotation = estimate.estimatedPose.getRotation();
+            lastCameraRollDegrees = Math.toDegrees(rotation.getX());
+            lastCameraPitchDegrees = Math.toDegrees(rotation.getY());
             latestSnapshot =
                     new LocalizationSnapshot(
                             estimate.estimatedPose.toPose2d(),
@@ -315,6 +335,18 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
 
     private int supplyTargetId() {
         return lastTargetId;
+    }
+
+    private double supplyPoseAmbiguity() {
+        return lastPoseAmbiguity;
+    }
+
+    private double supplyCameraPitch() {
+        return lastCameraPitchDegrees;
+    }
+
+    private double supplyCameraRoll() {
+        return lastCameraRollDegrees;
     }
 
     private List<LocalizationCamera.TargetMeasurement> supplyTargetMeasurements() {

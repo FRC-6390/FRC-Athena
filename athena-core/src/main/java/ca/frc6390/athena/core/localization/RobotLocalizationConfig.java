@@ -337,6 +337,10 @@ public record RobotLocalizationConfig(
         return setBackend(backend().withSlipVisionStdDevScale(slipVisionStdDevScale));
     }
 
+    public RobotLocalizationConfig setSlipProcessStdDevScale(double slipProcessStdDevScale) {
+        return setBackend(backend().withSlipProcessStdDevScale(slipProcessStdDevScale));
+    }
+
     public RobotLocalizationConfig setImuStrategy(BackendConfig.ImuStrategy imuStrategy) {
         return setBackend(backend().withImuStrategy(imuStrategy));
     }
@@ -397,6 +401,7 @@ public record RobotLocalizationConfig(
             double slipAccelDisagreement,
             double slipHoldSeconds,
             double slipVisionStdDevScale,
+            double slipProcessStdDevScale,
             double visionFusionMaxSeparationSeconds,
             double visionFusionMinWeight,
             double visionFusionDistanceWeight,
@@ -435,6 +440,7 @@ public record RobotLocalizationConfig(
                     1.0,
                     0.25,
                     0.7,
+                    1.5,
                     0.04,
                     1e-3,
                     0.25,
@@ -457,6 +463,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -479,6 +486,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -501,6 +509,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -523,6 +532,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -545,6 +555,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -567,6 +578,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -589,6 +601,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -611,6 +624,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -633,6 +647,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -655,6 +670,30 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
+                    visionFusionMaxSeparationSeconds,
+                    visionFusionMinWeight,
+                    visionFusionDistanceWeight,
+                    visionFusionLatencyWeight,
+                    visionFusionConfidenceExponent,
+                    poseJumpMeters,
+                    poseJumpHoldSeconds,
+                    poseJumpAgreementMeters);
+        }
+
+        public BackendConfig withSlipProcessStdDevScale(double slipProcessStdDevScale) {
+            return new BackendConfig(
+                    slipStrategy,
+                    imuStrategy,
+                    visionStrategy,
+                    slipThreshold,
+                    slipYawRateThreshold,
+                    slipYawRateDisagreement,
+                    slipAccelThreshold,
+                    slipAccelDisagreement,
+                    slipHoldSeconds,
+                    slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -677,6 +716,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -699,6 +739,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -721,6 +762,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -743,6 +785,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -765,6 +808,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -787,6 +831,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -809,6 +854,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -831,6 +877,7 @@ public record RobotLocalizationConfig(
                     slipAccelDisagreement,
                     slipHoldSeconds,
                     slipVisionStdDevScale,
+                    slipProcessStdDevScale,
                     visionFusionMaxSeparationSeconds,
                     visionFusionMinWeight,
                     visionFusionDistanceWeight,
@@ -877,6 +924,9 @@ public record RobotLocalizationConfig(
             }
             if (!Double.isFinite(slipVisionStdDevScale) || slipVisionStdDevScale <= 0.0) {
                 slipVisionStdDevScale = 0.7;
+            }
+            if (!Double.isFinite(slipProcessStdDevScale) || slipProcessStdDevScale <= 0.0) {
+                slipProcessStdDevScale = 1.5;
             }
             if (!Double.isFinite(visionFusionMaxSeparationSeconds) || visionFusionMaxSeparationSeconds <= 0.0) {
                 visionFusionMaxSeparationSeconds = 0.04;

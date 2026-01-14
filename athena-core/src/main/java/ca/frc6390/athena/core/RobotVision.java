@@ -254,7 +254,11 @@ public class RobotVision implements RobotSendableSystem {
       double stdX = safeStdDev(std.get(0, 0));
       double stdY = safeStdDev(std.get(1, 0));
       double stdTheta = safeStdDev(std.get(2, 0));
-      return stdX + stdY + stdTheta;
+      double weight = measurement.weightMultiplier();
+      if (!Double.isFinite(weight) || weight <= 0.0) {
+         weight = 1.0;
+      }
+      return (stdX + stdY + stdTheta) / weight;
    }
 
    public Set<String> getCameraTables() {

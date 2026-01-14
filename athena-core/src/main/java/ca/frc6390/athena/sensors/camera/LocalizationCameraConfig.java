@@ -56,7 +56,11 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     private DoubleSupplier targetPitchSupplier = () -> Double.NaN;
     private DoubleSupplier targetDistanceSupplier = () -> Double.NaN;
     private IntSupplier tagIdSupplier = () -> -1;
+    private DoubleSupplier poseAmbiguitySupplier = () -> Double.NaN;
+    private DoubleSupplier cameraPitchSupplier = () -> Double.NaN;
+    private DoubleSupplier cameraRollSupplier = () -> Double.NaN;
     private Supplier<List<LocalizationCamera.TargetMeasurement>> targetMeasurementsSupplier = List::of;
+    private AprilTagFieldLayout fieldLayout;
     private double displayHorizontalFovDeg = Double.NaN;
     private double displayRangeMeters = Double.NaN;
     private boolean publishPoseTopic;
@@ -66,7 +70,12 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     private double stdDevLatencyWeight = 0.0;
     private double stdDevDistanceWeight = 0.0;
     private double stdDevTagCountWeight = 0.0;
+    private double stdDevAmbiguityWeight = 0.0;
+    private double stdDevPitchWeight = 0.0;
+    private double stdDevRollWeight = 0.0;
+    private double stdDevBaseScale = 1.0;
     private double stdDevMinScale = 0.2;
+    private double visionWeightMultiplier = 1.0;
 
     /**
      * Creates a configuration bound to a specific NetworkTables table and camera software stack.
@@ -161,10 +170,50 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
     }
 
     /**
+     * Scales pose std devs using (1 + weight * ambiguity). Zero disables scaling.
+     */
+    public LocalizationCameraConfig setStdDevAmbiguityWeight(double weight) {
+        this.stdDevAmbiguityWeight = weight;
+        return this;
+    }
+
+    /**
+     * Scales pose std devs using (1 + weight * |pitchDegrees|). Zero disables scaling.
+     */
+    public LocalizationCameraConfig setStdDevPitchWeight(double weight) {
+        this.stdDevPitchWeight = weight;
+        return this;
+    }
+
+    /**
+     * Scales pose std devs using (1 + weight * |rollDegrees|). Zero disables scaling.
+     */
+    public LocalizationCameraConfig setStdDevRollWeight(double weight) {
+        this.stdDevRollWeight = weight;
+        return this;
+    }
+
+    /**
+     * Scales pose std devs using a constant multiplier for this camera. One disables scaling.
+     */
+    public LocalizationCameraConfig setStdDevBaseScale(double scale) {
+        this.stdDevBaseScale = scale;
+        return this;
+    }
+
+    /**
      * Sets the minimum scale applied to std devs after dynamic adjustments.
      */
     public LocalizationCameraConfig setStdDevMinScale(double minScale) {
         this.stdDevMinScale = minScale;
+        return this;
+    }
+
+    /**
+     * Sets a per-camera weight multiplier applied during multi-camera fusion.
+     */
+    public LocalizationCameraConfig setVisionWeightMultiplier(double weight) {
+        this.visionWeightMultiplier = weight;
         return this;
     }
 
@@ -200,6 +249,7 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
      * @param layout field layout used to translate tag identifiers into poses
      */
     public LocalizationCameraConfig setFieldLayout(AprilTagFieldLayout layout) {
+        this.fieldLayout = layout;
         if (layout == null) {
             this.tagPoseResolver = id -> null;
         } else {
@@ -316,6 +366,30 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
      */
     public LocalizationCameraConfig setTargetPitchSupplier(DoubleSupplier supplier) {
         this.targetPitchSupplier = supplier != null ? supplier : () -> Double.NaN;
+        return this;
+    }
+
+    /**
+     * Supplies the pose ambiguity reported by the vision pipeline (0-1, higher is worse).
+     */
+    public LocalizationCameraConfig setPoseAmbiguitySupplier(DoubleSupplier supplier) {
+        this.poseAmbiguitySupplier = supplier != null ? supplier : () -> Double.NaN;
+        return this;
+    }
+
+    /**
+     * Supplies the camera pitch in degrees.
+     */
+    public LocalizationCameraConfig setCameraPitchSupplier(DoubleSupplier supplier) {
+        this.cameraPitchSupplier = supplier != null ? supplier : () -> Double.NaN;
+        return this;
+    }
+
+    /**
+     * Supplies the camera roll in degrees.
+     */
+    public LocalizationCameraConfig setCameraRollSupplier(DoubleSupplier supplier) {
+        this.cameraRollSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
 
@@ -506,8 +580,24 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
         return tagIdSupplier;
     }
 
+    public DoubleSupplier getPoseAmbiguitySupplier() {
+        return poseAmbiguitySupplier;
+    }
+
+    public DoubleSupplier getCameraPitchSupplier() {
+        return cameraPitchSupplier;
+    }
+
+    public DoubleSupplier getCameraRollSupplier() {
+        return cameraRollSupplier;
+    }
+
     public Supplier<List<LocalizationCamera.TargetMeasurement>> getTargetMeasurementsSupplier() {
         return targetMeasurementsSupplier;
+    }
+
+    public AprilTagFieldLayout getFieldLayout() {
+        return fieldLayout;
     }
 
     public double getDisplayHorizontalFov() {
@@ -542,8 +632,28 @@ public class LocalizationCameraConfig implements ConfigurableCamera {
         return stdDevTagCountWeight;
     }
 
+    public double getStdDevAmbiguityWeight() {
+        return stdDevAmbiguityWeight;
+    }
+
+    public double getStdDevPitchWeight() {
+        return stdDevPitchWeight;
+    }
+
+    public double getStdDevRollWeight() {
+        return stdDevRollWeight;
+    }
+
+    public double getStdDevBaseScale() {
+        return stdDevBaseScale;
+    }
+
     public double getStdDevMinScale() {
         return stdDevMinScale;
+    }
+
+    public double getVisionWeightMultiplier() {
+        return visionWeightMultiplier;
     }
 
     public EnumSet<CameraRole> getRoles() {

@@ -1,9 +1,11 @@
 package ca.frc6390.athena.core.auto;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotAuto;
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj2.command.Command;
 
 /**
@@ -48,6 +50,13 @@ public interface AutoBackend {
         * Create a Choreo-style auto factory if supported.
         */
     default Optional<ChoreoAutoFactory> createChoreoFactory(ChoreoBinding binding) {
+        return Optional.empty();
+    }
+
+    /**
+     * Returns a list of poses that describe the requested autonomous path, when supported.
+     */
+    default Optional<List<Pose2d>> getAutoPoses(RobotAuto.AutoSource source, String reference) {
         return Optional.empty();
     }
 }

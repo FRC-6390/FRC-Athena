@@ -1,8 +1,11 @@
 package ca.frc6390.athena.drivetrains.differential;
 
+import java.util.Set;
 import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
 import ca.frc6390.athena.commands.control.TankDriveCommand;
+import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.core.localization.RobotLocalization;
@@ -17,6 +20,7 @@ import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
+import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator;
 import edu.wpi.first.math.estimator.DifferentialDrivePoseEstimator3d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -26,19 +30,26 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.DifferentialDriveKinematics;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelPositions;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelSpeeds;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivetrain<DifferentialDrivetrain> {
 
     private final RobotSpeeds robotSpeeds;
+    private final MotionLimits motionLimits;
     private final Imu imu;
     private final DifferentialDriveKinematics kinematics;
     private final DifferentialDrive drive;
@@ -49,12 +60,20 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     private double lastSimulationTimestamp = -1;
     private double lastLeftCommand = 0;
     private double lastRightCommand = 0;
+    private ChassisSpeeds lastLimitedSpeeds = new ChassisSpeeds();
+    private double lastMotionLimitTimestampSeconds = Double.NaN;
     private SimpleMotorFeedForwardsSendable driveFeedforward;
     private boolean driveFeedforwardEnabled = false;
     private double nominalVoltage = 12.0;
     private double lastFeedforwardTimestampSeconds = Double.NaN;
     private double lastLeftSetpointMetersPerSecond = 0.0;
     private double lastRightSetpointMetersPerSecond = 0.0;
+    private SysIdRoutine sysIdRoutine;
+    private double sysIdRampRateVoltsPerSecond = 1.0;
+    private double sysIdStepVoltage = 7.0;
+    private double sysIdTimeoutSeconds = 10.0;
+    private double sysIdLastVoltage = 0.0;
+    private boolean sysIdActive = false;
 
     public DifferentialDrivetrain(Imu imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors){
        this(imu, maxVelocity, trackwidth, leftMotors, rightMotors, leftMotors.getEncoderGroup(), rightMotors.getEncoderGroup());
@@ -63,6 +82,8 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     public DifferentialDrivetrain(Imu imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors, EncoderGroup leftEncoders, EncoderGroup rightEncoders){
         this.imu = imu;
         robotSpeeds = new RobotSpeeds(maxVelocity, maxVelocity);
+        motionLimits = new MotionLimits()
+                .setBaseDriveLimits(MotionLimits.DriveLimits.fromRobotSpeeds(robotSpeeds));
 
         this.leftMotors = leftMotors;
         this.rightMotors = rightMotors;
@@ -88,6 +109,11 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     @Override
     public RobotSpeeds getRobotSpeeds() {
         return robotSpeeds;
+    }
+
+    @Override
+    public MotionLimits getMotionLimits() {
+        return motionLimits;
     }
 
     public DifferentialDrivetrain setDriveFeedforward(SimpleMotorFeedforward feedforward) {
@@ -119,6 +145,46 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         return driveFeedforward != null;
     }
 
+    public double getSysIdRampRateVoltsPerSecond() {
+        return sysIdRampRateVoltsPerSecond;
+    }
+
+    public void setSysIdRampRateVoltsPerSecond(double rampRate) {
+        if (!Double.isFinite(rampRate) || rampRate <= 0.0) {
+            return;
+        }
+        sysIdRampRateVoltsPerSecond = rampRate;
+        invalidateSysIdRoutine();
+    }
+
+    public double getSysIdStepVoltage() {
+        return sysIdStepVoltage;
+    }
+
+    public void setSysIdStepVoltage(double stepVoltage) {
+        if (!Double.isFinite(stepVoltage) || stepVoltage <= 0.0) {
+            return;
+        }
+        sysIdStepVoltage = stepVoltage;
+        invalidateSysIdRoutine();
+    }
+
+    public double getSysIdTimeoutSeconds() {
+        return sysIdTimeoutSeconds;
+    }
+
+    public void setSysIdTimeoutSeconds(double timeoutSeconds) {
+        if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0.0) {
+            return;
+        }
+        sysIdTimeoutSeconds = timeoutSeconds;
+        invalidateSysIdRoutine();
+    }
+
+    public boolean isSysIdActive() {
+        return sysIdActive;
+    }
+
     @Override
     public void update() {
         if (imu != null) {
@@ -135,7 +201,12 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
             }
         }
         
+        if (sysIdActive) {
+            return;
+        }
+
         ChassisSpeeds speeds = getRobotSpeeds().calculate();
+        speeds = applyMotionLimits(speeds);
         if (driveFeedforwardEnabled && driveFeedforward != null) {
             DifferentialDriveWheelSpeeds wheelSpeeds = kinematics.toWheelSpeeds(speeds);
             double now = Timer.getFPGATimestamp();
@@ -269,6 +340,22 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
             tab.add("Drive Feedforward Enabled",
                     (builder) -> builder.addBooleanProperty("Enabled", this::isDriveFeedforwardEnabled, this::setDriveFeedforwardEnabled));
         }
+        ShuffleboardLayout sysIdLayout = tab.getLayout("SysId", BuiltInLayouts.kList);
+        sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
+                .withWidget(BuiltInWidgets.kCommand);
+        sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
+                .withWidget(BuiltInWidgets.kCommand);
+        sysIdLayout.add("Dynamic Forward", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))
+                .withWidget(BuiltInWidgets.kCommand);
+        sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
+                .withWidget(BuiltInWidgets.kCommand);
+        sysIdLayout.add("Ramp Rate (V/s)",
+                builder -> builder.addDoubleProperty("Ramp Rate (V/s)", this::getSysIdRampRateVoltsPerSecond, this::setSysIdRampRateVoltsPerSecond));
+        sysIdLayout.add("Step Voltage (V)",
+                builder -> builder.addDoubleProperty("Step Voltage (V)", this::getSysIdStepVoltage, this::setSysIdStepVoltage));
+        sysIdLayout.add("Timeout (s)",
+                builder -> builder.addDoubleProperty("Timeout (s)", this::getSysIdTimeoutSeconds, this::setSysIdTimeoutSeconds));
+        sysIdLayout.addBoolean("Active", this::isSysIdActive).withWidget(BuiltInWidgets.kBooleanBox);
         if (simulationField != null) {
             tab.add("Sim Pose", simulationField).withWidget(BuiltInWidgets.kField);
         }
@@ -351,6 +438,144 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         lastFeedforwardTimestampSeconds = Double.NaN;
         lastLeftSetpointMetersPerSecond = 0.0;
         lastRightSetpointMetersPerSecond = 0.0;
+    }
+
+    private SysIdRoutine getSysIdRoutine() {
+        if (sysIdRoutine == null) {
+            sysIdRoutine = new SysIdRoutine(
+                    new SysIdRoutine.Config(
+                            edu.wpi.first.units.Units.Volts.of(sysIdRampRateVoltsPerSecond).per(edu.wpi.first.units.Units.Second),
+                            edu.wpi.first.units.Units.Volts.of(sysIdStepVoltage),
+                            edu.wpi.first.units.Units.Seconds.of(sysIdTimeoutSeconds)),
+                    new SysIdRoutine.Mechanism(this::applySysIdVoltage, this::logSysIdData, this, getName()));
+        }
+        return sysIdRoutine;
+    }
+
+    private void invalidateSysIdRoutine() {
+        sysIdRoutine = null;
+    }
+
+    private void applySysIdVoltage(Voltage voltage) {
+        double requested = voltage.in(edu.wpi.first.units.Units.Volts);
+        double voltageLimit = getVoltageLimit();
+        double applied = MathUtil.clamp(requested, -voltageLimit, voltageLimit);
+        sysIdLastVoltage = applied;
+        setLeftVoltage(applied);
+        setRightVoltage(applied);
+        drive.feed();
+    }
+
+    private void logSysIdData(SysIdRoutineLog log) {
+        double leftPosition = leftEncoders != null ? leftEncoders.getPosition() : 0.0;
+        double rightPosition = rightEncoders != null ? rightEncoders.getPosition() : 0.0;
+        double leftVelocity = leftEncoders != null ? leftEncoders.getVelocity() : 0.0;
+        double rightVelocity = rightEncoders != null ? rightEncoders.getVelocity() : 0.0;
+
+        log.motor("left")
+                .voltage(edu.wpi.first.units.Units.Volts.of(sysIdLastVoltage))
+                .linearPosition(edu.wpi.first.units.Units.Meters.of(leftPosition))
+                .linearVelocity(edu.wpi.first.units.Units.MetersPerSecond.of(leftVelocity));
+
+        log.motor("right")
+                .voltage(edu.wpi.first.units.Units.Volts.of(sysIdLastVoltage))
+                .linearPosition(edu.wpi.first.units.Units.Meters.of(rightPosition))
+                .linearVelocity(edu.wpi.first.units.Units.MetersPerSecond.of(rightVelocity));
+    }
+
+    private void startSysId() {
+        sysIdActive = true;
+        robotSpeeds.stopSpeeds("drive");
+        robotSpeeds.stopSpeeds("auto");
+        robotSpeeds.stopSpeeds("feedback");
+    }
+
+    private void stopSysId() {
+        sysIdActive = false;
+        leftMotors.stopMotors();
+        rightMotors.stopMotors();
+    }
+
+    private Command sysIdCommand(Supplier<Command> supplier) {
+        return Commands.defer(
+                () -> Commands.either(
+                        wrapSysIdCommand(supplier.get()),
+                        Commands.runOnce(() -> DriverStation.reportWarning("SysId commands require Test mode.", false)),
+                        DriverStation::isTest),
+                Set.of(this));
+    }
+
+    private Command wrapSysIdCommand(Command base) {
+        return Commands.runOnce(this::startSysId)
+                .andThen(base)
+                .finallyDo(this::stopSysId);
+    }
+
+    private MotionLimits.DriveLimits resolveDriveLimits() {
+        MotionLimits.DriveLimits limits = motionLimits.resolveDriveLimits();
+        return limits != null ? limits : MotionLimits.DriveLimits.none();
+    }
+
+    private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds) {
+        MotionLimits.DriveLimits limits = resolveDriveLimits();
+        ChassisSpeeds limited = limitVelocity(speeds, limits);
+        limited = limitAcceleration(limited, limits, Timer.getFPGATimestamp());
+        lastLimitedSpeeds = limited;
+        return limited;
+    }
+
+    private ChassisSpeeds limitVelocity(ChassisSpeeds speeds, MotionLimits.DriveLimits limits) {
+        double vx = speeds.vxMetersPerSecond;
+        double vy = speeds.vyMetersPerSecond;
+        double omega = speeds.omegaRadiansPerSecond;
+        if (limits.maxLinearVelocity() > 0.0) {
+            double linear = Math.hypot(vx, vy);
+            if (linear > limits.maxLinearVelocity()) {
+                double scale = limits.maxLinearVelocity() / linear;
+                vx *= scale;
+                vy *= scale;
+            }
+        }
+        if (limits.maxAngularVelocity() > 0.0) {
+            omega = MathUtil.clamp(omega, -limits.maxAngularVelocity(), limits.maxAngularVelocity());
+        }
+        return new ChassisSpeeds(vx, vy, omega);
+    }
+
+    private ChassisSpeeds limitAcceleration(ChassisSpeeds speeds, MotionLimits.DriveLimits limits, double nowSeconds) {
+        if (!Double.isFinite(lastMotionLimitTimestampSeconds)) {
+            lastMotionLimitTimestampSeconds = nowSeconds;
+            return speeds;
+        }
+        double dt = nowSeconds - lastMotionLimitTimestampSeconds;
+        lastMotionLimitTimestampSeconds = nowSeconds;
+        if (dt <= 0.0) {
+            return speeds;
+        }
+        double maxLinearDelta = limits.maxLinearAcceleration() > 0.0
+                ? limits.maxLinearAcceleration() * dt
+                : Double.POSITIVE_INFINITY;
+        double maxAngularDelta = limits.maxAngularAcceleration() > 0.0
+                ? limits.maxAngularAcceleration() * dt
+                : Double.POSITIVE_INFINITY;
+        double vx = limitDelta(speeds.vxMetersPerSecond, lastLimitedSpeeds.vxMetersPerSecond, maxLinearDelta);
+        double vy = limitDelta(speeds.vyMetersPerSecond, lastLimitedSpeeds.vyMetersPerSecond, maxLinearDelta);
+        double omega = limitDelta(speeds.omegaRadiansPerSecond, lastLimitedSpeeds.omegaRadiansPerSecond, maxAngularDelta);
+        return new ChassisSpeeds(vx, vy, omega);
+    }
+
+    private double limitDelta(double value, double lastValue, double maxDelta) {
+        if (!Double.isFinite(maxDelta)) {
+            return value;
+        }
+        double delta = value - lastValue;
+        if (delta > maxDelta) {
+            return lastValue + maxDelta;
+        }
+        if (delta < -maxDelta) {
+            return lastValue - maxDelta;
+        }
+        return value;
     }
 
 }

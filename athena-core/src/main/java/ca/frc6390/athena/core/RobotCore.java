@@ -42,31 +42,69 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
-            boolean autoInitResetEnabled) {
+            boolean autoInitResetEnabled, TelemetryRegistry.TelemetryConfig telemetryConfig) {
 
         public static RobotCoreConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
-            return new RobotCoreConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt(), true);
+            return new RobotCoreConfig<>(
+                    config,
+                    RobotLocalizationConfig.defualt(),
+                    RobotVisionConfig.defualt(),
+                    true,
+                    TelemetryRegistry.TelemetryConfig.defualt());
         }
 
         public static RobotCoreConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
-            return new RobotCoreConfig<>(config, RobotLocalizationConfig.defualt(), RobotVisionConfig.defualt(), true);
+            return new RobotCoreConfig<>(
+                    config,
+                    RobotLocalizationConfig.defualt(),
+                    RobotVisionConfig.defualt(),
+                    true,
+                    TelemetryRegistry.TelemetryConfig.defualt());
         }
 
         public RobotCoreConfig<T> setLocalization(RobotLocalizationConfig localizationConfig) {
-            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig, autoInitResetEnabled);
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig);
         }
 
         public RobotCoreConfig<T> setVision(RobotVisionConfig visionConfig) {
-            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig, autoInitResetEnabled);
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig);
         }
 
         public RobotCoreConfig<T> setVision(ConfigurableCamera... cameras) {
-            return new RobotCoreConfig<>(driveTrain, localizationConfig,
-                    RobotVisionConfig.defualt().addCameras(cameras), autoInitResetEnabled);
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    RobotVisionConfig.defualt().addCameras(cameras),
+                    autoInitResetEnabled,
+                    telemetryConfig);
         }
 
         public RobotCoreConfig<T> setAutoInitResetEnabled(boolean enabled) {
-            return new RobotCoreConfig<>(driveTrain, localizationConfig, visionConfig, enabled);
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    enabled,
+                    telemetryConfig);
+        }
+
+        public RobotCoreConfig<T> setTelemetry(TelemetryRegistry.TelemetryConfig telemetryConfig) {
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig);
         }
 
         public RobotCore<T> create() {
@@ -80,6 +118,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private RobotVisionSim visionSim;
     private Notifier visionSimNotifier;
     private final RobotAuto autos;
+    private final RobotCopilot copilot;
     private final HashMap<String, Mechanism> mechanisms;
     private final Set<Mechanism> scheduledCustomPidMechanisms;
     private Command autonomousCommand;
@@ -92,10 +131,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         localization = drivetrain.localization(config.localizationConfig());
         vision = RobotVision.fromConfig(config.visionConfig);
         autos = new RobotAuto();
+        copilot = new RobotCopilot(drivetrain.get(), localization, RobotCopilot.inferDriveStyle(drivetrain.get()));
         mechanisms = new HashMap<>();
         scheduledCustomPidMechanisms = new HashSet<>();
         autonomousCommand = null;
-        telemetry = TelemetryRegistry.createDefault("Telemetry");
+        telemetry = TelemetryRegistry.create(config.telemetryConfig());
         autoInitResetEnabled = config.autoInitResetEnabled();
 
         if (localization != null && vision != null) {
@@ -129,6 +169,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void robotPeriodic() {
         CommandScheduler.getInstance().run();
         telemetry.tick();
+        if (localization != null) {
+            localization.updateAutoVisualization(autos);
+        }
         onRobotPeriodic();
     }
 
@@ -136,6 +179,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void autonomousInit() {
         drivetrain.getRobotSpeeds().setSpeedSourceState("drive", false);
         drivetrain.getRobotSpeeds().stopSpeeds("drive");
+        drivetrain.getRobotSpeeds().setSpeedSourceState("auto", true);
+        drivetrain.getRobotSpeeds().stopSpeeds("auto");
         resetAutoInitPoseIfConfigured();
         scheduleAutonomousCommand();
         onAutonomousInit();
@@ -159,6 +204,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void teleopInit() {
         cancelAutonomousCommand();
         drivetrain.getRobotSpeeds().setSpeedSourceState("drive", true);
+        drivetrain.getRobotSpeeds().setSpeedSourceState("auto", false);
         drivetrain.getRobotSpeeds().stopSpeeds("auto");
         onTeleopInit();
     }
@@ -177,6 +223,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void disabledInit() {
         cancelAutonomousCommand();
         drivetrain.getRobotSpeeds().setSpeedSourceState("drive", true);
+        drivetrain.getRobotSpeeds().setSpeedSourceState("auto", false);
         drivetrain.getRobotSpeeds().stopSpeeds("auto");
         onDisabledInit();
     }
@@ -330,6 +377,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public RobotLocalization<?> getLocalization() {
         return localization;
+    }
+
+    public RobotCopilot getCopilot() {
+        return copilot;
     }
 
     public T getDrivetrain() {
