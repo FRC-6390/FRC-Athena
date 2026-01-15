@@ -139,7 +139,6 @@ if (!project.hasProperty('frcYear')) {
 
 // Group/Artifact used below and for updating JSON
 def artifactGroupId = 'ca.frc6390.athena'
-def baseArtifactId = 'competition-java'
 
 allprojects {
     group = artifactGroupId
@@ -316,7 +315,7 @@ task copyAllOutputs(type: Copy) {
     group = 'Build'
     destinationDir file("$buildDir/allOutputs")
     from versionFile
-    dependsOn outputVersions
+    dependsOn outputVersions, updateAthenaJson
 }
 
 tasks.register('buildAllModules') {
@@ -434,35 +433,9 @@ publishing {
         //     }
         // }
     }
-
-    // Publications
-    publications {
-        // The main Java publication
-        java(MavenPublication) {
-            artifact jar
-            artifact sourcesJar
-            groupId = artifactGroupId
-            artifactId = baseArtifactId
-            version = pubVersion
-        }
-    }
 }
 
 // -----------------------------------------------------------------------------
-// (Optional) Model block if you need custom packaging tasks. You can remove
-// or adapt these if you do not actually use them for your competition library.
+// Optional model publishing tasks removed; root competition artifacts are no
+// longer published.
 // -----------------------------------------------------------------------------
-
-model {
-    publishing {
-        // Example calls to a helper method createComponentZipTasks(...) if you have it.
-        // If you do not have that method or do not need them, remove or comment out.
-        def taskList = createComponentZipTasks($.components, ['Vendor'], zipBaseName, Zip, project, includeStandardZipFormat)
-        def driverTaskList = createComponentZipTasks($.components, ['VendorDriver'], driverZipBaseName, Zip, project, includeStandardZipFormat)
-
-        publications {
-            // If you need an additional publication, define it here.
-            // Otherwise, we already declared a 'java(MavenPublication)' above.
-        }
-    }
-}

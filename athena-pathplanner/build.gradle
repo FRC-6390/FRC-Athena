@@ -4,7 +4,6 @@ plugins {
 
 dependencies {
     implementation project(':athena-core')
-    implementation project(':')
     implementation project(':athena-photonvision')
     implementation project(':athena-limelight')
     implementation project(':athena-ctre')
