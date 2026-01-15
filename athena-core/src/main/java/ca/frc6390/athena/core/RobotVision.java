@@ -17,12 +17,12 @@ import java.util.ServiceLoader;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.sensors.camera.CameraProvider;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.LocalizationData;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.CoordinateSpace;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
+import ca.frc6390.athena.sensors.camera.VisionCamera;
+import ca.frc6390.athena.sensors.camera.VisionCamera.LocalizationData;
+import ca.frc6390.athena.sensors.camera.VisionCamera.CoordinateSpace;
+import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
+import ca.frc6390.athena.sensors.camera.VisionCameraConfig;
+import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -63,8 +63,8 @@ public class RobotVision implements RobotSendableSystem {
    }
 
    private final RobotVisionConfig config;
-   private final HashMap<String, LocalizationCamera> cameras;
-   private final EnumMap<CameraRole, List<LocalizationCamera>> camerasByRole;
+   private final HashMap<String, VisionCamera> cameras;
+   private final EnumMap<CameraRole, List<VisionCamera>> camerasByRole;
    private final HashMap<String, Object> vendorCameras;
    private RobotLocalization<?> localization;
    
@@ -77,7 +77,7 @@ public class RobotVision implements RobotSendableSystem {
       boolean simulation = edu.wpi.first.wpilibj.RobotBase.isSimulation();
 
       for (ConfigurableCamera cameraConfig : config.cameras) {
-         LocalizationCamera camera = createCamera(cameraConfig, simulation);
+         VisionCamera camera = createCamera(cameraConfig, simulation);
          if (camera != null) {
             registerCamera(cameraConfig.getTable(), camera, null);
          }
@@ -88,7 +88,7 @@ public class RobotVision implements RobotSendableSystem {
       return new RobotVision(config);
    }
 
-   public LocalizationCamera getCamera(String key) {
+   public VisionCamera getCamera(String key) {
       return cameras.get(key);
    }
 
@@ -104,12 +104,12 @@ public class RobotVision implements RobotSendableSystem {
       }
    }
 
-   public Map<String, LocalizationCamera> getCameras() {
+   public Map<String, VisionCamera> getCameras() {
       return Collections.unmodifiableMap(cameras);
    }
 
    public void setUseForLocalization(String key, boolean enabled) {
-      LocalizationCamera camera = cameras.get(key);
+      VisionCamera camera = cameras.get(key);
       if (camera == null) {
          return;
       }
@@ -121,34 +121,34 @@ public class RobotVision implements RobotSendableSystem {
       this.localization = localization;
    }
 
-   public Map<CameraRole, List<LocalizationCamera>> getCamerasByRole() {
-      EnumMap<CameraRole, List<LocalizationCamera>> copy = new EnumMap<>(CameraRole.class);
+   public Map<CameraRole, List<VisionCamera>> getCamerasByRole() {
+      EnumMap<CameraRole, List<VisionCamera>> copy = new EnumMap<>(CameraRole.class);
       camerasByRole.forEach((role, list) -> copy.put(role, Collections.unmodifiableList(list)));
       return Collections.unmodifiableMap(copy);
    }
 
-   public List<LocalizationCamera> getCamerasForRole(CameraRole role) {
+   public List<VisionCamera> getCamerasForRole(CameraRole role) {
       return camerasByRole.containsKey(role)
               ? Collections.unmodifiableList(camerasByRole.get(role))
               : Collections.emptyList();
    }
 
-   public Optional<LocalizationCamera> getFirstCameraWithRole(CameraRole role) {
+   public Optional<VisionCamera> getFirstCameraWithRole(CameraRole role) {
       return camerasByRole.containsKey(role) && !camerasByRole.get(role).isEmpty()
               ? Optional.of(camerasByRole.get(role).get(0))
               : Optional.empty();
    }
 
-   public <T> Optional<T> getCameraCapability(String key, LocalizationCameraCapability capability) {
-      LocalizationCamera camera = cameras.get(key);
+   public <T> Optional<T> getCameraCapability(String key, VisionCameraCapability capability) {
+      VisionCamera camera = cameras.get(key);
       if (camera == null) {
          return Optional.empty();
       }
       return camera.capability(capability);
    }
 
-   public Optional<LocalizationCamera.TargetObservation> getCameraObservation(String key, CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
-      LocalizationCamera camera = cameras.get(key);
+   public Optional<VisionCamera.TargetObservation> getCameraObservation(String key, CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
+      VisionCamera camera = cameras.get(key);
       if (camera == null) {
          return Optional.empty();
       }
@@ -156,20 +156,20 @@ public class RobotVision implements RobotSendableSystem {
    }
 
    public Optional<Translation2d> getCameraTranslation(String key, CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
-      LocalizationCamera camera = cameras.get(key);
+      VisionCamera camera = cameras.get(key);
       if (camera == null) {
          return Optional.empty();
       }
       return camera.getTargetTranslation(space, robotPose, tagPose);
    }
 
-   public Optional<LocalizationCamera.TargetObservation> getBestObservation(CoordinateSpace space, Pose2d robotPose, Function<Integer, Pose2d> tagPoseLookup) {
+   public Optional<VisionCamera.TargetObservation> getBestObservation(CoordinateSpace space, Pose2d robotPose, Function<Integer, Pose2d> tagPoseLookup) {
       return selectBestObservation(cameras.values(), space, robotPose, tagPoseLookup);
    }
 
-    public Optional<LocalizationCamera.TargetObservation> getBestObservationForRole(CameraRole role, CoordinateSpace space,
+    public Optional<VisionCamera.TargetObservation> getBestObservationForRole(CameraRole role, CoordinateSpace space,
           Pose2d robotPose, Function<Integer, Pose2d> tagPoseLookup) {
-      List<LocalizationCamera> roleCameras = camerasByRole.get(role);
+      List<VisionCamera> roleCameras = camerasByRole.get(role);
       if (roleCameras == null || roleCameras.isEmpty()) {
          return Optional.empty();
       }
@@ -183,43 +183,43 @@ public class RobotVision implements RobotSendableSystem {
    public ArrayList<Pose2d> getCameraLocalizationPoses(){
       ArrayList<Pose2d> poses = new ArrayList<>();
       cameras.values().stream()
-          .filter(LocalizationCamera::isUseForLocalization)
-          .filter(LocalizationCamera::hasValidTarget)
-          .map(LocalizationCamera::getLocalizationPose)
+          .filter(VisionCamera::isUseForLocalization)
+          .filter(VisionCamera::hasValidTarget)
+          .map(VisionCamera::getLocalizationPose)
           .forEach(poses::add);
       return poses;
    }
 
    public void addLocalizationPoses(Consumer<LocalizationData> estimator){
       cameras.values().stream()
-          .filter(LocalizationCamera::isUseForLocalization)
-          .filter(LocalizationCamera::hasValidTarget)
-          .map(LocalizationCamera::getLocalizationData)
+          .filter(VisionCamera::isUseForLocalization)
+          .filter(VisionCamera::hasValidTarget)
+          .map(VisionCamera::getLocalizationData)
           .forEach(estimator);
    }
 
    public Optional<LocalizationData> getBestLocalizationData() {
       return cameras.values().stream()
-              .filter(LocalizationCamera::isUseForLocalization)
-          .filter(LocalizationCamera::hasValidTarget)
-          .map(LocalizationCamera::getLocalizationData)
+              .filter(VisionCamera::isUseForLocalization)
+          .filter(VisionCamera::hasValidTarget)
+          .map(VisionCamera::getLocalizationData)
           .filter(data -> data != null && data.pose2d() != null)
               .min(Comparator.comparingDouble(RobotVision::scoreLocalizationData));
    }
 
-   public Optional<LocalizationCamera.VisionMeasurement> getBestVisionMeasurement() {
+   public Optional<VisionCamera.VisionMeasurement> getBestVisionMeasurement() {
       return cameras.values().stream()
-              .filter(LocalizationCamera::isUseForLocalization)
-              .map(LocalizationCamera::getLatestVisionMeasurement)
+              .filter(VisionCamera::isUseForLocalization)
+              .map(VisionCamera::getLatestVisionMeasurement)
               .flatMap(Optional::stream)
               .filter(measurement -> measurement.pose2d() != null)
               .min(Comparator.comparingDouble(RobotVision::scoreVisionMeasurement));
    }
 
-   public List<LocalizationCamera.VisionMeasurement> getVisionMeasurements() {
+   public List<VisionCamera.VisionMeasurement> getVisionMeasurements() {
       return cameras.values().stream()
-              .filter(LocalizationCamera::isUseForLocalization)
-              .map(LocalizationCamera::getLatestVisionMeasurement)
+              .filter(VisionCamera::isUseForLocalization)
+              .map(VisionCamera::getLatestVisionMeasurement)
               .flatMap(Optional::stream)
               .filter(measurement -> measurement.pose2d() != null)
               .toList();
@@ -246,7 +246,7 @@ public class RobotVision implements RobotSendableSystem {
       return sanitized;
    }
 
-   private static double scoreVisionMeasurement(LocalizationCamera.VisionMeasurement measurement) {
+   private static double scoreVisionMeasurement(VisionCamera.VisionMeasurement measurement) {
       Matrix<N3, N1> std = measurement.stdDevs();
       if (std == null) {
          return Double.POSITIVE_INFINITY;
@@ -269,14 +269,14 @@ public class RobotVision implements RobotSendableSystem {
       cameras.values().forEach(camera -> camera.setStdDevs(singleStdDevs, multiStdDevs));
    }
 
-   private Optional<LocalizationCamera.TargetObservation> selectBestObservation(Iterable<LocalizationCamera> cameraIterable,
+   private Optional<VisionCamera.TargetObservation> selectBestObservation(Iterable<VisionCamera> cameraIterable,
          CoordinateSpace space, Pose2d robotPose, Function<Integer, Pose2d> tagPoseLookup) {
-      LocalizationCamera.TargetObservation best = null;
-      for (LocalizationCamera camera : cameraIterable) {
-         Optional<LocalizationCamera.TargetObservation> baseObservation = camera.getLatestObservation(CoordinateSpace.CAMERA, robotPose, null);
+      VisionCamera.TargetObservation best = null;
+      for (VisionCamera camera : cameraIterable) {
+         Optional<VisionCamera.TargetObservation> baseObservation = camera.getLatestObservation(CoordinateSpace.CAMERA, robotPose, null);
          if (baseObservation.isEmpty()) continue;
 
-         LocalizationCamera.TargetObservation base = baseObservation.get();
+         VisionCamera.TargetObservation base = baseObservation.get();
          Pose2d tagPose = null;
          if (space == CoordinateSpace.TAG && tagPoseLookup != null) {
             tagPose = tagPoseLookup.apply(base.tagId());
@@ -297,7 +297,7 @@ public class RobotVision implements RobotSendableSystem {
             }
          }
 
-         LocalizationCamera.TargetObservation transformed = new LocalizationCamera.TargetObservation(
+         VisionCamera.TargetObservation transformed = new VisionCamera.TargetObservation(
                  base.tagId(),
                  base.yawDegrees(),
                  base.distanceMeters(),
@@ -311,8 +311,8 @@ public class RobotVision implements RobotSendableSystem {
       return Optional.ofNullable(best);
    }
 
-   private LocalizationCamera.TargetObservation pickBetterObservation(LocalizationCamera.TargetObservation current,
-         LocalizationCamera.TargetObservation candidate) {
+   private VisionCamera.TargetObservation pickBetterObservation(VisionCamera.TargetObservation current,
+         VisionCamera.TargetObservation candidate) {
       if (candidate == null) {
          return current;
       }
@@ -343,7 +343,7 @@ public class RobotVision implements RobotSendableSystem {
       return current;
    }
 
-   private void registerCamera(String key, LocalizationCamera camera, Object vendorInstance) {
+   private void registerCamera(String key, VisionCamera camera, Object vendorInstance) {
       cameras.put(key, camera);
       if (vendorInstance != null) {
          vendorCameras.put(key, vendorInstance);
@@ -351,7 +351,7 @@ public class RobotVision implements RobotSendableSystem {
       refreshCameraRoles(camera);
    }
 
-   private LocalizationCamera createCamera(ConfigurableCamera config, boolean simulation) {
+   private VisionCamera createCamera(ConfigurableCamera config, boolean simulation) {
       for (CameraProvider provider : CAMERA_PROVIDERS) {
          if (provider.supports(config)) {
             return provider.create(config, simulation);
@@ -360,8 +360,8 @@ public class RobotVision implements RobotSendableSystem {
       return null;
    }
 
-   private void refreshCameraRoles(LocalizationCamera camera) {
-      for (List<LocalizationCamera> list : camerasByRole.values()) {
+   private void refreshCameraRoles(VisionCamera camera) {
+      for (List<VisionCamera> list : camerasByRole.values()) {
          list.remove(camera);
       }
       for (CameraRole role : camera.getRoles()) {

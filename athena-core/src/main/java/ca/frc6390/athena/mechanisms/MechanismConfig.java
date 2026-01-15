@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.nio.file.Path;
 import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -1449,5 +1450,25 @@ public class MechanismConfig<T extends Mechanism> {
             }
             MechanismSimulationConfig.requireSupportedMotorSim(config.type);
         });
+    }
+
+    /**
+     * Loads configuration values from a JSON file into this builder.
+     *
+     * @param path path to a JSON config snapshot
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> loadFromJson(Path path) {
+        MechanismConfigIO.apply(this, MechanismConfigIO.load(path));
+        return this;
+    }
+
+    /**
+     * Writes this configuration to a JSON file.
+     *
+     * @param path path to write the JSON snapshot
+     */
+    public void saveToJson(Path path) {
+        MechanismConfigIO.save(path, MechanismConfigIO.snapshot(this));
     }
 }

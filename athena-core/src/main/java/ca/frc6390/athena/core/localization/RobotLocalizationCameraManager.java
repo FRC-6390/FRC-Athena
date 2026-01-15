@@ -4,9 +4,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 import ca.frc6390.athena.core.RobotVision;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.TargetObservation;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.CoordinateSpace;
+import ca.frc6390.athena.sensors.camera.VisionCamera;
+import ca.frc6390.athena.sensors.camera.VisionCamera.TargetObservation;
+import ca.frc6390.athena.sensors.camera.VisionCamera.CoordinateSpace;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -26,7 +26,7 @@ import edu.wpi.first.wpilibj.shuffleboard.SimpleWidget;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 
-final class RobotLocalizationCameraManager {
+final class RobotVisionCameraManager {
 
     private static final Pose2d ZERO_POSE = new Pose2d();
     private static final java.util.List<Pose2d> EMPTY_POSES = java.util.List.of();
@@ -39,7 +39,7 @@ final class RobotLocalizationCameraManager {
     private ShuffleboardTab localizationTab;
     private ShuffleboardTab visionTab;
 
-    RobotLocalizationCameraManager(double stdEpsilon, Field2d field) {
+    RobotVisionCameraManager(double stdEpsilon, Field2d field) {
         this.stdEpsilon = stdEpsilon;
         this.field = field;
         this.visionField = new Field2d();
@@ -61,8 +61,8 @@ final class RobotLocalizationCameraManager {
         if (vision == null || localizationTab == null || visionTab == null) {
             return;
         }
-        Map<String, LocalizationCamera> cameras = vision.getCameras();
-        for (Map.Entry<String, LocalizationCamera> entry : cameras.entrySet()) {
+        Map<String, VisionCamera> cameras = vision.getCameras();
+        for (Map.Entry<String, VisionCamera> entry : cameras.entrySet()) {
             cameraDisplayStates.computeIfAbsent(entry.getKey(), key -> createCameraDisplayState(key, entry.getValue()));
         }
         cameraDisplayStates.entrySet().removeIf(stateEntry -> {
@@ -84,7 +84,7 @@ final class RobotLocalizationCameraManager {
         }
         ensureCameraShuffleboardEntries(vision);
         for (CameraDisplayState state : cameraDisplayStates.values()) {
-            LocalizationCamera camera = vision.getCamera(state.key);
+            VisionCamera camera = vision.getCamera(state.key);
             if (camera == null) {
                 state.visionCameraPoseObject.setPoses(EMPTY_POSES);
                 state.localizationEstimatedPoseObject.setPoses(EMPTY_POSES);
@@ -101,7 +101,7 @@ final class RobotLocalizationCameraManager {
         }
     }
 
-    private CameraDisplayState createCameraDisplayState(String key, LocalizationCamera camera) {
+    private CameraDisplayState createCameraDisplayState(String key, VisionCamera camera) {
         if (visionTab == null || localizationTab == null) {
             return null;
         }
@@ -229,7 +229,7 @@ final class RobotLocalizationCameraManager {
                 estimatedPosePublisher);
     }
 
-    private void applyCameraConfigUpdates(CameraDisplayState state, LocalizationCamera camera, RobotVision vision) {
+    private void applyCameraConfigUpdates(CameraDisplayState state, VisionCamera camera, RobotVision vision) {
         boolean currentUse = camera.isUseForLocalization();
         boolean desiredUse = state.localizationToggleEntry != null
                 ? state.localizationToggleEntry.getBoolean(currentUse)
@@ -291,7 +291,7 @@ final class RobotLocalizationCameraManager {
         return sanitized;
     }
 
-    private Pose2d computeCameraFieldPose(LocalizationCamera camera, Pose2d fieldPose) {
+    private Pose2d computeCameraFieldPose(VisionCamera camera, Pose2d fieldPose) {
         if (fieldPose == null) {
             return null;
         }
@@ -315,7 +315,7 @@ final class RobotLocalizationCameraManager {
         state.cameraPosePublisher.set(cameraPose != null ? cameraPose : ZERO_POSE);
     }
 
-    private void updateEstimatedPose(CameraDisplayState state, LocalizationCamera camera) {
+    private void updateEstimatedPose(CameraDisplayState state, VisionCamera camera) {
         boolean show = state.showEstimatedPoseEntry.getBoolean(false);
         Pose2d estimatePose =
                 camera.hasValidTarget() ? camera.getLocalizationPose() : null;
@@ -327,7 +327,7 @@ final class RobotLocalizationCameraManager {
         state.estimatedPosePublisher.set(estimatePose != null ? estimatePose : ZERO_POSE);
     }
 
-    private void updateTagLines(CameraDisplayState state, LocalizationCamera camera, Pose2d cameraPose, Pose2d fieldPose) {
+    private void updateTagLines(CameraDisplayState state, VisionCamera camera, Pose2d cameraPose, Pose2d fieldPose) {
         boolean show = state.showTagLinesEntry.getBoolean(true);
         if (!show || cameraPose == null) {
             state.visionTagLineObject.setPoses(EMPTY_POSES);

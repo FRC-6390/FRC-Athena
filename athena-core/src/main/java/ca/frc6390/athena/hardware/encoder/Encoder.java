@@ -109,6 +109,19 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
 
     @Override
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
+        layout.addDouble("Position", this::getPosition);
+        layout.addDouble("Velocity", this::getVelocity);
+        layout.addBoolean("Connected", this::isConnected);
+        layout.add("Inverted", builder ->
+                builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
+        layout.add("Gear Ratio", builder ->
+                builder.addDoubleProperty("Gear Ratio", this::getGearRatio, this::setGearRatio));
+        layout.add("Conversion", builder ->
+                builder.addDoubleProperty("Conversion", this::getConversion, this::setConversion));
+        layout.add("Conversion Offset", builder ->
+                builder.addDoubleProperty("Conversion Offset", this::getConversionOffset, this::setConversionOffset));
+        layout.add("Offset", builder ->
+                builder.addDoubleProperty("Offset", this::getOffset, this::setOffset));
         return layout;
     }
 }

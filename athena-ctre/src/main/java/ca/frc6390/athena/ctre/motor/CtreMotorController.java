@@ -134,6 +134,7 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public void setCurrentLimit(double amps) {
+        config.currentLimit = amps;
         setCurrentLimit.accept(amps);
     }
 
@@ -144,11 +145,13 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public void setNeutralMode(MotorNeutralMode mode) {
+        config.neutralMode = mode;
         setNeutralMode.accept(mode);
     }
 
     @Override
     public void setPid(PIDController pid) {
+        config.pid = pid;
         setPid.accept(pid);
     }
 
@@ -190,6 +193,11 @@ public class CtreMotorController implements MotorController {
     @Override
     public MotorNeutralMode getNeutralMode() {
         return config.neutralMode;
+    }
+
+    @Override
+    public MotorControllerConfig getConfig() {
+        return config;
     }
 
     @Override

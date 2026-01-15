@@ -36,6 +36,7 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.math.geometry.Pose3d;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
 
@@ -45,7 +46,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Encoder encoder;
     private final PIDController pidController;
     private final ProfiledPIDController profiledPIDController;
-    private final boolean useAbsolute, useVoltage;
+    private boolean useAbsolute, useVoltage;
     private final GenericLimitSwitch[] limitSwitches;
     private static final String MOTION_AXIS_ID = "axis";
     private final MotionLimits motionLimits;
@@ -378,10 +379,32 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return useAbsolute;
     }
 
+    public void setUseAbsolute(boolean useAbsolute) {
+        this.useAbsolute = useAbsolute;
+    }
+
     public boolean isUseVoltage() {
         return useVoltage;
     }
 
+    public void setUseVoltage(boolean useVoltage) {
+        this.useVoltage = useVoltage;
+    }
+
+    public boolean isSetpointAsOutput() {
+        return setpointIsOutput;
+    }
+
+    public void setSetpointAsOutput(boolean setpointAsOutput) {
+        this.setpointIsOutput = setpointAsOutput;
+    }
+
+    public void setPidPeriod(double pidPeriod) {
+        if (!Double.isFinite(pidPeriod)) {
+            return;
+        }
+        this.pidPeriod = pidPeriod;
+    }
     public boolean isOutputVoltage() {
         if (override && manualOutputActive) {
             return manualOutputIsVoltage;
@@ -604,6 +627,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return simulationUpdatePeriodSeconds;
     }
 
+    public void loadConfig(Path path) {
+        MechanismConfigIO.apply(this, MechanismConfigIO.load(path));
+    }
+
+    public void saveConfig(Path path) {
+        MechanismConfigIO.save(path, MechanismConfigIO.snapshot(this));
+    }
+
     public void resetSimulation() {
         if (simulationModel == null) {
             return;
@@ -735,8 +766,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         if (level.equals(SendableLevel.DEBUG)) {
             ShuffleboardLayout configLayout = tab.getLayout("Config", BuiltInLayouts.kList);
-            configLayout.addBoolean("Use Voltage", this::isUseVoltage);
-            configLayout.addBoolean("Use Absolute", this::isUseAbsolute);
+            configLayout.add("Use Voltage", builder ->
+                    builder.addBooleanProperty("Use Voltage", this::isUseVoltage, this::setUseVoltage));
+            configLayout.add("Use Absolute", builder ->
+                    builder.addBooleanProperty("Use Absolute", this::isUseAbsolute, this::setUseAbsolute));
+            configLayout.add("Setpoint As Output", builder ->
+                    builder.addBooleanProperty("Setpoint As Output", this::isSetpointAsOutput, this::setSetpointAsOutput));
+            configLayout.add("PID Period (s)", builder ->
+                    builder.addDoubleProperty("PID Period (s)", this::getPidPeriod, this::setPidPeriod));
             configLayout.addBoolean("Feedforward Enabled", this::isFeedforwardEnabled);
             configLayout.addBoolean("PID Enabled", this::isPidEnabled);
         }

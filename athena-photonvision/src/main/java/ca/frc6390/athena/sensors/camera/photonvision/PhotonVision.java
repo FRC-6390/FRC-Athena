@@ -10,10 +10,13 @@ import org.photonvision.PhotonPoseEstimator;
 import org.photonvision.targeting.PhotonPipelineResult;
 import org.photonvision.targeting.PhotonTrackedTarget;
 
-import ca.frc6390.athena.sensors.camera.LocalizationCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
-import ca.frc6390.athena.sensors.camera.PhotonVisionCapability;
+import ca.frc6390.athena.sensors.camera.FiducialSource;
+import ca.frc6390.athena.sensors.camera.LocalizationSource;
+import ca.frc6390.athena.sensors.camera.TargetingSource;
+import ca.frc6390.athena.sensors.camera.VisionCamera;
+import ca.frc6390.athena.sensors.camera.VisionCameraConfig;
+import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
+import ca.frc6390.athena.sensors.camera.PhotonVisionCamera;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -27,7 +30,7 @@ import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.wpilibj.Timer;
 
-public class PhotonVision extends PhotonCamera implements PhotonVisionCapability {
+public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, LocalizationSource, TargetingSource, FiducialSource {
 
     private final Transform3d pose;
     private final PhotonVisionConfig config;
@@ -35,7 +38,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
     private final AprilTagFieldLayout fieldLayout;
     private List<PhotonPipelineResult> results;
     private boolean useForLocalization;
-    private final LocalizationCamera localizationCamera;
+    private final VisionCamera localizationCamera;
     private LocalizationSnapshot latestSnapshot = LocalizationSnapshot.empty();
     private double lastTargetYawDegrees = Double.NaN;
     private double lastTargetPitchDegrees = Double.NaN;
@@ -44,7 +47,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
     private double lastPoseAmbiguity = Double.NaN;
     private double lastCameraPitchDegrees = Double.NaN;
     private double lastCameraRollDegrees = Double.NaN;
-    private List<LocalizationCamera.TargetMeasurement> latestMeasurements = List.of();
+    private List<VisionCamera.TargetMeasurement> latestMeasurements = List.of();
 
     private static final class LocalizationSnapshot {
         private final Pose2d pose;
@@ -101,7 +104,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         this.estimator = new PhotonPoseEstimator(fieldLayout, config.poseStrategy(), pose);
         estimator.setMultiTagFallbackStrategy(config.poseStrategyFallback());
         this.useForLocalization = config.useForLocalization();
-        this.localizationCamera = createLocalizationCamera();
+        this.localizationCamera = createVisionCamera();
     }
 
     public PhotonVision(String table, Transform3d pose) {
@@ -112,9 +115,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         return config;
     }
 
-    private LocalizationCamera createLocalizationCamera() {
-        LocalizationCameraConfig cameraConfig =
-                new LocalizationCameraConfig(config.getTable(), config.getSoftware())
+    private VisionCamera createVisionCamera() {
+        VisionCameraConfig cameraConfig =
+                new VisionCameraConfig(config.getTable(), config.getSoftware())
                         .setUseForLocalization(config.useForLocalization())
                         .setTrustDistance(config.trustDistance())
                         .setConnectedSupplier(this::isConnected)
@@ -140,7 +143,11 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
                         .setCameraRollSupplier(this::supplyCameraRoll)
                         .setTargetMeasurementsSupplier(this::supplyTargetMeasurements)
                         .setFieldLayout(fieldLayout);
-        return new LocalizationCamera(cameraConfig).registerCapability(LocalizationCameraCapability.PHOTON_VISION, this);
+        return new VisionCamera(cameraConfig)
+                .registerCapability(VisionCameraCapability.PHOTON_VISION_CAMERA, this)
+                .registerCapability(VisionCameraCapability.LOCALIZATION_SOURCE, this)
+                .registerCapability(VisionCameraCapability.TARGETING_SOURCE, this)
+                .registerCapability(VisionCameraCapability.FIDUCIAL_SOURCE, this);
     }
 
     private void refreshLocalizationSnapshot() {
@@ -220,14 +227,14 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         clearResults();
     }
 
-    private List<LocalizationCamera.TargetMeasurement> buildTargetMeasurements(
+    private List<VisionCamera.TargetMeasurement> buildTargetMeasurements(
             PhotonTrackedTarget primary, List<PhotonTrackedTarget> targets) {
         if (targets == null || targets.isEmpty()) {
             return List.of();
         }
-        List<LocalizationCamera.TargetMeasurement> measurements = new ArrayList<>();
+        List<VisionCamera.TargetMeasurement> measurements = new ArrayList<>();
         if (primary != null) {
-            LocalizationCamera.TargetMeasurement measurement = createMeasurement(primary);
+            VisionCamera.TargetMeasurement measurement = createMeasurement(primary);
             if (measurement != null) {
                 measurements.add(measurement);
             }
@@ -236,7 +243,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
             if (target == null || target == primary) {
                 continue;
             }
-            LocalizationCamera.TargetMeasurement measurement = createMeasurement(target);
+            VisionCamera.TargetMeasurement measurement = createMeasurement(target);
             if (measurement != null) {
                 measurements.add(measurement);
             }
@@ -244,7 +251,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         return measurements.isEmpty() ? List.of() : List.copyOf(measurements);
     }
 
-    private LocalizationCamera.TargetMeasurement createMeasurement(PhotonTrackedTarget target) {
+    private VisionCamera.TargetMeasurement createMeasurement(PhotonTrackedTarget target) {
         if (target == null) {
             return null;
         }
@@ -263,7 +270,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         if (!Double.isNaN(poseAmbiguity)) {
             confidence = 1.0 - Math.min(Math.max(poseAmbiguity, 0.0), 1.0);
         }
-        return new LocalizationCamera.TargetMeasurement(
+        return new VisionCamera.TargetMeasurement(
                 translation2d,
                 yawDegrees,
                 distance,
@@ -349,7 +356,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         return lastCameraRollDegrees;
     }
 
-    private List<LocalizationCamera.TargetMeasurement> supplyTargetMeasurements() {
+    private List<VisionCamera.TargetMeasurement> supplyTargetMeasurements() {
         return latestMeasurements;
     }
 
@@ -364,7 +371,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCapability
         return latestSnapshot.visibleTargets() > 0 || !latestMeasurements.isEmpty();
     }
 
-    public LocalizationCamera getLocalizationCamera() {
+    public VisionCamera getVisionCamera() {
         return localizationCamera;
     }
 

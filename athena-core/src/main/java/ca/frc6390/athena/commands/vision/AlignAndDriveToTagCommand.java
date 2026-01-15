@@ -15,10 +15,10 @@ import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotVision;
 import ca.frc6390.athena.core.localization.RobotLocalization;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.CoordinateSpace;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.TargetObservation;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
+import ca.frc6390.athena.sensors.camera.VisionCamera;
+import ca.frc6390.athena.sensors.camera.VisionCamera.CoordinateSpace;
+import ca.frc6390.athena.sensors.camera.VisionCamera.TargetObservation;
+import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -323,20 +323,20 @@ public class AlignAndDriveToTagCommand extends Command {
 
     private void updateCameraSources() {
         cameraSources.clear();
-        Map<String, LocalizationCamera> cameras = robotVision.getCameras();
+        Map<String, VisionCamera> cameras = robotVision.getCameras();
         if (cameras.isEmpty()) {
             return;
         }
 
         for (String key : cameraTables) {
-            LocalizationCamera camera = cameras.get(key);
+            VisionCamera camera = cameras.get(key);
             if (camera != null && cameraMatches(camera)) {
                 cameraSources.add(new CameraSource(key, camera));
             }
         }
     }
 
-    private boolean cameraMatches(LocalizationCamera camera) {
+    private boolean cameraMatches(VisionCamera camera) {
         if (requiredRoles.isEmpty()) {
             return true;
         }
@@ -445,7 +445,7 @@ public class AlignAndDriveToTagCommand extends Command {
         return Double.isFinite(sanitized) ? sanitized : 0.0;
     }
 
-    private record CameraSource(String key, LocalizationCamera camera) {}
+    private record CameraSource(String key, VisionCamera camera) {}
 
     private record SelectedObservation(String cameraKey, TargetObservation observation) {}
 }

@@ -4,20 +4,23 @@ import java.util.Optional;
 
 
 /**
- * Enumeration of well-known {@link LocalizationCamera} capabilities. Centralising the type
+ * Enumeration of well-known {@link VisionCamera} capabilities. Centralising the type
  * associations in an enum keeps IntelliSense-friendly names while still giving us strongly-typed
  * lookups at runtime.
  */
-public enum LocalizationCameraCapability {
-    LED(LocalizationCamera.LedControl.class),
-    PIPELINE(LocalizationCamera.PipelineControl.class),
-    STREAM(LocalizationCamera.StreamControl.class),
-    LIMELIGHT(LimelightCapability.class),
-    PHOTON_VISION(PhotonVisionCapability.class);
+public enum VisionCameraCapability {
+    LED(VisionCamera.LedControl.class),
+    PIPELINE(VisionCamera.PipelineControl.class),
+    STREAM(VisionCamera.StreamControl.class),
+    LOCALIZATION_SOURCE(LocalizationSource.class),
+    TARGETING_SOURCE(TargetingSource.class),
+    FIDUCIAL_SOURCE(FiducialSource.class),
+    LIMELIGHT_CAMERA(LimelightCamera.class),
+    PHOTON_VISION_CAMERA(PhotonVisionCamera.class);
 
     private final Class<?> type;
 
-    LocalizationCameraCapability(Class<?> type) {
+    VisionCameraCapability(Class<?> type) {
         this.type = type;
     }
 

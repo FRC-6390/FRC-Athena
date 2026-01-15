@@ -2,13 +2,16 @@ package ca.frc6390.athena.sensors.camera.limelight;
 
 import java.util.Arrays;
 
-import ca.frc6390.athena.sensors.camera.LocalizationCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.PipelineControl;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera.StreamControl;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
-import ca.frc6390.athena.sensors.camera.LimelightCapability;
+import ca.frc6390.athena.sensors.camera.VisionCamera;
+import ca.frc6390.athena.sensors.camera.VisionCamera.PipelineControl;
+import ca.frc6390.athena.sensors.camera.VisionCamera.StreamControl;
+import ca.frc6390.athena.sensors.camera.VisionCameraConfig;
+import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
+import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
+import ca.frc6390.athena.sensors.camera.FiducialSource;
+import ca.frc6390.athena.sensors.camera.LimelightCamera;
+import ca.frc6390.athena.sensors.camera.LocalizationSource;
+import ca.frc6390.athena.sensors.camera.TargetingSource;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -23,7 +26,7 @@ import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.Timer;
 
-public class LimeLight implements LimelightCapability {
+public class LimeLight implements LimelightCamera, LocalizationSource, TargetingSource, FiducialSource {
     public LimeLightConfig config;
     private NetworkTable limelightTable;
     public NetworkTableEntry tv;
@@ -75,7 +78,7 @@ public class LimeLight implements LimelightCapability {
     public NetworkTableEntry rawfiducials;
     public boolean useForLocalization = false;
 
-    private final LocalizationCamera localizationCamera;
+    private final VisionCamera localizationCamera;
     private final AprilTagFieldLayout fieldLayout;
     private LocalizationSnapshot latestSnapshot = LocalizationSnapshot.empty();
     private static final double DEFAULT_HORIZONTAL_FOV_DEG = 63.3;
@@ -340,12 +343,12 @@ public class LimeLight implements LimelightCapability {
         setFiducialIdFilters(Arrays.stream(config.filteredTags()).mapToDouble(i -> i).toArray());
         applyCameraTransformToNetworkTables(config.cameraRobotSpace());
         refreshLocalizationSnapshot();
-        localizationCamera = createLocalizationCamera();
+        localizationCamera = createVisionCamera();
     }
 
-    private LocalizationCamera createLocalizationCamera() {
-        LocalizationCameraConfig cameraConfig =
-                new LocalizationCameraConfig(config.getTable(), config.getSoftware())
+    private VisionCamera createVisionCamera() {
+        VisionCameraConfig cameraConfig =
+                new VisionCameraConfig(config.getTable(), config.getSoftware())
                         .setUseForLocalization(config.useForLocalization())
                         .setTrustDistance(config.trustDistance())
                         .setHasTargetsSupplier(this::hasValidTarget)
@@ -367,11 +370,14 @@ public class LimeLight implements LimelightCapability {
                         .setRoles(config.roles())
                         .setFieldLayout(fieldLayout);
 
-        LocalizationCamera camera = new LocalizationCamera(cameraConfig);
-        camera.registerCapability(LocalizationCameraCapability.LIMELIGHT, this);
-        camera.registerCapability(LocalizationCameraCapability.LED, new LimelightLedCapability());
-        camera.registerCapability(LocalizationCameraCapability.PIPELINE, new LimelightPipelineCapability());
-        camera.registerCapability(LocalizationCameraCapability.STREAM, new LimelightStreamCapability());
+        VisionCamera camera = new VisionCamera(cameraConfig);
+        camera.registerCapability(VisionCameraCapability.LIMELIGHT_CAMERA, this);
+        camera.registerCapability(VisionCameraCapability.LOCALIZATION_SOURCE, this);
+        camera.registerCapability(VisionCameraCapability.TARGETING_SOURCE, this);
+        camera.registerCapability(VisionCameraCapability.FIDUCIAL_SOURCE, this);
+        camera.registerCapability(VisionCameraCapability.LED, new LimelightLedCapability());
+        camera.registerCapability(VisionCameraCapability.PIPELINE, new LimelightPipelineCapability());
+        camera.registerCapability(VisionCameraCapability.STREAM, new LimelightStreamCapability());
         return camera;
     }
 
@@ -486,15 +492,15 @@ public class LimeLight implements LimelightCapability {
         return Math.toDegrees(Math.atan2(z, x));
     }
 
-    private class LimelightLedCapability implements LocalizationCamera.LedControl {
+    private class LimelightLedCapability implements VisionCamera.LedControl {
 
         @Override
-        public void setLedMode(LocalizationCamera.LedMode mode) {
+        public void setLedMode(VisionCamera.LedMode mode) {
             LimeLight.this.setLedMode(toVendorLedMode(mode));
         }
 
         @Override
-        public LocalizationCamera.LedMode getLedMode() {
+        public VisionCamera.LedMode getLedMode() {
             return toGenericLedMode(LimeLight.this.getLedMode());
         }
     }
@@ -513,26 +519,26 @@ public class LimeLight implements LimelightCapability {
 
     private class LimelightStreamCapability implements StreamControl {
         @Override
-        public void setStreamMode(LocalizationCamera.StreamMode mode) {
+        public void setStreamMode(VisionCamera.StreamMode mode) {
             LimeLight.this.setStream(toVendorStreamMode(mode));
         }
 
         @Override
-        public LocalizationCamera.StreamMode getStreamMode() {
+        public VisionCamera.StreamMode getStreamMode() {
             return toGenericStreamMode(LimeLight.this.getStreamMode());
         }
     }
 
-    private static LocalizationCamera.LedMode toGenericLedMode(LedMode mode) {
+    private static VisionCamera.LedMode toGenericLedMode(LedMode mode) {
         return switch (mode) {
-            case PIPELINE -> LocalizationCamera.LedMode.PIPELINE;
-            case OFF -> LocalizationCamera.LedMode.OFF;
-            case BLINK -> LocalizationCamera.LedMode.BLINK;
-            case ON -> LocalizationCamera.LedMode.ON;
+            case PIPELINE -> VisionCamera.LedMode.PIPELINE;
+            case OFF -> VisionCamera.LedMode.OFF;
+            case BLINK -> VisionCamera.LedMode.BLINK;
+            case ON -> VisionCamera.LedMode.ON;
         };
     }
 
-    private static LedMode toVendorLedMode(LocalizationCamera.LedMode mode) {
+    private static LedMode toVendorLedMode(VisionCamera.LedMode mode) {
         return switch (mode) {
             case PIPELINE -> LedMode.PIPELINE;
             case OFF -> LedMode.OFF;
@@ -541,15 +547,15 @@ public class LimeLight implements LimelightCapability {
         };
     }
 
-    private static LocalizationCamera.StreamMode toGenericStreamMode(StreamMode mode) {
+    private static VisionCamera.StreamMode toGenericStreamMode(StreamMode mode) {
         return switch (mode) {
-            case STANDARD -> LocalizationCamera.StreamMode.STANDARD;
-            case PIP_MAIN -> LocalizationCamera.StreamMode.PIP_MAIN;
-            case PIP_SECONDARY -> LocalizationCamera.StreamMode.PIP_SECONDARY;
+            case STANDARD -> VisionCamera.StreamMode.STANDARD;
+            case PIP_MAIN -> VisionCamera.StreamMode.PIP_MAIN;
+            case PIP_SECONDARY -> VisionCamera.StreamMode.PIP_SECONDARY;
         };
     }
 
-    private static StreamMode toVendorStreamMode(LocalizationCamera.StreamMode mode) {
+    private static StreamMode toVendorStreamMode(VisionCamera.StreamMode mode) {
         return switch (mode) {
             case STANDARD -> StreamMode.STANDARD;
             case PIP_MAIN -> StreamMode.PIP_MAIN;
@@ -851,7 +857,7 @@ public class LimeLight implements LimelightCapability {
     public Matrix<N3, N1> getMultiStdDev() {
         return localizationCamera.getMultiStdDev();
     }
-    public LocalizationCamera getLocalizationCamera() {
+    public VisionCamera getVisionCamera() {
         return localizationCamera;
     }
 

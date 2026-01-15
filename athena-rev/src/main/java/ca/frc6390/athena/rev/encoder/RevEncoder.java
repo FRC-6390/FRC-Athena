@@ -102,11 +102,17 @@ public class RevEncoder implements Encoder {
     @Override
     public void setInverted(boolean inverted) {
         this.inverted = inverted;
+        if (config != null) {
+            config.inverted = inverted;
+        }
     }
 
     @Override
     public void setConversion(double conversion) {
         this.conversion = conversion;
+        if (config != null) {
+            config.conversion = conversion;
+        }
     }
 
     @Override
@@ -132,16 +138,25 @@ public class RevEncoder implements Encoder {
     @Override
     public void setGearRatio(double gearRatio) {
         this.gearRatio = gearRatio;
+        if (config != null) {
+            config.gearRatio = gearRatio;
+        }
     }
 
     @Override
     public void setConversionOffset(double conversionOffset) {
         this.conversionOffset = conversionOffset;
+        if (config != null) {
+            config.conversionOffset = conversionOffset;
+        }
     }
 
     @Override
     public void setOffset(double offset) {
         this.offset = offset;
+        if (config != null) {
+            config.offset = offset;
+        }
     }
 
     @Override

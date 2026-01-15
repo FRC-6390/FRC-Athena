@@ -38,9 +38,9 @@ import edu.wpi.first.wpilibj.Timer;
 
 /**
  * Unified wrapper around vendor-specific vision cameras. Works similarly to {@code MotorController}
- * by delegating to suppliers/consumers defined in {@link LocalizationCameraConfig}.
+ * by delegating to suppliers/consumers defined in {@link VisionCameraConfig}.
  */
-public class LocalizationCamera {
+public class VisionCamera {
 
     /**
      * Coordinate systems used when translating measurements emitted by the camera.
@@ -100,7 +100,7 @@ public class LocalizationCamera {
 
     private static final double LATENCY_TIMESTAMP_THRESHOLD_SECONDS = 5.0;
 
-    private final LocalizationCameraConfig config;
+    private final VisionCameraConfig config;
     private final BooleanSupplier connectedSupplier;
     private final BooleanSupplier hasTargetsSupplier;
     private final Supplier<Pose2d> poseSupplier;
@@ -127,9 +127,9 @@ public class LocalizationCamera {
     private final double displayHorizontalFovDeg;
     private final double displayRangeMeters;
     private final double visionWeightMultiplier;
-    private final EnumSet<LocalizationCameraConfig.CameraRole> roles;
-    private final EnumMap<LocalizationCameraCapability, Object> capabilities =
-            new EnumMap<>(LocalizationCameraCapability.class);
+    private final EnumSet<VisionCameraConfig.CameraRole> roles;
+    private final EnumMap<VisionCameraCapability, Object> capabilities =
+            new EnumMap<>(VisionCameraCapability.class);
     private final StructPublisher<Pose2d> networkEstimatedPosePublisher;
     private final IntFunction<Pose2d> tagPoseResolver;
 
@@ -146,7 +146,7 @@ public class LocalizationCamera {
      *
      * @param config provider-specific configuration that exposes the camera capabilities
      */
-    public LocalizationCamera(LocalizationCameraConfig config) {
+    public VisionCamera(VisionCameraConfig config) {
         this.config = config;
         this.connectedSupplier = wrapBoolean(config.getConnectedSupplier(), true);
         this.hasTargetsSupplier = wrapBoolean(config.getHasTargetsSupplier(), false);
@@ -178,12 +178,12 @@ public class LocalizationCamera {
         this.visionWeightMultiplier = sanitizeWeight(config.getVisionWeightMultiplier());
         IntFunction<Pose2d> resolver = config.getTagPoseResolver();
         this.tagPoseResolver = resolver != null ? resolver : id -> null;
-        EnumSet<LocalizationCameraConfig.CameraRole> configRoles = config.getRoles();
+        EnumSet<VisionCameraConfig.CameraRole> configRoles = config.getRoles();
         this.roles = configRoles.isEmpty()
-                ? EnumSet.noneOf(LocalizationCameraConfig.CameraRole.class)
+                ? EnumSet.noneOf(VisionCameraConfig.CameraRole.class)
                 : EnumSet.copyOf(configRoles);
         if (config.isUseForLocalization()) {
-            this.roles.add(LocalizationCameraConfig.CameraRole.LOCALIZATION);
+            this.roles.add(VisionCameraConfig.CameraRole.LOCALIZATION);
         }
         this.singleStdDevs = config.getSingleStdDevs();
         this.multiStdDevs = config.getMultiTagStdDevs();
@@ -202,7 +202,7 @@ public class LocalizationCamera {
     /**
      * Returns the underlying configuration that defines how the camera is integrated.
      */
-    public LocalizationCameraConfig getConfig() {
+    public VisionCameraConfig getConfig() {
         return config;
     }
 
@@ -210,7 +210,7 @@ public class LocalizationCamera {
      * Runs any periodic hooks, caches vendor measurements, and pushes the estimated pose to
      * NetworkTables. Returns {@code this} to allow fluent access patterns.
      */
-    public LocalizationCamera update() {
+    public VisionCamera update() {
         if (updateHook != null) {
             updateHook.run();
         }
@@ -538,22 +538,22 @@ public class LocalizationCamera {
     public void setUseForLocalization(boolean useForLocalization) {
         config.setUseForLocalization(useForLocalization);
         if (useForLocalization) {
-            roles.add(LocalizationCameraConfig.CameraRole.LOCALIZATION);
+            roles.add(VisionCameraConfig.CameraRole.LOCALIZATION);
         } else {
-            roles.remove(LocalizationCameraConfig.CameraRole.LOCALIZATION);
+            roles.remove(VisionCameraConfig.CameraRole.LOCALIZATION);
         }
     }
 
     /**
      * Registers a capability implementation that can later be queried through
-     * {@link #capability(LocalizationCameraCapability)}.
+     * {@link #capability(VisionCameraCapability)}.
      *
      * @param capabilityKey capability descriptor
      * @param implementation object implementing the capability contract
      * @return this camera for chaining
      * @throws IllegalArgumentException when the implementation does not match the capability type
      */
-    public LocalizationCamera registerCapability(LocalizationCameraCapability capabilityKey, Object implementation) {
+    public VisionCamera registerCapability(VisionCameraCapability capabilityKey, Object implementation) {
         if (capabilityKey != null && implementation != null) {
             if (!capabilityKey.getType().isInstance(implementation)) {
                 throw new IllegalArgumentException(
@@ -573,21 +573,21 @@ public class LocalizationCamera {
      * @param capabilityKey capability descriptor
      * @return optional containing the implementation when installed
      */
-    public <T> Optional<T> capability(LocalizationCameraCapability capabilityKey) {
+    public <T> Optional<T> capability(VisionCameraCapability capabilityKey) {
         return capabilityKey.cast(capabilities.get(capabilityKey));
     }
 
     /**
      * True when a capability implementation has been registered for the given key.
      */
-    public boolean supports(LocalizationCameraCapability capabilityKey) {
+    public boolean supports(VisionCameraCapability capabilityKey) {
         return capabilities.containsKey(capabilityKey);
     }
 
     /**
      * Returns a defensive copy of the roles assigned to this camera instance.
      */
-    public EnumSet<LocalizationCameraConfig.CameraRole> getRoles() {
+    public EnumSet<VisionCameraConfig.CameraRole> getRoles() {
         return EnumSet.copyOf(roles);
     }
 
@@ -642,32 +642,32 @@ public class LocalizationCamera {
         return robotToCameraTransform;
     }
 
-    public LocalizationCamera setStdDevAmbiguityWeight(double weight) {
+    public VisionCamera setStdDevAmbiguityWeight(double weight) {
         config.setStdDevAmbiguityWeight(weight);
         return this;
     }
 
-    public LocalizationCamera setStdDevDistanceWeight(double weight) {
+    public VisionCamera setStdDevDistanceWeight(double weight) {
         config.setStdDevDistanceWeight(weight);
         return this;
     }
 
-    public LocalizationCamera setStdDevLatencyWeight(double weight) {
+    public VisionCamera setStdDevLatencyWeight(double weight) {
         config.setStdDevLatencyWeight(weight);
         return this;
     }
 
-    public LocalizationCamera setStdDevPitchWeight(double weight) {
+    public VisionCamera setStdDevPitchWeight(double weight) {
         config.setStdDevPitchWeight(weight);
         return this;
     }
 
-    public LocalizationCamera setStdDevRollWeight(double weight) {
+    public VisionCamera setStdDevRollWeight(double weight) {
         config.setStdDevRollWeight(weight);
         return this;
     }
 
-    public LocalizationCamera setVisionWeightMultiplier(double weight) {
+    public VisionCamera setVisionWeightMultiplier(double weight) {
         config.setVisionWeightMultiplier(weight);
         return this;
     }

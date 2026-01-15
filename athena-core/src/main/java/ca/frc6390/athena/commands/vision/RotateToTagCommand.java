@@ -4,7 +4,7 @@ import java.util.Objects;
 import java.util.OptionalDouble;
 
 import ca.frc6390.athena.core.RobotSpeeds;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera;
+import ca.frc6390.athena.sensors.camera.VisionCamera;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.wpilibj.Timer;
@@ -16,7 +16,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 public class RotateToTagCommand extends Command {
 
     private final RobotSpeeds robotSpeeds;
-    private final LocalizationCamera camera;
+    private final VisionCamera camera;
     private final PIDController headingController;
     private final double headingOffsetDegrees;
     private final double maxAngularVelocityRadPerSec;
@@ -36,7 +36,7 @@ public class RotateToTagCommand extends Command {
      */
     public RotateToTagCommand(
             RobotSpeeds robotSpeeds,
-            LocalizationCamera camera,
+            VisionCamera camera,
             PIDController headingController,
             double headingOffsetDegrees,
             double maxAngularVelocityRadPerSec,
@@ -54,7 +54,7 @@ public class RotateToTagCommand extends Command {
      */
     public RotateToTagCommand(
             RobotSpeeds robotSpeeds,
-            LocalizationCamera camera,
+            VisionCamera camera,
             PIDController headingController,
             double maxAngularVelocityRadPerSec) {
         this(robotSpeeds, camera, headingController, 0.0, maxAngularVelocityRadPerSec, 0.0);

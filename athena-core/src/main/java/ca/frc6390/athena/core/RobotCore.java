@@ -22,7 +22,7 @@ import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanism;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraCapability;
+import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
 import ca.frc6390.athena.logging.TelemetryRegistry;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.geometry.Pose2d;

@@ -23,7 +23,7 @@ import ca.frc6390.athena.core.auto.HolonomicDriveBinding;
 import ca.frc6390.athena.core.auto.HolonomicFeedforward;
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import ca.frc6390.athena.hardware.imu.Imu;
-import ca.frc6390.athena.sensors.camera.LocalizationCamera;
+import ca.frc6390.athena.sensors.camera.VisionCamera;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
@@ -135,7 +135,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private SendableChooser<RobotLocalizationConfig.BackendConfig.VisionStrategy> backendVisionStrategyChooser;
 
     private final RobotLocalizationPersistence persistence;
-    private final RobotLocalizationCameraManager cameraManager;
+    private final RobotVisionCameraManager cameraManager;
     private boolean restoringPersistentState = false;
     private final Matrix<N3, N1> baseStateStdDevs2d;
     private final Matrix<N4, N1> baseStateStdDevs3d;
@@ -223,7 +223,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.relativePose3dPublisher = null;
         this.plannedPathObject = field.getObject("AutoPlan");
         this.actualPathObject = field.getObject("ActualPath");
-        this.cameraManager = new RobotLocalizationCameraManager(STD_EPSILON, field);
+        this.cameraManager = new RobotVisionCameraManager(STD_EPSILON, field);
 
         this.fieldEstimator2d = fieldEstimator2d;
         this.relativeEstimator2d = relativeEstimator2d;
@@ -942,7 +942,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             return fieldLengthMetersOverride;
         }
         if (vision != null) {
-            for (LocalizationCamera camera : vision.getCameras().values()) {
+            for (VisionCamera camera : vision.getCameras().values()) {
                 var layout = camera != null ? camera.getConfig().getFieldLayout() : null;
                 if (layout != null) {
                     return layout.getFieldLength();
@@ -957,7 +957,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             return fieldWidthMetersOverride;
         }
         if (vision != null) {
-            for (LocalizationCamera camera : vision.getCameras().values()) {
+            for (VisionCamera camera : vision.getCameras().values()) {
                 var layout = camera != null ? camera.getConfig().getFieldLayout() : null;
                 if (layout != null) {
                     return layout.getFieldWidth();
@@ -1378,7 +1378,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
        update();
     }
 
-    private boolean applyVisionMeasurement(LocalizationCamera.VisionMeasurement measurement) {
+    private boolean applyVisionMeasurement(VisionCamera.VisionMeasurement measurement) {
         if (measurement == null) {
             return false;
         }
@@ -1475,14 +1475,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 stdDevs.get(2, 0) * scale);
     }
 
-    private Optional<LocalizationCamera.VisionMeasurement> fuseVisionMeasurements(
-            List<LocalizationCamera.VisionMeasurement> measurements,
+    private Optional<VisionCamera.VisionMeasurement> fuseVisionMeasurements(
+            List<VisionCamera.VisionMeasurement> measurements,
             RobotLocalizationConfig.BackendConfig backend) {
         if (measurements == null || measurements.isEmpty()) {
             return Optional.empty();
         }
         boolean hasAgreement = hasPoseAgreement(measurements, backend.poseJumpAgreementMeters());
-        measurements.sort(Comparator.comparingDouble(LocalizationCamera.VisionMeasurement::timestampSeconds));
+        measurements.sort(Comparator.comparingDouble(VisionCamera.VisionMeasurement::timestampSeconds));
         double latestTimestamp = measurements.get(measurements.size() - 1).timestampSeconds();
         double maxSeparation = backend.visionFusionMaxSeparationSeconds();
         double minWeight = backend.visionFusionMinWeight();
@@ -1500,7 +1500,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         double sumStdY2 = 0.0;
         double sumStdTheta2 = 0.0;
 
-        for (LocalizationCamera.VisionMeasurement measurement : measurements) {
+        for (VisionCamera.VisionMeasurement measurement : measurements) {
             if (latestTimestamp - measurement.timestampSeconds() > maxSeparation) {
                 continue;
             }
@@ -1575,7 +1575,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                     Math.sqrt(sumStdTheta2 / sumWeight));
         }
 
-        return Optional.of(new LocalizationCamera.VisionMeasurement(
+        return Optional.of(new VisionCamera.VisionMeasurement(
                 fusedPose,
                 new Pose3d(fusedPose),
                 fusedTimestamp,
@@ -1587,7 +1587,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private boolean hasPoseAgreement(
-            List<LocalizationCamera.VisionMeasurement> measurements,
+            List<VisionCamera.VisionMeasurement> measurements,
             double agreementMeters) {
         if (measurements == null || measurements.size() < 2 || agreementMeters <= 0.0) {
             return false;

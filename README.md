@@ -130,8 +130,8 @@ robot.getAutos().registerNamedCommand("AutoAlignToTag", autoAlign);
 You can restrict the command to particular cameras or roles when needed:
 
 ```java
-EnumSet<LocalizationCameraConfig.CameraRole> preferredRoles =
-        EnumSet.of(LocalizationCameraConfig.CameraRole.ALIGNMENT);
+EnumSet<VisionCameraConfig.CameraRole> preferredRoles =
+        EnumSet.of(VisionCameraConfig.CameraRole.AUTO);
 Set<String> cameraTables = Set.of("limelight-left", "photon-front");
 
 Command filteredAlign = new AlignAndDriveToTagCommand(

@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.EnumSet;
 
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
+import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
 import ca.frc6390.athena.sensors.camera.limelight.LimeLight.PoseEstimateWithLatencyType;
 import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.math.geometry.Rotation3d;

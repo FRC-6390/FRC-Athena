@@ -34,8 +34,10 @@ public class RevMotorController implements MotorController {
     private final Consumer<Double> setPosition;
     private final Consumer<MotorNeutralMode> setNeutralMode;
     private final Consumer<PIDController> setPid;
+    private final Consumer<Boolean> setInverted;
     private final BooleanSupplier getConnected;
     private final java.util.function.DoubleSupplier getTemperature;
+    private final BooleanSupplier getInverted;
 
     public RevMotorController(MotorControllerConfig config,
                               Encoder encoder,
@@ -45,8 +47,10 @@ public class RevMotorController implements MotorController {
                               Consumer<Double> setPosition,
                               Consumer<MotorNeutralMode> setNeutralMode,
                               Consumer<PIDController> setPid,
+                              Consumer<Boolean> setInverted,
                               BooleanSupplier getConnected,
-                              java.util.function.DoubleSupplier getTemperature) {
+                              java.util.function.DoubleSupplier getTemperature,
+                              BooleanSupplier getInverted) {
         this.config = config;
         this.encoder = encoder;
         this.setSpeed = setSpeed;
@@ -55,8 +59,10 @@ public class RevMotorController implements MotorController {
         this.setPosition = setPosition;
         this.setNeutralMode = setNeutralMode;
         this.setPid = setPid;
+        this.setInverted = setInverted;
         this.getConnected = getConnected;
         this.getTemperature = getTemperature;
+        this.getInverted = getInverted;
     }
 
     public static RevMotorController fromConfig(MotorControllerConfig config) {
@@ -120,8 +126,10 @@ public class RevMotorController implements MotorController {
                     update.closedLoop.pid(pid.getP(), pid.getI(), pid.getD());
                     controller.configure(update, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
                 },
+                controller::setInverted,
                 () -> !controller.hasActiveFault(),
-                controller::getMotorTemperature);
+                controller::getMotorTemperature,
+                controller::getInverted);
     }
 
     private static RevMotorController createSparkFlex(MotorControllerConfig config, MotorType motorType) {
@@ -161,8 +169,10 @@ public class RevMotorController implements MotorController {
                     update.closedLoop.pid(pid.getP(), pid.getI(), pid.getD());
                     controller.configure(update, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
                 },
+                controller::setInverted,
                 () -> !controller.hasActiveFault(),
-                controller::getMotorTemperature);
+                controller::getMotorTemperature,
+                controller::getInverted);
     }
 
     @Override
@@ -192,6 +202,7 @@ public class RevMotorController implements MotorController {
 
     @Override
     public void setCurrentLimit(double amps) {
+        config.currentLimit = amps;
         setCurrentLimit.accept(amps);
     }
 
@@ -202,11 +213,13 @@ public class RevMotorController implements MotorController {
 
     @Override
     public void setNeutralMode(MotorNeutralMode mode) {
+        config.neutralMode = mode;
         setNeutralMode.accept(mode);
     }
 
     @Override
     public void setPid(PIDController pid) {
+        config.pid = pid;
         setPid.accept(pid);
     }
 
@@ -223,5 +236,33 @@ public class RevMotorController implements MotorController {
     @Override
     public Encoder getEncoder() {
         return encoder;
+    }
+
+    @Override
+    public boolean isInverted() {
+        boolean inverted = getInverted.getAsBoolean();
+        config.inverted = inverted;
+        return inverted;
+    }
+
+    @Override
+    public void setInverted(boolean inverted) {
+        config.inverted = inverted;
+        setInverted.accept(inverted);
+    }
+
+    @Override
+    public double getCurrentLimit() {
+        return config.currentLimit;
+    }
+
+    @Override
+    public MotorNeutralMode getNeutralMode() {
+        return config.neutralMode;
+    }
+
+    @Override
+    public MotorControllerConfig getConfig() {
+        return config;
     }
 }

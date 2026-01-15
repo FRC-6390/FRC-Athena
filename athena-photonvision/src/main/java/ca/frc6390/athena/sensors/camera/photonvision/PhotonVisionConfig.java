@@ -7,7 +7,7 @@ import java.util.EnumSet;
 import org.photonvision.PhotonPoseEstimator.PoseStrategy;
 
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
-import ca.frc6390.athena.sensors.camera.LocalizationCameraConfig.CameraRole;
+import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
 import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Rotation3d;
