@@ -722,6 +722,14 @@ public class VisionCamera {
     }
 
     /**
+     * Returns the latest per-target measurements reported by the camera.
+     */
+    public List<TargetMeasurement> getTargetMeasurements() {
+        update();
+        return List.copyOf(measurementCache);
+    }
+
+    /**
      * Returns the camera-to-target translation expressed in camera coordinates, if the vendor
      * reported enough information to compute it.
      */

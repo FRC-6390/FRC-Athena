@@ -51,62 +51,9 @@ import edu.wpi.first.math.trajectory.TrapezoidProfile;
  */
 public class MechanismConfig<T extends Mechanism> {
 
-    /** Ordered list of motor controller configurations that will be grouped together. */
-    public ArrayList<MotorControllerConfig> motors = new ArrayList<>();
-    /** Primary encoder used for feedback, typically attached to the drivetrain output. */
-    public EncoderConfig encoder = null;
-    /** PID controller instance for traditional position/velocity control loops. */
-    public PIDController pidController = null;
-    /** Profiled PID controller that enforces velocity/acceleration constraints. */
-    public ProfiledPIDController profiledPIDController = null;
-    /** When true, treats the attached encoder as an absolute device during initialization. */
-    public boolean useAbsolute = false;
-    /** When true, assumes mechanism outputs are already in volts instead of a [-1, 1] scale. */
-    public boolean useVoltage = false;
-    /** When true, bypasses PID and writes the requested setpoint straight to the motor output. */
-    public boolean useSetpointAsOutput = false;
-    /** When true, PID compares velocity instead of position. */
-    public boolean pidUseVelocity = false;
-    /** Enables a user-specified control-loop period instead of WPILib's default loop timing. */
-    public boolean customPIDCycle = false;
-    /** Enables continuous PID input for cyclical mechanisms (turrets, wheels, etc.). */
-    public boolean pidContinous = false;
+    private MechanismConfigRecord data = MechanismConfigRecord.defaults();
     /** Factory used to instantiate the final mechanism once configuration is complete. */
     public Function<MechanismConfig<T>, T> factory = null;
-    /** Additional limit switches wired into the mechanism for soft/hard stop behavior. */
-    public ArrayList<GenericLimitSwitchConfig> limitSwitches = new ArrayList<>();
-    
-    /** CAN bus name shared by all motors/encoders in this mechanism (defaults to the roboRIO bus). */
-    public String canbus = "rio";
-    /** Overall gear ratio from motor encoder to mechanism output (motor rotations per output rotation). */
-    public double encoderGearRatio = 1;
-    /** Scalar that converts encoder units into meaningful output units (rad, meters, etc.). */
-    public double encoderConversion = 1;
-    /** Offset applied to the conversion factor once, useful for calibrating absolute encoders. */
-    public double encoderConversionOffset = 0;
-    /** Raw zeroing offset for the encoder reading, often captured during homing. */
-    public double encoderOffset = 0;
-    /** Peak current limit (amps) applied to each configured motor controller. */
-    public double motorCurrentLimit = 40;
-    /** Acceptable error band for PID controllers before considering the setpoint reached. */
-    public double tolerance = 0;
-    /** Delay (seconds) applied between state-machine transitions to debounce sequencing. */
-    public double stateMachineDelay = 0;
-    /** Custom control-loop period (seconds) when {@link #customPIDCycle} is true. */
-    public double pidPeriod = 0;
-    /** Integral zone width; integrator is only active when the error is within this band. */
-    public double pidIZone = 0;
-    /** Continuous input minimum bound used when {@link #pidContinous} is set. */
-    public double continousMin, continousMax;
-    /** Optional minimum bound for mechanism setpoints. */
-    public double minBound = Double.NaN;
-    /** Optional maximum bound for mechanism setpoints. */
-    public double maxBound = Double.NaN;
-    /** Optional motion limits applied to profiled PID constraints (max velocity/acceleration). */
-    public MotionLimits.AxisLimits motionLimits = null;
-
-    /** Neutral motor behavior applied to all controllers (coast vs. brake). */
-    public MotorNeutralMode motorNeutralMode = MotorNeutralMode.Brake;
     /** Optional per-state callbacks that run when the mechanism state machine enters the state. */
     public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
     /** Optional state hooks that run every loop while a state is active. */
@@ -135,6 +82,21 @@ public class MechanismConfig<T extends Mechanism> {
     public Supplier<TurretMechanism.FieldHeadingVisualization> turretHeadingVisualization = null;
     /** Optional sensor simulation configuration used to generate virtual readings. */
     public MechanismSensorSimulationConfig sensorSimulationConfig = null;
+
+    public MechanismConfigRecord data() {
+        return data;
+    }
+
+    public MechanismConfig<T> setData(MechanismConfigRecord data) {
+        this.data = data != null ? data : MechanismConfigRecord.defaults();
+        return this;
+    }
+
+    private void updateData(Consumer<MechanismConfigRecord.Builder> mutator) {
+        MechanismConfigRecord.Builder builder = data.toBuilder();
+        mutator.accept(builder);
+        data = builder.build();
+    }
 
     /**
      * Creates a configuration builder that instantiates a plain {@link Mechanism} with no additional
@@ -349,7 +311,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> addMotor(MotorControllerConfig config){
-        motors.add(config);
+        data.motors().add(config);
         return this;
     }
 
@@ -410,7 +372,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setEncoder(EncoderConfig encoder){
-        this.encoder  = encoder;
+        updateData(builder -> builder.encoder(encoder));
         return this;
     }
 
@@ -445,7 +407,13 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setEncoderFromMotor(int id){
-        return setEncoder(motors.stream().filter((motors) -> motors.id == Math.abs(id)).findFirst().get().encoderConfig.setInverted(id < 0));
+        return setEncoder(
+                data.motors().stream()
+                        .filter((motors) -> motors.id == Math.abs(id))
+                        .findFirst()
+                        .get()
+                        .encoderConfig
+                        .setInverted(id < 0));
     }
 
     /**
@@ -467,7 +435,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setPID(PIDController pidController){
-        this.pidController = pidController;
+        updateData(builder -> builder.pidController(pidController));
         return this;
     }
 
@@ -506,7 +474,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setProfiledPID(ProfiledPIDController profiledPIDController){
-        this.profiledPIDController = profiledPIDController;
+        updateData(builder -> builder.profiledPIDController(profiledPIDController));
         return this;
     }
 
@@ -517,7 +485,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setMotionLimits(MotionLimits.AxisLimits limits) {
-        this.motionLimits = limits;
+        updateData(builder -> builder.motionLimits(limits));
         return this;
     }
 
@@ -539,7 +507,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setTolerance(double tolerance){
-        this.tolerance = tolerance;
+        updateData(builder -> builder.tolerance(tolerance));
         return this;
     }
     /**
@@ -549,7 +517,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setCanbus(String canbus){
-        this.canbus = canbus;
+        updateData(builder -> builder.canbus(canbus));
         return this;
     }
 
@@ -560,7 +528,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setEncoderGearRatio(double ratio){
-        this.encoderGearRatio = ratio;
+        updateData(builder -> builder.encoderGearRatio(ratio));
         return this;
     }
 
@@ -571,7 +539,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setEncoderConversion(double conversion){
-        this.encoderConversion = conversion;
+        updateData(builder -> builder.encoderConversion(conversion));
         return this;
     }
 
@@ -582,7 +550,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setEncoderConversionOffset(double conversionOffset){
-        this.encoderConversionOffset = conversionOffset;
+        updateData(builder -> builder.encoderConversionOffset(conversionOffset));
         return this;
     }
 
@@ -593,7 +561,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setEncoderOffset(double offset){
-        this.encoderOffset = offset;
+        updateData(builder -> builder.encoderOffset(offset));
         return this;
     }
 
@@ -604,7 +572,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setCurrentLimit(double limit){
-        this.motorCurrentLimit = limit;
+        updateData(builder -> builder.motorCurrentLimit(limit));
         return this;
     }
 
@@ -616,7 +584,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setEncoderConfig(Consumer<EncoderConfig> func){
-        func.accept(encoder);
+        func.accept(data.encoder());
         return this;
     }
 
@@ -627,7 +595,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setUseEncoderAbsolute(boolean useAbsolute){
-        this.useAbsolute = useAbsolute;
+        updateData(builder -> builder.useAbsolute(useAbsolute));
         return this;
     }
 
@@ -639,7 +607,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setUseVoltage(boolean useVoltage){
-        this.useVoltage = useVoltage;
+        updateData(builder -> builder.useVoltage(useVoltage));
         return this;
     }
 
@@ -650,7 +618,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setNeutralMode(MotorNeutralMode mode){
-        this.motorNeutralMode = mode;
+        updateData(builder -> builder.motorNeutralMode(mode));
         return this;
     }
 
@@ -673,7 +641,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> addLimitSwitch(GenericLimitSwitchConfig config) {
-        limitSwitches.add(config);
+        data.limitSwitches().add(config);
         return this;
     }
 
@@ -684,7 +652,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setUseSetpointAsOutput(boolean useSetpointAsOutput) {
-        this.useSetpointAsOutput = useSetpointAsOutput;
+        updateData(builder -> builder.useSetpointAsOutput(useSetpointAsOutput));
         return this;
     }
 
@@ -695,7 +663,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setPidUseVelocity(boolean useVelocity) {
-        this.pidUseVelocity = useVelocity;
+        updateData(builder -> builder.pidUseVelocity(useVelocity));
         return this;
     }
 
@@ -776,7 +744,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setStateMachineDelay(double delay){
-        this.stateMachineDelay = delay;
+        updateData(builder -> builder.stateMachineDelay(delay));
         return this;
     }
 
@@ -788,8 +756,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setBounds(double min, double max) {
-        this.minBound = min;
-        this.maxBound = max;
+        updateData(builder -> builder.minBound(min).maxBound(max));
         return this;
     }
 
@@ -799,8 +766,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> clearBounds() {
-        this.minBound = Double.NaN;
-        this.maxBound = Double.NaN;
+        updateData(builder -> builder.minBound(Double.NaN).maxBound(Double.NaN));
         return this;
     }
 
@@ -926,8 +892,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setCustomPIDCycle(boolean customPIDCycle, double period) {
-        this.customPIDCycle = customPIDCycle;
-        this.pidPeriod = period;
+        updateData(builder -> builder.customPIDCycle(customPIDCycle).pidPeriod(period));
         return this;
     }
 
@@ -938,7 +903,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setPIDIZone(double pidIZone){
-        this.pidIZone = pidIZone;
+        updateData(builder -> builder.pidIZone(pidIZone));
         return this;
     }
 
@@ -950,8 +915,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setPIDEnableContinous(double continousMin, double continousMax){
-        this.continousMin = continousMin;
-        this.continousMax = continousMax;
+        updateData(builder -> builder.pidContinous(true).continousMin(continousMin).continousMax(continousMax));
         return this;
     }
 
@@ -1301,34 +1265,34 @@ public class MechanismConfig<T extends Mechanism> {
      * @return constructed mechanism instance
      */
     public T build(){
-
-        motors.forEach(
-            (motor) -> motor.setNeutralMode(motorNeutralMode)
-                            .setCurrentLimit(motorCurrentLimit)
-                            .setCanbus(canbus)
+        MechanismConfigRecord cfg = data;
+        cfg.motors().forEach(
+            (motor) -> motor.setNeutralMode(cfg.motorNeutralMode())
+                            .setCurrentLimit(cfg.motorCurrentLimit())
+                            .setCanbus(cfg.canbus())
                             );
 
-        if (encoder != null) {
-             encoder.setCanbus(canbus)
-                    .setConversion(encoderConversion)
-                    .setConversionOffset(encoderConversionOffset)
-                    .setGearRatio(encoderGearRatio)
-                    .setOffset(encoderOffset);
+        if (cfg.encoder() != null) {
+             cfg.encoder().setCanbus(cfg.canbus())
+                    .setConversion(cfg.encoderConversion())
+                    .setConversionOffset(cfg.encoderConversionOffset())
+                    .setGearRatio(cfg.encoderGearRatio())
+                    .setOffset(cfg.encoderOffset());
         }
 
-        if(pidController != null){
-            pidController.setTolerance(tolerance);
-            pidController.setIZone(pidIZone);
-            if(pidContinous){
-                pidController.enableContinuousInput(continousMin, continousMax);
+        if(cfg.pidController() != null){
+            cfg.pidController().setTolerance(cfg.tolerance());
+            cfg.pidController().setIZone(cfg.pidIZone());
+            if(cfg.pidContinous()){
+                cfg.pidController().enableContinuousInput(cfg.continousMin(), cfg.continousMax());
             }
         }
 
-        if(profiledPIDController != null){
-            profiledPIDController.setTolerance(tolerance);
-            profiledPIDController.setIZone(pidIZone);
-            if(pidContinous){
-                profiledPIDController.enableContinuousInput(continousMin, continousMax);
+        if(cfg.profiledPIDController() != null){
+            cfg.profiledPIDController().setTolerance(cfg.tolerance());
+            cfg.profiledPIDController().setIZone(cfg.pidIZone());
+            if(cfg.pidContinous()){
+                cfg.profiledPIDController().enableContinuousInput(cfg.continousMin(), cfg.continousMax());
             }
         }
 
@@ -1408,10 +1372,10 @@ public class MechanismConfig<T extends Mechanism> {
      * vendor modules early instead of failing silently at runtime.
      */
     private void validateMotorTypesForHardware() {
-        if (motors == null || motors.isEmpty()) {
+        if (data.motors() == null || data.motors().isEmpty()) {
             return;
         }
-        motors.forEach(config -> {
+        data.motors().forEach(config -> {
             if (config.type == null) {
                 throw new IllegalStateException("Motor controller config is missing a type");
             }
@@ -1441,10 +1405,10 @@ public class MechanismConfig<T extends Mechanism> {
         if (!simEnabled) {
             return;
         }
-        if (motors == null || motors.isEmpty()) {
+        if (data.motors() == null || data.motors().isEmpty()) {
             throw new IllegalStateException("Simulation requires at least one motor controller to be configured");
         }
-        motors.forEach(config -> {
+        data.motors().forEach(config -> {
             if (config.type == null) {
                 throw new IllegalStateException("Motor controller config is missing a type");
             }

@@ -22,6 +22,9 @@ public class MotorControllerConfig {
         this.inverted = id < 0;
     }
 
+    public MotorControllerConfig() {
+    }
+
     public MotorControllerConfig setCanbus(String canbus) {
         this.canbus = canbus;
         if (encoderConfig != null) {

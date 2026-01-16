@@ -10,9 +10,16 @@ import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerType;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.hardware.motor.MotorRegistry;
-import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
@@ -20,86 +27,60 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public final class MechanismConfigIO {
-    private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+    private static final ObjectMapper MAPPER = buildMapper();
 
     private MechanismConfigIO() {
     }
 
-    public static MechanismConfigSnapshot load(Path path) {
+    public static MechanismConfigRecord load(Path path) {
         try {
-            return MAPPER.readValue(path.toFile(), MechanismConfigSnapshot.class);
+            return MAPPER.readValue(path.toFile(), MechanismConfigRecord.class);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to load mechanism config from " + path, e);
         }
     }
 
-    public static void save(Path path, MechanismConfigSnapshot snapshot) {
+    public static void save(Path path, MechanismConfigRecord record) {
         try {
-            MAPPER.writeValue(path.toFile(), snapshot);
+            MAPPER.writeValue(path.toFile(), record);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to save mechanism config to " + path, e);
         }
     }
 
-    public static MechanismConfigSnapshot snapshot(MechanismConfig<?> config) {
+    public static MechanismConfigRecord snapshot(MechanismConfig<?> config) {
         if (config == null) {
             return null;
         }
-        List<MotorControllerConfigSnapshot> motors = new ArrayList<>();
-        for (MotorControllerConfig motor : config.motors) {
-            motors.add(MotorControllerConfigSnapshot.from(motor));
-        }
-        EncoderConfigSnapshot encoder = EncoderConfigSnapshot.from(config.encoder);
-        PidConfig pid = PidConfig.from(config.pidController);
-        ProfiledPidConfig profiled = ProfiledPidConfig.from(config.profiledPIDController);
-        return new MechanismConfigSnapshot(
-                motors,
-                encoder,
-                config.useAbsolute,
-                config.useVoltage,
-                config.useSetpointAsOutput,
-                config.pidUseVelocity,
-                config.customPIDCycle,
-                config.pidContinous,
-                config.motorCurrentLimit,
-                config.motorNeutralMode,
-                config.canbus,
-                config.encoderGearRatio,
-                config.encoderConversion,
-                config.encoderConversionOffset,
-                config.encoderOffset,
-                config.tolerance,
-                config.stateMachineDelay,
-                config.pidPeriod,
-                config.pidIZone,
-                config.continousMin,
-                config.continousMax,
-                config.minBound,
-                config.maxBound,
-                config.motionLimits,
-                pid,
-                profiled,
-                new ArrayList<>(config.limitSwitches));
+        return config.data();
     }
 
-    public static MechanismConfigSnapshot snapshot(Mechanism mechanism) {
+    public static MechanismConfigRecord snapshot(Mechanism mechanism) {
         if (mechanism == null) {
             return null;
         }
-        List<MotorControllerConfigSnapshot> motors = new ArrayList<>();
+        List<MotorControllerConfig> motors = new ArrayList<>();
         MotorController[] controllers = mechanism.getMotorGroup() != null
                 ? mechanism.getMotorGroup().getControllers()
                 : new MotorController[0];
         for (MotorController controller : controllers) {
-            motors.add(MotorControllerConfigSnapshot.from(controller));
+            MotorControllerConfig config = controller.getConfig();
+            if (config != null) {
+                motors.add(config);
+            } else if (controller.getType() != null) {
+                MotorControllerConfig fallback = new MotorControllerConfig(controller.getType(), controller.getId());
+                fallback.setCanbus(controller.getCanbus());
+                fallback.setCurrentLimit(controller.getCurrentLimit());
+                fallback.setInverted(controller.isInverted());
+                fallback.setNeutralMode(controller.getNeutralMode());
+                motors.add(fallback);
+            }
         }
         Encoder encoder = mechanism.getEncoder();
-        EncoderConfigSnapshot encoderSnapshot = EncoderConfigSnapshot.from(encoder != null ? encoder.getConfig() : null);
+        EncoderConfig encoderConfig = encoder != null ? encoder.getConfig() : null;
         MotorNeutralMode neutralMode = controllers.length > 0 ? controllers[0].getNeutralMode() : MotorNeutralMode.Coast;
         double currentLimit = controllers.length > 0 ? controllers[0].getCurrentLimit() : Double.NaN;
         String canbus = controllers.length > 0 ? controllers[0].getCanbus() : null;
@@ -108,304 +89,248 @@ public final class MechanismConfigIO {
         double conversionOffset = encoder != null ? encoder.getConversionOffset() : 0.0;
         double offset = encoder != null ? encoder.getOffset() : 0.0;
         MotionLimits.AxisLimits limits = mechanism.resolveMotionLimits();
-        return new MechanismConfigSnapshot(
-                motors,
-                encoderSnapshot,
-                mechanism.isUseAbsolute(),
-                mechanism.isUseVoltage(),
-                mechanism.isSetpointAsOutput(),
-                false,
-                mechanism.isCustomPIDCycle(),
-                false,
-                currentLimit,
-                neutralMode,
-                canbus,
-                gearRatio,
-                conversion,
-                conversionOffset,
-                offset,
-                0.0,
-                0.0,
-                mechanism.getPidPeriod(),
-                0.0,
-                0.0,
-                0.0,
-                Double.NaN,
-                Double.NaN,
-                limits,
-                null,
-                null,
-                List.of());
+        return MechanismConfigRecord.defaults().toBuilder()
+                .motors(motors)
+                .encoder(encoderConfig)
+                .useAbsolute(mechanism.isUseAbsolute())
+                .useVoltage(mechanism.isUseVoltage())
+                .useSetpointAsOutput(mechanism.isSetpointAsOutput())
+                .customPIDCycle(mechanism.isCustomPIDCycle())
+                .pidPeriod(mechanism.getPidPeriod())
+                .motorCurrentLimit(currentLimit)
+                .motorNeutralMode(neutralMode)
+                .canbus(canbus)
+                .encoderGearRatio(gearRatio)
+                .encoderConversion(conversion)
+                .encoderConversionOffset(conversionOffset)
+                .encoderOffset(offset)
+                .motionLimits(limits)
+                .build();
     }
 
-    public static void apply(MechanismConfig<?> config, MechanismConfigSnapshot snapshot) {
-        if (config == null || snapshot == null) {
+    public static void apply(MechanismConfig<?> config, MechanismConfigRecord record) {
+        if (config == null || record == null) {
             return;
         }
-        config.motors.clear();
-        if (snapshot.motors != null) {
-            for (MotorControllerConfigSnapshot motor : snapshot.motors) {
-                config.motors.add(motor.toConfig());
-            }
-        }
-        config.encoder = snapshot.encoder != null ? snapshot.encoder.toConfig() : null;
-        config.useAbsolute = snapshot.useAbsolute;
-        config.useVoltage = snapshot.useVoltage;
-        config.useSetpointAsOutput = snapshot.useSetpointAsOutput;
-        config.pidUseVelocity = snapshot.pidUseVelocity;
-        config.customPIDCycle = snapshot.customPIDCycle;
-        config.pidContinous = snapshot.pidContinous;
-        config.motorCurrentLimit = snapshot.motorCurrentLimit;
-        config.motorNeutralMode = snapshot.motorNeutralMode != null ? snapshot.motorNeutralMode : config.motorNeutralMode;
-        if (snapshot.canbus != null) {
-            config.canbus = snapshot.canbus;
-        }
-        config.encoderGearRatio = snapshot.encoderGearRatio;
-        config.encoderConversion = snapshot.encoderConversion;
-        config.encoderConversionOffset = snapshot.encoderConversionOffset;
-        config.encoderOffset = snapshot.encoderOffset;
-        config.tolerance = snapshot.tolerance;
-        config.stateMachineDelay = snapshot.stateMachineDelay;
-        config.pidPeriod = snapshot.pidPeriod;
-        config.pidIZone = snapshot.pidIZone;
-        config.continousMin = snapshot.continousMin;
-        config.continousMax = snapshot.continousMax;
-        config.minBound = snapshot.minBound;
-        config.maxBound = snapshot.maxBound;
-        config.motionLimits = snapshot.motionLimits;
-        config.pidController = snapshot.pid != null ? snapshot.pid.toController() : null;
-        config.profiledPIDController = snapshot.profiledPid != null ? snapshot.profiledPid.toController() : null;
-        config.limitSwitches.clear();
-        if (snapshot.limitSwitches != null) {
-            config.limitSwitches.addAll(snapshot.limitSwitches);
-        }
+        config.setData(record);
     }
 
-    public static void apply(Mechanism mechanism, MechanismConfigSnapshot snapshot) {
-        if (mechanism == null || snapshot == null) {
+    public static void apply(Mechanism mechanism, MechanismConfigRecord record) {
+        if (mechanism == null || record == null) {
             return;
         }
-        mechanism.setUseAbsolute(snapshot.useAbsolute);
-        mechanism.setUseVoltage(snapshot.useVoltage);
-        mechanism.setSetpointAsOutput(snapshot.useSetpointAsOutput);
-        mechanism.setCustomPIDCycle(snapshot.customPIDCycle);
-        mechanism.setPidPeriod(snapshot.pidPeriod);
-        if (snapshot.motionLimits != null) {
-            mechanism.setMotionLimits(snapshot.motionLimits);
+        mechanism.setUseAbsolute(record.useAbsolute());
+        mechanism.setUseVoltage(record.useVoltage());
+        mechanism.setSetpointAsOutput(record.useSetpointAsOutput());
+        mechanism.setCustomPIDCycle(record.customPIDCycle());
+        mechanism.setPidPeriod(record.pidPeriod());
+        if (record.motionLimits() != null) {
+            mechanism.setMotionLimits(record.motionLimits());
         }
-        if (Double.isFinite(snapshot.minBound) && Double.isFinite(snapshot.maxBound)) {
-            mechanism.setBounds(snapshot.minBound, snapshot.maxBound);
+        if (Double.isFinite(record.minBound()) && Double.isFinite(record.maxBound())) {
+            mechanism.setBounds(record.minBound(), record.maxBound());
         } else {
             mechanism.clearBounds();
         }
-        if (snapshot.motorCurrentLimit > 0.0) {
-            mechanism.setCurrentLimit(snapshot.motorCurrentLimit);
+        if (record.motorCurrentLimit() > 0.0) {
+            mechanism.setCurrentLimit(record.motorCurrentLimit());
         }
-        if (snapshot.motorNeutralMode != null) {
-            mechanism.setMotorNeutralMode(snapshot.motorNeutralMode);
+        if (record.motorNeutralMode() != null) {
+            mechanism.setMotorNeutralMode(record.motorNeutralMode());
         }
-        if (snapshot.encoder != null && mechanism.getEncoder() != null) {
-            applyEncoderSnapshot(mechanism.getEncoder(), snapshot.encoder);
+        if (record.encoder() != null && mechanism.getEncoder() != null) {
+            applyEncoderConfig(mechanism.getEncoder(), record.encoder());
         }
-        if (snapshot.motors == null || snapshot.motors.isEmpty()) {
+        if (record.motors() == null || record.motors().isEmpty()) {
             return;
-        }
-        Map<Integer, MotorControllerConfigSnapshot> byId = new HashMap<>();
-        for (MotorControllerConfigSnapshot motor : snapshot.motors) {
-            byId.put(motor.id, motor);
         }
         if (mechanism.getMotorGroup() != null) {
             for (MotorController controller : mechanism.getMotorGroup().getControllers()) {
-                MotorControllerConfigSnapshot motorSnapshot = byId.get(controller.getId());
-                if (motorSnapshot == null) {
-                    continue;
-                }
-                if (motorSnapshot.currentLimit > 0.0) {
-                    controller.setCurrentLimit(motorSnapshot.currentLimit);
-                }
-                controller.setInverted(motorSnapshot.inverted);
-                if (motorSnapshot.neutralMode != null) {
-                    controller.setNeutralMode(motorSnapshot.neutralMode);
-                }
-                if (motorSnapshot.pid != null) {
-                    controller.setPid(motorSnapshot.pid.toController());
-                }
-                if (motorSnapshot.encoder != null && controller.getEncoder() != null) {
-                    applyEncoderSnapshot(controller.getEncoder(), motorSnapshot.encoder);
-                }
+                record.motors().stream()
+                        .filter(motor -> motor.id == controller.getId())
+                        .findFirst()
+                        .ifPresent(motor -> applyMotorConfig(controller, motor));
             }
         }
     }
 
-    private static void applyEncoderSnapshot(Encoder encoder, EncoderConfigSnapshot snapshot) {
-        encoder.setGearRatio(snapshot.gearRatio);
-        encoder.setConversion(snapshot.conversion);
-        encoder.setConversionOffset(snapshot.conversionOffset);
-        encoder.setOffset(snapshot.offset);
-        encoder.setInverted(snapshot.inverted);
+    private static void applyMotorConfig(MotorController controller, MotorControllerConfig config) {
+        if (config.currentLimit > 0.0) {
+            controller.setCurrentLimit(config.currentLimit);
+        }
+        controller.setInverted(config.inverted);
+        if (config.neutralMode != null) {
+            controller.setNeutralMode(config.neutralMode);
+        }
+        if (config.pid != null) {
+            controller.setPid(config.pid);
+        }
+        if (config.encoderConfig != null && controller.getEncoder() != null) {
+            applyEncoderConfig(controller.getEncoder(), config.encoderConfig);
+        }
     }
 
-    public record MechanismConfigSnapshot(
-            List<MotorControllerConfigSnapshot> motors,
-            EncoderConfigSnapshot encoder,
-            boolean useAbsolute,
-            boolean useVoltage,
-            boolean useSetpointAsOutput,
-            boolean pidUseVelocity,
-            boolean customPIDCycle,
-            boolean pidContinous,
-            double motorCurrentLimit,
-            MotorNeutralMode motorNeutralMode,
-            String canbus,
-            double encoderGearRatio,
-            double encoderConversion,
-            double encoderConversionOffset,
-            double encoderOffset,
-            double tolerance,
-            double stateMachineDelay,
-            double pidPeriod,
-            double pidIZone,
-            double continousMin,
-            double continousMax,
-            double minBound,
-            double maxBound,
-            MotionLimits.AxisLimits motionLimits,
-            PidConfig pid,
-            ProfiledPidConfig profiledPid,
-            List<GenericLimitSwitchConfig> limitSwitches) {
+    private static void applyEncoderConfig(Encoder encoder, EncoderConfig config) {
+        encoder.setGearRatio(config.gearRatio);
+        encoder.setConversion(config.conversion);
+        encoder.setConversionOffset(config.conversionOffset);
+        encoder.setOffset(config.offset);
+        encoder.setInverted(config.inverted);
     }
 
-    public record MotorControllerConfigSnapshot(
-            String typeKey,
-            int id,
-            String canbus,
-            double currentLimit,
-            boolean inverted,
-            MotorNeutralMode neutralMode,
-            EncoderConfigSnapshot encoder,
-            PidConfig pid) {
+    private static ObjectMapper buildMapper() {
+        ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+        SimpleModule module = new SimpleModule();
+        module.addSerializer(MotorControllerType.class, new MotorControllerTypeSerializer());
+        module.addDeserializer(MotorControllerType.class, new MotorControllerTypeDeserializer());
+        module.addSerializer(EncoderType.class, new EncoderTypeSerializer());
+        module.addDeserializer(EncoderType.class, new EncoderTypeDeserializer());
+        module.addSerializer(PIDController.class, new PIDControllerSerializer());
+        module.addDeserializer(PIDController.class, new PIDControllerDeserializer());
+        module.addSerializer(ProfiledPIDController.class, new ProfiledPIDControllerSerializer());
+        module.addDeserializer(ProfiledPIDController.class, new ProfiledPIDControllerDeserializer());
+        mapper.registerModule(module);
+        return mapper;
+    }
 
-        public static MotorControllerConfigSnapshot from(MotorControllerConfig config) {
-            if (config == null) {
+    private static final class MotorControllerTypeSerializer extends JsonSerializer<MotorControllerType> {
+        @Override
+        public void serialize(MotorControllerType value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            if (value == null) {
+                gen.writeNull();
+                return;
+            }
+            gen.writeString(value.getKey());
+        }
+    }
+
+    private static final class MotorControllerTypeDeserializer extends JsonDeserializer<MotorControllerType> {
+        @Override
+        public MotorControllerType deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+            if (p.currentToken() == JsonToken.VALUE_NULL) {
                 return null;
             }
-            String key = config.type != null ? config.type.getKey() : null;
-            return new MotorControllerConfigSnapshot(
-                    key,
-                    config.id,
-                    config.canbus,
-                    config.currentLimit,
-                    config.inverted,
-                    config.neutralMode,
-                    EncoderConfigSnapshot.from(config.encoderConfig),
-                    PidConfig.from(config.pid));
-        }
-
-        public static MotorControllerConfigSnapshot from(MotorController controller) {
-            if (controller == null) {
+            String key = p.getValueAsString();
+            if (key == null || key.isBlank()) {
                 return null;
             }
-            String key = controller.getType() != null ? controller.getType().getKey() : null;
-            Encoder encoder = controller.getEncoder();
-            EncoderConfigSnapshot encoderSnapshot = EncoderConfigSnapshot.from(encoder != null ? encoder.getConfig() : null);
-            MotorControllerConfig cfg = controller.getConfig();
-            PidConfig pid = cfg != null ? PidConfig.from(cfg.pid) : null;
-            return new MotorControllerConfigSnapshot(
-                    key,
-                    controller.getId(),
-                    controller.getCanbus(),
-                    controller.getCurrentLimit(),
-                    controller.isInverted(),
-                    controller.getNeutralMode(),
-                    encoderSnapshot,
-                    pid);
-        }
-
-        public MotorControllerConfig toConfig() {
-            MotorControllerType resolved = typeKey != null ? MotorRegistry.get().motor(typeKey) : null;
-            MotorControllerConfig config = new MotorControllerConfig(resolved, id);
-            if (canbus != null) {
-                config.canbus = canbus;
-            }
-            config.currentLimit = currentLimit;
-            config.inverted = inverted;
-            config.neutralMode = neutralMode != null ? neutralMode : config.neutralMode;
-            config.encoderConfig = encoder != null ? encoder.toConfig() : null;
-            config.pid = pid != null ? pid.toController() : null;
-            return config;
+            return MotorRegistry.get().motor(key);
         }
     }
 
-    public record EncoderConfigSnapshot(
-            String typeKey,
-            int id,
-            String canbus,
-            double gearRatio,
-            double offset,
-            double conversion,
-            boolean inverted,
-            double conversionOffset) {
-
-        public static EncoderConfigSnapshot from(EncoderConfig config) {
-            if (config == null) {
-                return null;
+    private static final class EncoderTypeSerializer extends JsonSerializer<EncoderType> {
+        @Override
+        public void serialize(EncoderType value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            if (value == null) {
+                gen.writeNull();
+                return;
             }
-            String key = config.type != null ? config.type.getKey() : null;
-            return new EncoderConfigSnapshot(
-                    key,
-                    config.id,
-                    config.canbus,
-                    config.gearRatio,
-                    config.offset,
-                    config.conversion,
-                    config.inverted,
-                    config.conversionOffset);
-        }
-
-        public EncoderConfig toConfig() {
-            EncoderType resolved = typeKey != null ? EncoderRegistry.get().encoder(typeKey) : null;
-            EncoderConfig config = new EncoderConfig();
-            config.type = resolved;
-            config.id = id;
-            config.canbus = canbus;
-            config.gearRatio = gearRatio;
-            config.offset = offset;
-            config.conversion = conversion;
-            config.inverted = inverted;
-            config.conversionOffset = conversionOffset;
-            return config;
+            gen.writeString(value.getKey());
         }
     }
 
-    public record PidConfig(double p, double i, double d) {
-        public static PidConfig from(PIDController controller) {
-            if (controller == null) {
+    private static final class EncoderTypeDeserializer extends JsonDeserializer<EncoderType> {
+        @Override
+        public EncoderType deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+            if (p.currentToken() == JsonToken.VALUE_NULL) {
                 return null;
             }
-            return new PidConfig(controller.getP(), controller.getI(), controller.getD());
-        }
-
-        public PIDController toController() {
-            return new PIDController(p, i, d);
+            String key = p.getValueAsString();
+            if (key == null || key.isBlank()) {
+                return null;
+            }
+            return EncoderRegistry.get().encoder(key);
         }
     }
 
-    public record ProfiledPidConfig(double p, double i, double d, double maxVelocity, double maxAcceleration) {
-        public static ProfiledPidConfig from(ProfiledPIDController controller) {
-            if (controller == null) {
+    private static final class PIDControllerSerializer extends JsonSerializer<PIDController> {
+        @Override
+        public void serialize(PIDController value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            if (value == null) {
+                gen.writeNull();
+                return;
+            }
+            gen.writeStartObject();
+            gen.writeNumberField("p", value.getP());
+            gen.writeNumberField("i", value.getI());
+            gen.writeNumberField("d", value.getD());
+            gen.writeEndObject();
+        }
+    }
+
+    private static final class PIDControllerDeserializer extends JsonDeserializer<PIDController> {
+        @Override
+        public PIDController deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+            if (p.currentToken() == JsonToken.VALUE_NULL) {
                 return null;
             }
-            TrapezoidProfile.Constraints constraints = controller.getConstraints();
-            return new ProfiledPidConfig(
-                    controller.getP(),
-                    controller.getI(),
-                    controller.getD(),
-                    constraints.maxVelocity,
-                    constraints.maxAcceleration);
+            double pGain = 0.0;
+            double iGain = 0.0;
+            double dGain = 0.0;
+            while (p.nextToken() != JsonToken.END_OBJECT) {
+                String name = p.getCurrentName();
+                p.nextToken();
+                if ("p".equals(name)) {
+                    pGain = p.getDoubleValue();
+                } else if ("i".equals(name)) {
+                    iGain = p.getDoubleValue();
+                } else if ("d".equals(name)) {
+                    dGain = p.getDoubleValue();
+                } else {
+                    p.skipChildren();
+                }
+            }
+            return new PIDController(pGain, iGain, dGain);
         }
+    }
 
-        public ProfiledPIDController toController() {
-            return new ProfiledPIDController(p, i, d, new TrapezoidProfile.Constraints(maxVelocity, maxAcceleration));
+    private static final class ProfiledPIDControllerSerializer extends JsonSerializer<ProfiledPIDController> {
+        @Override
+        public void serialize(ProfiledPIDController value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            if (value == null) {
+                gen.writeNull();
+                return;
+            }
+            TrapezoidProfile.Constraints constraints = value.getConstraints();
+            gen.writeStartObject();
+            gen.writeNumberField("p", value.getP());
+            gen.writeNumberField("i", value.getI());
+            gen.writeNumberField("d", value.getD());
+            gen.writeNumberField("maxVelocity", constraints.maxVelocity);
+            gen.writeNumberField("maxAcceleration", constraints.maxAcceleration);
+            gen.writeEndObject();
+        }
+    }
+
+    private static final class ProfiledPIDControllerDeserializer extends JsonDeserializer<ProfiledPIDController> {
+        @Override
+        public ProfiledPIDController deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+            if (p.currentToken() == JsonToken.VALUE_NULL) {
+                return null;
+            }
+            double pGain = 0.0;
+            double iGain = 0.0;
+            double dGain = 0.0;
+            double maxVelocity = 0.0;
+            double maxAcceleration = 0.0;
+            while (p.nextToken() != JsonToken.END_OBJECT) {
+                String name = p.getCurrentName();
+                p.nextToken();
+                if ("p".equals(name)) {
+                    pGain = p.getDoubleValue();
+                } else if ("i".equals(name)) {
+                    iGain = p.getDoubleValue();
+                } else if ("d".equals(name)) {
+                    dGain = p.getDoubleValue();
+                } else if ("maxVelocity".equals(name)) {
+                    maxVelocity = p.getDoubleValue();
+                } else if ("maxAcceleration".equals(name)) {
+                    maxAcceleration = p.getDoubleValue();
+                } else {
+                    p.skipChildren();
+                }
+            }
+            return new ProfiledPIDController(pGain, iGain, dGain, new TrapezoidProfile.Constraints(maxVelocity, maxAcceleration));
         }
     }
 }

@@ -10,6 +10,7 @@ import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.core.RobotDrivetrain;
+import ca.frc6390.athena.core.localization.PoseEstimatorFactory;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.odometry.SlipCompensatingSwerveDrivePoseEstimator;
@@ -18,6 +19,7 @@ import ca.frc6390.athena.drivetrains.swerve.sim.SwerveDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
@@ -33,6 +35,9 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
+import edu.wpi.first.math.numbers.N1;
+import edu.wpi.first.math.numbers.N3;
+import edu.wpi.first.math.numbers.N4;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.Timer;
@@ -433,69 +438,52 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   @Override
   public RobotLocalization<SwerveModulePosition[]> localization(RobotLocalizationConfig config) {
     RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defualt();
-    if (effectiveConfig.poseSpace() == RobotLocalizationConfig.PoseSpace.THREE_D) {
-      Rotation3d gyroRotation = getImuRotation3d();
-      SwerveDrivePoseEstimator3d fieldEstimator =
-              new SwerveDrivePoseEstimator3d(
-                      kinematics,
-                      gyroRotation,
-                      getPositions(),
-                      new Pose3d(),
-                      effectiveConfig.getStd3d(),
-                      effectiveConfig.getVisionStd3d());
-      SwerveDrivePoseEstimator3d relativeEstimator =
-              new SwerveDrivePoseEstimator3d(
-                      kinematics,
-                      gyroRotation,
-                      getPositions(),
-                      new Pose3d(),
-                      effectiveConfig.getStd3d(),
-                      effectiveConfig.getVisionStd3d());
-      return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, robotSpeeds, imu, this::getPositions);
-    }
-
     RobotLocalizationConfig.BackendConfig backend = effectiveConfig.backend();
-    if (backend != null
-            && backend.slipStrategy() == RobotLocalizationConfig.BackendConfig.SlipStrategy.SWERVE_VARIANCE) {
-      SlipCompensatingSwerveDrivePoseEstimator fieldEstimator =
-              new SlipCompensatingSwerveDrivePoseEstimator(
-                      kinematics,
-                      imu.getYaw(),
-                      getPositions(),
-                      new Pose2d(),
-                      effectiveConfig.getStd(),
-                      effectiveConfig.getVisionStd());
-      SlipCompensatingSwerveDrivePoseEstimator relativeEstimator =
-              new SlipCompensatingSwerveDrivePoseEstimator(
-                      kinematics,
-                      imu.getYaw(),
-                      getPositions(),
-                      new Pose2d(),
-                      effectiveConfig.getStd(),
-                      effectiveConfig.getVisionStd());
-      fieldEstimator.setSlipThreshold(backend.slipThreshold());
-      relativeEstimator.setSlipThreshold(backend.slipThreshold());
-      return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, robotSpeeds, imu, this::getPositions);
-    }
+    PoseEstimatorFactory<SwerveModulePosition[]> factory = new PoseEstimatorFactory<>() {
+      @Override
+      public SwerveDrivePoseEstimator create2d(
+              Pose2d startPose,
+              Matrix<N3, N1> stateStdDevs,
+              Matrix<N3, N1> visionStdDevs) {
+        if (backend != null
+                && backend.slipStrategy() == RobotLocalizationConfig.BackendConfig.SlipStrategy.SWERVE_VARIANCE) {
+          SlipCompensatingSwerveDrivePoseEstimator estimator =
+                  new SlipCompensatingSwerveDrivePoseEstimator(
+                          kinematics,
+                          imu.getYaw(),
+                          getPositions(),
+                          startPose,
+                          stateStdDevs,
+                          visionStdDevs);
+          estimator.setSlipThreshold(backend.slipThreshold());
+          return estimator;
+        }
+        return new SwerveDrivePoseEstimator(
+                kinematics,
+                imu.getYaw(),
+                getPositions(),
+                startPose,
+                stateStdDevs,
+                visionStdDevs);
+      }
 
-    SwerveDrivePoseEstimator fieldEstimator =
-            new SwerveDrivePoseEstimator(
-                    kinematics,
-                    imu.getYaw(),
-                    getPositions(),
-                    new Pose2d(),
-                    effectiveConfig.getStd(),
-                    effectiveConfig.getVisionStd());
-    SwerveDrivePoseEstimator relativeEstimator =
-            new SwerveDrivePoseEstimator(
-                    kinematics,
-                    imu.getYaw(),
-                    getPositions(),
-                    new Pose2d(),
-                    effectiveConfig.getStd(),
-                    effectiveConfig.getVisionStd());
+      @Override
+      public SwerveDrivePoseEstimator3d create3d(
+              Pose3d startPose,
+              Matrix<N4, N1> stateStdDevs,
+              Matrix<N4, N1> visionStdDevs) {
+        Rotation3d gyroRotation = getImuRotation3d();
+        return new SwerveDrivePoseEstimator3d(
+                kinematics,
+                gyroRotation,
+                getPositions(),
+                startPose,
+                stateStdDevs,
+                visionStdDevs);
+      }
+    };
 
-    return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, robotSpeeds, imu, this::getPositions);
+    return new RobotLocalization<>(factory, effectiveConfig, robotSpeeds, imu, this::getPositions);
   }
 
   private Rotation3d getImuRotation3d() {

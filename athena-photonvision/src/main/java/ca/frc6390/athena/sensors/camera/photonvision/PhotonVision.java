@@ -3,6 +3,8 @@ package ca.frc6390.athena.sensors.camera.photonvision;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
 
 import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonCamera;
@@ -380,16 +382,70 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         estimator.setLastPose(pose);
     }
 
+    @Override
     public Pose2d getLocalizationPose() {
         return localizationCamera.getLocalizationPose();
     }
 
+    @Override
     public double getLocalizationLatency() {
         return localizationCamera.getLocalizationLatency();
     }
 
+    @Override
+    public VisionCamera.LocalizationData getLocalizationData() {
+        return localizationCamera.getLocalizationData();
+    }
+
+    @Override
+    public Optional<VisionCamera.VisionMeasurement> getLatestVisionMeasurement() {
+        return localizationCamera.getLatestVisionMeasurement();
+    }
+
+    @Override
     public boolean hasValidTarget() {
-        return computeHasTargets();
+        return localizationCamera.hasValidTarget();
+    }
+
+    @Override
+    public OptionalDouble getTargetYawDegrees() {
+        return localizationCamera.getTargetYawDegrees();
+    }
+
+    @Override
+    public OptionalDouble getTargetPitchDegrees() {
+        return localizationCamera.getTargetPitchDegrees();
+    }
+
+    @Override
+    public OptionalDouble getTargetDistanceMeters() {
+        return localizationCamera.getTargetDistanceMeters();
+    }
+
+    @Override
+    public OptionalInt getLatestTagId() {
+        return localizationCamera.getLatestTagId();
+    }
+
+    @Override
+    public List<VisionCamera.TargetMeasurement> getTargetMeasurements() {
+        return localizationCamera.getTargetMeasurements();
+    }
+
+    @Override
+    public Optional<VisionCamera.TargetObservation> getLatestObservation(
+            VisionCamera.CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
+        return localizationCamera.getLatestObservation(space, robotPose, tagPose);
+    }
+
+    @Override
+    public Optional<Pose2d> estimateFieldPoseFromTag(int tagId) {
+        return localizationCamera.estimateFieldPoseFromTag(tagId);
+    }
+
+    @Override
+    public Optional<Pose2d> estimateFieldPoseFromTag(int tagId, Translation2d cameraOffsetMeters) {
+        return localizationCamera.estimateFieldPoseFromTag(tagId, cameraOffsetMeters);
     }
 
     private void updateResults(){
@@ -402,6 +458,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         results = null;
     }
 
+    @Override
     public Matrix<N3, N1> getLocalizationStdDevs() {
         return localizationCamera.getLocalizationStdDevs();
     }

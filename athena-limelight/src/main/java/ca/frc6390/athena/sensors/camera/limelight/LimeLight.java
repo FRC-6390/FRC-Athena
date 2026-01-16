@@ -1,6 +1,10 @@
 package ca.frc6390.athena.sensors.camera.limelight;
 
 import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
 
 import ca.frc6390.athena.sensors.camera.VisionCamera;
 import ca.frc6390.athena.sensors.camera.VisionCamera.PipelineControl;
@@ -562,15 +566,6 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
             case PIP_SECONDARY -> StreamMode.PIP_SECONDARY;
         };
     }
-    
-    
-    /**
-     * Whether the limelight has any valid targets
-     */
-    public boolean hasValidTarget(){
-        return tv.getDouble(0) == 1;
-    }
-
     public boolean hasBotPose(){
         // return botpose.getNumberArray(null) != null;
         return false;
@@ -826,12 +821,70 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         robot_orientation_set.setDoubleArray(new Double[] {pose.getRotation().getDegrees(),0d,0d,0d,0d,0d});
     }
 
+    @Override
     public double getLocalizationLatency() {
         return localizationCamera.getLocalizationLatency();
     }
 
+    @Override
     public Pose2d getLocalizationPose() {
         return localizationCamera.getLocalizationPose();
+    }
+
+    @Override
+    public VisionCamera.LocalizationData getLocalizationData() {
+        return localizationCamera.getLocalizationData();
+    }
+
+    @Override
+    public Optional<VisionCamera.VisionMeasurement> getLatestVisionMeasurement() {
+        return localizationCamera.getLatestVisionMeasurement();
+    }
+
+    @Override
+    public boolean hasValidTarget() {
+        return tv.getDouble(0) == 1;
+    }
+
+    @Override
+    public OptionalDouble getTargetYawDegrees() {
+        return localizationCamera.getTargetYawDegrees();
+    }
+
+    @Override
+    public OptionalDouble getTargetPitchDegrees() {
+        return localizationCamera.getTargetPitchDegrees();
+    }
+
+    @Override
+    public OptionalDouble getTargetDistanceMeters() {
+        return localizationCamera.getTargetDistanceMeters();
+    }
+
+    @Override
+    public OptionalInt getLatestTagId() {
+        return localizationCamera.getLatestTagId();
+    }
+
+    @Override
+    public List<VisionCamera.TargetMeasurement> getTargetMeasurements() {
+        return localizationCamera.getTargetMeasurements();
+    }
+
+    @Override
+    public Optional<VisionCamera.TargetObservation> getLatestObservation(
+            VisionCamera.CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
+        return localizationCamera.getLatestObservation(space, robotPose, tagPose);
+    }
+
+    @Override
+    public Optional<Pose2d> estimateFieldPoseFromTag(int tagId) {
+        return localizationCamera.estimateFieldPoseFromTag(tagId);
+    }
+
+    @Override
+    public Optional<Pose2d> estimateFieldPoseFromTag(int tagId, Translation2d cameraOffsetMeters) {
+        return localizationCamera.estimateFieldPoseFromTag(tagId, cameraOffsetMeters);
     }
 
     public void setFiducialIdFilters(double[] array){
@@ -842,6 +895,7 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         return fiducial_id_filters_set.getDoubleArray(new Double[]{});
     }
 
+    @Override
     public Matrix<N3, N1> getLocalizationStdDevs() {
         return localizationCamera.getLocalizationStdDevs();
     }

@@ -17,7 +17,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
 
     public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
         super(config);
-        stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.stateMachineDelay,
+        stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
                 config.stateActions, config.stateHooks, config.alwaysHooks, config.inputs, config.doubleInputs, config.objectInputs);
     }
 

@@ -1,5 +1,8 @@
 package ca.frc6390.athena.core.localization;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
@@ -8,28 +11,52 @@ import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.math.numbers.N4;
 
-public record RobotLocalizationConfig(
-        double xStd,
-        double yStd,
-        double thetaStd,
-        double vXStd,
-        double vYStda,
-        double vThetaStd,
-        double v2XStd,
-        double v2YStda,
-        double v2ThetaStd,
-        double zStd,
-        double vZStd,
-        double v2ZStd,
-        HolonomicPidConstants translation,
-        HolonomicPidConstants rotation,
-        boolean useVision,
-        PoseSpace poseSpace,
-        BackendConfig backend) {
+public class RobotLocalizationConfig {
+    private StdDevs stateStdDevs;
+    private StdDevs visionStdDevs;
+    private StdDevs visionMultiStdDevs;
+    private HolonomicPidConstants translation;
+    private HolonomicPidConstants rotation;
+    private boolean useVision;
+    private PoseSpace poseSpace;
+    private BackendConfig backend;
+    private List<PoseConfig> poseConfigs;
+    private String autoPoseName;
 
     public enum PoseSpace {
         TWO_D,
         THREE_D
+    }
+
+    public RobotLocalizationConfig(
+            double xStd,
+            double yStd,
+            double thetaStd,
+            double vXStd,
+            double vYStda,
+            double vThetaStd,
+            double v2XStd,
+            double v2YStda,
+            double v2ThetaStd,
+            double zStd,
+            double vZStd,
+            double v2ZStd,
+            HolonomicPidConstants translation,
+            HolonomicPidConstants rotation,
+            boolean useVision,
+            PoseSpace poseSpace,
+            BackendConfig backend,
+            List<PoseConfig> poseConfigs) {
+        this.stateStdDevs = new StdDevs(xStd, yStd, zStd, thetaStd);
+        this.visionStdDevs = new StdDevs(vXStd, vYStda, vZStd, vThetaStd);
+        this.visionMultiStdDevs = new StdDevs(v2XStd, v2YStda, v2ZStd, v2ThetaStd);
+        this.translation = translation;
+        this.rotation = rotation;
+        this.useVision = useVision;
+        this.poseSpace = poseSpace;
+        this.backend = backend;
+        this.poseConfigs = poseConfigs;
+        normalize();
     }
 
     public RobotLocalizationConfig(double xStd, double yStd, double thetaStd, double vXStd, double vYStda, double vThetaStd) {
@@ -50,7 +77,8 @@ public record RobotLocalizationConfig(
                 new HolonomicPidConstants(0, 0, 0),
                 true,
                 PoseSpace.TWO_D,
-                BackendConfig.defualt());
+                BackendConfig.defualt(),
+                List.of());
     }
 
     public RobotLocalizationConfig(double xStd, double yStd, double thetaStd) {
@@ -69,28 +97,90 @@ public record RobotLocalizationConfig(
         return new RobotLocalizationConfig();
     }
 
+    public double xStd() {
+        return stateStdDevs.x();
+    }
+
+    public double yStd() {
+        return stateStdDevs.y();
+    }
+
+    public double thetaStd() {
+        return stateStdDevs.theta();
+    }
+
+    public double vXStd() {
+        return visionStdDevs.x();
+    }
+
+    public double vYStda() {
+        return visionStdDevs.y();
+    }
+
+    public double vThetaStd() {
+        return visionStdDevs.theta();
+    }
+
+    public double v2XStd() {
+        return visionMultiStdDevs.x();
+    }
+
+    public double v2YStda() {
+        return visionMultiStdDevs.y();
+    }
+
+    public double v2ThetaStd() {
+        return visionMultiStdDevs.theta();
+    }
+
+    public double zStd() {
+        return stateStdDevs.z();
+    }
+
+    public double vZStd() {
+        return visionStdDevs.z();
+    }
+
+    public double v2ZStd() {
+        return visionMultiStdDevs.z();
+    }
+
+    public HolonomicPidConstants translation() {
+        return translation;
+    }
+
+    public HolonomicPidConstants rotation() {
+        return rotation;
+    }
+
+    public boolean useVision() {
+        return useVision;
+    }
+
+    public PoseSpace poseSpace() {
+        return poseSpace;
+    }
+
+    public BackendConfig backend() {
+        return backend != null ? backend : BackendConfig.defualt();
+    }
+
+    public String autoPoseName() {
+        return autoPoseName;
+    }
+
+    public List<PoseConfig> poseConfigs() {
+        return poseConfigs != null ? List.copyOf(poseConfigs) : List.of();
+    }
+
     public RobotLocalizationConfig setAutoPlannerPID(double tP, double tI, double tD, double rP, double rI, double rD){
         return setAutoPlannerPID(new HolonomicPidConstants(tP, tI, tD), new HolonomicPidConstants(rP, rI, rD));
     }
 
     public RobotLocalizationConfig setAutoPlannerPID(HolonomicPidConstants translation, HolonomicPidConstants rotation){
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
-                zStd,
-                vZStd,
-                v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace, backend);
+        this.translation = translation;
+        this.rotation = rotation;
+        return this;
     }
 
     public RobotLocalizationConfig setVision(double vXStd, double vYStda, double vThetaStd){
@@ -98,23 +188,8 @@ public record RobotLocalizationConfig(
     }
 
     public RobotLocalizationConfig setVision(double vXStd, double vYStda, double vZStd, double vThetaStd) {
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
-                zStd,
-                vZStd,
-                v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace, backend);
+        this.visionStdDevs = new StdDevs(vXStd, vYStda, vZStd, vThetaStd);
+        return this;
     }
 
     public RobotLocalizationConfig setVisionMultitag(double v2XStd, double v2YStda, double v2ThetaStd){
@@ -122,54 +197,33 @@ public record RobotLocalizationConfig(
     }
 
     public RobotLocalizationConfig setVisionMultitag(double v2XStd, double v2YStda, double v2ZStd, double v2ThetaStd){
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
-                zStd,
-                vZStd,
-                v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace, backend);
+        this.visionMultiStdDevs = new StdDevs(v2XStd, v2YStda, v2ZStd, v2ThetaStd);
+        return this;
     }
 
     public RobotLocalizationConfig setVisionEnabled(boolean useVision){
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
-                zStd,
-                vZStd,
-                v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace, backend);
+        this.useVision = useVision;
+        return this;
     }
 
     public Matrix<N3, N1> getStd(){
-        return VecBuilder.fill(xStd,yStd,Units.degreesToRadians(thetaStd));
+        return VecBuilder.fill(
+                stateStdDevs.x(),
+                stateStdDevs.y(),
+                Units.degreesToRadians(stateStdDevs.theta()));
     }
 
     public Matrix<N3, N1> getVisionStd(){
-        return VecBuilder.fill(vXStd,vYStda,Units.degreesToRadians(vThetaStd));
+        return VecBuilder.fill(
+                visionStdDevs.x(),
+                visionStdDevs.y(),
+                Units.degreesToRadians(visionStdDevs.theta()));
     }
     public Matrix<N3, N1> getVisionMultitagStd(){
-        return VecBuilder.fill(v2XStd,v2YStda,Units.degreesToRadians(v2ThetaStd));
+        return VecBuilder.fill(
+                visionMultiStdDevs.x(),
+                visionMultiStdDevs.y(),
+                Units.degreesToRadians(visionMultiStdDevs.theta()));
     }
 
     public Matrix<N3, N1> getStd2d() {
@@ -185,95 +239,60 @@ public record RobotLocalizationConfig(
     }
 
     public Matrix<N4, N1> getStd3d(){
-        return VecBuilder.fill(xStd, yStd, zStd, Units.degreesToRadians(thetaStd));
+        return VecBuilder.fill(
+                stateStdDevs.x(),
+                stateStdDevs.y(),
+                stateStdDevs.z(),
+                Units.degreesToRadians(stateStdDevs.theta()));
     }
 
     public Matrix<N4, N1> getVisionStd3d(){
-        return VecBuilder.fill(vXStd, vYStda, vZStd, Units.degreesToRadians(vThetaStd));
+        return VecBuilder.fill(
+                visionStdDevs.x(),
+                visionStdDevs.y(),
+                visionStdDevs.z(),
+                Units.degreesToRadians(visionStdDevs.theta()));
     }
 
     public Matrix<N4, N1> getVisionMultitagStd3d(){
-        return VecBuilder.fill(v2XStd, v2YStda, v2ZStd, Units.degreesToRadians(v2ThetaStd));
+        return VecBuilder.fill(
+                visionMultiStdDevs.x(),
+                visionMultiStdDevs.y(),
+                visionMultiStdDevs.z(),
+                Units.degreesToRadians(visionMultiStdDevs.theta()));
     }
 
     public RobotLocalizationConfig setPoseSpace(PoseSpace poseSpace) {
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
-                zStd,
-                vZStd,
-                v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace, backend);
+        this.poseSpace = poseSpace;
+        normalize();
+        return this;
     }
 
     public RobotLocalizationConfig setZStd(double zStd) {
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
+        this.stateStdDevs = new StdDevs(
+                stateStdDevs.x(),
+                stateStdDevs.y(),
                 zStd,
-                vZStd,
-                v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace, backend);
+                stateStdDevs.theta());
+        return this;
     }
 
     public RobotLocalizationConfig setVisionZStd(double vZStd) {
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
-                zStd,
+        this.visionStdDevs = new StdDevs(
+                visionStdDevs.x(),
+                visionStdDevs.y(),
                 vZStd,
-                v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace, backend);
+                visionStdDevs.theta());
+        return this;
     }
 
     public RobotLocalizationConfig setVisionMultiZStd(double v2ZStd) {
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
-                zStd,
-                vZStd,
+        this.visionMultiStdDevs = new StdDevs(
+                visionMultiStdDevs.x(),
+                visionMultiStdDevs.y(),
                 v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace, backend);
+                visionMultiStdDevs.theta());
+        return this;
     }
 
     public RobotLocalizationConfig use3d() {
@@ -285,24 +304,31 @@ public record RobotLocalizationConfig(
     }
 
     public RobotLocalizationConfig setBackend(BackendConfig backend) {
-        return new RobotLocalizationConfig(
-                xStd,
-                yStd,
-                thetaStd,
-                vXStd,
-                vYStda,
-                vThetaStd,
-                v2XStd,
-                v2YStda,
-                v2ThetaStd,
-                zStd,
-                vZStd,
-                v2ZStd,
-                translation,
-                rotation,
-                useVision,
-                poseSpace,
-                backend);
+        this.backend = backend;
+        normalize();
+        return this;
+    }
+
+    public RobotLocalizationConfig setPoseConfigs(List<PoseConfig> poseConfigs) {
+        this.poseConfigs = poseConfigs != null ? new ArrayList<>(poseConfigs) : new ArrayList<>();
+        return this;
+    }
+
+    public RobotLocalizationConfig addPoseConfig(PoseConfig poseConfig) {
+        if (poseConfig == null) {
+            return this;
+        }
+        if (poseConfigs == null) {
+            poseConfigs = new ArrayList<>();
+        }
+        poseConfigs.add(poseConfig);
+        return this;
+    }
+
+    public RobotLocalizationConfig setAutoPoseName(String autoPoseName) {
+        this.autoPoseName = autoPoseName;
+        normalize();
+        return this;
     }
 
     public RobotLocalizationConfig setSlipStrategy(BackendConfig.SlipStrategy slipStrategy) {
@@ -385,9 +411,35 @@ public record RobotLocalizationConfig(
         return backend().resolveVisionEnabled(useVision);
     }
 
-    public RobotLocalizationConfig {
+    private void normalize() {
         poseSpace = poseSpace != null ? poseSpace : PoseSpace.TWO_D;
         backend = backend != null ? backend : BackendConfig.defualt();
+        poseConfigs = poseConfigs != null ? new ArrayList<>(poseConfigs) : new ArrayList<>();
+        stateStdDevs = stateStdDevs != null ? stateStdDevs : StdDevs.defaults();
+        visionStdDevs = visionStdDevs != null ? visionStdDevs : StdDevs.defaults();
+        visionMultiStdDevs = visionMultiStdDevs != null ? visionMultiStdDevs : StdDevs.defaults();
+        autoPoseName = (autoPoseName == null || autoPoseName.isBlank()) ? "field" : autoPoseName;
+    }
+
+    public record StdDevs(double x, double y, double z, double theta) {
+        public StdDevs {
+            if (!Double.isFinite(x)) {
+                x = 0.0;
+            }
+            if (!Double.isFinite(y)) {
+                y = 0.0;
+            }
+            if (!Double.isFinite(z)) {
+                z = 0.0;
+            }
+            if (!Double.isFinite(theta)) {
+                theta = 0.0;
+            }
+        }
+
+        public static StdDevs defaults() {
+            return new StdDevs(0.9, 0.9, 0.9, 0.9);
+        }
     }
 
     public record BackendConfig(

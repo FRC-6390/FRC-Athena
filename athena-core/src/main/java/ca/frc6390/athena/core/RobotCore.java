@@ -143,7 +143,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             localization.configureChoreo(drivetrain);
         }
         if (localization != null) {
-            autos.setAutoPlanResetter(pose -> Commands.runOnce(() -> localization.resetFieldPose(pose)));
+            String autoPose = config.localizationConfig().autoPoseName();
+            autos.setAutoPlanResetter(pose -> Commands.runOnce(() -> localization.resetPose(autoPose, pose)));
         }
 
         if (vision != null && edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
@@ -493,12 +494,12 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public ChassisSpeeds createRobotRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
         return ChassisSpeeds.fromRobotRelativeSpeeds(
-                new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
+                new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getFieldPose().getRotation());
     }
 
     public ChassisSpeeds createFieldRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
         return ChassisSpeeds.fromFieldRelativeSpeeds(
-                new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getRelativePose().getRotation());
+                new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getFieldPose().getRotation());
     }
 
     private boolean isAutoInitResetEnabled() {
@@ -519,7 +520,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (!shouldReset || !routine.hasStartingPose()) {
                 return;
             }
-            localization.resetFieldPose(routine.startingPose());
+            localization.resetPose(localization.getLocalizationConfig().autoPoseName(), routine.startingPose());
         });
     }
 }

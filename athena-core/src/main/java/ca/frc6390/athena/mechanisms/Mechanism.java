@@ -69,6 +69,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean manualOutputActive;
     private double manualOutput;
     private boolean manualOutputIsVoltage;
+    private boolean lastOutputValid;
+    private double lastOutput;
+    private boolean lastOutputIsVoltage;
     private RobotCore<?> robotCore;
     private SysIdRoutine sysIdRoutine;
     private double sysIdRampRateVoltsPerSecond = 1.0;
@@ -87,21 +90,22 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
         this(
-            MotorControllerGroup.fromConfigs(config.motors.toArray(MotorControllerConfig[]::new)),
-            config.encoder != null ? HardwareFactories.encoder(config.encoder) : null,
-            config.pidController,
-            config.profiledPIDController,
-            config.useAbsolute,
-            config.useVoltage,
-            config.limitSwitches.stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new),
-            config.useSetpointAsOutput,
-            config.pidPeriod,
+            MotorControllerGroup.fromConfigs(config.data().motors().toArray(MotorControllerConfig[]::new)),
+            config.data().encoder() != null ? HardwareFactories.encoder(config.data().encoder()) : null,
+            config.data().pidController(),
+            config.data().profiledPIDController(),
+            config.data().useAbsolute(),
+            config.data().useVoltage(),
+            config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new),
+            config.data().useSetpointAsOutput(),
+            config.data().pidPeriod(),
             config.simulationConfig,
             config.visualizationConfig,
             config.sensorSimulationConfig
         );
-        setBounds(config.minBound, config.maxBound);
-        setMotionLimits(config.motionLimits);
+        MechanismConfigRecord cfg = config.data();
+        setBounds(cfg.minBound(), cfg.maxBound());
+        setMotionLimits(cfg.motionLimits());
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
@@ -250,12 +254,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public void setVoltage(double voltage){
-        recordManualOutput(voltage, true);
+        recordOutput(voltage, true);
         motors.setVoltage(voltage);
     }
 
     public void setSpeed(double speed){
-        recordManualOutput(speed, false);
+        recordOutput(speed, false);
         motors.setSpeed(speed);
     }
 
@@ -408,6 +412,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     public boolean isOutputVoltage() {
         if (override && manualOutputActive) {
             return manualOutputIsVoltage;
+        }
+        if (RobotBase.isSimulation() && lastOutputValid) {
+            return lastOutputIsVoltage;
         }
         return useVoltage;
     }
@@ -595,6 +602,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (override) {
             return manualOutputActive ? manualOutput : 0.0;
         }
+        if (RobotBase.isSimulation() && lastOutputValid) {
+            return lastOutput;
+        }
         return output;
     }
 
@@ -602,7 +612,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.nudge = nudge;
     }
 
-    private void recordManualOutput(double output, boolean outputIsVoltage) {
+    private void recordOutput(double output, boolean outputIsVoltage) {
+        lastOutputValid = true;
+        lastOutput = output;
+        lastOutputIsVoltage = outputIsVoltage;
         if (!override) {
             return;
         }

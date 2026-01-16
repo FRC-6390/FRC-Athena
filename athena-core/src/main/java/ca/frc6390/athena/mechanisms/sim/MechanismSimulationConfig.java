@@ -69,7 +69,7 @@ public final class MechanismSimulationConfig {
         if (sourceConfig == null) {
             return Double.NaN;
         }
-        double ratio = sourceConfig.encoderGearRatio;
+        double ratio = sourceConfig.data().encoderGearRatio();
         if (Math.abs(ratio) < 1e-6) {
             return Double.NaN;
         }
@@ -95,8 +95,8 @@ public final class MechanismSimulationConfig {
         if (sourceConfig == null) {
             return 0.02;
         }
-        double conversion = sourceConfig.encoderConversion;
-        double ratio = sourceConfig.encoderGearRatio;
+        double conversion = sourceConfig.data().encoderConversion();
+        double ratio = sourceConfig.data().encoderGearRatio();
         if (Math.abs(conversion) < 1e-6 || Math.abs(ratio) < 1e-6) {
             return 0.02;
         }
@@ -114,8 +114,8 @@ public final class MechanismSimulationConfig {
         if (!Double.isFinite(drumRadiusMeters) || Math.abs(drumRadiusMeters) < 1e-6) {
             drumRadiusMeters = 0.02;
         }
-        double conversion = sourceConfig.encoderConversion;
-        double ratio = sourceConfig.encoderGearRatio;
+        double conversion = sourceConfig.data().encoderConversion();
+        double ratio = sourceConfig.data().encoderGearRatio();
         if (Math.abs(conversion) < 1e-6 || Math.abs(ratio) < 1e-6) {
             return 1.0;
         }
@@ -131,8 +131,8 @@ public final class MechanismSimulationConfig {
         if (sourceConfig == null) {
             return 1.0;
         }
-        double conversion = sourceConfig.encoderConversion;
-        double ratio = sourceConfig.encoderGearRatio;
+        double conversion = sourceConfig.data().encoderConversion();
+        double ratio = sourceConfig.data().encoderGearRatio();
         if (Math.abs(conversion) < 1e-6 || Math.abs(ratio) < 1e-6) {
             return 1.0;
         }

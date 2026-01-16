@@ -8,6 +8,7 @@ import ca.frc6390.athena.commands.control.TankDriveCommand;
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
+import ca.frc6390.athena.core.localization.PoseEstimatorFactory;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotSpeeds;
@@ -18,6 +19,7 @@ import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.units.measure.Voltage;
@@ -30,6 +32,9 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.DifferentialDriveKinematics;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelPositions;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelSpeeds;
+import edu.wpi.first.math.numbers.N1;
+import edu.wpi.first.math.numbers.N3;
+import edu.wpi.first.math.numbers.N4;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
@@ -283,50 +288,42 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
      @Override
     public RobotLocalization<DifferentialDriveWheelPositions> localization(RobotLocalizationConfig config) {
         RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defualt();
-        DifferentialDriveWheelPositions positions = getPositions();
-        if (effectiveConfig.poseSpace() == RobotLocalizationConfig.PoseSpace.THREE_D) {
-            Rotation3d gyroRotation = getImuRotation3d();
-            DifferentialDrivePoseEstimator3d fieldEstimator =
-                    new DifferentialDrivePoseEstimator3d(
-                            kinematics,
-                            gyroRotation,
-                            positions.leftMeters,
-                            positions.rightMeters,
-                            new Pose3d(),
-                            effectiveConfig.getStd3d(),
-                            effectiveConfig.getVisionStd3d());
-            DifferentialDrivePoseEstimator3d relativeEstimator =
-                    new DifferentialDrivePoseEstimator3d(
-                            kinematics,
-                            gyroRotation,
-                            positions.leftMeters,
-                            positions.rightMeters,
-                            new Pose3d(),
-                            effectiveConfig.getStd3d(),
-                            effectiveConfig.getVisionStd3d());
-            return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, getRobotSpeeds(), imu, this::getPositions);
-        }
-
-        DifferentialDrivePoseEstimator fieldEstimator =
-                new DifferentialDrivePoseEstimator(
+        PoseEstimatorFactory<DifferentialDriveWheelPositions> factory = new PoseEstimatorFactory<>() {
+            @Override
+            public DifferentialDrivePoseEstimator create2d(
+                    Pose2d startPose,
+                    Matrix<N3, N1> stateStdDevs,
+                    Matrix<N3, N1> visionStdDevs) {
+                DifferentialDriveWheelPositions positions = getPositions();
+                return new DifferentialDrivePoseEstimator(
                         kinematics,
                         imu.getYaw(),
                         positions.leftMeters,
                         positions.rightMeters,
-                        new Pose2d(),
-                        effectiveConfig.getStd(),
-                        effectiveConfig.getVisionStd());
-        DifferentialDrivePoseEstimator relativeEstimator =
-                new DifferentialDrivePoseEstimator(
+                        startPose,
+                        stateStdDevs,
+                        visionStdDevs);
+            }
+
+            @Override
+            public DifferentialDrivePoseEstimator3d create3d(
+                    Pose3d startPose,
+                    Matrix<N4, N1> stateStdDevs,
+                    Matrix<N4, N1> visionStdDevs) {
+                DifferentialDriveWheelPositions positions = getPositions();
+                Rotation3d gyroRotation = getImuRotation3d();
+                return new DifferentialDrivePoseEstimator3d(
                         kinematics,
-                        imu.getYaw(),
+                        gyroRotation,
                         positions.leftMeters,
                         positions.rightMeters,
-                        new Pose2d(),
-                        effectiveConfig.getStd(),
-                        effectiveConfig.getVisionStd());
+                        startPose,
+                        stateStdDevs,
+                        visionStdDevs);
+            }
+        };
 
-        return new RobotLocalization<>(fieldEstimator, relativeEstimator, effectiveConfig, getRobotSpeeds(), imu, this::getPositions);
+        return new RobotLocalization<>(factory, effectiveConfig, getRobotSpeeds(), imu, this::getPositions);
     }
 
     @Override

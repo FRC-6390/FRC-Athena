@@ -41,7 +41,7 @@ public class SimpleMotorMechanism  extends Mechanism  {
 
         public StatefulSimpleMotorMechanism(MechanismConfig<StatefulSimpleMotorMechanism<E>> config, SimpleMotorFeedforward feedforward, E initialState) {
             super(config, feedforward);
-            stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.stateMachineDelay,
+            stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
                     config.stateActions, config.stateHooks, config.alwaysHooks, config.inputs, config.doubleInputs, config.objectInputs);
         }
 

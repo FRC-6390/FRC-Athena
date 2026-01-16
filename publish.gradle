@@ -159,9 +159,9 @@ if (osName.contains("win")) {
 // Key directories
 def vendordepsFolder = file("$wpilibFolder/vendordeps")
 def mavenFolder = file("$wpilibFolder/maven")
-def outputsFolder = file("$buildDir/outputs")
+def outputsFolder = rootProject.file("${rootProject.buildDir}/outputs")
 def versionFile = file("$outputsFolder/version.txt")
-def localRepoDir = file("$buildDir/repos/releases")
+def localRepoDir = rootProject.file("${rootProject.buildDir}/repos/releases")
 
 // Publish mode can be: 'local', 'online', 'all'
 def publishMode = project.hasProperty('publishMode') ? project.property('publishMode') : 'local'
@@ -178,6 +178,7 @@ task outputVersions() {
     description = 'Prints the version to a file (for use by downstream tasks)'
     group = 'Build'
     outputs.files(versionFile)
+    inputs.property('pubVersion', pubVersion)
 
     doFirst {
         buildDir.mkdir()
@@ -248,6 +249,8 @@ task updateAthenaJson {
     description = 'Updates vendordep JSON files with the correct version, frcYear, and javaDependencies'
     group = 'Publishing'
     inputs.files vendordepDescriptors.collect { it.file }
+    inputs.property('pubVersion', pubVersion)
+    inputs.property('frcYear', frcYear)
     outputs.dir outputsFolder
 
     doLast {
@@ -291,6 +294,8 @@ task copyToWpilib(type: Copy) {
         vendordepsFolder.mkdirs()
     }
 }
+
+copyToWpilib.dependsOn(subprojects.collect { it.tasks.named('publish') })
 
 task copyJsonToVendordeps(type: Copy) {
     description = 'Copies the updated vendordep JSON files to the wpilib vendordeps folder'
@@ -382,7 +387,7 @@ tasks.matching { it.name == 'publish' }.configureEach {
 // -----------------------------------------------------------------------------
 
 // Extra local 'releases' folder for debugging
-def releasesRepoUrl = "$buildDir/repos/releases"
+def releasesRepoUrl = "${rootProject.buildDir}/repos/releases"
 
 // An optional clean-up step. Remove if undesired.
 task cleanReleaseRepo(type: Delete) {
@@ -390,8 +395,10 @@ task cleanReleaseRepo(type: Delete) {
     delete releasesRepoUrl
 }
 
-// Force all tasks (except the cleaner itself) to run after cleaning
-tasks.matching { it != cleanReleaseRepo }.all {
+// Clean once before publishing tasks so artifacts are not deleted between steps.
+tasks.matching {
+    it.name == 'publish' || it.name == 'publishLocal' || it.name == 'publishToMavenLocal'
+}.configureEach {
     it.dependsOn cleanReleaseRepo
 }
 

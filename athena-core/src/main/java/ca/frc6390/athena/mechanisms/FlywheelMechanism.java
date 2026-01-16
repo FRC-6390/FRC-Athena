@@ -17,7 +17,7 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
 
     public FlywheelMechanism(MechanismConfig<? extends FlywheelMechanism> config, SimpleMotorFeedforward feedforward) {
         super(config, feedforward);
-        this.useVelocityPid = config.pidUseVelocity;
+        this.useVelocityPid = config.data().pidUseVelocity();
     }
 
     @Override
@@ -34,7 +34,7 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
                                          SimpleMotorFeedforward feedforward,
                                          E initialState) {
             super(config, feedforward);
-            stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.stateMachineDelay,
+            stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
                     config.stateActions, config.stateHooks, config.alwaysHooks, config.inputs, config.doubleInputs, config.objectInputs);
         }
 
