@@ -76,8 +76,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private BiConsumer<ChassisSpeeds, HolonomicFeedforward> autoDrive;
 
     private boolean suppressUpdates = false;
-    private StructPublisher<Pose2d> fieldPosePublisher;
-    private StructPublisher<Pose3d> fieldPose3dPublisher;
     private NetworkTable backendTable;
     private NetworkTableEntry backendOverrideEnabledEntry;
     private NetworkTableEntry backendSlipStrategyEntry;
@@ -159,8 +157,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.autoDrive = (speeds, feed) -> robotSpeeds.setSpeeds("auto", speeds);
 
         this.fieldPublisher = new RobotLocalizationFieldPublisher(() -> vision);
-        this.fieldPosePublisher = null;
-        this.fieldPose3dPublisher = null;
         this.cameraManager = new RobotVisionCameraManager(STD_EPSILON, fieldPublisher.getField());
 
         this.visionEnabled = config.isVisionEnabled();
@@ -865,12 +861,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private PoseConfig defaultPoseConfig() {
-        EnumSet<PoseInput> continuous = EnumSet.of(PoseInput.ODOMETRY, PoseInput.IMU_YAW);
-        EnumSet<PoseInput> onDemand = EnumSet.of(PoseInput.VISION);
-        return PoseConfig.field("field")
-                .withActive(true)
-                .withContinuousInputs(continuous)
-                .withOnDemandInputs(onDemand);
+        return PoseConfig.defaults("field");
     }
 
     public void registerPoseConfig(PoseConfig config) {
@@ -1113,25 +1104,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         cameraManager.setLocalizationShuffleboardTab(tab);
         tab.add("Estimator", fieldPublisher.getField()).withPosition( 0,0).withSize(4, 3);
 
-        String baseTopic = "/Shuffleboard/" + tab.getTitle();
-
-        if (fieldPosePublisher == null) {
-            String fieldTopic = baseTopic + "/EstimatorPose";
-            fieldPosePublisher = NetworkTableInstance.getDefault()
-                    .getStructTopic(fieldTopic, Pose2d.struct)
-                    .publish();
-            fieldPosePublisher.set(fieldPose);
-        }
-
-        if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
-            if (fieldPose3dPublisher == null) {
-                String field3dTopic = baseTopic + "/EstimatorPose3d";
-                fieldPose3dPublisher = NetworkTableInstance.getDefault()
-                        .getStructTopic(field3dTopic, Pose3d.struct)
-                        .publish();
-                fieldPose3dPublisher.set(fieldPose3d);
-            }
-        }
+        // Field2d widget handles pose visualization; no extra struct publishers.
 
         if (level == SendableLevel.DEBUG) {
             // Debug-specific struct publishers are already configured above.
@@ -1246,6 +1219,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
             fieldPublisher.getObject(config.name()).setPose(pose);
         }
+        fieldPublisher.publishFieldOnce();
     }
 
     private void updatePoseFromConfig(PoseConfig config, PoseEstimatorState state) {
@@ -1394,7 +1368,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
         if (isPrimary) {
             setPrimaryPose(state);
-            fieldPublisher.setRobotPose(pose);
             fieldPublisher.updateActualPath(pose);
         } else {
             PoseConfig config = findConfigForState(state);
@@ -1405,12 +1378,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         fieldPublisher.publishFieldOnce();
         if (isPrimary) {
             updateHealthMetrics();
-            if (fieldPosePublisher != null) {
-                fieldPosePublisher.set(fieldPose);
-            }
-            if (fieldPose3dPublisher != null) {
-                fieldPose3dPublisher.set(fieldPose3d);
-            }
             cameraManager.updateCameraVisualizations(vision, fieldPose);
             updateSlipState();
             persistRobotState(false);

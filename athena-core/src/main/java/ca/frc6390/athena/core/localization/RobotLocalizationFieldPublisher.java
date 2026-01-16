@@ -14,7 +14,6 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 final class RobotLocalizationFieldPublisher {
     private final Field2d field;
@@ -53,10 +52,6 @@ final class RobotLocalizationFieldPublisher {
     }
 
     void publishFieldOnce() {
-        if (fieldPublished) {
-            return;
-        }
-        SmartDashboard.putData("Field", field);
         fieldPublished = true;
     }
 

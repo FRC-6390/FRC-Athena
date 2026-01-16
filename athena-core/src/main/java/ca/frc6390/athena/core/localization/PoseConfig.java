@@ -62,15 +62,15 @@ public record PoseConfig(
                 startPose);
     }
 
-    public static PoseConfig field(String name) {
-        return field(name, (Pose2d) null);
+    public static PoseConfig defaults(String name) {
+        return defaults(name, (Pose2d) null);
     }
 
-    public static PoseConfig field(String name, Pose2d startPose) {
+    public static PoseConfig defaults(String name, Pose2d startPose) {
         return new PoseConfig(
                 name,
                 PoseFrame.FIELD,
-                EnumSet.noneOf(PoseInput.class),
+                EnumSet.of(PoseInput.ODOMETRY, PoseInput.IMU_YAW, PoseInput.VISION),
                 EnumSet.noneOf(PoseInput.class),
                 PoseConstraints.defaults(),
                 null,
@@ -79,11 +79,71 @@ public record PoseConfig(
                 null);
     }
 
-    public static PoseConfig field(String name, Pose3d startPose) {
+    public static PoseConfig defaults(String name, Pose3d startPose) {
         return new PoseConfig(
                 name,
                 PoseFrame.FIELD,
+                EnumSet.of(PoseInput.ODOMETRY, PoseInput.IMU_YAW, PoseInput.VISION),
                 EnumSet.noneOf(PoseInput.class),
+                PoseConstraints.defaults(),
+                null,
+                true,
+                null,
+                startPose);
+    }
+
+    public static PoseConfig vision(String name) {
+        return vision(name, (Pose2d) null);
+    }
+
+    public static PoseConfig vision(String name, Pose2d startPose) {
+        return new PoseConfig(
+                name,
+                PoseFrame.FIELD,
+                EnumSet.of(PoseInput.VISION),
+                EnumSet.noneOf(PoseInput.class),
+                PoseConstraints.defaults(),
+                null,
+                true,
+                startPose,
+                null);
+    }
+
+    public static PoseConfig vision(String name, Pose3d startPose) {
+        return new PoseConfig(
+                name,
+                PoseFrame.FIELD,
+                EnumSet.of(PoseInput.VISION),
+                EnumSet.noneOf(PoseInput.class),
+                PoseConstraints.defaults(),
+                null,
+                true,
+                null,
+                startPose);
+    }
+
+    public static PoseConfig odometry(String name) {
+        return odometry(name, (Pose2d) null);
+    }
+
+    public static PoseConfig odometry(String name, Pose2d startPose) {
+        return new PoseConfig(
+                name,
+                PoseFrame.FIELD,
+                EnumSet.of(PoseInput.ODOMETRY),
+                EnumSet.noneOf(PoseInput.class),
+                PoseConstraints.defaults(),
+                null,
+                true,
+                startPose,
+                null);
+    }
+
+    public static PoseConfig odometry(String name, Pose3d startPose) {
+        return new PoseConfig(
+                name,
+                PoseFrame.FIELD,
+                EnumSet.of(PoseInput.ODOMETRY),
                 EnumSet.noneOf(PoseInput.class),
                 PoseConstraints.defaults(),
                 null,
@@ -157,7 +217,7 @@ public record PoseConfig(
                 startPose3d);
     }
 
-    public PoseConfig withActive(boolean active) {
+    public PoseConfig setActive(boolean active) {
         return new PoseConfig(
                 name,
                 frame,
