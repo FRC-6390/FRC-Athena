@@ -16,11 +16,6 @@ public class CtreEncoder implements Encoder {
     private final EncoderConfig config;
     private final CANcoder cancoder;
     private final TalonFX talonFx;
-    private double conversion = 1.0;
-    private double conversionOffset = 0.0;
-    private double offset = 0.0;
-    private double gearRatio = 1.0;
-    private boolean inverted = false;
     private double simPosition = 0.0;
     private double simVelocity = 0.0;
 
@@ -42,11 +37,7 @@ public class CtreEncoder implements Encoder {
         if (config == null) {
             return;
         }
-        this.conversion = config.conversion;
-        this.conversionOffset = config.conversionOffset;
-        this.offset = config.offset;
-        this.gearRatio = config.gearRatio;
-        this.inverted = config.inverted;
+        // Raw encoder: configuration is applied by core adapter.
     }
 
     public static CtreEncoder fromConfig(EncoderConfig config) {
@@ -84,79 +75,59 @@ public class CtreEncoder implements Encoder {
 
     @Override
     public double getPosition() {
-        double direction = inverted ? -1.0 : 1.0;
         if (RobotBase.isSimulation()) {
-            return direction * ((simPosition * gearRatio + offset) * conversion - conversionOffset);
+            return simPosition;
         }
         if (cancoder != null) {
-            double rawPosition = cancoder.getPosition().getValueAsDouble();
-            return direction * ((rawPosition * gearRatio + offset) * conversion - conversionOffset);
+            return cancoder.getPosition().getValueAsDouble();
         }
         if (talonFx != null) {
-            double rawPosition = talonFx.getPosition().getValueAsDouble();
-            return direction * ((rawPosition * gearRatio + offset) * conversion - conversionOffset);
+            return talonFx.getPosition().getValueAsDouble();
         }
         return 0.0;
     }
 
     @Override
     public double getVelocity() {
-        double direction = inverted ? -1.0 : 1.0;
         if (RobotBase.isSimulation()) {
-            return direction * simVelocity * gearRatio * conversion;
+            return simVelocity;
         }
         if (cancoder != null) {
-            return direction * cancoder.getVelocity().getValueAsDouble() * gearRatio * conversion;
+            return cancoder.getVelocity().getValueAsDouble();
         }
         if (talonFx != null) {
-            return direction * talonFx.getVelocity().getValueAsDouble() * gearRatio * conversion;
+            return talonFx.getVelocity().getValueAsDouble();
         }
         return 0.0;
     }
 
     @Override
     public double getAbsolutePosition() {
-        return getPosition(); // CANCoder absolute position already reflected via getPosition
+        if (RobotBase.isSimulation()) {
+            return simPosition;
+        }
+        if (cancoder != null) {
+            return cancoder.getAbsolutePosition().getValueAsDouble();
+        }
+        if (talonFx != null) {
+            return talonFx.getPosition().getValueAsDouble();
+        }
+        return 0.0;
     }
 
     @Override
     public double getAbsoluteRotations() {
-        return getAbsolutePosition(); // same units as getPosition
+        return getAbsolutePosition();
     }
 
     @Override
     public double getRotations() {
-        return getPosition(); // Talon/CANCoder expose rotations directly
+        return getPosition();
     }
 
     @Override
     public double getRate() {
         return getVelocity();
-    }
-
-    @Override
-    public double getConversion() {
-        return conversion;
-    }
-
-    @Override
-    public double getConversionOffset() {
-        return conversionOffset;
-    }
-
-    @Override
-    public double getOffset() {
-        return offset;
-    }
-
-    @Override
-    public double getGearRatio() {
-        return gearRatio;
-    }
-
-    @Override
-    public boolean isInverted() {
-        return inverted;
     }
 
     @Override
@@ -172,7 +143,6 @@ public class CtreEncoder implements Encoder {
 
     @Override
     public void setGearRatio(double gearRatio) {
-        this.gearRatio = gearRatio;
         if (config != null) {
             config.gearRatio = gearRatio;
         }
@@ -180,7 +150,6 @@ public class CtreEncoder implements Encoder {
 
     @Override
     public void setConversionOffset(double conversionOffset) {
-        this.conversionOffset = conversionOffset;
         if (config != null) {
             config.conversionOffset = conversionOffset;
         }
@@ -214,22 +183,18 @@ public class CtreEncoder implements Encoder {
 
     @Override
     public void setPosition(double position) {
-        double safeConversion = conversion != 0.0 ? conversion : 1.0;
-        double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
-        double rawPosition = ((position + conversionOffset) / safeConversion - offset) / safeGearRatio;
         if (cancoder != null) {
-            cancoder.setPosition(rawPosition);
+            cancoder.setPosition(position);
         } else if (talonFx != null) {
-            talonFx.setPosition(rawPosition);
+            talonFx.setPosition(position);
         }
         if (RobotBase.isSimulation()) {
-            simPosition = rawPosition;
+            simPosition = position;
         }
     }
 
     @Override
     public void setInverted(boolean inverted) {
-        this.inverted = inverted;
         if (config != null) {
             config.inverted = inverted;
         }
@@ -237,7 +202,6 @@ public class CtreEncoder implements Encoder {
 
     @Override
     public void setConversion(double conversion) {
-        this.conversion = conversion;
         if (config != null) {
             config.conversion = conversion;
         }
@@ -245,7 +209,6 @@ public class CtreEncoder implements Encoder {
 
     @Override
     public void setOffset(double offset) {
-        this.offset = offset;
         if (config != null) {
             config.offset = offset;
         }

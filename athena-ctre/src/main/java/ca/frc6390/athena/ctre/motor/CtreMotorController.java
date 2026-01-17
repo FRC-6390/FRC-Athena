@@ -4,16 +4,15 @@ import java.util.function.Consumer;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
-import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.PositionDutyCycle;
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.InvertedValue;
 
 import ca.frc6390.athena.ctre.encoder.CtreEncoder;
 import ca.frc6390.athena.ctre.encoder.CtreEncoderType;
 import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderAdapter;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
@@ -87,13 +86,12 @@ public class CtreMotorController implements MotorController {
                     .setInverted(encoderCfg.inverted);
         }
         Encoder encoder = encoderCfg.type instanceof CtreEncoderType
-                ? CtreEncoder.fromConfig(encoderCfg, talon)
+                ? EncoderAdapter.wrap(CtreEncoder.fromConfig(encoderCfg, talon), encoderCfg)
                 : null;
 
         CtreMotorController controller = new CtreMotorController(talon, config, encoder);
         controller.setCurrentLimit(config.currentLimit);
         controller.setNeutralMode(config.neutralMode);
-        controller.setInverted(config.inverted);
         if (config.pid != null) {
             controller.setPid(config.pid);
         }
@@ -178,11 +176,6 @@ public class CtreMotorController implements MotorController {
     @Override
     public void setInverted(boolean inverted) {
         config.inverted = inverted;
-        MotorOutputConfigs outputConfigs = new MotorOutputConfigs();
-        outputConfigs.Inverted = inverted
-                ? InvertedValue.Clockwise_Positive
-                : InvertedValue.CounterClockwise_Positive;
-        controller.getConfigurator().apply(outputConfigs);
     }
 
     @Override

@@ -17,11 +17,6 @@ public class RevEncoder implements Encoder {
     private final EncoderConfig config;
     private final RelativeEncoder relative;
     private final AbsoluteEncoder absolute;
-    private double conversion = 1.0;
-    private double offset = 0.0;
-    private double conversionOffset = 0.0;
-    private double gearRatio = 1.0;
-    private boolean inverted = false;
     private double simPosition = 0.0;
     private double simVelocity = 0.0;
 
@@ -36,11 +31,7 @@ public class RevEncoder implements Encoder {
         if (config == null) {
             return;
         }
-        this.conversion = config.conversion;
-        this.conversionOffset = config.conversionOffset;
-        this.offset = config.offset;
-        this.gearRatio = config.gearRatio;
-        this.inverted = config.inverted;
+        // Raw encoder: configuration is applied by core adapter.
     }
 
     public static RevEncoder fromConfig(EncoderConfig config) {
@@ -64,44 +55,36 @@ public class RevEncoder implements Encoder {
 
     @Override
     public double getPosition() {
-        double direction = inverted ? -1.0 : 1.0;
         if (RobotBase.isSimulation()) {
-            return direction * ((simPosition * gearRatio + offset) * conversion - conversionOffset);
+            return simPosition;
         }
         if (absolute != null) {
-            double rawPosition = absolute.getPosition();
-            return direction * ((rawPosition * gearRatio + offset) * conversion - conversionOffset);
+            return absolute.getPosition();
         }
-        double rawPosition = relative.getPosition();
-        return direction * ((rawPosition * gearRatio + offset) * conversion - conversionOffset);
+        return relative.getPosition();
     }
 
     @Override
     public double getVelocity() {
-        double direction = inverted ? -1.0 : 1.0;
         if (RobotBase.isSimulation()) {
-            return direction * simVelocity * gearRatio * conversion;
+            return simVelocity;
         }
         if (absolute != null) {
-            return direction * absolute.getVelocity() * gearRatio * conversion;
+            return absolute.getVelocity();
         }
-        return direction * relative.getVelocity() * gearRatio * conversion;
+        return relative.getVelocity();
     }
 
     @Override
     public void setPosition(double position) {
-        double safeConversion = conversion != 0.0 ? conversion : 1.0;
-        double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
-        double raw = ((position + conversionOffset) / safeConversion - offset) / safeGearRatio;
-        relative.setPosition(raw);
+        relative.setPosition(position);
         if (RobotBase.isSimulation()) {
-            simPosition = raw;
+            simPosition = position;
         }
     }
 
     @Override
     public void setInverted(boolean inverted) {
-        this.inverted = inverted;
         if (config != null) {
             config.inverted = inverted;
         }
@@ -109,35 +92,13 @@ public class RevEncoder implements Encoder {
 
     @Override
     public void setConversion(double conversion) {
-        this.conversion = conversion;
         if (config != null) {
             config.conversion = conversion;
         }
     }
 
     @Override
-    public double getConversion() {
-        return conversion;
-    }
-
-    @Override
-    public double getConversionOffset() {
-        return conversionOffset;
-    }
-
-    @Override
-    public double getOffset() {
-        return offset;
-    }
-
-    @Override
-    public double getGearRatio() {
-        return gearRatio;
-    }
-
-    @Override
     public void setGearRatio(double gearRatio) {
-        this.gearRatio = gearRatio;
         if (config != null) {
             config.gearRatio = gearRatio;
         }
@@ -145,7 +106,6 @@ public class RevEncoder implements Encoder {
 
     @Override
     public void setConversionOffset(double conversionOffset) {
-        this.conversionOffset = conversionOffset;
         if (config != null) {
             config.conversionOffset = conversionOffset;
         }
@@ -153,10 +113,20 @@ public class RevEncoder implements Encoder {
 
     @Override
     public void setOffset(double offset) {
-        this.offset = offset;
         if (config != null) {
             config.offset = offset;
         }
+    }
+
+    @Override
+    public double getRawAbsoluteValue() {
+        if (RobotBase.isSimulation()) {
+            return simPosition;
+        }
+        if (absolute != null) {
+            return absolute.getPosition();
+        }
+        return relative.getPosition();
     }
 
     @Override

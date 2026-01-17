@@ -13,12 +13,9 @@ import edu.wpi.first.math.geometry.Rotation2d;
 public class CtreImu implements Imu {
     private final ImuConfig config;
     private final Pigeon2 pigeon;
-    private boolean inverted;
-
     public CtreImu(Pigeon2 pigeon, ImuConfig config) {
         this.pigeon = pigeon;
         this.config = config;
-        this.inverted = config.inverted;
     }
 
     public static CtreImu fromConfig(ImuConfig config) {
@@ -32,31 +29,29 @@ public class CtreImu implements Imu {
 
     @Override
     public Rotation2d getRoll() {
-        return Rotation2d.fromDegrees(direction() * pigeon.getRoll(true).getValueAsDouble());
+        return Rotation2d.fromDegrees(pigeon.getRoll(true).getValueAsDouble());
     }
 
     @Override
     public Rotation2d getPitch() {
-        return Rotation2d.fromDegrees(direction() * pigeon.getPitch(true).getValueAsDouble());
+        return Rotation2d.fromDegrees(pigeon.getPitch(true).getValueAsDouble());
     }
 
     @Override
     public Rotation2d getYaw() {
-        return Rotation2d.fromDegrees(direction() * pigeon.getYaw(true).getValueAsDouble());
+        return Rotation2d.fromDegrees(pigeon.getYaw(true).getValueAsDouble());
     }
 
     @Override
     public void setInverted(boolean inverted) {
-        this.inverted = inverted;
+        if (config != null) {
+            config.inverted = inverted;
+        }
     }
 
     @Override
     public ImuConfig getConfig() {
         return config;
-    }
-
-    private double direction() {
-        return inverted ? -1.0 : 1.0;
     }
 
     private static CANBus resolveCanBus(String canbus) {

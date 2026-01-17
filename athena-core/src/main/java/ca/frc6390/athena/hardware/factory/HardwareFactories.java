@@ -23,32 +23,35 @@ public final class HardwareFactories {
     private HardwareFactories() {}
 
     public static MotorController motor(MotorControllerConfig config) {
-        return MOTOR_FACTORIES.stream()
+        MotorController raw = MOTOR_FACTORIES.stream()
                 .map(ServiceLoader.Provider::get)
                 .filter(f -> f.supports(config.type))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No motor factory for type: " + config.type.getKey()))
                 .create(config);
+        return ca.frc6390.athena.hardware.motor.MotorControllerAdapter.wrap(raw, config);
     }
 
     public static Encoder encoder(EncoderConfig config) {
-        return ENCODER_FACTORIES.stream()
+        Encoder raw = ENCODER_FACTORIES.stream()
                 .map(ServiceLoader.Provider::get)
                 .filter(f -> f.supports(config.type))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No encoder factory for type: " + config.type.getKey()))
                 .create(config);
+        return ca.frc6390.athena.hardware.encoder.EncoderAdapter.wrap(raw, config);
     }
 
     public static Imu imu(ImuConfig config) {
-        return IMU_FACTORIES.stream()
+        Imu raw = IMU_FACTORIES.stream()
                 .map(ServiceLoader.Provider::get)
                 .filter(f -> f.supports(config.type))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No IMU factory for type: " + config.type.getKey()))
                 .create(config);
+        return ca.frc6390.athena.hardware.imu.ImuAdapter.wrap(raw, config);
     }
 }

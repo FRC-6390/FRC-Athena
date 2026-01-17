@@ -261,11 +261,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public void setVoltage(double voltage){
         recordOutput(voltage, true);
+        if (emergencyStopped || suppressMotorOutput) {
+            motors.stopMotors();
+            return;
+        }
         motors.setVoltage(voltage);
     }
 
     public void setSpeed(double speed){
         recordOutput(speed, false);
+        if (emergencyStopped || suppressMotorOutput) {
+            motors.stopMotors();
+            return;
+        }
         motors.setSpeed(speed);
     }
 
@@ -537,12 +545,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.output = output;
         this.prevSetpoint = getSetpoint();
 
-        if (override){
-            return;
-        }
-        
         if(emergencyStopped){
             motors.stopMotors();
+            return;
+        }
+
+        if (override){
             return;
         }
 

@@ -15,6 +15,7 @@ import com.revrobotics.spark.config.SparkMaxConfig;
 import ca.frc6390.athena.rev.encoder.RevEncoder;
 import ca.frc6390.athena.rev.encoder.RevEncoderType;
 import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderAdapter;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
@@ -90,7 +91,7 @@ public class RevMotorController implements MotorController {
 
         Encoder encoder = null;
         if (config.encoderConfig != null && config.encoderConfig.type instanceof RevEncoderType) {
-            encoder = RevEncoder.fromConfig(config.encoderConfig);
+            encoder = EncoderAdapter.wrap(RevEncoder.fromConfig(config.encoderConfig), config.encoderConfig);
         } else if (encoder == null) {
             EncoderConfig encoderCfg = new EncoderConfig()
                     .setType(RevEncoderType.SPARK_MAX)
@@ -100,7 +101,7 @@ public class RevMotorController implements MotorController {
                     .setConversion(config.encoderConfig != null ? config.encoderConfig.conversion : 1.0)
                     .setOffset(config.encoderConfig != null ? config.encoderConfig.offset : 0.0)
                     .setInverted(config.encoderConfig != null && config.encoderConfig.inverted);
-            encoder = RevEncoder.fromConfig(encoderCfg);
+            encoder = EncoderAdapter.wrap(RevEncoder.fromConfig(encoderCfg), encoderCfg);
         }
 
         return new RevMotorController(
@@ -143,7 +144,7 @@ public class RevMotorController implements MotorController {
 
         Encoder encoder = null;
         if (config.encoderConfig != null && config.encoderConfig.type instanceof RevEncoderType) {
-            encoder = RevEncoder.fromConfig(config.encoderConfig);
+            encoder = EncoderAdapter.wrap(RevEncoder.fromConfig(config.encoderConfig), config.encoderConfig);
         }
 
         return new RevMotorController(
@@ -240,15 +241,12 @@ public class RevMotorController implements MotorController {
 
     @Override
     public boolean isInverted() {
-        boolean inverted = getInverted.getAsBoolean();
-        config.inverted = inverted;
-        return inverted;
+        return config.inverted;
     }
 
     @Override
     public void setInverted(boolean inverted) {
         config.inverted = inverted;
-        setInverted.accept(inverted);
     }
 
     @Override

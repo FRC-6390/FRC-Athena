@@ -13,12 +13,9 @@ import edu.wpi.first.math.geometry.Rotation2d;
 public class StudicaImu implements Imu {
     private final ImuConfig config;
     private final AHRS navx;
-    private boolean inverted;
-
     public StudicaImu(AHRS navx, ImuConfig config) {
         this.navx = navx;
         this.config = config;
-        this.inverted = config.inverted;
     }
 
     public static StudicaImu fromConfig(ImuConfig config) {
@@ -32,22 +29,24 @@ public class StudicaImu implements Imu {
 
     @Override
     public Rotation2d getRoll() {
-        return Rotation2d.fromDegrees(direction() * navx.getRoll());
+        return Rotation2d.fromDegrees(navx.getRoll());
     }
 
     @Override
     public Rotation2d getPitch() {
-        return Rotation2d.fromDegrees(direction() * navx.getPitch());
+        return Rotation2d.fromDegrees(navx.getPitch());
     }
 
     @Override
     public Rotation2d getYaw() {
-        return Rotation2d.fromDegrees(direction() * navx.getYaw());
+        return Rotation2d.fromDegrees(navx.getYaw());
     }
 
     @Override
     public void setInverted(boolean inverted) {
-        this.inverted = inverted;
+        if (config != null) {
+            config.inverted = inverted;
+        }
     }
 
     @Override
@@ -55,7 +54,4 @@ public class StudicaImu implements Imu {
         return config;
     }
 
-    private double direction() {
-        return inverted ? -1.0 : 1.0;
-    }
 }
