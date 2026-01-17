@@ -37,8 +37,11 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 public class Mechanism extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism{
 
@@ -80,6 +83,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double sysIdLastVoltage = 0.0;
     private boolean sysIdActive = false;
     private boolean sysIdPreviousOverride = false;
+    private final List<Consumer<?>> periodicHooks;
 
     private enum RobotMode {
         TELE,
@@ -106,6 +110,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         MechanismConfigRecord cfg = config.data();
         setBounds(cfg.minBound(), cfg.maxBound());
         setMotionLimits(cfg.motionLimits());
+        this.periodicHooks.addAll(config.periodicHooks);
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
@@ -169,6 +174,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         } else {
             this.sensorSimulation = MechanismSensorSimulation.empty();
         }
+        this.periodicHooks = new ArrayList<>();
     }
 
     public MotionLimits getMotionLimits() {
@@ -688,6 +694,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         lastSimulationTimestampSeconds = nowSeconds;
     }
 
+    @SuppressWarnings("unchecked")
+    private void applyPeriodicHooks() {
+        for (Consumer<?> hook : periodicHooks) {
+            ((Consumer<Mechanism>) hook).accept(this);
+        }
+    }
+
     @Override
     public void periodic() {
 
@@ -715,6 +728,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         sensorSimulation.update(this);
+
+        applyPeriodicHooks();
 
         update();
 

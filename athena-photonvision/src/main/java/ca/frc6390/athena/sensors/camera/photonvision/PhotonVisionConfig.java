@@ -53,7 +53,7 @@ public record PhotonVisionConfig(
                 new Transform3d(),
                 PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
                 new ArrayList<>(),
-                AprilTagFields.k2025ReefscapeWelded,
+                AprilTagFields.kDefaultField,
                 false,
                 PoseStrategy.LOWEST_AMBIGUITY,
                 2,

@@ -31,7 +31,7 @@ public record LimeLightConfig(
         cameraRobotSpace = sanitizeTransform(cameraRobotSpace);
         filteredTags = filteredTags != null ? Arrays.copyOf(filteredTags, filteredTags.length) : new int[]{};
         roles = roles != null ? copyRoles(roles) : EnumSet.noneOf(CameraRole.class);
-        fieldLayout = fieldLayout != null ? fieldLayout : AprilTagFields.k2025ReefscapeWelded;
+        fieldLayout = fieldLayout != null ? fieldLayout : AprilTagFields.kDefaultField;
     }
 
     /**
@@ -43,7 +43,7 @@ public record LimeLightConfig(
                 new Transform3d(),
                 PoseEstimateWithLatencyType.BOT_POSE_MT2_BLUE,
                 new int[]{},
-                AprilTagFields.k2025ReefscapeWelded,
+                AprilTagFields.kDefaultField,
                 false,
                 2,
                 EnumSet.noneOf(CameraRole.class),

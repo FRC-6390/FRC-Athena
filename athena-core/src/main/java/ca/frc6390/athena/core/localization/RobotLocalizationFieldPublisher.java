@@ -55,6 +55,10 @@ final class RobotLocalizationFieldPublisher {
         fieldPublished = true;
     }
 
+    void clearRobotPose() {
+        field.getObject("Robot").setPoses(List.of());
+    }
+
     void updateAutoVisualization(RobotAuto autos) {
         if (autos == null) {
             clearPlannedPath();
