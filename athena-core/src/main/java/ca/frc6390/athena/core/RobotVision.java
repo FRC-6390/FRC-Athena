@@ -24,6 +24,7 @@ import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
 import ca.frc6390.athena.sensors.camera.VisionCameraConfig;
 import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
+import ca.frc6390.athena.core.sim.RobotVisionSimProvider;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -36,6 +37,11 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 public class RobotVision implements RobotSendableSystem {
    private static final List<CameraProvider> CAMERA_PROVIDERS = ServiceLoader
            .load(CameraProvider.class)
+           .stream()
+           .map(ServiceLoader.Provider::get)
+           .toList();
+   private static final List<RobotVisionSimProvider> VISION_SIM_PROVIDERS = ServiceLoader
+           .load(RobotVisionSimProvider.class)
            .stream()
            .map(ServiceLoader.Provider::get)
            .toList();
@@ -93,12 +99,17 @@ public class RobotVision implements RobotSendableSystem {
    }
 
    public RobotVisionSim createSimulation(AprilTagFieldLayout layout) {
+      for (RobotVisionSimProvider provider : VISION_SIM_PROVIDERS) {
+         if (provider.supports(this)) {
+            return provider.create(this, layout);
+         }
+      }
       return new RobotVisionSim(this, layout);
    }
 
    public AprilTagFieldLayout deriveSimulationLayout() {
       try {
-         return AprilTagFieldLayout.loadField(AprilTagFields.k2025ReefscapeWelded);
+         return AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
       } catch (Exception e) {
          throw new RuntimeException("Failed to load default AprilTag layout", e);
       }

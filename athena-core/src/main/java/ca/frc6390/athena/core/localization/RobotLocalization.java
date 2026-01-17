@@ -92,6 +92,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private final RobotLocalizationConfig.PoseSpace poseSpace;
     private final Map<String, PoseConfig> poseConfigs = new HashMap<>();
     private final Map<String, PoseEstimatorState> poseStates = new HashMap<>();
+    private final Map<String, StructPublisher<Pose2d>> poseStructPublishers = new HashMap<>();
     private String primaryPoseName;
     private boolean slipActive = false;
     private double slipActiveUntilSeconds = Double.NEGATIVE_INFINITY;
@@ -133,8 +134,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static Field poseEstimatorQField;
     private static Field poseEstimator3dQField;
     private final RobotLocalizationFieldPublisher fieldPublisher;
-    private final StructPublisher<Pose2d> robotPosePublisher;
-    private final StructPublisher<Pose3d> robotPose3dPublisher;
 
     public RobotLocalization(
             PoseEstimatorFactory<T> estimatorFactory,
@@ -157,18 +156,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
         this.fieldPublisher = new RobotLocalizationFieldPublisher(() -> vision);
         this.cameraManager = new RobotVisionCameraManager(STD_EPSILON, fieldPublisher.getField());
-        NetworkTableInstance ntInstance = NetworkTableInstance.getDefault();
-        this.robotPosePublisher = ntInstance
-                .getStructTopic("Athena/Localization/RobotPose", Pose2d.struct)
-                .publish();
-        this.robotPosePublisher.set(new Pose2d());
         if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
-            this.robotPose3dPublisher = ntInstance
-                    .getStructTopic("Athena/Localization/RobotPose3d", Pose3d.struct)
-                    .publish();
-            this.robotPose3dPublisher.set(new Pose3d());
-        } else {
-            this.robotPose3dPublisher = null;
+            // No extra initialization required.
         }
 
         this.visionEnabled = config.isVisionEnabled();
@@ -547,11 +536,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             imu.setVirtualAxis("field", pose.getRotation());
             setPrimaryPose(state);
             resetVisionTracking(state);
-            publishRobotPose(state);
             persistRobotState(true);
-        } else {
-            fieldPublisher.getObject(config.name()).setPose(pose);
         }
+        publishPoseStruct(config.name(), pose);
     }
 
     public void resetPose(String name, Pose3d pose) {
@@ -579,11 +566,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             imu.setVirtualAxis("field", pose2d.getRotation());
             setPrimaryPose(state);
             resetVisionTracking(state);
-            publishRobotPose(state);
             persistRobotState(true);
-        } else {
-            fieldPublisher.getObject(config.name()).setPose(pose2d);
         }
+        publishPoseStruct(config.name(), pose2d);
     }
 
     public void resetPose(String name, double x, double y) {
@@ -850,7 +835,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         ensurePrimaryPose(config);
         if (!isPrimaryPose(config)) {
             Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
-            fieldPublisher.getObject(config.name()).setPose(pose);
+            publishPoseStruct(config.name(), pose);
         }
     }
 
@@ -1109,9 +1094,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         cameraManager.setLocalizationShuffleboardTab(tab);
-        tab.add("Estimator", fieldPublisher.getField()).withPosition( 0,0).withSize(4, 3);
-
-        // Field2d widget handles pose visualization; no extra struct publishers.
+        tab.add("Estimator Paths", fieldPublisher.getField()).withPosition(0, 0).withSize(4, 3);
 
         if (level == SendableLevel.DEBUG) {
             // Debug-specific struct publishers are already configured above.
@@ -1218,15 +1201,30 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private void publishPoseObjects() {
+        fieldPublisher.clearRobotPose();
         for (PoseConfig config : poseConfigs.values()) {
             PoseEstimatorState state = poseStates.get(config.name());
             if (state == null) {
                 continue;
             }
             Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
-            fieldPublisher.getObject(config.name()).setPose(pose);
+            publishPoseStruct(config.name(), pose);
         }
-        fieldPublisher.publishFieldOnce();
+    }
+
+    private void publishPoseStruct(String name, Pose2d pose) {
+        if (name == null || name.isBlank()) {
+            return;
+        }
+        StructPublisher<Pose2d> publisher = poseStructPublishers.get(name);
+        if (publisher == null) {
+            String topic = "Athena/Localization/Poses/" + name;
+            publisher = NetworkTableInstance.getDefault()
+                    .getStructTopic(topic, Pose2d.struct)
+                    .publish();
+            poseStructPublishers.put(name, publisher);
+        }
+        publisher.set(pose);
     }
 
     private void updatePoseFromConfig(PoseConfig config, PoseEstimatorState state) {
@@ -1375,28 +1373,18 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (isPrimary) {
             setPrimaryPose(state);
             fieldPublisher.updateActualPath(pose);
-            publishRobotPose(state);
+            publishPoseStruct(primaryPoseName, pose);
         } else {
             PoseConfig config = findConfigForState(state);
             if (config != null) {
-                fieldPublisher.getObject(config.name()).setPose(pose);
+                publishPoseStruct(config.name(), pose);
             }
         }
-        fieldPublisher.publishFieldOnce();
         if (isPrimary) {
             updateHealthMetrics();
             cameraManager.updateCameraVisualizations(vision, fieldPose);
             updateSlipState();
             persistRobotState(false);
-        }
-    }
-
-    private void publishRobotPose(PoseEstimatorState state) {
-        Pose2d pose2d = state.pose2d != null ? state.pose2d : new Pose2d();
-        robotPosePublisher.set(pose2d);
-        if (robotPose3dPublisher != null) {
-            Pose3d pose3d = state.pose3d != null ? state.pose3d : new Pose3d(pose2d);
-            robotPose3dPublisher.set(pose3d);
         }
     }
 

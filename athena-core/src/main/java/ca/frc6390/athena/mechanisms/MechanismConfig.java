@@ -60,6 +60,8 @@ public class MechanismConfig<T extends Mechanism> {
     public Map<Enum<?>, List<MechanismBinding<T, ?>>> stateHooks = new HashMap<>();
     /** Optional hooks that run every loop regardless of the active state. */
     public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
+    /** Optional hooks that run every periodic loop. */
+    public List<Consumer<T>> periodicHooks = new ArrayList<>();
     /** Optional boolean inputs exposed to state hooks. */
     public Map<String, BooleanSupplier> inputs = new HashMap<>();
     /** Optional double inputs exposed to state hooks. */
@@ -841,6 +843,15 @@ public class MechanismConfig<T extends Mechanism> {
             MechanismBinding<T, E> binding) {
         Objects.requireNonNull(binding, "binding");
         alwaysHooks.add(binding);
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs every periodic loop.
+     */
+    public MechanismConfig<T> addOnPeriodicHook(Consumer<T> hook) {
+        Objects.requireNonNull(hook, "hook");
+        periodicHooks.add(hook);
         return this;
     }
 
