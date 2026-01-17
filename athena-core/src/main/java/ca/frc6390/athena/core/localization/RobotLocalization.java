@@ -90,12 +90,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private double visionStdDevRotationLimit = Units.degreesToRadians(120.0);
     private double minVisionUpdateSeparationSeconds = 0.02;
     private final RobotLocalizationConfig.PoseSpace poseSpace;
-    private final Map<String, VirtualPose2d> virtualPoses2d = new HashMap<>();
-    private final Map<String, VirtualPose3d> virtualPoses3d = new HashMap<>();
     private final Map<String, PoseConfig> poseConfigs = new HashMap<>();
     private final Map<String, PoseEstimatorState> poseStates = new HashMap<>();
     private String primaryPoseName;
-    private long virtualPoseRevision = 0;
     private boolean slipActive = false;
     private double slipActiveUntilSeconds = Double.NEGATIVE_INFINITY;
     private double lastUpdateTimestamp = Double.NaN;
@@ -136,6 +133,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static Field poseEstimatorQField;
     private static Field poseEstimator3dQField;
     private final RobotLocalizationFieldPublisher fieldPublisher;
+    private final StructPublisher<Pose2d> robotPosePublisher;
+    private final StructPublisher<Pose3d> robotPose3dPublisher;
 
     public RobotLocalization(
             PoseEstimatorFactory<T> estimatorFactory,
@@ -158,6 +157,19 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
         this.fieldPublisher = new RobotLocalizationFieldPublisher(() -> vision);
         this.cameraManager = new RobotVisionCameraManager(STD_EPSILON, fieldPublisher.getField());
+        NetworkTableInstance ntInstance = NetworkTableInstance.getDefault();
+        this.robotPosePublisher = ntInstance
+                .getStructTopic("Athena/Localization/RobotPose", Pose2d.struct)
+                .publish();
+        this.robotPosePublisher.set(new Pose2d());
+        if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
+            this.robotPose3dPublisher = ntInstance
+                    .getStructTopic("Athena/Localization/RobotPose3d", Pose3d.struct)
+                    .publish();
+            this.robotPose3dPublisher.set(new Pose3d());
+        } else {
+            this.robotPose3dPublisher = null;
+        }
 
         this.visionEnabled = config.isVisionEnabled();
 
@@ -535,11 +547,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             imu.setVirtualAxis("field", pose.getRotation());
             setPrimaryPose(state);
             resetVisionTracking(state);
+            publishRobotPose(state);
             persistRobotState(true);
         } else {
             fieldPublisher.getObject(config.name()).setPose(pose);
         }
-        advanceVirtualPoseRevision();
     }
 
     public void resetPose(String name, Pose3d pose) {
@@ -567,11 +579,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             imu.setVirtualAxis("field", pose2d.getRotation());
             setPrimaryPose(state);
             resetVisionTracking(state);
+            publishRobotPose(state);
             persistRobotState(true);
         } else {
             fieldPublisher.getObject(config.name()).setPose(pose2d);
         }
-        advanceVirtualPoseRevision();
     }
 
     public void resetPose(String name, double x, double y) {
@@ -816,52 +828,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
     }
 
-    public void addVirtualPose(String name, Supplier<Pose2d> supplier) {
-        Objects.requireNonNull(name, "name");
-        Objects.requireNonNull(supplier, "supplier");
-        virtualPoses2d.put(name, new VirtualPose2d(supplier));
-    }
-
-    public void addVirtualPose3d(String name, Supplier<Pose3d> supplier) {
-        Objects.requireNonNull(name, "name");
-        Objects.requireNonNull(supplier, "supplier");
-        virtualPoses3d.put(name, new VirtualPose3d(supplier));
-    }
-
-    public Pose2d getVirtualPose(String name) {
-        VirtualPose2d virtualPose = virtualPoses2d.get(name);
-        return virtualPose != null ? virtualPose.get(virtualPoseRevision) : new Pose2d();
-    }
-
-    public Pose3d getVirtualPose3d(String name) {
-        VirtualPose3d virtualPose = virtualPoses3d.get(name);
-        return virtualPose != null ? virtualPose.get(virtualPoseRevision) : new Pose3d();
-    }
-
-    public void setVirtualPose(String name, Pose2d pose) {
-        VirtualPose2d virtualPose = virtualPoses2d.get(name);
-        if (virtualPose != null && pose != null) {
-            virtualPose.set(pose, virtualPoseRevision);
-        }
-    }
-
-    public void setVirtualPose3d(String name, Pose3d pose) {
-        VirtualPose3d virtualPose = virtualPoses3d.get(name);
-        if (virtualPose != null && pose != null) {
-            virtualPose.set(pose, virtualPoseRevision);
-        }
-    }
-
-    public void invalidateVirtualPoses() {
-        advanceVirtualPoseRevision();
-    }
-
-    private void advanceVirtualPoseRevision() {
-        virtualPoseRevision++;
-    }
-
     private PoseConfig defaultPoseConfig() {
         return PoseConfig.defaults("field");
+    }
+
+    public boolean addPoseConfig(PoseConfig config) {
+        Objects.requireNonNull(config, "config");
+        if (poseConfigs.containsKey(config.name())) {
+            return false;
+        }
+        registerPoseConfig(config);
+        return true;
     }
 
     public void registerPoseConfig(PoseConfig config) {
@@ -879,6 +856,44 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public Optional<PoseConfig> getPoseConfig(String name) {
         return Optional.ofNullable(poseConfigs.get(name));
+    }
+
+    public boolean hasPoseConfig(String name) {
+        return name != null && poseConfigs.containsKey(name);
+    }
+
+    public boolean removePoseConfigIfPresent(String name) {
+        if (!poseConfigs.containsKey(name)) {
+            return false;
+        }
+        removePoseConfig(name);
+        return true;
+    }
+
+    public boolean setPoseConfigPose(String name, Pose2d pose) {
+        if (name == null || pose == null) {
+            return false;
+        }
+        PoseConfig config = poseConfigs.get(name);
+        if (config == null) {
+            return false;
+        }
+        poseConfigs.put(name, config.withStartPose(pose));
+        resetPose(name, pose);
+        return true;
+    }
+
+    public boolean setPoseConfigPose(String name, Pose3d pose) {
+        if (name == null || pose == null) {
+            return false;
+        }
+        PoseConfig config = poseConfigs.get(name);
+        if (config == null) {
+            return false;
+        }
+        poseConfigs.put(name, config.withStartPose(pose));
+        resetPose(name, pose);
+        return true;
     }
 
     public void removePoseConfig(String name) {
@@ -911,10 +926,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         PoseEstimatorState state = ensurePoseState(config);
         updatePoseFromConfig(config, state);
-        VirtualPose2d virtualPose = virtualPoses2d.get(name);
-        if (virtualPose != null) {
-            return virtualPose.get(virtualPoseRevision);
-        }
         return state.pose2d != null ? state.pose2d : new Pose2d();
     }
 
@@ -925,10 +936,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         PoseEstimatorState state = ensurePoseState(config);
         updatePoseFromConfig(config, state);
-        VirtualPose3d virtualPose = virtualPoses3d.get(name);
-        if (virtualPose != null) {
-            return virtualPose.get(virtualPoseRevision);
-        }
         return state.pose3d != null ? state.pose3d : new Pose3d();
     }
  
@@ -1257,7 +1264,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
         if (updatedEstimator || appliedVision) {
             state.lastUpdateSeconds = now;
-            advanceVirtualPoseRevision();
         }
     }
 
@@ -1369,6 +1375,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (isPrimary) {
             setPrimaryPose(state);
             fieldPublisher.updateActualPath(pose);
+            publishRobotPose(state);
         } else {
             PoseConfig config = findConfigForState(state);
             if (config != null) {
@@ -1381,6 +1388,15 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             cameraManager.updateCameraVisualizations(vision, fieldPose);
             updateSlipState();
             persistRobotState(false);
+        }
+    }
+
+    private void publishRobotPose(PoseEstimatorState state) {
+        Pose2d pose2d = state.pose2d != null ? state.pose2d : new Pose2d();
+        robotPosePublisher.set(pose2d);
+        if (robotPose3dPublisher != null) {
+            Pose3d pose3d = state.pose3d != null ? state.pose3d : new Pose3d(pose2d);
+            robotPose3dPublisher.set(pose3d);
         }
     }
 
