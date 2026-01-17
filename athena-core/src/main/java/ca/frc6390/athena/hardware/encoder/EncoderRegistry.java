@@ -17,7 +17,12 @@ public final class EncoderRegistry {
     private static final EncoderRegistry INSTANCE = new EncoderRegistry();
 
     static {
-        ServiceLoader.load(Provider.class).forEach(p -> p.register(INSTANCE));
+        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+        loadProviders(contextLoader);
+        ClassLoader registryLoader = EncoderRegistry.class.getClassLoader();
+        if (registryLoader != contextLoader) {
+            loadProviders(registryLoader);
+        }
     }
 
     private final Map<String, EncoderType> encoders = new HashMap<>();
@@ -35,6 +40,13 @@ public final class EncoderRegistry {
 
     public EncoderType encoder(String key) {
         return Objects.requireNonNull(encoders.get(key), missing(key));
+    }
+
+    private static void loadProviders(ClassLoader loader) {
+        ServiceLoader<Provider> providers = loader == null
+                ? ServiceLoader.load(Provider.class)
+                : ServiceLoader.load(Provider.class, loader);
+        providers.forEach(p -> p.register(INSTANCE));
     }
 
     private static String missing(String key) {

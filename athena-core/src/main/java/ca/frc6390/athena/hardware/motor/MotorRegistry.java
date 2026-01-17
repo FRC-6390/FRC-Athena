@@ -18,7 +18,12 @@ public final class MotorRegistry {
     private static final MotorRegistry INSTANCE = new MotorRegistry();
 
     static {
-        ServiceLoader.load(Provider.class).forEach(p -> p.register(INSTANCE));
+        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+        loadProviders(contextLoader);
+        ClassLoader registryLoader = MotorRegistry.class.getClassLoader();
+        if (registryLoader != contextLoader) {
+            loadProviders(registryLoader);
+        }
     }
 
     private final Map<String, MotorControllerType> motors = new HashMap<>();
@@ -36,6 +41,13 @@ public final class MotorRegistry {
 
     public MotorControllerType motor(String key) {
         return Objects.requireNonNull(motors.get(key), missing(key));
+    }
+
+    private static void loadProviders(ClassLoader loader) {
+        ServiceLoader<Provider> providers = loader == null
+                ? ServiceLoader.load(Provider.class)
+                : ServiceLoader.load(Provider.class, loader);
+        providers.forEach(p -> p.register(INSTANCE));
     }
 
     private static String missing(String key) {

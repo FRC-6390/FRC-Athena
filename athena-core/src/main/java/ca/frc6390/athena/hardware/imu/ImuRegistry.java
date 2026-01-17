@@ -17,7 +17,12 @@ public final class ImuRegistry {
     private static final ImuRegistry INSTANCE = new ImuRegistry();
 
     static {
-        ServiceLoader.load(Provider.class).forEach(p -> p.register(INSTANCE));
+        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+        loadProviders(contextLoader);
+        ClassLoader registryLoader = ImuRegistry.class.getClassLoader();
+        if (registryLoader != contextLoader) {
+            loadProviders(registryLoader);
+        }
     }
 
     private final Map<String, ImuType> imus = new HashMap<>();
@@ -35,6 +40,13 @@ public final class ImuRegistry {
 
     public ImuType imu(String key) {
         return Objects.requireNonNull(imus.get(key), missing(key));
+    }
+
+    private static void loadProviders(ClassLoader loader) {
+        ServiceLoader<Provider> providers = loader == null
+                ? ServiceLoader.load(Provider.class)
+                : ServiceLoader.load(Provider.class, loader);
+        providers.forEach(p -> p.register(INSTANCE));
     }
 
     private static String missing(String key) {
