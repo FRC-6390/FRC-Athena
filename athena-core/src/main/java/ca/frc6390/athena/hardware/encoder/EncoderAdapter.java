@@ -50,7 +50,7 @@ public class EncoderAdapter implements Encoder {
     public void setPosition(double position) {
         double safeConversion = conversion != 0.0 ? conversion : 1.0;
         double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
-        double rawPosition = ((position - conversionOffset) / safeConversion) / safeGearRatio - offset;
+        double rawPosition = ((position - conversionOffset) / safeConversion) / safeGearRatio + offset;
         if (!Double.isFinite(rawPosition)) {
             rawPosition = 0.0;
         }
@@ -124,7 +124,7 @@ public class EncoderAdapter implements Encoder {
 
     @Override
     public double getRotations() {
-        return (getRawPosition() + offset) * gearRatio;
+        return (getRawPosition() - offset) * gearRatio;
     }
 
     @Override
@@ -134,7 +134,7 @@ public class EncoderAdapter implements Encoder {
 
     @Override
     public double getAbsoluteRotations() {
-        return (getRawAbsolutePosition() + offset) * gearRatio;
+        return (getRawAbsolutePosition() - offset) * gearRatio;
     }
 
     @Override

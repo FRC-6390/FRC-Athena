@@ -97,7 +97,7 @@ public record LimeLightConfig(
     }
 
     /**
-     * Returns a copy of this configuration with a filtered tag list used for localization.
+     * Returns a copy of this configuration with a list of tags excluded from localization.
      */
     public LimeLightConfig setLocalizationTagFilter(int... filteredTags){
         return new LimeLightConfig(

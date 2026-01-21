@@ -7,6 +7,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
@@ -416,6 +417,17 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         @Override
         public SP setpoint() {
             return stateMachine.getGoalStateSetpoint();
+        }
+
+        @Override
+        public RobotCore<?> robotCore() {
+            for (Mechanism mech : getMechanisms().all()) {
+                RobotCore<?> core = mech.getRobotCore();
+                if (core != null) {
+                    return core;
+                }
+            }
+            return null;
         }
 
         @Override

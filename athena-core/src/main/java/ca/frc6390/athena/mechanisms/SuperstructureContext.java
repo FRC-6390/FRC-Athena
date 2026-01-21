@@ -4,6 +4,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 
 /**
@@ -14,6 +15,11 @@ import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 public interface SuperstructureContext<SP> {
 
     SP setpoint();
+
+    /**
+     * Returns the robot core associated with the superstructure's child mechanisms.
+     */
+    RobotCore<?> robotCore();
 
     <E extends Enum<E> & SetpointProvider<Double>> StatefulLike<E> mechanism(Function<SP, E> mapper);
 

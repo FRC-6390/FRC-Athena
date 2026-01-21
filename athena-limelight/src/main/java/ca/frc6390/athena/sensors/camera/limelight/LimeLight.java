@@ -1,10 +1,12 @@
 package ca.frc6390.athena.sensors.camera.limelight;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
+import java.util.Set;
 
 import ca.frc6390.athena.sensors.camera.VisionCamera;
 import ca.frc6390.athena.sensors.camera.VisionCamera.PipelineControl;
@@ -16,6 +18,7 @@ import ca.frc6390.athena.sensors.camera.FiducialSource;
 import ca.frc6390.athena.sensors.camera.LimelightCamera;
 import ca.frc6390.athena.sensors.camera.LocalizationSource;
 import ca.frc6390.athena.sensors.camera.TargetingSource;
+import edu.wpi.first.apriltag.AprilTag;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -344,10 +347,42 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         cy1 = limelightTable.getEntry("cy1");
         rawfiducials =  limelightTable.getEntry("rawfiducials");
         useForLocalization = config.useForLocalization();
-        setFiducialIdFilters(Arrays.stream(config.filteredTags()).mapToDouble(i -> i).toArray());
+        applyLocalizationTagFilters();
         applyCameraTransformToNetworkTables(config.cameraRobotSpace());
         refreshLocalizationSnapshot();
         localizationCamera = createVisionCamera();
+    }
+
+    private void applyLocalizationTagFilters() {
+        int[] filteredTags = config.filteredTags();
+        if (filteredTags == null || filteredTags.length == 0) {
+            setFiducialIdFilters(new double[] {});
+            return;
+        }
+
+        if (fieldLayout == null) {
+            setFiducialIdFilters(Arrays.stream(filteredTags).mapToDouble(i -> i).toArray());
+            return;
+        }
+
+        List<AprilTag> tags = fieldLayout.getTags();
+        if (tags == null || tags.isEmpty()) {
+            setFiducialIdFilters(Arrays.stream(filteredTags).mapToDouble(i -> i).toArray());
+            return;
+        }
+
+        Set<Integer> filteredSet = new HashSet<>();
+        for (int tagId : filteredTags) {
+            filteredSet.add(tagId);
+        }
+
+        double[] allowedTags = tags.stream()
+                .mapToInt(tag -> tag.ID)
+                .filter(id -> !filteredSet.contains(id))
+                .distinct()
+                .mapToDouble(id -> id)
+                .toArray();
+        setFiducialIdFilters(allowedTags);
     }
 
     private VisionCamera createVisionCamera() {
