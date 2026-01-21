@@ -14,6 +14,7 @@ public record PoseConfig(
         PoseConstraints constraints,
         RobotLocalizationConfig.BackendConfig backendOverride,
         boolean active,
+        boolean publishToShuffleboard,
         Pose2d startPose2d,
         Pose3d startPose3d) {
 
@@ -45,6 +46,7 @@ public record PoseConfig(
                 PoseConstraints.defaults(),
                 null,
                 true,
+                false,
                 startPose,
                 null);
     }
@@ -58,6 +60,7 @@ public record PoseConfig(
                 PoseConstraints.defaults(),
                 null,
                 true,
+                false,
                 null,
                 startPose);
     }
@@ -75,6 +78,7 @@ public record PoseConfig(
                 PoseConstraints.defaults(),
                 null,
                 true,
+                false,
                 startPose,
                 null);
     }
@@ -88,6 +92,7 @@ public record PoseConfig(
                 PoseConstraints.defaults(),
                 null,
                 true,
+                false,
                 null,
                 startPose);
     }
@@ -105,6 +110,7 @@ public record PoseConfig(
                 PoseConstraints.defaults(),
                 null,
                 true,
+                false,
                 startPose,
                 null);
     }
@@ -118,6 +124,7 @@ public record PoseConfig(
                 PoseConstraints.defaults(),
                 null,
                 true,
+                false,
                 null,
                 startPose);
     }
@@ -135,6 +142,7 @@ public record PoseConfig(
                 PoseConstraints.defaults(),
                 null,
                 true,
+                false,
                 startPose,
                 null);
     }
@@ -148,6 +156,7 @@ public record PoseConfig(
                 PoseConstraints.defaults(),
                 null,
                 true,
+                false,
                 null,
                 startPose);
     }
@@ -161,6 +170,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
+                publishToShuffleboard,
                 startPose2d,
                 startPose3d);
     }
@@ -174,6 +184,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
+                publishToShuffleboard,
                 startPose2d,
                 startPose3d);
     }
@@ -187,6 +198,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
+                publishToShuffleboard,
                 startPose2d,
                 startPose3d);
     }
@@ -200,6 +212,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
+                publishToShuffleboard,
                 startPose2d,
                 startPose3d);
     }
@@ -213,6 +226,7 @@ public record PoseConfig(
                 constraints,
                 backend,
                 active,
+                publishToShuffleboard,
                 startPose2d,
                 startPose3d);
     }
@@ -226,6 +240,21 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
+                publishToShuffleboard,
+                startPose2d,
+                startPose3d);
+    }
+
+    public PoseConfig withShuffleboardPublishing(boolean publishToShuffleboard) {
+        return new PoseConfig(
+                name,
+                frame,
+                continuousInputs,
+                onDemandInputs,
+                constraints,
+                backendOverride,
+                active,
+                publishToShuffleboard,
                 startPose2d,
                 startPose3d);
     }
@@ -239,6 +268,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
+                publishToShuffleboard,
                 startPose,
                 null);
     }
@@ -252,6 +282,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
+                publishToShuffleboard,
                 null,
                 startPose);
     }

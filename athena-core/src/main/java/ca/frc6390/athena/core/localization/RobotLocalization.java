@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 import ca.frc6390.athena.core.RobotAuto;
 import ca.frc6390.athena.core.RobotSendableSystem;
@@ -538,7 +539,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             resetVisionTracking(state);
             persistRobotState(true);
         }
-        publishPoseStruct(config.name(), pose);
+        publishPoseStruct(config, pose);
     }
 
     public void resetPose(String name, Pose3d pose) {
@@ -568,7 +569,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             resetVisionTracking(state);
             persistRobotState(true);
         }
-        publishPoseStruct(config.name(), pose2d);
+        publishPoseStruct(config, pose2d);
     }
 
     public void resetPose(String name, double x, double y) {
@@ -835,7 +836,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         ensurePrimaryPose(config);
         if (!isPrimaryPose(config)) {
             Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
-            publishPoseStruct(config.name(), pose);
+            publishPoseStruct(config, pose);
         }
     }
 
@@ -881,6 +882,34 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return true;
     }
 
+    public boolean updatePoseConfig(String name, UnaryOperator<PoseConfig> updater) {
+        if (name == null || updater == null) {
+            return false;
+        }
+        PoseConfig existing = poseConfigs.get(name);
+        if (existing == null) {
+            return false;
+        }
+        PoseConfig updated = updater.apply(existing);
+        if (updated == null || !Objects.equals(name, updated.name())) {
+            return false;
+        }
+        applyPoseConfigUpdate(existing, updated);
+        return true;
+    }
+
+    public boolean updatePoseConfig(String name, PoseConfig updated) {
+        if (name == null || updated == null || !Objects.equals(name, updated.name())) {
+            return false;
+        }
+        PoseConfig existing = poseConfigs.get(name);
+        if (existing == null) {
+            return false;
+        }
+        applyPoseConfigUpdate(existing, updated);
+        return true;
+    }
+
     public void removePoseConfig(String name) {
         poseConfigs.remove(name);
         poseStates.remove(name);
@@ -893,15 +922,43 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     public void setPoseActive(String name, boolean active) {
-        PoseEstimatorState state = poseStates.get(name);
-        if (state != null) {
-            state.active = active;
+        PoseConfig config = poseConfigs.get(name);
+        if (config == null) {
+            return;
         }
+        applyPoseConfigUpdate(config, config.setActive(active));
+    }
+
+    public boolean setPoseConfigShuffleboardPublishing(String name, boolean publishToShuffleboard) {
+        return updatePoseConfig(name, config -> config.withShuffleboardPublishing(publishToShuffleboard));
     }
 
     public boolean isPoseActive(String name) {
         PoseEstimatorState state = poseStates.get(name);
         return state != null && state.active;
+    }
+
+    private void applyPoseConfigUpdate(PoseConfig existing, PoseConfig updated) {
+        if (existing == null || updated == null) {
+            return;
+        }
+        poseConfigs.put(updated.name(), updated);
+        PoseEstimatorState state = poseStates.get(updated.name());
+        if (state != null) {
+            state.active = updated.active();
+        }
+        if (existing.publishToShuffleboard() && !updated.publishToShuffleboard()) {
+            StructPublisher<Pose2d> publisher = poseStructPublishers.remove(updated.name());
+            if (publisher != null) {
+                publisher.close();
+            }
+        }
+        ensurePrimaryPose(updated);
+        if (updated.startPose2d() != null && !Objects.equals(existing.startPose2d(), updated.startPose2d())) {
+            resetPose(updated.name(), updated.startPose2d());
+        } else if (updated.startPose3d() != null && !Objects.equals(existing.startPose3d(), updated.startPose3d())) {
+            resetPose(updated.name(), updated.startPose3d());
+        }
     }
 
     public Pose2d getPose2d(String name) {
@@ -1208,11 +1265,15 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 continue;
             }
             Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
-            publishPoseStruct(config.name(), pose);
+            publishPoseStruct(config, pose);
         }
     }
 
-    private void publishPoseStruct(String name, Pose2d pose) {
+    private void publishPoseStruct(PoseConfig config, Pose2d pose) {
+        if (config == null || !config.publishToShuffleboard()) {
+            return;
+        }
+        String name = config.name();
         if (name == null || name.isBlank()) {
             return;
         }
@@ -1373,11 +1434,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (isPrimary) {
             setPrimaryPose(state);
             fieldPublisher.updateActualPath(pose);
-            publishPoseStruct(primaryPoseName, pose);
+            PoseConfig config = primaryPoseName != null ? poseConfigs.get(primaryPoseName) : null;
+            publishPoseStruct(config, pose);
         } else {
             PoseConfig config = findConfigForState(state);
             if (config != null) {
-                publishPoseStruct(config.name(), pose);
+                publishPoseStruct(config, pose);
             }
         }
         if (isPrimary) {
