@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import ca.frc6390.athena.hardware.encoder.EncoderRegistry;
 import ca.frc6390.athena.hardware.encoder.EncoderType;
 import ca.frc6390.athena.hardware.motor.AthenaMotor;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
@@ -409,13 +410,63 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> setEncoderFromMotor(int id){
-        return setEncoder(
-                data.motors().stream()
-                        .filter((motors) -> motors.id == Math.abs(id))
-                        .findFirst()
-                        .get()
-                        .encoderConfig
-                        .setInverted(id < 0));
+        MotorControllerConfig motor = data.motors().stream()
+                .filter((motors) -> motors.id == Math.abs(id))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "No motor controller configured with ID " + Math.abs(id)));
+        EncoderConfig encoderCfg = motor.encoderConfig;
+        if (encoderCfg == null) {
+            encoderCfg = new EncoderConfig()
+                    .setType(resolveIntegratedEncoderType(motor.type))
+                    .setId(motor.id)
+                    .setCanbus(motor.canbus);
+            motor.encoderConfig = encoderCfg;
+        } else if (encoderCfg.type == null) {
+            EncoderConfig resolved = new EncoderConfig()
+                    .setType(resolveIntegratedEncoderType(motor.type))
+                    .setId(encoderCfg.id != 0 ? encoderCfg.id : motor.id)
+                    .setCanbus(encoderCfg.canbus != null ? encoderCfg.canbus : motor.canbus)
+                    .setGearRatio(encoderCfg.gearRatio)
+                    .setConversion(encoderCfg.conversion)
+                    .setConversionOffset(encoderCfg.conversionOffset)
+                    .setOffset(encoderCfg.offset)
+                    .setInverted(encoderCfg.inverted);
+            encoderCfg = resolved;
+            motor.encoderConfig = encoderCfg;
+        }
+        encoderCfg.setInverted(id < 0);
+        return setEncoder(encoderCfg);
+    }
+
+    private static EncoderType resolveIntegratedEncoderType(MotorControllerType type) {
+        if (type == null) {
+            throw new IllegalStateException("Motor controller config is missing a type");
+        }
+        String key = type.getKey();
+        if (key == null || key.isBlank()) {
+            throw new IllegalStateException("Motor controller type key is missing");
+        }
+        String encoderKey = integratedEncoderKey(key);
+        if (encoderKey == null) {
+            throw new IllegalStateException(
+                    "Motor type '" + key + "' does not expose an integrated encoder. "
+                            + "Configure an encoder explicitly with setEncoder(...).");
+        }
+        return EncoderRegistry.get().encoder(encoderKey);
+    }
+
+    private static String integratedEncoderKey(String motorKey) {
+        if (motorKey.startsWith("rev:sparkmax")) {
+            return "rev:sparkmax";
+        }
+        if (motorKey.startsWith("rev:sparkflex")) {
+            return "rev:sparkflex";
+        }
+        if (motorKey.startsWith("ctre:talonfx")) {
+            return "ctre:talonfx-integrated";
+        }
+        return null;
     }
 
     /**

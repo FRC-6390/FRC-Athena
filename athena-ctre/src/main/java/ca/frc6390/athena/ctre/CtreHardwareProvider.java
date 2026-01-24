@@ -19,6 +19,7 @@ public class CtreHardwareProvider implements MotorRegistry.Provider, EncoderRegi
     @Override
     public void register(EncoderRegistry registry) {
         registry.add(CtreEncoderType.CANCODER);
+        registry.add(CtreEncoderType.TALON_FX);
     }
 
     @Override
