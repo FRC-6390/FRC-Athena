@@ -7,6 +7,7 @@ import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
@@ -93,24 +94,69 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
+        MotorControllerGroup motors =
+                MotorControllerGroup.fromConfigs(config.data().motors().toArray(MotorControllerConfig[]::new));
+        Encoder encoder = resolveEncoder(config.data().encoder(), motors);
         this(
-            MotorControllerGroup.fromConfigs(config.data().motors().toArray(MotorControllerConfig[]::new)),
-            config.data().encoder() != null ? HardwareFactories.encoder(config.data().encoder()) : null,
-            config.data().pidController(),
-            config.data().profiledPIDController(),
-            config.data().useAbsolute(),
-            config.data().useVoltage(),
-            config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new),
-            config.data().useSetpointAsOutput(),
-            config.data().pidPeriod(),
-            config.simulationConfig,
-            config.visualizationConfig,
-            config.sensorSimulationConfig
+                motors,
+                encoder,
+                config.data().pidController(),
+                config.data().profiledPIDController(),
+                config.data().useAbsolute(),
+                config.data().useVoltage(),
+                config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new),
+                config.data().useSetpointAsOutput(),
+                config.data().pidPeriod(),
+                config.simulationConfig,
+                config.visualizationConfig,
+                config.sensorSimulationConfig
         );
         MechanismConfigRecord cfg = config.data();
         setBounds(cfg.minBound(), cfg.maxBound());
         setMotionLimits(cfg.motionLimits());
         this.periodicHooks.addAll(config.periodicHooks);
+    }
+
+    private static Encoder resolveEncoder(EncoderConfig config, MotorControllerGroup motors) {
+        if (config == null) {
+            return null;
+        }
+        Encoder integrated = resolveIntegratedEncoder(config, motors);
+        return integrated != null ? integrated : HardwareFactories.encoder(config);
+    }
+
+    private static Encoder resolveIntegratedEncoder(EncoderConfig config, MotorControllerGroup motors) {
+        if (motors == null || config.type == null) {
+            return null;
+        }
+        String key = config.type.getKey();
+        if (!isIntegratedEncoderKey(key)) {
+            return null;
+        }
+        int encoderId = config.id;
+        MotorController matchingMotor = null;
+        for (MotorController motor : motors.getControllers()) {
+            if (motor.getId() == encoderId) {
+                matchingMotor = motor;
+                break;
+            }
+        }
+        if (matchingMotor == null) {
+            throw new IllegalStateException(
+                    "Integrated encoder requested for motor ID " + encoderId + ", but no matching motor was configured.");
+        }
+        Encoder motorEncoder = matchingMotor.getEncoder();
+        if (motorEncoder == null) {
+            throw new IllegalStateException(
+                    "Motor controller '" + matchingMotor.getName() + "' has no integrated encoder.");
+        }
+        return motorEncoder;
+    }
+
+    private static boolean isIntegratedEncoderKey(String key) {
+        return "ctre:talonfx-integrated".equals(key)
+                || "rev:sparkmax".equals(key)
+                || "rev:sparkflex".equals(key);
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
