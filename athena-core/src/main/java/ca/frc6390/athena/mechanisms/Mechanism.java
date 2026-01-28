@@ -26,6 +26,7 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.units.measure.Voltage;
+import java.util.function.DoubleSupplier;
 import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
@@ -85,6 +86,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean sysIdActive = false;
     private boolean sysIdPreviousOverride = false;
     private final List<Consumer<?>> periodicHooks;
+    private  boolean shouldCustomEncoder = false;
+    private  DoubleSupplier customEncoderPos;
+    private boolean shouldSetpointOverride = false;
+    private double setPointOverride = 0;
 
     private enum RobotMode {
         TELE,
@@ -115,6 +120,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         setBounds(cfg.minBound(), cfg.maxBound());
         setMotionLimits(cfg.motionLimits());
         this.periodicHooks.addAll(config.periodicHooks);
+        this.shouldCustomEncoder = config.shouldCustomEncoder;
+        this.customEncoderPos = config.customEncoderPos;
+
     }
 
     private static Encoder resolveEncoder(EncoderConfig config, MotorControllerGroup motors) {
@@ -418,8 +426,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      * Measurement used by PID loops. Defaults to position; mechanisms may override.
      */
     protected double getPidMeasurement() {
-        return getPosition();
+        
+        return shouldCustomEncoder ? customEncoderPos.getAsDouble() : getPosition();
+
     }
+
 
 
     public boolean isOverride() {
@@ -503,13 +514,24 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.output = 0;
     }
 
+    public void setSetpointOverride(boolean should)
+    {
+        shouldSetpointOverride = should;
+    }
+
+    public void setPointOverride(double setpoint)
+    {
+        setPointOverride = setpoint;
+    }
+
     public double calculatePID(){
         double output = 0;
         double encoderPos = getPidMeasurement();
         applyMotionLimits();
 
         if (pidController != null){
-            output += pidController.calculate(encoderPos, getSetpoint() + getNudge());
+            double setpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
+            output += pidController.calculate(encoderPos, setpoint + getNudge());
         }
 
         if(profiledPIDController != null){
@@ -589,7 +611,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         this.output = output;
-        this.prevSetpoint = getSetpoint();
+
+        this.prevSetpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
 
         if(emergencyStopped){
             motors.stopMotors();

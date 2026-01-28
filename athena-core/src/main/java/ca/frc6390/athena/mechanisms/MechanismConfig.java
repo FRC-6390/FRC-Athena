@@ -85,6 +85,9 @@ public class MechanismConfig<T extends Mechanism> {
     public Supplier<TurretMechanism.FieldHeadingVisualization> turretHeadingVisualization = null;
     /** Optional sensor simulation configuration used to generate virtual readings. */
     public MechanismSensorSimulationConfig sensorSimulationConfig = null;
+    public boolean shouldCustomEncoder = false;
+    public DoubleSupplier customEncoderPos;
+
 
     public MechanismConfigRecord data() {
         return data;
@@ -354,6 +357,18 @@ public class MechanismConfig<T extends Mechanism> {
             addMotor(new MotorControllerConfig(type, ids[i]));
          }
          return this;
+    }
+
+    public MechanismConfig<T> useCustomEncoder(boolean b)
+    {
+        shouldCustomEncoder = b;
+        return this;
+    }
+
+    public MechanismConfig<T> setCustomEncoder(DoubleSupplier d)
+    {
+        customEncoderPos = d;
+        return this;
     }
 
     /**
