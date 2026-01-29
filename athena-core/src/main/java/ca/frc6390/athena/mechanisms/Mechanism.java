@@ -99,23 +99,53 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
-        MotorControllerGroup motors =
+        this.motors =
                 MotorControllerGroup.fromConfigs(config.data().motors().toArray(MotorControllerConfig[]::new));
-        Encoder encoder = resolveEncoder(config.data().encoder(), motors);
-        this(
-                motors,
-                encoder,
-                config.data().pidController(),
-                config.data().profiledPIDController(),
-                config.data().useAbsolute(),
-                config.data().useVoltage(),
-                config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new),
-                config.data().useSetpointAsOutput(),
-                config.data().pidPeriod(),
-                config.simulationConfig,
-                config.visualizationConfig,
-                config.sensorSimulationConfig
-        );
+        this.encoder = resolveEncoder(config.data().encoder(), this.motors);
+        this.pidController = config.data().pidController();
+        this.profiledPIDController = config.data().profiledPIDController();
+        this.useAbsolute = config.data().useAbsolute();
+        this.useVoltage = config.data().useVoltage();
+        this.override = false;
+        this.limitSwitches =
+                config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new);
+        this.setpointIsOutput = config.data().useSetpointAsOutput();
+        this.pidPeriod = config.data().pidPeriod();
+        this.motionLimits = new MotionLimits();
+
+        if(profiledPIDController != null){
+            profiledPIDController.reset(getPosition(), getVelocity());
+        }
+        this.baseProfiledConstraints =
+                profiledPIDController != null ? profiledPIDController.getConstraints() : null;
+
+        pidEnabled = pidController != null || profiledPIDController != null;
+
+        MechanismSimulationModel model = null;
+        double updatePeriod = 0.02;
+        if (config.simulationConfig != null && RobotBase.isSimulation()) {
+            model = config.simulationConfig.createSimulation(this);
+            updatePeriod = config.simulationConfig.updatePeriodSeconds();
+        }
+        this.simulationModel = model;
+        this.simulationUpdatePeriodSeconds = updatePeriod;
+        if (simulationModel != null) {
+            simulationModel.reset();
+            lastSimulationTimestampSeconds = Timer.getFPGATimestamp();
+        }
+        MechanismVisualizationConfig resolvedVisualizationConfig =
+                config.visualizationConfig != null ? config.visualizationConfig : MechanismVisualizationDefaults.forMechanism(this);
+        this.visualization = resolvedVisualizationConfig != null ? new MechanismVisualization(resolvedVisualizationConfig) : null;
+        if (RobotBase.isSimulation()) {
+            if (config.sensorSimulationConfig != null) {
+                this.sensorSimulation = MechanismSensorSimulation.fromConfig(this, config.sensorSimulationConfig);
+            } else {
+                this.sensorSimulation = MechanismSensorSimulation.forLimitSwitches(this);
+            }
+        } else {
+            this.sensorSimulation = MechanismSensorSimulation.empty();
+        }
+        this.periodicHooks = new ArrayList<>();
         MechanismConfigRecord cfg = config.data();
         setBounds(cfg.minBound(), cfg.maxBound());
         setMotionLimits(cfg.motionLimits());
