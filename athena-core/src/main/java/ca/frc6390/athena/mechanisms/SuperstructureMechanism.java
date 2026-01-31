@@ -70,6 +70,9 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private final Map<String, Supplier<?>> objectInputs;
     private final Map<S, List<SuperstructureConfig.Binding<SP>>> bindings;
     private final List<SuperstructureConfig.Binding<SP>> alwaysBindings;
+    private final List<SuperstructureConfig.Binding<SP>> periodicBindings;
+    private final Map<S, List<SuperstructureConfig.Binding<SP>>> exitBindings;
+    private final List<SuperstructureConfig.Binding<SP>> exitAlwaysBindings;
     private final SuperstructureContextImpl context;
     private S prevState;
 
@@ -82,7 +85,10 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                             Map<String, DoubleSupplier> doubleInputs,
                             Map<String, Supplier<?>> objectInputs,
                             Map<S, List<SuperstructureConfig.Binding<SP>>> bindings,
-                            List<SuperstructureConfig.Binding<SP>> alwaysBindings) {
+                            List<SuperstructureConfig.Binding<SP>> alwaysBindings,
+                            List<SuperstructureConfig.Binding<SP>> periodicBindings,
+                            Map<S, List<SuperstructureConfig.Binding<SP>>> exitBindings,
+                            List<SuperstructureConfig.Binding<SP>> exitAlwaysBindings) {
         this.children = children;
         this.constraints = constraints;
         this.attachments = attachments;
@@ -91,6 +97,9 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         this.objectInputs = objectInputs;
         this.bindings = bindings;
         this.alwaysBindings = alwaysBindings;
+        this.periodicBindings = periodicBindings;
+        this.exitBindings = exitBindings;
+        this.exitAlwaysBindings = exitAlwaysBindings;
         this.stateMachine = new StateMachine<>(initialState, this::childrenAtGoals);
         this.stateMachine.setAtStateDelay(stateMachineDelaySeconds);
         this.context = new SuperstructureContextImpl();
@@ -146,14 +155,22 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
     @Override
     public void periodic() {
+        applyPeriodicBindings();
         stateMachine.update();
         applyAttachments();
         S current = stateMachine.getGoalState();
         if (!Objects.equals(current, prevState)) {
+            applyExitBindings(prevState);
             applySetpoints(stateMachine.getGoalStateSetpoint());
             prevState = current;
         }
         applyBindings(current);
+    }
+
+    private void applyPeriodicBindings() {
+        for (SuperstructureConfig.Binding<SP> binding : periodicBindings) {
+            binding.apply(context);
+        }
     }
 
     private void applyAttachments() {
@@ -173,6 +190,23 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         for (SuperstructureConfig.Binding<SP> binding : stateBindings) {
             binding.apply(context);
         }
+    }
+
+    private void applyExitBindings(S state) {
+        if (state == null) {
+            return;
+        }
+        context.setOverrideSetpoint(state.getSetpoint());
+        for (SuperstructureConfig.Binding<SP> binding : exitAlwaysBindings) {
+            binding.apply(context);
+        }
+        List<SuperstructureConfig.Binding<SP>> stateBindings = exitBindings.get(state);
+        if (stateBindings != null) {
+            for (SuperstructureConfig.Binding<SP> binding : stateBindings) {
+                binding.apply(context);
+            }
+        }
+        context.clearOverrideSetpoint();
     }
 
     @SuppressWarnings("unchecked")
@@ -414,9 +448,20 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     }
 
     private final class SuperstructureContextImpl implements SuperstructureContext<SP> {
+        private SP overrideSetpoint;
+
+        private void setOverrideSetpoint(SP setpoint) {
+            this.overrideSetpoint = setpoint;
+        }
+
+        private void clearOverrideSetpoint() {
+            this.overrideSetpoint = null;
+        }
+
         @Override
         public SP setpoint() {
-            return stateMachine.getGoalStateSetpoint();
+            SP override = overrideSetpoint;
+            return override != null ? override : stateMachine.getGoalStateSetpoint();
         }
 
         @Override

@@ -619,6 +619,13 @@ public class VisionCamera {
         return cameraRollSupplier.getAsDouble();
     }
 
+    /**
+     * Camera yaw offset in degrees relative to the robot frame.
+     */
+    public double getCameraYawDegrees() {
+        return cameraYawRelativeToRobot.getDegrees();
+    }
+
     private double getMeasurementDistance() {
         double distance = targetDistanceSupplier.getAsDouble();
         if (!Double.isNaN(distance) && Double.isFinite(distance)) {

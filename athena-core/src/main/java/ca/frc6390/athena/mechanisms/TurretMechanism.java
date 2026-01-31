@@ -338,7 +338,8 @@ public class TurretMechanism extends SimpleMotorMechanism {
         public StatefulTurretMechanism(MechanismConfig<StatefulTurretMechanism<E>> config, SimpleMotorFeedforward feedforward, E initialState) {
             super(config, feedforward);
             stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                    config.stateActions, config.stateHooks, config.alwaysHooks, config.inputs, config.doubleInputs, config.objectInputs);
+                    config.stateActions, config.stateHooks, config.exitStateHooks, config.alwaysHooks, config.exitAlwaysHooks,
+                    config.inputs, config.doubleInputs, config.objectInputs);
         }
 
         @Override

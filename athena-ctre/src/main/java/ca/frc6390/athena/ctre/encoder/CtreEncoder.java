@@ -2,12 +2,12 @@ package ca.frc6390.athena.ctre.encoder;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.configs.CANcoderConfiguration;
-import com.ctre.phoenix6.signals.AbsoluteSensorRangeValue;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 
@@ -45,14 +45,8 @@ public class CtreEncoder implements Encoder {
         if (!hasDiscontinuityConfig) {
             CANcoderConfiguration current = new CANcoderConfiguration();
             cancoder.getConfigurator().refresh(current);
-            AbsoluteSensorRangeValue rangeValue = current.MagnetSensor.AbsoluteSensorRange;
-            if (rangeValue == AbsoluteSensorRangeValue.Signed_PlusMinusHalf) {
-                config.discontinuityRange = 1.0;
-                config.discontinuityPoint = 0.0;
-            } else if (rangeValue == AbsoluteSensorRangeValue.Unsigned_0To1) {
-                config.discontinuityRange = 1.0;
-                config.discontinuityPoint = 0.5;
-            }
+            config.discontinuityRange = 1.0;
+            config.discontinuityPoint = current.MagnetSensor.AbsoluteSensorDiscontinuityPoint;
             return;
         }
 
@@ -74,8 +68,8 @@ public class CtreEncoder implements Encoder {
                 return;
             }
             CANcoderConfiguration cfg = new CANcoderConfiguration();
-            cfg.MagnetSensor.AbsoluteSensorRange = AbsoluteSensorRangeValue.Signed_PlusMinusHalf;
-            cfg.MagnetSensor.MagnetOffset = 0.5 - config.discontinuityPoint;
+            cfg.MagnetSensor.AbsoluteSensorDiscontinuityPoint =
+                    MathUtil.inputModulus(config.discontinuityPoint, 0.0, 1.0);
             cancoder.getConfigurator().apply(cfg);
         }
     }

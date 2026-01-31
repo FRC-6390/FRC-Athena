@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanisms;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
@@ -18,7 +19,8 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
     public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
         super(config);
         stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                config.stateActions, config.stateHooks, config.alwaysHooks, config.inputs, config.doubleInputs, config.objectInputs);
+                config.stateActions, config.stateHooks, config.exitStateHooks, config.alwaysHooks, config.exitAlwaysHooks,
+                config.inputs, config.doubleInputs, config.objectInputs);
     }
 
     @Override
@@ -94,18 +96,23 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         private final StateMachine<Double, E> stateMachine;
         private final Map<Enum<?>, Function<T, Boolean>> stateActions;
         private final Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> stateHooks;
+        private final Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> exitStateHooks;
         private final List<MechanismConfig.MechanismBinding<T, ?>> alwaysHooks;
+        private final List<MechanismConfig.MechanismBinding<T, ?>> exitAlwaysHooks;
         private final Map<String, BooleanSupplier> inputs;
         private final Map<String, DoubleSupplier> doubleInputs;
         private final Map<String, Supplier<?>> objectInputs;
         private final MechanismContextImpl context = new MechanismContextImpl();
         private DoubleSupplier setpointOverride;
         private BooleanSupplier outputSuppressor;
+        private E previousState;
 
         public StatefulMechanismCore(E initialState, Supplier<Boolean> atSetpointSupplier, double delay,
                                         Map<Enum<?>, Function<T, Boolean>> stateActions,
                                         Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> stateHooks,
+                                        Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> exitStateHooks,
                                         List<MechanismConfig.MechanismBinding<T, ?>> alwaysHooks,
+                                        List<MechanismConfig.MechanismBinding<T, ?>> exitAlwaysHooks,
                                         Map<String, BooleanSupplier> inputs,
                                         Map<String, DoubleSupplier> doubleInputs,
                                         Map<String, Supplier<?>> objectInputs) {
@@ -113,10 +120,13 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             stateMachine.setAtStateDelay(delay);
             this.stateActions = stateActions;
             this.stateHooks = stateHooks;
+            this.exitStateHooks = exitStateHooks;
             this.alwaysHooks = alwaysHooks;
+            this.exitAlwaysHooks = exitAlwaysHooks;
             this.inputs = inputs;
             this.doubleInputs = doubleInputs;
             this.objectInputs = objectInputs;
+            this.previousState = initialState;
         }
 
         public double getSetpoint() {
@@ -150,6 +160,10 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         public boolean update(T instance) {
             stateMachine.update();
             E currentState = stateMachine.getGoalState();
+            if (!Objects.equals(currentState, previousState)) {
+                applyExitHooks(instance, previousState);
+                previousState = currentState;
+            }
             context.update(instance, currentState, getBaseSetpoint());
             applyHooks(currentState);
             boolean suppress = false;
@@ -161,6 +175,23 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
                 suppress = true;
             }
             return suppress;
+        }
+
+        private void applyExitHooks(T instance, E state) {
+            if (state == null) {
+                return;
+            }
+            context.update(instance, state, state.getSetpoint());
+            for (MechanismConfig.MechanismBinding<T, ?> binding : exitAlwaysHooks) {
+                applyHook(binding);
+            }
+            List<MechanismConfig.MechanismBinding<T, ?>> hooks = exitStateHooks.get(state);
+            if (hooks == null) {
+                return;
+            }
+            for (MechanismConfig.MechanismBinding<T, ?> binding : hooks) {
+                applyHook(binding);
+            }
         }
 
         private void applyHooks(E state) {

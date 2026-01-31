@@ -59,6 +59,10 @@ public class MechanismConfig<T extends Mechanism> {
     public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
     /** Optional state hooks that run every loop while a state is active. */
     public Map<Enum<?>, List<MechanismBinding<T, ?>>> stateHooks = new HashMap<>();
+    /** Optional hooks that run once when leaving a state. */
+    public Map<Enum<?>, List<MechanismBinding<T, ?>>> exitStateHooks = new HashMap<>();
+    /** Optional hooks that run once whenever any state is exited. */
+    public List<MechanismBinding<T, ?>> exitAlwaysHooks = new ArrayList<>();
     /** Optional hooks that run every loop regardless of the active state. */
     public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
     /** Optional hooks that run every periodic loop. */
@@ -929,11 +933,10 @@ public class MechanismConfig<T extends Mechanism> {
             E... states) {
         Objects.requireNonNull(binding, "binding");
         if (states == null || states.length == 0) {
-            alwaysHooks.add(binding);
-            return this;
+            throw new IllegalArgumentException("states must contain at least one state; use addOnStateHook(binding) for always-on hooks");
         }
         for (E state : states) {
-            Objects.requireNonNull(state, "states cannot contain null");
+            Objects.requireNonNull(state, "states cannot contain null entries");
             stateHooks.computeIfAbsent(state, key -> new ArrayList<>()).add(binding);
         }
         return this;
@@ -946,6 +949,34 @@ public class MechanismConfig<T extends Mechanism> {
             MechanismBinding<T, E> binding) {
         Objects.requireNonNull(binding, "binding");
         alwaysHooks.add(binding);
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs once when leaving any of the supplied states.
+     */
+    @SafeVarargs
+    public final <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<T> addOnExitStateHook(
+            MechanismBinding<T, E> binding,
+            E... states) {
+        Objects.requireNonNull(binding, "binding");
+        if (states == null || states.length == 0) {
+            throw new IllegalArgumentException("states must contain at least one state; use addOnExitStateHook(binding) for any-state exit hooks");
+        }
+        for (E state : states) {
+            Objects.requireNonNull(state, "states cannot contain null entries");
+            exitStateHooks.computeIfAbsent(state, key -> new ArrayList<>()).add(binding);
+        }
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs once whenever any state is exited.
+     */
+    public <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<T> addOnExitStateHook(
+            MechanismBinding<T, E> binding) {
+        Objects.requireNonNull(binding, "binding");
+        exitAlwaysHooks.add(binding);
         return this;
     }
 

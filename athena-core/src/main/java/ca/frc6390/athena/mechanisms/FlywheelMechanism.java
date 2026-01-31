@@ -35,7 +35,8 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
                                          E initialState) {
             super(config, feedforward);
             stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                    config.stateActions, config.stateHooks, config.alwaysHooks, config.inputs, config.doubleInputs, config.objectInputs);
+                    config.stateActions, config.stateHooks, config.exitStateHooks, config.alwaysHooks, config.exitAlwaysHooks,
+                    config.inputs, config.doubleInputs, config.objectInputs);
         }
 
         @Override

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,9 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     public Map<String, Supplier<?>> objectInputs = new HashMap<>();
     public Map<S, List<Binding<SP>>> bindings = new HashMap<>();
     public List<Binding<SP>> alwaysBindings = new ArrayList<>();
+    public List<Binding<SP>> periodicBindings = new ArrayList<>();
+    public Map<S, List<Binding<SP>>> exitBindings = new HashMap<>();
+    public List<Binding<SP>> exitAlwaysBindings = new ArrayList<>();
     private SP initialSetpoint;
 
     public SuperstructureConfig(S initialState) {
@@ -66,7 +70,10 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
                 doubleInputs,
                 objectInputs,
                 mergedBindings(),
-                mergedAlwaysBindings());
+                mergedAlwaysBindings(),
+                mergedPeriodicBindings(),
+                mergedExitBindings(),
+                mergedExitAlwaysBindings());
     }
 
     /**
@@ -90,7 +97,10 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
                 doubleInputs,
                 objectInputs,
                 mergedBindings(),
-                mergedAlwaysBindings());
+                mergedAlwaysBindings(),
+                mergedPeriodicBindings(),
+                mergedExitBindings(),
+                mergedExitAlwaysBindings());
     }
 
     /**
@@ -126,7 +136,10 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
                 mergedDoubles,
                 mergedObjects,
                 mergedBindings(),
-                mergedAlwaysBindings());
+                mergedAlwaysBindings(),
+                mergedPeriodicBindings(),
+                mergedExitBindings(),
+                mergedExitAlwaysBindings());
     }
 
     private void ensureInitialState() {
@@ -476,8 +489,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     public final SuperstructureConfig<S, SP> addOnStateHook(Binding<SP> binding, S... states) {
         Objects.requireNonNull(binding, "binding");
         if (states == null || states.length == 0) {
-            alwaysBindings.add(binding);
-            return this;
+            throw new IllegalArgumentException("states must contain at least one superstate; use addOnStateHook(binding) for always-on hooks");
         }
         boolean added = false;
         boolean hadNull = false;
@@ -490,8 +502,38 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
             added = true;
         }
         if (!added && hadNull) {
-            alwaysBindings.add(binding);
+            throw new IllegalArgumentException("states must not contain null entries");
         }
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs once when leaving any of the specified superstates.
+     */
+    @SafeVarargs
+    public final SuperstructureConfig<S, SP> addOnExitStateHook(Binding<SP> binding, S... states) {
+        Objects.requireNonNull(binding, "binding");
+        if (states == null || states.length == 0) {
+            throw new IllegalArgumentException("states must contain at least one superstate; use addOnExitStateHook(binding) for any-state exit hooks");
+        }
+        for (S state : states) {
+            if (state == null) {
+                continue;
+            }
+            exitBindings.computeIfAbsent(state, key -> new ArrayList<>()).add(binding);
+        }
+        if (Arrays.stream(states).anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("states must not contain null entries");
+        }
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs once whenever any superstate is exited.
+     */
+    public SuperstructureConfig<S, SP> addOnExitStateHook(Binding<SP> binding) {
+        Objects.requireNonNull(binding, "binding");
+        exitAlwaysBindings.add(binding);
         return this;
     }
 
@@ -501,6 +543,15 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     public SuperstructureConfig<S, SP> addOnStateHook(Binding<SP> binding) {
         Objects.requireNonNull(binding, "binding");
         alwaysBindings.add(binding);
+        return this;
+    }
+
+    /**
+     * Registers a hook that runs every periodic loop regardless of the active superstate.
+     */
+    public SuperstructureConfig<S, SP> addOnPeriodicHook(Binding<SP> binding) {
+        Objects.requireNonNull(binding, "binding");
+        periodicBindings.add(binding);
         return this;
     }
 
@@ -566,6 +617,22 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
 
     private List<Binding<SP>> mergedAlwaysBindings() {
         return List.copyOf(alwaysBindings);
+    }
+
+    private List<Binding<SP>> mergedPeriodicBindings() {
+        return List.copyOf(periodicBindings);
+    }
+
+    private Map<S, List<Binding<SP>>> mergedExitBindings() {
+        Map<S, List<Binding<SP>>> merged = new HashMap<>();
+        for (Map.Entry<S, List<Binding<SP>>> entry : exitBindings.entrySet()) {
+            merged.put(entry.getKey(), List.copyOf(entry.getValue()));
+        }
+        return merged;
+    }
+
+    private List<Binding<SP>> mergedExitAlwaysBindings() {
+        return List.copyOf(exitAlwaysBindings);
     }
 
     /**
