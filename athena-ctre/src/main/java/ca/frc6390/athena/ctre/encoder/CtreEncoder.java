@@ -69,7 +69,7 @@ public class CtreEncoder implements Encoder {
             }
             CANcoderConfiguration cfg = new CANcoderConfiguration();
             cfg.MagnetSensor.AbsoluteSensorDiscontinuityPoint =
-                    MathUtil.inputModulus(config.discontinuityPoint, 0.0, 1.0);
+                    MathUtil.clamp(config.discontinuityPoint, 0.0, 1.0);
             cancoder.getConfigurator().apply(cfg);
         }
     }
