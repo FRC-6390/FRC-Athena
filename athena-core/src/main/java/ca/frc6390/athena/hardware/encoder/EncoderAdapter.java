@@ -1,5 +1,6 @@
 package ca.frc6390.athena.hardware.encoder;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
 
 /**
@@ -12,6 +13,8 @@ public class EncoderAdapter implements Encoder {
     private double offset = 0.0;
     private double conversion = 1.0;
     private double conversionOffset = 0.0;
+    private double discontinuityPoint = Double.NaN;
+    private double discontinuityRange = Double.NaN;
     private boolean inverted = false;
 
     public EncoderAdapter(Encoder raw, EncoderConfig config) {
@@ -22,6 +25,8 @@ public class EncoderAdapter implements Encoder {
             this.offset = config.offset;
             this.conversion = config.conversion;
             this.conversionOffset = config.conversionOffset;
+            this.discontinuityPoint = config.discontinuityPoint;
+            this.discontinuityRange = config.discontinuityRange;
             this.inverted = config.inverted;
         }
     }
@@ -98,6 +103,22 @@ public class EncoderAdapter implements Encoder {
     }
 
     @Override
+    public void setDiscontinuityPoint(double discontinuityPoint) {
+        this.discontinuityPoint = discontinuityPoint;
+        if (config != null) {
+            config.discontinuityPoint = discontinuityPoint;
+        }
+    }
+
+    @Override
+    public void setDiscontinuityRange(double discontinuityRange) {
+        this.discontinuityRange = discontinuityRange;
+        if (config != null) {
+            config.discontinuityRange = discontinuityRange;
+        }
+    }
+
+    @Override
     public double getConversion() {
         return conversion;
     }
@@ -110,6 +131,16 @@ public class EncoderAdapter implements Encoder {
     @Override
     public double getOffset() {
         return offset;
+    }
+
+    @Override
+    public double getDiscontinuityPoint() {
+        return discontinuityPoint;
+    }
+
+    @Override
+    public double getDiscontinuityRange() {
+        return discontinuityRange;
     }
 
     @Override
@@ -134,7 +165,8 @@ public class EncoderAdapter implements Encoder {
 
     @Override
     public double getAbsoluteRotations() {
-        return (getRawAbsolutePosition() - offset) * gearRatio;
+        double rotations = (getRawAbsolutePosition() - offset) * gearRatio;
+        return applyDiscontinuity(rotations);
     }
 
     @Override
@@ -206,5 +238,18 @@ public class EncoderAdapter implements Encoder {
     private double getRawVelocity() {
         double rawVelocity = raw.getVelocity();
         return inverted ? -rawVelocity : rawVelocity;
+    }
+
+    private double applyDiscontinuity(double value) {
+        if (!Double.isFinite(discontinuityPoint) || !Double.isFinite(discontinuityRange) || discontinuityRange <= 0.0) {
+            return value;
+        }
+        double min = discontinuityPoint - (discontinuityRange / 2.0);
+        double max = discontinuityPoint + (discontinuityRange / 2.0);
+        if (!Double.isFinite(min) || !Double.isFinite(max) || min == max) {
+            return value;
+        }
+        double wrapped = MathUtil.inputModulus(value, min, max);
+        return Double.isFinite(wrapped) ? wrapped : value;
     }
 }

@@ -446,6 +446,7 @@ public class MechanismConfig<T extends Mechanism> {
                     .setConversion(encoderCfg.conversion)
                     .setConversionOffset(encoderCfg.conversionOffset)
                     .setOffset(encoderCfg.offset)
+                    .setDiscontinuity(encoderCfg.discontinuityPoint, encoderCfg.discontinuityRange)
                     .setInverted(encoderCfg.inverted);
             encoderCfg = resolved;
             motor.encoderConfig = encoderCfg;
@@ -630,6 +631,42 @@ public class MechanismConfig<T extends Mechanism> {
      */
     public MechanismConfig<T> setEncoderOffset(double offset){
         updateData(builder -> builder.encoderOffset(offset));
+        return this;
+    }
+
+    /**
+     * Sets the discontinuity point for absolute encoders in encoder rotations.
+     *
+     * @param discontinuityPoint wrap point in encoder rotations
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> setEncoderDiscontinuityPoint(double discontinuityPoint){
+        updateData(builder -> builder.encoderDiscontinuityPoint(discontinuityPoint));
+        return this;
+    }
+
+    /**
+     * Sets the discontinuity range for absolute encoders in encoder rotations.
+     *
+     * @param discontinuityRange wrap range in encoder rotations
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> setEncoderDiscontinuityRange(double discontinuityRange){
+        updateData(builder -> builder.encoderDiscontinuityRange(discontinuityRange));
+        return this;
+    }
+
+    /**
+     * Sets the discontinuity point and range for absolute encoders in encoder rotations.
+     *
+     * @param discontinuityPoint wrap point in encoder rotations
+     * @param discontinuityRange wrap range in encoder rotations
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> setEncoderDiscontinuity(double discontinuityPoint, double discontinuityRange){
+        updateData(builder -> builder
+                .encoderDiscontinuityPoint(discontinuityPoint)
+                .encoderDiscontinuityRange(discontinuityRange));
         return this;
     }
 
@@ -1354,7 +1391,8 @@ public class MechanismConfig<T extends Mechanism> {
                     .setConversion(cfg.encoderConversion())
                     .setConversionOffset(cfg.encoderConversionOffset())
                     .setGearRatio(cfg.encoderGearRatio())
-                    .setOffset(cfg.encoderOffset());
+                    .setOffset(cfg.encoderOffset())
+                    .setDiscontinuity(cfg.encoderDiscontinuityPoint(), cfg.encoderDiscontinuityRange());
         }
 
         if(cfg.pidController() != null){

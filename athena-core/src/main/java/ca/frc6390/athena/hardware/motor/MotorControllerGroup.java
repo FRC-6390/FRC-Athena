@@ -86,8 +86,21 @@ public class MotorControllerGroup implements RobotSendableDevice {
         return encoders;
     }
 
+    public double getAverageTemperatureCelsius() {
+        return Arrays.stream(controllers)
+                .mapToDouble(MotorController::getTemperatureCelsius)
+                .average()
+                .orElse(0.0);
+    }
+
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
+        summary.addBoolean("All Connected", this::allMotorsConnected);
+        summary.addDouble("Average Temp (C)", this::getAverageTemperatureCelsius);
+        if (encoders != null && level.equals(SendableLevel.DEBUG)) {
+            encoders.shuffleboard(layout.getLayout("Encoders", BuiltInLayouts.kList), level);
+        }
         Arrays.stream(controllers).forEach(motorController ->
                 motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList), level));
         return layout;

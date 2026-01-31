@@ -9,9 +9,7 @@ import java.util.function.Supplier;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-import edu.wpi.first.wpilibj2.command.InstantCommand;
 
 /**
  * Decorates a concrete {@link Imu} with virtual-axis support to preserve legacy heading helpers
@@ -234,16 +232,7 @@ public class VirtualImu implements Imu {
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        layout.addDouble("Max Linear Speed", this::getMaxLinearSpeed);
-        layout.addDouble("Max Radial Speed", this::getMaxRadialSpeed);
-        layout.add("Max Speed Window (s)",
-                builder -> builder.addDoubleProperty(
-                        "Max Speed Window (s)",
-                        this::getMaxSpeedWindowSeconds,
-                        this::setMaxSpeedWindowSeconds));
-        layout.add("Reset Max Speeds", new InstantCommand(this::resetMaxSpeedWindow))
-                .withWidget(BuiltInWidgets.kCommand);
-        return layout;
+        return Imu.super.shuffleboard(layout, level);
     }
 
     private void updateMaxSpeedTracking() {

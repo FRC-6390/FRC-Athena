@@ -12,6 +12,8 @@ public class EncoderConfig {
     public double conversion = 1;
     public boolean inverted = false;
     public double conversionOffset = 0;
+    public double discontinuityPoint = Double.NaN;
+    public double discontinuityRange = Double.NaN;
 
     public EncoderConfig() {
     }
@@ -63,6 +65,22 @@ public class EncoderConfig {
 
     public EncoderConfig setConversionOffset(double conversionOffset) {
         this.conversionOffset = conversionOffset;
+        return this;
+    }
+
+    public EncoderConfig setDiscontinuityPoint(double discontinuityPoint) {
+        this.discontinuityPoint = discontinuityPoint;
+        return this;
+    }
+
+    public EncoderConfig setDiscontinuityRange(double discontinuityRange) {
+        this.discontinuityRange = discontinuityRange;
+        return this;
+    }
+
+    public EncoderConfig setDiscontinuity(double discontinuityPoint, double discontinuityRange) {
+        this.discontinuityPoint = discontinuityPoint;
+        this.discontinuityRange = discontinuityRange;
         return this;
     }
 

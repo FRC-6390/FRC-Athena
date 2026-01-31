@@ -99,7 +99,11 @@ public class RevMotorController implements MotorController {
                     .setCanbus(config.canbus)
                     .setGearRatio(config.encoderConfig != null ? config.encoderConfig.gearRatio : 1.0)
                     .setConversion(config.encoderConfig != null ? config.encoderConfig.conversion : 1.0)
+                    .setConversionOffset(config.encoderConfig != null ? config.encoderConfig.conversionOffset : 0.0)
                     .setOffset(config.encoderConfig != null ? config.encoderConfig.offset : 0.0)
+                    .setDiscontinuity(
+                            config.encoderConfig != null ? config.encoderConfig.discontinuityPoint : Double.NaN,
+                            config.encoderConfig != null ? config.encoderConfig.discontinuityRange : Double.NaN)
                     .setInverted(config.encoderConfig != null && config.encoderConfig.inverted);
             encoder = EncoderAdapter.wrap(RevEncoder.fromConfig(encoderCfg), encoderCfg);
         }

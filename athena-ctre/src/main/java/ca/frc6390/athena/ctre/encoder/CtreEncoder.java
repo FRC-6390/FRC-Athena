@@ -2,11 +2,13 @@ package ca.frc6390.athena.ctre.encoder;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.configs.CANcoderConfiguration;
+import com.ctre.phoenix6.signals.AbsoluteSensorRangeValue;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 
 /**
@@ -34,10 +36,48 @@ public class CtreEncoder implements Encoder {
     }
 
     private void applyConfig(EncoderConfig config) {
-        if (config == null) {
+        if (config == null || cancoder == null) {
             return;
         }
-        // Raw encoder: configuration is applied by core adapter.
+        boolean hasDiscontinuityConfig =
+                Double.isFinite(config.discontinuityPoint) || Double.isFinite(config.discontinuityRange);
+
+        if (!hasDiscontinuityConfig) {
+            CANcoderConfiguration current = new CANcoderConfiguration();
+            cancoder.getConfigurator().refresh(current);
+            AbsoluteSensorRangeValue rangeValue = current.MagnetSensor.AbsoluteSensorRange;
+            if (rangeValue == AbsoluteSensorRangeValue.Signed_PlusMinusHalf) {
+                config.discontinuityRange = 1.0;
+                config.discontinuityPoint = 0.0;
+            } else if (rangeValue == AbsoluteSensorRangeValue.Unsigned_0To1) {
+                config.discontinuityRange = 1.0;
+                config.discontinuityPoint = 0.5;
+            }
+            return;
+        }
+
+        double range = Double.isFinite(config.discontinuityRange)
+                ? config.discontinuityRange
+                : (Double.isFinite(config.discontinuityPoint) ? 1.0 : Double.NaN);
+        if (Double.isFinite(range) && range > 0.0) {
+            if (Math.abs(range - 1.0) > 1e-4) {
+                DriverStation.reportWarning(
+                        "CANCoder discontinuity range must be 1.0 rotation for hardware config; "
+                                + "requested " + range + ". Using software wrap only.",
+                        false);
+                return;
+            }
+            if (!Double.isFinite(config.discontinuityPoint)) {
+                DriverStation.reportWarning(
+                        "CANCoder discontinuity point missing; set encoder discontinuity point to apply hardware wrap.",
+                        false);
+                return;
+            }
+            CANcoderConfiguration cfg = new CANcoderConfiguration();
+            cfg.MagnetSensor.AbsoluteSensorRange = AbsoluteSensorRangeValue.Signed_PlusMinusHalf;
+            cfg.MagnetSensor.MagnetOffset = 0.5 - config.discontinuityPoint;
+            cancoder.getConfigurator().apply(cfg);
+        }
     }
 
     public static CtreEncoder fromConfig(EncoderConfig config) {
@@ -53,7 +93,6 @@ public class CtreEncoder implements Encoder {
         switch (type) {
             case CANCODER -> {
                 CANcoder encoder = new CANcoder(config.id, resolveCanBus(config.canbus));
-                encoder.getConfigurator().apply(new CANcoderConfiguration());
                 return new CtreEncoder(encoder, config);
             }
             case TALON_FX -> {

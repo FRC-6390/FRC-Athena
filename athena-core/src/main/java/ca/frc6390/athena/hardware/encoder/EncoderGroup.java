@@ -85,8 +85,17 @@ public class EncoderGroup implements RobotSendableDevice {
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        Arrays.stream(encoders).forEach(
-                encoder -> encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), level));
+        ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
+        summary.addDouble("Average Position", this::getPosition);
+        summary.addDouble("Average Velocity", this::getVelocity);
+        summary.addDouble("Average Rotations", this::getRotations);
+        summary.addDouble("Average Rate", this::getRate);
+        summary.addBoolean("All Connected", this::allEncodersConnected);
+
+        Arrays.stream(encoders)
+                .filter(Objects::nonNull)
+                .forEach(encoder ->
+                        encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), level));
         return layout;
     }
 }

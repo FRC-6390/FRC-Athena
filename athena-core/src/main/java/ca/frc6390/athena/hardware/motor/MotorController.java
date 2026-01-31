@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.motor;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 /**
@@ -59,17 +60,28 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
         layout.addDouble("CAN ID", () -> getId());
         layout.addString("CAN Bus", this::getCanbus);
+        layout.addString("Type", () -> {
+            MotorControllerType type = getType();
+            return type != null ? type.getKey() : "unknown";
+        });
         layout.addBoolean("Connected", this::isConnected);
         layout.addDouble("Temperature (C)", this::getTemperatureCelsius);
-        layout.add("Current Limit (A)", builder ->
-                builder.addDoubleProperty("Current Limit (A)", this::getCurrentLimit, this::setCurrentLimit));
-        layout.add("Inverted", builder ->
-                builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
-        layout.add("Brake Mode", builder ->
-                builder.addBooleanProperty(
-                        "Brake Mode",
-                        () -> getNeutralMode() == MotorNeutralMode.Brake,
-                        value -> setNeutralMode(value ? MotorNeutralMode.Brake : MotorNeutralMode.Coast)));
+        layout.addString("Neutral Mode", () -> getNeutralMode().name());
+        if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
+            layout.add("Current Limit (A)", builder ->
+                    builder.addDoubleProperty("Current Limit (A)", this::getCurrentLimit, this::setCurrentLimit));
+            layout.add("Inverted", builder ->
+                    builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
+            layout.add("Brake Mode", builder ->
+                    builder.addBooleanProperty(
+                            "Brake Mode",
+                            () -> getNeutralMode() == MotorNeutralMode.Brake,
+                            value -> setNeutralMode(value ? MotorNeutralMode.Brake : MotorNeutralMode.Coast)));
+            Encoder encoder = getEncoder();
+            if (encoder != null) {
+                encoder.shuffleboard(layout.getLayout("Encoder", BuiltInLayouts.kList), level);
+            }
+        }
         return layout;
     }
 }

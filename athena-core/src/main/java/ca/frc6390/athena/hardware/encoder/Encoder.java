@@ -48,6 +48,14 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         return 0.0;
     }
 
+    default double getDiscontinuityPoint() {
+        return Double.NaN;
+    }
+
+    default double getDiscontinuityRange() {
+        return Double.NaN;
+    }
+
     default double getGearRatio() {
         return 1.0;
     }
@@ -63,6 +71,15 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
     default void setGearRatio(double gearRatio) {}
 
     default void setConversionOffset(double conversionOffset) {}
+
+    default void setDiscontinuityPoint(double discontinuityPoint) {}
+
+    default void setDiscontinuityRange(double discontinuityRange) {}
+
+    default void setDiscontinuity(double discontinuityPoint, double discontinuityRange) {
+        setDiscontinuityPoint(discontinuityPoint);
+        setDiscontinuityRange(discontinuityRange);
+    }
 
     default void setRotations(double rotations) {
         setPosition(rotations);
@@ -111,17 +128,45 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
         layout.addDouble("Position", this::getPosition);
         layout.addDouble("Velocity", this::getVelocity);
+        layout.addDouble("Absolute Position", this::getAbsolutePosition);
         layout.addBoolean("Connected", this::isConnected);
-        layout.add("Inverted", builder ->
-                builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
-        layout.add("Gear Ratio", builder ->
-                builder.addDoubleProperty("Gear Ratio", this::getGearRatio, this::setGearRatio));
-        layout.add("Conversion", builder ->
-                builder.addDoubleProperty("Conversion", this::getConversion, this::setConversion));
-        layout.add("Conversion Offset", builder ->
-                builder.addDoubleProperty("Conversion Offset", this::getConversionOffset, this::setConversionOffset));
-        layout.add("Offset", builder ->
-                builder.addDoubleProperty("Offset", this::getOffset, this::setOffset));
+        if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
+            layout.addDouble("Rotations", this::getRotations);
+            layout.addDouble("Rate", this::getRate);
+            layout.addDouble("Absolute Rotations", this::getAbsoluteRotations);
+            layout.addDouble("Raw Absolute", this::getRawAbsoluteValue);
+            layout.addDouble("Rotation (deg)", () -> getRotation2d().getDegrees());
+            layout.addDouble("Absolute Rotation (deg)", () -> getAbsoluteRotation2d().getDegrees());
+            layout.addBoolean("Supports Simulation", this::supportsSimulation);
+
+            layout.add("Inverted", builder ->
+                    builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
+            layout.add("Gear Ratio", builder ->
+                    builder.addDoubleProperty("Gear Ratio", this::getGearRatio, this::setGearRatio));
+            layout.add("Conversion", builder ->
+                    builder.addDoubleProperty("Conversion", this::getConversion, this::setConversion));
+            layout.add("Conversion Offset", builder ->
+                    builder.addDoubleProperty("Conversion Offset", this::getConversionOffset, this::setConversionOffset));
+            layout.add("Offset", builder ->
+                    builder.addDoubleProperty("Offset", this::getOffset, this::setOffset));
+            layout.add("Discontinuity Point", builder ->
+                    builder.addDoubleProperty("Discontinuity Point", this::getDiscontinuityPoint, this::setDiscontinuityPoint));
+            layout.add("Discontinuity Range", builder ->
+                    builder.addDoubleProperty("Discontinuity Range", this::getDiscontinuityRange, this::setDiscontinuityRange));
+
+            layout.addDouble("CAN ID", () -> {
+                EncoderConfig cfg = getConfig();
+                return cfg != null ? cfg.id : 0.0;
+            });
+            layout.addString("CAN Bus", () -> {
+                EncoderConfig cfg = getConfig();
+                return cfg != null && cfg.canbus != null ? cfg.canbus : "";
+            });
+            layout.addString("Type", () -> {
+                EncoderConfig cfg = getConfig();
+                return cfg != null && cfg.type != null ? cfg.type.getKey() : "unknown";
+            });
+        }
         return layout;
     }
 }

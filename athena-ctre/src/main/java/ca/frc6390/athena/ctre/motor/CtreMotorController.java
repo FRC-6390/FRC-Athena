@@ -83,6 +83,7 @@ public class CtreMotorController implements MotorController {
                     .setConversion(encoderCfg.conversion)
                     .setConversionOffset(encoderCfg.conversionOffset)
                     .setOffset(encoderCfg.offset)
+                    .setDiscontinuity(encoderCfg.discontinuityPoint, encoderCfg.discontinuityRange)
                     .setInverted(encoderCfg.inverted);
         }
         Encoder encoder = encoderCfg.type instanceof CtreEncoderType

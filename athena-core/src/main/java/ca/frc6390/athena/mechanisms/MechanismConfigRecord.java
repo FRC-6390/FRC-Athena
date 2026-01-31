@@ -28,6 +28,8 @@ public record MechanismConfigRecord(
         double encoderConversion,
         double encoderConversionOffset,
         double encoderOffset,
+        double encoderDiscontinuityPoint,
+        double encoderDiscontinuityRange,
         double tolerance,
         double stateMachineDelay,
         double pidPeriod,
@@ -73,6 +75,8 @@ public record MechanismConfigRecord(
                 1.0,
                 0.0,
                 0.0,
+                Double.NaN,
+                Double.NaN,
                 0.0,
                 0.0,
                 0.0,
@@ -107,6 +111,8 @@ public record MechanismConfigRecord(
         private double encoderConversion;
         private double encoderConversionOffset;
         private double encoderOffset;
+        private double encoderDiscontinuityPoint;
+        private double encoderDiscontinuityRange;
         private double tolerance;
         private double stateMachineDelay;
         private double pidPeriod;
@@ -136,6 +142,8 @@ public record MechanismConfigRecord(
             this.encoderConversion = base.encoderConversion();
             this.encoderConversionOffset = base.encoderConversionOffset();
             this.encoderOffset = base.encoderOffset();
+            this.encoderDiscontinuityPoint = base.encoderDiscontinuityPoint();
+            this.encoderDiscontinuityRange = base.encoderDiscontinuityRange();
             this.tolerance = base.tolerance();
             this.stateMachineDelay = base.stateMachineDelay();
             this.pidPeriod = base.pidPeriod();
@@ -233,6 +241,16 @@ public record MechanismConfigRecord(
             return this;
         }
 
+        public Builder encoderDiscontinuityPoint(double encoderDiscontinuityPoint) {
+            this.encoderDiscontinuityPoint = encoderDiscontinuityPoint;
+            return this;
+        }
+
+        public Builder encoderDiscontinuityRange(double encoderDiscontinuityRange) {
+            this.encoderDiscontinuityRange = encoderDiscontinuityRange;
+            return this;
+        }
+
         public Builder tolerance(double tolerance) {
             this.tolerance = tolerance;
             return this;
@@ -302,6 +320,8 @@ public record MechanismConfigRecord(
                     encoderConversion,
                     encoderConversionOffset,
                     encoderOffset,
+                    encoderDiscontinuityPoint,
+                    encoderDiscontinuityRange,
                     tolerance,
                     stateMachineDelay,
                     pidPeriod,

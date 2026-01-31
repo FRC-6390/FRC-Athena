@@ -2,7 +2,9 @@ package ca.frc6390.athena.hardware.imu;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import ca.frc6390.athena.core.RobotSendableSystem;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+import edu.wpi.first.wpilibj2.command.InstantCommand;
 
 /**
  * Vendor-agnostic IMU interface for the new vendordep system.
@@ -59,6 +61,59 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
 
     @Override
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
+        layout.addDouble("Yaw (deg)", () -> {
+            Rotation2d yaw = getYaw();
+            return yaw != null ? yaw.getDegrees() : 0.0;
+        });
+        layout.addDouble("Pitch (deg)", () -> {
+            Rotation2d pitch = getPitch();
+            return pitch != null ? pitch.getDegrees() : 0.0;
+        });
+        layout.addDouble("Roll (deg)", () -> {
+            Rotation2d roll = getRoll();
+            return roll != null ? roll.getDegrees() : 0.0;
+        });
+        layout.addDouble("Velocity X (deg/s)", () -> {
+            Rotation2d vel = getVelocityX();
+            return vel != null ? vel.getDegrees() : 0.0;
+        });
+        layout.addDouble("Velocity Y (deg/s)", () -> {
+            Rotation2d vel = getVelocityY();
+            return vel != null ? vel.getDegrees() : 0.0;
+        });
+        layout.addDouble("Velocity Z (deg/s)", () -> {
+            Rotation2d vel = getVelocityZ();
+            return vel != null ? vel.getDegrees() : 0.0;
+        });
+        layout.addDouble("Accel X", this::getAccelX);
+        layout.addDouble("Accel Y", this::getAccelY);
+        layout.addDouble("Accel Z", this::getAccelZ);
+        layout.addBoolean("Connected", this::isConnected);
+        if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
+            layout.add("Inverted", builder ->
+                    builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
+            layout.addDouble("Max Linear Speed", this::getMaxLinearSpeed);
+            layout.addDouble("Max Radial Speed", this::getMaxRadialSpeed);
+            layout.add("Max Speed Window (s)",
+                    builder -> builder.addDoubleProperty(
+                            "Max Speed Window (s)",
+                            this::getMaxSpeedWindowSeconds,
+                            this::setMaxSpeedWindowSeconds));
+            layout.add("Reset Max Speeds", new InstantCommand(this::resetMaxSpeedWindow))
+                    .withWidget(BuiltInWidgets.kCommand);
+            layout.addDouble("CAN ID", () -> {
+                ImuConfig cfg = getConfig();
+                return cfg != null ? cfg.id : 0.0;
+            });
+            layout.addString("CAN Bus", () -> {
+                ImuConfig cfg = getConfig();
+                return cfg != null && cfg.canbus != null ? cfg.canbus : "";
+            });
+            layout.addString("Type", () -> {
+                ImuConfig cfg = getConfig();
+                return cfg != null && cfg.type != null ? cfg.type.getKey() : "unknown";
+            });
+        }
         return layout;
     }
 }
