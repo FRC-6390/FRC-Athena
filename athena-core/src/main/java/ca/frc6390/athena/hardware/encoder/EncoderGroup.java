@@ -101,16 +101,48 @@ public class EncoderGroup implements RobotSendableDevice {
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
-        summary.addDouble("Average Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getPosition, period));
-        summary.addDouble("Average Velocity", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getVelocity, period));
-        summary.addDouble("Average Rotations", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getRotations, period));
-        summary.addDouble("Average Rate", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getRate, period));
-        summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allEncodersConnected, period));
+        summary.addDouble("Average Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedPosition, period));
+        summary.addDouble("Average Velocity", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedVelocity, period));
+        summary.addDouble("Average Rotations", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedRotations, period));
+        summary.addDouble("Average Rate", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedRate, period));
+        summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allEncodersCachedConnected, period));
 
         Arrays.stream(encoders)
                 .filter(Objects::nonNull)
                 .forEach(encoder ->
                         encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), level));
         return layout;
+    }
+
+    private double getCachedPosition() {
+        return Arrays.stream(encoders)
+                .mapToDouble(Encoder::getCachedPosition)
+                .average()
+                .orElse(0.0);
+    }
+
+    private double getCachedVelocity() {
+        return Arrays.stream(encoders)
+                .mapToDouble(Encoder::getCachedVelocity)
+                .average()
+                .orElse(0.0);
+    }
+
+    private double getCachedRotations() {
+        return Arrays.stream(encoders)
+                .mapToDouble(Encoder::getCachedRotations)
+                .average()
+                .orElse(0.0);
+    }
+
+    private double getCachedRate() {
+        return Arrays.stream(encoders)
+                .mapToDouble(Encoder::getCachedRate)
+                .average()
+                .orElse(0.0);
+    }
+
+    private boolean allEncodersCachedConnected() {
+        return Arrays.stream(encoders).allMatch(Encoder::isCachedConnected);
     }
 }

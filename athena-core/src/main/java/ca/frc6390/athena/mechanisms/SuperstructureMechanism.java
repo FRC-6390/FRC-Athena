@@ -415,7 +415,8 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             if (child.mechanism != null) {
                 child.mechanism.setRobotCore(robotCore);
             }
-            if (child.superstructure instanceof SuperstructureMechanism<?, ?> nested) {
+            if (child.superstructure != null) {
+                SuperstructureMechanism<?, ?> nested = child.superstructure;
                 nested.robotCore = robotCore;
                 propagateRobotCore(robotCore, nested);
             }

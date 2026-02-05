@@ -17,6 +17,16 @@ public class EncoderAdapter implements Encoder {
     private double discontinuityRange = Double.NaN;
     private boolean inverted = false;
     private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
+    private double cachedPosition;
+    private double cachedVelocity;
+    private double cachedAbsolutePosition;
+    private double cachedRotations;
+    private double cachedRate;
+    private double cachedAbsoluteRotations;
+    private double cachedRawAbsoluteValue;
+    private double cachedRotationDegrees;
+    private double cachedAbsoluteRotationDegrees;
+    private boolean cachedConnected;
 
     public EncoderAdapter(Encoder raw, EncoderConfig config) {
         this.raw = raw;
@@ -198,6 +208,7 @@ public class EncoderAdapter implements Encoder {
     @Override
     public Encoder update() {
         raw.update();
+        updateCache();
         return this;
     }
 
@@ -213,6 +224,56 @@ public class EncoderAdapter implements Encoder {
         }
         shuffleboardPeriodSeconds = periodSeconds;
         raw.setShuffleboardPeriodSeconds(periodSeconds);
+    }
+
+    @Override
+    public double getCachedPosition() {
+        return cachedPosition;
+    }
+
+    @Override
+    public double getCachedVelocity() {
+        return cachedVelocity;
+    }
+
+    @Override
+    public double getCachedAbsolutePosition() {
+        return cachedAbsolutePosition;
+    }
+
+    @Override
+    public double getCachedRotations() {
+        return cachedRotations;
+    }
+
+    @Override
+    public double getCachedRate() {
+        return cachedRate;
+    }
+
+    @Override
+    public double getCachedAbsoluteRotations() {
+        return cachedAbsoluteRotations;
+    }
+
+    @Override
+    public double getCachedRawAbsoluteValue() {
+        return cachedRawAbsoluteValue;
+    }
+
+    @Override
+    public double getCachedRotationDegrees() {
+        return cachedRotationDegrees;
+    }
+
+    @Override
+    public double getCachedAbsoluteRotationDegrees() {
+        return cachedAbsoluteRotationDegrees;
+    }
+
+    @Override
+    public boolean isCachedConnected() {
+        return cachedConnected;
     }
 
     @Override
@@ -266,5 +327,17 @@ public class EncoderAdapter implements Encoder {
         }
         double wrapped = MathUtil.inputModulus(value, min, max);
         return Double.isFinite(wrapped) ? wrapped : value;
+    }
+
+    private void updateCache() {
+        cachedConnected = raw.isConnected();
+        cachedRotations = (getRawPosition() - offset) * gearRatio;
+        cachedRate = getRawVelocity() * gearRatio;
+        cachedPosition = cachedRotations * conversion + conversionOffset;
+        cachedAbsoluteRotations = applyDiscontinuity((getRawAbsolutePosition() - offset) * gearRatio);
+        cachedAbsolutePosition = cachedAbsoluteRotations * conversion + conversionOffset;
+        cachedRawAbsoluteValue = getRawAbsolutePosition();
+        cachedRotationDegrees = Rotation2d.fromRotations(cachedRotations).getDegrees();
+        cachedAbsoluteRotationDegrees = Rotation2d.fromRotations(cachedAbsoluteRotations).getDegrees();
     }
 }

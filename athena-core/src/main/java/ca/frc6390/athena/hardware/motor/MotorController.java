@@ -51,6 +51,26 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
 
     default void update() {}
 
+    // Cached accessors for shuffleboard/logging (override in adapters to return cached values)
+    default int getCachedId() { return getId(); }
+
+    default String getCachedCanbus() { return getCanbus(); }
+
+    default String getCachedTypeKey() {
+        MotorControllerType type = getType();
+        return type != null ? type.getKey() : "unknown";
+    }
+
+    default boolean isCachedConnected() { return isConnected(); }
+
+    default double getCachedTemperatureCelsius() { return getTemperatureCelsius(); }
+
+    default MotorNeutralMode getCachedNeutralMode() { return getNeutralMode(); }
+
+    default double getCachedCurrentLimit() { return getCurrentLimit(); }
+
+    default boolean isCachedInverted() { return isInverted(); }
+
     default MotorControllerConfig getConfig() { return null; }
 
     // Compatibility helpers
@@ -59,31 +79,28 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
     @Override
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        layout.addDouble("CAN ID", RobotSendableSystem.rateLimit(this::getId, period));
-        layout.addString("CAN Bus", RobotSendableSystem.rateLimit(this::getCanbus, period));
-        layout.addString("Type", RobotSendableSystem.rateLimit(() -> {
-            MotorControllerType type = getType();
-            return type != null ? type.getKey() : "unknown";
-        }, period));
-        layout.addBoolean("Connected", RobotSendableSystem.rateLimit(this::isConnected, period));
-        layout.addDouble("Temperature (C)", RobotSendableSystem.rateLimit(this::getTemperatureCelsius, period));
-        layout.addString("Neutral Mode", RobotSendableSystem.rateLimit(() -> getNeutralMode().name(), period));
+        layout.addDouble("CAN ID", RobotSendableSystem.rateLimit(this::getCachedId, period));
+        layout.addString("CAN Bus", RobotSendableSystem.rateLimit(this::getCachedCanbus, period));
+        layout.addString("Type", RobotSendableSystem.rateLimit(this::getCachedTypeKey, period));
+        layout.addBoolean("Connected", RobotSendableSystem.rateLimit(this::isCachedConnected, period));
+        layout.addDouble("Temperature (C)", RobotSendableSystem.rateLimit(this::getCachedTemperatureCelsius, period));
+        layout.addString("Neutral Mode", RobotSendableSystem.rateLimit(() -> getCachedNeutralMode().name(), period));
         if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
             layout.add("Current Limit (A)", builder ->
                     builder.addDoubleProperty(
                             "Current Limit (A)",
-                            RobotSendableSystem.rateLimit(this::getCurrentLimit, period),
+                            RobotSendableSystem.rateLimit(this::getCachedCurrentLimit, period),
                             this::setCurrentLimit));
             layout.add("Inverted", builder ->
                     builder.addBooleanProperty(
                             "Inverted",
-                            RobotSendableSystem.rateLimit(this::isInverted, period),
+                            RobotSendableSystem.rateLimit(this::isCachedInverted, period),
                             this::setInverted));
             layout.add("Brake Mode", builder ->
                     builder.addBooleanProperty(
                             "Brake Mode",
                             RobotSendableSystem.rateLimit(
-                                    () -> getNeutralMode() == MotorNeutralMode.Brake,
+                                    () -> getCachedNeutralMode() == MotorNeutralMode.Brake,
                                     period),
                             value -> setNeutralMode(value ? MotorNeutralMode.Brake : MotorNeutralMode.Coast)));
             Encoder encoder = getEncoder();

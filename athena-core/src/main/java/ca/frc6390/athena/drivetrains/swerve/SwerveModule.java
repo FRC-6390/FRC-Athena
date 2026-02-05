@@ -403,7 +403,9 @@ public class SwerveModule implements RobotSendableDevice {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         layout.addDouble(
                 "Drive Motor Position",
-                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getDriveMotorPosition, period))
+                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(
+                        () -> driveEncoder != null ? driveEncoder.getCachedPosition() : 0.0,
+                        period))
             .withSize(1, 1)
             .withPosition(1, 2);
         encoder.shuffleboard(layout.getLayout("Encoder", BuiltInLayouts.kList));

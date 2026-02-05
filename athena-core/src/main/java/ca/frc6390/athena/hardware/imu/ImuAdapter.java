@@ -9,6 +9,16 @@ public class ImuAdapter implements Imu {
     private final Imu raw;
     private final ImuConfig config;
     private boolean inverted;
+    private Rotation2d cachedRoll = new Rotation2d();
+    private Rotation2d cachedPitch = new Rotation2d();
+    private Rotation2d cachedYaw = new Rotation2d();
+    private Rotation2d cachedVelX = new Rotation2d();
+    private Rotation2d cachedVelY = new Rotation2d();
+    private Rotation2d cachedVelZ = new Rotation2d();
+    private double cachedAccelX;
+    private double cachedAccelY;
+    private double cachedAccelZ;
+    private boolean cachedConnected = true;
 
     public ImuAdapter(Imu raw, ImuConfig config) {
         this.raw = raw;
@@ -142,6 +152,66 @@ public class ImuAdapter implements Imu {
     @Override
     public void update() {
         raw.update();
+        cachedRoll = invertRotation(raw.getRoll());
+        cachedPitch = invertRotation(raw.getPitch());
+        cachedYaw = invertRotation(raw.getYaw());
+        cachedVelX = invertRotation(raw.getVelocityX());
+        cachedVelY = invertRotation(raw.getVelocityY());
+        cachedVelZ = invertRotation(raw.getVelocityZ());
+        cachedAccelX = inverted ? -raw.getAccelX() : raw.getAccelX();
+        cachedAccelY = inverted ? -raw.getAccelY() : raw.getAccelY();
+        cachedAccelZ = inverted ? -raw.getAccelZ() : raw.getAccelZ();
+        cachedConnected = raw.isConnected();
+    }
+
+    @Override
+    public Rotation2d getCachedRoll() {
+        return cachedRoll;
+    }
+
+    @Override
+    public Rotation2d getCachedPitch() {
+        return cachedPitch;
+    }
+
+    @Override
+    public Rotation2d getCachedYaw() {
+        return cachedYaw;
+    }
+
+    @Override
+    public Rotation2d getCachedVelocityX() {
+        return cachedVelX;
+    }
+
+    @Override
+    public Rotation2d getCachedVelocityY() {
+        return cachedVelY;
+    }
+
+    @Override
+    public Rotation2d getCachedVelocityZ() {
+        return cachedVelZ;
+    }
+
+    @Override
+    public double getCachedAccelX() {
+        return cachedAccelX;
+    }
+
+    @Override
+    public double getCachedAccelY() {
+        return cachedAccelY;
+    }
+
+    @Override
+    public double getCachedAccelZ() {
+        return cachedAccelZ;
+    }
+
+    @Override
+    public boolean isCachedConnected() {
+        return cachedConnected;
     }
 
     @Override

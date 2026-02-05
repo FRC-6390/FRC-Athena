@@ -111,13 +111,24 @@ public class MotorControllerGroup implements RobotSendableDevice {
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
-        summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allMotorsConnected, period));
-        summary.addDouble("Average Temp (C)", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAverageTemperatureCelsius, period));
+        summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allMotorsCachedConnected, period));
+        summary.addDouble("Average Temp (C)", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAverageCachedTemperatureCelsius, period));
         if (encoders != null && level.equals(SendableLevel.DEBUG)) {
             encoders.shuffleboard(layout.getLayout("Encoders", BuiltInLayouts.kList), level);
         }
         Arrays.stream(controllers).forEach(motorController ->
                 motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList), level));
         return layout;
+    }
+
+    private boolean allMotorsCachedConnected() {
+        return Arrays.stream(controllers).allMatch(MotorController::isCachedConnected);
+    }
+
+    private double getAverageCachedTemperatureCelsius() {
+        return Arrays.stream(controllers)
+                .mapToDouble(MotorController::getCachedTemperatureCelsius)
+                .average()
+                .orElse(0.0);
     }
 }

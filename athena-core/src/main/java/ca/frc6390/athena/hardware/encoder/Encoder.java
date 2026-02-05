@@ -112,6 +112,27 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         return this;
     }
 
+    // Cached accessors for shuffleboard/logging (override in adapters to return cached values)
+    default double getCachedPosition() { return getPosition(); }
+
+    default double getCachedVelocity() { return getVelocity(); }
+
+    default double getCachedAbsolutePosition() { return getAbsolutePosition(); }
+
+    default double getCachedRotations() { return getRotations(); }
+
+    default double getCachedRate() { return getRate(); }
+
+    default double getCachedAbsoluteRotations() { return getAbsoluteRotations(); }
+
+    default double getCachedRawAbsoluteValue() { return getRawAbsoluteValue(); }
+
+    default double getCachedRotationDegrees() { return getRotation2d().getDegrees(); }
+
+    default double getCachedAbsoluteRotationDegrees() { return getAbsoluteRotation2d().getDegrees(); }
+
+    default boolean isCachedConnected() { return isConnected(); }
+
     EncoderConfig getConfig();
 
     default double getRawAbsoluteValue() {
@@ -127,17 +148,17 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
     @Override
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        layout.addDouble("Position", RobotSendableSystem.rateLimit(this::getPosition, period));
-        layout.addDouble("Velocity", RobotSendableSystem.rateLimit(this::getVelocity, period));
-        layout.addDouble("Absolute Position", RobotSendableSystem.rateLimit(this::getAbsolutePosition, period));
-        layout.addBoolean("Connected", RobotSendableSystem.rateLimit(this::isConnected, period));
+        layout.addDouble("Position", RobotSendableSystem.rateLimit(this::getCachedPosition, period));
+        layout.addDouble("Velocity", RobotSendableSystem.rateLimit(this::getCachedVelocity, period));
+        layout.addDouble("Absolute Position", RobotSendableSystem.rateLimit(this::getCachedAbsolutePosition, period));
+        layout.addBoolean("Connected", RobotSendableSystem.rateLimit(this::isCachedConnected, period));
         if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
-            layout.addDouble("Rotations", RobotSendableSystem.rateLimit(this::getRotations, period));
-            layout.addDouble("Rate", RobotSendableSystem.rateLimit(this::getRate, period));
-            layout.addDouble("Absolute Rotations", RobotSendableSystem.rateLimit(this::getAbsoluteRotations, period));
-            layout.addDouble("Raw Absolute", RobotSendableSystem.rateLimit(this::getRawAbsoluteValue, period));
-            layout.addDouble("Rotation (deg)", RobotSendableSystem.rateLimit(() -> getRotation2d().getDegrees(), period));
-            layout.addDouble("Absolute Rotation (deg)", RobotSendableSystem.rateLimit(() -> getAbsoluteRotation2d().getDegrees(), period));
+            layout.addDouble("Rotations", RobotSendableSystem.rateLimit(this::getCachedRotations, period));
+            layout.addDouble("Rate", RobotSendableSystem.rateLimit(this::getCachedRate, period));
+            layout.addDouble("Absolute Rotations", RobotSendableSystem.rateLimit(this::getCachedAbsoluteRotations, period));
+            layout.addDouble("Raw Absolute", RobotSendableSystem.rateLimit(this::getCachedRawAbsoluteValue, period));
+            layout.addDouble("Rotation (deg)", RobotSendableSystem.rateLimit(this::getCachedRotationDegrees, period));
+            layout.addDouble("Absolute Rotation (deg)", RobotSendableSystem.rateLimit(this::getCachedAbsoluteRotationDegrees, period));
             layout.addBoolean("Supports Simulation", RobotSendableSystem.rateLimit(this::supportsSimulation, period));
 
             layout.add("Inverted", builder ->

@@ -51,6 +51,18 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     // Optional periodic update hook (default no-op)
     default void update() {}
 
+    // Cached accessors for shuffleboard/logging (override in adapters to return cached values)
+    default Rotation2d getCachedRoll() { return getRoll(); }
+    default Rotation2d getCachedPitch() { return getPitch(); }
+    default Rotation2d getCachedYaw() { return getYaw(); }
+    default Rotation2d getCachedVelocityX() { return getVelocityX(); }
+    default Rotation2d getCachedVelocityY() { return getVelocityY(); }
+    default Rotation2d getCachedVelocityZ() { return getVelocityZ(); }
+    default double getCachedAccelX() { return getAccelX(); }
+    default double getCachedAccelY() { return getAccelY(); }
+    default double getCachedAccelZ() { return getAccelZ(); }
+    default boolean isCachedConnected() { return isConnected(); }
+
     // Simulation hooks (default no-op)
     default void setSimulatedHeading(Rotation2d yaw, Rotation2d angularVelocityZ) {}
     default void setSimulatedReadings(Rotation2d yaw, Rotation2d pitch, Rotation2d roll,
@@ -62,33 +74,33 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     @Override
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
         layout.addDouble("Yaw (deg)", () -> {
-            Rotation2d yaw = getYaw();
+            Rotation2d yaw = getCachedYaw();
             return yaw != null ? yaw.getDegrees() : 0.0;
         });
         layout.addDouble("Pitch (deg)", () -> {
-            Rotation2d pitch = getPitch();
+            Rotation2d pitch = getCachedPitch();
             return pitch != null ? pitch.getDegrees() : 0.0;
         });
         layout.addDouble("Roll (deg)", () -> {
-            Rotation2d roll = getRoll();
+            Rotation2d roll = getCachedRoll();
             return roll != null ? roll.getDegrees() : 0.0;
         });
         layout.addDouble("Velocity X (deg/s)", () -> {
-            Rotation2d vel = getVelocityX();
+            Rotation2d vel = getCachedVelocityX();
             return vel != null ? vel.getDegrees() : 0.0;
         });
         layout.addDouble("Velocity Y (deg/s)", () -> {
-            Rotation2d vel = getVelocityY();
+            Rotation2d vel = getCachedVelocityY();
             return vel != null ? vel.getDegrees() : 0.0;
         });
         layout.addDouble("Velocity Z (deg/s)", () -> {
-            Rotation2d vel = getVelocityZ();
+            Rotation2d vel = getCachedVelocityZ();
             return vel != null ? vel.getDegrees() : 0.0;
         });
-        layout.addDouble("Accel X", this::getAccelX);
-        layout.addDouble("Accel Y", this::getAccelY);
-        layout.addDouble("Accel Z", this::getAccelZ);
-        layout.addBoolean("Connected", this::isConnected);
+        layout.addDouble("Accel X", this::getCachedAccelX);
+        layout.addDouble("Accel Y", this::getCachedAccelY);
+        layout.addDouble("Accel Z", this::getCachedAccelZ);
+        layout.addBoolean("Connected", this::isCachedConnected);
         if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
             layout.add("Inverted", builder ->
                     builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));

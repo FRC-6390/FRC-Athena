@@ -82,6 +82,26 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double lastOutput;
     private boolean lastOutputIsVoltage;
     private double shuffleboardPeriodSeconds = RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
+    private boolean cachedEmergencyStopped;
+    private boolean cachedOverride;
+    private boolean cachedAtSetpoint;
+    private double cachedSetpoint;
+    private double cachedNudge;
+    private double cachedOutput;
+    private double cachedPidOutput;
+    private double cachedFeedforwardOutput;
+    private boolean cachedHasSimulation;
+    private double cachedSimulationUpdatePeriodSeconds;
+    private boolean cachedUseVoltage;
+    private boolean cachedUseAbsolute;
+    private boolean cachedSetpointAsOutput;
+    private double cachedPidPeriod;
+    private boolean cachedFeedforwardEnabled;
+    private boolean cachedPidEnabled;
+    private double cachedSysIdRampRate;
+    private double cachedSysIdStepVoltage;
+    private double cachedSysIdTimeoutSeconds;
+    private boolean cachedSysIdActive;
     private RobotCore<?> robotCore;
     private SysIdRoutine sysIdRoutine;
     private double sysIdRampRateVoltsPerSecond = 1.0;
@@ -885,6 +905,29 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
+    private void updateShuffleboardCache() {
+        cachedEmergencyStopped = emergencyStopped;
+        cachedOverride = override;
+        cachedAtSetpoint = atSetpoint();
+        cachedSetpoint = setpoint;
+        cachedNudge = nudge;
+        cachedOutput = output;
+        cachedPidOutput = pidOutput;
+        cachedFeedforwardOutput = feedforwardOutput;
+        cachedHasSimulation = hasSimulation();
+        cachedSimulationUpdatePeriodSeconds = simulationUpdatePeriodSeconds;
+        cachedUseVoltage = useVoltage;
+        cachedUseAbsolute = useAbsolute;
+        cachedSetpointAsOutput = setpointIsOutput;
+        cachedPidPeriod = pidPeriod;
+        cachedFeedforwardEnabled = feedforwardEnabled;
+        cachedPidEnabled = pidEnabled;
+        cachedSysIdRampRate = sysIdRampRateVoltsPerSecond;
+        cachedSysIdStepVoltage = sysIdStepVoltage;
+        cachedSysIdTimeoutSeconds = sysIdTimeoutSeconds;
+        cachedSysIdActive = sysIdActive;
+    }
+
     private double calculateControlLoopOutput() {
         if (controlLoops.isEmpty()) {
             return 0.0;
@@ -936,6 +979,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         applyPeriodicHooks();
 
         update();
+
+        updateShuffleboardCache();
 
         if (visualization != null) {
             visualization.setExternalRootPose(visualizationRootOverride);
@@ -1106,21 +1151,21 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         ShuffleboardLayout statusLayout = tab.getLayout("Status", BuiltInLayouts.kList);
-        statusLayout.addBoolean("Emergency Stopped", RobotSendableSystem.rateLimit(this::isEmergencyStopped, period));
-        statusLayout.addBoolean("Override", RobotSendableSystem.rateLimit(this::isOverride, period));
-        statusLayout.addBoolean("At Setpoint", RobotSendableSystem.rateLimit(this::atSetpoint, period));
+        statusLayout.addBoolean("Emergency Stopped", RobotSendableSystem.rateLimit(() -> cachedEmergencyStopped, period));
+        statusLayout.addBoolean("Override", RobotSendableSystem.rateLimit(() -> cachedOverride, period));
+        statusLayout.addBoolean("At Setpoint", RobotSendableSystem.rateLimit(() -> cachedAtSetpoint, period));
 
         ShuffleboardLayout setpointLayout = tab.getLayout("Setpoints", BuiltInLayouts.kList);
-        setpointLayout.addDouble("Setpoint", RobotSendableSystem.rateLimit(this::getSetpoint, period));
+        setpointLayout.addDouble("Setpoint", RobotSendableSystem.rateLimit(() -> cachedSetpoint, period));
         if (level.equals(SendableLevel.DEBUG)) {
-            setpointLayout.addDouble("Nudge", RobotSendableSystem.rateLimit(this::getNudge, period));
+            setpointLayout.addDouble("Nudge", RobotSendableSystem.rateLimit(() -> cachedNudge, period));
         }
 
         ShuffleboardLayout outputLayout = tab.getLayout("Outputs", BuiltInLayouts.kList);
-        outputLayout.addDouble("Output", RobotSendableSystem.rateLimit(this::getOutput, period));
+        outputLayout.addDouble("Output", RobotSendableSystem.rateLimit(() -> cachedOutput, period));
         if (level.equals(SendableLevel.DEBUG)) {
-            outputLayout.addDouble("PID Output", RobotSendableSystem.rateLimit(this::getPidOutput, period));
-            outputLayout.addDouble("Feedforward Output", RobotSendableSystem.rateLimit(this::getFeedforwardOutput, period));
+            outputLayout.addDouble("PID Output", RobotSendableSystem.rateLimit(() -> cachedPidOutput, period));
+            outputLayout.addDouble("Feedforward Output", RobotSendableSystem.rateLimit(() -> cachedFeedforwardOutput, period));
         }
 
         if (visualization != null) {
@@ -1130,9 +1175,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         if (RobotBase.isSimulation()) {
             ShuffleboardLayout simulationLayout = tab.getLayout("Simulation", BuiltInLayouts.kList);
-            simulationLayout.addBoolean("Simulation Enabled", RobotSendableSystem.rateLimit(this::hasSimulation, period));
+            simulationLayout.addBoolean("Simulation Enabled", RobotSendableSystem.rateLimit(() -> cachedHasSimulation, period));
             if (level.equals(SendableLevel.DEBUG)) {
-                simulationLayout.addDouble("Simulation dt", RobotSendableSystem.rateLimit(this::getSimulationUpdatePeriodSeconds, period));
+                simulationLayout.addDouble("Simulation dt", RobotSendableSystem.rateLimit(() -> cachedSimulationUpdatePeriodSeconds, period));
             }
         }
 
@@ -1141,25 +1186,25 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             configLayout.add("Use Voltage", builder ->
                     builder.addBooleanProperty(
                             "Use Voltage",
-                            RobotSendableSystem.rateLimit(this::isUseVoltage, period),
+                            RobotSendableSystem.rateLimit(() -> cachedUseVoltage, period),
                             this::setUseVoltage));
             configLayout.add("Use Absolute", builder ->
                     builder.addBooleanProperty(
                             "Use Absolute",
-                            RobotSendableSystem.rateLimit(this::isUseAbsolute, period),
+                            RobotSendableSystem.rateLimit(() -> cachedUseAbsolute, period),
                             this::setUseAbsolute));
             configLayout.add("Setpoint As Output", builder ->
                     builder.addBooleanProperty(
                             "Setpoint As Output",
-                            RobotSendableSystem.rateLimit(this::isSetpointAsOutput, period),
+                            RobotSendableSystem.rateLimit(() -> cachedSetpointAsOutput, period),
                             this::setSetpointAsOutput));
             configLayout.add("PID Period (s)", builder ->
                     builder.addDoubleProperty(
                             "PID Period (s)",
-                            RobotSendableSystem.rateLimit(this::getPidPeriod, period),
+                            RobotSendableSystem.rateLimit(() -> cachedPidPeriod, period),
                             this::setPidPeriod));
-            configLayout.addBoolean("Feedforward Enabled", RobotSendableSystem.rateLimit(this::isFeedforwardEnabled, period));
-            configLayout.addBoolean("PID Enabled", RobotSendableSystem.rateLimit(this::isPidEnabled, period));
+            configLayout.addBoolean("Feedforward Enabled", RobotSendableSystem.rateLimit(() -> cachedFeedforwardEnabled, period));
+            configLayout.addBoolean("PID Enabled", RobotSendableSystem.rateLimit(() -> cachedPidEnabled, period));
         }
 
         if (level.equals(SendableLevel.DEBUG)) {
@@ -1200,19 +1245,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         sysIdLayout.add("Ramp Rate (V/s)",
                 builder -> builder.addDoubleProperty(
                         "Ramp Rate (V/s)",
-                        RobotSendableSystem.rateLimit(this::getSysIdRampRateVoltsPerSecond, period),
+                        RobotSendableSystem.rateLimit(() -> cachedSysIdRampRate, period),
                         this::setSysIdRampRateVoltsPerSecond));
         sysIdLayout.add("Step Voltage (V)",
                 builder -> builder.addDoubleProperty(
                         "Step Voltage (V)",
-                        RobotSendableSystem.rateLimit(this::getSysIdStepVoltage, period),
+                        RobotSendableSystem.rateLimit(() -> cachedSysIdStepVoltage, period),
                         this::setSysIdStepVoltage));
         sysIdLayout.add("Timeout (s)",
                 builder -> builder.addDoubleProperty(
                         "Timeout (s)",
-                        RobotSendableSystem.rateLimit(this::getSysIdTimeoutSeconds, period),
+                        RobotSendableSystem.rateLimit(() -> cachedSysIdTimeoutSeconds, period),
                         this::setSysIdTimeoutSeconds));
-        sysIdLayout.addBoolean("Active", RobotSendableSystem.rateLimit(this::isSysIdActive, period))
+        sysIdLayout.addBoolean("Active", RobotSendableSystem.rateLimit(() -> cachedSysIdActive, period))
                 .withWidget(BuiltInWidgets.kBooleanBox);
 
         if (level.equals(SendableLevel.DEBUG)) {

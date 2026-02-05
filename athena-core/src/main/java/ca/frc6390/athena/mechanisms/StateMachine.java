@@ -276,7 +276,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
                             ca.frc6390.athena.core.RobotSendableSystem.rateLimit(number::doubleValue, period));
                 } else if (setpoint instanceof Boolean bool) {
                     statesLayout.addBoolean(state.name(),
-                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> bool, period));
+                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(bool::booleanValue, period));
                 } else {
                     statesLayout.addString(state.name(),
                             ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> String.valueOf(setpoint), period));
