@@ -13,9 +13,11 @@ import edu.wpi.first.math.geometry.Rotation2d;
 public class StudicaImu implements Imu {
     private final ImuConfig config;
     private final AHRS navx;
+    private boolean inverted;
     public StudicaImu(AHRS navx, ImuConfig config) {
         this.navx = navx;
         this.config = config;
+        this.inverted = config != null && config.inverted;
     }
 
     public static StudicaImu fromConfig(ImuConfig config) {
@@ -44,9 +46,59 @@ public class StudicaImu implements Imu {
 
     @Override
     public void setInverted(boolean inverted) {
+        this.inverted = inverted;
         if (config != null) {
             config.inverted = inverted;
         }
+    }
+
+    @Override
+    public boolean isInverted() {
+        return inverted;
+    }
+
+    @Override
+    public boolean isConnected() {
+        return navx.isConnected();
+    }
+
+    @Override
+    public Rotation2d getVelocityX() {
+        return Rotation2d.fromDegrees(navx.getRawGyroX());
+    }
+
+    @Override
+    public Rotation2d getVelocityY() {
+        return Rotation2d.fromDegrees(navx.getRawGyroY());
+    }
+
+    @Override
+    public Rotation2d getVelocityZ() {
+        return Rotation2d.fromDegrees(navx.getRawGyroZ());
+    }
+
+    @Override
+    public double getAccelX() {
+        return navx.getWorldLinearAccelX();
+    }
+
+    @Override
+    public double getAccelY() {
+        return navx.getWorldLinearAccelY();
+    }
+
+    @Override
+    public double getAccelZ() {
+        return navx.getWorldLinearAccelZ();
+    }
+
+    @Override
+    public void setYaw(Rotation2d yaw) {
+        if (yaw == null) {
+            return;
+        }
+        double adjustment = yaw.getDegrees() - navx.getYaw();
+        navx.setAngleAdjustment(adjustment);
     }
 
     @Override
