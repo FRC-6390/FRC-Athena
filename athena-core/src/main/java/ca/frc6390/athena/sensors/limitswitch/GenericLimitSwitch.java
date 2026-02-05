@@ -95,9 +95,10 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         super.shuffleboard(layout);
-        layout.addDouble("Block Direction", this::getBlockDirection);
-        layout.addBoolean("Is Hardstop", this::isHardstop);
-        layout.addDouble("Position", this::getPosition);
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+        layout.addDouble("Block Direction", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getBlockDirection, period));
+        layout.addBoolean("Is Hardstop", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::isHardstop, period));
+        layout.addDouble("Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getPosition, period));
         return layout;
     }
     

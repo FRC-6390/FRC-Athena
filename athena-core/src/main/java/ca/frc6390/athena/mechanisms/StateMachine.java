@@ -22,6 +22,7 @@ import edu.wpi.first.wpilibj2.command.InstantCommand;
 public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implements RobotSendableDevice {
     
     private final DelayedOutput atGoalDelayedOutput;
+    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
 
     public interface SetpointProvider<T> {
         T getSetpoint();
@@ -240,12 +241,26 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         }
     }
 
+    @Override
+    public double getShuffleboardPeriodSeconds() {
+        return shuffleboardPeriodSeconds;
+    }
+
+    @Override
+    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds)) {
+            return;
+        }
+        shuffleboardPeriodSeconds = periodSeconds;
+    }
+
     public T getGoalStateSetpoint(){
         return getGoalState().getSetpoint();
     }
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
 
         if(level.equals(SendableLevel.DEBUG)){
             layout.add("State Chooser", chooser);
@@ -257,19 +272,26 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
             for (E state: goalState.getDeclaringClass().getEnumConstants()){
                 Object setpoint = state.getSetpoint();
                 if (setpoint instanceof Number number) {
-                    statesLayout.addNumber(state.name(), number::doubleValue);
+                    statesLayout.addNumber(state.name(),
+                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(number::doubleValue, period));
                 } else if (setpoint instanceof Boolean bool) {
-                    statesLayout.addBoolean(state.name(), () -> bool);
+                    statesLayout.addBoolean(state.name(),
+                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> bool, period));
                 } else {
-                    statesLayout.addString(state.name(), () -> String.valueOf(setpoint));
+                    statesLayout.addString(state.name(),
+                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> String.valueOf(setpoint), period));
                 }
             }
         }
     
-        layout.addString("Goal State", () -> this.getGoalState().name());
-        layout.addString("Next State", () -> this.getNextState().name());
-        layout.addString("State Queue", () -> this.getNextStateQueue());
-        layout.addBoolean("Should Change State", () -> this.shouldChangeState());
+        layout.addString("Goal State",
+                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> this.getGoalState().name(), period));
+        layout.addString("Next State",
+                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> this.getNextState().name(), period));
+        layout.addString("State Queue",
+                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getNextStateQueue, period));
+        layout.addBoolean("Should Change State",
+                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::shouldChangeState, period));
 
         return layout;
     }

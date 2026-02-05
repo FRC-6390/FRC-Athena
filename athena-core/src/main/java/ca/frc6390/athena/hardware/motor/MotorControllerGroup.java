@@ -17,6 +17,7 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class MotorControllerGroup implements RobotSendableDevice {
     private final MotorController[] controllers;
     private EncoderGroup encoders;
+    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
 
     public MotorControllerGroup(MotorController... controllers) {
         this.controllers = controllers;
@@ -82,6 +83,19 @@ public class MotorControllerGroup implements RobotSendableDevice {
         Arrays.stream(controllers).forEach(MotorController::update);
     }
 
+    @Override
+    public double getShuffleboardPeriodSeconds() {
+        return shuffleboardPeriodSeconds;
+    }
+
+    @Override
+    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds)) {
+            return;
+        }
+        shuffleboardPeriodSeconds = periodSeconds;
+    }
+
     public EncoderGroup getEncoderGroup() {
         return encoders;
     }
@@ -95,9 +109,10 @@ public class MotorControllerGroup implements RobotSendableDevice {
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
-        summary.addBoolean("All Connected", this::allMotorsConnected);
-        summary.addDouble("Average Temp (C)", this::getAverageTemperatureCelsius);
+        summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allMotorsConnected, period));
+        summary.addDouble("Average Temp (C)", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAverageTemperatureCelsius, period));
         if (encoders != null && level.equals(SendableLevel.DEBUG)) {
             encoders.shuffleboard(layout.getLayout("Encoders", BuiltInLayouts.kList), level);
         }

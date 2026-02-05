@@ -16,6 +16,7 @@ public class EncoderAdapter implements Encoder {
     private double discontinuityPoint = Double.NaN;
     private double discontinuityRange = Double.NaN;
     private boolean inverted = false;
+    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
 
     public EncoderAdapter(Encoder raw, EncoderConfig config) {
         this.raw = raw;
@@ -198,6 +199,20 @@ public class EncoderAdapter implements Encoder {
     public Encoder update() {
         raw.update();
         return this;
+    }
+
+    @Override
+    public double getShuffleboardPeriodSeconds() {
+        return shuffleboardPeriodSeconds;
+    }
+
+    @Override
+    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds)) {
+            return;
+        }
+        shuffleboardPeriodSeconds = periodSeconds;
+        raw.setShuffleboardPeriodSeconds(periodSeconds);
     }
 
     @Override

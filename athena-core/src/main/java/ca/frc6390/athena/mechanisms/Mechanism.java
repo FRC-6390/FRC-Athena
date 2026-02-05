@@ -81,6 +81,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean lastOutputValid;
     private double lastOutput;
     private boolean lastOutputIsVoltage;
+    private double shuffleboardPeriodSeconds = RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
     private RobotCore<?> robotCore;
     private SysIdRoutine sysIdRoutine;
     private double sysIdRampRateVoltsPerSecond = 1.0;
@@ -781,6 +782,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return pidPeriod;
     }
 
+    public double getShuffleboardPeriodSeconds() {
+        return shuffleboardPeriodSeconds;
+    }
+
+    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
+            return;
+        }
+        this.shuffleboardPeriodSeconds = periodSeconds;
+    }
+
     public void disableControlLoop(String name) {
         if (name == null || !controlLoopsByName.containsKey(name)) {
             return;
@@ -1084,6 +1096,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         ShuffleboardLayout motorsLayout = tab.getLayout("Motors", BuiltInLayouts.kList);
         motors.shuffleboard(motorsLayout, level);
 
@@ -1093,21 +1106,21 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         ShuffleboardLayout statusLayout = tab.getLayout("Status", BuiltInLayouts.kList);
-        statusLayout.addBoolean("Emergency Stopped", this::isEmergencyStopped);
-        statusLayout.addBoolean("Override", this::isOverride);
-        statusLayout.addBoolean("At Setpoint", this::atSetpoint);
+        statusLayout.addBoolean("Emergency Stopped", RobotSendableSystem.rateLimit(this::isEmergencyStopped, period));
+        statusLayout.addBoolean("Override", RobotSendableSystem.rateLimit(this::isOverride, period));
+        statusLayout.addBoolean("At Setpoint", RobotSendableSystem.rateLimit(this::atSetpoint, period));
 
         ShuffleboardLayout setpointLayout = tab.getLayout("Setpoints", BuiltInLayouts.kList);
-        setpointLayout.addDouble("Setpoint", this::getSetpoint);
+        setpointLayout.addDouble("Setpoint", RobotSendableSystem.rateLimit(this::getSetpoint, period));
         if (level.equals(SendableLevel.DEBUG)) {
-            setpointLayout.addDouble("Nudge", this::getNudge);
+            setpointLayout.addDouble("Nudge", RobotSendableSystem.rateLimit(this::getNudge, period));
         }
 
         ShuffleboardLayout outputLayout = tab.getLayout("Outputs", BuiltInLayouts.kList);
-        outputLayout.addDouble("Output", this::getOutput);
+        outputLayout.addDouble("Output", RobotSendableSystem.rateLimit(this::getOutput, period));
         if (level.equals(SendableLevel.DEBUG)) {
-            outputLayout.addDouble("PID Output", this::getPidOutput);
-            outputLayout.addDouble("Feedforward Output", this::getFeedforwardOutput);
+            outputLayout.addDouble("PID Output", RobotSendableSystem.rateLimit(this::getPidOutput, period));
+            outputLayout.addDouble("Feedforward Output", RobotSendableSystem.rateLimit(this::getFeedforwardOutput, period));
         }
 
         if (visualization != null) {
@@ -1117,24 +1130,36 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         if (RobotBase.isSimulation()) {
             ShuffleboardLayout simulationLayout = tab.getLayout("Simulation", BuiltInLayouts.kList);
-            simulationLayout.addBoolean("Simulation Enabled", this::hasSimulation);
+            simulationLayout.addBoolean("Simulation Enabled", RobotSendableSystem.rateLimit(this::hasSimulation, period));
             if (level.equals(SendableLevel.DEBUG)) {
-                simulationLayout.addDouble("Simulation dt", this::getSimulationUpdatePeriodSeconds);
+                simulationLayout.addDouble("Simulation dt", RobotSendableSystem.rateLimit(this::getSimulationUpdatePeriodSeconds, period));
             }
         }
 
         if (level.equals(SendableLevel.DEBUG)) {
             ShuffleboardLayout configLayout = tab.getLayout("Config", BuiltInLayouts.kList);
             configLayout.add("Use Voltage", builder ->
-                    builder.addBooleanProperty("Use Voltage", this::isUseVoltage, this::setUseVoltage));
+                    builder.addBooleanProperty(
+                            "Use Voltage",
+                            RobotSendableSystem.rateLimit(this::isUseVoltage, period),
+                            this::setUseVoltage));
             configLayout.add("Use Absolute", builder ->
-                    builder.addBooleanProperty("Use Absolute", this::isUseAbsolute, this::setUseAbsolute));
+                    builder.addBooleanProperty(
+                            "Use Absolute",
+                            RobotSendableSystem.rateLimit(this::isUseAbsolute, period),
+                            this::setUseAbsolute));
             configLayout.add("Setpoint As Output", builder ->
-                    builder.addBooleanProperty("Setpoint As Output", this::isSetpointAsOutput, this::setSetpointAsOutput));
+                    builder.addBooleanProperty(
+                            "Setpoint As Output",
+                            RobotSendableSystem.rateLimit(this::isSetpointAsOutput, period),
+                            this::setSetpointAsOutput));
             configLayout.add("PID Period (s)", builder ->
-                    builder.addDoubleProperty("PID Period (s)", this::getPidPeriod, this::setPidPeriod));
-            configLayout.addBoolean("Feedforward Enabled", this::isFeedforwardEnabled);
-            configLayout.addBoolean("PID Enabled", this::isPidEnabled);
+                    builder.addDoubleProperty(
+                            "PID Period (s)",
+                            RobotSendableSystem.rateLimit(this::getPidPeriod, period),
+                            this::setPidPeriod));
+            configLayout.addBoolean("Feedforward Enabled", RobotSendableSystem.rateLimit(this::isFeedforwardEnabled, period));
+            configLayout.addBoolean("PID Enabled", RobotSendableSystem.rateLimit(this::isPidEnabled, period));
         }
 
         if (level.equals(SendableLevel.DEBUG)) {
@@ -1173,12 +1198,22 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
                 .withWidget(BuiltInWidgets.kCommand);
         sysIdLayout.add("Ramp Rate (V/s)",
-                builder -> builder.addDoubleProperty("Ramp Rate (V/s)", this::getSysIdRampRateVoltsPerSecond, this::setSysIdRampRateVoltsPerSecond));
+                builder -> builder.addDoubleProperty(
+                        "Ramp Rate (V/s)",
+                        RobotSendableSystem.rateLimit(this::getSysIdRampRateVoltsPerSecond, period),
+                        this::setSysIdRampRateVoltsPerSecond));
         sysIdLayout.add("Step Voltage (V)",
-                builder -> builder.addDoubleProperty("Step Voltage (V)", this::getSysIdStepVoltage, this::setSysIdStepVoltage));
+                builder -> builder.addDoubleProperty(
+                        "Step Voltage (V)",
+                        RobotSendableSystem.rateLimit(this::getSysIdStepVoltage, period),
+                        this::setSysIdStepVoltage));
         sysIdLayout.add("Timeout (s)",
-                builder -> builder.addDoubleProperty("Timeout (s)", this::getSysIdTimeoutSeconds, this::setSysIdTimeoutSeconds));
-        sysIdLayout.addBoolean("Active", this::isSysIdActive).withWidget(BuiltInWidgets.kBooleanBox);
+                builder -> builder.addDoubleProperty(
+                        "Timeout (s)",
+                        RobotSendableSystem.rateLimit(this::getSysIdTimeoutSeconds, period),
+                        this::setSysIdTimeoutSeconds));
+        sysIdLayout.addBoolean("Active", RobotSendableSystem.rateLimit(this::isSysIdActive, period))
+                .withWidget(BuiltInWidgets.kBooleanBox);
 
         if (level.equals(SendableLevel.DEBUG)) {
             ShuffleboardLayout controllersLayout = tab.getLayout("Controllers", BuiltInLayouts.kList);

@@ -58,24 +58,33 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
 
     @Override
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
-        layout.addDouble("CAN ID", () -> getId());
-        layout.addString("CAN Bus", this::getCanbus);
-        layout.addString("Type", () -> {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+        layout.addDouble("CAN ID", RobotSendableSystem.rateLimit(this::getId, period));
+        layout.addString("CAN Bus", RobotSendableSystem.rateLimit(this::getCanbus, period));
+        layout.addString("Type", RobotSendableSystem.rateLimit(() -> {
             MotorControllerType type = getType();
             return type != null ? type.getKey() : "unknown";
-        });
-        layout.addBoolean("Connected", this::isConnected);
-        layout.addDouble("Temperature (C)", this::getTemperatureCelsius);
-        layout.addString("Neutral Mode", () -> getNeutralMode().name());
+        }, period));
+        layout.addBoolean("Connected", RobotSendableSystem.rateLimit(this::isConnected, period));
+        layout.addDouble("Temperature (C)", RobotSendableSystem.rateLimit(this::getTemperatureCelsius, period));
+        layout.addString("Neutral Mode", RobotSendableSystem.rateLimit(() -> getNeutralMode().name(), period));
         if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
             layout.add("Current Limit (A)", builder ->
-                    builder.addDoubleProperty("Current Limit (A)", this::getCurrentLimit, this::setCurrentLimit));
+                    builder.addDoubleProperty(
+                            "Current Limit (A)",
+                            RobotSendableSystem.rateLimit(this::getCurrentLimit, period),
+                            this::setCurrentLimit));
             layout.add("Inverted", builder ->
-                    builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
+                    builder.addBooleanProperty(
+                            "Inverted",
+                            RobotSendableSystem.rateLimit(this::isInverted, period),
+                            this::setInverted));
             layout.add("Brake Mode", builder ->
                     builder.addBooleanProperty(
                             "Brake Mode",
-                            () -> getNeutralMode() == MotorNeutralMode.Brake,
+                            RobotSendableSystem.rateLimit(
+                                    () -> getNeutralMode() == MotorNeutralMode.Brake,
+                                    period),
                             value -> setNeutralMode(value ? MotorNeutralMode.Brake : MotorNeutralMode.Coast)));
             Encoder encoder = getEncoder();
             if (encoder != null) {

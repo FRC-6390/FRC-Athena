@@ -401,10 +401,25 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
     public void setRobotCore(RobotCore<?> robotCore) {
         this.robotCore = robotCore;
+        if (robotCore != null) {
+            propagateRobotCore(robotCore, this);
+        }
     }
 
     public RobotCore<?> getRobotCore() {
         return robotCore;
+    }
+
+    private static void propagateRobotCore(RobotCore<?> robotCore, SuperstructureMechanism<?, ?> mech) {
+        for (Child<?, ?> child : mech.children) {
+            if (child.mechanism != null) {
+                child.mechanism.setRobotCore(robotCore);
+            }
+            if (child.superstructure instanceof SuperstructureMechanism<?, ?> nested) {
+                nested.robotCore = robotCore;
+                propagateRobotCore(robotCore, nested);
+            }
+        }
     }
 
     public boolean input(String key) {

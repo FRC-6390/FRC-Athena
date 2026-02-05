@@ -126,46 +126,68 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
 
     @Override
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
-        layout.addDouble("Position", this::getPosition);
-        layout.addDouble("Velocity", this::getVelocity);
-        layout.addDouble("Absolute Position", this::getAbsolutePosition);
-        layout.addBoolean("Connected", this::isConnected);
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+        layout.addDouble("Position", RobotSendableSystem.rateLimit(this::getPosition, period));
+        layout.addDouble("Velocity", RobotSendableSystem.rateLimit(this::getVelocity, period));
+        layout.addDouble("Absolute Position", RobotSendableSystem.rateLimit(this::getAbsolutePosition, period));
+        layout.addBoolean("Connected", RobotSendableSystem.rateLimit(this::isConnected, period));
         if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
-            layout.addDouble("Rotations", this::getRotations);
-            layout.addDouble("Rate", this::getRate);
-            layout.addDouble("Absolute Rotations", this::getAbsoluteRotations);
-            layout.addDouble("Raw Absolute", this::getRawAbsoluteValue);
-            layout.addDouble("Rotation (deg)", () -> getRotation2d().getDegrees());
-            layout.addDouble("Absolute Rotation (deg)", () -> getAbsoluteRotation2d().getDegrees());
-            layout.addBoolean("Supports Simulation", this::supportsSimulation);
+            layout.addDouble("Rotations", RobotSendableSystem.rateLimit(this::getRotations, period));
+            layout.addDouble("Rate", RobotSendableSystem.rateLimit(this::getRate, period));
+            layout.addDouble("Absolute Rotations", RobotSendableSystem.rateLimit(this::getAbsoluteRotations, period));
+            layout.addDouble("Raw Absolute", RobotSendableSystem.rateLimit(this::getRawAbsoluteValue, period));
+            layout.addDouble("Rotation (deg)", RobotSendableSystem.rateLimit(() -> getRotation2d().getDegrees(), period));
+            layout.addDouble("Absolute Rotation (deg)", RobotSendableSystem.rateLimit(() -> getAbsoluteRotation2d().getDegrees(), period));
+            layout.addBoolean("Supports Simulation", RobotSendableSystem.rateLimit(this::supportsSimulation, period));
 
             layout.add("Inverted", builder ->
-                    builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
+                    builder.addBooleanProperty(
+                            "Inverted",
+                            RobotSendableSystem.rateLimit(this::isInverted, period),
+                            this::setInverted));
             layout.add("Gear Ratio", builder ->
-                    builder.addDoubleProperty("Gear Ratio", this::getGearRatio, this::setGearRatio));
+                    builder.addDoubleProperty(
+                            "Gear Ratio",
+                            RobotSendableSystem.rateLimit(this::getGearRatio, period),
+                            this::setGearRatio));
             layout.add("Conversion", builder ->
-                    builder.addDoubleProperty("Conversion", this::getConversion, this::setConversion));
+                    builder.addDoubleProperty(
+                            "Conversion",
+                            RobotSendableSystem.rateLimit(this::getConversion, period),
+                            this::setConversion));
             layout.add("Conversion Offset", builder ->
-                    builder.addDoubleProperty("Conversion Offset", this::getConversionOffset, this::setConversionOffset));
+                    builder.addDoubleProperty(
+                            "Conversion Offset",
+                            RobotSendableSystem.rateLimit(this::getConversionOffset, period),
+                            this::setConversionOffset));
             layout.add("Offset", builder ->
-                    builder.addDoubleProperty("Offset", this::getOffset, this::setOffset));
+                    builder.addDoubleProperty(
+                            "Offset",
+                            RobotSendableSystem.rateLimit(this::getOffset, period),
+                            this::setOffset));
             layout.add("Discontinuity Point", builder ->
-                    builder.addDoubleProperty("Discontinuity Point", this::getDiscontinuityPoint, this::setDiscontinuityPoint));
+                    builder.addDoubleProperty(
+                            "Discontinuity Point",
+                            RobotSendableSystem.rateLimit(this::getDiscontinuityPoint, period),
+                            this::setDiscontinuityPoint));
             layout.add("Discontinuity Range", builder ->
-                    builder.addDoubleProperty("Discontinuity Range", this::getDiscontinuityRange, this::setDiscontinuityRange));
+                    builder.addDoubleProperty(
+                            "Discontinuity Range",
+                            RobotSendableSystem.rateLimit(this::getDiscontinuityRange, period),
+                            this::setDiscontinuityRange));
 
-            layout.addDouble("CAN ID", () -> {
+            layout.addDouble("CAN ID", RobotSendableSystem.rateLimit(() -> {
                 EncoderConfig cfg = getConfig();
                 return cfg != null ? cfg.id : 0.0;
-            });
-            layout.addString("CAN Bus", () -> {
+            }, period));
+            layout.addString("CAN Bus", RobotSendableSystem.rateLimit(() -> {
                 EncoderConfig cfg = getConfig();
                 return cfg != null && cfg.canbus != null ? cfg.canbus : "";
-            });
-            layout.addString("Type", () -> {
+            }, period));
+            layout.addString("Type", RobotSendableSystem.rateLimit(() -> {
                 EncoderConfig cfg = getConfig();
                 return cfg != null && cfg.type != null ? cfg.type.getKey() : "unknown";
-            });
+            }, period));
         }
         return layout;
     }

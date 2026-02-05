@@ -16,6 +16,7 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
     private final DIOSim dioSim;
     private final AtomicBoolean inverted;
     private final DelayedOutput delayedOutput;
+    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
 
     public EnhancedDigitalInput(int channel) {
         this(channel, false);
@@ -95,12 +96,26 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        if(level.equals(SendableLevel.DEBUG)){ 
-            layout.addBoolean("Inverted", this::isInverted);
-            layout.addDouble("Port", this::getPort);
+    public double getShuffleboardPeriodSeconds() {
+        return shuffleboardPeriodSeconds;
+    }
+
+    @Override
+    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds)) {
+            return;
         }
-        layout.addBoolean("Value", this::getAsBoolean);
+        shuffleboardPeriodSeconds = periodSeconds;
+    }
+
+    @Override
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+        if(level.equals(SendableLevel.DEBUG)){ 
+            layout.addBoolean("Inverted", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::isInverted, period));
+            layout.addDouble("Port", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getPort, period));
+        }
+        layout.addBoolean("Value", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAsBoolean, period));
         return layout;
     }
 

@@ -46,6 +46,7 @@ public class SwerveModule implements RobotSendableDevice {
     private double lastSetpointSpeedMetersPerSecond = 0.0;
     private double lastSetpointTimestampSeconds = Double.NaN;
     private ca.frc6390.athena.drivetrains.swerve.sim.SwerveModuleSimulation simulation;
+    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
     // SWERVE MOTOR RECORD
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder, SwerveModuleSimConfig sim) {
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder) {
@@ -399,7 +400,12 @@ public class SwerveModule implements RobotSendableDevice {
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 2));
-        layout.addDouble("Drive Motor Position", () -> getDriveMotorPosition()).withSize(1, 1).withPosition(1, 2);
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+        layout.addDouble(
+                "Drive Motor Position",
+                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getDriveMotorPosition, period))
+            .withSize(1, 1)
+            .withPosition(1, 2);
         encoder.shuffleboard(layout.getLayout("Encoder", BuiltInLayouts.kList));
         if(level.equals(SendableLevel.DEBUG)){
             driveMotor.shuffleboard(layout.getLayout("Drive Motor", BuiltInLayouts.kList));
@@ -416,5 +422,18 @@ public class SwerveModule implements RobotSendableDevice {
         
 
         return layout;
+    }
+
+    @Override
+    public double getShuffleboardPeriodSeconds() {
+        return shuffleboardPeriodSeconds;
+    }
+
+    @Override
+    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds)) {
+            return;
+        }
+        shuffleboardPeriodSeconds = periodSeconds;
     }
 }

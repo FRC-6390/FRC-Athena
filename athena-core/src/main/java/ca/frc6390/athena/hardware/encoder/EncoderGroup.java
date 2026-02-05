@@ -17,6 +17,7 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
  */
 public class EncoderGroup implements RobotSendableDevice {
     private final Encoder[] encoders;
+    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
 
     public EncoderGroup(Encoder... encoders) {
         this.encoders = encoders;
@@ -84,13 +85,27 @@ public class EncoderGroup implements RobotSendableDevice {
     }
 
     @Override
+    public double getShuffleboardPeriodSeconds() {
+        return shuffleboardPeriodSeconds;
+    }
+
+    @Override
+    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds)) {
+            return;
+        }
+        shuffleboardPeriodSeconds = periodSeconds;
+    }
+
+    @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
-        summary.addDouble("Average Position", this::getPosition);
-        summary.addDouble("Average Velocity", this::getVelocity);
-        summary.addDouble("Average Rotations", this::getRotations);
-        summary.addDouble("Average Rate", this::getRate);
-        summary.addBoolean("All Connected", this::allEncodersConnected);
+        summary.addDouble("Average Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getPosition, period));
+        summary.addDouble("Average Velocity", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getVelocity, period));
+        summary.addDouble("Average Rotations", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getRotations, period));
+        summary.addDouble("Average Rate", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getRate, period));
+        summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allEncodersConnected, period));
 
         Arrays.stream(encoders)
                 .filter(Objects::nonNull)

@@ -12,6 +12,7 @@ public class MotorControllerAdapter implements MotorController {
     private final MotorController raw;
     private final MotorControllerConfig config;
     private Encoder wrappedEncoder;
+    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
 
     public MotorControllerAdapter(MotorController raw, MotorControllerConfig config) {
         this.raw = raw;
@@ -142,5 +143,19 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void update() {
         raw.update();
+    }
+
+    @Override
+    public double getShuffleboardPeriodSeconds() {
+        return shuffleboardPeriodSeconds;
+    }
+
+    @Override
+    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds)) {
+            return;
+        }
+        shuffleboardPeriodSeconds = periodSeconds;
+        raw.setShuffleboardPeriodSeconds(periodSeconds);
     }
 }
