@@ -25,6 +25,7 @@ import java.util.ArrayList;
  * the same mapper supplied to the config.
  */
 public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
+    private RobotCore<?> robotCore;
 
     static final class Child<SP, E extends Enum<E> & SetpointProvider<?>> {
         final Mechanism mechanism;
@@ -398,6 +399,14 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return getMechanisms().all();
     }
 
+    public void setRobotCore(RobotCore<?> robotCore) {
+        this.robotCore = robotCore;
+    }
+
+    public RobotCore<?> getRobotCore() {
+        return robotCore;
+    }
+
     public boolean input(String key) {
         java.util.function.BooleanSupplier supplier = inputs.get(key);
         return supplier != null && supplier.getAsBoolean();
@@ -466,6 +475,9 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
         @Override
         public RobotCore<?> robotCore() {
+            if (SuperstructureMechanism.this.robotCore != null) {
+                return SuperstructureMechanism.this.robotCore;
+            }
             for (Mechanism mech : getMechanisms().all()) {
                 RobotCore<?> core = mech.getRobotCore();
                 if (core != null) {

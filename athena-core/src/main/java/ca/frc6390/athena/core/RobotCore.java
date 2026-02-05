@@ -364,7 +364,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
      * Registers all child mechanisms contained within the given superstructures.
      */
     public RobotCore<T> registerMechanism(SuperstructureMechanism<?, ?>... supers) {
-        Arrays.stream(supers).forEach(s -> registerMechanism(s.getMechanisms().all().toArray(Mechanism[]::new)));
+        Arrays.stream(supers).forEach(s -> {
+            s.setRobotCore(this);
+            registerMechanism(s.getMechanisms().all().toArray(Mechanism[]::new));
+        });
         return this;
     }
 
@@ -372,7 +375,12 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
      * Registers any registerable mechanism (plain or composite).
      */
     public RobotCore<T> registerMechanism(RegisterableMechanism... entries) {
-        Arrays.stream(entries).forEach(entry -> registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new)));
+        Arrays.stream(entries).forEach(entry -> {
+            if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
+                superstructure.setRobotCore(this);
+            }
+            registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
+        });
         return this;
     }
 

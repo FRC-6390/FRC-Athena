@@ -28,6 +28,16 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         return stateCore.getSetpoint();
     }
 
+    @Override
+    protected double getBaseSetpoint() {
+        return stateCore.getBaseSetpoint();
+    }
+
+    @Override
+    protected Enum<?> getActiveState() {
+        return stateCore.getStateMachine().getGoalState();
+    }
+
     /**
      * Overrides the setpoint used by the state machine with a dynamic supplier.
      */

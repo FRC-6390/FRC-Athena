@@ -40,10 +40,14 @@ import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public class Mechanism extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism{
 
@@ -86,6 +90,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean sysIdActive = false;
     private boolean sysIdPreviousOverride = false;
     private final List<Consumer<?>> periodicHooks;
+    private final List<ControlLoopRunner<Mechanism>> controlLoops;
+    private final Map<String, ControlLoopRunner<Mechanism>> controlLoopsByName;
+    private final Set<String> disabledControlLoops;
+    private final Map<String, BooleanSupplier> controlLoopInputs;
+    private final Map<String, DoubleSupplier> controlLoopDoubleInputs;
+    private final Map<String, Supplier<?>> controlLoopObjectInputs;
+    private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
     private  boolean shouldCustomEncoder = false;
     private  DoubleSupplier customEncoderPos;
     private boolean shouldSetpointOverride = false;
@@ -152,6 +163,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.periodicHooks.addAll(config.periodicHooks);
         this.shouldCustomEncoder = config.shouldCustomEncoder;
         this.customEncoderPos = config.customEncoderPos;
+        this.controlLoopInputs = new HashMap<>(config.inputs);
+        this.controlLoopDoubleInputs = new HashMap<>(config.doubleInputs);
+        this.controlLoopObjectInputs = new HashMap<>(config.objectInputs);
+        this.controlLoops = new ArrayList<>();
+        this.controlLoopsByName = new HashMap<>();
+        this.disabledControlLoops = new HashSet<>();
+        for (MechanismConfig.ControlLoopBinding<?> binding : config.controlLoops) {
+            registerControlLoop(binding);
+        }
 
     }
 
@@ -259,6 +279,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             this.sensorSimulation = MechanismSensorSimulation.empty();
         }
         this.periodicHooks = new ArrayList<>();
+        this.controlLoops = new ArrayList<>();
+        this.controlLoopsByName = new HashMap<>();
+        this.disabledControlLoops = new HashSet<>();
+        this.controlLoopInputs = new HashMap<>();
+        this.controlLoopDoubleInputs = new HashMap<>();
+        this.controlLoopObjectInputs = new HashMap<>();
     }
 
     public MotionLimits getMotionLimits() {
@@ -410,6 +436,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public double getSetpoint(){
         return setpoint;
+    }
+
+    protected double getBaseSetpoint() {
+        return getSetpoint();
+    }
+
+    protected Enum<?> getActiveState() {
+        return null;
     }
 
     /**
@@ -640,6 +674,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             output = getSetpoint() + getNudge();
         }
 
+        output += calculateControlLoopOutput();
+
         this.output = output;
 
         this.prevSetpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
@@ -745,6 +781,35 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return pidPeriod;
     }
 
+    public void disableControlLoop(String name) {
+        if (name == null || !controlLoopsByName.containsKey(name)) {
+            return;
+        }
+        disabledControlLoops.add(name);
+    }
+
+    public void enableControlLoop(String name) {
+        if (name == null || !controlLoopsByName.containsKey(name)) {
+            return;
+        }
+        disabledControlLoops.remove(name);
+    }
+
+    public void setControlLoopEnabled(String name, boolean enabled) {
+        if (enabled) {
+            enableControlLoop(name);
+        } else {
+            disableControlLoop(name);
+        }
+    }
+
+    public boolean isControlLoopEnabled(String name) {
+        if (name == null || !controlLoopsByName.containsKey(name)) {
+            return false;
+        }
+        return !disabledControlLoops.contains(name);
+    }
+
     public boolean hasSimulation() {
         return simulationModel != null;
     }
@@ -808,6 +873,26 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
+    private double calculateControlLoopOutput() {
+        if (controlLoops.isEmpty()) {
+            return 0.0;
+        }
+        double nowSeconds = Timer.getFPGATimestamp();
+        double total = 0.0;
+        for (ControlLoopRunner<Mechanism> runner : controlLoops) {
+            if (!isControlLoopEnabled(runner.name())) {
+                runner.setLastOutput(0.0);
+                continue;
+            }
+            if (runner.shouldRun(nowSeconds)) {
+                runner.setLastOutput(runner.loop().calculate(controlContext));
+                runner.setLastRunSeconds(nowSeconds);
+            }
+            total += runner.lastOutput();
+        }
+        return total;
+    }
+
     @Override
     public void periodic() {
 
@@ -846,6 +931,145 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         prevRobotMode = robotMode;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void registerControlLoop(MechanismConfig.ControlLoopBinding<?> binding) {
+        if (binding == null) {
+            return;
+        }
+        String name = binding.name();
+        if (name == null || name.isBlank()) {
+            return;
+        }
+        if (controlLoopsByName.containsKey(name)) {
+            throw new IllegalArgumentException("control loop name already registered: " + name);
+        }
+        ControlLoopRunner<Mechanism> runner = new ControlLoopRunner<>(
+                name,
+                binding.periodSeconds(),
+                (MechanismConfig.MechanismControlLoop<Mechanism>) binding.loop());
+        controlLoops.add(runner);
+        controlLoopsByName.put(name, runner);
+    }
+
+    private final class MechanismControlContextImpl implements MechanismControlContext<Mechanism> {
+        @Override
+        public Mechanism mechanism() {
+            return Mechanism.this;
+        }
+
+        @Override
+        public double baseSetpoint() {
+            return getBaseSetpoint();
+        }
+
+        @Override
+        public Enum<?> state() {
+            return getActiveState();
+        }
+
+        @Override
+        public boolean input(String key) {
+            BooleanSupplier supplier = controlLoopInputs.get(key);
+            return supplier != null && supplier.getAsBoolean();
+        }
+
+        @Override
+        public BooleanSupplier inputSupplier(String key) {
+            BooleanSupplier supplier = controlLoopInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public double doubleInput(String key) {
+            DoubleSupplier supplier = controlLoopDoubleInputs.get(key);
+            return supplier != null ? supplier.getAsDouble() : Double.NaN;
+        }
+
+        @Override
+        public DoubleSupplier doubleInputSupplier(String key) {
+            DoubleSupplier supplier = controlLoopDoubleInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No double input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public <V> V objectInput(String key, Class<V> type) {
+            Supplier<?> supplier = controlLoopObjectInputs.get(key);
+            if (supplier == null) {
+                return null;
+            }
+            Object value = supplier.get();
+            if (value == null) {
+                return null;
+            }
+            if (!type.isInstance(value)) {
+                throw new IllegalArgumentException("Input '" + key + "' is not of type " + type.getSimpleName());
+            }
+            return type.cast(value);
+        }
+
+        @Override
+        public <V> Supplier<V> objectInputSupplier(String key, Class<V> type) {
+            Supplier<?> supplier = controlLoopObjectInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No object input found for key " + key);
+            }
+            return () -> objectInput(key, type);
+        }
+    }
+
+    private static final class ControlLoopRunner<M extends Mechanism> {
+        private final String name;
+        private final double periodSeconds;
+        private final MechanismConfig.MechanismControlLoop<M> loop;
+        private double lastRunSeconds = Double.NaN;
+        private double lastOutput;
+
+        private ControlLoopRunner(String name, double periodSeconds, MechanismConfig.MechanismControlLoop<M> loop) {
+            this.name = name;
+            this.periodSeconds = Math.max(0.0, periodSeconds);
+            this.loop = loop;
+        }
+
+        private String name() {
+            return name;
+        }
+
+        private MechanismConfig.MechanismControlLoop<M> loop() {
+            return loop;
+        }
+
+        private double lastOutput() {
+            return lastOutput;
+        }
+
+        private void setLastOutput(double output) {
+            this.lastOutput = output;
+        }
+
+        private void setLastRunSeconds(double nowSeconds) {
+            this.lastRunSeconds = nowSeconds;
+        }
+
+        private boolean shouldRun(double nowSeconds) {
+            if (!Double.isFinite(nowSeconds)) {
+                return true;
+            }
+            if (Double.isNaN(lastRunSeconds)) {
+                return true;
+            }
+            if (periodSeconds <= 0.0) {
+                return true;
+            }
+            return (nowSeconds - lastRunSeconds) >= periodSeconds;
+        }
     }
 
     @Override

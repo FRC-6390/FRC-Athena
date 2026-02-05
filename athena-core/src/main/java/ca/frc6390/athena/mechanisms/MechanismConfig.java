@@ -67,6 +67,8 @@ public class MechanismConfig<T extends Mechanism> {
     public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
     /** Optional hooks that run every periodic loop. */
     public List<Consumer<T>> periodicHooks = new ArrayList<>();
+    /** Optional custom control loops that return output contributions. */
+    public List<ControlLoopBinding<T>> controlLoops = new ArrayList<>();
     /** Optional boolean inputs exposed to state hooks. */
     public Map<String, BooleanSupplier> inputs = new HashMap<>();
     /** Optional double inputs exposed to state hooks. */
@@ -989,10 +991,54 @@ public class MechanismConfig<T extends Mechanism> {
         return this;
     }
 
+    /**
+     * Registers a custom control loop that runs at the requested period in milliseconds.
+     * Returning a value contributes directly to the mechanism output each cycle.
+     *
+     * @param name unique loop name used for enable/disable controls
+     * @param periodMs loop period in milliseconds (<= 0 runs every periodic cycle)
+     * @param loop loop callback that computes an output contribution
+     * @return this config for chaining
+     */
+    public MechanismConfig<T> addControlLoop(String name, double periodMs, MechanismControlLoop<T> loop) {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(loop, "loop");
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("control loop name cannot be blank");
+        }
+        if (!Double.isFinite(periodMs)) {
+            throw new IllegalArgumentException("control loop period must be finite");
+        }
+        for (ControlLoopBinding<T> binding : controlLoops) {
+            if (binding.name().equals(name)) {
+                throw new IllegalArgumentException("control loop name already registered: " + name);
+            }
+        }
+        controlLoops.add(new ControlLoopBinding<>(name, periodMs / 1000.0, loop));
+        return this;
+    }
+
+    /**
+     * Registers a custom control loop with a period specified in seconds.
+     */
+    public MechanismConfig<T> addControlLoopSeconds(String name, double periodSeconds, MechanismControlLoop<T> loop) {
+        return addControlLoop(name, periodSeconds * 1000.0, loop);
+    }
+
     @FunctionalInterface
     public interface MechanismBinding<M extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
         void apply(MechanismContext<M, E> context);
     }
+
+    @FunctionalInterface
+    public interface MechanismControlLoop<M extends Mechanism> {
+        double calculate(MechanismControlContext<M> context);
+    }
+
+    public record ControlLoopBinding<M extends Mechanism>(
+            String name,
+            double periodSeconds,
+            MechanismControlLoop<M> loop) { }
 
     /**
      * Registers a callback that runs whenever the state machine enters any of the supplied states.

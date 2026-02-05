@@ -1,25 +1,28 @@
 package ca.frc6390.athena.mechanisms;
 
+import ca.frc6390.athena.core.RobotCore;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
-import ca.frc6390.athena.core.RobotCore;
-import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-
 /**
- * Read-only view used by mechanism state hooks.
+ * Read-only view used by custom control loops.
  *
  * @param <T> mechanism type
- * @param <E> state enum type
  */
-public interface MechanismContext<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
+public interface MechanismControlContext<T extends Mechanism> {
 
     T mechanism();
 
-    E state();
-
+    /**
+     * Base setpoint for the mechanism, excluding any runtime overrides.
+     */
     double baseSetpoint();
+
+    /**
+     * Active state for stateful mechanisms, or {@code null} if none exists.
+     */
+    Enum<?> state();
 
     default RobotCore<?> robotCore() {
         return mechanism().getRobotCore();
@@ -37,23 +40,14 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
 
     <V> Supplier<V> objectInputSupplier(String key, Class<V> type);
 
-    /**
-     * Disables a named control loop on the owning mechanism.
-     */
     default void disableControlLoop(String name) {
         mechanism().disableControlLoop(name);
     }
 
-    /**
-     * Enables a named control loop on the owning mechanism.
-     */
     default void enableControlLoop(String name) {
         mechanism().enableControlLoop(name);
     }
 
-    /**
-     * Returns whether a named control loop is enabled on the owning mechanism.
-     */
     default boolean isControlLoopEnabled(String name) {
         return mechanism().isControlLoopEnabled(name);
     }
