@@ -706,7 +706,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 Translation2d odomAccel = odomVelocity.minus(lastFieldVelocityForSlip).times(1.0 / dt);
                 double odomAccelMag = odomAccel.getNorm();
                 double imuAccelMag =
-                        Math.hypot(imu.getAccelX(), imu.getAccelY());
+                        Math.hypot(imu.getAccelerationX(), imu.getAccelerationY());
                 boolean accelSlip =
                         Double.isFinite(imuAccelMag)
                                 && imuAccelMag > backend.slipAccelThreshold()

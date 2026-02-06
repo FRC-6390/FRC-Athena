@@ -43,6 +43,21 @@ public class StudicaImu implements Imu {
     }
 
     @Override
+    public double getAccelerationX() {
+        return navx.getWorldLinearAccelX();
+    }
+
+    @Override
+    public double getAccelerationY() {
+        return navx.getWorldLinearAccelY();
+    }
+
+    @Override
+    public double getAccelerationZ() {
+        return navx.getWorldLinearAccelZ();
+    }
+
+    @Override
     public void setInverted(boolean inverted) {
         if (config != null) {
             config.inverted = inverted;

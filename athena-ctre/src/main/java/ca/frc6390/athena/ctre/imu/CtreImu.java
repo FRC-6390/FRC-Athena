@@ -58,6 +58,21 @@ public class CtreImu implements Imu {
     }
 
     @Override
+    public double getAccelerationX() {
+        return pigeon.getAccelerationX().getValueAsDouble();
+    }
+
+    @Override
+    public double getAccelerationY() {
+        return pigeon.getAccelerationY().getValueAsDouble();
+    }
+
+    @Override
+    public double getAccelerationZ() {
+        return pigeon.getAccelerationZ().getValueAsDouble();
+    }
+
+    @Override
     public void setInverted(boolean inverted) {
         if (config != null) {
             config.inverted = inverted;

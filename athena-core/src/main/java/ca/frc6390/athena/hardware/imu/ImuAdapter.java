@@ -15,9 +15,9 @@ public class ImuAdapter implements Imu {
     private Rotation2d cachedVelX = new Rotation2d();
     private Rotation2d cachedVelY = new Rotation2d();
     private Rotation2d cachedVelZ = new Rotation2d();
-    private double cachedAccelX;
-    private double cachedAccelY;
-    private double cachedAccelZ;
+    private double cachedAccelerationX;
+    private double cachedAccelerationY;
+    private double cachedAccelerationZ;
     private boolean cachedConnected = true;
 
     public ImuAdapter(Imu raw, ImuConfig config) {
@@ -85,18 +85,18 @@ public class ImuAdapter implements Imu {
     }
 
     @Override
-    public double getAccelX() {
-        return inverted ? -raw.getAccelX() : raw.getAccelX();
+    public double getAccelerationX() {
+        return inverted ? -raw.getAccelerationX() : raw.getAccelerationX();
     }
 
     @Override
-    public double getAccelY() {
-        return inverted ? -raw.getAccelY() : raw.getAccelY();
+    public double getAccelerationY() {
+        return inverted ? -raw.getAccelerationY() : raw.getAccelerationY();
     }
 
     @Override
-    public double getAccelZ() {
-        return inverted ? -raw.getAccelZ() : raw.getAccelZ();
+    public double getAccelerationZ() {
+        return inverted ? -raw.getAccelerationZ() : raw.getAccelerationZ();
     }
 
     @Override
@@ -158,9 +158,9 @@ public class ImuAdapter implements Imu {
         cachedVelX = invertRotation(raw.getVelocityX());
         cachedVelY = invertRotation(raw.getVelocityY());
         cachedVelZ = invertRotation(raw.getVelocityZ());
-        cachedAccelX = inverted ? -raw.getAccelX() : raw.getAccelX();
-        cachedAccelY = inverted ? -raw.getAccelY() : raw.getAccelY();
-        cachedAccelZ = inverted ? -raw.getAccelZ() : raw.getAccelZ();
+        cachedAccelerationX = inverted ? -raw.getAccelerationX() : raw.getAccelerationX();
+        cachedAccelerationY = inverted ? -raw.getAccelerationY() : raw.getAccelerationY();
+        cachedAccelerationZ = inverted ? -raw.getAccelerationZ() : raw.getAccelerationZ();
         cachedConnected = raw.isConnected();
     }
 
@@ -195,18 +195,18 @@ public class ImuAdapter implements Imu {
     }
 
     @Override
-    public double getCachedAccelX() {
-        return cachedAccelX;
+    public double getCachedAccelerationX() {
+        return cachedAccelerationX;
     }
 
     @Override
-    public double getCachedAccelY() {
-        return cachedAccelY;
+    public double getCachedAccelerationY() {
+        return cachedAccelerationY;
     }
 
     @Override
-    public double getCachedAccelZ() {
-        return cachedAccelZ;
+    public double getCachedAccelerationZ() {
+        return cachedAccelerationZ;
     }
 
     @Override

@@ -713,14 +713,13 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Indicates that mechanism outputs will be provided in volts instead of a normalized [-1, 1]
-     * duty-cycle signal.
+     * Sets the output space used by the mechanism.
      *
-     * @param useVoltage whether the mechanism outputs real volt commands
+     * @param outputType desired output space
      * @return this config for chaining
      */
-    public MechanismConfig<T> setUseVoltage(boolean useVoltage){
-        updateData(builder -> builder.useVoltage(useVoltage));
+    public MechanismConfig<T> setOutputType(OutputType outputType) {
+        updateData(builder -> builder.outputType(outputType));
         return this;
     }
 

@@ -89,6 +89,11 @@ public class MotorControllerAdapter implements MotorController {
     }
 
     @Override
+    public void setVelocity(double rotationsPerSecond) {
+        raw.setVelocity(isInverted() ? -rotationsPerSecond : rotationsPerSecond);
+    }
+
+    @Override
     public void setNeutralMode(MotorNeutralMode mode) {
         if (config != null) {
             config.neutralMode = mode;

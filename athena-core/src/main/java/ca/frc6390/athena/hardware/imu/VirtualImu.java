@@ -105,6 +105,21 @@ public class VirtualImu implements Imu {
     }
 
     @Override
+    public double getAccelerationX() {
+        return useSimulatedReadings ? 0.0 : delegate.getAccelerationX();
+    }
+
+    @Override
+    public double getAccelerationY() {
+        return useSimulatedReadings ? 0.0 : delegate.getAccelerationY();
+    }
+
+    @Override
+    public double getAccelerationZ() {
+        return useSimulatedReadings ? 0.0 : delegate.getAccelerationZ();
+    }
+
+    @Override
     public void setInverted(boolean inverted) {
         this.inverted = inverted;
         delegate.setInverted(inverted);

@@ -26,6 +26,8 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
 
     void setPosition(double rotations);
 
+    void setVelocity(double rotationsPerSecond);
+
     void setNeutralMode(MotorNeutralMode mode);
 
     void setPid(PIDController pid);

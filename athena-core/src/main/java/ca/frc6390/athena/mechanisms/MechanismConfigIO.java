@@ -93,7 +93,7 @@ public final class MechanismConfigIO {
                 .motors(motors)
                 .encoder(encoderConfig)
                 .useAbsolute(mechanism.isUseAbsolute())
-                .useVoltage(mechanism.isUseVoltage())
+                .outputType(mechanism.getOutputType())
                 .useSetpointAsOutput(mechanism.isSetpointAsOutput())
                 .customPIDCycle(mechanism.isCustomPIDCycle())
                 .pidPeriod(mechanism.getPidPeriod())
@@ -120,7 +120,11 @@ public final class MechanismConfigIO {
             return;
         }
         mechanism.setUseAbsolute(record.useAbsolute());
-        mechanism.setUseVoltage(record.useVoltage());
+        if (record.outputType() != null) {
+            mechanism.setOutputType(record.outputType());
+        } else {
+            mechanism.setOutputType(record.useVoltage() ? OutputType.VOLTAGE : OutputType.PERCENT);
+        }
         mechanism.setSetpointAsOutput(record.useSetpointAsOutput());
         mechanism.setCustomPIDCycle(record.customPIDCycle());
         mechanism.setPidPeriod(record.pidPeriod());

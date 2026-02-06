@@ -28,9 +28,9 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     default Rotation2d getVelocityZ() { return new Rotation2d(); }
 
     // Optional linear acceleration accessors (default to zero)
-    default double getAccelX() { return 0.0; }
-    default double getAccelY() { return 0.0; }
-    default double getAccelZ() { return 0.0; }
+    default double getAccelerationX() { return 0.0; }
+    default double getAccelerationY() { return 0.0; }
+    default double getAccelerationZ() { return 0.0; }
 
     // Optional max speed tracking helpers (default to no-op)
     default double getMaxLinearSpeed() { return 0.0; }
@@ -58,9 +58,9 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     default Rotation2d getCachedVelocityX() { return getVelocityX(); }
     default Rotation2d getCachedVelocityY() { return getVelocityY(); }
     default Rotation2d getCachedVelocityZ() { return getVelocityZ(); }
-    default double getCachedAccelX() { return getAccelX(); }
-    default double getCachedAccelY() { return getAccelY(); }
-    default double getCachedAccelZ() { return getAccelZ(); }
+    default double getCachedAccelerationX() { return getAccelerationX(); }
+    default double getCachedAccelerationY() { return getAccelerationY(); }
+    default double getCachedAccelerationZ() { return getAccelerationZ(); }
     default boolean isCachedConnected() { return isConnected(); }
 
     // Simulation hooks (default no-op)
@@ -97,9 +97,9 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
             Rotation2d vel = getCachedVelocityZ();
             return vel != null ? vel.getDegrees() : 0.0;
         });
-        layout.addDouble("Accel X", this::getCachedAccelX);
-        layout.addDouble("Accel Y", this::getCachedAccelY);
-        layout.addDouble("Accel Z", this::getCachedAccelZ);
+        layout.addDouble("Acceleration X", this::getCachedAccelerationX);
+        layout.addDouble("Acceleration Y", this::getCachedAccelerationY);
+        layout.addDouble("Acceleration Z", this::getCachedAccelerationZ);
         layout.addBoolean("Connected", this::isCachedConnected);
         if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
             layout.add("Inverted", builder ->

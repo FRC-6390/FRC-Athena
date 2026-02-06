@@ -57,7 +57,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Encoder encoder;
     private final PIDController pidController;
     private final ProfiledPIDController profiledPIDController;
-    private boolean useAbsolute, useVoltage;
+    private boolean useAbsolute;
+    private OutputType outputType = OutputType.PERCENT;
     private final GenericLimitSwitch[] limitSwitches;
     private static final String MOTION_AXIS_ID = "axis";
     private final MotionLimits motionLimits;
@@ -145,7 +146,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.pidController = config.data().pidController();
         this.profiledPIDController = config.data().profiledPIDController();
         this.useAbsolute = config.data().useAbsolute();
-        this.useVoltage = config.data().useVoltage();
+        OutputType configOutputType = config.data().outputType();
+        if (configOutputType == null) {
+            this.outputType = config.data().useVoltage() ? OutputType.VOLTAGE : OutputType.PERCENT;
+        } else {
+            this.outputType = configOutputType;
+        }
         this.override = false;
         this.limitSwitches =
                 config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new);
@@ -274,7 +280,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.pidController = pidController;
         this.profiledPIDController = profiledPIDController;
         this.useAbsolute = useAbsolute;
-        this.useVoltage = useVoltage;
+        this.outputType = useVoltage ? OutputType.VOLTAGE : OutputType.PERCENT;
         this.override = false;
         this.limitSwitches = limitSwitches;
         this.setpointIsOutput = useSetpointAsOutput;
@@ -421,6 +427,33 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
         motors.setSpeed(speed);
+    }
+
+    /**
+     * Sends a manual output in the currently configured output space.
+     */
+    public void setOutput(double output) {
+        setOverride(true);
+        switch (outputType) {
+            case VOLTAGE -> setVoltage(output);
+            case POSITION -> {
+                recordOutput(output, false);
+                if (emergencyStopped || suppressMotorOutput) {
+                    motors.stopMotors();
+                    return;
+                }
+                motors.setPosition(output);
+            }
+            case VELOCITY -> {
+                recordOutput(output, false);
+                if (emergencyStopped || suppressMotorOutput) {
+                    motors.stopMotors();
+                    return;
+                }
+                motors.setVelocity(output);
+            }
+            case PERCENT -> setSpeed(output);
+        }
     }
 
     /**
@@ -571,11 +604,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public boolean isUseVoltage() {
-        return useVoltage;
+        return outputType == OutputType.VOLTAGE;
     }
 
-    public void setUseVoltage(boolean useVoltage) {
-        this.useVoltage = useVoltage;
+    public OutputType getOutputType() {
+        return outputType;
+    }
+
+    public void setOutputType(OutputType outputType) {
+        if (outputType == null) {
+            return;
+        }
+        this.outputType = outputType;
     }
 
     public boolean isSetpointAsOutput() {
@@ -599,7 +639,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (RobotBase.isSimulation() && lastOutputValid) {
             return lastOutputIsVoltage;
         }
-        return useVoltage;
+        return isUseVoltage();
     }
 
     public boolean isCustomPIDCycle() {
@@ -688,10 +728,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private void outputMotor(double output) {
         if (!suppressMotorOutput){
-            if (useVoltage) {
-                setVoltage(output);
-            } else {
-                setSpeed(output);
+            switch (outputType) {
+                case VOLTAGE -> setVoltage(output);
+                case POSITION -> motors.setPosition(output);
+                case VELOCITY -> motors.setVelocity(output);
+                case PERCENT -> setSpeed(output);
             }
         }
     }
@@ -989,7 +1030,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         cachedFeedforwardOutput = feedforwardOutput;
         cachedHasSimulation = hasSimulation();
         cachedSimulationUpdatePeriodSeconds = simulationUpdatePeriodSeconds;
-        cachedUseVoltage = useVoltage;
+        cachedUseVoltage = isUseVoltage();
         cachedUseAbsolute = useAbsolute;
         cachedSetpointAsOutput = setpointIsOutput;
         cachedPidPeriod = pidPeriod;
@@ -1315,11 +1356,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         if (level.equals(SendableLevel.DEBUG)) {
             ShuffleboardLayout configLayout = container.getLayout("Config", BuiltInLayouts.kList);
-            configLayout.add("Use Voltage", builder ->
-                    builder.addBooleanProperty(
-                            "Use Voltage",
-                            RobotSendableSystem.rateLimit(() -> cachedUseVoltage, period),
-                            this::setUseVoltage));
+            configLayout.addString("Output Type", RobotSendableSystem.rateLimit(() -> outputType.name(), period));
             configLayout.add("Use Absolute", builder ->
                     builder.addBooleanProperty(
                             "Use Absolute",

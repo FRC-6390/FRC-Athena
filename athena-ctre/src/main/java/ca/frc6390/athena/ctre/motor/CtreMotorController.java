@@ -7,6 +7,7 @@ import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.PositionDutyCycle;
+import com.ctre.phoenix6.controls.VelocityDutyCycle;
 import com.ctre.phoenix6.hardware.TalonFX;
 
 import ca.frc6390.athena.ctre.encoder.CtreEncoder;
@@ -31,6 +32,7 @@ public class CtreMotorController implements MotorController {
     private final Consumer<Double> setVoltage;
     private final Consumer<Double> setCurrentLimit;
     private final Consumer<Double> setPosition;
+    private final Consumer<Double> setVelocity;
     private final Consumer<MotorNeutralMode> setNeutralMode;
     private final Consumer<PIDController> setPid;
 
@@ -49,6 +51,7 @@ public class CtreMotorController implements MotorController {
             controller.getConfigurator().apply(cfg);
         };
         this.setPosition = val -> controller.setControl(new PositionDutyCycle(val).withSlot(0));
+        this.setVelocity = val -> controller.setControl(new VelocityDutyCycle(val).withSlot(0));
         this.setNeutralMode = mode -> controller.setNeutralMode(mode == MotorNeutralMode.Brake
                 ? com.ctre.phoenix6.signals.NeutralModeValue.Brake
                 : com.ctre.phoenix6.signals.NeutralModeValue.Coast);
@@ -141,6 +144,11 @@ public class CtreMotorController implements MotorController {
     @Override
     public void setPosition(double rotations) {
         setPosition.accept(rotations);
+    }
+
+    @Override
+    public void setVelocity(double rotationsPerSecond) {
+        setVelocity.accept(rotationsPerSecond);
     }
 
     @Override

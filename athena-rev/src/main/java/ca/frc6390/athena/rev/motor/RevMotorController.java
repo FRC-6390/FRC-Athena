@@ -33,6 +33,7 @@ public class RevMotorController implements MotorController {
     private final Consumer<Double> setVoltage;
     private final Consumer<Double> setCurrentLimit;
     private final Consumer<Double> setPosition;
+    private final Consumer<Double> setVelocity;
     private final Consumer<MotorNeutralMode> setNeutralMode;
     private final Consumer<PIDController> setPid;
     private final Consumer<Boolean> setInverted;
@@ -46,6 +47,7 @@ public class RevMotorController implements MotorController {
                               Consumer<Double> setVoltage,
                               Consumer<Double> setCurrentLimit,
                               Consumer<Double> setPosition,
+                              Consumer<Double> setVelocity,
                               Consumer<MotorNeutralMode> setNeutralMode,
                               Consumer<PIDController> setPid,
                               Consumer<Boolean> setInverted,
@@ -58,6 +60,7 @@ public class RevMotorController implements MotorController {
         this.setVoltage = setVoltage;
         this.setCurrentLimit = setCurrentLimit;
         this.setPosition = setPosition;
+        this.setVelocity = setVelocity;
         this.setNeutralMode = setNeutralMode;
         this.setPid = setPid;
         this.setInverted = setInverted;
@@ -119,6 +122,7 @@ public class RevMotorController implements MotorController {
                     controller.configure(update, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
                 },
                 val -> controller.getClosedLoopController().setSetpoint(val, ControlType.kPosition),
+                val -> controller.getClosedLoopController().setSetpoint(val * 60.0, ControlType.kVelocity),
                 mode -> {
                     SparkMaxConfig update = new SparkMaxConfig();
                     update.idleMode(mode == MotorNeutralMode.Brake
@@ -162,6 +166,7 @@ public class RevMotorController implements MotorController {
                     controller.configure(update, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
                 },
                 val -> controller.getClosedLoopController().setSetpoint(val, ControlType.kPosition),
+                val -> controller.getClosedLoopController().setSetpoint(val * 60.0, ControlType.kVelocity),
                 mode -> {
                     SparkFlexConfig update = new SparkFlexConfig();
                     update.idleMode(mode == MotorNeutralMode.Brake
@@ -214,6 +219,11 @@ public class RevMotorController implements MotorController {
     @Override
     public void setPosition(double rotations) {
         setPosition.accept(rotations);
+    }
+
+    @Override
+    public void setVelocity(double rotationsPerSecond) {
+        setVelocity.accept(rotationsPerSecond);
     }
 
     @Override

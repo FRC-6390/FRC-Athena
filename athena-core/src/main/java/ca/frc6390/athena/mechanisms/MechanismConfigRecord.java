@@ -17,6 +17,7 @@ public record MechanismConfigRecord(
         ProfiledPIDController profiledPIDController,
         boolean useAbsolute,
         boolean useVoltage,
+        OutputType outputType,
         boolean useSetpointAsOutput,
         boolean pidUseVelocity,
         boolean customPIDCycle,
@@ -54,6 +55,9 @@ public record MechanismConfigRecord(
         if (canbus == null) {
             canbus = "rio";
         }
+        if (outputType == null) {
+            outputType = useVoltage ? OutputType.VOLTAGE : OutputType.PERCENT;
+        }
     }
 
     public static MechanismConfigRecord defaults() {
@@ -64,6 +68,7 @@ public record MechanismConfigRecord(
                 null,
                 false,
                 false,
+                OutputType.PERCENT,
                 false,
                 false,
                 false,
@@ -100,6 +105,7 @@ public record MechanismConfigRecord(
         private ProfiledPIDController profiledPIDController;
         private boolean useAbsolute;
         private boolean useVoltage;
+        private OutputType outputType;
         private boolean useSetpointAsOutput;
         private boolean pidUseVelocity;
         private boolean customPIDCycle;
@@ -131,6 +137,7 @@ public record MechanismConfigRecord(
             this.profiledPIDController = base.profiledPIDController();
             this.useAbsolute = base.useAbsolute();
             this.useVoltage = base.useVoltage();
+            this.outputType = base.outputType();
             this.useSetpointAsOutput = base.useSetpointAsOutput();
             this.pidUseVelocity = base.pidUseVelocity();
             this.customPIDCycle = base.customPIDCycle();
@@ -183,6 +190,13 @@ public record MechanismConfigRecord(
 
         public Builder useVoltage(boolean useVoltage) {
             this.useVoltage = useVoltage;
+            this.outputType = useVoltage ? OutputType.VOLTAGE : OutputType.PERCENT;
+            return this;
+        }
+
+        public Builder outputType(OutputType outputType) {
+            this.outputType = outputType;
+            this.useVoltage = outputType == OutputType.VOLTAGE;
             return this;
         }
 
@@ -309,6 +323,7 @@ public record MechanismConfigRecord(
                     profiledPIDController,
                     useAbsolute,
                     useVoltage,
+                    outputType,
                     useSetpointAsOutput,
                     pidUseVelocity,
                     customPIDCycle,

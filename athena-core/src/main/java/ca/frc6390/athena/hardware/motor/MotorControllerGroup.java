@@ -55,6 +55,10 @@ public class MotorControllerGroup implements RobotSendableDevice {
         Arrays.stream(controllers).forEach(motorController -> motorController.setPosition(position));
     }
 
+    public void setVelocity(double rotationsPerSecond) {
+        Arrays.stream(controllers).forEach(motorController -> motorController.setVelocity(rotationsPerSecond));
+    }
+
     public void setPid(PIDController pid) {
         Arrays.stream(controllers).forEach(motorController -> motorController.setPid(pid));
     }
