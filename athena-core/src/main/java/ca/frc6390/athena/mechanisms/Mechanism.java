@@ -21,6 +21,7 @@ import ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.ProfiledPIDController;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -121,6 +122,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, BooleanSupplier> controlLoopInputs;
     private final Map<String, DoubleSupplier> controlLoopDoubleInputs;
     private final Map<String, Supplier<?>> controlLoopObjectInputs;
+    private final Map<String, PIDController> controlLoopPids;
+    private final Map<String, SimpleMotorFeedforward> controlLoopFeedforwards;
     private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
     private  boolean shouldCustomEncoder = false;
     private  DoubleSupplier customEncoderPos;
@@ -207,9 +210,35 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.controlLoopInputs = new HashMap<>(config.inputs);
         this.controlLoopDoubleInputs = new HashMap<>(config.doubleInputs);
         this.controlLoopObjectInputs = new HashMap<>(config.objectInputs);
+        this.controlLoopPids = new HashMap<>();
+        this.controlLoopFeedforwards = new HashMap<>();
         this.controlLoops = new ArrayList<>();
         this.controlLoopsByName = new HashMap<>();
         this.disabledControlLoops = new HashSet<>();
+        if (config.controlLoopPidProfiles != null) {
+            for (Map.Entry<String, MechanismConfig.PidProfile> entry : config.controlLoopPidProfiles.entrySet()) {
+                String name = entry.getKey();
+                MechanismConfig.PidProfile profile = entry.getValue();
+                if (name == null || name.isBlank() || profile == null) {
+                    continue;
+                }
+                PIDController pid = new PIDController(profile.kP(), profile.kI(), profile.kD());
+                if (Double.isFinite(profile.iZone()) && profile.iZone() > 0.0) {
+                    pid.setIZone(profile.iZone());
+                }
+                controlLoopPids.put(name, pid);
+            }
+        }
+        if (config.controlLoopFeedforwardProfiles != null) {
+            for (Map.Entry<String, SimpleMotorFeedforward> entry : config.controlLoopFeedforwardProfiles.entrySet()) {
+                String name = entry.getKey();
+                SimpleMotorFeedforward ff = entry.getValue();
+                if (name == null || name.isBlank() || ff == null) {
+                    continue;
+                }
+                controlLoopFeedforwards.put(name, new SimpleMotorFeedforward(ff.getKs(), ff.getKv(), ff.getKa()));
+            }
+        }
         for (MechanismConfig.ControlLoopBinding<?> binding : config.controlLoops) {
             registerControlLoop(binding);
         }
@@ -327,6 +356,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.controlLoopInputs = new HashMap<>();
         this.controlLoopDoubleInputs = new HashMap<>();
         this.controlLoopObjectInputs = new HashMap<>();
+        this.controlLoopPids = new HashMap<>();
+        this.controlLoopFeedforwards = new HashMap<>();
     }
 
     public MotionLimits getMotionLimits() {
@@ -1212,6 +1243,24 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             }
             return () -> objectInput(key, type);
         }
+
+        @Override
+        public PIDController pid(String name) {
+            PIDController pid = controlLoopPids.get(name);
+            if (pid == null) {
+                throw new IllegalArgumentException("No PID profile found for name " + name);
+            }
+            return pid;
+        }
+
+        @Override
+        public SimpleMotorFeedforward feedforward(String name) {
+            SimpleMotorFeedforward ff = controlLoopFeedforwards.get(name);
+            if (ff == null) {
+                throw new IllegalArgumentException("No feedforward profile found for name " + name);
+            }
+            return ff;
+        }
     }
 
     private static final class ControlLoopRunner<M extends Mechanism> {
@@ -1302,12 +1351,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+        if (!RobotSendableSystem.isShuffleboardEnabled()) {
+            return tab;
+        }
         shuffleboardEnabled = true;
         shuffleboardInternal(tab, level);
         return tab;
     }
 
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        if (!RobotSendableSystem.isShuffleboardEnabled()) {
+            return layout;
+        }
         shuffleboardEnabled = true;
         shuffleboardInternal(layout, level);
         return layout;

@@ -71,6 +71,10 @@ public class MechanismConfig<T extends Mechanism> {
     public List<PeriodicHookBinding<T>> periodicHookBindings = new ArrayList<>();
     /** Optional custom control loops that return output contributions. */
     public List<ControlLoopBinding<T>> controlLoops = new ArrayList<>();
+    /** Optional named PID profiles for control-loop usage. */
+    public Map<String, PidProfile> controlLoopPidProfiles = new HashMap<>();
+    /** Optional named feedforward profiles for control-loop usage. */
+    public Map<String, SimpleMotorFeedforward> controlLoopFeedforwardProfiles = new HashMap<>();
     /** Optional boolean inputs exposed to state hooks. */
     public Map<String, BooleanSupplier> inputs = new HashMap<>();
     /** Optional double inputs exposed to state hooks. */
@@ -1028,6 +1032,42 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Registers a named PID profile that control loops can access by name.
+     */
+    public MechanismConfig<T> addControlLoopPid(String name, double kP, double kI, double kD) {
+        Objects.requireNonNull(name, "name");
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("PID profile name cannot be blank");
+        }
+        controlLoopPidProfiles.put(name, new PidProfile(kP, kI, kD, Double.NaN));
+        return this;
+    }
+
+    /**
+     * Registers a named PID profile with an I-zone that control loops can access by name.
+     */
+    public MechanismConfig<T> addControlLoopPid(String name, double kP, double kI, double kD, double iZone) {
+        Objects.requireNonNull(name, "name");
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("PID profile name cannot be blank");
+        }
+        controlLoopPidProfiles.put(name, new PidProfile(kP, kI, kD, iZone));
+        return this;
+    }
+
+    /**
+     * Registers a named feedforward profile that control loops can access by name.
+     */
+    public MechanismConfig<T> addControlLoopFeedforward(String name, double kS, double kV, double kA) {
+        Objects.requireNonNull(name, "name");
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("feedforward profile name cannot be blank");
+        }
+        controlLoopFeedforwardProfiles.put(name, new SimpleMotorFeedforward(kS, kV, kA));
+        return this;
+    }
+
+    /**
      * Registers a custom control loop with a period specified in seconds.
      */
     public MechanismConfig<T> addControlLoopSeconds(String name, double periodSeconds, MechanismControlLoop<T> loop) {
@@ -1048,6 +1088,8 @@ public class MechanismConfig<T extends Mechanism> {
             String name,
             double periodSeconds,
             MechanismControlLoop<M> loop) { }
+
+    public record PidProfile(double kP, double kI, double kD, double iZone) { }
 
     public record PeriodicHookBinding<M extends Mechanism>(
             Consumer<M> hook,

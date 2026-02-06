@@ -11,6 +11,13 @@ import java.util.function.Supplier;
 public interface RobotSendableSystem {
 
     String SHUFFLEBOARD_ROOT = "Athena";
+    static boolean isShuffleboardEnabled() {
+      return ShuffleboardGate.ENABLED;
+    }
+
+    static void setShuffleboardEnabled(boolean enabled) {
+      ShuffleboardGate.ENABLED = enabled;
+    }
 
     public static enum SendableLevel {
       COMP,
@@ -38,6 +45,9 @@ public interface RobotSendableSystem {
     }
 
     default RobotSendableSystem shuffleboard(String tab, SendableLevel level) {
+      if (!isShuffleboardEnabled()) {
+        return this;
+      }
       shuffleboard(Shuffleboard.getTab(resolveShuffleboardTab(tab)), level);
       return this;
     }
@@ -75,6 +85,11 @@ public interface RobotSendableSystem {
 
     static <T> Supplier<T> rateLimit(Supplier<T> supplier, DoubleSupplier periodSecondsSupplier) {
       return new RateLimitedSupplier<>(supplier, periodSecondsSupplier);
+    }
+
+    final class ShuffleboardGate {
+      private ShuffleboardGate() {}
+      private static volatile boolean ENABLED = true;
     }
 
     final class ShuffleboardRate {

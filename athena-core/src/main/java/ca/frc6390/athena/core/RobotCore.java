@@ -12,6 +12,7 @@ import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
+import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
@@ -36,6 +37,7 @@ import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -48,7 +50,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
             boolean autoInitResetEnabled, TelemetryRegistry.TelemetryConfig telemetryConfig,
-            List<RegisterableMechanism> mechanisms) {
+            List<RegisterableMechanism> mechanisms, boolean performanceMode,
+            boolean timingDebugEnabled, boolean telemetryEnabled) {
 
         public static RobotCoreConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
             return new RobotCoreConfig<>(
@@ -57,7 +60,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     RobotVisionConfig.defualt(),
                     true,
                     TelemetryRegistry.TelemetryConfig.defualt(),
-                    List.of());
+                    List.of(),
+                    false,
+                    false,
+                    true);
         }
 
         public static RobotCoreConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
@@ -67,7 +73,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     RobotVisionConfig.defualt(),
                     true,
                     TelemetryRegistry.TelemetryConfig.defualt(),
-                    List.of());
+                    List.of(),
+                    false,
+                    false,
+                    true);
         }
 
         public RobotCoreConfig<T> setLocalization(RobotLocalizationConfig localizationConfig) {
@@ -77,7 +86,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     visionConfig,
                     autoInitResetEnabled,
                     telemetryConfig,
-                    mechanisms);
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled);
         }
 
         public RobotCoreConfig<T> setVision(RobotVisionConfig visionConfig) {
@@ -87,7 +99,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     visionConfig,
                     autoInitResetEnabled,
                     telemetryConfig,
-                    mechanisms);
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled);
         }
 
         public RobotCoreConfig<T> setVision(ConfigurableCamera... cameras) {
@@ -97,7 +112,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     RobotVisionConfig.defualt().addCameras(cameras),
                     autoInitResetEnabled,
                     telemetryConfig,
-                    mechanisms);
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled);
         }
 
         public RobotCoreConfig<T> setAutoInitResetEnabled(boolean enabled) {
@@ -107,7 +125,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     visionConfig,
                     enabled,
                     telemetryConfig,
-                    mechanisms);
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled);
         }
 
         public RobotCoreConfig<T> setTelemetry(TelemetryRegistry.TelemetryConfig telemetryConfig) {
@@ -117,7 +138,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     visionConfig,
                     autoInitResetEnabled,
                     telemetryConfig,
-                    mechanisms);
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled);
         }
 
         /**
@@ -135,7 +159,49 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     visionConfig,
                     autoInitResetEnabled,
                     telemetryConfig,
-                    merged);
+                    merged,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled);
+        }
+
+        public RobotCoreConfig<T> setPerformanceMode(boolean enabled) {
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    enabled,
+                    timingDebugEnabled,
+                    telemetryEnabled);
+        }
+
+        public RobotCoreConfig<T> setTimingDebugEnabled(boolean enabled) {
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    enabled,
+                    telemetryEnabled);
+        }
+
+        public RobotCoreConfig<T> setTelemetryEnabled(boolean enabled) {
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    enabled);
         }
 
         public RobotCore<T> create() {
@@ -157,6 +223,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private boolean autoInitResetEnabled;
     private NetworkTableEntry autoInitResetEntry;
     private final List<RegisterableMechanism> configuredMechanisms;
+    private final boolean timingDebugEnabled;
+    private final boolean telemetryEnabled;
 
     public RobotCore(RobotCoreConfig<T> config) {
         activeInstance = this;
@@ -171,6 +239,16 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         telemetry = TelemetryRegistry.create(config.telemetryConfig());
         autoInitResetEnabled = config.autoInitResetEnabled();
         configuredMechanisms = config.mechanisms() != null ? List.copyOf(config.mechanisms()) : List.of();
+        timingDebugEnabled = config.timingDebugEnabled();
+        telemetryEnabled = config.telemetryEnabled();
+        if (config.performanceMode()) {
+            RobotSendableSystem.setShuffleboardEnabled(false);
+            telemetry.setEnabled(false);
+        }
+        if (!telemetryEnabled) {
+            telemetry.setEnabled(false);
+        }
+        LoopTiming.setDebugAlways(timingDebugEnabled);
 
         if (localization != null && vision != null) {
             localization.setRobotVision(vision);
@@ -209,7 +287,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         double t1 = Timer.getFPGATimestamp();
         telemetry.tick();
         double t2 = Timer.getFPGATimestamp();
-        if (localization != null) {
+        if (localization != null && !DriverStation.isDisabled()) {
             localization.updateAutoVisualization(autos);
         }
         double t3 = Timer.getFPGATimestamp();

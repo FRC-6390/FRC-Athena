@@ -10,17 +10,22 @@ public final class LoopTiming {
     private static final long REPORT_PERIOD_MS = 1000;
     private static volatile boolean sampleMechanismsNext = false;
     private static volatile boolean samplingMechanisms = false;
+    private static volatile boolean debugAlways = false;
     private static long lastReportMs = 0;
     private static final Map<String, Double> mechanismDurationsMs = new HashMap<>();
 
     private LoopTiming() {}
 
     static void beginCycle() {
-        samplingMechanisms = sampleMechanismsNext;
+        samplingMechanisms = debugAlways || sampleMechanismsNext;
         sampleMechanismsNext = false;
         if (samplingMechanisms) {
             mechanismDurationsMs.clear();
         }
+    }
+
+    public static void setDebugAlways(boolean enabled) {
+        debugAlways = enabled;
     }
 
     public static boolean shouldSampleMechanisms() {
@@ -36,9 +41,6 @@ public final class LoopTiming {
 
     static void endCycle(double t0, double t1, double t2, double t3, double t4) {
         double total = t4 - t0;
-        if (total <= LOOP_BUDGET_SECONDS) {
-            return;
-        }
         long nowMs = (long) (Timer.getFPGATimestamp() * 1000.0);
         if (nowMs - lastReportMs < REPORT_PERIOD_MS) {
             return;
@@ -63,12 +65,16 @@ public final class LoopTiming {
         if (samplingMechanisms && !mechanismDurationsMs.isEmpty()) {
             message.append(" | Top mechanisms: ");
             appendTopMechanisms(message);
-        } else {
+        } else if (!debugAlways) {
             message.append(" | Sampling mechanisms next cycle.");
             sampleMechanismsNext = true;
         }
 
-        DriverStation.reportWarning(message.toString(), false);
+        String text = message.toString();
+        if (total > LOOP_BUDGET_SECONDS) {
+            DriverStation.reportWarning(text, false);
+        }
+        System.out.println("[Athena][LoopTiming] " + text);
     }
 
     private static String formatMs(double ms) {

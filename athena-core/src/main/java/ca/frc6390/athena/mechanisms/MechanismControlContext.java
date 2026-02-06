@@ -5,6 +5,9 @@ import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
+import ca.frc6390.athena.hardware.encoder.Encoder;
 
 /**
  * Read-only view used by custom control loops.
@@ -12,6 +15,20 @@ import edu.wpi.first.wpilibj.RobotController;
  * @param <T> mechanism type
  */
 public interface MechanismControlContext<T extends Mechanism> {
+
+    enum PositionUnit {
+        ROTATIONS,
+        RADIANS,
+        DEGREES,
+        ENCODER_UNITS
+    }
+
+    enum VelocityUnit {
+        ROTATIONS_PER_SEC,
+        RAD_PER_SEC,
+        DEG_PER_SEC,
+        ENCODER_UNITS_PER_SEC
+    }
 
     T mechanism();
 
@@ -41,6 +58,16 @@ public interface MechanismControlContext<T extends Mechanism> {
     <V> V objectInput(String key, Class<V> type);
 
     <V> Supplier<V> objectInputSupplier(String key, Class<V> type);
+
+    /**
+     * Returns a named PID controller registered in the mechanism config.
+     */
+    PIDController pid(String name);
+
+    /**
+     * Returns a named feedforward registered in the mechanism config.
+     */
+    SimpleMotorFeedforward feedforward(String name);
 
     default boolean usesVoltage() {
         return mechanism().isUseVoltage();
@@ -95,6 +122,66 @@ public interface MechanismControlContext<T extends Mechanism> {
             case PERCENT -> percentToOutput(value);
             case POSITION, VELOCITY -> value;
         };
+    }
+
+    /**
+     * Converts a position value to rotations.
+     */
+    default double positionToRotations(double value, PositionUnit unit) {
+        if (unit == null) {
+            return value;
+        }
+        return switch (unit) {
+            case ROTATIONS -> value;
+            case RADIANS -> value / (2.0 * Math.PI);
+            case DEGREES -> value / 360.0;
+            case ENCODER_UNITS -> {
+                Encoder encoder = mechanism().getEncoder();
+                double conversion = encoder != null ? encoder.getConversion() : 0.0;
+                if (!Double.isFinite(conversion) || conversion == 0.0) {
+                    yield 0.0;
+                }
+                yield value / conversion;
+            }
+        };
+    }
+
+    /**
+     * Converts a velocity value to rotations per second.
+     */
+    default double velocityToRotationsPerSecond(double value, VelocityUnit unit) {
+        if (unit == null) {
+            return value;
+        }
+        return switch (unit) {
+            case ROTATIONS_PER_SEC -> value;
+            case RAD_PER_SEC -> value / (2.0 * Math.PI);
+            case DEG_PER_SEC -> value / 360.0;
+            case ENCODER_UNITS_PER_SEC -> {
+                Encoder encoder = mechanism().getEncoder();
+                double conversion = encoder != null ? encoder.getConversion() : 0.0;
+                if (!Double.isFinite(conversion) || conversion == 0.0) {
+                    yield 0.0;
+                }
+                yield value / conversion;
+            }
+        };
+    }
+
+    /**
+     * Converts a position value into the mechanism's output space.
+     */
+    default double positionToOutput(double value, PositionUnit unit) {
+        double rotations = positionToRotations(value, unit);
+        return toOutput(OutputType.POSITION, rotations);
+    }
+
+    /**
+     * Converts a velocity value into the mechanism's output space.
+     */
+    default double velocityToOutput(double value, VelocityUnit unit) {
+        double rps = velocityToRotationsPerSecond(value, unit);
+        return toOutput(OutputType.VELOCITY, rps);
     }
 
     /**

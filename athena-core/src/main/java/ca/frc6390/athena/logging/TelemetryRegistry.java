@@ -7,11 +7,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
+import ca.frc6390.athena.core.RobotSendableSystem;
 import edu.wpi.first.wpilibj.DriverStation;
 
 public final class TelemetryRegistry {
     private static final String DEFAULT_PREFIX = "Athena";
     private static final int DEFAULT_PERIOD_MS = 100;
+    private volatile boolean enabled = true;
     private final TelemetrySink diskSink;
     private final TelemetrySink shuffleboardSink;
     private final List<Entry> entries;
@@ -116,6 +118,9 @@ public final class TelemetryRegistry {
     }
 
     public void tick(long nowMs) {
+        if (!enabled || entries.isEmpty()) {
+            return;
+        }
         for (Entry entry : entries) {
             if (nowMs - entry.lastPublishMs < entry.periodMs) {
                 continue;
@@ -144,12 +149,20 @@ public final class TelemetryRegistry {
             if (entry.diskOutput != null) {
                 entry.diskOutput.write(value);
             }
-            if (entry.shuffleboardOutput != null) {
+            if (entry.shuffleboardOutput != null && RobotSendableSystem.isShuffleboardEnabled()) {
                 entry.shuffleboardOutput.write(value);
             }
             entry.lastValue = snapshotValue(entry.type, value);
             entry.lastPublishMs = nowMs;
         }
+    }
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
     }
 
     private void registerField(Object target, Field field, Telemetry telemetry) {

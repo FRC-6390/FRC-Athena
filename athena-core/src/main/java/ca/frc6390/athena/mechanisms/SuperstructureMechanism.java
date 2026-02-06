@@ -250,6 +250,9 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+        if (!RobotSendableSystem.isShuffleboardEnabled()) {
+            return tab;
+        }
         stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList), level);
         List<Mechanism> mechanisms = new ArrayList<>();
         flattenMechanisms(mechanisms, this);
