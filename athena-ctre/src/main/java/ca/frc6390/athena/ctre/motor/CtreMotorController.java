@@ -67,6 +67,7 @@ public class CtreMotorController implements MotorController {
         }
 
         TalonFX talon = new TalonFX(config.id, resolveCanBus(config.canbus));
+        talon.getConfigurator().apply(new TalonFXConfiguration());
         EncoderConfig encoderCfg = config.encoderConfig;
         if (encoderCfg == null) {
             encoderCfg = new EncoderConfig()
