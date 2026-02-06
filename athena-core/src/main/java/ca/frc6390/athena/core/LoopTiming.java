@@ -23,11 +23,11 @@ public final class LoopTiming {
         }
     }
 
-    static boolean shouldSampleMechanisms() {
+    public static boolean shouldSampleMechanisms() {
         return samplingMechanisms;
     }
 
-    static void recordMechanism(String name, double durationMs) {
+    public static void recordMechanism(String name, double durationMs) {
         if (!samplingMechanisms || name == null) {
             return;
         }
