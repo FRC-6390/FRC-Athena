@@ -27,6 +27,12 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     default Rotation2d getVelocityY() { return new Rotation2d(); }
     default Rotation2d getVelocityZ() { return new Rotation2d(); }
 
+    // Optional angular acceleration accessors (default to zero)
+    default double getAngularAccelerationZRadiansPerSecondSquared() { return 0.0; }
+    default double getAngularAccelerationZDegreesPerSecondSquared() {
+        return Math.toDegrees(getAngularAccelerationZRadiansPerSecondSquared());
+    }
+
     // Optional linear acceleration accessors (default to zero)
     default double getAccelerationX() { return 0.0; }
     default double getAccelerationY() { return 0.0; }
@@ -58,6 +64,12 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     default Rotation2d getCachedVelocityX() { return getVelocityX(); }
     default Rotation2d getCachedVelocityY() { return getVelocityY(); }
     default Rotation2d getCachedVelocityZ() { return getVelocityZ(); }
+    default double getCachedAngularAccelerationZRadiansPerSecondSquared() {
+        return getAngularAccelerationZRadiansPerSecondSquared();
+    }
+    default double getCachedAngularAccelerationZDegreesPerSecondSquared() {
+        return Math.toDegrees(getCachedAngularAccelerationZRadiansPerSecondSquared());
+    }
     default double getCachedAccelerationX() { return getAccelerationX(); }
     default double getCachedAccelerationY() { return getAccelerationY(); }
     default double getCachedAccelerationZ() { return getAccelerationZ(); }

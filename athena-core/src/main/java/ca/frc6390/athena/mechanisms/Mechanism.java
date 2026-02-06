@@ -1085,6 +1085,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 continue;
             }
             if (runner.shouldRun(nowSeconds)) {
+                double dtSeconds;
+                if (Double.isNaN(runner.lastRunSeconds)) {
+                    dtSeconds = runner.periodSeconds();
+                } else {
+                    dtSeconds = nowSeconds - runner.lastRunSeconds;
+                }
+                if (!Double.isFinite(dtSeconds) || dtSeconds < 0.0) {
+                    dtSeconds = Double.NaN;
+                }
+                controlContext.setControlLoopDtSeconds(dtSeconds);
                 runner.setLastOutput(runner.loop().calculate(controlContext));
                 runner.setLastRunSeconds(nowSeconds);
             }
@@ -1174,9 +1184,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private final class MechanismControlContextImpl implements MechanismControlContext<Mechanism> {
+        private double controlLoopDtSeconds = Double.NaN;
+
         @Override
         public Mechanism mechanism() {
             return Mechanism.this;
+        }
+
+        @Override
+        public double controlLoopDtSeconds() {
+            return controlLoopDtSeconds;
         }
 
         @Override
@@ -1261,6 +1278,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             }
             return ff;
         }
+
+        private void setControlLoopDtSeconds(double dtSeconds) {
+            this.controlLoopDtSeconds = dtSeconds;
+        }
     }
 
     private static final class ControlLoopRunner<M extends Mechanism> {
@@ -1294,6 +1315,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         private void setLastRunSeconds(double nowSeconds) {
             this.lastRunSeconds = nowSeconds;
+        }
+
+        private double periodSeconds() {
+            return periodSeconds;
         }
 
         private boolean shouldRun(double nowSeconds) {

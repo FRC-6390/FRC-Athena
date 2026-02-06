@@ -33,6 +33,9 @@ public class VirtualImu implements Imu {
     private double maxSpeedWindowSeconds = DEFAULT_MAX_SPEED_WINDOW_SECONDS;
     private double maxLinearSpeed = 0.0;
     private double maxRadialSpeed = 0.0;
+    private double cachedAngularAccelerationZ = 0.0;
+    private double lastVelZRadians = Double.NaN;
+    private double lastUpdateSeconds = Double.NaN;
 
     private static class VirtualAxis {
         private final Supplier<Rotation2d> supplier;
@@ -102,6 +105,11 @@ public class VirtualImu implements Imu {
     @Override
     public Rotation2d getVelocityZ() {
         return useSimulatedReadings ? applySimInversion(simVelZ) : delegate.getVelocityZ();
+    }
+
+    @Override
+    public double getAngularAccelerationZRadiansPerSecondSquared() {
+        return cachedAngularAccelerationZ;
     }
 
     @Override
@@ -183,6 +191,7 @@ public class VirtualImu implements Imu {
         if (!useSimulatedReadings) {
             delegate.update();
         }
+        updateAngularAcceleration();
         updateMaxSpeedTracking();
     }
 
@@ -297,5 +306,24 @@ public class VirtualImu implements Imu {
         Rotation2d velZ = getVelocityZ();
         double omega = velZ != null ? Math.abs(velZ.getRadians()) : 0.0;
         return Double.isFinite(omega) ? omega : 0.0;
+    }
+
+    private void updateAngularAcceleration() {
+        double now = Timer.getFPGATimestamp();
+        Rotation2d velZ = getVelocityZ();
+        double currentVel = velZ != null ? velZ.getRadians() : 0.0;
+        if (Double.isNaN(lastUpdateSeconds) || !Double.isFinite(lastUpdateSeconds)) {
+            cachedAngularAccelerationZ = 0.0;
+        } else {
+            double dt = now - lastUpdateSeconds;
+            if (dt > 0.0 && Double.isFinite(dt)) {
+                double accel = (currentVel - lastVelZRadians) / dt;
+                cachedAngularAccelerationZ = Double.isFinite(accel) ? accel : 0.0;
+            } else {
+                cachedAngularAccelerationZ = 0.0;
+            }
+        }
+        lastUpdateSeconds = now;
+        lastVelZRadians = currentVel;
     }
 }

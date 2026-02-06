@@ -19,6 +19,14 @@ public interface RobotSendableSystem {
       ShuffleboardGate.ENABLED = enabled;
     }
 
+    static boolean isDebugShuffleboardEnabled() {
+      return DebugShuffleboardGate.ENABLED;
+    }
+
+    static void setDebugShuffleboardEnabled(boolean enabled) {
+      DebugShuffleboardGate.ENABLED = enabled;
+    }
+
     public static enum SendableLevel {
       COMP,
       DEBUG,
@@ -46,6 +54,9 @@ public interface RobotSendableSystem {
 
     default RobotSendableSystem shuffleboard(String tab, SendableLevel level) {
       if (!isShuffleboardEnabled()) {
+        return this;
+      }
+      if (level == SendableLevel.DEBUG && !isDebugShuffleboardEnabled()) {
         return this;
       }
       shuffleboard(Shuffleboard.getTab(resolveShuffleboardTab(tab)), level);
@@ -92,9 +103,14 @@ public interface RobotSendableSystem {
       private static volatile boolean ENABLED = true;
     }
 
+    final class DebugShuffleboardGate {
+      private DebugShuffleboardGate() {}
+      private static volatile boolean ENABLED = false;
+    }
+
     final class ShuffleboardRate {
       private ShuffleboardRate() {}
-      private static volatile double DEFAULT_PERIOD_SECONDS = 0.25;
+      private static volatile double DEFAULT_PERIOD_SECONDS = 1.0;
     }
 
     final class RateLimiter {

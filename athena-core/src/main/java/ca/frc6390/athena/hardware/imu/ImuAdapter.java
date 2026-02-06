@@ -15,10 +15,13 @@ public class ImuAdapter implements Imu {
     private Rotation2d cachedVelX = new Rotation2d();
     private Rotation2d cachedVelY = new Rotation2d();
     private Rotation2d cachedVelZ = new Rotation2d();
+    private double cachedAngularAccelerationZ;
     private double cachedAccelerationX;
     private double cachedAccelerationY;
     private double cachedAccelerationZ;
     private boolean cachedConnected = true;
+    private double lastVelZRadians = Double.NaN;
+    private double lastUpdateSeconds = Double.NaN;
 
     public ImuAdapter(Imu raw, ImuConfig config) {
         this.raw = raw;
@@ -82,6 +85,11 @@ public class ImuAdapter implements Imu {
     @Override
     public Rotation2d getVelocityZ() {
         return invertRotation(raw.getVelocityZ());
+    }
+
+    @Override
+    public double getAngularAccelerationZRadiansPerSecondSquared() {
+        return cachedAngularAccelerationZ;
     }
 
     @Override
@@ -158,6 +166,7 @@ public class ImuAdapter implements Imu {
         cachedVelX = invertRotation(raw.getVelocityX());
         cachedVelY = invertRotation(raw.getVelocityY());
         cachedVelZ = invertRotation(raw.getVelocityZ());
+        updateAngularAcceleration();
         cachedAccelerationX = inverted ? -raw.getAccelerationX() : raw.getAccelerationX();
         cachedAccelerationY = inverted ? -raw.getAccelerationY() : raw.getAccelerationY();
         cachedAccelerationZ = inverted ? -raw.getAccelerationZ() : raw.getAccelerationZ();
@@ -192,6 +201,11 @@ public class ImuAdapter implements Imu {
     @Override
     public Rotation2d getCachedVelocityZ() {
         return cachedVelZ;
+    }
+
+    @Override
+    public double getCachedAngularAccelerationZRadiansPerSecondSquared() {
+        return cachedAngularAccelerationZ;
     }
 
     @Override
@@ -247,4 +261,21 @@ public class ImuAdapter implements Imu {
         return Rotation2d.fromRadians(-value.getRadians());
     }
 
+    private void updateAngularAcceleration() {
+        double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+        double currentVel = cachedVelZ != null ? cachedVelZ.getRadians() : 0.0;
+        if (Double.isNaN(lastUpdateSeconds) || !Double.isFinite(lastUpdateSeconds)) {
+            cachedAngularAccelerationZ = 0.0;
+        } else {
+            double dt = now - lastUpdateSeconds;
+            if (dt > 0.0 && Double.isFinite(dt)) {
+                double accel = (currentVel - lastVelZRadians) / dt;
+                cachedAngularAccelerationZ = Double.isFinite(accel) ? accel : 0.0;
+            } else {
+                cachedAngularAccelerationZ = 0.0;
+            }
+        }
+        lastUpdateSeconds = now;
+        lastVelZRadians = currentVel;
+    }
 }

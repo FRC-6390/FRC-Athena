@@ -8,6 +8,9 @@ import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderGroup;
+import ca.frc6390.athena.hardware.motor.MotorController;
+import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 
 /**
  * Read-only view used by custom control loops.
@@ -31,6 +34,126 @@ public interface MechanismControlContext<T extends Mechanism> {
     }
 
     T mechanism();
+
+    /**
+     * Returns the elapsed time (seconds) since this control loop last ran.
+     * If unavailable, returns {@link Double#NaN}.
+     */
+    default double controlLoopDtSeconds() {
+        return Double.NaN;
+    }
+
+    /**
+     * Returns the motor group for the mechanism, if any.
+     */
+    default MotorControllerGroup motorGroup() {
+        return mechanism().getMotorGroup();
+    }
+
+    /**
+     * Returns the individual motors for the mechanism, if any.
+     */
+    default MotorController[] motors() {
+        MotorControllerGroup group = motorGroup();
+        return group != null ? group.getControllers() : new MotorController[0];
+    }
+
+    /**
+     * Returns the primary encoder for the mechanism, if any.
+     */
+    default Encoder encoder() {
+        return mechanism().getEncoder();
+    }
+
+    /**
+     * Returns the encoder group for the mechanism's motor group, if any.
+     */
+    default EncoderGroup encoderGroup() {
+        MotorControllerGroup group = motorGroup();
+        return group != null ? group.getEncoderGroup() : null;
+    }
+
+    /**
+     * Returns the encoders for the mechanism's motor group, if any.
+     */
+    default Encoder[] encoders() {
+        EncoderGroup group = encoderGroup();
+        return group != null ? group.getEncoders() : new Encoder[0];
+    }
+
+    /**
+     * Converts a raw encoder position (rotations) into mechanism-space units
+     * using the encoder's gear ratio, conversion, and offsets.
+     */
+    default double encoderRawToMechanismPosition(double rawRotations) {
+        Encoder encoder = encoder();
+        if (encoder == null) {
+            return 0.0;
+        }
+        double conversion = encoder.getConversion();
+        double conversionOffset = encoder.getConversionOffset();
+        double gearRatio = encoder.getGearRatio();
+        double offset = encoder.getOffset();
+
+        double safeConversion = conversion != 0.0 ? conversion : 1.0;
+        double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
+        double value = ((rawRotations - offset) * safeGearRatio) * safeConversion + conversionOffset;
+        return Double.isFinite(value) ? value : 0.0;
+    }
+
+    /**
+     * Converts a mechanism-space position into raw encoder rotations
+     * using the encoder's gear ratio, conversion, and offsets.
+     */
+    default double mechanismPositionToEncoderRaw(double position) {
+        Encoder encoder = encoder();
+        if (encoder == null) {
+            return 0.0;
+        }
+        double conversion = encoder.getConversion();
+        double conversionOffset = encoder.getConversionOffset();
+        double gearRatio = encoder.getGearRatio();
+        double offset = encoder.getOffset();
+
+        double safeConversion = conversion != 0.0 ? conversion : 1.0;
+        double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
+        double value = ((position - conversionOffset) / safeConversion) / safeGearRatio + offset;
+        return Double.isFinite(value) ? value : 0.0;
+    }
+
+    /**
+     * Converts a raw encoder velocity (rotations/sec) into mechanism-space units/sec.
+     */
+    default double encoderRawToMechanismVelocity(double rawRotationsPerSecond) {
+        Encoder encoder = encoder();
+        if (encoder == null) {
+            return 0.0;
+        }
+        double conversion = encoder.getConversion();
+        double gearRatio = encoder.getGearRatio();
+
+        double safeConversion = conversion != 0.0 ? conversion : 1.0;
+        double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
+        double value = (rawRotationsPerSecond * safeGearRatio) * safeConversion;
+        return Double.isFinite(value) ? value : 0.0;
+    }
+
+    /**
+     * Converts a mechanism-space velocity (units/sec) into raw encoder rotations/sec.
+     */
+    default double mechanismVelocityToEncoderRaw(double velocity) {
+        Encoder encoder = encoder();
+        if (encoder == null) {
+            return 0.0;
+        }
+        double conversion = encoder.getConversion();
+        double gearRatio = encoder.getGearRatio();
+
+        double safeConversion = conversion != 0.0 ? conversion : 1.0;
+        double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
+        double value = (velocity / safeConversion) / safeGearRatio;
+        return Double.isFinite(value) ? value : 0.0;
+    }
 
     /**
      * Base setpoint for the mechanism, excluding any runtime overrides.
@@ -234,4 +357,5 @@ public interface MechanismControlContext<T extends Mechanism> {
     default boolean isControlLoopEnabled(String name) {
         return mechanism().isControlLoopEnabled(name);
     }
+    
 }
