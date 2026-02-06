@@ -121,7 +121,7 @@ public class MotorControllerGroup implements RobotSendableDevice {
         return layout;
     }
 
-    private boolean allMotorsCachedConnected() {
+    public boolean allMotorsCachedConnected() {
         return Arrays.stream(controllers).allMatch(MotorController::isCachedConnected);
     }
 

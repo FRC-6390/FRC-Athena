@@ -15,6 +15,7 @@ import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import java.util.ArrayList;
@@ -250,6 +251,24 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList), level);
+        List<Mechanism> mechanisms = new ArrayList<>();
+        flattenMechanisms(mechanisms, this);
+        if (!mechanisms.isEmpty()) {
+            ShuffleboardLayout mechanismsLayout = tab.getLayout("Mechanisms", BuiltInLayouts.kList);
+            int index = 1;
+            for (Mechanism mechanism : mechanisms) {
+                if (mechanism == null) {
+                    continue;
+                }
+                String name = mechanism.getName();
+                if (name == null || name.isBlank()) {
+                    name = "Mechanism-" + index;
+                }
+                ShuffleboardLayout mechanismLayout = mechanismsLayout.getLayout(name, BuiltInLayouts.kList);
+                mechanism.shuffleboard(mechanismLayout, level);
+                index++;
+            }
+        }
         return tab;
     }
 

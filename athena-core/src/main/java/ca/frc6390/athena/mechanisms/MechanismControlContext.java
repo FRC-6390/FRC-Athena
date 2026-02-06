@@ -25,7 +25,8 @@ public interface MechanismControlContext<T extends Mechanism> {
     Enum<?> state();
 
     default RobotCore<?> robotCore() {
-        return mechanism().getRobotCore();
+        RobotCore<?> core = mechanism().getRobotCore();
+        return core != null ? core : RobotCore.getActiveInstance();
     }
 
     boolean input(String key);

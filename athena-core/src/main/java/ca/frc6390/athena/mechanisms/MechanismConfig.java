@@ -67,6 +67,8 @@ public class MechanismConfig<T extends Mechanism> {
     public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
     /** Optional hooks that run every periodic loop. */
     public List<Consumer<T>> periodicHooks = new ArrayList<>();
+    /** Optional hooks that run on a fixed cadence rather than every loop. */
+    public List<PeriodicHookBinding<T>> periodicHookBindings = new ArrayList<>();
     /** Optional custom control loops that return output contributions. */
     public List<ControlLoopBinding<T>> controlLoops = new ArrayList<>();
     /** Optional boolean inputs exposed to state hooks. */
@@ -992,6 +994,14 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Registers a hook that runs on a fixed cadence (milliseconds). A period of 0 runs every loop.
+     */
+    public MechanismConfig<T> addOnPeriodicHook(Consumer<T> hook, double periodMs) {
+        periodicHookBindings.add(new PeriodicHookBinding<>(hook, periodMs));
+        return this;
+    }
+
+    /**
      * Registers a custom control loop that runs at the requested period in milliseconds.
      * Returning a value contributes directly to the mechanism output each cycle.
      *
@@ -1039,6 +1049,17 @@ public class MechanismConfig<T extends Mechanism> {
             String name,
             double periodSeconds,
             MechanismControlLoop<M> loop) { }
+
+    public record PeriodicHookBinding<M extends Mechanism>(
+            Consumer<M> hook,
+            double periodMs) {
+        public PeriodicHookBinding {
+            Objects.requireNonNull(hook, "hook");
+            if (!Double.isFinite(periodMs) || periodMs < 0.0) {
+                throw new IllegalArgumentException("periodMs must be finite and >= 0");
+            }
+        }
+    }
 
     /**
      * Registers a callback that runs whenever the state machine enters any of the supplied states.

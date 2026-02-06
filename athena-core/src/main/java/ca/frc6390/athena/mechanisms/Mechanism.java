@@ -30,6 +30,7 @@ import java.util.function.DoubleSupplier;
 import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardContainer;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -111,6 +112,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean sysIdActive = false;
     private boolean sysIdPreviousOverride = false;
     private final List<Consumer<?>> periodicHooks;
+    private final List<PeriodicHookRunner<Mechanism>> timedPeriodicHooks;
     private final List<ControlLoopRunner<Mechanism>> controlLoops;
     private final Map<String, ControlLoopRunner<Mechanism>> controlLoopsByName;
     private final Set<String> disabledControlLoops;
@@ -122,6 +124,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private  DoubleSupplier customEncoderPos;
     private boolean shouldSetpointOverride = false;
     private double setPointOverride = 0;
+    private boolean shuffleboardEnabled;
+    private double lastShuffleboardCacheUpdateSeconds = Double.NaN;
 
     private enum RobotMode {
         TELE,
@@ -175,13 +179,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 this.sensorSimulation = MechanismSensorSimulation.forLimitSwitches(this);
             }
         } else {
-            this.sensorSimulation = MechanismSensorSimulation.empty();
+        this.sensorSimulation = MechanismSensorSimulation.empty();
         }
         this.periodicHooks = new ArrayList<>();
+        this.timedPeriodicHooks = new ArrayList<>();
         MechanismConfigRecord cfg = config.data();
         setBounds(cfg.minBound(), cfg.maxBound());
         setMotionLimits(cfg.motionLimits());
         this.periodicHooks.addAll(config.periodicHooks);
+        if (config.periodicHookBindings != null) {
+            for (MechanismConfig.PeriodicHookBinding<?> binding : config.periodicHookBindings) {
+                registerPeriodicHook(binding);
+            }
+        }
         this.shouldCustomEncoder = config.shouldCustomEncoder;
         this.customEncoderPos = config.customEncoderPos;
         this.controlLoopInputs = new HashMap<>(config.inputs);
@@ -300,6 +310,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             this.sensorSimulation = MechanismSensorSimulation.empty();
         }
         this.periodicHooks = new ArrayList<>();
+        this.timedPeriodicHooks = new ArrayList<>();
         this.controlLoops = new ArrayList<>();
         this.controlLoopsByName = new HashMap<>();
         this.disabledControlLoops = new HashSet<>();
@@ -499,6 +510,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return MathUtil.clamp(value, minBound, maxBound);
     }
 
+    protected boolean hasBounds() {
+        return boundsEnabled;
+    }
+
+    protected double getMinBound() {
+        return minBound;
+    }
+
+    protected double getMaxBound() {
+        return maxBound;
+    }
+
     public double getControllerSetpointVelocity(){
         return profiledPIDController != null ? profiledPIDController.getSetpoint().velocity : pidController != null ? pidController.getSetpoint() : 0;
     }
@@ -682,7 +705,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         double output = 0;
 
-        if ( (encoder != null && !encoder.isConnected()) || !motors.allMotorsConnected()) {
+        if ((encoder != null && !encoder.isCachedConnected()) || !motors.allMotorsCachedConnected()) {
             emergencyStopped = true;
         }
 
@@ -903,9 +926,29 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         for (Consumer<?> hook : periodicHooks) {
             ((Consumer<Mechanism>) hook).accept(this);
         }
+        if (!timedPeriodicHooks.isEmpty()) {
+            double nowSeconds = Timer.getFPGATimestamp();
+            double nowMs = nowSeconds * 1000.0;
+            for (PeriodicHookRunner<Mechanism> runner : timedPeriodicHooks) {
+                if (runner.shouldRun(nowMs)) {
+                    runner.run(this, nowMs);
+                }
+            }
+        }
     }
 
     private void updateShuffleboardCache() {
+        if (!shuffleboardEnabled) {
+            return;
+        }
+        double nowSeconds = Timer.getFPGATimestamp();
+        if (Double.isFinite(shuffleboardPeriodSeconds) && shuffleboardPeriodSeconds > 0.0
+                && Double.isFinite(nowSeconds)
+                && !Double.isNaN(lastShuffleboardCacheUpdateSeconds)
+                && (nowSeconds - lastShuffleboardCacheUpdateSeconds) < shuffleboardPeriodSeconds) {
+            return;
+        }
+        lastShuffleboardCacheUpdateSeconds = nowSeconds;
         cachedEmergencyStopped = emergencyStopped;
         cachedOverride = override;
         cachedAtSetpoint = atSetpoint();
@@ -1008,6 +1051,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 (MechanismConfig.MechanismControlLoop<Mechanism>) binding.loop());
         controlLoops.add(runner);
         controlLoopsByName.put(name, runner);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void registerPeriodicHook(MechanismConfig.PeriodicHookBinding<?> binding) {
+        if (binding == null) {
+            return;
+        }
+        timedPeriodicHooks.add(new PeriodicHookRunner<>((Consumer<Mechanism>) binding.hook(), binding.periodMs()));
     }
 
     private final class MechanismControlContextImpl implements MechanismControlContext<Mechanism> {
@@ -1129,6 +1180,35 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
+    private static final class PeriodicHookRunner<M extends Mechanism> {
+        private final Consumer<M> hook;
+        private final double periodMs;
+        private double lastRunMs = Double.NaN;
+
+        private PeriodicHookRunner(Consumer<M> hook, double periodMs) {
+            this.hook = hook;
+            this.periodMs = Math.max(0.0, periodMs);
+        }
+
+        private boolean shouldRun(double nowMs) {
+            if (!Double.isFinite(nowMs)) {
+                return true;
+            }
+            if (Double.isNaN(lastRunMs)) {
+                return true;
+            }
+            if (periodMs <= 0.0) {
+                return true;
+            }
+            return (nowMs - lastRunMs) >= periodMs;
+        }
+
+        private void run(M mechanism, double nowMs) {
+            hook.accept(mechanism);
+            lastRunMs = nowMs;
+        }
+    }
+
     @Override
     public void simulationPeriodic() {
         // Simulation updates are executed within periodic() to keep sensor data fresh before control.
@@ -1141,27 +1221,39 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+        shuffleboardEnabled = true;
+        shuffleboardInternal(tab, level);
+        return tab;
+    }
+
+    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        shuffleboardEnabled = true;
+        shuffleboardInternal(layout, level);
+        return layout;
+    }
+
+    private void shuffleboardInternal(ShuffleboardContainer container, SendableLevel level) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        ShuffleboardLayout motorsLayout = tab.getLayout("Motors", BuiltInLayouts.kList);
+        ShuffleboardLayout motorsLayout = container.getLayout("Motors", BuiltInLayouts.kList);
         motors.shuffleboard(motorsLayout, level);
 
         if (encoder != null) {
-            ShuffleboardLayout encoderLayout = tab.getLayout("Encoders", BuiltInLayouts.kList);
+            ShuffleboardLayout encoderLayout = container.getLayout("Encoders", BuiltInLayouts.kList);
             encoder.shuffleboard(encoderLayout, level);
         }
 
-        ShuffleboardLayout statusLayout = tab.getLayout("Status", BuiltInLayouts.kList);
+        ShuffleboardLayout statusLayout = container.getLayout("Status", BuiltInLayouts.kList);
         statusLayout.addBoolean("Emergency Stopped", RobotSendableSystem.rateLimit(() -> cachedEmergencyStopped, period));
         statusLayout.addBoolean("Override", RobotSendableSystem.rateLimit(() -> cachedOverride, period));
         statusLayout.addBoolean("At Setpoint", RobotSendableSystem.rateLimit(() -> cachedAtSetpoint, period));
 
-        ShuffleboardLayout setpointLayout = tab.getLayout("Setpoints", BuiltInLayouts.kList);
+        ShuffleboardLayout setpointLayout = container.getLayout("Setpoints", BuiltInLayouts.kList);
         setpointLayout.addDouble("Setpoint", RobotSendableSystem.rateLimit(() -> cachedSetpoint, period));
         if (level.equals(SendableLevel.DEBUG)) {
             setpointLayout.addDouble("Nudge", RobotSendableSystem.rateLimit(() -> cachedNudge, period));
         }
 
-        ShuffleboardLayout outputLayout = tab.getLayout("Outputs", BuiltInLayouts.kList);
+        ShuffleboardLayout outputLayout = container.getLayout("Outputs", BuiltInLayouts.kList);
         outputLayout.addDouble("Output", RobotSendableSystem.rateLimit(() -> cachedOutput, period));
         if (level.equals(SendableLevel.DEBUG)) {
             outputLayout.addDouble("PID Output", RobotSendableSystem.rateLimit(() -> cachedPidOutput, period));
@@ -1169,12 +1261,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         if (visualization != null) {
-            ShuffleboardLayout visualizationLayout = tab.getLayout("Visualization", BuiltInLayouts.kList);
+            ShuffleboardLayout visualizationLayout = container.getLayout("Visualization", BuiltInLayouts.kList);
             visualizationLayout.add("Mechanism2d", visualization.mechanism2d());
         }
 
         if (RobotBase.isSimulation()) {
-            ShuffleboardLayout simulationLayout = tab.getLayout("Simulation", BuiltInLayouts.kList);
+            ShuffleboardLayout simulationLayout = container.getLayout("Simulation", BuiltInLayouts.kList);
             simulationLayout.addBoolean("Simulation Enabled", RobotSendableSystem.rateLimit(() -> cachedHasSimulation, period));
             if (level.equals(SendableLevel.DEBUG)) {
                 simulationLayout.addDouble("Simulation dt", RobotSendableSystem.rateLimit(() -> cachedSimulationUpdatePeriodSeconds, period));
@@ -1182,7 +1274,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         if (level.equals(SendableLevel.DEBUG)) {
-            ShuffleboardLayout configLayout = tab.getLayout("Config", BuiltInLayouts.kList);
+            ShuffleboardLayout configLayout = container.getLayout("Config", BuiltInLayouts.kList);
             configLayout.add("Use Voltage", builder ->
                     builder.addBooleanProperty(
                             "Use Voltage",
@@ -1208,7 +1300,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         if (level.equals(SendableLevel.DEBUG)) {
-            ShuffleboardLayout limitsLayout = tab.getLayout("Limit Switches", BuiltInLayouts.kList);
+            ShuffleboardLayout limitsLayout = container.getLayout("Limit Switches", BuiltInLayouts.kList);
             for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
                 ShuffleboardLayout limitLayout =
                         limitsLayout.getLayout("DIO " + genericLimitSwitch.getPort(), BuiltInLayouts.kList);
@@ -1217,7 +1309,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             }
         }
 
-        ShuffleboardLayout commandsLayout = tab.getLayout("Commands", BuiltInLayouts.kList);
+        ShuffleboardLayout commandsLayout = container.getLayout("Commands", BuiltInLayouts.kList);
         commandsLayout.add("Brake Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Brake)))
                 .withWidget(BuiltInWidgets.kCommand);
         commandsLayout.add("Coast Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Coast)))
@@ -1233,7 +1325,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     .withWidget(BuiltInWidgets.kCommand);
         }
 
-        ShuffleboardLayout sysIdLayout = tab.getLayout("SysId", BuiltInLayouts.kList);
+        ShuffleboardLayout sysIdLayout = container.getLayout("SysId", BuiltInLayouts.kList);
         sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
                 .withWidget(BuiltInWidgets.kCommand);
         sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
@@ -1261,7 +1353,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 .withWidget(BuiltInWidgets.kBooleanBox);
 
         if (level.equals(SendableLevel.DEBUG)) {
-            ShuffleboardLayout controllersLayout = tab.getLayout("Controllers", BuiltInLayouts.kList);
+            ShuffleboardLayout controllersLayout = container.getLayout("Controllers", BuiltInLayouts.kList);
             if (pidController != null) {
                 controllersLayout.add("PID Controller", pidController);
             }
@@ -1269,8 +1361,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 controllersLayout.add("Profiled PID Controller", profiledPIDController);
             }
         }
-
-        return tab;
     }
 
     public Mechanism2d getMechanism2d() {

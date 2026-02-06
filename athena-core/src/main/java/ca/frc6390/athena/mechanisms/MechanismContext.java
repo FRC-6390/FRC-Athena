@@ -22,7 +22,8 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
     double baseSetpoint();
 
     default RobotCore<?> robotCore() {
-        return mechanism().getRobotCore();
+        RobotCore<?> core = mechanism().getRobotCore();
+        return core != null ? core : RobotCore.getActiveInstance();
     }
 
     boolean input(String key);

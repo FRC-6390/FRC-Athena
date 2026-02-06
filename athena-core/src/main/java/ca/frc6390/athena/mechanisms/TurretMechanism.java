@@ -56,9 +56,6 @@ public class TurretMechanism extends SimpleMotorMechanism {
         }
     }
 
-    private Rotation2d minRotation = Rotation2d.fromRadians(Double.NEGATIVE_INFINITY);
-    private Rotation2d maxRotation = Rotation2d.fromRadians(Double.POSITIVE_INFINITY);
-    private boolean enforceBounds = false;
     private Supplier<FieldHeadingVisualization> fieldHeadingVisualizationSupplier;
     private Supplier<Pose2d> fieldPoseSupplier;
     private DoubleSupplier fieldHeadingLengthSupplier;
@@ -223,36 +220,24 @@ public class TurretMechanism extends SimpleMotorMechanism {
         return this;
     }
 
-    /** Restricts turret travel to a bounded window to protect wiring. */
-    public TurretMechanism setRotationBounds(Rotation2d min, Rotation2d max) {
-        double minRad = min.getRadians();
-        double maxRad = max.getRadians();
-        if (maxRad <= minRad) {
-            throw new IllegalArgumentException("maxRotation must be greater than minRotation");
-        }
-        this.minRotation = min;
-        this.maxRotation = max;
-        this.enforceBounds = true;
-        setBounds(minRad, maxRad);
+    /** Removes any configured rotation bounds. */
+    public TurretMechanism clearRotationBounds() {
+        super.clearBounds();
         return this;
     }
 
-    /** Removes any configured rotation bounds. */
-    public TurretMechanism clearRotationBounds() {
-        enforceBounds = false;
-        minRotation = Rotation2d.fromRadians(Double.NEGATIVE_INFINITY);
-        maxRotation = Rotation2d.fromRadians(Double.POSITIVE_INFINITY);
-        clearBounds();
-        return this;
+    @Override
+    public TurretMechanism clearBounds() {
+        return clearRotationBounds();
     }
 
     private double applyBounds(double targetRadians) {
-        if (!enforceBounds) {
+        if (!hasBounds()) {
             return targetRadians;
         }
 
-        double min = minRotation.getRadians();
-        double max = maxRotation.getRadians();
+        double min = getMinBound();
+        double max = getMaxBound();
         double span = max - min;
         if (!(span > 0)) {
             return targetRadians;

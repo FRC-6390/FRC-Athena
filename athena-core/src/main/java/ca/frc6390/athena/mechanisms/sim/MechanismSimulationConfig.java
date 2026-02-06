@@ -10,7 +10,6 @@ import ca.frc6390.athena.mechanisms.ArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.mechanisms.MechanismTravelRange;
-import ca.frc6390.athena.mechanisms.SimpleMotorMechanism;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.system.plant.DCMotor;
@@ -282,9 +281,6 @@ public final class MechanismSimulationConfig {
     }
 
     /**
-     * Helper for constructing a {@link SimpleMotorMechanism} simulation using {@link FlywheelSim}.
-     */
-    /**
      * Creates a generic simple-motor simulation (flywheel/roller). Uses mechanism motor data for
      * the motor model and supports optional overrides like inertia or units-per-radian.
      *
@@ -297,10 +293,7 @@ public final class MechanismSimulationConfig {
         MechanismSimulationConfig config = new MechanismSimulationConfig(
                 mechanism -> {
                     MechanismSimulationConfig self = holder[0];
-                    if (!(mechanism instanceof SimpleMotorMechanism simple)) {
-                        throw new IllegalArgumentException(
-                                "Simple motor simulation requires a SimpleMotorMechanism instance.");
-                    }
+                    Mechanism target = mechanism;
                     DCMotor motor = resolveMotor(mechanism, params.motorOverride);
                     MechanismConfig.SimpleMotorSimulationParameters configParams =
                             self != null && self.sourceConfig != null
@@ -328,7 +321,7 @@ public final class MechanismSimulationConfig {
                                     moi,
                                     gearing),
                             motor);
-                    return new SimpleMotorModel(simple, sim, unitsPerRadian, nominalVoltage);
+                    return new SimpleMotorModel(target, sim, unitsPerRadian, nominalVoltage);
                 },
                 params.updatePeriodSeconds);
         holder[0] = config;
@@ -934,14 +927,14 @@ public final class MechanismSimulationConfig {
 
     private static final class SimpleMotorModel implements MechanismSimulationModel {
 
-        private final SimpleMotorMechanism mechanism;
+        private final Mechanism mechanism;
         private final FlywheelSim sim;
         private final double unitsPerRadian;
         private final double nominalVoltage;
         private double simulatedAngleRad;
         private double lastAngularVelocityRadPerSec;
 
-        SimpleMotorModel(SimpleMotorMechanism mechanism,
+        SimpleMotorModel(Mechanism mechanism,
                          FlywheelSim sim,
                          double unitsPerRadian,
                          double nominalVoltage) {

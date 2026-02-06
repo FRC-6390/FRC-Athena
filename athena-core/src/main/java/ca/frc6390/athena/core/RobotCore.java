@@ -39,6 +39,7 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 
 public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
+    private static volatile RobotCore<?> activeInstance;
 
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
@@ -127,6 +128,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private NetworkTableEntry autoInitResetEntry;
 
     public RobotCore(RobotCoreConfig<T> config) {
+        activeInstance = this;
         drivetrain = config.driveTrain.build();
         localization = drivetrain.localization(config.localizationConfig());
         vision = RobotVision.fromConfig(config.visionConfig);
@@ -276,6 +278,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             autoInitResetEntry.setBoolean(enabled);
         }
         return this;
+    }
+
+    public static RobotCore<?> getActiveInstance() {
+        return activeInstance;
     }
 
     public TelemetryRegistry telemetry() {
