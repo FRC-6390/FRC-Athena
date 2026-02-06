@@ -122,6 +122,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private  DoubleSupplier customEncoderPos;
     private boolean shouldSetpointOverride = false;
     private double setPointOverride = 0;
+    private double customFeedforward = 0;
 
     private enum RobotMode {
         TELE,
@@ -455,6 +456,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.setpoint = applyBounds(setpoint);
     }
 
+    public void setCustomFeedforward(double output){
+        this.customFeedforward = output;
+    }
+
     public double getSetpoint(){
         return setpoint;
     }
@@ -690,6 +695,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         output = isPidEnabled() ? pidOutput : 0;
         output += isFeedforwardEnabled() ? feedforwardOutput : 0;
+        output += customFeedforward;
 
         if (setpointIsOutput){
             output = getSetpoint() + getNudge();

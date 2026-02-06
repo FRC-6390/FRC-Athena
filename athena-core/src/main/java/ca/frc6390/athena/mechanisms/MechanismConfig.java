@@ -93,6 +93,7 @@ public class MechanismConfig<T extends Mechanism> {
     public MechanismSensorSimulationConfig sensorSimulationConfig = null;
     public boolean shouldCustomEncoder = false;
     public DoubleSupplier customEncoderPos;
+    
 
 
     public MechanismConfigRecord data() {
