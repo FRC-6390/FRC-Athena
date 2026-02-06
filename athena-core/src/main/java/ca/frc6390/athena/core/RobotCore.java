@@ -1,8 +1,11 @@
 package ca.frc6390.athena.core;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
@@ -32,6 +35,7 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.TimedRobot;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -43,7 +47,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
-            boolean autoInitResetEnabled, TelemetryRegistry.TelemetryConfig telemetryConfig) {
+            boolean autoInitResetEnabled, TelemetryRegistry.TelemetryConfig telemetryConfig,
+            List<RegisterableMechanism> mechanisms) {
 
         public static RobotCoreConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
             return new RobotCoreConfig<>(
@@ -51,7 +56,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     RobotLocalizationConfig.defualt(),
                     RobotVisionConfig.defualt(),
                     true,
-                    TelemetryRegistry.TelemetryConfig.defualt());
+                    TelemetryRegistry.TelemetryConfig.defualt(),
+                    List.of());
         }
 
         public static RobotCoreConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
@@ -60,7 +66,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     RobotLocalizationConfig.defualt(),
                     RobotVisionConfig.defualt(),
                     true,
-                    TelemetryRegistry.TelemetryConfig.defualt());
+                    TelemetryRegistry.TelemetryConfig.defualt(),
+                    List.of());
         }
 
         public RobotCoreConfig<T> setLocalization(RobotLocalizationConfig localizationConfig) {
@@ -69,7 +76,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     localizationConfig,
                     visionConfig,
                     autoInitResetEnabled,
-                    telemetryConfig);
+                    telemetryConfig,
+                    mechanisms);
         }
 
         public RobotCoreConfig<T> setVision(RobotVisionConfig visionConfig) {
@@ -78,7 +86,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     localizationConfig,
                     visionConfig,
                     autoInitResetEnabled,
-                    telemetryConfig);
+                    telemetryConfig,
+                    mechanisms);
         }
 
         public RobotCoreConfig<T> setVision(ConfigurableCamera... cameras) {
@@ -87,7 +96,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     localizationConfig,
                     RobotVisionConfig.defualt().addCameras(cameras),
                     autoInitResetEnabled,
-                    telemetryConfig);
+                    telemetryConfig,
+                    mechanisms);
         }
 
         public RobotCoreConfig<T> setAutoInitResetEnabled(boolean enabled) {
@@ -96,7 +106,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     localizationConfig,
                     visionConfig,
                     enabled,
-                    telemetryConfig);
+                    telemetryConfig,
+                    mechanisms);
         }
 
         public RobotCoreConfig<T> setTelemetry(TelemetryRegistry.TelemetryConfig telemetryConfig) {
@@ -105,7 +116,26 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     localizationConfig,
                     visionConfig,
                     autoInitResetEnabled,
-                    telemetryConfig);
+                    telemetryConfig,
+                    mechanisms);
+        }
+
+        /**
+         * Adds mechanisms to be registered automatically during {@link RobotCore#robotInit()}.
+         */
+        public RobotCoreConfig<T> addMechanisms(RegisterableMechanism... entries) {
+            if (entries == null || entries.length == 0) {
+                return this;
+            }
+            List<RegisterableMechanism> merged = new ArrayList<>(mechanisms != null ? mechanisms : List.of());
+            merged.addAll(Arrays.asList(entries));
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    merged);
         }
 
         public RobotCore<T> create() {
@@ -126,6 +156,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final TelemetryRegistry telemetry;
     private boolean autoInitResetEnabled;
     private NetworkTableEntry autoInitResetEntry;
+    private final List<RegisterableMechanism> configuredMechanisms;
 
     public RobotCore(RobotCoreConfig<T> config) {
         activeInstance = this;
@@ -139,6 +170,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         autonomousCommand = null;
         telemetry = TelemetryRegistry.create(config.telemetryConfig());
         autoInitResetEnabled = config.autoInitResetEnabled();
+        configuredMechanisms = config.mechanisms() != null ? List.copyOf(config.mechanisms()) : List.of();
 
         if (localization != null && vision != null) {
             localization.setRobotVision(vision);
@@ -162,6 +194,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void robotInit() {
+        registerConfiguredMechanisms();
         configureAutos(autos);
         ensureAutoChooserPublished();
         onRobotInit();
@@ -170,12 +203,19 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void robotPeriodic() {
+        LoopTiming.beginCycle();
+        double t0 = Timer.getFPGATimestamp();
         CommandScheduler.getInstance().run();
+        double t1 = Timer.getFPGATimestamp();
         telemetry.tick();
+        double t2 = Timer.getFPGATimestamp();
         if (localization != null) {
             localization.updateAutoVisualization(autos);
         }
+        double t3 = Timer.getFPGATimestamp();
         onRobotPeriodic();
+        double t4 = Timer.getFPGATimestamp();
+        LoopTiming.endCycle(t0, t1, t2, t3, t4);
     }
 
     @Override
@@ -388,6 +428,42 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
         });
         return this;
+    }
+
+    private void registerConfiguredMechanisms() {
+        if (configuredMechanisms.isEmpty()) {
+            return;
+        }
+        registerMechanism(configuredMechanisms.toArray(RegisterableMechanism[]::new));
+    }
+
+    /**
+     * Returns the registered mechanism with the given name, or {@code null} if not found.
+     */
+    public Mechanism getMechanism(String name) {
+        return mechanisms.get(name);
+    }
+
+    /**
+     * Returns the first registered mechanism assignable to the requested type, or {@code null}.
+     */
+    public <M extends Mechanism> M getMechanism(Class<M> type) {
+        if (type == null) {
+            return null;
+        }
+        for (Mechanism mechanism : mechanisms.values()) {
+            if (type.isInstance(mechanism)) {
+                return type.cast(mechanism);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns an unmodifiable view of all registered mechanisms keyed by name.
+     */
+    public java.util.Map<String, Mechanism> getMechanisms() {
+        return Collections.unmodifiableMap(mechanisms);
     }
 
     public RobotLocalization<?> getLocalization() {

@@ -3,6 +3,7 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotCore;
+import ca.frc6390.athena.core.LoopTiming;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
@@ -126,6 +127,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double setPointOverride = 0;
     private boolean shuffleboardEnabled;
     private double lastShuffleboardCacheUpdateSeconds = Double.NaN;
+    private double lastEmergencyStopLogSeconds = Double.NaN;
+    private String lastEmergencyStopReason = "";
+    private static final double EMERGENCY_STOP_LOG_PERIOD_SECONDS = 1.0;
 
     private enum RobotMode {
         TELE,
@@ -705,8 +709,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         double output = 0;
 
-        if ((encoder != null && !encoder.isCachedConnected()) || !motors.allMotorsCachedConnected()) {
+        boolean encoderDisconnected = encoder != null && !encoder.isCachedConnected();
+        boolean motorsDisconnected = !motors.allMotorsCachedConnected();
+        if (encoderDisconnected || motorsDisconnected) {
             emergencyStopped = true;
+            logEmergencyStopReason(encoderDisconnected, motorsDisconnected);
         }
 
         if(!customPIDCycle) updatePID();
@@ -749,6 +756,29 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         outputMotor(output);
+    }
+
+    private void logEmergencyStopReason(boolean encoderDisconnected, boolean motorsDisconnected) {
+        StringBuilder reason = new StringBuilder();
+        if (encoderDisconnected) {
+            reason.append("encoder disconnected");
+        }
+        if (motorsDisconnected) {
+            if (reason.length() > 0) {
+                reason.append(", ");
+            }
+            reason.append("motor controller disconnected");
+        }
+        String reasonText = reason.toString();
+        double now = Timer.getFPGATimestamp();
+        boolean shouldLog = Double.isNaN(lastEmergencyStopLogSeconds)
+                || (now - lastEmergencyStopLogSeconds) >= EMERGENCY_STOP_LOG_PERIOD_SECONDS
+                || !reasonText.equals(lastEmergencyStopReason);
+        if (shouldLog) {
+            System.out.println("[Athena][EmergencyStop] " + getName() + ": " + reasonText);
+            lastEmergencyStopLogSeconds = now;
+            lastEmergencyStopReason = reasonText;
+        }
     }
 
     public GenericLimitSwitch[] getLimitSwitches() {
@@ -993,7 +1023,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @Override
     public void periodic() {
+        if (LoopTiming.shouldSampleMechanisms()) {
+            double startSeconds = Timer.getFPGATimestamp();
+            periodicImpl();
+            double durationMs = (Timer.getFPGATimestamp() - startSeconds) * 1000.0;
+            LoopTiming.recordMechanism(getName(), durationMs);
+            return;
+        }
+        periodicImpl();
+    }
 
+    private void periodicImpl() {
         if(DriverStation.isAutonomousEnabled()){
             robotMode = RobotMode.AUTO;
         } else if(DriverStation.isTeleopEnabled()){

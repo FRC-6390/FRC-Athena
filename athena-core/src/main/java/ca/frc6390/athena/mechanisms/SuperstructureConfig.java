@@ -165,7 +165,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
      * @param <E> child mechanism state enum type
      * @return this config for chaining
      */
-    public <E extends Enum<E> & SetpointProvider<Double>, T extends Mechanism & StatefulLike<E>> SuperstructureConfig<S, SP> addMech(
+    public <E extends Enum<E> & SetpointProvider<Double>, T extends Mechanism & StatefulLike<E>> SuperstructureConfig<S, SP> addMechanisms(
             MechanismConfig<T> config,
             Function<SP, E> mapper) {
 
@@ -192,7 +192,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     public <E extends Enum<E> & SetpointProvider<Double>, T extends Mechanism & StatefulLike<E>> SuperstructureConfig<S, SP> addMechanism(
             MechanismConfig<T> config,
             Function<SP, E> mapper) {
-        return addMech(config, mapper);
+        return addMechanisms(config, mapper);
     }
 
     /**
@@ -305,7 +305,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     }
 
     /**
-     * Adds a nested superstructure using the same addMech syntax as leaf mechanisms.
+     * Adds a nested superstructure using the same addMechanisms syntax as leaf mechanisms.
      *
      * @param config nested superstructure configuration
      * @param mapper maps the parent supertuple to the nested superstructure's state enum
@@ -313,7 +313,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
      * @param <CSP> nested superstructure setpoint tuple type
      * @return this config for chaining
      */
-    public <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> SuperstructureConfig<S, SP> addMech(
+    public <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> SuperstructureConfig<S, SP> addMechanisms(
             SuperstructureConfig<CS, CSP> config,
             Function<SP, CS> mapper) {
         return addSuperstructure(config, mapper);
@@ -357,7 +357,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     }
 
     /**
-     * Adds an already-constructed nested superstructure using the addMech syntax.
+     * Adds an already-constructed nested superstructure using the addMechanisms syntax.
      *
      * @param superstructure existing superstructure instance
      * @param mapper maps the parent supertuple to the nested superstructure's state enum
@@ -365,7 +365,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
      * @param <CSP> nested superstructure setpoint tuple type
      * @return this config for chaining
      */
-    public <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> SuperstructureConfig<S, SP> addMech(
+    public <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> SuperstructureConfig<S, SP> addMechanisms(
             SuperstructureMechanism<CS, CSP> superstructure,
             Function<SP, CS> mapper) {
         return addExistingSuperstructure(superstructure, mapper);
@@ -374,7 +374,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     /**
      * Adds a constraint for a specific superstate. The guard can inspect child mechanisms through
      * {@link SuperstructureContext#getMechanisms()} using the same mapper passed to
-     * {@link #addMech(MechanismConfig, Function)}. If transition states are provided and the guard
+     * {@link #addMechanisms(MechanismConfig, Function)}. If transition states are provided and the guard
      * is not satisfied when the state is queued, the transition states are queued first.
      *
      * @param state superstate to constrain

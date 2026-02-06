@@ -123,8 +123,8 @@ public final class ExampleCompositeSuperstructure {
         // Superstructure config mirrors the legacy sequencing.
         SuperstructureConfig<SuperState, SuperTuple> config =
                 new SuperstructureConfig<>(SuperState.Home)
-                .addMech(elevator, SuperTuple::elev)
-                .addMech(eff, SuperTuple::eff)
+                .addMechanisms(elevator, SuperTuple::elev)
+                .addMechanisms(eff, SuperTuple::eff)
                 // Constraints similar to old class:
                 // - Stow before intaking from high states (queue Home first if not clear)
                 .addConstraint(SuperState.Intaking,
