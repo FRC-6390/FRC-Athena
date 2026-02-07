@@ -29,13 +29,14 @@ import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
-import ca.frc6390.athena.mechanisms.TurretMechanism;
-import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
-import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
-import ca.frc6390.athena.mechanisms.sim.MechanismSimulationConfig;
-import ca.frc6390.athena.mechanisms.sim.MechanismSimulationModel;
-import ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig;
-import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulationConfig;
+	import ca.frc6390.athena.mechanisms.TurretMechanism;
+	import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
+	import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
+	import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.BlockDirection;
+	import ca.frc6390.athena.mechanisms.sim.MechanismSimulationConfig;
+	import ca.frc6390.athena.mechanisms.sim.MechanismSimulationModel;
+	import ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig;
+	import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulationConfig;
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.math.controller.PIDController;
@@ -834,7 +835,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> addLowerLimitSwitch(int id, double position){
-        return addLimitSwitch(id, position, false, 0);
+        return addLimitSwitch(id, position, false, BlockDirection.None, 0);
     }
 
     /**
@@ -846,7 +847,14 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> addLowerLimitSwitch(int id, double position, boolean stopMotors){
-        return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, -1));
+        return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, BlockDirection.NegativeInput));
+    }
+
+    public MechanismConfig<T> addLowerLimitSwitch(int id, double position, boolean stopMotors, double delaySeconds){
+        return addLimitSwitch(GenericLimitSwitchConfig.create(id)
+                .setPosition(position)
+                .setHardstop(stopMotors, BlockDirection.NegativeInput)
+                .setDelay(delaySeconds));
     }
 
     /**
@@ -857,7 +865,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> addUpperLimitSwitch(int id, double position){
-        return addLimitSwitch(id, position, false, 0);
+        return addLimitSwitch(id, position, false, BlockDirection.None, 0);
     }
 
     /**
@@ -869,7 +877,14 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> addUpperLimitSwitch(int id, double position, boolean stopMotors){
-        return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, 1));
+        return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, BlockDirection.PositiveInput));
+    }
+
+    public MechanismConfig<T> addUpperLimitSwitch(int id, double position, boolean stopMotors, double delaySeconds){
+        return addLimitSwitch(GenericLimitSwitchConfig.create(id)
+                .setPosition(position)
+                .setHardstop(stopMotors, BlockDirection.PositiveInput)
+                .setDelay(delaySeconds));
     }
 
     /**
@@ -880,7 +895,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     public MechanismConfig<T> addLimitSwitch(int id, double position){
-        return addLimitSwitch(id, position, false, 0);
+        return addLimitSwitch(id, position, false, BlockDirection.None, 0);
     }
 
     /**
@@ -892,8 +907,21 @@ public class MechanismConfig<T extends Mechanism> {
      * @param blockDirection direction multiplier (1, -1, or 0) that blocks motion past the switch
      * @return this config for chaining
      */
+    public MechanismConfig<T> addLimitSwitch(int id, double position, boolean stopMotors, BlockDirection blockDirection){
+        return addLimitSwitch(id, position, stopMotors, blockDirection, 0);
+    }
+
+    public MechanismConfig<T> addLimitSwitch(int id, double position, boolean stopMotors, BlockDirection blockDirection, double delaySeconds){
+        return addLimitSwitch(GenericLimitSwitchConfig.create(id)
+                .setPosition(position)
+                .setHardstop(stopMotors, blockDirection)
+                .setDelay(delaySeconds));
+    }
+
+    /** @deprecated Use {@link #addLimitSwitch(int, double, boolean, BlockDirection)} instead. */
+    @Deprecated(forRemoval = false)
     public MechanismConfig<T> addLimitSwitch(int id, double position, boolean stopMotors, int blockDirection){
-        return addLimitSwitch(GenericLimitSwitchConfig.create(id).setPosition(position).setHardstop(stopMotors, blockDirection));
+        return addLimitSwitch(id, position, stopMotors, BlockDirection.fromMultiplier(blockDirection));
     }
 
     /**

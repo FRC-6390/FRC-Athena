@@ -1,7 +1,7 @@
 {
     "fileName": "FRC6390-Athena-REV.json",
     "name": "FRC6390 Athena REV",
-    "version": "2026.0.79",
+    "version": "2026.0.80",
     "frcYear": "2026",
     "uuid": "b0e5a07b-6a34-4e2f-b9a8-4eac7e95c621",
     "mavenUrls": [
@@ -12,7 +12,7 @@
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "athena-rev",
-            "version": "2026.0.79"
+            "version": "2026.0.80"
         }
     ],
     "requires": [

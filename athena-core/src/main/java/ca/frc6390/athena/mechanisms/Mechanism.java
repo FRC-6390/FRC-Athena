@@ -818,6 +818,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         this.prevSetpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
 
+        // Apply limit switch encoder zeroing regardless of control mode. Previously, override
+        // short-circuited the update loop and would skip zeroing entirely.
+        applyLimitSwitchZeroing();
+
         if(emergencyStopped){
             motors.stopMotors();
             return;
@@ -827,22 +831,38 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
 
-        for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
-            if(genericLimitSwitch.getAsBoolean()){
-
-                if (genericLimitSwitch.isHardstop()){
-                    if(Math.signum(genericLimitSwitch.getBlockDirection()) == Math.signum(output)){
-                        output = 0;
-                    }
-                }
-
-                if (!Double.isNaN(genericLimitSwitch.getPosition())) {
-                    setEncoderPosition(genericLimitSwitch.getPosition());
-                }
-            }
-        }
+        output = applyHardstopSuppression(output);
 
         outputMotor(output);
+    }
+
+    private void applyLimitSwitchZeroing() {
+        for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
+            if (!genericLimitSwitch.getAsBoolean()) {
+                continue;
+            }
+            double position = genericLimitSwitch.getPosition();
+            if (Double.isFinite(position)) {
+                setEncoderPosition(position);
+            }
+        }
+    }
+
+    private double applyHardstopSuppression(double output) {
+        double suppressed = output;
+        for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
+            if (!genericLimitSwitch.getAsBoolean()) {
+                continue;
+            }
+            if (!genericLimitSwitch.isHardstop()) {
+                continue;
+            }
+            int direction = genericLimitSwitch.getBlockDirectionMultiplier();
+            if (Math.signum(direction) == Math.signum(suppressed)) {
+                suppressed = 0;
+            }
+        }
+        return suppressed;
     }
 
     private void logEmergencyStopReason(boolean encoderDisconnected, boolean motorsDisconnected) {

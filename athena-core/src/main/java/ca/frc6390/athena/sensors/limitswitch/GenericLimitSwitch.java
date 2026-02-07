@@ -5,18 +5,50 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import java.util.function.BooleanSupplier;
 public class GenericLimitSwitch extends EnhancedDigitalInput {
 
-    public record GenericLimitSwitchConfig(int id, boolean inverted, double position, boolean isHardstop, int blockDirection, String name, double delaySeconds) {
+    public enum BlockDirection {
+        None(0),
+        PositiveInput(1),
+        NegativeInput(-1);
+
+        private final int multiplier;
+
+        BlockDirection(int multiplier) {
+            this.multiplier = multiplier;
+        }
+
+        public int multiplier() {
+            return multiplier;
+        }
+
+        public static BlockDirection fromMultiplier(int multiplier) {
+            if (multiplier > 0) {
+                return PositiveInput;
+            }
+            if (multiplier < 0) {
+                return NegativeInput;
+            }
+            return None;
+        }
+    }
+
+    public record GenericLimitSwitchConfig(int id, boolean inverted, double position, boolean isHardstop, BlockDirection blockDirection, String name, double delaySeconds) {
 
         public static GenericLimitSwitchConfig create(int id){
-            return new GenericLimitSwitchConfig(Math.abs(id) ,id<0,  Double.NaN, false, 0, null, 0);
+            return new GenericLimitSwitchConfig(Math.abs(id) ,id<0,  Double.NaN, false, BlockDirection.None, null, 0);
         }
 
         public GenericLimitSwitchConfig setPosition(double position){
             return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
         }
 
-        public GenericLimitSwitchConfig setHardstop(boolean isHardstop, int blockDirection){
+        public GenericLimitSwitchConfig setHardstop(boolean isHardstop, BlockDirection blockDirection){
             return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
+        }
+
+        /** @deprecated Use {@link #setHardstop(boolean, BlockDirection)} instead. */
+        @Deprecated(forRemoval = false)
+        public GenericLimitSwitchConfig setHardstop(boolean isHardstop, int blockDirection){
+            return setHardstop(isHardstop, BlockDirection.fromMultiplier(blockDirection));
         }
 
         public GenericLimitSwitchConfig setName(String name){
@@ -41,7 +73,7 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
 
     private double position = Double.NaN;
     private boolean isHardstop;
-    private int blockDirection;
+    private BlockDirection blockDirection = BlockDirection.None;
     /**
      * Constructs an GenericLimitSwitch sensor.
      *
@@ -84,19 +116,29 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
         this.isHardstop = isHardstop;
     }
 
-    public void setBlockDirection(int blockDirection) {
-        this.blockDirection = blockDirection;
+    public void setBlockDirection(BlockDirection blockDirection) {
+        this.blockDirection = blockDirection != null ? blockDirection : BlockDirection.None;
     }
 
-    public int getBlockDirection() {
+    /** @deprecated Use {@link #setBlockDirection(BlockDirection)} instead. */
+    @Deprecated(forRemoval = false)
+    public void setBlockDirection(int blockDirection) {
+        setBlockDirection(BlockDirection.fromMultiplier(blockDirection));
+    }
+
+    public BlockDirection getBlockDirection() {
         return blockDirection;
+    }
+
+    public int getBlockDirectionMultiplier() {
+        return blockDirection.multiplier();
     }
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
         super.shuffleboard(layout);
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        layout.addDouble("Block Direction", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getBlockDirection, period));
+        layout.addDouble("Block Direction", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getBlockDirectionMultiplier, period));
         layout.addBoolean("Is Hardstop", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::isHardstop, period));
         layout.addDouble("Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getPosition, period));
         return layout;

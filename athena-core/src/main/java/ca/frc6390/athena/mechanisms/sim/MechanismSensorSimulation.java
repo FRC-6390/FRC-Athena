@@ -69,7 +69,7 @@ public final class MechanismSensorSimulation {
             if (!Double.isFinite(position)) {
                 continue;
             }
-            int direction = limitSwitch.getBlockDirection();
+            int direction = limitSwitch.getBlockDirectionMultiplier();
             MechanismSensorSimulationConfig.SensorCondition condition;
             if (direction > 0) {
                 condition = MechanismSensorSimulationConfig.positionAtOrAbove(() -> position);
