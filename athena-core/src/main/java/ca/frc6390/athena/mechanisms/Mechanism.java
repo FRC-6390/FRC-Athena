@@ -486,7 +486,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             case PERCENT -> setSpeed(output);
         }
     }
-
     /**
      * Will enable manual override (should not be used unless manual control is wanted, override will not be disabled until done explicitly)
      * @param speed
@@ -706,6 +705,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if(profiledPIDController != null) profiledPIDController.reset(getPosition(), getVelocity());
         this.output = 0;
     }
+
+    public PIDController getPIDController()
+    {
+        return pidController;
+    }
+
 
     public void setSetpointOverride(boolean should)
     {
