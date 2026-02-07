@@ -714,7 +714,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public void setPointOverride(double setpoint)
     {
-        setPointOverride = setpoint;
+        setPointOverride = applyBounds(setpoint);
     }
 
     public double calculatePID(){
