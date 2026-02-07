@@ -53,6 +53,14 @@ import edu.wpi.first.math.trajectory.TrapezoidProfile;
 public class MechanismConfig<T extends Mechanism> {
 
     private MechanismConfigRecord data = MechanismConfigRecord.defaults();
+    /**
+     * When true, turret factory helpers will auto-enable continuous PID input for unbounded turrets
+     * using the configured encoder conversion as the wrap span (e.g. 360 degrees, 2*pi radians).
+     *
+     * This is intentionally only applied when bounds are not configured because bounded turrets
+     * typically must not "wrap" across hard stops.
+     */
+    private boolean autoContinuousPidForUnboundedTurret;
     /** Factory used to instantiate the final mechanism once configuration is complete. */
     public Function<MechanismConfig<T>, T> factory = null;
     /** Optional per-state callbacks that run when the mechanism state machine enters the state. */
@@ -221,7 +229,11 @@ public class MechanismConfig<T extends Mechanism> {
      * @param <E> state enum type that provides setpoints
      */
     public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(SimpleMotorFeedforward feedforward, E initialState) {
-        return custom(config -> new StatefulTurretMechanism<>(config, feedforward, initialState));
+        MechanismConfig<StatefulTurretMechanism<E>> cfg =
+                MechanismConfig.<StatefulTurretMechanism<E>>custom(
+                        config -> new StatefulTurretMechanism<>(config, feedforward, initialState));
+        cfg.autoContinuousPidForUnboundedTurret = true;
+        return cfg;
     }
 
     /**
@@ -233,7 +245,9 @@ public class MechanismConfig<T extends Mechanism> {
      * @param <T> concrete mechanism type created by the factory
      */
     public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulTurretMechanism<E>> MechanismConfig<T> statefulTurret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
-        return custom(factory);
+        MechanismConfig<T> cfg = MechanismConfig.<T>custom(factory);
+        cfg.autoContinuousPidForUnboundedTurret = true;
+        return cfg;
     }
 
     /**
@@ -260,7 +274,10 @@ public class MechanismConfig<T extends Mechanism> {
      * @param feedforward feedforward model tuned for the mechanism
      */
     public static MechanismConfig<TurretMechanism> turret(SimpleMotorFeedforward feedforward) {
-        return custom(config -> new TurretMechanism(config, feedforward));
+        MechanismConfig<TurretMechanism> cfg =
+                MechanismConfig.<TurretMechanism>custom(config -> new TurretMechanism(config, feedforward));
+        cfg.autoContinuousPidForUnboundedTurret = true;
+        return cfg;
     }
 
     /**
@@ -271,7 +288,33 @@ public class MechanismConfig<T extends Mechanism> {
      * @param <T> concrete mechanism type created by the factory
      */
     public static <T extends TurretMechanism> MechanismConfig<T> turret(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
-        return custom(factory);
+        MechanismConfig<T> cfg = MechanismConfig.<T>custom(factory);
+        cfg.autoContinuousPidForUnboundedTurret = true;
+        return cfg;
+    }
+
+    static MechanismConfigRecord applyAutoContinuousPidForUnboundedTurret(MechanismConfigRecord cfg) {
+        if (cfg == null || cfg.pidContinous()) {
+            return cfg;
+        }
+
+        // Only apply defaults when bounds are unset (unbounded turret).
+        if (Double.isFinite(cfg.minBound()) && Double.isFinite(cfg.maxBound()) && cfg.maxBound() > cfg.minBound()) {
+            return cfg;
+        }
+
+        double conversion = cfg.encoderConversion();
+        if (!Double.isFinite(conversion) || conversion <= 0.0) {
+            return cfg;
+        }
+
+        double min = -conversion / 2.0;
+        double max = conversion / 2.0;
+        return cfg.toBuilder()
+                .pidContinous(true)
+                .continousMin(min)
+                .continousMax(max)
+                .build();
     }
 
     /**
@@ -1519,11 +1562,15 @@ public class MechanismConfig<T extends Mechanism> {
      */
     public T build(){
         MechanismConfigRecord cfg = data;
-        cfg.motors().forEach(
-            (motor) -> motor.setNeutralMode(cfg.motorNeutralMode())
-                            .setCurrentLimit(cfg.motorCurrentLimit())
-                            .setCanbus(cfg.canbus())
-                            );
+        if (autoContinuousPidForUnboundedTurret) {
+            cfg = applyAutoContinuousPidForUnboundedTurret(cfg);
+            data = cfg;
+        }
+        for (MotorControllerConfig motor : cfg.motors()) {
+            motor.setNeutralMode(cfg.motorNeutralMode())
+                    .setCurrentLimit(cfg.motorCurrentLimit())
+                    .setCanbus(cfg.canbus());
+        }
 
         if (cfg.encoder() != null) {
              cfg.encoder().setCanbus(cfg.canbus())

@@ -1,7 +1,7 @@
 {
     "fileName": "FRC6390-Athena-Choreo.json",
     "name": "FRC6390 Athena Choreo",
-    "version": "2026.0.72",
+    "version": "2026.0.73",
     "frcYear": "2026",
     "uuid": "f8e0c33c-8f11-4d7d-9e3f-3de8792b3b49",
     "mavenUrls": [
@@ -12,7 +12,7 @@
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "athena-choreo",
-            "version": "2026.0.72"
+            "version": "2026.0.73"
         }
     ],
     "requires": [

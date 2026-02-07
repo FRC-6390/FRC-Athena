@@ -1,6 +1,7 @@
 package ca.frc6390.athena.hardware.encoder;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 /**
@@ -118,6 +119,27 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
     default double getCachedVelocity() { return getVelocity(); }
 
     default double getCachedAbsolutePosition() { return getAbsolutePosition(); }
+
+    /**
+     * Returns the current position wrapped into the provided range.
+     *
+     * This is useful for "angle-like" mechanisms (turrets, wrists, etc.) where you want a stable
+     * 0..360 (or -180..180) view for logging/UI, while still keeping {@link #getPosition()} as a
+     * continuous multi-turn signal for control.
+     *
+     * Range is interpreted in the same units as {@link #getPosition()} (after gear ratio and
+     * conversion have been applied by the encoder implementation).
+     */
+    default double getPositionModulus(double min, double max) {
+        return MathUtil.inputModulus(getPosition(), min, max);
+    }
+
+    /**
+     * Cached variant of {@link #getPositionModulus(double, double)} for logging/UI.
+     */
+    default double getCachedPositionModulus(double min, double max) {
+        return MathUtil.inputModulus(getCachedPosition(), min, max);
+    }
 
     default double getCachedRotations() { return getRotations(); }
 

@@ -517,6 +517,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return useAbsolute ? getEncoder().getAbsolutePosition() : getEncoder().getPosition();
     }
 
+    /**
+     * Returns the current mechanism position wrapped into the provided range.
+     *
+     * This does not change the underlying sensor; it is just a view for dashboards/logging and
+     * angle math. Units match {@link #getPosition()}.
+     */
+    public double getPositionModulus(double min, double max) {
+        return MathUtil.inputModulus(getPosition(), min, max);
+    }
+
     public double getVelocity(){
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderVelocity;
