@@ -1,7 +1,7 @@
 {
     "fileName": "FRC6390-Athena-PhotonVision.json",
     "name": "FRC6390 Athena PhotonVision",
-    "version": "2026.0.81",
+    "version": "2026.0.83",
     "frcYear": "2026",
     "uuid": "f0ab7d3a-6bfb-4c2b-8e3f-4a201215b688",
     "mavenUrls": [
@@ -12,7 +12,7 @@
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "athena-photonvision",
-            "version": "2026.0.81"
+            "version": "2026.0.83"
         }
     ],
     "requires": [
