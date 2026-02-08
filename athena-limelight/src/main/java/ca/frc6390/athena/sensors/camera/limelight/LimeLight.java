@@ -229,28 +229,74 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
             super(type.get());
         }
 
-        public double getLatency()
-        {
-            return getRaw()[6];
+        private double getRawValue(int idx) {
+            Double[] raw = getRaw();
+            if (raw == null || idx < 0 || idx >= raw.length) {
+                return Double.NaN;
+            }
+            Double value = raw[idx];
+            return value != null ? value.doubleValue() : Double.NaN;
         }
-        public int getTagCount()
-        {
-            return getRaw()[7].intValue();
+
+        /**
+         * Limelight "botpose*" arrays:
+         * - Older format: [0..5]=pose, [6]=latency(ms), [7]=tagCount, [8]=avgTagDist(m), [9]=avgTagArea(%)
+         * - Newer format: [0..5]=pose, [6]=latency(ms), [7]=tagCount, [8]=tagSpan, [9]=avgTagDist(m), [10]=avgTagArea(%)
+         */
+        public double getLatency() {
+            return getRawValue(6);
         }
-        public double getDistToTag()
-        {
-            return getRaw()[8];
+
+        public int getTagCount() {
+            double value = getRawValue(7);
+            return Double.isFinite(value) ? (int) value : 0;
         }
-        public double getAvgTagArea()
-        {
-            return getRaw()[9];
+
+        /**
+         * Average distance from camera to observed tags, in meters.
+         *
+         * Note: newer Limelight arrays include a tagSpan element; in that case avgTagDist shifts
+         * from index 8 to index 9. Returning index 8 in the newer format often yields 0 for a
+         * single-tag observation (tagSpan = 0).
+         */
+        public double getDistToTag() {
+            Double[] raw = getRaw();
+            if (raw == null) {
+                return Double.NaN;
+            }
+            if (raw.length >= 11) {
+                return getRawValue(9);
+            }
+            if (raw.length >= 10) {
+                return getRawValue(8);
+            }
+            return Double.NaN;
+        }
+
+        public double getAvgTagArea() {
+            Double[] raw = getRaw();
+            if (raw == null) {
+                return Double.NaN;
+            }
+            if (raw.length >= 11) {
+                return getRawValue(10);
+            }
+            if (raw.length >= 10) {
+                return getRawValue(9);
+            }
+            return Double.NaN;
         }
         
     }
 
     public class PoseEstimate
     {
-        Double[] dub = new Double[]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        // Default to NaN so callers can distinguish "no data" from a legitimate 0.
+        // We use 11 elements to match Limelight's extended botpose* arrays.
+        Double[] dub = new Double[]{
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN,
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN
+        };
         String table;
 
         public PoseEstimate(PoseEstimateType type)
@@ -271,6 +317,12 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         {
             Double[] poseReal = getRaw();
             if (poseReal == null) return new Pose2d();
+            if (poseReal.length < 6
+                    || !Double.isFinite(poseReal[0])
+                    || !Double.isFinite(poseReal[2])
+                    || !Double.isFinite(poseReal[5])) {
+                return new Pose2d();
+            }
             Translation2d translation = new Translation2d(poseReal[2], poseReal[0]);
             Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[5]);
             return new Pose2d(translation, rotation2d);
@@ -280,6 +332,12 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         {
             Double[] poseReal = getRaw();
             if (poseReal == null) return new Pose2d();
+            if (poseReal.length < 6
+                    || !Double.isFinite(poseReal[0])
+                    || !Double.isFinite(poseReal[1])
+                    || !Double.isFinite(poseReal[5])) {
+                return new Pose2d();
+            }
             Translation2d translation = new Translation2d(poseReal[0], poseReal[1]);
             Rotation2d rotation2d = Rotation2d.fromDegrees(poseReal[5]);
             return new Pose2d(translation, rotation2d);
