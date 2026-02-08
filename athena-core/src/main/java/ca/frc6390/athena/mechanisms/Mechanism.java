@@ -722,6 +722,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         setPointOverride = applyBounds(setpoint);
     }
 
+    public double getMin()
+    {
+        return minBound;
+    }
+    public double getMax()
+    {
+        return maxBound;
+    }
+
     public double calculatePID(){
         double output = 0;
         double encoderPos = getPidMeasurement();
