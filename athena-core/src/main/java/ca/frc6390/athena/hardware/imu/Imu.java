@@ -85,35 +85,39 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
 
     @Override
     default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
-        layout.addDouble("Yaw (deg)", () -> {
-            Rotation2d yaw = getCachedYaw();
-            return yaw != null ? yaw.getDegrees() : 0.0;
-        });
-        layout.addDouble("Pitch (deg)", () -> {
-            Rotation2d pitch = getCachedPitch();
-            return pitch != null ? pitch.getDegrees() : 0.0;
-        });
-        layout.addDouble("Roll (deg)", () -> {
-            Rotation2d roll = getCachedRoll();
-            return roll != null ? roll.getDegrees() : 0.0;
-        });
-        layout.addDouble("Velocity X (deg/s)", () -> {
-            Rotation2d vel = getCachedVelocityX();
-            return vel != null ? vel.getDegrees() : 0.0;
-        });
-        layout.addDouble("Velocity Y (deg/s)", () -> {
-            Rotation2d vel = getCachedVelocityY();
-            return vel != null ? vel.getDegrees() : 0.0;
-        });
-        layout.addDouble("Velocity Z (deg/s)", () -> {
-            Rotation2d vel = getCachedVelocityZ();
-            return vel != null ? vel.getDegrees() : 0.0;
-        });
-        layout.addDouble("Acceleration X", this::getCachedAccelerationX);
-        layout.addDouble("Acceleration Y", this::getCachedAccelerationY);
-        layout.addDouble("Acceleration Z", this::getCachedAccelerationZ);
-        layout.addBoolean("Connected", this::isCachedConnected);
-        if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
+        // Important: DEBUG publishing can happen after COMP publishing at runtime.
+        // WPILib throws if you add the same title twice to a container, so DEBUG only adds DEBUG-only
+        // widgets (COMP is responsible for "base" yaw/pitch/roll/etc).
+        if (!level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
+            layout.addDouble("Yaw (deg)", () -> {
+                Rotation2d yaw = getCachedYaw();
+                return yaw != null ? yaw.getDegrees() : 0.0;
+            });
+            layout.addDouble("Pitch (deg)", () -> {
+                Rotation2d pitch = getCachedPitch();
+                return pitch != null ? pitch.getDegrees() : 0.0;
+            });
+            layout.addDouble("Roll (deg)", () -> {
+                Rotation2d roll = getCachedRoll();
+                return roll != null ? roll.getDegrees() : 0.0;
+            });
+            layout.addDouble("Velocity X (deg/s)", () -> {
+                Rotation2d vel = getCachedVelocityX();
+                return vel != null ? vel.getDegrees() : 0.0;
+            });
+            layout.addDouble("Velocity Y (deg/s)", () -> {
+                Rotation2d vel = getCachedVelocityY();
+                return vel != null ? vel.getDegrees() : 0.0;
+            });
+            layout.addDouble("Velocity Z (deg/s)", () -> {
+                Rotation2d vel = getCachedVelocityZ();
+                return vel != null ? vel.getDegrees() : 0.0;
+            });
+            layout.addDouble("Acceleration X", this::getCachedAccelerationX);
+            layout.addDouble("Acceleration Y", this::getCachedAccelerationY);
+            layout.addDouble("Acceleration Z", this::getCachedAccelerationZ);
+            layout.addBoolean("Connected", this::isCachedConnected);
+        } else {
             layout.add("Inverted", builder ->
                     builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
             layout.addDouble("Max Linear Speed", this::getMaxLinearSpeed);

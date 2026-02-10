@@ -140,7 +140,10 @@ public interface RobotSendableSystem {
 
       @Override
       public double getAsDouble() {
-        double nowSeconds = Timer.getFPGATimestamp();
+        double nowSeconds = RobotTime.nowSeconds();
+        if (!Double.isFinite(nowSeconds)) {
+          nowSeconds = Timer.getFPGATimestamp();
+        }
         double periodSeconds = periodSecondsSupplier.getAsDouble();
         if (RateLimiter.shouldUpdate(nowSeconds, lastUpdateSeconds, periodSeconds)) {
           lastValue = supplier.getAsDouble();
@@ -163,7 +166,10 @@ public interface RobotSendableSystem {
 
       @Override
       public boolean getAsBoolean() {
-        double nowSeconds = Timer.getFPGATimestamp();
+        double nowSeconds = RobotTime.nowSeconds();
+        if (!Double.isFinite(nowSeconds)) {
+          nowSeconds = Timer.getFPGATimestamp();
+        }
         double periodSeconds = periodSecondsSupplier.getAsDouble();
         if (RateLimiter.shouldUpdate(nowSeconds, lastUpdateSeconds, periodSeconds)) {
           lastValue = supplier.getAsBoolean();
@@ -186,7 +192,10 @@ public interface RobotSendableSystem {
 
       @Override
       public T get() {
-        double nowSeconds = Timer.getFPGATimestamp();
+        double nowSeconds = RobotTime.nowSeconds();
+        if (!Double.isFinite(nowSeconds)) {
+          nowSeconds = Timer.getFPGATimestamp();
+        }
         double periodSeconds = periodSecondsSupplier.getAsDouble();
         if (RateLimiter.shouldUpdate(nowSeconds, lastUpdateSeconds, periodSeconds)) {
           lastValue = supplier.get();

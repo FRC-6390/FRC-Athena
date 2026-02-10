@@ -26,6 +26,7 @@ import ca.frc6390.athena.core.auto.HolonomicFeedforward;
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.sensors.camera.VisionCamera;
+import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
@@ -1145,7 +1146,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public void registerVisionShuffleboardTab(ShuffleboardTab tab) {
         cameraManager.setVisionShuffleboardTab(tab);
-        cameraManager.ensureCameraShuffleboardEntries(vision);
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.VISION_CAMERA_WIDGETS)) {
+            cameraManager.ensureCameraShuffleboardEntries(vision);
+        }
     }
 
     @Override
@@ -1156,7 +1159,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (level == SendableLevel.DEBUG) {
             // Debug-specific struct publishers are already configured above.
         }
-        if (poseJumpEntry == null) {
+        if (poseJumpEntry == null && ShuffleboardControls.enabled(ShuffleboardControls.Flag.LOCALIZATION_HEALTH_WIDGETS)) {
             var healthLayout = tab.getLayout("Localization Health", BuiltInLayouts.kList);
             poseJumpEntry = healthLayout.add("Pose Jump (m)", lastPoseJumpMeters)
                     .withWidget(BuiltInWidgets.kTextView)
@@ -1171,7 +1174,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                     .withWidget(BuiltInWidgets.kBooleanBox)
                     .getEntry();
         }
-        if (backendOverrideToggleEntry == null && backendOverrideEnabledEntry != null) {
+        if (backendOverrideToggleEntry == null
+                && backendOverrideEnabledEntry != null
+                && ShuffleboardControls.enabled(ShuffleboardControls.Flag.LOCALIZATION_BACKEND_WIDGETS)) {
             var backendLayout = tab.getLayout("Localization Backend", BuiltInLayouts.kList);
             backendOverrideToggleEntry = backendLayout.add(
                             "Override Enabled", backendOverrideEnabledEntry.getBoolean(false))
@@ -1185,7 +1190,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             backendLayout.add("Vision Strategy", backendVisionStrategyChooser)
                     .withWidget(BuiltInWidgets.kComboBoxChooser);
         }
-        cameraManager.ensureCameraShuffleboardEntries(vision);
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.VISION_CAMERA_WIDGETS)) {
+            cameraManager.ensureCameraShuffleboardEntries(vision);
+        }
         return tab;
     }
 
@@ -1270,6 +1277,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private void publishPoseStruct(PoseConfig config, Pose2d pose) {
+        if (!ShuffleboardControls.dashboardEnabled()
+                || !ShuffleboardControls.enabled(ShuffleboardControls.Flag.LOCALIZATION_POSE_TOPICS)) {
+            return;
+        }
         if (config == null || !config.publishToShuffleboard()) {
             return;
         }
@@ -1444,7 +1455,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         if (isPrimary) {
             updateHealthMetrics();
-            cameraManager.updateCameraVisualizations(vision, fieldPose);
+            if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.VISION_CAMERA_WIDGETS)) {
+                cameraManager.updateCameraVisualizations(vision, fieldPose);
+            }
             updateSlipState();
             persistRobotState(false);
         }

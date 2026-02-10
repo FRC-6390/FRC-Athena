@@ -28,6 +28,7 @@ import ca.frc6390.athena.mechanisms.RegisterableMechanism;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
 import ca.frc6390.athena.logging.TelemetryRegistry;
+import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -38,6 +39,10 @@ import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
+import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -225,6 +230,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final List<RegisterableMechanism> configuredMechanisms;
     private final boolean timingDebugEnabled;
     private final boolean telemetryEnabled;
+    private boolean mechanismsShuffleboardPublished;
+    private boolean coreShuffleboardPublished;
+    private boolean debugShuffleboardPublished;
+    private boolean debugMechanismsShuffleboardPublished;
+    private final Set<String> publishedMechanismsComp;
+    private final Set<String> publishedMechanismsDebug;
+    private double lastMechanismAutoPublishSeconds = Double.NaN;
+    private static final double MECHANISM_AUTO_PUBLISH_PERIOD_SECONDS = 0.5;
 
     public RobotCore(RobotCoreConfig<T> config) {
         activeInstance = this;
@@ -235,6 +248,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         copilot = new RobotCopilot(drivetrain.get(), localization, RobotCopilot.inferDriveStyle(drivetrain.get()));
         mechanisms = new HashMap<>();
         scheduledCustomPidMechanisms = new HashSet<>();
+        publishedMechanismsComp = new HashSet<>();
+        publishedMechanismsDebug = new HashSet<>();
         autonomousCommand = null;
         telemetry = TelemetryRegistry.create(config.telemetryConfig());
         autoInitResetEnabled = config.autoInitResetEnabled();
@@ -249,6 +264,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             telemetry.setEnabled(false);
         }
         LoopTiming.setDebugAlways(timingDebugEnabled);
+        mechanismsShuffleboardPublished = false;
+        coreShuffleboardPublished = false;
+        debugShuffleboardPublished = false;
+        debugMechanismsShuffleboardPublished = false;
 
         if (localization != null && vision != null) {
             localization.setRobotVision(vision);
@@ -275,6 +294,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         registerConfiguredMechanisms();
         configureAutos(autos);
         ensureAutoChooserPublished();
+        ShuffleboardControls.publishConfigTab();
+        if (RobotSendableSystem.isShuffleboardEnabled() && ShuffleboardControls.enabled(ca.frc6390.athena.dashboard.ShuffleboardControls.Flag.AUTO_PUBLISH_CORE)) {
+            shuffleboard(SendableLevel.COMP);
+        }
+        if (RobotSendableSystem.isShuffleboardEnabled() && ShuffleboardControls.enabled(ca.frc6390.athena.dashboard.ShuffleboardControls.Flag.AUTO_PUBLISH_MECHANISMS)) {
+            shuffleboardMechanisms(SendableLevel.COMP);
+        }
         onRobotInit();
         registerPIDCycles();
     }
@@ -282,6 +308,23 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void robotPeriodic() {
         LoopTiming.beginCycle();
+        ShuffleboardControls.refresh();
+
+        // Auto publish when enabled at runtime from Athena/Config.
+        if (RobotSendableSystem.isShuffleboardEnabled()) {
+            if (!coreShuffleboardPublished
+                    && ShuffleboardControls.enabled(ca.frc6390.athena.dashboard.ShuffleboardControls.Flag.AUTO_PUBLISH_CORE)) {
+                shuffleboard(SendableLevel.COMP);
+            }
+            if (ShuffleboardControls.enabled(ca.frc6390.athena.dashboard.ShuffleboardControls.Flag.AUTO_PUBLISH_MECHANISMS)) {
+                autoPublishMechanismsIncremental(SendableLevel.COMP);
+            }
+        }
+
+        // DEBUG gate is runtime-controlled from Athena/Config, but we intentionally do not auto-publish
+        // DEBUG dashboards here. Auto-publishing DEBUG after COMP can easily double-add titles to the
+        // same Shuffleboard containers (WPILib throws), and it also spikes CPU on large robots.
+
         double t0 = Timer.getFPGATimestamp();
         CommandScheduler.getInstance().run();
         double t1 = Timer.getFPGATimestamp();
@@ -294,6 +337,44 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         onRobotPeriodic();
         double t4 = Timer.getFPGATimestamp();
         LoopTiming.endCycle(t0, t1, t2, t3, t4);
+    }
+
+    private void autoPublishMechanismsIncremental(SendableLevel level) {
+        double now = Timer.getFPGATimestamp();
+        if (Double.isFinite(lastMechanismAutoPublishSeconds)
+                && (now - lastMechanismAutoPublishSeconds) < MECHANISM_AUTO_PUBLISH_PERIOD_SECONDS) {
+            return;
+        }
+        lastMechanismAutoPublishSeconds = now;
+
+        // Mark as "published" so DEBUG enabling later can opt into mechanism publishing paths.
+        mechanismsShuffleboardPublished = true;
+        if (level == SendableLevel.DEBUG) {
+            debugMechanismsShuffleboardPublished = true;
+        }
+
+        ShuffleboardTab tab = Shuffleboard.getTab(RobotSendableSystem.SHUFFLEBOARD_ROOT + "/Mechanisms");
+        ShuffleboardLayout list = tab.getLayout("All", BuiltInLayouts.kList);
+
+        Set<String> published = (level == SendableLevel.DEBUG) ? publishedMechanismsDebug : publishedMechanismsComp;
+        for (Mechanism mech : mechanisms.values()) {
+            if (mech == null) {
+                continue;
+            }
+            String name = mech.getName();
+            if (published.contains(name)) {
+                continue;
+            }
+            if (!ShuffleboardControls.mechanismAllowed(name, level)) {
+                continue;
+            }
+            mech.shuffleboard(list.getLayout(name, BuiltInLayouts.kList), level);
+            published.add(name);
+            if (level == SendableLevel.DEBUG) {
+                // DEBUG publish implies COMP container was also created.
+                publishedMechanismsComp.add(name);
+            }
+        }
     }
 
     @Override
@@ -476,11 +557,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     public RobotCore<T> registerMechanism(Mechanism... mechs) {
-        Arrays.stream(mechs).forEach(mech -> {
+        if (mechs == null || mechs.length == 0) {
+            return this;
+        }
+        for (Mechanism mech : mechs) {
+            if (mech == null) {
+                continue;
+            }
             mechanisms.put(mech.getName(), mech);
+            ShuffleboardControls.registerMechanism(mech.getName());
             mech.setRobotCore(this);
             scheduleCustomPidCycle(mech);
-        });
+        }
         return this;
     }
 
@@ -488,10 +576,16 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
      * Registers all child mechanisms contained within the given superstructures.
      */
     public RobotCore<T> registerMechanism(SuperstructureMechanism<?, ?>... supers) {
-        Arrays.stream(supers).forEach(s -> {
+        if (supers == null || supers.length == 0) {
+            return this;
+        }
+        for (SuperstructureMechanism<?, ?> s : supers) {
+            if (s == null) {
+                continue;
+            }
             s.setRobotCore(this);
             registerMechanism(s.getMechanisms().all().toArray(Mechanism[]::new));
-        });
+        }
         return this;
     }
 
@@ -499,12 +593,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
      * Registers any registerable mechanism (plain or composite).
      */
     public RobotCore<T> registerMechanism(RegisterableMechanism... entries) {
-        Arrays.stream(entries).forEach(entry -> {
+        if (entries == null || entries.length == 0) {
+            return this;
+        }
+        for (RegisterableMechanism entry : entries) {
+            if (entry == null) {
+                continue;
+            }
             if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
                 superstructure.setRobotCore(this);
             }
             registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
-        });
+        }
         return this;
     }
 
@@ -591,6 +691,49 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             vision.shuffleboard("Robot Vision", level);
         }
 
+        if (level == SendableLevel.DEBUG) {
+            debugShuffleboardPublished = true;
+        }
+        coreShuffleboardPublished = true;
+
+        return this;
+    }
+
+    /**
+     * Publishes all registered mechanisms to Shuffleboard under a single tab.
+     *
+     * <p>Note: {@link #shuffleboard()} only publishes drivetrain/localization/vision. Mechanisms must
+     * be published explicitly (either via this helper or by calling {@code mechanism.shuffleboard(...)}).</p>
+     */
+    public RobotCore<T> shuffleboardMechanisms() {
+        return shuffleboardMechanisms("Mechanisms", SendableLevel.COMP);
+    }
+
+    public RobotCore<T> shuffleboardMechanisms(SendableLevel level) {
+        return shuffleboardMechanisms("Mechanisms", level);
+    }
+
+    public RobotCore<T> shuffleboardMechanisms(String tabName, SendableLevel level) {
+        if (!RobotSendableSystem.isShuffleboardEnabled()) {
+            return this;
+        }
+        mechanismsShuffleboardPublished = true;
+        if (level == SendableLevel.DEBUG) {
+            debugMechanismsShuffleboardPublished = true;
+        }
+        String resolved = tabName == null || tabName.isBlank() ? "Mechanisms" : tabName;
+        ShuffleboardTab tab = Shuffleboard.getTab(RobotSendableSystem.SHUFFLEBOARD_ROOT + "/" + resolved);
+        ShuffleboardLayout list = tab.getLayout("All", BuiltInLayouts.kList);
+        for (Mechanism mech : mechanisms.values()) {
+            String name = mech != null ? mech.getName() : "unknown";
+            if (mech == null) {
+                continue;
+            }
+            if (!ShuffleboardControls.mechanismAllowed(name, level)) {
+                continue;
+            }
+            mech.shuffleboard(list.getLayout(name, BuiltInLayouts.kList), level);
+        }
         return this;
     }
 

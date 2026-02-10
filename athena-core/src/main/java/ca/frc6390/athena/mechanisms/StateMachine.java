@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
+import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
@@ -22,7 +23,9 @@ import edu.wpi.first.wpilibj2.command.InstantCommand;
 public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implements RobotSendableDevice {
     
     private final DelayedOutput atGoalDelayedOutput;
-    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
+    private double shuffleboardPeriodSecondsOverride = Double.NaN;
+    private ShuffleboardLayout lastShuffleboardLayoutComp;
+    private ShuffleboardLayout lastShuffleboardLayoutDebug;
 
     public interface SetpointProvider<T> {
         T getSetpoint();
@@ -243,15 +246,18 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
 
     @Override
     public double getShuffleboardPeriodSeconds() {
-        return shuffleboardPeriodSeconds;
+        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
+                ? shuffleboardPeriodSecondsOverride
+                : ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
     }
 
     @Override
     public void setShuffleboardPeriodSeconds(double periodSeconds) {
-        if (!Double.isFinite(periodSeconds)) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
+            shuffleboardPeriodSecondsOverride = Double.NaN;
             return;
         }
-        shuffleboardPeriodSeconds = periodSeconds;
+        shuffleboardPeriodSecondsOverride = periodSeconds;
     }
 
     public T getGoalStateSetpoint(){
@@ -260,6 +266,19 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        if (level == SendableLevel.DEBUG) {
+            if (layout == lastShuffleboardLayoutDebug) {
+                return layout;
+            }
+            lastShuffleboardLayoutDebug = layout;
+            lastShuffleboardLayoutComp = layout;
+        } else {
+            if (layout == lastShuffleboardLayoutComp) {
+                return layout;
+            }
+            lastShuffleboardLayoutComp = layout;
+        }
+
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
 
         if(level.equals(SendableLevel.DEBUG)){
@@ -268,18 +287,20 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
             layout.add("Queue State", new InstantCommand(() -> queueState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
             layout.add("Reset Queue", new InstantCommand(() -> resetQueue())).withWidget(BuiltInWidgets.kCommand);
 
-            ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
-            for (E state: goalState.getDeclaringClass().getEnumConstants()){
-                Object setpoint = state.getSetpoint();
-                if (setpoint instanceof Number number) {
-                    statesLayout.addNumber(state.name(),
-                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(number::doubleValue, period));
-                } else if (setpoint instanceof Boolean bool) {
-                    statesLayout.addBoolean(state.name(),
-                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(bool::booleanValue, period));
-                } else {
-                    statesLayout.addString(state.name(),
-                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> String.valueOf(setpoint), period));
+            if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.STATE_MACHINE_STATES_LIST)) {
+                ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
+                for (E state: goalState.getDeclaringClass().getEnumConstants()){
+                    Object setpoint = state.getSetpoint();
+                    if (setpoint instanceof Number number) {
+                        statesLayout.addNumber(state.name(),
+                                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(number::doubleValue, period));
+                    } else if (setpoint instanceof Boolean bool) {
+                        statesLayout.addBoolean(state.name(),
+                                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(bool::booleanValue, period));
+                    } else {
+                        statesLayout.addString(state.name(),
+                                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> String.valueOf(setpoint), period));
+                    }
                 }
             }
         }

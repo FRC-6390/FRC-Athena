@@ -17,6 +17,8 @@ public final class LoopTiming {
     private LoopTiming() {}
 
     static void beginCycle() {
+        // Cache a single "now" timestamp for this robot loop.
+        RobotTime.updateNowSeconds(Timer.getFPGATimestamp());
         samplingMechanisms = debugAlways || sampleMechanismsNext;
         sampleMechanismsNext = false;
         if (samplingMechanisms) {

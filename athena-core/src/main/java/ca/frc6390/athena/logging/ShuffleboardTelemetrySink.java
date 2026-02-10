@@ -3,6 +3,7 @@ package ca.frc6390.athena.logging;
 import java.util.HashMap;
 import java.util.Map;
 
+import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import edu.wpi.first.networktables.GenericEntry;
 import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
@@ -22,6 +23,9 @@ public final class ShuffleboardTelemetrySink implements TelemetrySink {
 
     @Override
     public TelemetryOutput create(String key, TelemetryValueType type, Object initialValue) {
+        if (!ShuffleboardControls.enabled(ShuffleboardControls.Flag.TELEMETRY_SHUFFLEBOARD_WIDGETS)) {
+            return null;
+        }
         GenericEntry entry = entries.computeIfAbsent(key, name -> {
             Object defaultValue = initialValue != null ? initialValue : defaultValue(type);
             return tab.add(name, defaultValue).getEntry();

@@ -8,14 +8,17 @@ import java.util.List;
 import java.util.Objects;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
+import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import edu.wpi.first.wpilibj.DriverStation;
 
 public final class TelemetryRegistry {
     private static final String DEFAULT_PREFIX = "Athena";
     private static final int DEFAULT_PERIOD_MS = 100;
+    private static final long SHUFFLEBOARD_CREATE_BACKOFF_MS = 1000;
     private volatile boolean enabled = true;
     private final TelemetrySink diskSink;
     private final TelemetrySink shuffleboardSink;
+    private final TelemetrySink networkTablesSink;
     private final List<Entry> entries;
     private final int defaultPeriodMs;
 
@@ -23,17 +26,21 @@ public final class TelemetryRegistry {
         private final String key;
         private final TelemetryValueType type;
         private final TelemetryOutput diskOutput;
-        private final TelemetryOutput shuffleboardOutput;
+        private final TelemetryOutput networkTablesOutput;
+        private final boolean wantsShuffleboard;
         private final ValueSupplier supplier;
         private final int periodMs;
         private final double epsilon;
         private long lastPublishMs;
+        private long lastShuffleboardCreateAttemptMs;
+        private TelemetryOutput shuffleboardOutput;
         private Object lastValue;
 
         private Entry(String key,
                       TelemetryValueType type,
                       TelemetryOutput diskOutput,
-                      TelemetryOutput shuffleboardOutput,
+                      TelemetryOutput networkTablesOutput,
+                      boolean wantsShuffleboard,
                       ValueSupplier supplier,
                       int periodMs,
                       double epsilon,
@@ -41,11 +48,14 @@ public final class TelemetryRegistry {
             this.key = key;
             this.type = type;
             this.diskOutput = diskOutput;
-            this.shuffleboardOutput = shuffleboardOutput;
+            this.networkTablesOutput = networkTablesOutput;
+            this.wantsShuffleboard = wantsShuffleboard;
             this.supplier = supplier;
             this.periodMs = periodMs;
             this.epsilon = epsilon;
             this.lastPublishMs = 0L;
+            this.lastShuffleboardCreateAttemptMs = 0L;
+            this.shuffleboardOutput = null;
             this.lastValue = snapshotValue(type, initialValue);
         }
     }
@@ -56,18 +66,28 @@ public final class TelemetryRegistry {
     }
 
     public TelemetryRegistry(TelemetrySink diskSink, TelemetrySink shuffleboardSink) {
-        this(diskSink, shuffleboardSink, DEFAULT_PERIOD_MS);
+        this(diskSink, shuffleboardSink, null, DEFAULT_PERIOD_MS);
     }
 
     public TelemetryRegistry(TelemetrySink diskSink, TelemetrySink shuffleboardSink, int defaultPeriodMs) {
+        this(diskSink, shuffleboardSink, null, defaultPeriodMs);
+    }
+
+    public TelemetryRegistry(TelemetrySink diskSink,
+                             TelemetrySink shuffleboardSink,
+                             TelemetrySink networkTablesSink,
+                             int defaultPeriodMs) {
         this.diskSink = diskSink;
         this.shuffleboardSink = shuffleboardSink;
+        this.networkTablesSink = networkTablesSink;
         this.entries = new ArrayList<>();
         this.defaultPeriodMs = defaultPeriodMs > 0 ? defaultPeriodMs : DEFAULT_PERIOD_MS;
     }
 
     public static TelemetryRegistry createDefault(String shuffleboardTab) {
-        return create(TelemetryConfig.defualt().setShuffleboardTab(shuffleboardTab));
+        return create(TelemetryConfig.defualt()
+                .setShuffleboardEnabled(true)
+                .setShuffleboardTab(shuffleboardTab));
     }
 
     public static TelemetryRegistry create(TelemetryConfig config) {
@@ -75,15 +95,13 @@ public final class TelemetryRegistry {
         TelemetrySink disk = resolved.isDiskEnabled()
                 ? new DataLogTelemetrySink(resolved.diskPrefix())
                 : null;
-        TelemetrySink shuffleboard = null;
-        if (resolved.isShuffleboardEnabled()) {
-            TelemetrySink primary = new ShuffleboardTelemetrySink(resolved.shuffleboardTab());
-            TelemetrySink mirror = resolved.isNetworkTablesEnabled()
-                    ? new NetworkTableTelemetrySink(resolved.networkTablePrefix())
-                    : null;
-            shuffleboard = new MirrorTelemetrySink(primary, mirror);
-        }
-        return new TelemetryRegistry(disk, shuffleboard, resolved.defaultPeriodMs());
+        TelemetrySink shuffleboard = resolved.isShuffleboardEnabled()
+                ? new ShuffleboardTelemetrySink(resolved.shuffleboardTab())
+                : null;
+        TelemetrySink networkTables = resolved.isNetworkTablesEnabled()
+                ? new NetworkTableTelemetrySink(resolved.networkTablePrefix())
+                : null;
+        return new TelemetryRegistry(disk, shuffleboard, networkTables, resolved.defaultPeriodMs());
     }
 
     public void register(Object target) {
@@ -149,8 +167,23 @@ public final class TelemetryRegistry {
             if (entry.diskOutput != null) {
                 entry.diskOutput.write(value);
             }
-            if (entry.shuffleboardOutput != null && RobotSendableSystem.isShuffleboardEnabled()) {
-                entry.shuffleboardOutput.write(value);
+            if (entry.networkTablesOutput != null) {
+                entry.networkTablesOutput.write(value);
+            }
+
+            if (entry.wantsShuffleboard && shuffleboardSink != null) {
+                boolean shouldWriteWidgets = RobotSendableSystem.isShuffleboardEnabled()
+                        && ShuffleboardControls.enabled(ShuffleboardControls.Flag.TELEMETRY_SHUFFLEBOARD_WIDGETS);
+                if (shouldWriteWidgets) {
+                    if (entry.shuffleboardOutput == null
+                            && (nowMs - entry.lastShuffleboardCreateAttemptMs) >= SHUFFLEBOARD_CREATE_BACKOFF_MS) {
+                        entry.shuffleboardOutput = shuffleboardSink.create(entry.key, entry.type, entry.lastValue);
+                        entry.lastShuffleboardCreateAttemptMs = nowMs;
+                    }
+                    if (entry.shuffleboardOutput != null) {
+                        entry.shuffleboardOutput.write(value);
+                    }
+                }
             }
             entry.lastValue = snapshotValue(entry.type, value);
             entry.lastPublishMs = nowMs;
@@ -203,11 +236,12 @@ public final class TelemetryRegistry {
         TelemetryOutput diskOutput = shouldLogToDisk(telemetry)
                 ? diskSink.create(key, valueType, initialValue)
                 : null;
-        TelemetryOutput shuffleboardOutput = shouldLogToShuffleboard(telemetry)
-                ? shuffleboardSink.create(key, valueType, initialValue)
+        TelemetryOutput networkTablesOutput = shouldLogToNetworkTables(telemetry)
+                ? networkTablesSink.create(key, valueType, initialValue)
                 : null;
+        boolean wantsShuffleboard = shouldLogToShuffleboard(telemetry);
         int periodMs = telemetry.periodMs() > 0 ? telemetry.periodMs() : defaultPeriodMs;
-        entries.add(new Entry(key, valueType, diskOutput, shuffleboardOutput, supplier,
+        entries.add(new Entry(key, valueType, diskOutput, networkTablesOutput, wantsShuffleboard, supplier,
                 periodMs, telemetry.epsilon(), initialValue));
     }
 
@@ -223,6 +257,15 @@ public final class TelemetryRegistry {
         if (shuffleboardSink == null) {
             return false;
         }
+        return telemetry.destination() == TelemetryDestination.SHUFFLEBOARD
+                || telemetry.destination() == TelemetryDestination.BOTH;
+    }
+
+    private boolean shouldLogToNetworkTables(Telemetry telemetry) {
+        if (networkTablesSink == null) {
+            return false;
+        }
+        // Treat NetworkTables as a dashboard sink for any telemetry intended for Shuffleboard/BOTH.
         return telemetry.destination() == TelemetryDestination.SHUFFLEBOARD
                 || telemetry.destination() == TelemetryDestination.BOTH;
     }
@@ -341,7 +384,14 @@ public final class TelemetryRegistry {
     }
 
     static long[] toLongArray(int[] values) {
-        return Arrays.stream(values).asLongStream().toArray();
+        if (values == null) {
+            return new long[0];
+        }
+        long[] out = new long[values.length];
+        for (int i = 0; i < values.length; i++) {
+            out[i] = values[i];
+        }
+        return out;
     }
 
     public record TelemetryConfig(

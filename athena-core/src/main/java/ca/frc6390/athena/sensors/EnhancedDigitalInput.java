@@ -16,7 +16,9 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
     private final DIOSim dioSim;
     private final AtomicBoolean inverted;
     private final DelayedOutput delayedOutput;
-    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
+    private double shuffleboardPeriodSecondsOverride = Double.NaN;
+    private ShuffleboardLayout lastShuffleboardLayoutComp;
+    private ShuffleboardLayout lastShuffleboardLayoutDebug;
 
     public EnhancedDigitalInput(int channel) {
         this(channel, false);
@@ -97,19 +99,35 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
 
     @Override
     public double getShuffleboardPeriodSeconds() {
-        return shuffleboardPeriodSeconds;
+        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
+                ? shuffleboardPeriodSecondsOverride
+                : ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
     }
 
     @Override
     public void setShuffleboardPeriodSeconds(double periodSeconds) {
-        if (!Double.isFinite(periodSeconds)) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
+            shuffleboardPeriodSecondsOverride = Double.NaN;
             return;
         }
-        shuffleboardPeriodSeconds = periodSeconds;
+        shuffleboardPeriodSecondsOverride = periodSeconds;
     }
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        if (level == SendableLevel.DEBUG) {
+            if (layout == lastShuffleboardLayoutDebug) {
+                return layout;
+            }
+            lastShuffleboardLayoutDebug = layout;
+            lastShuffleboardLayoutComp = layout;
+        } else {
+            if (layout == lastShuffleboardLayoutComp) {
+                return layout;
+            }
+            lastShuffleboardLayoutComp = layout;
+        }
+
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         if(level.equals(SendableLevel.DEBUG)){ 
             layout.addBoolean("Inverted", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::isInverted, period));

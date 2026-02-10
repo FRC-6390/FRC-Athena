@@ -11,6 +11,7 @@ import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
+import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulation;
 import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulationConfig;
@@ -85,7 +86,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean lastOutputValid;
     private double lastOutput;
     private boolean lastOutputIsVoltage;
-    private double shuffleboardPeriodSeconds = RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
+    private double shuffleboardPeriodSecondsOverride = Double.NaN;
+    private ShuffleboardContainer lastShuffleboardContainerComp;
+    private ShuffleboardContainer lastShuffleboardContainerDebug;
+    private String desiredShuffleboardTabComp;
+    private String desiredShuffleboardTabDebug;
+    private double lastShuffleboardPublishAttemptSeconds = Double.NaN;
+    private static final double SHUFFLEBOARD_PUBLISH_RETRY_PERIOD_SECONDS = 0.5;
     private boolean cachedEmergencyStopped;
     private boolean cachedOverride;
     private boolean cachedAtSetpoint;
@@ -972,14 +979,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public double getShuffleboardPeriodSeconds() {
-        return shuffleboardPeriodSeconds;
+        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
+                ? shuffleboardPeriodSecondsOverride
+                : RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
     }
 
     public void setShuffleboardPeriodSeconds(double periodSeconds) {
         if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
+            // Reset to global default.
+            this.shuffleboardPeriodSecondsOverride = Double.NaN;
             return;
         }
-        this.shuffleboardPeriodSeconds = periodSeconds;
+        this.shuffleboardPeriodSecondsOverride = periodSeconds;
     }
 
     public void disableControlLoop(String name) {
@@ -1088,10 +1099,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
         double nowSeconds = Timer.getFPGATimestamp();
-        if (Double.isFinite(shuffleboardPeriodSeconds) && shuffleboardPeriodSeconds > 0.0
+        double periodSeconds = getShuffleboardPeriodSeconds();
+        if (Double.isFinite(periodSeconds) && periodSeconds > 0.0
                 && Double.isFinite(nowSeconds)
                 && !Double.isNaN(lastShuffleboardCacheUpdateSeconds)
-                && (nowSeconds - lastShuffleboardCacheUpdateSeconds) < shuffleboardPeriodSeconds) {
+                && (nowSeconds - lastShuffleboardCacheUpdateSeconds) < periodSeconds) {
             return;
         }
         lastShuffleboardCacheUpdateSeconds = nowSeconds;
@@ -1190,6 +1202,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         update();
 
         updateShuffleboardCache();
+        attemptShuffleboardPublishIfNeeded();
 
         if (visualization != null) {
             visualization.setExternalRootPose(visualizationRootOverride);
@@ -1415,12 +1428,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @Override
     public Mechanism shuffleboard(String tab, SendableLevel level) {
+        recordDesiredShuffleboardTab(tab, level);
+        if (!ShuffleboardControls.mechanismAllowed(getName(), level)) {
+            return this;
+        }
         return (Mechanism) RobotSendableSystem.super.shuffleboard(tab, level);
     }
 
     @Override
     public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
         if (!RobotSendableSystem.isShuffleboardEnabled()) {
+            return tab;
+        }
+        if (!ShuffleboardControls.mechanismAllowed(getName(), level)) {
             return tab;
         }
         shuffleboardEnabled = true;
@@ -1432,53 +1452,185 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!RobotSendableSystem.isShuffleboardEnabled()) {
             return layout;
         }
+        if (!ShuffleboardControls.mechanismAllowed(getName(), level)) {
+            return layout;
+        }
         shuffleboardEnabled = true;
         shuffleboardInternal(layout, level);
         return layout;
     }
 
+    private void recordDesiredShuffleboardTab(String tab, SendableLevel level) {
+        if (tab == null || tab.isBlank()) {
+            return;
+        }
+        if (level == SendableLevel.DEBUG) {
+            desiredShuffleboardTabDebug = tab;
+            // If a user asks for DEBUG but DEBUG is globally off, COMP can still be useful.
+            if (desiredShuffleboardTabComp == null) {
+                desiredShuffleboardTabComp = tab;
+            }
+        } else {
+            desiredShuffleboardTabComp = tab;
+        }
+    }
+
+    private void attemptShuffleboardPublishIfNeeded() {
+        if (!RobotSendableSystem.isShuffleboardEnabled()) {
+            return;
+        }
+
+        boolean needsComp = desiredShuffleboardTabComp != null && lastShuffleboardContainerComp == null;
+        boolean needsDebug = desiredShuffleboardTabDebug != null && lastShuffleboardContainerDebug == null;
+        if (!needsComp && !needsDebug) {
+            return;
+        }
+
+        double now = Timer.getFPGATimestamp();
+        if (Double.isFinite(lastShuffleboardPublishAttemptSeconds)
+                && (now - lastShuffleboardPublishAttemptSeconds) < SHUFFLEBOARD_PUBLISH_RETRY_PERIOD_SECONDS) {
+            return;
+        }
+        lastShuffleboardPublishAttemptSeconds = now;
+
+        if (needsComp && ShuffleboardControls.mechanismAllowed(getName(), SendableLevel.COMP)) {
+            RobotSendableSystem.super.shuffleboard(desiredShuffleboardTabComp, SendableLevel.COMP);
+        }
+        if (needsDebug && ShuffleboardControls.mechanismAllowed(getName(), SendableLevel.DEBUG)) {
+            RobotSendableSystem.super.shuffleboard(desiredShuffleboardTabDebug, SendableLevel.DEBUG);
+        }
+    }
+
     private void shuffleboardInternal(ShuffleboardContainer container, SendableLevel level) {
+        if (level == SendableLevel.DEBUG) {
+            if (container == lastShuffleboardContainerDebug) {
+                return;
+            }
+
+            boolean compAlreadyBuilt = (container == lastShuffleboardContainerComp);
+            lastShuffleboardContainerDebug = container;
+            if (!compAlreadyBuilt) {
+                lastShuffleboardContainerComp = container;
+                shuffleboardCommon(container);
+            }
+            shuffleboardDebugOnly(container);
+            return;
+        }
+
+        if (container == lastShuffleboardContainerComp) {
+            return;
+        }
+        lastShuffleboardContainerComp = container;
+        shuffleboardCommon(container);
+    }
+
+    private void shuffleboardCommon(ShuffleboardContainer container) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        ShuffleboardLayout motorsLayout = container.getLayout("Motors", BuiltInLayouts.kList);
-        motors.shuffleboard(motorsLayout, level);
 
-        if (encoder != null) {
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_MOTORS)) {
+            ShuffleboardLayout motorsLayout = container.getLayout("Motors", BuiltInLayouts.kList);
+            motors.shuffleboard(motorsLayout, SendableLevel.COMP);
+        }
+
+        if (encoder != null && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_ENCODERS)) {
             ShuffleboardLayout encoderLayout = container.getLayout("Encoders", BuiltInLayouts.kList);
-            encoder.shuffleboard(encoderLayout, level);
+            encoder.shuffleboard(encoderLayout, SendableLevel.COMP);
         }
 
-        ShuffleboardLayout statusLayout = container.getLayout("Status", BuiltInLayouts.kList);
-        statusLayout.addBoolean("Emergency Stopped", RobotSendableSystem.rateLimit(() -> cachedEmergencyStopped, period));
-        statusLayout.addBoolean("Override", RobotSendableSystem.rateLimit(() -> cachedOverride, period));
-        statusLayout.addBoolean("At Setpoint", RobotSendableSystem.rateLimit(() -> cachedAtSetpoint, period));
-
-        ShuffleboardLayout setpointLayout = container.getLayout("Setpoints", BuiltInLayouts.kList);
-        setpointLayout.addDouble("Setpoint", RobotSendableSystem.rateLimit(() -> cachedSetpoint, period));
-        if (level.equals(SendableLevel.DEBUG)) {
-            setpointLayout.addDouble("Nudge", RobotSendableSystem.rateLimit(() -> cachedNudge, period));
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_STATUS)) {
+            ShuffleboardLayout statusLayout = container.getLayout("Status", BuiltInLayouts.kList);
+            statusLayout.addBoolean("Emergency Stopped", RobotSendableSystem.rateLimit(() -> cachedEmergencyStopped, period));
+            statusLayout.addBoolean("Override", RobotSendableSystem.rateLimit(() -> cachedOverride, period));
+            statusLayout.addBoolean("At Setpoint", RobotSendableSystem.rateLimit(() -> cachedAtSetpoint, period));
         }
 
-        ShuffleboardLayout outputLayout = container.getLayout("Outputs", BuiltInLayouts.kList);
-        outputLayout.addDouble("Output", RobotSendableSystem.rateLimit(() -> cachedOutput, period));
-        if (level.equals(SendableLevel.DEBUG)) {
-            outputLayout.addDouble("PID Output", RobotSendableSystem.rateLimit(() -> cachedPidOutput, period));
-            outputLayout.addDouble("Feedforward Output", RobotSendableSystem.rateLimit(() -> cachedFeedforwardOutput, period));
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SETPOINTS)) {
+            ShuffleboardLayout setpointLayout = container.getLayout("Setpoints", BuiltInLayouts.kList);
+            setpointLayout.addDouble("Setpoint", RobotSendableSystem.rateLimit(() -> cachedSetpoint, period));
         }
 
-        if (visualization != null) {
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_OUTPUTS)) {
+            ShuffleboardLayout outputLayout = container.getLayout("Outputs", BuiltInLayouts.kList);
+            outputLayout.addDouble("Output", RobotSendableSystem.rateLimit(() -> cachedOutput, period));
+        }
+
+        if (visualization != null && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_VISUALIZATION)) {
             ShuffleboardLayout visualizationLayout = container.getLayout("Visualization", BuiltInLayouts.kList);
             visualizationLayout.add("Mechanism2d", visualization.mechanism2d());
         }
 
-        if (RobotBase.isSimulation()) {
+        if (RobotBase.isSimulation() && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SIMULATION)) {
             ShuffleboardLayout simulationLayout = container.getLayout("Simulation", BuiltInLayouts.kList);
             simulationLayout.addBoolean("Simulation Enabled", RobotSendableSystem.rateLimit(() -> cachedHasSimulation, period));
-            if (level.equals(SendableLevel.DEBUG)) {
-                simulationLayout.addDouble("Simulation dt", RobotSendableSystem.rateLimit(() -> cachedSimulationUpdatePeriodSeconds, period));
-            }
         }
 
-        if (level.equals(SendableLevel.DEBUG)) {
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_COMMANDS)) {
+            ShuffleboardLayout commandsLayout = container.getLayout("Commands", BuiltInLayouts.kList);
+            commandsLayout.add("Brake Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Brake)))
+                    .withWidget(BuiltInWidgets.kCommand);
+            commandsLayout.add("Coast Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Coast)))
+                    .withWidget(BuiltInWidgets.kCommand);
+        }
+
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SYSID)) {
+            ShuffleboardLayout sysIdLayout = container.getLayout("SysId", BuiltInLayouts.kList);
+            sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
+                    .withWidget(BuiltInWidgets.kCommand);
+            sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
+                    .withWidget(BuiltInWidgets.kCommand);
+            sysIdLayout.add("Dynamic Forward", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))
+                    .withWidget(BuiltInWidgets.kCommand);
+            sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
+                    .withWidget(BuiltInWidgets.kCommand);
+            sysIdLayout.add("Ramp Rate (V/s)",
+                    builder -> builder.addDoubleProperty(
+                            "Ramp Rate (V/s)",
+                            RobotSendableSystem.rateLimit(() -> cachedSysIdRampRate, period),
+                            this::setSysIdRampRateVoltsPerSecond));
+            sysIdLayout.add("Step Voltage (V)",
+                    builder -> builder.addDoubleProperty(
+                            "Step Voltage (V)",
+                            RobotSendableSystem.rateLimit(() -> cachedSysIdStepVoltage, period),
+                            this::setSysIdStepVoltage));
+            sysIdLayout.add("Timeout (s)",
+                    builder -> builder.addDoubleProperty(
+                            "Timeout (s)",
+                            RobotSendableSystem.rateLimit(() -> cachedSysIdTimeoutSeconds, period),
+                            this::setSysIdTimeoutSeconds));
+            sysIdLayout.addBoolean("Active", RobotSendableSystem.rateLimit(() -> cachedSysIdActive, period))
+                    .withWidget(BuiltInWidgets.kBooleanBox);
+        }
+    }
+
+    private void shuffleboardDebugOnly(ShuffleboardContainer container) {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_MOTORS)) {
+            ShuffleboardLayout motorsLayout = container.getLayout("Motors", BuiltInLayouts.kList);
+            motors.shuffleboard(motorsLayout, SendableLevel.DEBUG);
+        }
+        if (encoder != null && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_ENCODERS)) {
+            ShuffleboardLayout encoderLayout = container.getLayout("Encoders", BuiltInLayouts.kList);
+            encoder.shuffleboard(encoderLayout, SendableLevel.DEBUG);
+        }
+
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SETPOINTS)) {
+            ShuffleboardLayout setpointLayout = container.getLayout("Setpoints", BuiltInLayouts.kList);
+            setpointLayout.addDouble("Nudge", RobotSendableSystem.rateLimit(() -> cachedNudge, period));
+        }
+
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_OUTPUTS)) {
+            ShuffleboardLayout outputLayout = container.getLayout("Outputs", BuiltInLayouts.kList);
+            outputLayout.addDouble("PID Output", RobotSendableSystem.rateLimit(() -> cachedPidOutput, period));
+            outputLayout.addDouble("Feedforward Output", RobotSendableSystem.rateLimit(() -> cachedFeedforwardOutput, period));
+        }
+
+        if (RobotBase.isSimulation() && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SIMULATION)) {
+            ShuffleboardLayout simulationLayout = container.getLayout("Simulation", BuiltInLayouts.kList);
+            simulationLayout.addDouble("Simulation dt", RobotSendableSystem.rateLimit(() -> cachedSimulationUpdatePeriodSeconds, period));
+        }
+
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_CONFIG)) {
             ShuffleboardLayout configLayout = container.getLayout("Config", BuiltInLayouts.kList);
             configLayout.addString("Output Type", RobotSendableSystem.rateLimit(() -> outputType.name(), period));
             configLayout.add("Use Absolute", builder ->
@@ -1500,22 +1652,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             configLayout.addBoolean("PID Enabled", RobotSendableSystem.rateLimit(() -> cachedPidEnabled, period));
         }
 
-        if (level.equals(SendableLevel.DEBUG)) {
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_LIMIT_SWITCHES)) {
             ShuffleboardLayout limitsLayout = container.getLayout("Limit Switches", BuiltInLayouts.kList);
             for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
                 ShuffleboardLayout limitLayout =
                         limitsLayout.getLayout("DIO " + genericLimitSwitch.getPort(), BuiltInLayouts.kList);
                 genericLimitSwitch.shuffleboard(limitLayout);
-                sensorSimulation.decorateSensorLayout(genericLimitSwitch, limitLayout, level);
+                sensorSimulation.decorateSensorLayout(genericLimitSwitch, limitLayout, SendableLevel.DEBUG);
             }
         }
 
-        ShuffleboardLayout commandsLayout = container.getLayout("Commands", BuiltInLayouts.kList);
-        commandsLayout.add("Brake Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Brake)))
-                .withWidget(BuiltInWidgets.kCommand);
-        commandsLayout.add("Coast Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Coast)))
-                .withWidget(BuiltInWidgets.kCommand);
-        if (level.equals(SendableLevel.DEBUG)) {
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_COMMANDS)) {
+            ShuffleboardLayout commandsLayout = container.getLayout("Commands", BuiltInLayouts.kList);
             commandsLayout.add("Enable/Disable PID", new InstantCommand(() -> setPidEnabled(!pidEnabled)))
                     .withWidget(BuiltInWidgets.kCommand);
             commandsLayout.add("Enable/Disable FeedForward", new InstantCommand(() -> setFeedforwardEnabled(!feedforwardEnabled)))
@@ -1526,34 +1674,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     .withWidget(BuiltInWidgets.kCommand);
         }
 
-        ShuffleboardLayout sysIdLayout = container.getLayout("SysId", BuiltInLayouts.kList);
-        sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
-                .withWidget(BuiltInWidgets.kCommand);
-        sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
-                .withWidget(BuiltInWidgets.kCommand);
-        sysIdLayout.add("Dynamic Forward", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))
-                .withWidget(BuiltInWidgets.kCommand);
-        sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
-                .withWidget(BuiltInWidgets.kCommand);
-        sysIdLayout.add("Ramp Rate (V/s)",
-                builder -> builder.addDoubleProperty(
-                        "Ramp Rate (V/s)",
-                        RobotSendableSystem.rateLimit(() -> cachedSysIdRampRate, period),
-                        this::setSysIdRampRateVoltsPerSecond));
-        sysIdLayout.add("Step Voltage (V)",
-                builder -> builder.addDoubleProperty(
-                        "Step Voltage (V)",
-                        RobotSendableSystem.rateLimit(() -> cachedSysIdStepVoltage, period),
-                        this::setSysIdStepVoltage));
-        sysIdLayout.add("Timeout (s)",
-                builder -> builder.addDoubleProperty(
-                        "Timeout (s)",
-                        RobotSendableSystem.rateLimit(() -> cachedSysIdTimeoutSeconds, period),
-                        this::setSysIdTimeoutSeconds));
-        sysIdLayout.addBoolean("Active", RobotSendableSystem.rateLimit(() -> cachedSysIdActive, period))
-                .withWidget(BuiltInWidgets.kBooleanBox);
-
-        if (level.equals(SendableLevel.DEBUG)) {
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_CONTROLLERS)) {
             ShuffleboardLayout controllersLayout = container.getLayout("Controllers", BuiltInLayouts.kList);
             if (pidController != null) {
                 controllersLayout.add("PID Controller", pidController);

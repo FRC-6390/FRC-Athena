@@ -25,6 +25,7 @@ import ca.frc6390.athena.sensors.camera.VisionCameraConfig;
 import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
 import ca.frc6390.athena.core.sim.RobotVisionSimProvider;
+import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -384,9 +385,11 @@ public class RobotVision implements RobotSendableSystem {
    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, RobotSendableSystem.SendableLevel level) {
       if (localization != null) {
          localization.registerVisionShuffleboardTab(tab);
-         tab.add("Vision Field", localization.getVisionField2d())
-                 .withPosition(0, 0)
-                 .withSize(4, 3);
+         if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.VISION_FIELD_WIDGET)) {
+            tab.add("Vision Field", localization.getVisionField2d())
+                    .withPosition(0, 0)
+                    .withSize(4, 3);
+         }
       }
       return tab;
    }

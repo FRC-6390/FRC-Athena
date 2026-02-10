@@ -7,6 +7,7 @@ import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
+import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
@@ -17,7 +18,9 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
  */
 public class EncoderGroup implements RobotSendableDevice {
     private final Encoder[] encoders;
-    private double shuffleboardPeriodSeconds = ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
+    private double shuffleboardPeriodSecondsOverride = Double.NaN;
+    private ShuffleboardLayout lastShuffleboardLayoutComp;
+    private ShuffleboardLayout lastShuffleboardLayoutDebug;
 
     public EncoderGroup(Encoder... encoders) {
         this.encoders = encoders;
@@ -53,23 +56,63 @@ public class EncoderGroup implements RobotSendableDevice {
     }
 
     public double getVelocity() {
-        return Arrays.stream(encoders).mapToDouble(Encoder::getVelocity).average().orElse(0.0);
+        double sum = 0.0;
+        int count = 0;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            sum += encoder.getVelocity();
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
     }
 
     public double getPosition() {
-        return Arrays.stream(encoders).mapToDouble(Encoder::getPosition).average().orElse(0.0);
+        double sum = 0.0;
+        int count = 0;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            sum += encoder.getPosition();
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
     }
 
     public double getRotations() {
-        return Arrays.stream(encoders).mapToDouble(Encoder::getRotations).average().orElse(0.0);
+        double sum = 0.0;
+        int count = 0;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            sum += encoder.getRotations();
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
     }
 
     public double getRate() {
-        return Arrays.stream(encoders).mapToDouble(Encoder::getRate).average().orElse(0.0);
+        double sum = 0.0;
+        int count = 0;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            sum += encoder.getRate();
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
     }
 
     public void setPosition(double position) {
-        Arrays.stream(encoders).forEach(e -> e.setPosition(position));
+        for (Encoder encoder : encoders) {
+            if (encoder != null) {
+                encoder.setPosition(position);
+            }
+        }
     }
 
     public Rotation2d getRotation2d() {
@@ -77,28 +120,56 @@ public class EncoderGroup implements RobotSendableDevice {
     }
 
     public boolean allEncodersConnected() {
-        return Arrays.stream(encoders).allMatch(Encoder::isConnected);
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            if (!encoder.isConnected()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public void update() {
-        Arrays.stream(encoders).forEach(Encoder::update);
+        for (Encoder encoder : encoders) {
+            if (encoder != null) {
+                encoder.update();
+            }
+        }
     }
 
     @Override
     public double getShuffleboardPeriodSeconds() {
-        return shuffleboardPeriodSeconds;
+        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
+                ? shuffleboardPeriodSecondsOverride
+                : ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
     }
 
     @Override
     public void setShuffleboardPeriodSeconds(double periodSeconds) {
-        if (!Double.isFinite(periodSeconds)) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
+            shuffleboardPeriodSecondsOverride = Double.NaN;
             return;
         }
-        shuffleboardPeriodSeconds = periodSeconds;
+        shuffleboardPeriodSecondsOverride = periodSeconds;
     }
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        if (level == SendableLevel.DEBUG) {
+            if (layout == lastShuffleboardLayoutDebug) {
+                return layout;
+            }
+            lastShuffleboardLayoutDebug = layout;
+            lastShuffleboardLayoutComp = layout;
+        } else {
+            if (layout == lastShuffleboardLayoutComp) {
+                return layout;
+            }
+            lastShuffleboardLayoutComp = layout;
+        }
+
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
         summary.addDouble("Average Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedPosition, period));
@@ -107,42 +178,76 @@ public class EncoderGroup implements RobotSendableDevice {
         summary.addDouble("Average Rate", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedRate, period));
         summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allEncodersCachedConnected, period));
 
-        Arrays.stream(encoders)
-                .filter(Objects::nonNull)
-                .forEach(encoder ->
-                        encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), level));
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.ENCODER_GROUP_PER_ENCODER)) {
+            Arrays.stream(encoders)
+                    .filter(Objects::nonNull)
+                    .forEach(encoder ->
+                            encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), level));
+        }
         return layout;
     }
 
     private double getCachedPosition() {
-        return Arrays.stream(encoders)
-                .mapToDouble(Encoder::getCachedPosition)
-                .average()
-                .orElse(0.0);
+        double sum = 0.0;
+        int count = 0;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            sum += encoder.getCachedPosition();
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
     }
 
     private double getCachedVelocity() {
-        return Arrays.stream(encoders)
-                .mapToDouble(Encoder::getCachedVelocity)
-                .average()
-                .orElse(0.0);
+        double sum = 0.0;
+        int count = 0;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            sum += encoder.getCachedVelocity();
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
     }
 
     private double getCachedRotations() {
-        return Arrays.stream(encoders)
-                .mapToDouble(Encoder::getCachedRotations)
-                .average()
-                .orElse(0.0);
+        double sum = 0.0;
+        int count = 0;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            sum += encoder.getCachedRotations();
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
     }
 
     private double getCachedRate() {
-        return Arrays.stream(encoders)
-                .mapToDouble(Encoder::getCachedRate)
-                .average()
-                .orElse(0.0);
+        double sum = 0.0;
+        int count = 0;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            sum += encoder.getCachedRate();
+            count++;
+        }
+        return count > 0 ? sum / count : 0.0;
     }
 
     private boolean allEncodersCachedConnected() {
-        return Arrays.stream(encoders).allMatch(Encoder::isCachedConnected);
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            if (!encoder.isCachedConnected()) {
+                return false;
+            }
+        }
+        return true;
     }
 }
