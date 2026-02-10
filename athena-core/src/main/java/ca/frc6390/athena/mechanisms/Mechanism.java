@@ -27,6 +27,7 @@ import edu.wpi.first.math.trajectory.TrapezoidProfile;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.units.measure.Voltage;
 import java.util.function.DoubleSupplier;
@@ -58,6 +59,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Encoder encoder;
     private final PIDController pidController;
     private final ProfiledPIDController profiledPIDController;
+    private final OutputType mainPidOutputType;
     private boolean useAbsolute;
     private OutputType outputType = OutputType.PERCENT;
     private final GenericLimitSwitch[] limitSwitches;
@@ -141,9 +143,28 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Set<String> disabledControlLoops;
     private final Map<String, BooleanSupplier> controlLoopInputs;
     private final Map<String, DoubleSupplier> controlLoopDoubleInputs;
+    private final Map<String, java.util.function.IntSupplier> controlLoopIntInputs;
+    private final Map<String, java.util.function.Supplier<String>> controlLoopStringInputs;
+    private final Map<String, java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d>> controlLoopPose2dInputs;
+    private final Map<String, java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d>> controlLoopPose3dInputs;
     private final Map<String, Supplier<?>> controlLoopObjectInputs;
+    // Mutable inputs (declared with defaults in MechanismConfig.inputs(...)).
+    private final Map<String, Boolean> mutableBoolInputDefaults;
+    private final Map<String, Boolean> mutableBoolInputs;
+    private final Map<String, Double> mutableDoubleInputDefaults;
+    private final Map<String, Double> mutableDoubleInputs;
+    private final Map<String, Integer> mutableIntInputDefaults;
+    private final Map<String, Integer> mutableIntInputs;
+    private final Map<String, String> mutableStringInputDefaults;
+    private final Map<String, String> mutableStringInputs;
+    private final Map<String, edu.wpi.first.math.geometry.Pose2d> mutablePose2dInputDefaults;
+    private final Map<String, edu.wpi.first.math.geometry.Pose2d> mutablePose2dInputs;
+    private final Map<String, edu.wpi.first.math.geometry.Pose3d> mutablePose3dInputDefaults;
+    private final Map<String, edu.wpi.first.math.geometry.Pose3d> mutablePose3dInputs;
     private final Map<String, PIDController> controlLoopPids;
+    private final Map<String, OutputType> controlLoopPidOutputTypes;
     private final Map<String, SimpleMotorFeedforward> controlLoopFeedforwards;
+    private final Map<String, OutputType> controlLoopFeedforwardOutputTypes;
     private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
     private  boolean shouldCustomEncoder = false;
     private  DoubleSupplier customEncoderPos;
@@ -167,8 +188,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.motors =
                 MotorControllerGroup.fromConfigs(config.data().motors().toArray(MotorControllerConfig[]::new));
         this.encoder = resolveEncoder(config.data().encoder(), this.motors);
-        this.pidController = config.data().pidController();
-        this.profiledPIDController = config.data().profiledPIDController();
         this.useAbsolute = config.data().useAbsolute();
         OutputType configOutputType = config.data().outputType();
         if (configOutputType == null) {
@@ -176,12 +195,43 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         } else {
             this.outputType = configOutputType;
         }
+        PIDController basePid = config.data().pidController();
+        OutputType resolvedMainPidOutputType = this.outputType;
+        if (basePid == null && config != null && config.mainPidProfileName() != null) {
+            MechanismConfig.PidProfile profile = config.resolveMainPidProfile();
+            if (profile == null) {
+                throw new IllegalStateException("Main PID profile selected but not registered: " + config.mainPidProfileName());
+            }
+            OutputType profileOutput = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
+            if (profileOutput != OutputType.PERCENT && profileOutput != OutputType.VOLTAGE) {
+                throw new IllegalStateException("Main PID profile output type must be PERCENT or VOLTAGE");
+            }
+            PIDController pid = new PIDController(profile.kP(), profile.kI(), profile.kD());
+            if (Double.isFinite(profile.iZone()) && profile.iZone() > 0.0) {
+                pid.setIZone(profile.iZone());
+            }
+            if (Double.isFinite(profile.tolerance()) && profile.tolerance() > 0.0) {
+                pid.setTolerance(profile.tolerance());
+            }
+            basePid = pid;
+            resolvedMainPidOutputType = profileOutput;
+        }
+        this.pidController = basePid;
+        this.mainPidOutputType = resolvedMainPidOutputType != null ? resolvedMainPidOutputType : this.outputType;
+        this.profiledPIDController = config.data().profiledPIDController();
         this.override = false;
         this.limitSwitches =
                 config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new);
         this.setpointIsOutput = config.data().useSetpointAsOutput();
         this.pidPeriod = config.data().pidPeriod();
         this.motionLimits = new MotionLimits();
+
+        if (pidController != null && config.data().pidContinous()) {
+            pidController.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
+        }
+        if (profiledPIDController != null && config.data().pidContinous()) {
+            profiledPIDController.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
+        }
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
@@ -230,9 +280,27 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.customEncoderPos = config.customEncoderPos;
         this.controlLoopInputs = new HashMap<>(config.inputs);
         this.controlLoopDoubleInputs = new HashMap<>(config.doubleInputs);
+        this.controlLoopIntInputs = new HashMap<>(config.intInputs);
+        this.controlLoopStringInputs = new HashMap<>(config.stringInputs);
+        this.controlLoopPose2dInputs = new HashMap<>(config.pose2dInputs);
+        this.controlLoopPose3dInputs = new HashMap<>(config.pose3dInputs);
         this.controlLoopObjectInputs = new HashMap<>(config.objectInputs);
+        this.mutableBoolInputDefaults = new HashMap<>(config.mutableBoolInputDefaults);
+        this.mutableBoolInputs = new HashMap<>(this.mutableBoolInputDefaults);
+        this.mutableDoubleInputDefaults = new HashMap<>(config.mutableDoubleInputDefaults);
+        this.mutableDoubleInputs = new HashMap<>(this.mutableDoubleInputDefaults);
+        this.mutableIntInputDefaults = new HashMap<>(config.mutableIntInputDefaults);
+        this.mutableIntInputs = new HashMap<>(this.mutableIntInputDefaults);
+        this.mutableStringInputDefaults = new HashMap<>(config.mutableStringInputDefaults);
+        this.mutableStringInputs = new HashMap<>(this.mutableStringInputDefaults);
+        this.mutablePose2dInputDefaults = new HashMap<>(config.mutablePose2dInputDefaults);
+        this.mutablePose2dInputs = new HashMap<>(this.mutablePose2dInputDefaults);
+        this.mutablePose3dInputDefaults = new HashMap<>(config.mutablePose3dInputDefaults);
+        this.mutablePose3dInputs = new HashMap<>(this.mutablePose3dInputDefaults);
         this.controlLoopPids = new HashMap<>();
+        this.controlLoopPidOutputTypes = new HashMap<>();
         this.controlLoopFeedforwards = new HashMap<>();
+        this.controlLoopFeedforwardOutputTypes = new HashMap<>();
         this.controlLoops = new ArrayList<>();
         this.controlLoopsByName = new HashMap<>();
         this.disabledControlLoops = new HashSet<>();
@@ -243,21 +311,35 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (name == null || name.isBlank() || profile == null) {
                     continue;
                 }
+                OutputType profileOutput = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
+                if (profileOutput != OutputType.PERCENT && profileOutput != OutputType.VOLTAGE) {
+                    throw new IllegalStateException("PID profile '" + name + "' output type must be PERCENT or VOLTAGE");
+                }
                 PIDController pid = new PIDController(profile.kP(), profile.kI(), profile.kD());
                 if (Double.isFinite(profile.iZone()) && profile.iZone() > 0.0) {
                     pid.setIZone(profile.iZone());
                 }
+                if (Double.isFinite(profile.tolerance()) && profile.tolerance() > 0.0) {
+                    pid.setTolerance(profile.tolerance());
+                }
                 controlLoopPids.put(name, pid);
+                controlLoopPidOutputTypes.put(name, profileOutput);
             }
         }
         if (config.controlLoopFeedforwardProfiles != null) {
-            for (Map.Entry<String, SimpleMotorFeedforward> entry : config.controlLoopFeedforwardProfiles.entrySet()) {
+            for (Map.Entry<String, MechanismConfig.FeedforwardProfile> entry : config.controlLoopFeedforwardProfiles.entrySet()) {
                 String name = entry.getKey();
-                SimpleMotorFeedforward ff = entry.getValue();
+                MechanismConfig.FeedforwardProfile profile = entry.getValue();
+                SimpleMotorFeedforward ff = profile != null ? profile.feedforward() : null;
                 if (name == null || name.isBlank() || ff == null) {
                     continue;
                 }
+                OutputType profileOutput = profile.outputType() != null ? profile.outputType() : OutputType.VOLTAGE;
+                if (profileOutput != OutputType.VOLTAGE) {
+                    throw new IllegalStateException("Feedforward profile '" + name + "' output type must be VOLTAGE");
+                }
                 controlLoopFeedforwards.put(name, new SimpleMotorFeedforward(ff.getKs(), ff.getKv(), ff.getKa()));
+                controlLoopFeedforwardOutputTypes.put(name, profileOutput);
             }
         }
         for (MechanismConfig.ControlLoopBinding<?> binding : config.controlLoops) {
@@ -336,6 +418,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.profiledPIDController = profiledPIDController;
         this.useAbsolute = useAbsolute;
         this.outputType = useVoltage ? OutputType.VOLTAGE : OutputType.PERCENT;
+        this.mainPidOutputType = this.outputType;
         this.override = false;
         this.limitSwitches = limitSwitches;
         this.setpointIsOutput = useSetpointAsOutput;
@@ -381,9 +464,119 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.disabledControlLoops = new HashSet<>();
         this.controlLoopInputs = new HashMap<>();
         this.controlLoopDoubleInputs = new HashMap<>();
+        this.controlLoopIntInputs = new HashMap<>();
+        this.controlLoopStringInputs = new HashMap<>();
+        this.controlLoopPose2dInputs = new HashMap<>();
+        this.controlLoopPose3dInputs = new HashMap<>();
         this.controlLoopObjectInputs = new HashMap<>();
+        this.mutableBoolInputDefaults = new HashMap<>();
+        this.mutableBoolInputs = new HashMap<>();
+        this.mutableDoubleInputDefaults = new HashMap<>();
+        this.mutableDoubleInputs = new HashMap<>();
+        this.mutableIntInputDefaults = new HashMap<>();
+        this.mutableIntInputs = new HashMap<>();
+        this.mutableStringInputDefaults = new HashMap<>();
+        this.mutableStringInputs = new HashMap<>();
+        this.mutablePose2dInputDefaults = new HashMap<>();
+        this.mutablePose2dInputs = new HashMap<>();
+        this.mutablePose3dInputDefaults = new HashMap<>();
+        this.mutablePose3dInputs = new HashMap<>();
         this.controlLoopPids = new HashMap<>();
+        this.controlLoopPidOutputTypes = new HashMap<>();
         this.controlLoopFeedforwards = new HashMap<>();
+        this.controlLoopFeedforwardOutputTypes = new HashMap<>();
+    }
+
+    // Package-private helpers for state-hook contexts (StatefulMechanismCore).
+    boolean hasMutableBoolValKey(String key) { return key != null && mutableBoolInputs.containsKey(key); }
+    boolean mutableBoolVal(String key) { return mutableBoolInputs.get(key); }
+    boolean hasMutableDblValKey(String key) { return key != null && mutableDoubleInputs.containsKey(key); }
+    double mutableDblVal(String key) { return mutableDoubleInputs.get(key); }
+    boolean hasMutableIntValKey(String key) { return key != null && mutableIntInputs.containsKey(key); }
+    int mutableIntVal(String key) { return mutableIntInputs.get(key); }
+    boolean hasMutableStrValKey(String key) { return key != null && mutableStringInputs.containsKey(key); }
+    String mutableStrVal(String key) { return mutableStringInputs.get(key); }
+    boolean hasMutablePose2dValKey(String key) { return key != null && mutablePose2dInputs.containsKey(key); }
+    edu.wpi.first.math.geometry.Pose2d mutablePose2dVal(String key) { return mutablePose2dInputs.get(key); }
+    boolean hasMutablePose3dValKey(String key) { return key != null && mutablePose3dInputs.containsKey(key); }
+    edu.wpi.first.math.geometry.Pose3d mutablePose3dVal(String key) { return mutablePose3dInputs.get(key); }
+
+    private void requireMutableKey(String key, Map<String, ?> defaults) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("input key cannot be null/blank");
+        }
+        if (!defaults.containsKey(key)) {
+            throw new IllegalArgumentException("Mutable input key not declared in config: " + key);
+        }
+    }
+
+    public void setBoolVal(String key, boolean value) {
+        requireMutableKey(key, mutableBoolInputDefaults);
+        mutableBoolInputs.put(key, value);
+    }
+
+    public void resetBoolVal(String key) {
+        requireMutableKey(key, mutableBoolInputDefaults);
+        mutableBoolInputs.put(key, mutableBoolInputDefaults.get(key));
+    }
+
+    public void setDoubleVal(String key, double value) {
+        requireMutableKey(key, mutableDoubleInputDefaults);
+        mutableDoubleInputs.put(key, value);
+    }
+
+    public void resetDoubleVal(String key) {
+        requireMutableKey(key, mutableDoubleInputDefaults);
+        mutableDoubleInputs.put(key, mutableDoubleInputDefaults.get(key));
+    }
+
+    public void setIntVal(String key, int value) {
+        requireMutableKey(key, mutableIntInputDefaults);
+        mutableIntInputs.put(key, value);
+    }
+
+    public void resetIntVal(String key) {
+        requireMutableKey(key, mutableIntInputDefaults);
+        mutableIntInputs.put(key, mutableIntInputDefaults.get(key));
+    }
+
+    public void setStringVal(String key, String value) {
+        requireMutableKey(key, mutableStringInputDefaults);
+        if (value == null) {
+            throw new IllegalArgumentException("string input value cannot be null");
+        }
+        mutableStringInputs.put(key, value);
+    }
+
+    public void resetStringVal(String key) {
+        requireMutableKey(key, mutableStringInputDefaults);
+        mutableStringInputs.put(key, mutableStringInputDefaults.get(key));
+    }
+
+    public void setPose2dVal(String key, edu.wpi.first.math.geometry.Pose2d value) {
+        requireMutableKey(key, mutablePose2dInputDefaults);
+        if (value == null) {
+            throw new IllegalArgumentException("Pose2d input value cannot be null");
+        }
+        mutablePose2dInputs.put(key, value);
+    }
+
+    public void resetPose2dVal(String key) {
+        requireMutableKey(key, mutablePose2dInputDefaults);
+        mutablePose2dInputs.put(key, mutablePose2dInputDefaults.get(key));
+    }
+
+    public void setPose3dVal(String key, edu.wpi.first.math.geometry.Pose3d value) {
+        requireMutableKey(key, mutablePose3dInputDefaults);
+        if (value == null) {
+            throw new IllegalArgumentException("Pose3d input value cannot be null");
+        }
+        mutablePose3dInputs.put(key, value);
+    }
+
+    public void resetPose3dVal(String key) {
+        requireMutableKey(key, mutablePose3dInputDefaults);
+        mutablePose3dInputs.put(key, mutablePose3dInputDefaults.get(key));
     }
 
     public MotionLimits getMotionLimits() {
@@ -684,6 +877,52 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.outputType = outputType;
     }
 
+    protected double percentToOutput(double percent) {
+        if (outputType == OutputType.VOLTAGE) {
+            return percent * RobotController.getBatteryVoltage();
+        }
+        return percent;
+    }
+
+    protected double voltsToOutput(double volts) {
+        if (outputType == OutputType.VOLTAGE) {
+            return volts;
+        }
+        double vbat = RobotController.getBatteryVoltage();
+        if (!Double.isFinite(vbat) || vbat == 0.0) {
+            return 0.0;
+        }
+        return volts / vbat;
+    }
+
+    /**
+     * Converts a value from the given output type into this mechanism's output space.
+     */
+    protected double toOutput(OutputType type, double value) {
+        if (type == null || type == outputType) {
+            return value;
+        }
+        return switch (type) {
+            case VOLTAGE -> voltsToOutput(value);
+            case PERCENT -> percentToOutput(value);
+            case POSITION, VELOCITY -> value;
+        };
+    }
+
+    public OutputType getControlLoopPidOutputType(String name) {
+        if (name == null) {
+            return OutputType.PERCENT;
+        }
+        return controlLoopPidOutputTypes.getOrDefault(name, OutputType.PERCENT);
+    }
+
+    public OutputType getControlLoopFeedforwardOutputType(String name) {
+        if (name == null) {
+            return OutputType.VOLTAGE;
+        }
+        return controlLoopFeedforwardOutputTypes.getOrDefault(name, OutputType.VOLTAGE);
+    }
+
     public boolean isSetpointAsOutput() {
         return setpointIsOutput;
     }
@@ -764,11 +1003,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         if (pidController != null){
             double setpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
-            output += pidController.calculate(encoderPos, setpoint + getNudge());
+            output += toOutput(mainPidOutputType, pidController.calculate(encoderPos, setpoint + getNudge()));
         }
 
         if(profiledPIDController != null){
             if(prevSetpoint != getSetpoint()) resetPID();
+            // Profiled PID is assumed to already be expressed in the mechanism output space.
             output += profiledPIDController.calculate(encoderPos, getSetpoint() + getNudge());
         }
         
@@ -1309,12 +1549,21 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         @Override
         public boolean input(String key) {
+            if (mutableBoolInputs.containsKey(key)) {
+                return mutableBoolInputs.get(key);
+            }
             BooleanSupplier supplier = controlLoopInputs.get(key);
-            return supplier != null && supplier.getAsBoolean();
+            if (supplier == null) {
+                throw new IllegalArgumentException("No bool input found for key " + key);
+            }
+            return supplier.getAsBoolean();
         }
 
         @Override
         public BooleanSupplier inputSupplier(String key) {
+            if (mutableBoolInputs.containsKey(key)) {
+                return () -> mutableBoolInputs.get(key);
+            }
             BooleanSupplier supplier = controlLoopInputs.get(key);
             if (supplier == null) {
                 throw new IllegalArgumentException("No input found for key " + key);
@@ -1324,15 +1573,120 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         @Override
         public double doubleInput(String key) {
+            if (mutableDoubleInputs.containsKey(key)) {
+                return mutableDoubleInputs.get(key);
+            }
             DoubleSupplier supplier = controlLoopDoubleInputs.get(key);
-            return supplier != null ? supplier.getAsDouble() : Double.NaN;
+            if (supplier == null) {
+                throw new IllegalArgumentException("No double input found for key " + key);
+            }
+            return supplier.getAsDouble();
         }
 
         @Override
         public DoubleSupplier doubleInputSupplier(String key) {
+            if (mutableDoubleInputs.containsKey(key)) {
+                return () -> mutableDoubleInputs.get(key);
+            }
             DoubleSupplier supplier = controlLoopDoubleInputs.get(key);
             if (supplier == null) {
                 throw new IllegalArgumentException("No double input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public int intVal(String key) {
+            if (mutableIntInputs.containsKey(key)) {
+                return mutableIntInputs.get(key);
+            }
+            java.util.function.IntSupplier supplier = controlLoopIntInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No int input found for key " + key);
+            }
+            return supplier.getAsInt();
+        }
+
+        @Override
+        public java.util.function.IntSupplier intValSupplier(String key) {
+            if (mutableIntInputs.containsKey(key)) {
+                return () -> mutableIntInputs.get(key);
+            }
+            java.util.function.IntSupplier supplier = controlLoopIntInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No int input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public String stringVal(String key) {
+            if (mutableStringInputs.containsKey(key)) {
+                return mutableStringInputs.get(key);
+            }
+            java.util.function.Supplier<String> supplier = controlLoopStringInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No string input found for key " + key);
+            }
+            return supplier.get();
+        }
+
+        @Override
+        public java.util.function.Supplier<String> stringValSupplier(String key) {
+            if (mutableStringInputs.containsKey(key)) {
+                return () -> mutableStringInputs.get(key);
+            }
+            java.util.function.Supplier<String> supplier = controlLoopStringInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No string input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public edu.wpi.first.math.geometry.Pose2d pose2dVal(String key) {
+            if (mutablePose2dInputs.containsKey(key)) {
+                return mutablePose2dInputs.get(key);
+            }
+            java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d> supplier = controlLoopPose2dInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No Pose2d input found for key " + key);
+            }
+            return supplier.get();
+        }
+
+        @Override
+        public java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d> pose2dValSupplier(String key) {
+            if (mutablePose2dInputs.containsKey(key)) {
+                return () -> mutablePose2dInputs.get(key);
+            }
+            java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d> supplier = controlLoopPose2dInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No Pose2d input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public edu.wpi.first.math.geometry.Pose3d pose3dVal(String key) {
+            if (mutablePose3dInputs.containsKey(key)) {
+                return mutablePose3dInputs.get(key);
+            }
+            java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d> supplier = controlLoopPose3dInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No Pose3d input found for key " + key);
+            }
+            return supplier.get();
+        }
+
+        @Override
+        public java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d> pose3dValSupplier(String key) {
+            if (mutablePose3dInputs.containsKey(key)) {
+                return () -> mutablePose3dInputs.get(key);
+            }
+            java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d> supplier = controlLoopPose3dInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No Pose3d input found for key " + key);
             }
             return supplier;
         }
@@ -1647,12 +2001,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         String name = getName();
-        RobotNetworkTables.Node info = node.child("Info");
-        info.putString("name", name != null ? name : "");
-        info.putString("type", getNetworkTablesTypeName());
-        info.putString("owner", getNetworkTablesOwnerPath() != null ? getNetworkTablesOwnerPath() : "");
-        info.putString("hint",
+        RobotNetworkTables.Node meta = node.child("Meta");
+        meta.putString("name", name != null ? name : "");
+        meta.putString("type", getNetworkTablesTypeName());
+        meta.putString("owner", getNetworkTablesOwnerPath() != null ? getNetworkTablesOwnerPath() : "");
+        meta.putString("hint",
                 "Enable " + node.path() + "/NetworkTableConfig/Details (and .../Advanced) to publish more topics.");
+        String jsonUrl = resolveConfigDownloadUrl("json");
+        String tomlUrl = resolveConfigDownloadUrl("toml");
+        meta.putString("configUrlJson", jsonUrl != null ? jsonUrl : "");
+        meta.putString("configUrlToml", tomlUrl != null ? tomlUrl : "");
 
         RobotNetworkTables.MechanismToggles toggles = nt.mechanismConfig(node);
         boolean details = toggles.detailsEnabled();
@@ -1665,38 +2023,185 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             motors.networkTables(node.child("Motors"));
         }
 
-        if (encoder != null && toggles.encodersEnabled()) {
+        if (encoder != null && toggles.encoderEnabled()) {
             encoder.networkTables(node.child("Encoder"));
         }
 
-        if (toggles.statusEnabled()) {
-            RobotNetworkTables.Node status = node.child("Status");
+        if (toggles.constraintsEnabled()) {
+            RobotNetworkTables.Node constraints = node.child("Constraints");
+            double min = getMin();
+            double max = getMax();
+            boolean hasBounds = Double.isFinite(min) && Double.isFinite(max);
+            constraints.putBoolean("hasBounds", hasBounds);
+            if (hasBounds) {
+                constraints.putDouble("min", min);
+                constraints.putDouble("max", max);
+            }
+            MotionLimits.AxisLimits limits = resolveMotionLimits();
+            if (limits != null) {
+                constraints.putDouble("maxVelocity", limits.maxVelocity());
+                constraints.putDouble("maxAcceleration", limits.maxAcceleration());
+            }
+        }
+
+        if (toggles.sensorsEnabled()) {
+            RobotNetworkTables.Node sensors = node.child("Sensors");
+            GenericLimitSwitch[] switches = getLimitSwitches();
+            if (switches != null && switches.length > 0) {
+                RobotNetworkTables.Node ls = sensors.child("LimitSwitches");
+                for (int i = 0; i < switches.length; i++) {
+                    GenericLimitSwitch sw = switches[i];
+                    if (sw == null) {
+                        continue;
+                    }
+                    String key = "dio-" + sw.getPort();
+                    RobotNetworkTables.Node swNode = ls.child(key);
+                    swNode.putBoolean("active", sw.getAsBoolean());
+                    if (advanced) {
+                        swNode.putBoolean("hardstop", sw.isHardstop());
+                        swNode.putDouble("position", sw.getPosition());
+                        swNode.putString("blockDirection", String.valueOf(sw.getBlockDirection()));
+                    }
+                }
+            }
+        }
+
+        if (toggles.controlEnabled()) {
+            RobotNetworkTables.Node control = node.child("Control");
+            RobotNetworkTables.Node status = control.child("Status");
             status.putBoolean("emergencyStopped", cachedEmergencyStopped);
             status.putBoolean("override", cachedOverride);
             status.putBoolean("atSetpoint", cachedAtSetpoint);
             status.putBoolean("pidEnabled", cachedPidEnabled);
             status.putBoolean("feedforwardEnabled", cachedFeedforwardEnabled);
-        }
+            status.putString("outputType", String.valueOf(getOutputType()));
 
-        if (toggles.setpointsEnabled()) {
-            RobotNetworkTables.Node setpointsNode = node.child("Setpoints");
-            setpointsNode.putDouble("setpoint", cachedSetpoint);
+            RobotNetworkTables.Node setpoint = control.child("Setpoint");
+            setpoint.putDouble("value", cachedSetpoint);
             if (advanced) {
-                setpointsNode.putDouble("nudge", cachedNudge);
+                setpoint.putDouble("nudge", cachedNudge);
+            }
+
+            RobotNetworkTables.Node output = control.child("Output");
+            output.putDouble("value", cachedOutput);
+            if (advanced) {
+                output.putDouble("pid", cachedPidOutput);
+                output.putDouble("feedforward", cachedFeedforwardOutput);
             }
         }
 
-        if (toggles.outputsEnabled()) {
-            RobotNetworkTables.Node outputsNode = node.child("Outputs");
-            outputsNode.putDouble("output", cachedOutput);
-            if (advanced) {
-                outputsNode.putDouble("pidOutput", cachedPidOutput);
-                outputsNode.putDouble("feedforwardOutput", cachedFeedforwardOutput);
+        if (toggles.inputsEnabled()) {
+            RobotNetworkTables.Node inputs = node.child("Inputs");
+            RobotNetworkTables.Node bools = inputs.child("Bool");
+            for (Map.Entry<String, Boolean> e : mutableBoolInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                bools.putBoolean(sanitizeTopicKey(e.getKey()), e.getValue());
+            }
+            for (Map.Entry<String, BooleanSupplier> e : controlLoopInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                bools.putBoolean(sanitizeTopicKey(e.getKey()), e.getValue().getAsBoolean());
+            }
+            RobotNetworkTables.Node dbls = inputs.child("Double");
+            for (Map.Entry<String, Double> e : mutableDoubleInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                dbls.putDouble(sanitizeTopicKey(e.getKey()), e.getValue());
+            }
+            for (Map.Entry<String, DoubleSupplier> e : controlLoopDoubleInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                dbls.putDouble(sanitizeTopicKey(e.getKey()), e.getValue().getAsDouble());
+            }
+            RobotNetworkTables.Node ints = inputs.child("Int");
+            for (Map.Entry<String, Integer> e : mutableIntInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                ints.putDouble(sanitizeTopicKey(e.getKey()), e.getValue());
+            }
+            for (Map.Entry<String, java.util.function.IntSupplier> e : controlLoopIntInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                ints.putDouble(sanitizeTopicKey(e.getKey()), e.getValue().getAsInt());
+            }
+            RobotNetworkTables.Node strs = inputs.child("String");
+            for (Map.Entry<String, String> e : mutableStringInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                strs.putString(sanitizeTopicKey(e.getKey()), e.getValue());
+            }
+            for (Map.Entry<String, java.util.function.Supplier<String>> e : controlLoopStringInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                strs.putString(sanitizeTopicKey(e.getKey()), e.getValue().get());
+            }
+            RobotNetworkTables.Node poses2d = inputs.child("Pose2d");
+            for (Map.Entry<String, edu.wpi.first.math.geometry.Pose2d> e : mutablePose2dInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                edu.wpi.first.math.geometry.Pose2d pose = e.getValue();
+                RobotNetworkTables.Node p = poses2d.child(sanitizeTopicKey(e.getKey()));
+                p.putDouble("x", pose.getX());
+                p.putDouble("y", pose.getY());
+                p.putDouble("deg", pose.getRotation().getDegrees());
+            }
+            for (Map.Entry<String, java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d>> e : controlLoopPose2dInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                edu.wpi.first.math.geometry.Pose2d pose = e.getValue().get();
+                if (pose == null) {
+                    continue;
+                }
+                RobotNetworkTables.Node p = poses2d.child(sanitizeTopicKey(e.getKey()));
+                p.putDouble("x", pose.getX());
+                p.putDouble("y", pose.getY());
+                p.putDouble("deg", pose.getRotation().getDegrees());
+            }
+            RobotNetworkTables.Node poses3d = inputs.child("Pose3d");
+            for (Map.Entry<String, edu.wpi.first.math.geometry.Pose3d> e : mutablePose3dInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                edu.wpi.first.math.geometry.Pose3d pose = e.getValue();
+                RobotNetworkTables.Node p = poses3d.child(sanitizeTopicKey(e.getKey()));
+                p.putDouble("x", pose.getX());
+                p.putDouble("y", pose.getY());
+                p.putDouble("z", pose.getZ());
+                p.putDouble("rxDeg", pose.getRotation().getX() * 180.0 / Math.PI);
+                p.putDouble("ryDeg", pose.getRotation().getY() * 180.0 / Math.PI);
+                p.putDouble("rzDeg", pose.getRotation().getZ() * 180.0 / Math.PI);
+            }
+            for (Map.Entry<String, java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d>> e : controlLoopPose3dInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                edu.wpi.first.math.geometry.Pose3d pose = e.getValue().get();
+                if (pose == null) {
+                    continue;
+                }
+                RobotNetworkTables.Node p = poses3d.child(sanitizeTopicKey(e.getKey()));
+                p.putDouble("x", pose.getX());
+                p.putDouble("y", pose.getY());
+                p.putDouble("z", pose.getZ());
+                p.putDouble("rxDeg", pose.getRotation().getX() * 180.0 / Math.PI);
+                p.putDouble("ryDeg", pose.getRotation().getY() * 180.0 / Math.PI);
+                p.putDouble("rzDeg", pose.getRotation().getZ() * 180.0 / Math.PI);
             }
         }
 
         if (RobotBase.isSimulation() && toggles.simulationEnabled()) {
-            RobotNetworkTables.Node simNode = node.child("Simulation");
+            RobotNetworkTables.Node simNode = node.child("Sim");
             simNode.putBoolean("enabled", cachedHasSimulation);
             if (advanced) {
                 simNode.putDouble("dtSec", cachedSimulationUpdatePeriodSeconds);
@@ -1710,6 +2215,34 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             sysid.putDouble("timeoutSec", cachedSysIdTimeoutSeconds);
             sysid.putBoolean("active", cachedSysIdActive);
         }
+    }
+
+    private static String sanitizeTopicKey(String key) {
+        if (key == null) {
+            return "";
+        }
+        String trimmed = key.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        return trimmed.replaceAll("[^A-Za-z0-9_\\-]", "_");
+    }
+
+    private String resolveConfigDownloadUrl(String ext) {
+        RobotCore<?> core = robotCore;
+        if (core == null) {
+            return null;
+        }
+        String base = core.getConfigServerBaseUrl();
+        if (base == null || base.isBlank()) {
+            return null;
+        }
+        String n = getName();
+        if (n == null || n.isBlank()) {
+            return null;
+        }
+        String encoded = java.net.URLEncoder.encode(n, java.nio.charset.StandardCharsets.UTF_8);
+        return base + "/athena/config/mechanisms/" + encoded + "." + ext;
     }
 
     public Mechanism2d getMechanism2d() {

@@ -2,10 +2,14 @@ package ca.frc6390.athena.mechanisms;
 
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCore;
+import ca.frc6390.athena.core.RobotMechanisms;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 
 /**
  * Read-only view used by mechanism state hooks.
@@ -26,13 +30,56 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
         return core != null ? core : RobotCore.getActiveInstance();
     }
 
+    /**
+     * Returns the global robot-wide mechanisms view (lookup by name/config/type).
+     */
+    default RobotMechanisms robotMechanisms() {
+        RobotCore<?> core = robotCore();
+        if (core == null) {
+            throw new IllegalStateException("No RobotCore available in mechanism context");
+        }
+        return core.getMechanisms();
+    }
+
     boolean input(String key);
 
     BooleanSupplier inputSupplier(String key);
 
+    default boolean boolVal(String key) {
+        return input(key);
+    }
+
+    default BooleanSupplier boolValSupplier(String key) {
+        return inputSupplier(key);
+    }
+
     double doubleInput(String key);
 
     DoubleSupplier doubleInputSupplier(String key);
+
+    default double doubleVal(String key) {
+        return doubleInput(key);
+    }
+
+    default DoubleSupplier doubleValSupplier(String key) {
+        return doubleInputSupplier(key);
+    }
+
+    int intVal(String key);
+
+    IntSupplier intValSupplier(String key);
+
+    String stringVal(String key);
+
+    Supplier<String> stringValSupplier(String key);
+
+    Pose2d pose2dVal(String key);
+
+    Supplier<Pose2d> pose2dValSupplier(String key);
+
+    Pose3d pose3dVal(String key);
+
+    Supplier<Pose3d> pose3dValSupplier(String key);
 
     <V> V objectInput(String key, Class<V> type);
 

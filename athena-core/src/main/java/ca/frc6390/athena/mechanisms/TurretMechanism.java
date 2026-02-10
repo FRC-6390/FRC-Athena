@@ -61,8 +61,10 @@ public class TurretMechanism extends SimpleMotorMechanism {
     private FieldObject2d fieldHeadingObject;
     private Rotation2d fieldHeadingOffset = Rotation2d.kZero;
 
-    public TurretMechanism(MechanismConfig<? extends TurretMechanism> config, SimpleMotorFeedforward feedforward) {
-        super(config, feedforward);
+    public TurretMechanism(MechanismConfig<? extends TurretMechanism> config,
+                            SimpleMotorFeedforward feedforward,
+                            OutputType feedforwardOutputType) {
+        super(config, feedforward, feedforwardOutputType);
         if (config != null && config.turretHeadingVisualization != null) {
             setFieldHeadingVisualization(config.turretHeadingVisualization);
         }
@@ -314,11 +316,27 @@ public class TurretMechanism extends SimpleMotorMechanism {
 
         private final StatefulMechanismCore<StatefulTurretMechanism<E>, E> stateCore;
 
-        public StatefulTurretMechanism(MechanismConfig<StatefulTurretMechanism<E>> config, SimpleMotorFeedforward feedforward, E initialState) {
-            super(config, feedforward);
+        public StatefulTurretMechanism(MechanismConfig<StatefulTurretMechanism<E>> config,
+                                        SimpleMotorFeedforward feedforward,
+                                        OutputType feedforwardOutputType,
+                                        E initialState) {
+            super(config, feedforward, feedforwardOutputType);
             stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                    config.stateActions, config.stateHooks, config.exitStateHooks, config.alwaysHooks, config.exitAlwaysHooks,
-                    config.inputs, config.doubleInputs, config.objectInputs);
+                    config.stateActions,
+                    config.enterStateHooks,
+                    config.stateHooks,
+                    config.exitStateHooks,
+                    config.transitionHooks,
+                    config.alwaysHooks,
+                    config.exitAlwaysHooks,
+                    config.inputs,
+                    config.doubleInputs,
+                    config.intInputs,
+                    config.stringInputs,
+                    config.pose2dInputs,
+                    config.pose3dInputs,
+                    config.objectInputs,
+                    config.stateTriggerBindings);
         }
 
         @Override

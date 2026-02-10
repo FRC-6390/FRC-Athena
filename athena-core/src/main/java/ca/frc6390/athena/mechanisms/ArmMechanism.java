@@ -11,23 +11,39 @@ import edu.wpi.first.math.controller.ArmFeedforward;
 
 public class ArmMechanism extends Mechanism {
     private final ArmFeedforwardSendable feedforward;
+    private final OutputType feedforwardOutputType;
 
-    public ArmMechanism(MechanismConfig<? extends ArmMechanism> config, ArmFeedforward feedforward) {
+    public ArmMechanism(MechanismConfig<? extends ArmMechanism> config,
+                        ArmFeedforward feedforward,
+                        OutputType feedforwardOutputType) {
         super(config);
-        this.feedforward = new ArmFeedforwardSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
-        setFeedforwardEnabled(true);
+        if (feedforward != null) {
+            this.feedforward = new ArmFeedforwardSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
+            this.feedforwardOutputType = feedforwardOutputType != null ? feedforwardOutputType : OutputType.VOLTAGE;
+            setFeedforwardEnabled(true);
+        } else {
+            this.feedforward = null;
+            this.feedforwardOutputType = null;
+            setFeedforwardEnabled(false);
+        }
     }
 
     @Override
     public double calculateFeedForward() {
-        double value = feedforward.calculate(getControllerSetpointPosition(), getControllerSetpointVelocity());
-        return  isUseVoltage() ? value : value / 12d;
+        if (feedforward == null) {
+            return 0.0;
+        }
+        double valueVolts = feedforward.calculate(getControllerSetpointPosition(), getControllerSetpointVelocity());
+        return toOutput(feedforwardOutputType, valueVolts);
     }
 
     @Override
     public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
         if (node == null) {
             return null;
+        }
+        if (feedforward == null) {
+            return super.networkTables(node);
         }
         RobotNetworkTables.Node ff = node.child("Feedforward");
         ff.putDouble("ks", feedforward.getKs());
@@ -46,11 +62,27 @@ public class ArmMechanism extends Mechanism {
 
         private final StatefulMechanismCore<StatefulArmMechanism<E>, E> stateCore;
 
-        public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config, ArmFeedforward feedforward, E initialState) {
-            super(config, feedforward);
+        public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config,
+                                    ArmFeedforward feedforward,
+                                    OutputType feedforwardOutputType,
+                                    E initialState) {
+            super(config, feedforward, feedforwardOutputType);
             stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                    config.stateActions, config.stateHooks, config.exitStateHooks, config.alwaysHooks, config.exitAlwaysHooks,
-                    config.inputs, config.doubleInputs, config.objectInputs);
+                    config.stateActions,
+                    config.enterStateHooks,
+                    config.stateHooks,
+                    config.exitStateHooks,
+                    config.transitionHooks,
+                    config.alwaysHooks,
+                    config.exitAlwaysHooks,
+                    config.inputs,
+                    config.doubleInputs,
+                    config.intInputs,
+                    config.stringInputs,
+                    config.pose2dInputs,
+                    config.pose3dInputs,
+                    config.objectInputs,
+                    config.stateTriggerBindings);
         }
 
         @Override

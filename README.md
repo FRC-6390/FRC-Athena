@@ -165,7 +165,7 @@ StateGraph<SuperState> graph = StateGraph
 
 MechanismConfig.statefulGeneric(SuperState.STOW)
         .setStateGraph(graph)
-        .setStateAction(superstructure::zeroSensors, SuperState.STOW)
+        .hooks(h -> h.stateAction(superstructure::zeroSensors, SuperState.STOW))
         .build();
 ```
 

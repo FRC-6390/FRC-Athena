@@ -231,24 +231,29 @@ public final class RobotNetworkTables {
                     t.motors.set(motors);
                     changed = true;
                 }
-                boolean enc = t.encodersEntry.getBoolean(t.encoders.get());
-                if (enc != t.encoders.get()) {
-                    t.encoders.set(enc);
+                boolean enc = t.encoderEntry.getBoolean(t.encoder.get());
+                if (enc != t.encoder.get()) {
+                    t.encoder.set(enc);
                     changed = true;
                 }
-                boolean status = t.statusEntry.getBoolean(t.status.get());
-                if (status != t.status.get()) {
-                    t.status.set(status);
+                boolean constraints = t.constraintsEntry.getBoolean(t.constraints.get());
+                if (constraints != t.constraints.get()) {
+                    t.constraints.set(constraints);
                     changed = true;
                 }
-                boolean setpoints = t.setpointsEntry.getBoolean(t.setpoints.get());
-                if (setpoints != t.setpoints.get()) {
-                    t.setpoints.set(setpoints);
+                boolean sensors = t.sensorsEntry.getBoolean(t.sensors.get());
+                if (sensors != t.sensors.get()) {
+                    t.sensors.set(sensors);
                     changed = true;
                 }
-                boolean outputs = t.outputsEntry.getBoolean(t.outputs.get());
-                if (outputs != t.outputs.get()) {
-                    t.outputs.set(outputs);
+                boolean control = t.controlEntry.getBoolean(t.control.get());
+                if (control != t.control.get()) {
+                    t.control.set(control);
+                    changed = true;
+                }
+                boolean inputs = t.inputsEntry.getBoolean(t.inputs.get());
+                if (inputs != t.inputs.get()) {
+                    t.inputs.set(inputs);
                     changed = true;
                 }
                 boolean sim = t.simulationEntry.getBoolean(t.simulation.get());
@@ -315,19 +320,21 @@ public final class RobotNetworkTables {
         private final AtomicBoolean details;
         private final AtomicBoolean advanced;
         private final AtomicBoolean motors;
-        private final AtomicBoolean encoders;
-        private final AtomicBoolean status;
-        private final AtomicBoolean setpoints;
-        private final AtomicBoolean outputs;
+        private final AtomicBoolean encoder;
+        private final AtomicBoolean constraints;
+        private final AtomicBoolean sensors;
+        private final AtomicBoolean control;
+        private final AtomicBoolean inputs;
         private final AtomicBoolean simulation;
         private final AtomicBoolean sysId;
         private final NetworkTableEntry detailsEntry;
         private final NetworkTableEntry advancedEntry;
         private final NetworkTableEntry motorsEntry;
-        private final NetworkTableEntry encodersEntry;
-        private final NetworkTableEntry statusEntry;
-        private final NetworkTableEntry setpointsEntry;
-        private final NetworkTableEntry outputsEntry;
+        private final NetworkTableEntry encoderEntry;
+        private final NetworkTableEntry constraintsEntry;
+        private final NetworkTableEntry sensorsEntry;
+        private final NetworkTableEntry controlEntry;
+        private final NetworkTableEntry inputsEntry;
         private final NetworkTableEntry simulationEntry;
         private final NetworkTableEntry sysIdEntry;
 
@@ -335,38 +342,42 @@ public final class RobotNetworkTables {
                                 boolean detailsDefault,
                                 boolean advancedDefault,
                                 boolean motorsDefault,
-                                boolean encodersDefault,
-                                boolean statusDefault,
-                                boolean setpointsDefault,
-                                boolean outputsDefault,
+                                boolean encoderDefault,
+                                boolean constraintsDefault,
+                                boolean sensorsDefault,
+                                boolean controlDefault,
+                                boolean inputsDefault,
                                 boolean simulationDefault,
                                 boolean sysIdDefault,
                                 NetworkTableEntry detailsEntry,
                                 NetworkTableEntry advancedEntry,
                                 NetworkTableEntry motorsEntry,
-                                NetworkTableEntry encodersEntry,
-                                NetworkTableEntry statusEntry,
-                                NetworkTableEntry setpointsEntry,
-                                NetworkTableEntry outputsEntry,
+                                NetworkTableEntry encoderEntry,
+                                NetworkTableEntry constraintsEntry,
+                                NetworkTableEntry sensorsEntry,
+                                NetworkTableEntry controlEntry,
+                                NetworkTableEntry inputsEntry,
                                 NetworkTableEntry simulationEntry,
                                 NetworkTableEntry sysIdEntry) {
             this.name = name;
             this.details = new AtomicBoolean(detailsDefault);
             this.advanced = new AtomicBoolean(advancedDefault);
             this.motors = new AtomicBoolean(motorsDefault);
-            this.encoders = new AtomicBoolean(encodersDefault);
-            this.status = new AtomicBoolean(statusDefault);
-            this.setpoints = new AtomicBoolean(setpointsDefault);
-            this.outputs = new AtomicBoolean(outputsDefault);
+            this.encoder = new AtomicBoolean(encoderDefault);
+            this.constraints = new AtomicBoolean(constraintsDefault);
+            this.sensors = new AtomicBoolean(sensorsDefault);
+            this.control = new AtomicBoolean(controlDefault);
+            this.inputs = new AtomicBoolean(inputsDefault);
             this.simulation = new AtomicBoolean(simulationDefault);
             this.sysId = new AtomicBoolean(sysIdDefault);
             this.detailsEntry = detailsEntry;
             this.advancedEntry = advancedEntry;
             this.motorsEntry = motorsEntry;
-            this.encodersEntry = encodersEntry;
-            this.statusEntry = statusEntry;
-            this.setpointsEntry = setpointsEntry;
-            this.outputsEntry = outputsEntry;
+            this.encoderEntry = encoderEntry;
+            this.constraintsEntry = constraintsEntry;
+            this.sensorsEntry = sensorsEntry;
+            this.controlEntry = controlEntry;
+            this.inputsEntry = inputsEntry;
             this.simulationEntry = simulationEntry;
             this.sysIdEntry = sysIdEntry;
         }
@@ -383,20 +394,24 @@ public final class RobotNetworkTables {
             return motors.get();
         }
 
-        public boolean encodersEnabled() {
-            return encoders.get();
+        public boolean encoderEnabled() {
+            return encoder.get();
         }
 
-        public boolean statusEnabled() {
-            return status.get();
+        public boolean constraintsEnabled() {
+            return constraints.get();
         }
 
-        public boolean setpointsEnabled() {
-            return setpoints.get();
+        public boolean sensorsEnabled() {
+            return sensors.get();
         }
 
-        public boolean outputsEnabled() {
-            return outputs.get();
+        public boolean controlEnabled() {
+            return control.get();
+        }
+
+        public boolean inputsEnabled() {
+            return inputs.get();
         }
 
         public boolean simulationEnabled() {
@@ -428,30 +443,37 @@ public final class RobotNetworkTables {
             return this;
         }
 
-        public MechanismToggles encoders(boolean enabled) {
-            encodersEntry.setBoolean(enabled);
-            encoders.set(enabled);
+        public MechanismToggles encoder(boolean enabled) {
+            encoderEntry.setBoolean(enabled);
+            encoder.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
-        public MechanismToggles status(boolean enabled) {
-            statusEntry.setBoolean(enabled);
-            status.set(enabled);
+        public MechanismToggles constraints(boolean enabled) {
+            constraintsEntry.setBoolean(enabled);
+            constraints.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
-        public MechanismToggles setpoints(boolean enabled) {
-            setpointsEntry.setBoolean(enabled);
-            setpoints.set(enabled);
+        public MechanismToggles sensors(boolean enabled) {
+            sensorsEntry.setBoolean(enabled);
+            sensors.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
-        public MechanismToggles outputs(boolean enabled) {
-            outputsEntry.setBoolean(enabled);
-            outputs.set(enabled);
+        public MechanismToggles control(boolean enabled) {
+            controlEntry.setBoolean(enabled);
+            control.set(enabled);
+            revision.incrementAndGet();
+            return this;
+        }
+
+        public MechanismToggles inputs(boolean enabled) {
+            inputsEntry.setBoolean(enabled);
+            inputs.set(enabled);
             revision.incrementAndGet();
             return this;
         }
@@ -469,6 +491,39 @@ public final class RobotNetworkTables {
             revision.incrementAndGet();
             return this;
         }
+
+        // Backwards-compatible names (older Athena dashboards/tools).
+        public boolean encodersEnabled() {
+            return encoderEnabled();
+        }
+
+        public boolean statusEnabled() {
+            return controlEnabled();
+        }
+
+        public boolean setpointsEnabled() {
+            return controlEnabled();
+        }
+
+        public boolean outputsEnabled() {
+            return controlEnabled();
+        }
+
+        public MechanismToggles encoders(boolean enabled) {
+            return encoder(enabled);
+        }
+
+        public MechanismToggles status(boolean enabled) {
+            return control(enabled);
+        }
+
+        public MechanismToggles setpoints(boolean enabled) {
+            return control(enabled);
+        }
+
+        public MechanismToggles outputs(boolean enabled) {
+            return control(enabled);
+        }
     }
 
     private MechanismToggles createMechanismToggles(Node mechanismNode) {
@@ -479,10 +534,11 @@ public final class RobotNetworkTables {
         boolean detailsDefault = false;
         boolean advancedDefault = false;
         boolean motorsDefault = true;
-        boolean encodersDefault = true;
-        boolean statusDefault = true;
-        boolean setpointsDefault = true;
-        boolean outputsDefault = true;
+        boolean encoderDefault = true;
+        boolean constraintsDefault = true;
+        boolean sensorsDefault = true;
+        boolean controlDefault = true;
+        boolean inputsDefault = false;
         boolean simulationDefault = false;
         boolean sysIdDefault = false;
 
@@ -490,20 +546,48 @@ public final class RobotNetworkTables {
         NetworkTableEntry detailsEntry = cfg.entry("Details");
         NetworkTableEntry advancedEntry = cfg.entry("Advanced");
         NetworkTableEntry motorsEntry = cfg.entry("Motors");
-        NetworkTableEntry encodersEntry = cfg.entry("Encoders");
-        NetworkTableEntry statusEntry = cfg.entry("Status");
-        NetworkTableEntry setpointsEntry = cfg.entry("Setpoints");
-        NetworkTableEntry outputsEntry = cfg.entry("Outputs");
+        NetworkTableEntry encoderEntry = cfg.entry("Encoder");
+        NetworkTableEntry constraintsEntry = cfg.entry("Constraints");
+        NetworkTableEntry sensorsEntry = cfg.entry("Sensors");
+        NetworkTableEntry controlEntry = cfg.entry("Control");
+        NetworkTableEntry inputsEntry = cfg.entry("Inputs");
         NetworkTableEntry simulationEntry = cfg.entry("Simulation");
         NetworkTableEntry sysIdEntry = cfg.entry("SysId");
+
+        // Best-effort migration from older toggle keys (keeps existing dashboard toggles working).
+        NetworkTableEntry legacyEncoders = cfg.entry("Encoders");
+        NetworkTableEntry legacyStatus = cfg.entry("Status");
+        NetworkTableEntry legacySetpoints = cfg.entry("Setpoints");
+        NetworkTableEntry legacyOutputs = cfg.entry("Outputs");
+        if (encoderEntry.getType() == NetworkTableType.kUnassigned && legacyEncoders.getType() != NetworkTableType.kUnassigned) {
+            encoderEntry.setBoolean(legacyEncoders.getBoolean(encoderDefault));
+        }
+        if (controlEntry.getType() == NetworkTableType.kUnassigned) {
+            boolean legacyControl = false;
+            if (legacyStatus.getType() != NetworkTableType.kUnassigned) {
+                legacyControl |= legacyStatus.getBoolean(controlDefault);
+            }
+            if (legacySetpoints.getType() != NetworkTableType.kUnassigned) {
+                legacyControl |= legacySetpoints.getBoolean(controlDefault);
+            }
+            if (legacyOutputs.getType() != NetworkTableType.kUnassigned) {
+                legacyControl |= legacyOutputs.getBoolean(controlDefault);
+            }
+            if (legacyStatus.getType() != NetworkTableType.kUnassigned
+                    || legacySetpoints.getType() != NetworkTableType.kUnassigned
+                    || legacyOutputs.getType() != NetworkTableType.kUnassigned) {
+                controlEntry.setBoolean(legacyControl);
+            }
+        }
 
         initIfAbsent(detailsEntry, detailsDefault);
         initIfAbsent(advancedEntry, advancedDefault);
         initIfAbsent(motorsEntry, motorsDefault);
-        initIfAbsent(encodersEntry, encodersDefault);
-        initIfAbsent(statusEntry, statusDefault);
-        initIfAbsent(setpointsEntry, setpointsDefault);
-        initIfAbsent(outputsEntry, outputsDefault);
+        initIfAbsent(encoderEntry, encoderDefault);
+        initIfAbsent(constraintsEntry, constraintsDefault);
+        initIfAbsent(sensorsEntry, sensorsDefault);
+        initIfAbsent(controlEntry, controlDefault);
+        initIfAbsent(inputsEntry, inputsDefault);
         initIfAbsent(simulationEntry, simulationDefault);
         initIfAbsent(sysIdEntry, sysIdDefault);
 
@@ -511,19 +595,21 @@ public final class RobotNetworkTables {
                 detailsEntry.getBoolean(detailsDefault),
                 advancedEntry.getBoolean(advancedDefault),
                 motorsEntry.getBoolean(motorsDefault),
-                encodersEntry.getBoolean(encodersDefault),
-                statusEntry.getBoolean(statusDefault),
-                setpointsEntry.getBoolean(setpointsDefault),
-                outputsEntry.getBoolean(outputsDefault),
+                encoderEntry.getBoolean(encoderDefault),
+                constraintsEntry.getBoolean(constraintsDefault),
+                sensorsEntry.getBoolean(sensorsDefault),
+                controlEntry.getBoolean(controlDefault),
+                inputsEntry.getBoolean(inputsDefault),
                 simulationEntry.getBoolean(simulationDefault),
                 sysIdEntry.getBoolean(sysIdDefault),
                 detailsEntry,
                 advancedEntry,
                 motorsEntry,
-                encodersEntry,
-                statusEntry,
-                setpointsEntry,
-                outputsEntry,
+                encoderEntry,
+                constraintsEntry,
+                sensorsEntry,
+                controlEntry,
+                inputsEntry,
                 simulationEntry,
                 sysIdEntry);
     }

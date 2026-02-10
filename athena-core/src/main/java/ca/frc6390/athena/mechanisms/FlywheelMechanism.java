@@ -15,8 +15,10 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
 
     private final boolean useVelocityPid;
 
-    public FlywheelMechanism(MechanismConfig<? extends FlywheelMechanism> config, SimpleMotorFeedforward feedforward) {
-        super(config, feedforward);
+    public FlywheelMechanism(MechanismConfig<? extends FlywheelMechanism> config,
+                             SimpleMotorFeedforward feedforward,
+                             OutputType feedforwardOutputType) {
+        super(config, feedforward, feedforwardOutputType);
         this.useVelocityPid = config.data().pidUseVelocity();
     }
 
@@ -27,11 +29,25 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
 
         public StatefulFlywheelMechanism(MechanismConfig<StatefulFlywheelMechanism<E>> config,
                                          SimpleMotorFeedforward feedforward,
+                                         OutputType feedforwardOutputType,
                                          E initialState) {
-            super(config, feedforward);
+            super(config, feedforward, feedforwardOutputType);
             stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                    config.stateActions, config.stateHooks, config.exitStateHooks, config.alwaysHooks, config.exitAlwaysHooks,
-                    config.inputs, config.doubleInputs, config.objectInputs);
+                    config.stateActions,
+                    config.enterStateHooks,
+                    config.stateHooks,
+                    config.exitStateHooks,
+                    config.transitionHooks,
+                    config.alwaysHooks,
+                    config.exitAlwaysHooks,
+                    config.inputs,
+                    config.doubleInputs,
+                    config.intInputs,
+                    config.stringInputs,
+                    config.pose2dInputs,
+                    config.pose3dInputs,
+                    config.objectInputs,
+                    config.stateTriggerBindings);
         }
 
         @Override

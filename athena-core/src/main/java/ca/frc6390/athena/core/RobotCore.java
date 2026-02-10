@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
@@ -218,6 +219,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private Notifier visionSimNotifier;
     private final RobotAuto autos;
     private final RobotCopilot copilot;
+    private AthenaConfigServer configServer;
+    private String configServerBaseUrl;
     private final HashMap<String, Mechanism> mechanisms;
     private final List<SuperstructureMechanism<?, ?>> registeredSuperstructures;
     private final HashMap<String, SuperstructureMechanism<?, ?>> superstructuresByName;
@@ -299,6 +302,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void robotInit() {
         registerConfiguredMechanisms();
+        startConfigServerIfNeeded();
         configureAutos(autos);
         autos.finalizeRegistration();
         ensureAutoChooserPublished();
@@ -311,6 +315,28 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         onRobotInit();
         registerPIDCycles();
+    }
+
+    private void startConfigServerIfNeeded() {
+        if (configServer != null) {
+            return;
+        }
+        try {
+            configServer = AthenaConfigServer.start(this, 5806);
+            configServerBaseUrl = configServer.baseUrl();
+        } catch (Exception e) {
+            // Config export is a convenience feature; do not fail robot init if it cannot bind.
+            System.out.println("[Athena][ConfigServer] Failed to start: " + e.getMessage());
+            configServer = null;
+            configServerBaseUrl = null;
+        }
+    }
+
+    /**
+     * Returns the config server base URL (if available) used to build per-mechanism download links.
+     */
+    public String getConfigServerBaseUrl() {
+        return configServerBaseUrl;
     }
 
     @Override
@@ -362,6 +388,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
         mechanismsNetworkTablesPublished = true;
         RobotNetworkTables.Node mechanismsNode = robotNetworkTables.root().child("Mechanisms");
+        RobotNetworkTables.Node supersNode = robotNetworkTables.root().child("Superstructures");
 
         for (Mechanism mech : mechanisms.values()) {
             if (mech == null) {
@@ -375,6 +402,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             publishedMechanismsComp.add(name);
         }
 
+        for (Map.Entry<String, SuperstructureMechanism<?, ?>> e : superstructuresByName.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            e.getValue().networkTables(supersNode.child(e.getKey()));
+        }
+
         long revision = robotNetworkTables.revision();
         if (revision != lastMechanismsConfigRevision) {
             lastMechanismsConfigRevision = revision;
@@ -384,6 +418,12 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     continue;
                 }
                 mech.networkTables(mech.resolveDefaultMechanismNode(mechanismsNode));
+            }
+            for (Map.Entry<String, SuperstructureMechanism<?, ?>> e : superstructuresByName.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                e.getValue().networkTables(supersNode.child(e.getKey()));
             }
         }
     }
@@ -598,6 +638,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 continue;
             }
             registerSuperstructureInternal(s);
+            // Ensure per-superstructure NetworkTableConfig entries exist under Athena/Superstructures.
+            RobotNetworkTables.Node superNode =
+                    robotNetworkTables.root().child("Superstructures").child(s.getName() != null ? s.getName() : "Superstructure");
+            robotNetworkTables.mechanismConfig(superNode);
             s.setRobotCore(this);
             // Publish mechanisms under the owning superstructure name to avoid duplicates and
             // keep dashboards navigable at scale.
@@ -620,6 +664,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
                 registerSuperstructureInternal(superstructure);
+                RobotNetworkTables.Node superNode =
+                        robotNetworkTables.root().child("Superstructures").child(superstructure.getName() != null ? superstructure.getName() : "Superstructure");
+                robotNetworkTables.mechanismConfig(superNode);
                 superstructure.setRobotCore(this);
                 superstructure.assignDashboardOwners(superstructure.getName());
             }
@@ -810,6 +857,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 continue;
             }
             mech.networkTables(mech.resolveDefaultMechanismNode(mechanismsNode));
+        }
+
+        RobotNetworkTables.Node supersNode = robotNetworkTables.root().child("Superstructures");
+        for (Map.Entry<String, SuperstructureMechanism<?, ?>> e : superstructuresByName.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            e.getValue().networkTables(supersNode.child(e.getKey()));
         }
         return this;
     }

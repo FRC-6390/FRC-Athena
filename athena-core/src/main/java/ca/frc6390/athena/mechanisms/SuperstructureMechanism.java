@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCore;
@@ -14,6 +15,8 @@ import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import java.util.ArrayList;
 
@@ -67,7 +70,13 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private final List<SuperstructureConfig.Attachment<SP, ?>> attachments;
     private final Map<String, java.util.function.BooleanSupplier> inputs;
     private final Map<String, DoubleSupplier> doubleInputs;
+    private final Map<String, IntSupplier> intInputs;
+    private final Map<String, Supplier<String>> stringInputs;
+    private final Map<String, Supplier<Pose2d>> pose2dInputs;
+    private final Map<String, Supplier<Pose3d>> pose3dInputs;
     private final Map<String, Supplier<?>> objectInputs;
+    private final Map<S, List<SuperstructureConfig.Binding<SP>>> enterBindings;
+    private final List<SuperstructureConfig.TransitionBinding<SP, S>> transitionBindings;
     private final Map<S, List<SuperstructureConfig.Binding<SP>>> bindings;
     private final List<SuperstructureConfig.Binding<SP>> alwaysBindings;
     private final List<SuperstructureConfig.Binding<SP>> periodicBindings;
@@ -83,7 +92,13 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                             List<SuperstructureConfig.Attachment<SP, ?>> attachments,
                             Map<String, java.util.function.BooleanSupplier> inputs,
                             Map<String, DoubleSupplier> doubleInputs,
+                            Map<String, IntSupplier> intInputs,
+                            Map<String, Supplier<String>> stringInputs,
+                            Map<String, Supplier<Pose2d>> pose2dInputs,
+                            Map<String, Supplier<Pose3d>> pose3dInputs,
                             Map<String, Supplier<?>> objectInputs,
+                            Map<S, List<SuperstructureConfig.Binding<SP>>> enterBindings,
+                            List<SuperstructureConfig.TransitionBinding<SP, S>> transitionBindings,
                             Map<S, List<SuperstructureConfig.Binding<SP>>> bindings,
                             List<SuperstructureConfig.Binding<SP>> alwaysBindings,
                             List<SuperstructureConfig.Binding<SP>> periodicBindings,
@@ -94,7 +109,13 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         this.attachments = attachments;
         this.inputs = inputs;
         this.doubleInputs = doubleInputs;
+        this.intInputs = intInputs;
+        this.stringInputs = stringInputs;
+        this.pose2dInputs = pose2dInputs;
+        this.pose3dInputs = pose3dInputs;
         this.objectInputs = objectInputs;
+        this.enterBindings = enterBindings;
+        this.transitionBindings = transitionBindings;
         this.bindings = bindings;
         this.alwaysBindings = alwaysBindings;
         this.periodicBindings = periodicBindings;
@@ -159,12 +180,46 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         stateMachine.update();
         applyAttachments();
         S current = stateMachine.getGoalState();
-        if (!Objects.equals(current, prevState)) {
-            applyExitBindings(prevState);
+        boolean changed = !Objects.equals(current, prevState);
+        S from = prevState;
+        if (changed) {
+            applyExitBindings(from);
             applySetpoints(stateMachine.getGoalStateSetpoint());
+        }
+        if (changed) {
+            applyTransitionBindings(from, current);
+            applyEnterBindings(current);
             prevState = current;
         }
         applyBindings(current);
+    }
+
+    private void applyEnterBindings(S state) {
+        if (state == null) {
+            return;
+        }
+        List<SuperstructureConfig.Binding<SP>> stateBindings = enterBindings.get(state);
+        if (stateBindings == null) {
+            return;
+        }
+        for (SuperstructureConfig.Binding<SP> binding : stateBindings) {
+            binding.apply(context);
+        }
+    }
+
+    private void applyTransitionBindings(S from, S to) {
+        if (from == null || to == null || transitionBindings == null) {
+            return;
+        }
+        for (SuperstructureConfig.TransitionBinding<SP, S> binding : transitionBindings) {
+            if (binding == null || binding.hook() == null) {
+                continue;
+            }
+            if (!Objects.equals(binding.from(), from) || !Objects.equals(binding.to(), to)) {
+                continue;
+            }
+            binding.hook().apply(context, from, to);
+        }
     }
 
     private void applyPeriodicBindings() {
@@ -251,10 +306,98 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         if (node == null) {
             return node;
         }
-        if (!node.robot().isPublishingEnabled()) {
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
             return node;
         }
-        stateMachine.networkTables(node.child("StateMachine"));
+
+        RobotNetworkTables.Node meta = node.child("Meta");
+        String name = getName();
+        meta.putString("name", name != null ? name : "");
+        meta.putString("type", "Superstructure");
+        meta.putString("owner", "");
+        meta.putString("hint",
+                "Enable " + node.path() + "/NetworkTableConfig/Details (and .../Advanced) to publish more topics.");
+
+        RobotNetworkTables.MechanismToggles toggles = nt.mechanismConfig(node);
+        boolean details = toggles.detailsEnabled();
+        boolean advanced = toggles.advancedEnabled();
+        if (!details) {
+            return node;
+        }
+
+        if (toggles.controlEnabled()) {
+            stateMachine.networkTables(node.child("Control").child("StateMachine"));
+            if (advanced) {
+                RobotNetworkTables.Node status = node.child("Control").child("Status");
+                S state = stateMachine.getGoalState();
+                status.putString("state", state != null ? state.name() : "");
+            }
+        }
+
+        if (toggles.inputsEnabled()) {
+            RobotNetworkTables.Node inputsNode = node.child("Inputs");
+            RobotNetworkTables.Node bools = inputsNode.child("Bool");
+            for (Map.Entry<String, java.util.function.BooleanSupplier> e : inputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                bools.putBoolean(e.getKey(), e.getValue().getAsBoolean());
+            }
+            RobotNetworkTables.Node dbls = inputsNode.child("Double");
+            for (Map.Entry<String, DoubleSupplier> e : doubleInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                dbls.putDouble(e.getKey(), e.getValue().getAsDouble());
+            }
+            RobotNetworkTables.Node ints = inputsNode.child("Int");
+            for (Map.Entry<String, IntSupplier> e : intInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                ints.putDouble(e.getKey(), e.getValue().getAsInt());
+            }
+            RobotNetworkTables.Node strs = inputsNode.child("String");
+            for (Map.Entry<String, Supplier<String>> e : stringInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                strs.putString(e.getKey(), e.getValue().get());
+            }
+            RobotNetworkTables.Node poses2d = inputsNode.child("Pose2d");
+            for (Map.Entry<String, Supplier<Pose2d>> e : pose2dInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                Pose2d pose = e.getValue().get();
+                if (pose == null) {
+                    continue;
+                }
+                RobotNetworkTables.Node p = poses2d.child(e.getKey());
+                p.putDouble("x", pose.getX());
+                p.putDouble("y", pose.getY());
+                p.putDouble("deg", pose.getRotation().getDegrees());
+            }
+            RobotNetworkTables.Node poses3d = inputsNode.child("Pose3d");
+            for (Map.Entry<String, Supplier<Pose3d>> e : pose3dInputs.entrySet()) {
+                if (e == null || e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                Pose3d pose = e.getValue().get();
+                if (pose == null) {
+                    continue;
+                }
+                RobotNetworkTables.Node p = poses3d.child(e.getKey());
+                p.putDouble("x", pose.getX());
+                p.putDouble("y", pose.getY());
+                p.putDouble("z", pose.getZ());
+                p.putDouble("rxDeg", pose.getRotation().getX() * 180.0 / Math.PI);
+                p.putDouble("ryDeg", pose.getRotation().getY() * 180.0 / Math.PI);
+                p.putDouble("rzDeg", pose.getRotation().getZ() * 180.0 / Math.PI);
+            }
+            // Object inputs are not automatically published (type-dependent).
+        }
         return node;
     }
 
@@ -353,6 +496,46 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         @Override
         public DoubleSupplier doubleInputSupplier(String key) {
             return SuperstructureMechanism.this.doubleInputSupplier(key);
+        }
+
+        @Override
+        public int intVal(String key) {
+            return SuperstructureMechanism.this.intVal(key);
+        }
+
+        @Override
+        public IntSupplier intValSupplier(String key) {
+            return SuperstructureMechanism.this.intValSupplier(key);
+        }
+
+        @Override
+        public String stringVal(String key) {
+            return SuperstructureMechanism.this.stringVal(key);
+        }
+
+        @Override
+        public Supplier<String> stringValSupplier(String key) {
+            return SuperstructureMechanism.this.stringValSupplier(key);
+        }
+
+        @Override
+        public Pose2d pose2dVal(String key) {
+            return SuperstructureMechanism.this.pose2dVal(key);
+        }
+
+        @Override
+        public Supplier<Pose2d> pose2dValSupplier(String key) {
+            return SuperstructureMechanism.this.pose2dValSupplier(key);
+        }
+
+        @Override
+        public Pose3d pose3dVal(String key) {
+            return SuperstructureMechanism.this.pose3dVal(key);
+        }
+
+        @Override
+        public Supplier<Pose3d> pose3dValSupplier(String key) {
+            return SuperstructureMechanism.this.pose3dValSupplier(key);
         }
 
         @Override
@@ -476,6 +659,58 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         DoubleSupplier supplier = doubleInputs.get(key);
         if (supplier == null) {
             throw new IllegalArgumentException("No double input found for key " + key);
+        }
+        return supplier;
+    }
+
+    public int intVal(String key) {
+        IntSupplier supplier = intInputs.get(key);
+        return supplier != null ? supplier.getAsInt() : 0;
+    }
+
+    public IntSupplier intValSupplier(String key) {
+        IntSupplier supplier = intInputs.get(key);
+        if (supplier == null) {
+            throw new IllegalArgumentException("No int input found for key " + key);
+        }
+        return supplier;
+    }
+
+    public String stringVal(String key) {
+        Supplier<String> supplier = stringInputs.get(key);
+        return supplier != null ? supplier.get() : "";
+    }
+
+    public Supplier<String> stringValSupplier(String key) {
+        Supplier<String> supplier = stringInputs.get(key);
+        if (supplier == null) {
+            throw new IllegalArgumentException("No string input found for key " + key);
+        }
+        return supplier;
+    }
+
+    public Pose2d pose2dVal(String key) {
+        Supplier<Pose2d> supplier = pose2dInputs.get(key);
+        return supplier != null ? supplier.get() : null;
+    }
+
+    public Supplier<Pose2d> pose2dValSupplier(String key) {
+        Supplier<Pose2d> supplier = pose2dInputs.get(key);
+        if (supplier == null) {
+            throw new IllegalArgumentException("No Pose2d input found for key " + key);
+        }
+        return supplier;
+    }
+
+    public Pose3d pose3dVal(String key) {
+        Supplier<Pose3d> supplier = pose3dInputs.get(key);
+        return supplier != null ? supplier.get() : null;
+    }
+
+    public Supplier<Pose3d> pose3dValSupplier(String key) {
+        Supplier<Pose3d> supplier = pose3dInputs.get(key);
+        if (supplier == null) {
+            throw new IllegalArgumentException("No Pose3d input found for key " + key);
         }
         return supplier;
     }
@@ -606,6 +841,46 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         @Override
         public DoubleSupplier doubleInputSupplier(String key) {
             return SuperstructureMechanism.this.doubleInputSupplier(key);
+        }
+
+        @Override
+        public int intVal(String key) {
+            return SuperstructureMechanism.this.intVal(key);
+        }
+
+        @Override
+        public IntSupplier intValSupplier(String key) {
+            return SuperstructureMechanism.this.intValSupplier(key);
+        }
+
+        @Override
+        public String stringVal(String key) {
+            return SuperstructureMechanism.this.stringVal(key);
+        }
+
+        @Override
+        public Supplier<String> stringValSupplier(String key) {
+            return SuperstructureMechanism.this.stringValSupplier(key);
+        }
+
+        @Override
+        public Pose2d pose2dVal(String key) {
+            return SuperstructureMechanism.this.pose2dVal(key);
+        }
+
+        @Override
+        public Supplier<Pose2d> pose2dValSupplier(String key) {
+            return SuperstructureMechanism.this.pose2dValSupplier(key);
+        }
+
+        @Override
+        public Pose3d pose3dVal(String key) {
+            return SuperstructureMechanism.this.pose3dVal(key);
+        }
+
+        @Override
+        public Supplier<Pose3d> pose3dValSupplier(String key) {
+            return SuperstructureMechanism.this.pose3dValSupplier(key);
         }
 
         @Override

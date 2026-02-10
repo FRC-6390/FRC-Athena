@@ -1,8 +1,10 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.core.RobotCore;
+import ca.frc6390.athena.core.RobotMechanisms;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.math.controller.PIDController;
@@ -11,6 +13,8 @@ import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 
 /**
  * Read-only view used by custom control loops.
@@ -170,13 +174,56 @@ public interface MechanismControlContext<T extends Mechanism> {
         return core != null ? core : RobotCore.getActiveInstance();
     }
 
+    /**
+     * Returns the global robot-wide mechanisms view (lookup by name/config/type).
+     */
+    default RobotMechanisms robotMechanisms() {
+        RobotCore<?> core = robotCore();
+        if (core == null) {
+            throw new IllegalStateException("No RobotCore available in mechanism control context");
+        }
+        return core.getMechanisms();
+    }
+
     boolean input(String key);
 
     BooleanSupplier inputSupplier(String key);
 
+    default boolean boolVal(String key) {
+        return input(key);
+    }
+
+    default BooleanSupplier boolValSupplier(String key) {
+        return inputSupplier(key);
+    }
+
     double doubleInput(String key);
 
     DoubleSupplier doubleInputSupplier(String key);
+
+    default double doubleVal(String key) {
+        return doubleInput(key);
+    }
+
+    default DoubleSupplier doubleValSupplier(String key) {
+        return doubleInputSupplier(key);
+    }
+
+    int intVal(String key);
+
+    IntSupplier intValSupplier(String key);
+
+    String stringVal(String key);
+
+    Supplier<String> stringValSupplier(String key);
+
+    Pose2d pose2dVal(String key);
+
+    Supplier<Pose2d> pose2dValSupplier(String key);
+
+    Pose3d pose3dVal(String key);
+
+    Supplier<Pose3d> pose3dValSupplier(String key);
 
     <V> V objectInput(String key, Class<V> type);
 
@@ -191,6 +238,50 @@ public interface MechanismControlContext<T extends Mechanism> {
      * Returns a named feedforward registered in the mechanism config.
      */
     SimpleMotorFeedforward feedforward(String name);
+
+    /**
+     * Computes PID output for the named profile and converts it into the mechanism output space.
+     *
+     * <p>The PID profile declares the output units it was tuned in (percent or volts). This method
+     * handles the conversion to the mechanism's configured output type.</p>
+     */
+    default double pidOut(String name, double measurement, double setpoint) {
+        PIDController controller = pid(name);
+        if (controller == null) {
+            return 0.0;
+        }
+        double raw = controller.calculate(measurement, setpoint);
+        OutputType from = mechanism().getControlLoopPidOutputType(name);
+        return toOutput(from, raw);
+    }
+
+    /**
+     * Computes feedforward output for the named profile and converts it into the mechanism output space.
+     *
+     * <p>WPILib feedforward models output volts; profiles therefore use {@link OutputType#VOLTAGE}.</p>
+     */
+    default double feedforwardOut(String name, double velocity) {
+        SimpleMotorFeedforward ff = feedforward(name);
+        if (ff == null) {
+            return 0.0;
+        }
+        double volts = ff.calculate(velocity);
+        OutputType from = mechanism().getControlLoopFeedforwardOutputType(name);
+        return toOutput(from, volts);
+    }
+
+    /**
+     * Computes feedforward output using current and next velocity (better for acceleration terms).
+     */
+    default double feedforwardOut(String name, double currentVelocity, double nextVelocity) {
+        SimpleMotorFeedforward ff = feedforward(name);
+        if (ff == null) {
+            return 0.0;
+        }
+        double volts = ff.calculateWithVelocities(currentVelocity, nextVelocity);
+        OutputType from = mechanism().getControlLoopFeedforwardOutputType(name);
+        return toOutput(from, volts);
+    }
 
     default boolean usesVoltage() {
         return mechanism().isUseVoltage();

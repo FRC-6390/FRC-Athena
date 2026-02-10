@@ -15,6 +15,7 @@ dependencies {
     implementation "com.fasterxml.jackson.core:jackson-annotations:${rootProject.ext.athenaVersions.jackson}"
     implementation "com.fasterxml.jackson.core:jackson-core:${rootProject.ext.athenaVersions.jackson}"
     implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.athenaVersions.jackson}"
+    implementation "org.tomlj:tomlj:1.1.1"
     testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
 }
 

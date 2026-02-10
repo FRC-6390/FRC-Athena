@@ -7,13 +7,11 @@ import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.mechanisms.ArmMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.mechanisms.OutputType;
 import ca.frc6390.athena.mechanisms.SuperstructureConfig;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.TurretMechanism;
-import edu.wpi.first.math.controller.ArmFeedforward;
-import edu.wpi.first.math.controller.PIDController;
-import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -147,68 +145,79 @@ public final class ExampleTurretSuperstructure {
         double[] targetHeadingRad = new double[1];
 
         MechanismConfig<TurretMechanism.StatefulTurretMechanism<TurretState>> turretConfig =
-                MechanismConfig.statefulTurret(new SimpleMotorFeedforward(0.2, 0.1, 0.0), TurretState.NEUTRAL)
-                        .addMotors(AthenaMotor.KRAKEN_X60, 1)
-                        .setEncoder(new EncoderConfig()
-                                .setType(AthenaEncoder.CANCODER.resolve())
+                MechanismConfig.statefulTurret(TurretState.NEUTRAL)
+                        .motors(motors -> motors
+                                .add(AthenaMotor.KRAKEN_X60, 1)
+                                .neutralMode(MotorNeutralMode.Brake)
+                                .canbus(canbus)
+                                .currentLimit(20))
+                        .encoder(enc -> enc.config(EncoderConfig
+                                .type(AthenaEncoder.CANCODER.resolve(), 1)
                                 .setGearRatio(100.0)
-                                .setConversion(2.0 * Math.PI))
-                        .setPID(new PIDController(2.0, 0.0, 0.1))
-                        .setNeutralMode(MotorNeutralMode.Brake)
-                        .setCanbus(canbus)
-                        .setCurrentLimit(20)
-                        .setBounds(Math.toRadians(-170.0), Math.toRadians(170.0))
-                        .setSimulationSimpleMotor(new MechanismConfig.SimpleMotorSimulationParameters()
-                                .setMomentOfInertia(0.02))
-                        .setStateAction((TurretMechanism.StatefulTurretMechanism<TurretState> mech) -> {
-                            mech.setSetpoint(targetHeadingRad[0]);
-                            return false;
-                        }, TurretState.TARGET);
+                                .setConversion(2.0 * Math.PI)))
+                        .control(control -> control
+                                .pidProfile("main", OutputType.PERCENT, 2.0, 0.0, 0.1)
+                                .mainPid("main"))
+                        .constraints(constraints -> constraints.bounds(Math.toRadians(-170.0), Math.toRadians(170.0)))
+                        .sim(sim -> sim.simpleMotor(new MechanismConfig.SimpleMotorSimulationParameters()
+                                .setMomentOfInertia(0.02)))
+                        .hooks(h -> h.stateAction(
+                                (TurretMechanism.StatefulTurretMechanism<TurretState> mech) -> mech.setSetpoint(targetHeadingRad[0]),
+                                TurretState.TARGET));
 
         TurretMechanism.StatefulTurretMechanism<TurretState> turret = turretConfig.build();
 
         MechanismConfig<ArmMechanism.StatefulArmMechanism<HoodState>> hoodConfig =
-                MechanismConfig.statefulArm(new ArmFeedforward(0.1, 0.2, 0.0, 0.0), HoodState.STOW)
-                        .addMotors(AthenaMotor.NEO_V1, 2)
-                        .setEncoder(new EncoderConfig()
-                                .setType(AthenaEncoder.SPARK_MAX.resolve())
+                MechanismConfig.statefulArm(HoodState.STOW)
+                        .motors(motors -> motors
+                                .add(AthenaMotor.NEO_V1, 2)
+                                .neutralMode(MotorNeutralMode.Brake)
+                                .canbus(canbus)
+                                .currentLimit(15))
+                        .encoder(enc -> enc.config(EncoderConfig
+                                .type(AthenaEncoder.SPARK_MAX.resolve(), 2)
                                 .setGearRatio(50.0)
-                                .setConversion(2.0 * Math.PI))
-                        .setPID(new PIDController(3.0, 0.0, 0.2))
-                        .setNeutralMode(MotorNeutralMode.Brake)
-                        .setCanbus(canbus)
-                        .setCurrentLimit(15)
-                        .setBounds(Math.toRadians(0.0), Math.toRadians(60.0))
-                        .setSimulationArm(new MechanismConfig.ArmSimulationParameters()
+                                .setConversion(2.0 * Math.PI)))
+                        .control(control -> control
+                                .pidProfile("main", OutputType.PERCENT, 3.0, 0.0, 0.2)
+                                .mainPid("main"))
+                        .constraints(constraints -> constraints.bounds(Math.toRadians(0.0), Math.toRadians(60.0)))
+                        .sim(sim -> sim.arm(new MechanismConfig.ArmSimulationParameters()
                                 .setArmLengthMeters(0.4)
-                                .setStartingAngleRadians(0.0));
+                                .setStartingAngleRadians(0.0)));
 
         ArmMechanism.StatefulArmMechanism<HoodState> hood = hoodConfig.build();
 
         MechanismConfig<FlywheelMechanism.StatefulFlywheelMechanism<ShooterState>> shooterConfig =
-                MechanismConfig.statefulFlywheel(new SimpleMotorFeedforward(0.15, 0.12, 0.0), ShooterState.OFF)
-                        .addMotors(AthenaMotor.KRAKEN_X44, 3)
-                        .setEncoder(new EncoderConfig()
-                                .setType(AthenaEncoder.CANCODER.resolve())
+                MechanismConfig.statefulFlywheel(ShooterState.OFF)
+                        .motors(motors -> motors
+                                .add(AthenaMotor.KRAKEN_X44, 3)
+                                .neutralMode(MotorNeutralMode.Coast)
+                                .canbus(canbus)
+                                .currentLimit(30))
+                        .encoder(enc -> enc.config(EncoderConfig
+                                .type(AthenaEncoder.CANCODER.resolve(), 3)
                                 .setGearRatio(1.0)
-                                .setConversion(2.0 * Math.PI))
-                        .setPID(new PIDController(0.1, 0.0, 0.0))
-                        .setPidUseVelocity(true)
-                        .setUseSetpointAsOutput(false)
-                        .setNeutralMode(MotorNeutralMode.Coast)
-                        .setCanbus(canbus)
-                        .setCurrentLimit(30)
-                        .setBounds(0.0, rpm(6000.0))
-                        .setSimulationSimpleMotor(new MechanismConfig.SimpleMotorSimulationParameters()
-                                .setMomentOfInertia(0.01));
+                                .setConversion(2.0 * Math.PI)))
+                        .control(control -> control
+                                .feedforwardProfile("mainFF", 0.15, 0.12, 0.0)
+                                .mainSimpleFeedforward("mainFF")
+                                .pidProfile("main", OutputType.PERCENT, 0.1, 0.0, 0.0)
+                                .mainPid("main")
+                                .pidUseVelocity(true)
+                                .setpointAsOutput(false))
+                        .constraints(constraints -> constraints.bounds(0.0, rpm(6000.0)))
+                        .sim(sim -> sim.simpleMotor(new MechanismConfig.SimpleMotorSimulationParameters()
+                                .setMomentOfInertia(0.01)));
 
         FlywheelMechanism.StatefulFlywheelMechanism<ShooterState> shooter = shooterConfig.build();
 
         SuperstructureConfig<SuperState, SuperSetpoint> superConfig = SuperstructureConfig
                 .create(SuperState.STOWED)
-                .addExistingMechanism(turret, SuperSetpoint::turret)
-                .addExistingMechanism(hood, SuperSetpoint::hood)
-                .addExistingMechanism(shooter, SuperSetpoint::shooter);
+                .mechanisms(m -> m
+                        .existing(turret, SuperSetpoint::turret)
+                        .existing(hood, SuperSetpoint::hood)
+                        .existing(shooter, SuperSetpoint::shooter));
 
         SuperstructureMechanism<SuperState, SuperSetpoint> superstructure = superConfig.build();
 

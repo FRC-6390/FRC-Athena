@@ -89,6 +89,21 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         }
     }
 
+    /**
+     * Returns true if the state is currently present in the queue.
+     */
+    public boolean isQueued(E state) {
+        if (state == null || stateQueue.isEmpty()) {
+            return false;
+        }
+        for (StateQueueEntry<E> entry : stateQueue) {
+            if (entry != null && entry.state == state) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public void setStateGraph(StateGraph<E> stateGraph) {
         this.stateGraph = stateGraph;
     }

@@ -11,11 +11,21 @@ import edu.wpi.first.math.controller.ElevatorFeedforward;
 public class ElevatorMechanism extends Mechanism {
 
     private final ElevatorFeedForwardsSendable feedforward;
+    private final OutputType feedforwardOutputType;
 
-    public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config, ElevatorFeedforward feedforward) {
+    public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config,
+                             ElevatorFeedforward feedforward,
+                             OutputType feedforwardOutputType) {
         super(ElevatorMechanismVisualization.prepare(config));
-        this.feedforward = new ElevatorFeedForwardsSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
-        setFeedforwardEnabled(true);
+        if (feedforward != null) {
+            this.feedforward = new ElevatorFeedForwardsSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
+            this.feedforwardOutputType = feedforwardOutputType != null ? feedforwardOutputType : OutputType.VOLTAGE;
+            setFeedforwardEnabled(true);
+        } else {
+            this.feedforward = null;
+            this.feedforwardOutputType = null;
+            setFeedforwardEnabled(false);
+        }
         if (config.elevatorSimulationParameters != null) {
             MechanismConfig.ElevatorSimulationParameters params = config.elevatorSimulationParameters;
             double min = params.minHeightMeters;
@@ -41,14 +51,20 @@ public class ElevatorMechanism extends Mechanism {
 
     @Override
     public double calculateFeedForward() {
-        double value = feedforward.calculate(getControllerSetpointVelocity());
-        return  isUseVoltage() ? value : value / 12d;
+        if (feedforward == null) {
+            return 0.0;
+        }
+        double valueVolts = feedforward.calculate(getControllerSetpointVelocity());
+        return toOutput(feedforwardOutputType, valueVolts);
     }
 
     @Override
     public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
         if (node == null) {
             return null;
+        }
+        if (feedforward == null) {
+            return super.networkTables(node);
         }
         RobotNetworkTables.Node ff = node.child("Feedforward");
         ff.putDouble("ks", feedforward.getKs());
@@ -67,11 +83,27 @@ public class ElevatorMechanism extends Mechanism {
 
         private final StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateCore;
 
-        public StatefulElevatorMechanism(MechanismConfig<StatefulElevatorMechanism<E>> config, ElevatorFeedforward feedforward, E initialState) {
-            super(config, feedforward);
+        public StatefulElevatorMechanism(MechanismConfig<StatefulElevatorMechanism<E>> config,
+                                         ElevatorFeedforward feedforward,
+                                         OutputType feedforwardOutputType,
+                                         E initialState) {
+            super(config, feedforward, feedforwardOutputType);
             stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                    config.stateActions, config.stateHooks, config.exitStateHooks, config.alwaysHooks, config.exitAlwaysHooks,
-                    config.inputs, config.doubleInputs, config.objectInputs);
+                    config.stateActions,
+                    config.enterStateHooks,
+                    config.stateHooks,
+                    config.exitStateHooks,
+                    config.transitionHooks,
+                    config.alwaysHooks,
+                    config.exitAlwaysHooks,
+                    config.inputs,
+                    config.doubleInputs,
+                    config.intInputs,
+                    config.stringInputs,
+                    config.pose2dInputs,
+                    config.pose3dInputs,
+                    config.objectInputs,
+                    config.stateTriggerBindings);
         }
 
         @Override
