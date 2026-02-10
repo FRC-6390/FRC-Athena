@@ -1,7 +1,6 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.encoder.EncoderType;
@@ -9,10 +8,8 @@ import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
-import ca.frc6390.athena.dashboard.ShuffleboardControls;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.sim.MotorSimType;
-
-import java.util.Map;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
@@ -21,14 +18,10 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj2.command.InstantCommand;
 public class SwerveModule implements RobotSendableDevice {
     
     private final SwerveModuleConfig config;
@@ -47,9 +40,6 @@ public class SwerveModule implements RobotSendableDevice {
     private double lastSetpointSpeedMetersPerSecond = 0.0;
     private double lastSetpointTimestampSeconds = Double.NaN;
     private ca.frc6390.athena.drivetrains.swerve.sim.SwerveModuleSimulation simulation;
-    private double shuffleboardPeriodSecondsOverride = Double.NaN;
-    private ShuffleboardLayout lastShuffleboardLayoutComp;
-    private ShuffleboardLayout lastShuffleboardLayoutDebug;
     // SWERVE MOTOR RECORD
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder, SwerveModuleSimConfig sim) {
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder) {
@@ -401,69 +391,25 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        if (level == SendableLevel.DEBUG) {
-            if (layout == lastShuffleboardLayoutDebug) {
-                return layout;
-            }
-            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
-            lastShuffleboardLayoutDebug = layout;
-
-            if (!compAlreadyBuilt) {
-                lastShuffleboardLayoutComp = layout;
-                publishCommon(layout);
-            }
-            publishDebugOnly(layout);
-            return layout;
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
+        }
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
         }
 
-        if (layout == lastShuffleboardLayoutComp) {
-            return layout;
+        node.putDouble("driveMotorPosition", driveEncoder != null ? driveEncoder.getCachedPosition() : 0.0);
+        encoder.networkTables(node.child("Encoder"));
+
+        if (nt.enabled(RobotNetworkTables.Flag.SWERVE_MODULE_DEBUG)) {
+            driveMotor.networkTables(node.child("DriveMotor"));
+            rotationMotor.networkTables(node.child("SteerMotor"));
+            node.putDouble("offset", encoder != null ? encoder.getOffset() : 0.0);
+            node.putDouble("startupOffset", startUpOffset);
         }
-        lastShuffleboardLayoutComp = layout;
-        publishCommon(layout);
-        return layout;
-    }
 
-    private void publishCommon(ShuffleboardLayout layout) {
-        layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 2));
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        layout.addDouble(
-                "Drive Motor Position",
-                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(
-                        () -> driveEncoder != null ? driveEncoder.getCachedPosition() : 0.0,
-                        period))
-            .withSize(1, 1)
-            .withPosition(1, 2);
-        encoder.shuffleboard(layout.getLayout("Encoder", BuiltInLayouts.kList));
-    }
-
-    private void publishDebugOnly(ShuffleboardLayout layout) {
-        if (!ShuffleboardControls.enabled(ShuffleboardControls.Flag.SWERVE_MODULE_DEBUG)) {
-            return;
-        }
-        driveMotor.shuffleboard(layout.getLayout("Drive Motor", BuiltInLayouts.kList));
-        rotationMotor.shuffleboard(layout.getLayout("Steer Motor", BuiltInLayouts.kList));
-
-        ShuffleboardLayout commandsLayout = layout.getLayout("Quick Commands", BuiltInLayouts.kList);
-        commandsLayout.add("Set Offset", new InstantCommand(() -> setOffset(encoder.getRawAbsoluteValue()))).withWidget(BuiltInWidgets.kCommand);
-        commandsLayout.add("Zero Offset", new InstantCommand(() -> setOffset(0))).withWidget(BuiltInWidgets.kCommand);
-        commandsLayout.add("Clear Offset", new InstantCommand(() -> setOffset(startUpOffset))).withWidget(BuiltInWidgets.kCommand);
-    }
-
-    @Override
-    public double getShuffleboardPeriodSeconds() {
-        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
-                ? shuffleboardPeriodSecondsOverride
-                : ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
-    }
-
-    @Override
-    public void setShuffleboardPeriodSeconds(double periodSeconds) {
-        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
-            shuffleboardPeriodSecondsOverride = Double.NaN;
-            return;
-        }
-        shuffleboardPeriodSecondsOverride = periodSeconds;
+        return node;
     }
 }

@@ -7,17 +7,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-import ca.frc6390.athena.core.RobotSendableSystem;
-import ca.frc6390.athena.dashboard.ShuffleboardControls;
 import edu.wpi.first.wpilibj.DriverStation;
 
 public final class TelemetryRegistry {
     private static final String DEFAULT_PREFIX = "Athena";
     private static final int DEFAULT_PERIOD_MS = 100;
-    private static final long SHUFFLEBOARD_CREATE_BACKOFF_MS = 1000;
     private volatile boolean enabled = true;
     private final TelemetrySink diskSink;
-    private final TelemetrySink shuffleboardSink;
     private final TelemetrySink networkTablesSink;
     private final List<Entry> entries;
     private final int defaultPeriodMs;
@@ -27,20 +23,16 @@ public final class TelemetryRegistry {
         private final TelemetryValueType type;
         private final TelemetryOutput diskOutput;
         private final TelemetryOutput networkTablesOutput;
-        private final boolean wantsShuffleboard;
         private final ValueSupplier supplier;
         private final int periodMs;
         private final double epsilon;
         private long lastPublishMs;
-        private long lastShuffleboardCreateAttemptMs;
-        private TelemetryOutput shuffleboardOutput;
         private Object lastValue;
 
         private Entry(String key,
                       TelemetryValueType type,
                       TelemetryOutput diskOutput,
                       TelemetryOutput networkTablesOutput,
-                      boolean wantsShuffleboard,
                       ValueSupplier supplier,
                       int periodMs,
                       double epsilon,
@@ -49,13 +41,10 @@ public final class TelemetryRegistry {
             this.type = type;
             this.diskOutput = diskOutput;
             this.networkTablesOutput = networkTablesOutput;
-            this.wantsShuffleboard = wantsShuffleboard;
             this.supplier = supplier;
             this.periodMs = periodMs;
             this.epsilon = epsilon;
             this.lastPublishMs = 0L;
-            this.lastShuffleboardCreateAttemptMs = 0L;
-            this.shuffleboardOutput = null;
             this.lastValue = snapshotValue(type, initialValue);
         }
     }
@@ -65,29 +54,13 @@ public final class TelemetryRegistry {
         Object get() throws Exception;
     }
 
-    public TelemetryRegistry(TelemetrySink diskSink, TelemetrySink shuffleboardSink) {
-        this(diskSink, shuffleboardSink, null, DEFAULT_PERIOD_MS);
-    }
-
-    public TelemetryRegistry(TelemetrySink diskSink, TelemetrySink shuffleboardSink, int defaultPeriodMs) {
-        this(diskSink, shuffleboardSink, null, defaultPeriodMs);
-    }
-
     public TelemetryRegistry(TelemetrySink diskSink,
-                             TelemetrySink shuffleboardSink,
                              TelemetrySink networkTablesSink,
                              int defaultPeriodMs) {
         this.diskSink = diskSink;
-        this.shuffleboardSink = shuffleboardSink;
         this.networkTablesSink = networkTablesSink;
         this.entries = new ArrayList<>();
         this.defaultPeriodMs = defaultPeriodMs > 0 ? defaultPeriodMs : DEFAULT_PERIOD_MS;
-    }
-
-    public static TelemetryRegistry createDefault(String shuffleboardTab) {
-        return create(TelemetryConfig.defualt()
-                .setShuffleboardEnabled(true)
-                .setShuffleboardTab(shuffleboardTab));
     }
 
     public static TelemetryRegistry create(TelemetryConfig config) {
@@ -95,13 +68,10 @@ public final class TelemetryRegistry {
         TelemetrySink disk = resolved.isDiskEnabled()
                 ? new DataLogTelemetrySink(resolved.diskPrefix())
                 : null;
-        TelemetrySink shuffleboard = resolved.isShuffleboardEnabled()
-                ? new ShuffleboardTelemetrySink(resolved.shuffleboardTab())
-                : null;
         TelemetrySink networkTables = resolved.isNetworkTablesEnabled()
                 ? new NetworkTableTelemetrySink(resolved.networkTablePrefix())
                 : null;
-        return new TelemetryRegistry(disk, shuffleboard, networkTables, resolved.defaultPeriodMs());
+        return new TelemetryRegistry(disk, networkTables, resolved.defaultPeriodMs());
     }
 
     public void register(Object target) {
@@ -170,21 +140,6 @@ public final class TelemetryRegistry {
             if (entry.networkTablesOutput != null) {
                 entry.networkTablesOutput.write(value);
             }
-
-            if (entry.wantsShuffleboard && shuffleboardSink != null) {
-                boolean shouldWriteWidgets = RobotSendableSystem.isShuffleboardEnabled()
-                        && ShuffleboardControls.enabled(ShuffleboardControls.Flag.TELEMETRY_SHUFFLEBOARD_WIDGETS);
-                if (shouldWriteWidgets) {
-                    if (entry.shuffleboardOutput == null
-                            && (nowMs - entry.lastShuffleboardCreateAttemptMs) >= SHUFFLEBOARD_CREATE_BACKOFF_MS) {
-                        entry.shuffleboardOutput = shuffleboardSink.create(entry.key, entry.type, entry.lastValue);
-                        entry.lastShuffleboardCreateAttemptMs = nowMs;
-                    }
-                    if (entry.shuffleboardOutput != null) {
-                        entry.shuffleboardOutput.write(value);
-                    }
-                }
-            }
             entry.lastValue = snapshotValue(entry.type, value);
             entry.lastPublishMs = nowMs;
         }
@@ -239,9 +194,8 @@ public final class TelemetryRegistry {
         TelemetryOutput networkTablesOutput = shouldLogToNetworkTables(telemetry)
                 ? networkTablesSink.create(key, valueType, initialValue)
                 : null;
-        boolean wantsShuffleboard = shouldLogToShuffleboard(telemetry);
         int periodMs = telemetry.periodMs() > 0 ? telemetry.periodMs() : defaultPeriodMs;
-        entries.add(new Entry(key, valueType, diskOutput, networkTablesOutput, wantsShuffleboard, supplier,
+        entries.add(new Entry(key, valueType, diskOutput, networkTablesOutput, supplier,
                 periodMs, telemetry.epsilon(), initialValue));
     }
 
@@ -250,14 +204,6 @@ public final class TelemetryRegistry {
             return false;
         }
         return telemetry.destination() == TelemetryDestination.DISK
-                || telemetry.destination() == TelemetryDestination.BOTH;
-    }
-
-    private boolean shouldLogToShuffleboard(Telemetry telemetry) {
-        if (shuffleboardSink == null) {
-            return false;
-        }
-        return telemetry.destination() == TelemetryDestination.SHUFFLEBOARD
                 || telemetry.destination() == TelemetryDestination.BOTH;
     }
 
@@ -397,9 +343,7 @@ public final class TelemetryRegistry {
     public record TelemetryConfig(
             int defaultPeriodMs,
             boolean diskEnabled,
-            boolean shuffleboardEnabled,
             boolean networkTablesEnabled,
-            String shuffleboardTab,
             String diskPrefix,
             String networkTablePrefix) {
 
@@ -408,56 +352,34 @@ public final class TelemetryRegistry {
                     DEFAULT_PERIOD_MS,
                     true,
                     true,
-                    true,
-                    "Telemetry",
                     DEFAULT_PREFIX,
                     "Telemetry");
         }
 
         public TelemetryConfig setDefaultPeriodMs(int defaultPeriodMs) {
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, networkTablesEnabled,
-                    shuffleboardTab, diskPrefix, networkTablePrefix);
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, diskPrefix, networkTablePrefix);
         }
 
         public TelemetryConfig setDiskEnabled(boolean enabled) {
-            return new TelemetryConfig(defaultPeriodMs, enabled, shuffleboardEnabled, networkTablesEnabled,
-                    shuffleboardTab, diskPrefix, networkTablePrefix);
-        }
-
-        public TelemetryConfig setShuffleboardEnabled(boolean enabled) {
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, enabled, networkTablesEnabled,
-                    shuffleboardTab, diskPrefix, networkTablePrefix);
+            return new TelemetryConfig(defaultPeriodMs, enabled, networkTablesEnabled, diskPrefix, networkTablePrefix);
         }
 
         public TelemetryConfig setNetworkTablesEnabled(boolean enabled) {
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, enabled,
-                    shuffleboardTab, diskPrefix, networkTablePrefix);
-        }
-
-        public TelemetryConfig setShuffleboardTab(String tab) {
-            String resolved = tab != null && !tab.isBlank() ? tab : "Telemetry";
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, networkTablesEnabled,
-                    resolved, diskPrefix, networkTablePrefix);
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, enabled, diskPrefix, networkTablePrefix);
         }
 
         public TelemetryConfig setDiskPrefix(String prefix) {
             String resolved = prefix != null && !prefix.isBlank() ? prefix : DEFAULT_PREFIX;
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, networkTablesEnabled,
-                    shuffleboardTab, resolved, networkTablePrefix);
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, resolved, networkTablePrefix);
         }
 
         public TelemetryConfig setNetworkTablePrefix(String prefix) {
             String resolved = prefix != null && !prefix.isBlank() ? prefix : "Telemetry";
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, shuffleboardEnabled, networkTablesEnabled,
-                    shuffleboardTab, diskPrefix, resolved);
+            return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, diskPrefix, resolved);
         }
 
         public boolean isDiskEnabled() {
             return diskEnabled;
-        }
-
-        public boolean isShuffleboardEnabled() {
-            return shuffleboardEnabled;
         }
 
         public boolean isNetworkTablesEnabled() {

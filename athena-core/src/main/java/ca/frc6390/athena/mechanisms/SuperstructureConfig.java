@@ -31,6 +31,7 @@ import ca.frc6390.athena.mechanisms.Mechanism;
 public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>, SP> {
 
     public S initialState;
+    private String superstructureName;
     public double stateMachineDelaySeconds = 0.0;
     public List<ChildFactory<SP>> childConfigs = new ArrayList<>();
     public Map<S, Constraint<S, SP>> constraints = new HashMap<>();
@@ -54,13 +55,34 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         return new SuperstructureConfig<>(initialState);
     }
 
+    /**
+     * Named variant of {@link #create(Enum)}.
+     */
+    public static <S extends Enum<S> & SetpointProvider<SP>, SP> SuperstructureConfig<S, SP> create(String name, S initialState) {
+        return create(initialState).named(name);
+    }
+
+    /**
+     * Assigns the {@link edu.wpi.first.wpilibj2.command.Subsystem} name of the resulting
+     * superstructure. Recommended so RobotCore can enforce uniqueness and so teams can retrieve
+     * the owning superstructure from constants.
+     */
+    public SuperstructureConfig<S, SP> named(String name) {
+        this.superstructureName = name;
+        return this;
+    }
+
+    public String name() {
+        return superstructureName;
+    }
+
     public SuperstructureMechanism<S, SP> build() {
         ensureInitialState();
         List<SuperstructureMechanism.Child<SP, ?>> builtChildren = new ArrayList<>();
         for (ChildFactory<SP> child : childConfigs) {
             builtChildren.add(child.build());
         }
-        return new SuperstructureMechanism<>(
+        SuperstructureMechanism<S, SP> mech = new SuperstructureMechanism<>(
                 initialState,
                 stateMachineDelaySeconds,
                 builtChildren,
@@ -74,6 +96,11 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
                 mergedPeriodicBindings(),
                 mergedExitBindings(),
                 mergedExitAlwaysBindings());
+        if (superstructureName != null && !superstructureName.isBlank()) {
+            mech.setName(superstructureName);
+        }
+        mech.setSourceConfig(this);
+        return mech;
     }
 
     /**
@@ -87,7 +114,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         for (ChildFactory<SP> child : childConfigs) {
             builtChildren.add(child.build());
         }
-        return new SuperstructureMechanism<>(
+        SuperstructureMechanism<S, SP> mech = new SuperstructureMechanism<>(
                 initialState,
                 stateMachineDelaySeconds,
                 builtChildren,
@@ -101,6 +128,11 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
                 mergedPeriodicBindings(),
                 mergedExitBindings(),
                 mergedExitAlwaysBindings());
+        if (superstructureName != null && !superstructureName.isBlank()) {
+            mech.setName(superstructureName);
+        }
+        mech.setSourceConfig(this);
+        return mech;
     }
 
     /**
@@ -126,7 +158,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         for (ChildFactory<SP> child : childConfigs) {
             builtChildren.add(child.build());
         }
-        return new SuperstructureMechanism<>(
+        SuperstructureMechanism<S, SP> mech = new SuperstructureMechanism<>(
                 initialState,
                 stateMachineDelaySeconds,
                 builtChildren,
@@ -140,6 +172,11 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
                 mergedPeriodicBindings(),
                 mergedExitBindings(),
                 mergedExitAlwaysBindings());
+        if (superstructureName != null && !superstructureName.isBlank()) {
+            mech.setName(superstructureName);
+        }
+        mech.setSourceConfig(this);
+        return mech;
     }
 
     private void ensureInitialState() {

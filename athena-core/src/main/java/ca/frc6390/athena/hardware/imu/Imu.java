@@ -2,9 +2,7 @@ package ca.frc6390.athena.hardware.imu;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import ca.frc6390.athena.core.RobotSendableSystem;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-import edu.wpi.first.wpilibj2.command.InstantCommand;
+import ca.frc6390.athena.core.RobotNetworkTables;
 
 /**
  * Vendor-agnostic IMU interface for the new vendordep system.
@@ -57,7 +55,7 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     // Optional periodic update hook (default no-op)
     default void update() {}
 
-    // Cached accessors for shuffleboard/logging (override in adapters to return cached values)
+    // Cached accessors for logging/dashboard (override in adapters to return cached values)
     default Rotation2d getCachedRoll() { return getRoll(); }
     default Rotation2d getCachedPitch() { return getPitch(); }
     default Rotation2d getCachedYaw() { return getYaw(); }
@@ -84,64 +82,48 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     ImuConfig getConfig();
 
     @Override
-    default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
-        // Important: DEBUG publishing can happen after COMP publishing at runtime.
-        // WPILib throws if you add the same title twice to a container, so DEBUG only adds DEBUG-only
-        // widgets (COMP is responsible for "base" yaw/pitch/roll/etc).
-        if (!level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
-            layout.addDouble("Yaw (deg)", () -> {
-                Rotation2d yaw = getCachedYaw();
-                return yaw != null ? yaw.getDegrees() : 0.0;
-            });
-            layout.addDouble("Pitch (deg)", () -> {
-                Rotation2d pitch = getCachedPitch();
-                return pitch != null ? pitch.getDegrees() : 0.0;
-            });
-            layout.addDouble("Roll (deg)", () -> {
-                Rotation2d roll = getCachedRoll();
-                return roll != null ? roll.getDegrees() : 0.0;
-            });
-            layout.addDouble("Velocity X (deg/s)", () -> {
-                Rotation2d vel = getCachedVelocityX();
-                return vel != null ? vel.getDegrees() : 0.0;
-            });
-            layout.addDouble("Velocity Y (deg/s)", () -> {
-                Rotation2d vel = getCachedVelocityY();
-                return vel != null ? vel.getDegrees() : 0.0;
-            });
-            layout.addDouble("Velocity Z (deg/s)", () -> {
-                Rotation2d vel = getCachedVelocityZ();
-                return vel != null ? vel.getDegrees() : 0.0;
-            });
-            layout.addDouble("Acceleration X", this::getCachedAccelerationX);
-            layout.addDouble("Acceleration Y", this::getCachedAccelerationY);
-            layout.addDouble("Acceleration Z", this::getCachedAccelerationZ);
-            layout.addBoolean("Connected", this::isCachedConnected);
-        } else {
-            layout.add("Inverted", builder ->
-                    builder.addBooleanProperty("Inverted", this::isInverted, this::setInverted));
-            layout.addDouble("Max Linear Speed", this::getMaxLinearSpeed);
-            layout.addDouble("Max Radial Speed", this::getMaxRadialSpeed);
-            layout.add("Max Speed Window (s)",
-                    builder -> builder.addDoubleProperty(
-                            "Max Speed Window (s)",
-                            this::getMaxSpeedWindowSeconds,
-                            this::setMaxSpeedWindowSeconds));
-            layout.add("Reset Max Speeds", new InstantCommand(this::resetMaxSpeedWindow))
-                    .withWidget(BuiltInWidgets.kCommand);
-            layout.addDouble("CAN ID", () -> {
-                ImuConfig cfg = getConfig();
-                return cfg != null ? cfg.id : 0.0;
-            });
-            layout.addString("CAN Bus", () -> {
-                ImuConfig cfg = getConfig();
-                return cfg != null && cfg.canbus != null ? cfg.canbus : "";
-            });
-            layout.addString("Type", () -> {
-                ImuConfig cfg = getConfig();
-                return cfg != null && cfg.type != null ? cfg.type.getKey() : "unknown";
-            });
+    default RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
         }
-        return layout;
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
+        }
+
+        Rotation2d yaw = getCachedYaw();
+        Rotation2d pitch = getCachedPitch();
+        Rotation2d roll = getCachedRoll();
+        Rotation2d velX = getCachedVelocityX();
+        Rotation2d velY = getCachedVelocityY();
+        Rotation2d velZ = getCachedVelocityZ();
+
+        node.putDouble("yawDeg", yaw != null ? yaw.getDegrees() : 0.0);
+        node.putDouble("pitchDeg", pitch != null ? pitch.getDegrees() : 0.0);
+        node.putDouble("rollDeg", roll != null ? roll.getDegrees() : 0.0);
+        node.putDouble("velXDegPerSec", velX != null ? velX.getDegrees() : 0.0);
+        node.putDouble("velYDegPerSec", velY != null ? velY.getDegrees() : 0.0);
+        node.putDouble("velZDegPerSec", velZ != null ? velZ.getDegrees() : 0.0);
+        node.putDouble("accelX", getCachedAccelerationX());
+        node.putDouble("accelY", getCachedAccelerationY());
+        node.putDouble("accelZ", getCachedAccelerationZ());
+        node.putBoolean("connected", isCachedConnected());
+
+        if (nt.enabled(RobotNetworkTables.Flag.HW_IMU_TUNING_WIDGETS)) {
+            node.putBoolean("inverted", isInverted());
+            node.putDouble("maxLinearSpeed", getMaxLinearSpeed());
+            node.putDouble("maxRadialSpeed", getMaxRadialSpeed());
+            node.putDouble("maxSpeedWindowSec", getMaxSpeedWindowSeconds());
+            node.putDouble("angularAccelZDegPerSec2", getCachedAngularAccelerationZDegreesPerSecondSquared());
+
+            ImuConfig cfg = getConfig();
+            if (cfg != null) {
+                node.putDouble("canId", cfg.id);
+                node.putString("canbus", cfg.canbus != null ? cfg.canbus : "");
+                node.putString("type", cfg.type != null ? cfg.type.getKey() : "unknown");
+            }
+        }
+
+        return node;
     }
 }

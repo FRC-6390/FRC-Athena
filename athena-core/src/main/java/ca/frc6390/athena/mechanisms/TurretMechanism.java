@@ -14,7 +14,6 @@ import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 /**
  * Simple motor-based turret mechanism that supports continuous rotation inputs.
@@ -265,14 +264,9 @@ public class TurretMechanism extends SimpleMotorMechanism {
         return MathUtil.clamp(best, min, max);
     }
 
-    @Override
-    public TurretMechanism shuffleboard(String tab, SendableLevel level) {
-        return (TurretMechanism) super.shuffleboard(tab, level);
-    }
-
-    @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        return super.shuffleboard(tab, level);
+    public TurretMechanism publishNetworkTables(String ownerHint) {
+        super.publishNetworkTables(ownerHint);
+        return this;
     }
 
     @Override
@@ -363,15 +357,20 @@ public class TurretMechanism extends SimpleMotorMechanism {
         }
 
         @Override
-        public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-            stateCore.shuffleboard(tab, level);
-            return super.shuffleboard(tab, level);
+        public ca.frc6390.athena.core.RobotNetworkTables.Node networkTables(
+                ca.frc6390.athena.core.RobotNetworkTables.Node node) {
+            if (node == null) {
+                return null;
+            }
+            getStateMachine().networkTables(node.child("StateMachine"));
+            return super.networkTables(node);
         }
 
         @Override
         @SuppressWarnings("unchecked")
-        public StatefulTurretMechanism<E> shuffleboard(String tab, SendableLevel level) {
-            return (StatefulTurretMechanism<E>) super.shuffleboard(tab, level);
+        public StatefulTurretMechanism<E> publishNetworkTables(String ownerHint) {
+            super.publishNetworkTables(ownerHint);
+            return this;
         }
     }
 }

@@ -14,7 +14,7 @@ public record PoseConfig(
         PoseConstraints constraints,
         RobotLocalizationConfig.BackendConfig backendOverride,
         boolean active,
-        boolean publishToShuffleboard,
+        boolean publishToNetworkTables,
         Pose2d startPose2d,
         Pose3d startPose3d) {
 
@@ -170,7 +170,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 startPose2d,
                 startPose3d);
     }
@@ -184,7 +184,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 startPose2d,
                 startPose3d);
     }
@@ -198,7 +198,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 startPose2d,
                 startPose3d);
     }
@@ -212,7 +212,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 startPose2d,
                 startPose3d);
     }
@@ -226,7 +226,7 @@ public record PoseConfig(
                 constraints,
                 backend,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 startPose2d,
                 startPose3d);
     }
@@ -240,12 +240,12 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 startPose2d,
                 startPose3d);
     }
 
-    public PoseConfig withShuffleboardPublishing(boolean publishToShuffleboard) {
+    public PoseConfig withNetworkTablesPublishing(boolean publishToNetworkTables) {
         return new PoseConfig(
                 name,
                 frame,
@@ -254,7 +254,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 startPose2d,
                 startPose3d);
     }
@@ -268,7 +268,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 startPose,
                 null);
     }
@@ -282,7 +282,7 @@ public record PoseConfig(
                 constraints,
                 backendOverride,
                 active,
-                publishToShuffleboard,
+                publishToNetworkTables,
                 null,
                 startPose);
     }

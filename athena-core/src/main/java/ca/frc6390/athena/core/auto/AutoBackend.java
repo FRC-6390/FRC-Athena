@@ -19,6 +19,18 @@ public interface AutoBackend {
     boolean supports(RobotAuto.AutoSource source);
 
     /**
+     * Priority used when multiple backends claim to support the same {@link RobotAuto.AutoSource}.
+     * Higher values win.
+     *
+     * <p>Example: if both a Choreo-native backend and a PathPlanner backend can follow Choreo
+     * trajectories, the Choreo-native backend should return a higher priority for
+     * {@link RobotAuto.AutoSource#CHOREO} so it is selected.</p>
+     */
+    default int priority(RobotAuto.AutoSource source) {
+        return 0;
+    }
+
+    /**
         * Configure holonomic path following for the given bindings. Returns true if successful.
         */
     default boolean configureHolonomic(HolonomicDriveBinding binding) {

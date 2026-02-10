@@ -6,14 +6,10 @@ import java.util.function.DoubleSupplier;
 import ca.frc6390.athena.controllers.EnhancedXboxController;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.Command;
-import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 
 public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSendableSystem, Subsystem {
@@ -37,43 +33,32 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
     }
 
     @Override
-    default ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        
-        if(getIMU() != null){
-            ShuffleboardLayout imuLayout = tab.getLayout("IMU", BuiltInLayouts.kList).withSize(4, 8);
-            getIMU().shuffleboard(imuLayout, level);
+    default RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
         }
-       
-        if(level.equals(SendableLevel.DEBUG)){
-            ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kList).withSize(2, 3).withProperties(Map.of("Number of columns", 2, "Number of rows", 1));
-            { 
-            Map<String, Object> props = Map.of("Min", -getRobotSpeeds().getMaxVelocity(), "Max", getRobotSpeeds().getMaxVelocity(),"Label position", "TOP");
-            ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kList).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
-            chassisLayout.addDouble("X", () -> getRobotSpeeds().getSpeeds("drive").vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-            chassisLayout.addDouble("Y", () -> getRobotSpeeds().getSpeeds("drive").vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-            chassisLayout.addDouble("Z", () -> getRobotSpeeds().getSpeeds("drive").omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-            ShuffleboardLayout feedbackLayout = speedsLayout.getLayout("Feedback", BuiltInLayouts.kList).withProperties(Map.of("Number of columns", 1, "Number of rows", 3,"Label position", "TOP"));
-            feedbackLayout.addDouble("X", () -> getRobotSpeeds().getSpeeds("feedback").vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-            feedbackLayout.addDouble("Y", () -> getRobotSpeeds().getSpeeds("feedback").vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-            feedbackLayout.addDouble("Z", () -> getRobotSpeeds().getSpeeds("feedback").omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar).withProperties(props);
-            }
-        }
-       
-
-        ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kList).withSize(1, 3).withProperties(Map.of("Number of columns", 1, "Number of rows", 3));
-        {
-        commandsLayout.add("Reset Heading", new InstantCommand(() -> getIMU().setYaw(0))).withWidget(BuiltInWidgets.kCommand);
-        commandsLayout.add("Brake Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Brake))).withWidget(BuiltInWidgets.kCommand);
-        commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
         }
 
-        // ShuffleboardLayout driftCorrectionLayout = tab.getLayout("Drift Correction", BuiltInLayouts.kList).withSize(2, 2);
-        // {
-        // driftCorrectionLayout.add("Drift Correction", (builder) -> builder.addBooleanProperty("Drift Correction", this::getDriftCorrectionMode, this::setDriftCorrectionMode)).withWidget(BuiltInWidgets.kBooleanBox);
-        // driftCorrectionLayout.addDouble("Desired Heading", () -> desiredHeading).withWidget(BuiltInWidgets.kGyro);// might not display properly bc get heading is +-180
-        // driftCorrectionLayout.add(driftpid).withWidget(BuiltInWidgets.kPIDController);
-        // }
-        return tab;
+        if (getIMU() != null) {
+            getIMU().networkTables(node.child("IMU"));
+        }
+
+        if (nt.enabled(RobotNetworkTables.Flag.DRIVETRAIN_SPEED_WIDGETS)) {
+            RobotNetworkTables.Node speeds = node.child("RobotSpeeds");
+            speeds.child("drive").putDouble("vxMps", getRobotSpeeds().getSpeeds("drive").vxMetersPerSecond);
+            speeds.child("drive").putDouble("vyMps", getRobotSpeeds().getSpeeds("drive").vyMetersPerSecond);
+            speeds.child("drive").putDouble("omegaRadPerSec", getRobotSpeeds().getSpeeds("drive").omegaRadiansPerSecond);
+
+            speeds.child("feedback").putDouble("vxMps", getRobotSpeeds().getSpeeds("feedback").vxMetersPerSecond);
+            speeds.child("feedback").putDouble("vyMps", getRobotSpeeds().getSpeeds("feedback").vyMetersPerSecond);
+            speeds.child("feedback").putDouble("omegaRadPerSec", getRobotSpeeds().getSpeeds("feedback").omegaRadiansPerSecond);
+        }
+
+        // Commands are intentionally not published here; dashboards can invoke actions via your own bindings.
+        return node;
     }
 
     public class RobotDrivetrainIDs {

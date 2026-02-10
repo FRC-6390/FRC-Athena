@@ -9,14 +9,11 @@ import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotSendableSystem;
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.Mechanism;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import java.util.ArrayList;
 
@@ -27,6 +24,7 @@ import java.util.ArrayList;
  */
 public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
     private RobotCore<?> robotCore;
+    private SuperstructureConfig<?, ?> sourceConfig;
 
     static final class Child<SP, E extends Enum<E> & SetpointProvider<?>> {
         final Mechanism mechanism;
@@ -249,30 +247,15 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        if (!RobotSendableSystem.isShuffleboardEnabled()) {
-            return tab;
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
         }
-        stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList), level);
-        List<Mechanism> mechanisms = new ArrayList<>();
-        flattenMechanisms(mechanisms, this);
-        if (!mechanisms.isEmpty()) {
-            ShuffleboardLayout mechanismsLayout = tab.getLayout("Mechanisms", BuiltInLayouts.kList);
-            int index = 1;
-            for (Mechanism mechanism : mechanisms) {
-                if (mechanism == null) {
-                    continue;
-                }
-                String name = mechanism.getName();
-                if (name == null || name.isBlank()) {
-                    name = "Mechanism-" + index;
-                }
-                ShuffleboardLayout mechanismLayout = mechanismsLayout.getLayout(name, BuiltInLayouts.kList);
-                mechanism.shuffleboard(mechanismLayout, level);
-                index++;
-            }
+        if (!node.robot().isPublishingEnabled()) {
+            return node;
         }
-        return tab;
+        stateMachine.networkTables(node.child("StateMachine"));
+        return node;
     }
 
     /**
@@ -287,20 +270,6 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                 flattenMechanisms(out, (SuperstructureMechanism<?, ?>) child.superstructure);
             }
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    @Override
-    public SuperstructureMechanism<S, SP> shuffleboard(String tab, SendableLevel level) {
-        RobotSendableSystem.super.shuffleboard(tab, level);
-        return this;
-    }
-
-    @SuppressWarnings("unchecked")
-    @Override
-    public SuperstructureMechanism<S, SP> shuffleboard(String tab) {
-        RobotSendableSystem.super.shuffleboard(tab);
-        return this;
     }
 
     /**
@@ -428,8 +397,32 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
     }
 
+    /**
+     * Assigns a dashboard owner path to all child mechanisms (including nested superstructures).
+     *
+     * <p>This is used by RobotCore to publish mechanisms under Athena/Mechanisms in a structured
+     * tree (Owner -> Type -> Name) and avoid duplicate widgets across multiple tabs.</p>
+     */
+    public void assignDashboardOwners(String ownerPath) {
+        String base = ownerPath;
+        if (base == null || base.isBlank()) {
+            String n = getName();
+            base = (n == null || n.isBlank()) ? getClass().getSimpleName() : n;
+        }
+        propagateDashboardOwner(base, this);
+    }
+
     public RobotCore<?> getRobotCore() {
         return robotCore;
+    }
+
+    SuperstructureMechanism<S, SP> setSourceConfig(SuperstructureConfig<?, ?> config) {
+        this.sourceConfig = config;
+        return this;
+    }
+
+    public SuperstructureConfig<?, ?> getSourceConfig() {
+        return sourceConfig;
     }
 
     private static void propagateRobotCore(RobotCore<?> robotCore, SuperstructureMechanism<?, ?> mech) {
@@ -441,6 +434,22 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                 SuperstructureMechanism<?, ?> nested = child.superstructure;
                 nested.robotCore = robotCore;
                 propagateRobotCore(robotCore, nested);
+            }
+        }
+    }
+
+    private static void propagateDashboardOwner(String ownerPath, SuperstructureMechanism<?, ?> mech) {
+        for (Child<?, ?> child : mech.children) {
+            if (child.mechanism != null) {
+                child.mechanism.setNetworkTablesOwnerPath(ownerPath);
+            }
+            if (child.superstructure != null) {
+                SuperstructureMechanism<?, ?> nested = child.superstructure;
+                String nestedName = nested.getName();
+                if (nestedName == null || nestedName.isBlank()) {
+                    nestedName = nested.getClass().getSimpleName();
+                }
+                propagateDashboardOwner(ownerPath + "/" + nestedName, nested);
             }
         }
     }

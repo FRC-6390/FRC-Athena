@@ -14,7 +14,6 @@ import java.util.function.UnaryOperator;
 
 import ca.frc6390.athena.core.RobotAuto;
 import ca.frc6390.athena.core.RobotSendableSystem;
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotVision;
 import ca.frc6390.athena.core.auto.AutoBackend;
@@ -26,7 +25,7 @@ import ca.frc6390.athena.core.auto.HolonomicFeedforward;
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.sensors.camera.VisionCamera;
-import ca.frc6390.athena.dashboard.ShuffleboardControls;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
@@ -43,15 +42,11 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.StructPublisher;
-import edu.wpi.first.networktables.GenericEntry;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
-import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -113,21 +108,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private int visionAcceptCount = 0;
     private int visionAcceptAccepted = 0;
     private double visionAcceptRateWindow = 0.0;
-    private GenericEntry poseJumpEntry;
-    private GenericEntry driftRateEntry;
-    private GenericEntry visionAcceptanceEntry;
-    private GenericEntry slipActiveEntry;
     private NetworkTableEntry poseJumpNtEntry;
     private NetworkTableEntry driftRateNtEntry;
     private NetworkTableEntry visionAcceptanceNtEntry;
     private NetworkTableEntry slipActiveNtEntry;
-    private GenericEntry backendOverrideToggleEntry;
-    private SendableChooser<RobotLocalizationConfig.BackendConfig.SlipStrategy> backendSlipStrategyChooser;
-    private SendableChooser<RobotLocalizationConfig.BackendConfig.ImuStrategy> backendImuStrategyChooser;
-    private SendableChooser<RobotLocalizationConfig.BackendConfig.VisionStrategy> backendVisionStrategyChooser;
 
     private final RobotLocalizationPersistence persistence;
     private final RobotVisionCameraManager cameraManager;
+    private RobotNetworkTables robotNetworkTables;
     private boolean restoringPersistentState = false;
     private final Matrix<N3, N1> baseStateStdDevs2d;
     private final Matrix<N4, N1> baseStateStdDevs3d;
@@ -197,8 +185,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             vision.attachLocalization(this);
             vision.setLocalizationStdDevs(localizationConfig.getVisionStd(), localizationConfig.getVisionMultitagStd());
         }
-        cameraManager.ensureCameraShuffleboardEntries(vision);
+        cameraManager.ensureCameraEntries(vision);
         return this;
+    }
+
+    /**
+     * Attaches the RobotCore-owned NetworkTables router so localization can honor the same runtime
+     * gating flags and publish config topics under Athena/NetworkTableConfig.
+     */
+    public void attachRobotNetworkTables(RobotNetworkTables robotNetworkTables) {
+        this.robotNetworkTables = robotNetworkTables;
+        cameraManager.attachRobotNetworkTables(robotNetworkTables);
     }
 
     public RobotLocalization<T> setVisionOutlierThresholds(double translationMeters, double rotationDegrees) {
@@ -386,30 +383,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         backendVisionStrategyEntry.setString(base.visionStrategy().name());
     }
 
-    private void syncBackendOverridesFromShuffleboard() {
-        if (backendOverrideEnabledEntry == null || backendOverrideToggleEntry == null) {
-            return;
-        }
-        backendOverrideEnabledEntry.setBoolean(backendOverrideToggleEntry.getBoolean(false));
-        if (backendSlipStrategyEntry != null && backendSlipStrategyChooser != null) {
-            RobotLocalizationConfig.BackendConfig.SlipStrategy selected = backendSlipStrategyChooser.getSelected();
-            if (selected != null) {
-                backendSlipStrategyEntry.setString(selected.name());
-            }
-        }
-        if (backendImuStrategyEntry != null && backendImuStrategyChooser != null) {
-            RobotLocalizationConfig.BackendConfig.ImuStrategy selected = backendImuStrategyChooser.getSelected();
-            if (selected != null) {
-                backendImuStrategyEntry.setString(selected.name());
-            }
-        }
-        if (backendVisionStrategyEntry != null && backendVisionStrategyChooser != null) {
-            RobotLocalizationConfig.BackendConfig.VisionStrategy selected = backendVisionStrategyChooser.getSelected();
-            if (selected != null) {
-                backendVisionStrategyEntry.setString(selected.name());
-            }
-        }
-    }
+    // Backend override values are edited directly via NetworkTables under Athena/Localization/Backend.
 
     private RobotLocalizationConfig.BackendConfig applyBackendOverride(RobotLocalizationConfig.BackendConfig base) {
         RobotLocalizationConfig.BackendConfig.SlipStrategy slipStrategy =
@@ -657,26 +631,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         lastHealthTimestamp = now;
 
         double acceptanceRate = visionAcceptRateWindow;
-        if (poseJumpEntry != null) {
-            poseJumpEntry.setDouble(lastPoseJumpMeters);
-        }
         if (poseJumpNtEntry != null) {
             poseJumpNtEntry.setDouble(lastPoseJumpMeters);
-        }
-        if (driftRateEntry != null) {
-            driftRateEntry.setDouble(driftRateMetersPerSec);
         }
         if (driftRateNtEntry != null) {
             driftRateNtEntry.setDouble(driftRateMetersPerSec);
         }
-        if (visionAcceptanceEntry != null) {
-            visionAcceptanceEntry.setDouble(acceptanceRate);
-        }
         if (visionAcceptanceNtEntry != null) {
             visionAcceptanceNtEntry.setDouble(acceptanceRate);
-        }
-        if (slipActiveEntry != null) {
-            slipActiveEntry.setBoolean(slipActive);
         }
         if (slipActiveNtEntry != null) {
             slipActiveNtEntry.setBoolean(slipActive);
@@ -930,8 +892,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         applyPoseConfigUpdate(config, config.setActive(active));
     }
 
-    public boolean setPoseConfigShuffleboardPublishing(String name, boolean publishToShuffleboard) {
-        return updatePoseConfig(name, config -> config.withShuffleboardPublishing(publishToShuffleboard));
+    public boolean setPoseConfigNetworkTablesPublishing(String name, boolean publishToNetworkTables) {
+        return updatePoseConfig(name, config -> config.withNetworkTablesPublishing(publishToNetworkTables));
     }
 
     public boolean isPoseActive(String name) {
@@ -948,7 +910,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (state != null) {
             state.active = updated.active();
         }
-        if (existing.publishToShuffleboard() && !updated.publishToShuffleboard()) {
+        if (existing.publishToNetworkTables() && !updated.publishToNetworkTables()) {
             StructPublisher<Pose2d> publisher = poseStructPublishers.remove(updated.name());
             if (publisher != null) {
                 publisher.close();
@@ -1144,56 +1106,41 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return cameraManager.getVisionField();
     }
 
-    public void registerVisionShuffleboardTab(ShuffleboardTab tab) {
-        cameraManager.setVisionShuffleboardTab(tab);
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.VISION_CAMERA_WIDGETS)) {
-            cameraManager.ensureCameraShuffleboardEntries(vision);
-        }
-    }
-
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        cameraManager.setLocalizationShuffleboardTab(tab);
-        tab.add("Estimator Paths", fieldPublisher.getField()).withPosition(0, 0).withSize(4, 3);
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
+        }
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
+        }
 
-        if (level == SendableLevel.DEBUG) {
-            // Debug-specific struct publishers are already configured above.
+        Pose2d pose = getFieldPose();
+        RobotNetworkTables.Node posesNode = node.child("Poses").child("Primary");
+        posesNode.putDouble("xM", pose.getX());
+        posesNode.putDouble("yM", pose.getY());
+        posesNode.putDouble("rotDeg", pose.getRotation().getDegrees());
+
+        // Field2d is a localization concern (not vision). Publish it only when explicitly enabled.
+        if (nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET)) {
+            if (!fieldPublisher.isFieldPublished()) {
+                // Elastic/Glass can bind a Field2d widget to this SmartDashboard entry.
+                SmartDashboard.putData("Athena Localization Field2d", fieldPublisher.getField());
+                fieldPublisher.publishFieldOnce();
+            }
+            fieldPublisher.setRobotPose(pose);
         }
-        if (poseJumpEntry == null && ShuffleboardControls.enabled(ShuffleboardControls.Flag.LOCALIZATION_HEALTH_WIDGETS)) {
-            var healthLayout = tab.getLayout("Localization Health", BuiltInLayouts.kList);
-            poseJumpEntry = healthLayout.add("Pose Jump (m)", lastPoseJumpMeters)
-                    .withWidget(BuiltInWidgets.kTextView)
-                    .getEntry();
-            driftRateEntry = healthLayout.add("Drift Rate (m/s)", driftRateMetersPerSec)
-                    .withWidget(BuiltInWidgets.kTextView)
-                    .getEntry();
-            visionAcceptanceEntry = healthLayout.add("Vision Accept Rate", 0.0)
-                    .withWidget(BuiltInWidgets.kTextView)
-                    .getEntry();
-            slipActiveEntry = healthLayout.add("Slip Active", slipActive)
-                    .withWidget(BuiltInWidgets.kBooleanBox)
-                    .getEntry();
+
+        if (nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_HEALTH_WIDGETS)) {
+            RobotNetworkTables.Node health = node.child("Health");
+            health.putDouble("poseJumpMeters", lastPoseJumpMeters);
+            health.putDouble("driftRateMetersPerSec", driftRateMetersPerSec);
+            health.putDouble("visionAcceptRate", visionAcceptRateWindow);
+            health.putBoolean("slipActive", slipActive);
         }
-        if (backendOverrideToggleEntry == null
-                && backendOverrideEnabledEntry != null
-                && ShuffleboardControls.enabled(ShuffleboardControls.Flag.LOCALIZATION_BACKEND_WIDGETS)) {
-            var backendLayout = tab.getLayout("Localization Backend", BuiltInLayouts.kList);
-            backendOverrideToggleEntry = backendLayout.add(
-                            "Override Enabled", backendOverrideEnabledEntry.getBoolean(false))
-                    .withWidget(BuiltInWidgets.kToggleSwitch)
-                    .getEntry();
-            ensureBackendChoosers(backendConfig());
-            backendLayout.add("Slip Strategy", backendSlipStrategyChooser)
-                    .withWidget(BuiltInWidgets.kComboBoxChooser);
-            backendLayout.add("IMU Strategy", backendImuStrategyChooser)
-                    .withWidget(BuiltInWidgets.kComboBoxChooser);
-            backendLayout.add("Vision Strategy", backendVisionStrategyChooser)
-                    .withWidget(BuiltInWidgets.kComboBoxChooser);
-        }
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.VISION_CAMERA_WIDGETS)) {
-            cameraManager.ensureCameraShuffleboardEntries(vision);
-        }
-        return tab;
+
+        return node;
     }
 
     private void ensureHealthNetworkEntries() {
@@ -1207,50 +1154,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         slipActiveNtEntry = healthTable.getEntry("SlipActive");
     }
 
-    private void ensureBackendChoosers(RobotLocalizationConfig.BackendConfig base) {
-        RobotLocalizationConfig.BackendConfig resolved =
-                base != null ? base : RobotLocalizationConfig.BackendConfig.defualt();
-        if (backendSlipStrategyChooser == null) {
-            backendSlipStrategyChooser = new SendableChooser<>();
-            for (RobotLocalizationConfig.BackendConfig.SlipStrategy strategy :
-                    RobotLocalizationConfig.BackendConfig.SlipStrategy.values()) {
-                if (strategy == resolved.slipStrategy()) {
-                    backendSlipStrategyChooser.setDefaultOption(strategy.name(), strategy);
-                } else {
-                    backendSlipStrategyChooser.addOption(strategy.name(), strategy);
-                }
-            }
-        }
-        if (backendImuStrategyChooser == null) {
-            backendImuStrategyChooser = new SendableChooser<>();
-            for (RobotLocalizationConfig.BackendConfig.ImuStrategy strategy :
-                    RobotLocalizationConfig.BackendConfig.ImuStrategy.values()) {
-                if (strategy == resolved.imuStrategy()) {
-                    backendImuStrategyChooser.setDefaultOption(strategy.name(), strategy);
-                } else {
-                    backendImuStrategyChooser.addOption(strategy.name(), strategy);
-                }
-            }
-        }
-        if (backendVisionStrategyChooser == null) {
-            backendVisionStrategyChooser = new SendableChooser<>();
-            for (RobotLocalizationConfig.BackendConfig.VisionStrategy strategy :
-                    RobotLocalizationConfig.BackendConfig.VisionStrategy.values()) {
-                if (strategy == resolved.visionStrategy()) {
-                    backendVisionStrategyChooser.setDefaultOption(strategy.name(), strategy);
-                } else {
-                    backendVisionStrategyChooser.addOption(strategy.name(), strategy);
-                }
-            }
-        }
-    }
-
     @Override
     public void periodic() {
         if (suppressUpdates) {
             return;
         }
-        syncBackendOverridesFromShuffleboard();
         updateActivePoseConfigs();
         publishPoseObjects();
     }
@@ -1277,11 +1185,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private void publishPoseStruct(PoseConfig config, Pose2d pose) {
-        if (!ShuffleboardControls.dashboardEnabled()
-                || !ShuffleboardControls.enabled(ShuffleboardControls.Flag.LOCALIZATION_POSE_TOPICS)) {
+        RobotNetworkTables nt = robotNetworkTables;
+        if (nt == null || !nt.isPublishingEnabled() || !nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_POSE_TOPICS)) {
             return;
         }
-        if (config == null || !config.publishToShuffleboard()) {
+        if (config == null || !config.publishToNetworkTables()) {
             return;
         }
         String name = config.name();
@@ -1444,7 +1352,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
         if (isPrimary) {
             setPrimaryPose(state);
-            fieldPublisher.updateActualPath(pose);
+            RobotNetworkTables nt = robotNetworkTables;
+            boolean fieldEnabled = nt != null && nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET);
+            if (fieldEnabled) {
+                fieldPublisher.setRobotPose(pose);
+                fieldPublisher.updateActualPath(pose);
+            }
             PoseConfig config = primaryPoseName != null ? poseConfigs.get(primaryPoseName) : null;
             publishPoseStruct(config, pose);
         } else {
@@ -1455,7 +1368,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         if (isPrimary) {
             updateHealthMetrics();
-            if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.VISION_CAMERA_WIDGETS)) {
+            RobotNetworkTables nt = robotNetworkTables;
+            if (nt != null && nt.enabled(RobotNetworkTables.Flag.VISION_CAMERA_WIDGETS)) {
                 cameraManager.updateCameraVisualizations(vision, fieldPose);
             }
             updateSlipState();

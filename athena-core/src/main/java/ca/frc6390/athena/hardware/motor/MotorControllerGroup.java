@@ -3,13 +3,10 @@ package ca.frc6390.athena.hardware.motor;
 import java.util.Arrays;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
-import ca.frc6390.athena.dashboard.ShuffleboardControls;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.controller.PIDController;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 /**
  * Groups multiple {@link MotorController}s together to preserve the legacy group API while routing
@@ -18,9 +15,6 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 public class MotorControllerGroup implements RobotSendableDevice {
     private final MotorController[] controllers;
     private EncoderGroup encoders;
-    private double shuffleboardPeriodSecondsOverride = Double.NaN;
-    private ShuffleboardLayout lastShuffleboardLayoutComp;
-    private ShuffleboardLayout lastShuffleboardLayoutDebug;
 
     public MotorControllerGroup(MotorController... controllers) {
         this.controllers = controllers;
@@ -113,22 +107,6 @@ public class MotorControllerGroup implements RobotSendableDevice {
         }
     }
 
-    @Override
-    public double getShuffleboardPeriodSeconds() {
-        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
-                ? shuffleboardPeriodSecondsOverride
-                : ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
-    }
-
-    @Override
-    public void setShuffleboardPeriodSeconds(double periodSeconds) {
-        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
-            shuffleboardPeriodSecondsOverride = Double.NaN;
-            return;
-        }
-        shuffleboardPeriodSecondsOverride = periodSeconds;
-    }
-
     public EncoderGroup getEncoderGroup() {
         return encoders;
     }
@@ -147,48 +125,37 @@ public class MotorControllerGroup implements RobotSendableDevice {
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        if (level == SendableLevel.DEBUG) {
-            if (layout == lastShuffleboardLayoutDebug) {
-                return layout;
-            }
-
-            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
-            lastShuffleboardLayoutDebug = layout;
-            if (!compAlreadyBuilt) {
-                lastShuffleboardLayoutComp = layout;
-                publishCommon(layout);
-            }
-            publishDebugOnly(layout);
-            return layout;
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
         }
-
-        if (layout == lastShuffleboardLayoutComp) {
-            return layout;
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
         }
-        lastShuffleboardLayoutComp = layout;
-        publishCommon(layout);
-        return layout;
+        publish(node);
+        return node;
     }
 
-    private void publishCommon(ShuffleboardLayout layout) {
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
-        summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allMotorsCachedConnected, period));
-        summary.addDouble("Average Temp (C)", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAverageCachedTemperatureCelsius, period));
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MOTOR_GROUP_PER_MOTOR)) {
-            Arrays.stream(controllers).forEach(motorController ->
-                    motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList), SendableLevel.COMP));
-        }
-    }
+    private void publish(RobotNetworkTables.Node node) {
+        RobotNetworkTables.Node summary = node.child("Summary");
+        summary.putBoolean("allConnected", allMotorsCachedConnected());
+        summary.putDouble("avgTempC", getAverageCachedTemperatureCelsius());
 
-    private void publishDebugOnly(ShuffleboardLayout layout) {
-        if (encoders != null) {
-            encoders.shuffleboard(layout.getLayout("Encoders", BuiltInLayouts.kList), SendableLevel.DEBUG);
+        if (encoders != null && node.robot().enabled(RobotNetworkTables.Flag.HW_ENCODER_TUNING_WIDGETS)) {
+            encoders.networkTables(node.child("Encoders"));
         }
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MOTOR_GROUP_PER_MOTOR)) {
-            Arrays.stream(controllers).forEach(motorController ->
-                    motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList), SendableLevel.DEBUG));
+
+        if (node.robot().enabled(RobotNetworkTables.Flag.MOTOR_GROUP_PER_MOTOR)) {
+            RobotNetworkTables.Node motorsNode = node.child("Motors");
+            for (MotorController motor : controllers) {
+                if (motor == null) {
+                    continue;
+                }
+                String key = motor.getName();
+                key = key != null ? key.replace('\\', '_').replace('/', '_') : "motor";
+                motor.networkTables(motorsNode.child(key));
+            }
         }
     }
 

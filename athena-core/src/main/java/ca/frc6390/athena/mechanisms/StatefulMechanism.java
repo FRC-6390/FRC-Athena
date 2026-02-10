@@ -9,8 +9,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import ca.frc6390.athena.core.RobotNetworkTables;
 
 public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> extends Mechanism implements StatefulLike<E> {
         
@@ -84,22 +83,20 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         stateCore.setStateGraph(stateGraph);
     }
 
-    @Override
     @SuppressWarnings("unchecked")
-    public StatefulMechanism<E> shuffleboard(String tab) {
-        return (StatefulMechanism<E>) super.shuffleboard(tab);
+    public StatefulMechanism<E> publishNetworkTables(String ownerHint) {
+        super.publishNetworkTables(ownerHint);
+        return this;
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        stateCore.shuffleboard(tab,level);
-        return super.shuffleboard(tab,level);
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public StatefulMechanism<E> shuffleboard(String tab, SendableLevel level) {
-        return (StatefulMechanism<E>) super.shuffleboard(tab, level);
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return null;
+        }
+        // Publish state machine topics alongside the mechanism topics.
+        getStateMachine().networkTables(node.child("StateMachine"));
+        return super.networkTables(node);
     }
 
     public static class StatefulMechanismCore<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
@@ -228,10 +225,6 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
 
         public void setStateGraph(StateGraph<E> stateGraph) {
             stateMachine.setStateGraph(stateGraph);
-        }
-
-        public void shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-            stateMachine.shuffleboard(tab.getLayout("State Machine", BuiltInLayouts.kList), level);
         }
 
         private final class MechanismContextImpl implements MechanismContext<T, E> {

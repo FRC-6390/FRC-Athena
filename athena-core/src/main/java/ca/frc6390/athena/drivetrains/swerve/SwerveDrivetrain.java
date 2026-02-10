@@ -10,6 +10,7 @@ import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.core.RobotDrivetrain;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.core.localization.PoseEstimatorFactory;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
@@ -44,10 +45,6 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -344,69 +341,42 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   }
 
   @Override
-  public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
+  public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+    if (node == null) {
+      return node;
+    }
+    if (!node.robot().isPublishingEnabled()) {
+      return node;
+    }
 
-    ShuffleboardLayout swervelayout = tab.getLayout("Swerve Modules", BuiltInLayouts.kList);
+    RobotDrivetrain.super.networkTables(node);
 
-    {
-      for (int i = 0; i < swerveModules.length; i++) {
-        swerveModules[i].shuffleboard(swervelayout.getLayout("Module " + i, BuiltInLayouts.kList)).withPosition(1, i+1);
+    RobotNetworkTables.Node modules = node.child("SwerveModules");
+    for (int i = 0; i < swerveModules.length; i++) {
+      if (swerveModules[i] != null) {
+        swerveModules[i].networkTables(modules.child("Module" + i));
       }
     }
 
-    getIMU().shuffleboard(tab.getLayout("IMU", BuiltInLayouts.kList));
+    RobotNetworkTables.Node drift = node.child("DriftCorrection");
+    drift.putBoolean("enabled", getDriftCorrectionMode());
+    drift.putDouble("desiredHeadingDeg", desiredHeading);
 
-    if(level.equals(SendableLevel.DEBUG)){
-      ShuffleboardLayout speedsLayout = tab.getLayout("Robot Speeds", BuiltInLayouts.kList);
-      { 
-        ShuffleboardLayout chassisLayout = speedsLayout.getLayout("Chassis", BuiltInLayouts.kList);
-        chassisLayout.addDouble("X", () -> robotSpeeds.getSpeeds("drive").vxMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
-        chassisLayout.addDouble("Y", () -> robotSpeeds.getSpeeds("drive").vyMetersPerSecond).withWidget(BuiltInWidgets.kNumberBar);
-        chassisLayout.addDouble("Z", () -> robotSpeeds.getSpeeds("drive").omegaRadiansPerSecond).withWidget(BuiltInWidgets.kNumberBar);
-      }
-      ShuffleboardLayout driftCorrectionLayout = tab.getLayout("Drift Correction", BuiltInLayouts.kList);
-      {
-        driftCorrectionLayout.add("Drift Correction", (builder) -> builder.addBooleanProperty("Drift Correction", this::getDriftCorrectionMode, this::setDriftCorrectionMode)).withWidget(BuiltInWidgets.kBooleanBox);
-        driftCorrectionLayout.addDouble("Desired Heading", () -> desiredHeading).withWidget(BuiltInWidgets.kGyro);// might not display properly bc get heading is +-180
-        driftCorrectionLayout.add(driftpid).withWidget(BuiltInWidgets.kPIDController);
-      }
-      if (driveFeedforward != null) {
-        ShuffleboardLayout feedforwardLayout = tab.getLayout("Drive Feedforward", BuiltInLayouts.kList);
-        feedforwardLayout.add("Feedforward", driveFeedforward);
-        feedforwardLayout.add("Enabled",
-            (builder) -> builder.addBooleanProperty("Enabled", this::isDriveFeedforwardEnabled, this::setDriveFeedforwardEnabled));
-      }
-    }
-   
-    ShuffleboardLayout commandsLayout = tab.getLayout("Quick Commands",BuiltInLayouts.kList);
-    {
-      commandsLayout.add("Reset Heading", new InstantCommand(() -> getIMU().setYaw(0))).withWidget(BuiltInWidgets.kCommand);
-      commandsLayout.add("Brake Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Brake))).withWidget(BuiltInWidgets.kCommand);
-      commandsLayout.add("Coast Mode", new InstantCommand(() -> setNeutralMode(MotorNeutralMode.Coast))).withWidget(BuiltInWidgets.kCommand);
+    RobotNetworkTables.Node sysid = node.child("SysId");
+    sysid.putDouble("rampRateVPerSec", getSysIdRampRateVoltsPerSecond());
+    sysid.putDouble("stepVoltageV", getSysIdStepVoltage());
+    sysid.putDouble("timeoutSec", getSysIdTimeoutSeconds());
+    sysid.putBoolean("active", isSysIdActive());
+
+    if (simulation != null) {
+      Pose2d pose = getSimulatedPose();
+      RobotNetworkTables.Node simNode = node.child("Sim");
+      simNode.putDouble("xM", pose.getX());
+      simNode.putDouble("yM", pose.getY());
+      simNode.putDouble("rotDeg", pose.getRotation().getDegrees());
     }
 
-    ShuffleboardLayout sysIdLayout = tab.getLayout("SysId", BuiltInLayouts.kList);
-    sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
-        .withWidget(BuiltInWidgets.kCommand);
-    sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
-        .withWidget(BuiltInWidgets.kCommand);
-    sysIdLayout.add("Dynamic Forward", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))
-        .withWidget(BuiltInWidgets.kCommand);
-    sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
-        .withWidget(BuiltInWidgets.kCommand);
-    sysIdLayout.add("Ramp Rate (V/s)",
-        builder -> builder.addDoubleProperty("Ramp Rate (V/s)", this::getSysIdRampRateVoltsPerSecond, this::setSysIdRampRateVoltsPerSecond));
-    sysIdLayout.add("Step Voltage (V)",
-        builder -> builder.addDoubleProperty("Step Voltage (V)", this::getSysIdStepVoltage, this::setSysIdStepVoltage));
-    sysIdLayout.add("Timeout (s)",
-        builder -> builder.addDoubleProperty("Timeout (s)", this::getSysIdTimeoutSeconds, this::setSysIdTimeoutSeconds));
-    sysIdLayout.addBoolean("Active", this::isSysIdActive).withWidget(BuiltInWidgets.kBooleanBox);
-
-    if (simulationField != null) {
-      tab.add("Sim Pose", simulationField).withWidget(BuiltInWidgets.kField);
-    }
-
-    return tab;
+    return node;
   }
 
   @Override

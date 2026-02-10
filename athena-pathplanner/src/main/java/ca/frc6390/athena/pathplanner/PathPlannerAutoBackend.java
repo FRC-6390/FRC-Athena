@@ -41,6 +41,18 @@ public class PathPlannerAutoBackend implements AutoBackend {
     }
 
     @Override
+    public int priority(RobotAuto.AutoSource source) {
+        if (source == RobotAuto.AutoSource.PATH_PLANNER) {
+            return 100;
+        }
+        // Can follow Choreo trajectories via PathPlanner, but prefer the native Choreo backend when present.
+        if (source == RobotAuto.AutoSource.CHOREO) {
+            return 10;
+        }
+        return 0;
+    }
+
+    @Override
     public boolean configureHolonomic(HolonomicDriveBinding binding) {
         RobotConfig config;
         try {

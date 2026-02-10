@@ -3,11 +3,11 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public class SimpleMotorMechanism  extends Mechanism  {
     
@@ -26,14 +26,20 @@ public class SimpleMotorMechanism  extends Mechanism  {
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        tab.add("FeedForwards", feedforward);
-        return super.shuffleboard(tab, level);
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return null;
+        }
+        RobotNetworkTables.Node ff = node.child("Feedforward");
+        ff.putDouble("ks", feedforward.getKs());
+        ff.putDouble("kv", feedforward.getKv());
+        ff.putDouble("ka", feedforward.getKa());
+        return super.networkTables(node);
     }
 
-    @Override
-    public SimpleMotorMechanism shuffleboard(String tab, SendableLevel level) {
-        return (SimpleMotorMechanism) super.shuffleboard(tab, level);
+    public SimpleMotorMechanism publishNetworkTables(String ownerHint) {
+        super.publishNetworkTables(ownerHint);
+        return this;
     }
     public static class StatefulSimpleMotorMechanism<E extends Enum<E> & SetpointProvider<Double>> extends SimpleMotorMechanism implements StatefulLike<E> {
     
@@ -81,17 +87,19 @@ public class SimpleMotorMechanism  extends Mechanism  {
             stateCore.setStateGraph(stateGraph);
         }
 
-        
         @Override
-        public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-            stateCore.shuffleboard(tab, level);
-            return super.shuffleboard(tab, level);
+        public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+            if (node == null) {
+                return null;
+            }
+            getStateMachine().networkTables(node.child("StateMachine"));
+            return super.networkTables(node);
         }
 
         @SuppressWarnings("unchecked")
-        @Override
-        public StatefulSimpleMotorMechanism<E> shuffleboard(String tab, SendableLevel level) {
-            return (StatefulSimpleMotorMechanism<E>) super.shuffleboard(tab, level);
+        public StatefulSimpleMotorMechanism<E> publishNetworkTables(String ownerHint) {
+            super.publishNetworkTables(ownerHint);
+            return this;
         }
     }
 }

@@ -5,19 +5,19 @@ import java.util.List;
 import java.util.Objects;
 import java.util.OptionalDouble;
 
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.mechanisms.Mechanism;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.sensors.EnhancedDigitalInput;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
-import edu.wpi.first.networktables.GenericEntry;
+import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.wpilibj.RobotBase;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 /**
  * Runtime manager that applies {@link MechanismSensorSimulationConfig} to a {@link Mechanism}. When
  * running in simulation it drives the underlying digital inputs, exposes manual overrides via
- * NetworkTables, and adds quick commands for toggling sensor states.
+ * NetworkTables (no Shuffleboard containers), and allows dashboards to toggle sensor states
+ * without redeploying.
  */
 public final class MechanismSensorSimulation {
 
@@ -113,31 +113,21 @@ public final class MechanismSensorSimulation {
         }
     }
 
-    public void decorateSensorLayout(EnhancedDigitalInput sensor,
-                                     ShuffleboardLayout layout,
-                                     SendableLevel level) {
-        if (!RobotBase.isSimulation() || sensors.isEmpty() || sensor == null || layout == null) {
-            return;
-        }
-        sensors.stream()
-                .filter(runtime -> runtime.isSensor(sensor))
-                .findFirst()
-                .ifPresent(runtime -> runtime.decorateLayout(layout, level));
-    }
-
     private static final class SensorRuntime {
 
+        private final Mechanism mechanism;
+        private RobotNetworkTables.Node baseNode;
         private final String name;
         private final EnhancedDigitalInput sensor;
         private final MechanismSensorSimulationConfig.SensorCondition condition;
         private final boolean supportsSimulation;
         private final OptionalDouble location;
-        private GenericEntry overrideEntry;
-        private GenericEntry manualEntry;
-        private GenericEntry autoEntry;
-        private GenericEntry actualEntry;
-        private GenericEntry locationEntry;
-        private GenericEntry simBoundEntry;
+        private NetworkTableEntry overrideEntry;
+        private NetworkTableEntry manualEntry;
+        private NetworkTableEntry autoEntry;
+        private NetworkTableEntry actualEntry;
+        private NetworkTableEntry locationEntry;
+        private NetworkTableEntry supportsSimulationEntry;
         private boolean overrideValue;
         private boolean manualValue;
         private boolean autoValue;
@@ -148,17 +138,19 @@ public final class MechanismSensorSimulation {
                               EnhancedDigitalInput sensor,
                               MechanismSensorSimulationConfig.SensorCondition condition,
                               OptionalDouble location) {
+            this.mechanism = mechanism;
             this.name = Objects.requireNonNullElse(name, sensor.getClass().getSimpleName());
             this.sensor = sensor;
             this.condition = condition;
             this.supportsSimulation = sensor.supportsSimulation();
             this.location = location;
+            this.baseNode = null;
             this.overrideEntry = null;
             this.manualEntry = null;
             this.autoEntry = null;
             this.actualEntry = null;
             this.locationEntry = null;
-            this.simBoundEntry = null;
+            this.supportsSimulationEntry = null;
             this.overrideValue = false;
             this.manualValue = false;
             this.autoValue = false;
@@ -166,6 +158,7 @@ public final class MechanismSensorSimulation {
         }
 
         void update(MechanismSensorSimulationConfig.EvaluationContext context) {
+            ensureEntries();
             boolean computedAuto = condition.test(context);
             setAutoValue(computedAuto);
 
@@ -182,21 +175,6 @@ public final class MechanismSensorSimulation {
 
         boolean isSensor(EnhancedDigitalInput candidate) {
             return sensor == candidate;
-        }
-
-        void decorateLayout(ShuffleboardLayout layout, SendableLevel level) {
-            if (layout == null) {
-                return;
-            }
-            overrideEntry = ensureToggle(layout, "Sim Override", overrideEntry, overrideValue);
-            manualEntry = ensureToggle(layout, "Sim Manual Value", manualEntry, manualValue);
-            autoEntry = ensureIndicator(layout, "Sim Auto Value", autoEntry, autoValue);
-            actualEntry = ensureIndicator(layout, "Sim Actual Value", actualEntry, actualValue);
-            locationEntry = ensureLocation(layout, locationEntry);
-            if (level == SendableLevel.DEBUG) {
-                simBoundEntry = ensureIndicator(layout, "Sim Bound", simBoundEntry, supportsSimulation);
-            }
-            pushEntryValues();
         }
 
         private boolean readOverride() {
@@ -221,62 +199,75 @@ public final class MechanismSensorSimulation {
                 actualEntry.setBoolean(value);
             }
         }
-
-        private GenericEntry ensureToggle(ShuffleboardLayout layout,
-                                          String title,
-                                          GenericEntry entry,
-                                          boolean defaultValue) {
-            if (entry == null || !entry.exists()) {
-                entry = layout
-                        .add(title, defaultValue)
-                        .withWidget(BuiltInWidgets.kToggleSwitch)
-                        .getEntry();
-            }
-            return entry;
-        }
-
-        private GenericEntry ensureIndicator(ShuffleboardLayout layout,
-                                             String title,
-                                             GenericEntry entry,
-                                             boolean defaultValue) {
-            if (entry == null || !entry.exists()) {
-                entry = layout
-                        .add(title, defaultValue)
-                        .withWidget(BuiltInWidgets.kBooleanBox)
-                        .getEntry();
-            }
-            return entry;
-        }
-
-        private GenericEntry ensureLocation(ShuffleboardLayout layout, GenericEntry entry) {
-            if (entry == null || !entry.exists()) {
-                entry = layout
-                        .add("Sim Location", location.orElse(Double.NaN))
-                        .withWidget(BuiltInWidgets.kTextView)
-                        .getEntry();
-            }
-            return entry;
-        }
-
-        private void pushEntryValues() {
+        private void ensureEntries() {
             if (overrideEntry != null) {
-                overrideEntry.setBoolean(overrideValue);
+                return;
             }
-            if (manualEntry != null) {
-                manualEntry.setBoolean(manualValue);
+            if (baseNode == null) {
+                baseNode = resolveBaseNode(mechanism, name);
             }
-            if (autoEntry != null) {
-                autoEntry.setBoolean(autoValue);
+            if (baseNode == null) {
+                return;
             }
-            if (actualEntry != null) {
-                actualEntry.setBoolean(actualValue);
+            // These are plain NetworkTables entries so dashboards can toggle them directly.
+            overrideEntry = initIfAbsent(baseNode.entry("override"), false);
+            manualEntry = initIfAbsent(baseNode.entry("manual"), false);
+            autoEntry = initIfAbsent(baseNode.entry("auto"), false);
+            actualEntry = initIfAbsent(baseNode.entry("actual"), false);
+            locationEntry = initIfAbsent(baseNode.entry("location"), location.orElse(Double.NaN));
+            supportsSimulationEntry = initIfAbsent(baseNode.entry("supportsSimulation"), supportsSimulation);
+
+            // Push initial values once to ensure the tree exists in dashboards.
+            autoEntry.setBoolean(autoValue);
+            actualEntry.setBoolean(actualValue);
+            locationEntry.setDouble(location.orElse(Double.NaN));
+            supportsSimulationEntry.setBoolean(supportsSimulation);
+        }
+
+	        private static RobotNetworkTables.Node resolveBaseNode(Mechanism mechanism, String sensorName) {
+	            if (mechanism == null || sensorName == null || sensorName.isBlank()) {
+	                return null;
+	            }
+
+            ca.frc6390.athena.core.RobotCore<?> core = mechanism.getRobotCore();
+            RobotNetworkTables nt = core != null ? core.networkTables() : null;
+	            if (nt == null) {
+	                return null;
+	            }
+
+	            // Put simulation config alongside the mechanism itself:
+	            // Athena/Mechanisms/.../<MechName>/Simulation/Sensors/<SensorName>/...
+	            RobotNetworkTables.Node mechNode =
+	                    mechanism.resolveDefaultMechanismNode(nt.root().child("Mechanisms"));
+	            return mechNode
+	                    .child("Simulation")
+	                    .child("Sensors")
+	                    .child(sanitizeSegment(sensorName));
+	        }
+
+        private static String sanitizeSegment(String raw) {
+            String s = raw == null ? "" : raw.trim();
+            if (s.isEmpty()) {
+                return "";
             }
-            if (locationEntry != null) {
-                locationEntry.setDouble(location.orElse(Double.NaN));
+            s = s.replace('\\', '/');
+            s = s.replaceAll("/+", "/");
+            s = s.replace('/', '_');
+            return s.replace(' ', '_');
+        }
+
+        private static NetworkTableEntry initIfAbsent(NetworkTableEntry entry, boolean defaultValue) {
+            if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+                entry.setBoolean(defaultValue);
             }
-            if (simBoundEntry != null) {
-                simBoundEntry.setBoolean(supportsSimulation);
+            return entry;
+        }
+
+        private static NetworkTableEntry initIfAbsent(NetworkTableEntry entry, double defaultValue) {
+            if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+                entry.setDouble(defaultValue);
             }
+            return entry;
         }
     }
 }

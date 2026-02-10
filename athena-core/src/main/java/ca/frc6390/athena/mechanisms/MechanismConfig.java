@@ -54,6 +54,7 @@ import edu.wpi.first.math.trajectory.TrapezoidProfile;
 public class MechanismConfig<T extends Mechanism> {
 
     private MechanismConfigRecord data = MechanismConfigRecord.defaults();
+    private String mechanismName;
     /**
      * When true, turret factory helpers will auto-enable continuous PID input for unbounded turrets
      * using the configured encoder conversion as the wrap span (e.g. 360 degrees, 2*pi radians).
@@ -119,6 +120,20 @@ public class MechanismConfig<T extends Mechanism> {
         return this;
     }
 
+    /**
+     * Assigns the {@link edu.wpi.first.wpilibj2.command.Subsystem} name of the mechanism created by
+     * this config. This is strongly recommended so RobotCore can enforce uniqueness and so teams can
+     * retrieve mechanisms by name without relying on Java class names.
+     */
+    public MechanismConfig<T> named(String name) {
+        this.mechanismName = name;
+        return this;
+    }
+
+    public String name() {
+        return mechanismName;
+    }
+
     private void updateData(Consumer<MechanismConfigRecord.Builder> mutator) {
         MechanismConfigRecord.Builder builder = data.toBuilder();
         mutator.accept(builder);
@@ -134,6 +149,13 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Named variant of {@link #generic()}.
+     */
+    public static MechanismConfig<Mechanism> generic(String name) {
+        return generic().named(name);
+    }
+
+    /**
      * Creates a state-aware mechanism configuration where the mechanism itself owns a state machine
      * enum that produces setpoints.
      *
@@ -142,6 +164,13 @@ public class MechanismConfig<T extends Mechanism> {
      */
     public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> statefulGeneric(E initialState){
         return custom(config -> new StatefulMechanism<>(config, initialState));
+    }
+
+    /**
+     * Named variant of {@link #statefulGeneric(Enum)}.
+     */
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> statefulGeneric(String name, E initialState) {
+        return statefulGeneric(initialState).named(name);
     }
 
     /**
@@ -163,6 +192,13 @@ public class MechanismConfig<T extends Mechanism> {
      */
     public static MechanismConfig<ElevatorMechanism> elevator(ElevatorFeedforward feedforward) {
         return custom(config -> new ElevatorMechanism(config, feedforward));
+    }
+
+    /**
+     * Named variant of {@link #elevator(ElevatorFeedforward)}.
+     */
+    public static MechanismConfig<ElevatorMechanism> elevator(String name, ElevatorFeedforward feedforward) {
+        return elevator(feedforward).named(name);
     }
 
     /**
@@ -188,6 +224,16 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Named variant of {@link #statefulElevator(ElevatorFeedforward, Enum)}.
+     */
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(
+            String name,
+            ElevatorFeedforward feedforward,
+            E initialState) {
+        return statefulElevator(feedforward, initialState).named(name);
+    }
+
+    /**
      * Builds a stateful elevator configuration backed by a caller-supplied factory.
      *
      * @param feedforward feedforward model to pass through to the factory
@@ -208,6 +254,16 @@ public class MechanismConfig<T extends Mechanism> {
      */
     public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulArmMechanism<E>> statefulArm(ArmFeedforward feedforward, E initialState) {
         return custom(config -> new StatefulArmMechanism<>(config, feedforward, initialState));
+    }
+
+    /**
+     * Named variant of {@link #statefulArm(ArmFeedforward, Enum)}.
+     */
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulArmMechanism<E>> statefulArm(
+            String name,
+            ArmFeedforward feedforward,
+            E initialState) {
+        return statefulArm(feedforward, initialState).named(name);
     }
 
     /**
@@ -238,6 +294,16 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Named variant of {@link #statefulTurret(SimpleMotorFeedforward, Enum)}.
+     */
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(
+            String name,
+            SimpleMotorFeedforward feedforward,
+            E initialState) {
+        return statefulTurret(feedforward, initialState).named(name);
+    }
+
+    /**
      * Builds a stateful turret configuration backed by a caller-supplied factory.
      *
      * @param feedforward feedforward model to pass through to the factory
@@ -263,6 +329,16 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Named variant of {@link #statefulFlywheel(SimpleMotorFeedforward, Enum)}.
+     */
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulFlywheelMechanism<E>> statefulFlywheel(
+            String name,
+            SimpleMotorFeedforward feedforward,
+            E initialState) {
+        return statefulFlywheel(feedforward, initialState).named(name);
+    }
+
+    /**
      * Builds a stateful flywheel configuration backed by a caller-supplied factory.
      */
     public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulFlywheelMechanism<E>> MechanismConfig<T> statefulFlywheel(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
@@ -279,6 +355,13 @@ public class MechanismConfig<T extends Mechanism> {
                 MechanismConfig.<TurretMechanism>custom(config -> new TurretMechanism(config, feedforward));
         cfg.autoContinuousPidForUnboundedTurret = true;
         return cfg;
+    }
+
+    /**
+     * Named variant of {@link #turret(SimpleMotorFeedforward)}.
+     */
+    public static MechanismConfig<TurretMechanism> turret(String name, SimpleMotorFeedforward feedforward) {
+        return turret(feedforward).named(name);
     }
 
     /**
@@ -328,6 +411,13 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
+     * Named variant of {@link #flywheel(SimpleMotorFeedforward)}.
+     */
+    public static MechanismConfig<FlywheelMechanism> flywheel(String name, SimpleMotorFeedforward feedforward) {
+        return flywheel(feedforward).named(name);
+    }
+
+    /**
      * Creates a flywheel configuration backed by a caller-supplied factory.
      */
     public static <T extends FlywheelMechanism> MechanismConfig<T> flywheel(SimpleMotorFeedforward feedforward, Function<MechanismConfig<T>, T> factory) {
@@ -341,6 +431,13 @@ public class MechanismConfig<T extends Mechanism> {
      */
     public static MechanismConfig<ArmMechanism> arm(ArmFeedforward feedforward) {
         return custom(config -> new ArmMechanism(config, feedforward));
+    }
+
+    /**
+     * Named variant of {@link #arm(ArmFeedforward)}.
+     */
+    public static MechanismConfig<ArmMechanism> arm(String name, ArmFeedforward feedforward) {
+        return arm(feedforward).named(name);
     }
 
     /**
@@ -364,6 +461,14 @@ public class MechanismConfig<T extends Mechanism> {
         MechanismConfig<T> cfg = new MechanismConfig<>();
         cfg.factory = factory;
         return cfg;
+    }
+
+    /**
+     * Named variant of {@link #custom(Function)}. Prefer this overload so every mechanism config has
+     * a stable, unique name that RobotCore can validate during registration.
+     */
+    public static <T extends Mechanism> MechanismConfig<T> custom(String name, Function<MechanismConfig<T>, T> factory) {
+        return custom(factory).named(name);
     }
 
     /**
@@ -1688,6 +1793,9 @@ public class MechanismConfig<T extends Mechanism> {
         validateMotorTypesForSimulation();
 
         T mechanism = factory.apply(this);
+        if (mechanismName != null && !mechanismName.isBlank()) {
+            mechanism.setName(mechanismName);
+        }
 
         if (stateGraph != null && mechanism instanceof StatefulMechanism<?> statefulMechanism) {
             applyStateGraph(statefulMechanism, stateGraph);

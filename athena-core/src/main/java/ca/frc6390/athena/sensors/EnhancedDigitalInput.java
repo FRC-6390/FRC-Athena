@@ -3,11 +3,10 @@ package ca.frc6390.athena.sensors;
 import ca.frc6390.athena.commands.RunnableTrigger;
 import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import java.util.concurrent.atomic.AtomicBoolean;
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.RobotBase;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import edu.wpi.first.wpilibj.simulation.DIOSim;
 
 public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendableDevice{
@@ -16,9 +15,6 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
     private final DIOSim dioSim;
     private final AtomicBoolean inverted;
     private final DelayedOutput delayedOutput;
-    private double shuffleboardPeriodSecondsOverride = Double.NaN;
-    private ShuffleboardLayout lastShuffleboardLayoutComp;
-    private ShuffleboardLayout lastShuffleboardLayoutDebug;
 
     public EnhancedDigitalInput(int channel) {
         this(channel, false);
@@ -98,48 +94,18 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
     }
 
     @Override
-    public double getShuffleboardPeriodSeconds() {
-        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
-                ? shuffleboardPeriodSecondsOverride
-                : ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
-    }
-
-    @Override
-    public void setShuffleboardPeriodSeconds(double periodSeconds) {
-        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
-            shuffleboardPeriodSecondsOverride = Double.NaN;
-            return;
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
         }
-        shuffleboardPeriodSecondsOverride = periodSeconds;
-    }
-
-    @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-
-        if (level == SendableLevel.DEBUG) {
-            if (layout == lastShuffleboardLayoutDebug) {
-                return layout;
-            }
-            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
-            lastShuffleboardLayoutDebug = layout;
-
-            // DEBUG after COMP: only add DEBUG-only titles (Value would already exist and would throw).
-            layout.addBoolean("Inverted", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::isInverted, period));
-            layout.addDouble("Port", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getPort, period));
-            if (!compAlreadyBuilt) {
-                lastShuffleboardLayoutComp = layout;
-                layout.addBoolean("Value", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAsBoolean, period));
-            }
-            return layout;
+        if (!node.robot().isPublishingEnabled()) {
+            return node;
         }
-
-        if (layout == lastShuffleboardLayoutComp) {
-            return layout;
-        }
-        lastShuffleboardLayoutComp = layout;
-        layout.addBoolean("Value", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAsBoolean, period));
-        return layout;
+        node.putBoolean("value", getAsBoolean());
+        node.putBoolean("inverted", isInverted());
+        node.putDouble("port", getPort());
+        node.putBoolean("supportsSimulation", supportsSimulation());
+        return node;
     }
 
     private static boolean readRaw(DigitalInput input, AtomicBoolean inverted) {

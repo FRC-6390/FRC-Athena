@@ -3,6 +3,7 @@ package ca.frc6390.athena.core;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,9 @@ public class RobotAuto {
     private ProfiledPIDController yController;
     private ProfiledPIDController thetaController;
     private java.util.function.Function<Pose2d, Command> autoPlanResetter;
+    private boolean registrationFinalized;
+    private final Set<String> boundPathPlannerNamedCommands;
+    private final Set<String> boundChoreoNamedCommands;
 
     public RobotAuto() {
         namedCommandSuppliers = new LinkedHashMap<>();
@@ -51,6 +55,9 @@ public class RobotAuto {
         yController = null;
         thetaController = null;
         autoPlanResetter = null;
+        registrationFinalized = false;
+        boundPathPlannerNamedCommands = new HashSet<>();
+        boundChoreoNamedCommands = new HashSet<>();
     }
 
     /**
@@ -91,6 +98,31 @@ public class RobotAuto {
         static AutoKey of(String id, String displayName) {
             return new SimpleAutoKey(id, displayName);
         }
+    }
+
+    /**
+     * Convenience interface for keeping complex autos in their own files while still registering them
+     * through {@link #install(RobotCore, Class[])} or {@link #install(RobotCore, AutoModule)}.
+     *
+     * <p>Auto modules receive a {@link RobotCore} reference so they can access drivetrain/localization
+     * and any registered mechanisms via {@link RobotCore#getMechanism(String)} /
+     * {@link RobotCore#getMechanism(Class)} / {@link RobotCore#getMechanisms()}.</p>
+     *
+     * <p>Typical usage in a robot project:
+     * <pre>{@code
+     * public final class TwoPieceOrLeave implements RobotAuto.AutoModule {
+     *   public void register(RobotCore<?> robot, RobotAuto autos) {
+     *     autos.registerChoreoAuto("Right", "CompRightSide");
+     *     autos.registerAutoPlan("TwoPieceOrLeave", buildPlan(robot));
+     *   }
+     * }
+     *
+     * // In Robot.configureAutos(...)
+     * autos.install(this, TwoPieceOrLeave.class);
+     * }</pre>
+     */
+    public interface AutoModule {
+        void register(RobotCore<?> robot, RobotAuto autos);
     }
 
     private record SimpleNamedCommandKey(String id, String displayName) implements NamedCommandKey {
@@ -177,17 +209,15 @@ public class RobotAuto {
             throw new IllegalArgumentException("Named command already registered: " + id);
         }
         namedCommandSuppliers.put(id, supplier);
-        boolean bound = AutoBackends.forSource(AutoSource.PATH_PLANNER)
-                .map(backend -> backend.registerNamedCommand(id, () -> Commands.deferredProxy(supplier)))
-                .orElse(false);
-        if (!bound) {
-            bound = AutoBackends.forSource(AutoSource.CHOREO)
-                    .map(backend -> backend.registerNamedCommand(id, () -> Commands.deferredProxy(supplier)))
-                    .orElse(false);
-        }
+        boolean bound = bindNamedCommandToAvailableBackends(id, supplier);
         if (!bound) {
             DriverStation.reportWarning(
                     "No auto backend available; named command '" + id + "' not bound to vendor API.",
+                    false);
+        }
+        if (registrationFinalized) {
+            DriverStation.reportWarning(
+                    "Named command '" + id + "' registered after autos were finalized; prefer registering named commands first.",
                     false);
         }
         return this;
@@ -208,6 +238,40 @@ public class RobotAuto {
 
     public boolean hasNamedCommand(NamedCommandKey key) {
         return key != null && namedCommandSuppliers.containsKey(key.id());
+    }
+
+    public RobotAuto install(RobotCore<?> robot, AutoModule module) {
+        Objects.requireNonNull(robot, "robot");
+        Objects.requireNonNull(module, "module");
+        module.register(robot, this);
+        return this;
+    }
+
+    @SafeVarargs
+    public final RobotAuto install(RobotCore<?> robot, Class<? extends AutoModule>... modules) {
+        Objects.requireNonNull(robot, "robot");
+        if (modules == null) {
+            return this;
+        }
+        for (Class<? extends AutoModule> moduleClass : modules) {
+            if (moduleClass == null) {
+                continue;
+            }
+            AutoModule module = newInstance(moduleClass);
+            install(robot, module);
+        }
+        return this;
+    }
+
+    private static <T> T newInstance(Class<T> type) {
+        try {
+            return type.getDeclaredConstructor().newInstance();
+        } catch (ReflectiveOperationException ex) {
+            throw new IllegalArgumentException(
+                    "Failed to construct auto module " + type.getName()
+                            + ". Ensure it has an accessible no-arg constructor.",
+                    ex);
+        }
     }
 
     public RobotAuto registerAuto(AutoRoutine routine) {
@@ -400,6 +464,7 @@ public class RobotAuto {
     }
 
     public Optional<Command> buildSelectedCommand() {
+        finalizeRegistration();
         if (commandChooser != null) {
             return Optional.ofNullable(commandChooser.getSelected());
         }
@@ -475,6 +540,39 @@ public class RobotAuto {
 
     private Command deferredCommand(AutoRoutine routine) {
         return Commands.defer(routine::createCommand, Set.of());
+    }
+
+    /**
+     * Finalizes registration for the current robot init cycle. This rebinding step ensures named commands
+     * are bound to vendor APIs before any autonomous routine is built (some libraries cache missing
+     * named-command references during auto construction).
+     *
+     * <p>This is safe to call multiple times.</p>
+     */
+    public void finalizeRegistration() {
+        if (registrationFinalized) {
+            return;
+        }
+        for (Map.Entry<String, Supplier<Command>> entry : namedCommandSuppliers.entrySet()) {
+            bindNamedCommandToAvailableBackends(entry.getKey(), entry.getValue());
+        }
+        registrationFinalized = true;
+    }
+
+    private boolean bindNamedCommandToAvailableBackends(String id, Supplier<Command> supplier) {
+        // Always attempt to bind to both backends if present. Some robots include both vendor deps.
+        // Use deferred proxies so vendor APIs that eagerly call supplier.get() don't construct heavy commands at init.
+        Supplier<Command> deferred = () -> Commands.deferredProxy(supplier);
+        boolean boundAny = false;
+        boundAny |= AutoBackends.forSource(AutoSource.PATH_PLANNER)
+                .filter(backend -> boundPathPlannerNamedCommands.add(id))
+                .map(backend -> backend.registerNamedCommand(id, deferred))
+                .orElse(false);
+        boundAny |= AutoBackends.forSource(AutoSource.CHOREO)
+                .filter(backend -> boundChoreoNamedCommands.add(id))
+                .map(backend -> backend.registerNamedCommand(id, deferred))
+                .orElse(false);
+        return boundAny;
     }
 
     private Command deferredAuto(AutoKey key) {

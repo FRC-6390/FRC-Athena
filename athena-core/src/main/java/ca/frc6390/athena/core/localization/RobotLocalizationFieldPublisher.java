@@ -55,6 +55,10 @@ final class RobotLocalizationFieldPublisher {
         fieldPublished = true;
     }
 
+    boolean isFieldPublished() {
+        return fieldPublished;
+    }
+
     void clearRobotPose() {
         field.getObject("Robot").setPoses(List.of());
     }

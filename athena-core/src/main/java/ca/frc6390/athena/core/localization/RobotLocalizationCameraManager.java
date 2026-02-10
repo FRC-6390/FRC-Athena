@@ -4,9 +4,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 import ca.frc6390.athena.core.RobotVision;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.sensors.camera.VisionCamera;
-import ca.frc6390.athena.sensors.camera.VisionCamera.TargetObservation;
 import ca.frc6390.athena.sensors.camera.VisionCamera.CoordinateSpace;
+import ca.frc6390.athena.sensors.camera.VisionCamera.TargetObservation;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -15,17 +16,19 @@ import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-import edu.wpi.first.networktables.GenericEntry;
+import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.networktables.StructPublisher;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
-import edu.wpi.first.wpilibj.shuffleboard.SimpleWidget;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 
+/**
+ * Manages camera visualization + tuning via raw NetworkTables topics (no Shuffleboard containers).
+ *
+ * <p>Config/toggles are published under {@code /Athena/NetworkTableConfig/Vision/Cameras/<key>/...} so Elastic/Glass
+ * (or custom tools) can change behavior at runtime without redeploying.</p>
+ */
 final class RobotVisionCameraManager {
 
     private static final Pose2d ZERO_POSE = new Pose2d();
@@ -35,9 +38,7 @@ final class RobotVisionCameraManager {
     private final Field2d field;
     private final Field2d visionField;
     private final Map<String, CameraDisplayState> cameraDisplayStates = new HashMap<>();
-
-    private ShuffleboardTab localizationTab;
-    private ShuffleboardTab visionTab;
+    private RobotNetworkTables robotNetworkTables;
 
     RobotVisionCameraManager(double stdEpsilon, Field2d field) {
         this.stdEpsilon = stdEpsilon;
@@ -45,20 +46,16 @@ final class RobotVisionCameraManager {
         this.visionField = new Field2d();
     }
 
+    void attachRobotNetworkTables(RobotNetworkTables robotNetworkTables) {
+        this.robotNetworkTables = robotNetworkTables;
+    }
+
     Field2d getVisionField() {
         return visionField;
     }
 
-    void setLocalizationShuffleboardTab(ShuffleboardTab tab) {
-        this.localizationTab = tab;
-    }
-
-    void setVisionShuffleboardTab(ShuffleboardTab tab) {
-        this.visionTab = tab;
-    }
-
-    void ensureCameraShuffleboardEntries(RobotVision vision) {
-        if (vision == null || localizationTab == null || visionTab == null) {
+    void ensureCameraEntries(RobotVision vision) {
+        if (vision == null) {
             return;
         }
         Map<String, VisionCamera> cameras = vision.getCameras();
@@ -67,11 +64,12 @@ final class RobotVisionCameraManager {
         }
         cameraDisplayStates.entrySet().removeIf(stateEntry -> {
             if (!cameras.containsKey(stateEntry.getKey())) {
-                stateEntry.getValue().cameraPosePublisher.close();
-                stateEntry.getValue().estimatedPosePublisher.close();
-                stateEntry.getValue().visionCameraPoseObject.setPoses(EMPTY_POSES);
-                stateEntry.getValue().localizationEstimatedPoseObject.setPoses(EMPTY_POSES);
-                stateEntry.getValue().visionTagLineObject.setPoses(EMPTY_POSES);
+                CameraDisplayState state = stateEntry.getValue();
+                state.cameraPosePublisher.close();
+                state.estimatedPosePublisher.close();
+                state.visionCameraPoseObject.setPoses(EMPTY_POSES);
+                state.localizationEstimatedPoseObject.setPoses(EMPTY_POSES);
+                state.visionTagLineObject.setPoses(EMPTY_POSES);
                 return true;
             }
             return false;
@@ -82,7 +80,7 @@ final class RobotVisionCameraManager {
         if (vision == null) {
             return;
         }
-        ensureCameraShuffleboardEntries(vision);
+        ensureCameraEntries(vision);
         for (CameraDisplayState state : cameraDisplayStates.values()) {
             VisionCamera camera = vision.getCamera(state.key);
             if (camera == null) {
@@ -102,91 +100,43 @@ final class RobotVisionCameraManager {
     }
 
     private CameraDisplayState createCameraDisplayState(String key, VisionCamera camera) {
-        if (visionTab == null || localizationTab == null) {
+        if (key == null || key.isBlank() || camera == null) {
             return null;
         }
-        ShuffleboardLayout cameraLayout = visionTab.getLayout("Camera/" + key, BuiltInLayouts.kGrid);
 
-        ShuffleboardLayout toggleLayout =
-                cameraLayout.getLayout("Display Toggles", BuiltInLayouts.kList)
-                        .withSize(2, 4)
-                        .withPosition(0, 0);
+        RobotNetworkTables nt = robotNetworkTables;
+        if (nt == null) {
+            return null;
+        }
+        RobotNetworkTables.Node cfg = nt.root()
+                .child("NetworkTableConfig")
+                .child("Vision")
+                .child("Cameras")
+                .child(key);
 
-        SimpleWidget showCameraWidget =
-                toggleLayout.add("Show Camera Pose", true).withWidget(BuiltInWidgets.kToggleSwitch);
-        GenericEntry showCameraPoseEntry = showCameraWidget.getEntry();
-
-        SimpleWidget showTagWidget =
-                toggleLayout.add("Show Tag Lines", true).withWidget(BuiltInWidgets.kToggleSwitch);
-        GenericEntry showTagLinesEntry = showTagWidget.getEntry();
+        NetworkTableEntry showCameraPoseEntry = initIfAbsent(cfg.entry("ShowCameraPose"), true);
+        NetworkTableEntry showTagLinesEntry = initIfAbsent(cfg.entry("ShowTagLines"), true);
+        NetworkTableEntry showEstimatedPoseEntry = initIfAbsent(cfg.entry("ShowEstimatedPose"), false);
 
         boolean defaultUseForLocalization = camera.isUseForLocalization();
-        SimpleWidget useForLocalizationWidget =
-                toggleLayout.add("Use For Localization", defaultUseForLocalization)
-                        .withWidget(BuiltInWidgets.kToggleSwitch);
-        GenericEntry useForLocalizationEntry = useForLocalizationWidget.getEntry();
-
-        ShuffleboardLayout tuningLayout =
-                cameraLayout.getLayout("Tuning", BuiltInLayouts.kGrid)
-                        .withSize(4, 4)
-                        .withPosition(2, 0);
+        NetworkTableEntry useForLocalizationEntry = initIfAbsent(cfg.entry("UseForLocalization"), defaultUseForLocalization);
 
         double trustDistance = camera.getConfig().getTrustDistance();
-        GenericEntry trustDistanceEntry =
-                tuningLayout.add("Trust Distance (m)", trustDistance)
-                        .withWidget(BuiltInWidgets.kNumberSlider)
-                        .withProperties(Map.of("min", 0.0, "max", 10.0, "block increment", 0.05))
-                        .getEntry();
+        NetworkTableEntry trustDistanceEntry = initIfAbsent(cfg.entry("TrustDistanceMeters"), trustDistance);
 
         double singleStdX = camera.getSingleStdDev().get(0, 0);
         double singleStdY = camera.getSingleStdDev().get(1, 0);
         double singleStdThetaDeg = Math.toDegrees(camera.getSingleStdDev().get(2, 0));
-        ShuffleboardLayout singleStdLayout =
-                tuningLayout.getLayout("Single Tag Std", BuiltInLayouts.kList);
-        GenericEntry singleStdXEntry =
-                singleStdLayout.add("X (m)", singleStdX)
-                        .withWidget(BuiltInWidgets.kTextView)
-                        .getEntry();
-        GenericEntry singleStdYEntry =
-                singleStdLayout.add("Y (m)", singleStdY)
-                        .withWidget(BuiltInWidgets.kTextView)
-                        .getEntry();
-        GenericEntry singleStdThetaDegEntry =
-                singleStdLayout.add("Theta (deg)", singleStdThetaDeg)
-                        .withWidget(BuiltInWidgets.kTextView)
-                        .getEntry();
+        NetworkTableEntry singleStdXEntry = initIfAbsent(cfg.entry("SingleStdDevX_M"), singleStdX);
+        NetworkTableEntry singleStdYEntry = initIfAbsent(cfg.entry("SingleStdDevY_M"), singleStdY);
+        NetworkTableEntry singleStdThetaDegEntry = initIfAbsent(cfg.entry("SingleStdDevTheta_Deg"), singleStdThetaDeg);
 
         double multiStdX = camera.getMultiStdDev().get(0, 0);
         double multiStdY = camera.getMultiStdDev().get(1, 0);
         double multiStdThetaDeg = Math.toDegrees(camera.getMultiStdDev().get(2, 0));
-        ShuffleboardLayout multiStdLayout =
-                tuningLayout.getLayout("Multi Tag Std", BuiltInLayouts.kList);
-        GenericEntry multiStdXEntry =
-                multiStdLayout.add("X (m)", multiStdX)
-                        .withWidget(BuiltInWidgets.kTextView)
-                        .getEntry();
-        GenericEntry multiStdYEntry =
-                multiStdLayout.add("Y (m)", multiStdY)
-                        .withWidget(BuiltInWidgets.kTextView)
-                        .getEntry();
-        GenericEntry multiStdThetaDegEntry =
-                multiStdLayout.add("Theta (deg)", multiStdThetaDeg)
-                        .withWidget(BuiltInWidgets.kTextView)
-                        .getEntry();
-
-        ShuffleboardLayout estimatesLayout =
-                localizationTab.getLayout("Camera Estimates", BuiltInLayouts.kList);
-        SimpleWidget showEstimateWidget =
-                estimatesLayout.add("Show " + key + " Estimated Pose", false)
-                        .withWidget(BuiltInWidgets.kToggleSwitch);
-        GenericEntry showEstimatedPoseEntry = showEstimateWidget.getEntry();
-
-        ShuffleboardLayout localizationToggleLayout =
-                localizationTab.getLayout("Localization Cameras", BuiltInLayouts.kList);
-        SimpleWidget localizationToggleWidget =
-                localizationToggleLayout.add("Use " + key, defaultUseForLocalization)
-                        .withWidget(BuiltInWidgets.kToggleSwitch);
-        GenericEntry localizationToggleEntry = localizationToggleWidget.getEntry();
+        NetworkTableEntry multiStdXEntry = initIfAbsent(cfg.entry("MultiStdDevX_M"), multiStdX);
+        NetworkTableEntry multiStdYEntry = initIfAbsent(cfg.entry("MultiStdDevY_M"), multiStdY);
+        NetworkTableEntry multiStdThetaDegEntry = initIfAbsent(cfg.entry("MultiStdDevTheta_Deg"), multiStdThetaDeg);
 
         FieldObject2d cameraPoseObject = visionField.getObject("CameraPose/" + key);
         FieldObject2d estimatedPoseObject = field.getObject("CameraEstimate/" + key);
@@ -195,16 +145,13 @@ final class RobotVisionCameraManager {
         estimatedPoseObject.setPoses(EMPTY_POSES);
         tagLineObject.setPoses(EMPTY_POSES);
 
-        String visionBaseTopic = "/Shuffleboard/" + visionTab.getTitle() + "/Camera/" + key;
         StructPublisher<Pose2d> cameraPosePublisher = NetworkTableInstance.getDefault()
-                .getStructTopic(visionBaseTopic + "/CameraPose", Pose2d.struct)
+                .getStructTopic("/Athena/Vision/Cameras/" + key + "/CameraPose", Pose2d.struct)
                 .publish();
         cameraPosePublisher.set(ZERO_POSE);
 
-        String localizationBaseTopic =
-                "/Shuffleboard/" + localizationTab.getTitle() + "/CameraEstimates/" + key;
         StructPublisher<Pose2d> estimatedPosePublisher = NetworkTableInstance.getDefault()
-                .getStructTopic(localizationBaseTopic + "/EstimatedPose", Pose2d.struct)
+                .getStructTopic("/Athena/Localization/Cameras/" + key + "/EstimatedPose", Pose2d.struct)
                 .publish();
         estimatedPosePublisher.set(ZERO_POSE);
 
@@ -214,7 +161,6 @@ final class RobotVisionCameraManager {
                 showTagLinesEntry,
                 showEstimatedPoseEntry,
                 useForLocalizationEntry,
-                localizationToggleEntry,
                 trustDistanceEntry,
                 singleStdXEntry,
                 singleStdYEntry,
@@ -231,10 +177,10 @@ final class RobotVisionCameraManager {
 
     private void applyCameraConfigUpdates(CameraDisplayState state, VisionCamera camera, RobotVision vision) {
         boolean currentUse = camera.isUseForLocalization();
-        boolean desiredUse = state.localizationToggleEntry != null
-                ? state.localizationToggleEntry.getBoolean(currentUse)
-                : state.useForLocalizationEntry.getBoolean(currentUse);
-        if (desiredUse != camera.isUseForLocalization()) {
+        boolean desiredUse = state.useForLocalizationEntry != null
+                ? state.useForLocalizationEntry.getBoolean(currentUse)
+                : currentUse;
+        if (desiredUse != currentUse) {
             if (vision != null) {
                 vision.setUseForLocalization(state.key, desiredUse);
             } else {
@@ -244,14 +190,16 @@ final class RobotVisionCameraManager {
         if (state.useForLocalizationEntry != null) {
             state.useForLocalizationEntry.setBoolean(desiredUse);
         }
-        if (state.localizationToggleEntry != null) {
-            state.localizationToggleEntry.setBoolean(desiredUse);
-        }
 
         double currentTrust = camera.getConfig().getTrustDistance();
-        double desiredTrust = state.trustDistanceEntry.getDouble(currentTrust);
+        double desiredTrust = state.trustDistanceEntry != null
+                ? state.trustDistanceEntry.getDouble(currentTrust)
+                : currentTrust;
         if (Math.abs(desiredTrust - currentTrust) > stdEpsilon) {
             camera.getConfig().setTrustDistance(Math.max(0.0, desiredTrust));
+        }
+        if (state.trustDistanceEntry != null) {
+            state.trustDistanceEntry.setDouble(camera.getConfig().getTrustDistance());
         }
 
         Matrix<N3, N1> singleStd = camera.getSingleStdDev();
@@ -344,20 +292,33 @@ final class RobotVisionCameraManager {
         state.visionTagLineObject.setPoses(cameraPose, tagPose);
     }
 
-    private static class CameraDisplayState {
+    private static NetworkTableEntry initIfAbsent(NetworkTableEntry entry, boolean defaultValue) {
+        if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+            entry.setBoolean(defaultValue);
+        }
+        return entry;
+    }
+
+    private static NetworkTableEntry initIfAbsent(NetworkTableEntry entry, double defaultValue) {
+        if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+            entry.setDouble(defaultValue);
+        }
+        return entry;
+    }
+
+    private static final class CameraDisplayState {
         final String key;
-        final GenericEntry showCameraPoseEntry;
-        final GenericEntry showTagLinesEntry;
-        final GenericEntry showEstimatedPoseEntry;
-        final GenericEntry useForLocalizationEntry;
-        final GenericEntry localizationToggleEntry;
-        final GenericEntry trustDistanceEntry;
-        final GenericEntry singleStdXEntry;
-        final GenericEntry singleStdYEntry;
-        final GenericEntry singleStdThetaDegEntry;
-        final GenericEntry multiStdXEntry;
-        final GenericEntry multiStdYEntry;
-        final GenericEntry multiStdThetaDegEntry;
+        final NetworkTableEntry showCameraPoseEntry;
+        final NetworkTableEntry showTagLinesEntry;
+        final NetworkTableEntry showEstimatedPoseEntry;
+        final NetworkTableEntry useForLocalizationEntry;
+        final NetworkTableEntry trustDistanceEntry;
+        final NetworkTableEntry singleStdXEntry;
+        final NetworkTableEntry singleStdYEntry;
+        final NetworkTableEntry singleStdThetaDegEntry;
+        final NetworkTableEntry multiStdXEntry;
+        final NetworkTableEntry multiStdYEntry;
+        final NetworkTableEntry multiStdThetaDegEntry;
         final FieldObject2d visionCameraPoseObject;
         final FieldObject2d localizationEstimatedPoseObject;
         final FieldObject2d visionTagLineObject;
@@ -366,18 +327,17 @@ final class RobotVisionCameraManager {
 
         CameraDisplayState(
                 String key,
-                GenericEntry showCameraPoseEntry,
-                GenericEntry showTagLinesEntry,
-                GenericEntry showEstimatedPoseEntry,
-                GenericEntry useForLocalizationEntry,
-                GenericEntry localizationToggleEntry,
-                GenericEntry trustDistanceEntry,
-                GenericEntry singleStdXEntry,
-                GenericEntry singleStdYEntry,
-                GenericEntry singleStdThetaDegEntry,
-                GenericEntry multiStdXEntry,
-                GenericEntry multiStdYEntry,
-                GenericEntry multiStdThetaDegEntry,
+                NetworkTableEntry showCameraPoseEntry,
+                NetworkTableEntry showTagLinesEntry,
+                NetworkTableEntry showEstimatedPoseEntry,
+                NetworkTableEntry useForLocalizationEntry,
+                NetworkTableEntry trustDistanceEntry,
+                NetworkTableEntry singleStdXEntry,
+                NetworkTableEntry singleStdYEntry,
+                NetworkTableEntry singleStdThetaDegEntry,
+                NetworkTableEntry multiStdXEntry,
+                NetworkTableEntry multiStdYEntry,
+                NetworkTableEntry multiStdThetaDegEntry,
                 FieldObject2d visionCameraPoseObject,
                 FieldObject2d localizationEstimatedPoseObject,
                 FieldObject2d visionTagLineObject,
@@ -388,7 +348,6 @@ final class RobotVisionCameraManager {
             this.showTagLinesEntry = showTagLinesEntry;
             this.showEstimatedPoseEntry = showEstimatedPoseEntry;
             this.useForLocalizationEntry = useForLocalizationEntry;
-            this.localizationToggleEntry = localizationToggleEntry;
             this.trustDistanceEntry = trustDistanceEntry;
             this.singleStdXEntry = singleStdXEntry;
             this.singleStdYEntry = singleStdYEntry;

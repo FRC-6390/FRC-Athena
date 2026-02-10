@@ -2,9 +2,8 @@ package ca.frc6390.athena.hardware.motor;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.controller.PIDController;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 /**
  * Vendor-agnostic motor controller interface for the new vendordep system.
@@ -53,7 +52,7 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
 
     default void update() {}
 
-    // Cached accessors for shuffleboard/logging (override in adapters to return cached values)
+    // Cached accessors for logging/dashboard (override in adapters to return cached values)
     default int getCachedId() { return getId(); }
 
     default String getCachedCanbus() { return getCanbus(); }
@@ -79,37 +78,33 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
     default MotorControllerType getMotorControllerType() { return getType(); }
 
     @Override
-    default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        layout.addDouble("CAN ID", RobotSendableSystem.rateLimit(this::getCachedId, period));
-        layout.addString("CAN Bus", RobotSendableSystem.rateLimit(this::getCachedCanbus, period));
-        layout.addString("Type", RobotSendableSystem.rateLimit(this::getCachedTypeKey, period));
-        layout.addBoolean("Connected", RobotSendableSystem.rateLimit(this::isCachedConnected, period));
-        layout.addDouble("Temperature (C)", RobotSendableSystem.rateLimit(this::getCachedTemperatureCelsius, period));
-        layout.addString("Neutral Mode", RobotSendableSystem.rateLimit(() -> getCachedNeutralMode().name(), period));
-        if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
-            layout.add("Current Limit (A)", builder ->
-                    builder.addDoubleProperty(
-                            "Current Limit (A)",
-                            RobotSendableSystem.rateLimit(this::getCachedCurrentLimit, period),
-                            this::setCurrentLimit));
-            layout.add("Inverted", builder ->
-                    builder.addBooleanProperty(
-                            "Inverted",
-                            RobotSendableSystem.rateLimit(this::isCachedInverted, period),
-                            this::setInverted));
-            layout.add("Brake Mode", builder ->
-                    builder.addBooleanProperty(
-                            "Brake Mode",
-                            RobotSendableSystem.rateLimit(
-                                    () -> getCachedNeutralMode() == MotorNeutralMode.Brake,
-                                    period),
-                            value -> setNeutralMode(value ? MotorNeutralMode.Brake : MotorNeutralMode.Coast)));
+    default RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
+        }
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
+        }
+
+        node.putDouble("canId", getCachedId());
+        node.putString("canbus", getCachedCanbus());
+        node.putString("type", getCachedTypeKey());
+        node.putBoolean("connected", isCachedConnected());
+        node.putDouble("tempC", getCachedTemperatureCelsius());
+        node.putString("neutralMode", getCachedNeutralMode().name());
+
+        if (nt.enabled(RobotNetworkTables.Flag.HW_MOTOR_TUNING_WIDGETS)) {
+            node.putDouble("currentLimitA", getCachedCurrentLimit());
+            node.putBoolean("inverted", isCachedInverted());
+            node.putBoolean("brakeMode", getCachedNeutralMode() == MotorNeutralMode.Brake);
+
             Encoder encoder = getEncoder();
             if (encoder != null) {
-                encoder.shuffleboard(layout.getLayout("Encoder", BuiltInLayouts.kList), level);
+                encoder.networkTables(node.child("Encoder"));
             }
         }
-        return layout;
+
+        return node;
     }
 }

@@ -2,11 +2,11 @@ package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 /**
  * Simple motor mechanism intended for flywheel shooters and rollers.
@@ -18,11 +18,6 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
     public FlywheelMechanism(MechanismConfig<? extends FlywheelMechanism> config, SimpleMotorFeedforward feedforward) {
         super(config, feedforward);
         this.useVelocityPid = config.data().pidUseVelocity();
-    }
-
-    @Override
-    public FlywheelMechanism shuffleboard(String tab, SendableLevel level) {
-        return (FlywheelMechanism) super.shuffleboard(tab, level);
     }
 
     public static class StatefulFlywheelMechanism<E extends Enum<E> & SetpointProvider<Double>>
@@ -75,15 +70,18 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
         }
 
         @Override
-        public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-            stateCore.shuffleboard(tab, level);
-            return super.shuffleboard(tab, level);
+        public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+            if (node == null) {
+                return null;
+            }
+            getStateMachine().networkTables(node.child("StateMachine"));
+            return super.networkTables(node);
         }
 
         @SuppressWarnings("unchecked")
-        @Override
-        public StatefulFlywheelMechanism<E> shuffleboard(String tab, SendableLevel level) {
-            return (StatefulFlywheelMechanism<E>) super.shuffleboard(tab, level);
+        public StatefulFlywheelMechanism<E> publishNetworkTables(String ownerHint) {
+            super.publishNetworkTables(ownerHint);
+            return this;
         }
     }
 

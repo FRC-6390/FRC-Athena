@@ -6,10 +6,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 /**
  * Decorates a concrete {@link Imu} with virtual-axis support to preserve legacy heading helpers
@@ -252,11 +250,6 @@ public class VirtualImu implements Imu {
         maxSpeedSamples.clear();
         maxLinearSpeed = 0.0;
         maxRadialSpeed = 0.0;
-    }
-
-    @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        return Imu.super.shuffleboard(layout, level);
     }
 
     private void updateMaxSpeedTracking() {

@@ -7,7 +7,7 @@ import java.util.function.Supplier;
 import ca.frc6390.athena.commands.control.TankDriveCommand;
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotDrivetrain;
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.core.localization.PoseEstimatorFactory;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
@@ -40,10 +40,6 @@ import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -327,33 +323,37 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        RobotDrivetrain.super.shuffleboard(tab, level);
-        if (driveFeedforward != null && level.equals(SendableLevel.DEBUG)) {
-            tab.add("Drive Feedforward", driveFeedforward);
-            tab.add("Drive Feedforward Enabled",
-                    (builder) -> builder.addBooleanProperty("Enabled", this::isDriveFeedforwardEnabled, this::setDriveFeedforwardEnabled));
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
         }
-        ShuffleboardLayout sysIdLayout = tab.getLayout("SysId", BuiltInLayouts.kList);
-        sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
-                .withWidget(BuiltInWidgets.kCommand);
-        sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
-                .withWidget(BuiltInWidgets.kCommand);
-        sysIdLayout.add("Dynamic Forward", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))
-                .withWidget(BuiltInWidgets.kCommand);
-        sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
-                .withWidget(BuiltInWidgets.kCommand);
-        sysIdLayout.add("Ramp Rate (V/s)",
-                builder -> builder.addDoubleProperty("Ramp Rate (V/s)", this::getSysIdRampRateVoltsPerSecond, this::setSysIdRampRateVoltsPerSecond));
-        sysIdLayout.add("Step Voltage (V)",
-                builder -> builder.addDoubleProperty("Step Voltage (V)", this::getSysIdStepVoltage, this::setSysIdStepVoltage));
-        sysIdLayout.add("Timeout (s)",
-                builder -> builder.addDoubleProperty("Timeout (s)", this::getSysIdTimeoutSeconds, this::setSysIdTimeoutSeconds));
-        sysIdLayout.addBoolean("Active", this::isSysIdActive).withWidget(BuiltInWidgets.kBooleanBox);
-        if (simulationField != null) {
-            tab.add("Sim Pose", simulationField).withWidget(BuiltInWidgets.kField);
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
         }
-        return tab;
+
+        RobotDrivetrain.super.networkTables(node);
+
+        if (driveFeedforward != null && nt.enabled(RobotNetworkTables.Flag.DRIVETRAIN_SPEED_WIDGETS)) {
+            RobotNetworkTables.Node ff = node.child("DriveFeedforward");
+            ff.putBoolean("enabled", isDriveFeedforwardEnabled());
+        }
+
+        RobotNetworkTables.Node sysid = node.child("SysId");
+        sysid.putDouble("rampRateVPerSec", getSysIdRampRateVoltsPerSecond());
+        sysid.putDouble("stepVoltageV", getSysIdStepVoltage());
+        sysid.putDouble("timeoutSec", getSysIdTimeoutSeconds());
+        sysid.putBoolean("active", isSysIdActive());
+
+        if (simulation != null) {
+            Pose2d pose = getSimulatedPose();
+            RobotNetworkTables.Node simNode = node.child("Sim");
+            simNode.putDouble("xM", pose.getX());
+            simNode.putDouble("yM", pose.getY());
+            simNode.putDouble("rotDeg", pose.getRotation().getDegrees());
+        }
+
+        return node;
     }
 
     public DifferentialDrivetrain configureSimulation(DifferentialSimulationConfig config) {

@@ -4,23 +4,17 @@ import java.util.Arrays;
 import java.util.Objects;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
-import ca.frc6390.athena.core.RobotSendableSystem.SendableLevel;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
-import ca.frc6390.athena.dashboard.ShuffleboardControls;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 /**
  * Aggregates multiple encoders and exposes averaged readings to mimic the legacy encoder group API.
  */
 public class EncoderGroup implements RobotSendableDevice {
     private final Encoder[] encoders;
-    private double shuffleboardPeriodSecondsOverride = Double.NaN;
-    private ShuffleboardLayout lastShuffleboardLayoutComp;
-    private ShuffleboardLayout lastShuffleboardLayoutDebug;
 
     public EncoderGroup(Encoder... encoders) {
         this.encoders = encoders;
@@ -140,59 +134,35 @@ public class EncoderGroup implements RobotSendableDevice {
     }
 
     @Override
-    public double getShuffleboardPeriodSeconds() {
-        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
-                ? shuffleboardPeriodSecondsOverride
-                : ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
+        }
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
+        }
+        publish(node);
+        return node;
     }
 
-    @Override
-    public void setShuffleboardPeriodSeconds(double periodSeconds) {
-        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
-            shuffleboardPeriodSecondsOverride = Double.NaN;
-            return;
-        }
-        shuffleboardPeriodSecondsOverride = periodSeconds;
-    }
+    private void publish(RobotNetworkTables.Node node) {
+        RobotNetworkTables.Node summary = node.child("Summary");
+        summary.putDouble("avgPosition", getCachedPosition());
+        summary.putDouble("avgVelocity", getCachedVelocity());
+        summary.putDouble("avgRotations", getCachedRotations());
+        summary.putDouble("avgRate", getCachedRate());
+        summary.putBoolean("allConnected", allEncodersCachedConnected());
 
-    @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        if (level == SendableLevel.DEBUG) {
-            if (layout == lastShuffleboardLayoutDebug) {
-                return layout;
-            }
-            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
-            lastShuffleboardLayoutDebug = layout;
-            if (!compAlreadyBuilt) {
-                lastShuffleboardLayoutComp = layout;
-                publishCommon(layout);
-            }
-            // No debug-only widgets today; avoid re-adding titles.
-            return layout;
-        }
-
-        if (layout == lastShuffleboardLayoutComp) {
-            return layout;
-        }
-        lastShuffleboardLayoutComp = layout;
-        publishCommon(layout);
-        return layout;
-    }
-
-    private void publishCommon(ShuffleboardLayout layout) {
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
-        summary.addDouble("Average Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedPosition, period));
-        summary.addDouble("Average Velocity", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedVelocity, period));
-        summary.addDouble("Average Rotations", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedRotations, period));
-        summary.addDouble("Average Rate", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedRate, period));
-        summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allEncodersCachedConnected, period));
-
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.ENCODER_GROUP_PER_ENCODER)) {
+        if (node.robot().enabled(RobotNetworkTables.Flag.ENCODER_GROUP_PER_ENCODER)) {
+            RobotNetworkTables.Node encNode = node.child("Encoders");
             Arrays.stream(encoders)
                     .filter(Objects::nonNull)
-                    .forEach(encoder ->
-                            encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), SendableLevel.COMP));
+                    .forEach(encoder -> {
+                        String key = encoder.getName();
+                        key = key != null ? key.replace('\\', '_').replace('/', '_') : "encoder";
+                        encoder.networkTables(encNode.child(key));
+                    });
         }
     }
 

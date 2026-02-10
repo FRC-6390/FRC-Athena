@@ -1,4 +1,4 @@
-package ca.frc6390.athena.dashboard;
+package ca.frc6390.athena.networktables;
 
 
 import com.fasterxml.jackson.annotation.JsonProperty;

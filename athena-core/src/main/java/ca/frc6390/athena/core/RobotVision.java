@@ -25,7 +25,7 @@ import ca.frc6390.athena.sensors.camera.VisionCameraConfig;
 import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
 import ca.frc6390.athena.core.sim.RobotVisionSimProvider;
-import ca.frc6390.athena.dashboard.ShuffleboardControls;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -33,7 +33,6 @@ import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.apriltag.AprilTagFields;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 
 public class RobotVision implements RobotSendableSystem {
    private static final List<CameraProvider> CAMERA_PROVIDERS = ServiceLoader
@@ -382,15 +381,18 @@ public class RobotVision implements RobotSendableSystem {
    }
 
    @Override
-   public ShuffleboardTab shuffleboard(ShuffleboardTab tab, RobotSendableSystem.SendableLevel level) {
-      if (localization != null) {
-         localization.registerVisionShuffleboardTab(tab);
-         if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.VISION_FIELD_WIDGET)) {
-            tab.add("Vision Field", localization.getVisionField2d())
-                    .withPosition(0, 0)
-                    .withSize(4, 3);
-         }
+   public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+      if (node == null) {
+         return node;
       }
-      return tab;
+      RobotNetworkTables nt = node.robot();
+      if (!nt.isPublishingEnabled()) {
+         return node;
+      }
+
+      node.putDouble("cameraCount", cameras.size());
+      node.putBoolean("hasLocalization", localization != null);
+
+      return node;
    }
 }

@@ -1,8 +1,8 @@
 package ca.frc6390.athena.hardware.encoder;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 
 /**
  * Vendor-agnostic encoder interface for the new vendordep system.
@@ -113,7 +113,7 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         return this;
     }
 
-    // Cached accessors for shuffleboard/logging (override in adapters to return cached values)
+    // Cached accessors for logging/dashboard (override in adapters to return cached values)
     default double getCachedPosition() { return getPosition(); }
 
     default double getCachedVelocity() { return getVelocity(); }
@@ -168,70 +168,37 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
     }
 
     @Override
-    default ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, RobotSendableSystem.SendableLevel level) {
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        layout.addDouble("Position", RobotSendableSystem.rateLimit(this::getCachedPosition, period));
-        layout.addDouble("Velocity", RobotSendableSystem.rateLimit(this::getCachedVelocity, period));
-        layout.addDouble("Absolute Position", RobotSendableSystem.rateLimit(this::getCachedAbsolutePosition, period));
-        layout.addBoolean("Connected", RobotSendableSystem.rateLimit(this::isCachedConnected, period));
-        if (level.equals(RobotSendableSystem.SendableLevel.DEBUG)) {
-            layout.addDouble("Rotations", RobotSendableSystem.rateLimit(this::getCachedRotations, period));
-            layout.addDouble("Rate", RobotSendableSystem.rateLimit(this::getCachedRate, period));
-            layout.addDouble("Absolute Rotations", RobotSendableSystem.rateLimit(this::getCachedAbsoluteRotations, period));
-            layout.addDouble("Raw Absolute", RobotSendableSystem.rateLimit(this::getCachedRawAbsoluteValue, period));
-            layout.addDouble("Rotation (deg)", RobotSendableSystem.rateLimit(this::getCachedRotationDegrees, period));
-            layout.addDouble("Absolute Rotation (deg)", RobotSendableSystem.rateLimit(this::getCachedAbsoluteRotationDegrees, period));
-            layout.addBoolean("Supports Simulation", RobotSendableSystem.rateLimit(this::supportsSimulation, period));
-
-            layout.add("Inverted", builder ->
-                    builder.addBooleanProperty(
-                            "Inverted",
-                            RobotSendableSystem.rateLimit(this::isInverted, period),
-                            this::setInverted));
-            layout.add("Gear Ratio", builder ->
-                    builder.addDoubleProperty(
-                            "Gear Ratio",
-                            RobotSendableSystem.rateLimit(this::getGearRatio, period),
-                            this::setGearRatio));
-            layout.add("Conversion", builder ->
-                    builder.addDoubleProperty(
-                            "Conversion",
-                            RobotSendableSystem.rateLimit(this::getConversion, period),
-                            this::setConversion));
-            layout.add("Conversion Offset", builder ->
-                    builder.addDoubleProperty(
-                            "Conversion Offset",
-                            RobotSendableSystem.rateLimit(this::getConversionOffset, period),
-                            this::setConversionOffset));
-            layout.add("Offset", builder ->
-                    builder.addDoubleProperty(
-                            "Offset",
-                            RobotSendableSystem.rateLimit(this::getOffset, period),
-                            this::setOffset));
-            layout.add("Discontinuity Point", builder ->
-                    builder.addDoubleProperty(
-                            "Discontinuity Point",
-                            RobotSendableSystem.rateLimit(this::getDiscontinuityPoint, period),
-                            this::setDiscontinuityPoint));
-            layout.add("Discontinuity Range", builder ->
-                    builder.addDoubleProperty(
-                            "Discontinuity Range",
-                            RobotSendableSystem.rateLimit(this::getDiscontinuityRange, period),
-                            this::setDiscontinuityRange));
-
-            layout.addDouble("CAN ID", RobotSendableSystem.rateLimit(() -> {
-                EncoderConfig cfg = getConfig();
-                return cfg != null ? cfg.id : 0.0;
-            }, period));
-            layout.addString("CAN Bus", RobotSendableSystem.rateLimit(() -> {
-                EncoderConfig cfg = getConfig();
-                return cfg != null && cfg.canbus != null ? cfg.canbus : "";
-            }, period));
-            layout.addString("Type", RobotSendableSystem.rateLimit(() -> {
-                EncoderConfig cfg = getConfig();
-                return cfg != null && cfg.type != null ? cfg.type.getKey() : "unknown";
-            }, period));
+    default RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return node;
         }
-        return layout;
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
+        }
+
+        node.putDouble("position", getCachedPosition());
+        node.putDouble("velocity", getCachedVelocity());
+        node.putDouble("absolutePosition", getCachedAbsolutePosition());
+        node.putBoolean("connected", isCachedConnected());
+
+        if (nt.enabled(RobotNetworkTables.Flag.HW_ENCODER_TUNING_WIDGETS)) {
+            node.putDouble("rotations", getCachedRotations());
+            node.putDouble("rate", getCachedRate());
+            node.putDouble("absoluteRotations", getCachedAbsoluteRotations());
+            node.putDouble("rawAbsolute", getCachedRawAbsoluteValue());
+            node.putDouble("rotationDeg", getCachedRotationDegrees());
+            node.putDouble("absoluteRotationDeg", getCachedAbsoluteRotationDegrees());
+            node.putBoolean("supportsSimulation", supportsSimulation());
+
+            EncoderConfig cfg = getConfig();
+            if (cfg != null) {
+                node.putDouble("canId", cfg.id);
+                node.putString("canbus", cfg.canbus != null ? cfg.canbus : "");
+                node.putString("type", cfg.type != null ? cfg.type.getKey() : "unknown");
+            }
+        }
+
+        return node;
     }
 }

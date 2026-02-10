@@ -11,7 +11,7 @@ import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
-import ca.frc6390.athena.dashboard.ShuffleboardControls;
+import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulation;
 import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulationConfig;
@@ -31,11 +31,6 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.units.measure.Voltage;
 import java.util.function.DoubleSupplier;
 import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
-import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardContainer;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
@@ -54,6 +49,10 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public class Mechanism extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism{
+
+    // Retain the builder instance that constructed this mechanism so RobotCore can resolve
+    // mechanisms by config identity when desired (Constants-style configs).
+    private final MechanismConfig<? extends Mechanism> sourceConfig;
 
     private final MotorControllerGroup motors;
     private final Encoder encoder;
@@ -86,13 +85,27 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean lastOutputValid;
     private double lastOutput;
     private boolean lastOutputIsVoltage;
-    private double shuffleboardPeriodSecondsOverride = Double.NaN;
-    private ShuffleboardContainer lastShuffleboardContainerComp;
-    private ShuffleboardContainer lastShuffleboardContainerDebug;
-    private String desiredShuffleboardTabComp;
-    private String desiredShuffleboardTabDebug;
-    private double lastShuffleboardPublishAttemptSeconds = Double.NaN;
-    private static final double SHUFFLEBOARD_PUBLISH_RETRY_PERIOD_SECONDS = 0.5;
+    private double networkTablesPeriodSecondsOverride = Double.NaN;
+    private RobotNetworkTables.Node lastNetworkTablesNode;
+    private RobotNetworkTables lastRobotNetworkTables;
+    private boolean networkTablesPublishRequested;
+    private double lastNetworkTablesPublishAttemptSeconds = Double.NaN;
+    private static final double NETWORKTABLES_PUBLISH_RETRY_PERIOD_SECONDS = 0.5;
+    private long lastNetworkTablesConfigRevision = -1;
+    private String networkTablesOwnerPath;
+    private boolean ntMotorsBuilt;
+    private boolean ntEncodersBuilt;
+    private boolean ntStatusBuilt;
+    private boolean ntSetpointsBuilt;
+    private boolean ntOutputsBuilt;
+    private boolean ntVisualizationBuilt;
+    private boolean ntSimulationBuilt;
+    private boolean ntCommandsBuilt;
+    private boolean ntConfigBuilt;
+    private boolean ntLimitSwitchesBuilt;
+    private boolean ntSysIdBuilt;
+    private boolean ntControllersBuilt;
+    private boolean ntHintBuilt;
     private boolean cachedEmergencyStopped;
     private boolean cachedOverride;
     private boolean cachedAtSetpoint;
@@ -136,8 +149,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private  DoubleSupplier customEncoderPos;
     private boolean shouldSetpointOverride = false;
     private double setPointOverride = 0;
-    private boolean shuffleboardEnabled;
-    private double lastShuffleboardCacheUpdateSeconds = Double.NaN;
+    private boolean networkTablesEnabled;
+    private double lastNetworkTablesCacheUpdateSeconds = Double.NaN;
     private double lastEmergencyStopLogSeconds = Double.NaN;
     private String lastEmergencyStopReason = "";
     private static final double EMERGENCY_STOP_LOG_PERIOD_SECONDS = 1.0;
@@ -150,6 +163,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
+        this.sourceConfig = config;
         this.motors =
                 MotorControllerGroup.fromConfigs(config.data().motors().toArray(MotorControllerConfig[]::new));
         this.encoder = resolveEncoder(config.data().encoder(), this.motors);
@@ -252,6 +266,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     }
 
+    public MechanismConfig<? extends Mechanism> getSourceConfig() {
+        return sourceConfig;
+    }
+
     private static Encoder resolveEncoder(EncoderConfig config, MotorControllerGroup motors) {
         if (config == null) {
             return null;
@@ -311,6 +329,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             MechanismSimulationConfig simulationConfig,
             MechanismVisualizationConfig visualizationConfig,
             MechanismSensorSimulationConfig sensorSimulationConfig) {
+        this.sourceConfig = null;
         this.motors = motors;
         this.encoder = encoder;
         this.pidController = pidController;
@@ -978,19 +997,24 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return pidPeriod;
     }
 
-    public double getShuffleboardPeriodSeconds() {
-        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
-                ? shuffleboardPeriodSecondsOverride
-                : RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
+    public double getNetworkTablesPeriodSeconds() {
+        RobotNetworkTables nt = lastRobotNetworkTables;
+        if (nt == null && robotCore != null) {
+            nt = robotCore.networkTables();
+        }
+        double defaultPeriod = nt != null ? nt.getDefaultPeriodSeconds() : 1.0;
+        return Double.isFinite(networkTablesPeriodSecondsOverride) && networkTablesPeriodSecondsOverride > 0.0
+                ? networkTablesPeriodSecondsOverride
+                : defaultPeriod;
     }
 
-    public void setShuffleboardPeriodSeconds(double periodSeconds) {
+    public void setNetworkTablesPeriodSeconds(double periodSeconds) {
         if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
             // Reset to global default.
-            this.shuffleboardPeriodSecondsOverride = Double.NaN;
+            this.networkTablesPeriodSecondsOverride = Double.NaN;
             return;
         }
-        this.shuffleboardPeriodSecondsOverride = periodSeconds;
+        this.networkTablesPeriodSecondsOverride = periodSeconds;
     }
 
     public void disableControlLoop(String name) {
@@ -1094,19 +1118,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
-    private void updateShuffleboardCache() {
-        if (!shuffleboardEnabled) {
+    private void updateNetworkTablesCache() {
+        if (!networkTablesEnabled) {
             return;
         }
         double nowSeconds = Timer.getFPGATimestamp();
-        double periodSeconds = getShuffleboardPeriodSeconds();
+        double periodSeconds = getNetworkTablesPeriodSeconds();
         if (Double.isFinite(periodSeconds) && periodSeconds > 0.0
                 && Double.isFinite(nowSeconds)
-                && !Double.isNaN(lastShuffleboardCacheUpdateSeconds)
-                && (nowSeconds - lastShuffleboardCacheUpdateSeconds) < periodSeconds) {
+                && !Double.isNaN(lastNetworkTablesCacheUpdateSeconds)
+                && (nowSeconds - lastNetworkTablesCacheUpdateSeconds) < periodSeconds) {
             return;
         }
-        lastShuffleboardCacheUpdateSeconds = nowSeconds;
+        lastNetworkTablesCacheUpdateSeconds = nowSeconds;
         cachedEmergencyStopped = emergencyStopped;
         cachedOverride = override;
         cachedAtSetpoint = atSetpoint();
@@ -1201,8 +1225,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         update();
 
-        updateShuffleboardCache();
-        attemptShuffleboardPublishIfNeeded();
+        updateNetworkTablesCache();
+        refreshNetworkTablesOnConfigChange();
+        attemptNetworkTablesPublishIfNeeded();
 
         if (visualization != null) {
             visualization.setExternalRootPose(visualizationRootOverride);
@@ -1210,6 +1235,25 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         prevRobotMode = robotMode;
+    }
+
+    private void refreshNetworkTablesOnConfigChange() {
+        RobotNetworkTables nt = lastRobotNetworkTables;
+        if (nt == null || !nt.isPublishingEnabled()) {
+            return;
+        }
+        if (!networkTablesEnabled) {
+            return;
+        }
+        RobotNetworkTables.Node node = lastNetworkTablesNode;
+        if (node == null) {
+            return;
+        }
+        long revision = nt.revision();
+        if (revision == lastNetworkTablesConfigRevision) {
+            return;
+        }
+        networkTablesInternal(nt, node);
     }
 
     @SuppressWarnings("unchecked")
@@ -1426,262 +1470,245 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         // Simulation updates are executed within periodic() to keep sensor data fresh before control.
     }
 
-    @Override
-    public Mechanism shuffleboard(String tab, SendableLevel level) {
-        recordDesiredShuffleboardTab(tab, level);
-        if (!ShuffleboardControls.mechanismAllowed(getName(), level)) {
-            return this;
-        }
-        return (Mechanism) RobotSendableSystem.super.shuffleboard(tab, level);
+    public Mechanism publishNetworkTables(String ownerHint) {
+        recordNetworkTablesRequest(ownerHint);
+        publishToDefaultMechanismsNode();
+        return this;
     }
 
     @Override
-    public ShuffleboardTab shuffleboard(ShuffleboardTab tab, SendableLevel level) {
-        if (!RobotSendableSystem.isShuffleboardEnabled()) {
-            return tab;
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return null;
         }
-        if (!ShuffleboardControls.mechanismAllowed(getName(), level)) {
-            return tab;
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return node;
         }
-        shuffleboardEnabled = true;
-        shuffleboardInternal(tab, level);
-        return tab;
+        networkTablesEnabled = true;
+        lastNetworkTablesNode = node;
+        lastRobotNetworkTables = nt;
+        networkTablesInternal(nt, node);
+        return node;
     }
 
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
-        if (!RobotSendableSystem.isShuffleboardEnabled()) {
-            return layout;
+    private void recordNetworkTablesRequest(String ownerHint) {
+        // Explicit publish request from user code: also flip the per-mech toggles on so the request
+        // takes effect without hunting for another knob.
+        if (robotCore != null) {
+            RobotNetworkTables nt = robotCore.networkTables();
+            RobotNetworkTables.Node mechNode = resolveDefaultMechanismNode(nt.root().child("Mechanisms"));
+            nt.mechanismConfig(mechNode).details(true);
         }
-        if (!ShuffleboardControls.mechanismAllowed(getName(), level)) {
-            return layout;
+        networkTablesPublishRequested = true;
+
+        // For standalone mechanisms, allow the hint to act as an owner/group path.
+        if (networkTablesOwnerPath == null || networkTablesOwnerPath.isBlank()) {
+            setNetworkTablesOwnerPath(ownerHint);
         }
-        shuffleboardEnabled = true;
-        shuffleboardInternal(layout, level);
-        return layout;
     }
 
-    private void recordDesiredShuffleboardTab(String tab, SendableLevel level) {
-        if (tab == null || tab.isBlank()) {
+    private void attemptNetworkTablesPublishIfNeeded() {
+        RobotNetworkTables nt = lastRobotNetworkTables;
+        if (nt == null || !nt.isPublishingEnabled() || !networkTablesEnabled) {
             return;
         }
-        if (level == SendableLevel.DEBUG) {
-            desiredShuffleboardTabDebug = tab;
-            // If a user asks for DEBUG but DEBUG is globally off, COMP can still be useful.
-            if (desiredShuffleboardTabComp == null) {
-                desiredShuffleboardTabComp = tab;
-            }
-        } else {
-            desiredShuffleboardTabComp = tab;
-        }
-    }
-
-    private void attemptShuffleboardPublishIfNeeded() {
-        if (!RobotSendableSystem.isShuffleboardEnabled()) {
-            return;
-        }
-
-        boolean needsComp = desiredShuffleboardTabComp != null && lastShuffleboardContainerComp == null;
-        boolean needsDebug = desiredShuffleboardTabDebug != null && lastShuffleboardContainerDebug == null;
-        if (!needsComp && !needsDebug) {
+        RobotNetworkTables.Node node = lastNetworkTablesNode;
+        if (node == null) {
             return;
         }
 
         double now = Timer.getFPGATimestamp();
-        if (Double.isFinite(lastShuffleboardPublishAttemptSeconds)
-                && (now - lastShuffleboardPublishAttemptSeconds) < SHUFFLEBOARD_PUBLISH_RETRY_PERIOD_SECONDS) {
-            return;
-        }
-        lastShuffleboardPublishAttemptSeconds = now;
-
-        if (needsComp && ShuffleboardControls.mechanismAllowed(getName(), SendableLevel.COMP)) {
-            RobotSendableSystem.super.shuffleboard(desiredShuffleboardTabComp, SendableLevel.COMP);
-        }
-        if (needsDebug && ShuffleboardControls.mechanismAllowed(getName(), SendableLevel.DEBUG)) {
-            RobotSendableSystem.super.shuffleboard(desiredShuffleboardTabDebug, SendableLevel.DEBUG);
-        }
-    }
-
-    private void shuffleboardInternal(ShuffleboardContainer container, SendableLevel level) {
-        if (level == SendableLevel.DEBUG) {
-            if (container == lastShuffleboardContainerDebug) {
-                return;
-            }
-
-            boolean compAlreadyBuilt = (container == lastShuffleboardContainerComp);
-            lastShuffleboardContainerDebug = container;
-            if (!compAlreadyBuilt) {
-                lastShuffleboardContainerComp = container;
-                shuffleboardCommon(container);
-            }
-            shuffleboardDebugOnly(container);
+        double period = getNetworkTablesPeriodSeconds();
+        if (Double.isFinite(period) && period > 0.0
+                && Double.isFinite(now)
+                && Double.isFinite(lastNetworkTablesPublishAttemptSeconds)
+                && (now - lastNetworkTablesPublishAttemptSeconds) < period
+                && nt.revision() == lastNetworkTablesConfigRevision) {
             return;
         }
 
-        if (container == lastShuffleboardContainerComp) {
+        lastNetworkTablesPublishAttemptSeconds = now;
+        networkTablesInternal(nt, node);
+    }
+
+    private void networkTablesInternal(RobotNetworkTables nt, RobotNetworkTables.Node node) {
+        if (nt == null || node == null) {
             return;
         }
-        lastShuffleboardContainerComp = container;
-        shuffleboardCommon(container);
+        long revision = nt.revision();
+        boolean nodeChanged = (node != lastNetworkTablesNode);
+        if (nodeChanged) {
+            lastNetworkTablesNode = node;
+            lastRobotNetworkTables = nt;
+            lastNetworkTablesConfigRevision = -1;
+        }
+        // Always publish when we're due (handled by attemptNetworkTablesPublishIfNeeded) or when config changes.
+        if (!nodeChanged && revision == lastNetworkTablesConfigRevision) {
+            publishNetworkTables(node);
+            return;
+        }
+        lastNetworkTablesConfigRevision = revision;
+        publishNetworkTables(node);
     }
 
-    private void shuffleboardCommon(ShuffleboardContainer container) {
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_MOTORS)) {
-            ShuffleboardLayout motorsLayout = container.getLayout("Motors", BuiltInLayouts.kList);
-            motors.shuffleboard(motorsLayout, SendableLevel.COMP);
+    private void publishToDefaultMechanismsNode() {
+        if (robotCore == null) {
+            return;
         }
-
-        if (encoder != null && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_ENCODERS)) {
-            ShuffleboardLayout encoderLayout = container.getLayout("Encoders", BuiltInLayouts.kList);
-            encoder.shuffleboard(encoderLayout, SendableLevel.COMP);
-        }
-
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_STATUS)) {
-            ShuffleboardLayout statusLayout = container.getLayout("Status", BuiltInLayouts.kList);
-            statusLayout.addBoolean("Emergency Stopped", RobotSendableSystem.rateLimit(() -> cachedEmergencyStopped, period));
-            statusLayout.addBoolean("Override", RobotSendableSystem.rateLimit(() -> cachedOverride, period));
-            statusLayout.addBoolean("At Setpoint", RobotSendableSystem.rateLimit(() -> cachedAtSetpoint, period));
-        }
-
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SETPOINTS)) {
-            ShuffleboardLayout setpointLayout = container.getLayout("Setpoints", BuiltInLayouts.kList);
-            setpointLayout.addDouble("Setpoint", RobotSendableSystem.rateLimit(() -> cachedSetpoint, period));
-        }
-
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_OUTPUTS)) {
-            ShuffleboardLayout outputLayout = container.getLayout("Outputs", BuiltInLayouts.kList);
-            outputLayout.addDouble("Output", RobotSendableSystem.rateLimit(() -> cachedOutput, period));
-        }
-
-        if (visualization != null && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_VISUALIZATION)) {
-            ShuffleboardLayout visualizationLayout = container.getLayout("Visualization", BuiltInLayouts.kList);
-            visualizationLayout.add("Mechanism2d", visualization.mechanism2d());
-        }
-
-        if (RobotBase.isSimulation() && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SIMULATION)) {
-            ShuffleboardLayout simulationLayout = container.getLayout("Simulation", BuiltInLayouts.kList);
-            simulationLayout.addBoolean("Simulation Enabled", RobotSendableSystem.rateLimit(() -> cachedHasSimulation, period));
-        }
-
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_COMMANDS)) {
-            ShuffleboardLayout commandsLayout = container.getLayout("Commands", BuiltInLayouts.kList);
-            commandsLayout.add("Brake Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Brake)))
-                    .withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Coast Mode", new InstantCommand(() -> setMotorNeutralMode(MotorNeutralMode.Coast)))
-                    .withWidget(BuiltInWidgets.kCommand);
-        }
-
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SYSID)) {
-            ShuffleboardLayout sysIdLayout = container.getLayout("SysId", BuiltInLayouts.kList);
-            sysIdLayout.add("Quasistatic Forward", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))
-                    .withWidget(BuiltInWidgets.kCommand);
-            sysIdLayout.add("Quasistatic Reverse", sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))
-                    .withWidget(BuiltInWidgets.kCommand);
-            sysIdLayout.add("Dynamic Forward", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))
-                    .withWidget(BuiltInWidgets.kCommand);
-            sysIdLayout.add("Dynamic Reverse", sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))
-                    .withWidget(BuiltInWidgets.kCommand);
-            sysIdLayout.add("Ramp Rate (V/s)",
-                    builder -> builder.addDoubleProperty(
-                            "Ramp Rate (V/s)",
-                            RobotSendableSystem.rateLimit(() -> cachedSysIdRampRate, period),
-                            this::setSysIdRampRateVoltsPerSecond));
-            sysIdLayout.add("Step Voltage (V)",
-                    builder -> builder.addDoubleProperty(
-                            "Step Voltage (V)",
-                            RobotSendableSystem.rateLimit(() -> cachedSysIdStepVoltage, period),
-                            this::setSysIdStepVoltage));
-            sysIdLayout.add("Timeout (s)",
-                    builder -> builder.addDoubleProperty(
-                            "Timeout (s)",
-                            RobotSendableSystem.rateLimit(() -> cachedSysIdTimeoutSeconds, period),
-                            this::setSysIdTimeoutSeconds));
-            sysIdLayout.addBoolean("Active", RobotSendableSystem.rateLimit(() -> cachedSysIdActive, period))
-                    .withWidget(BuiltInWidgets.kBooleanBox);
-        }
+        RobotNetworkTables nt = robotCore.networkTables();
+        RobotNetworkTables.Node mechanisms = nt.root().child("Mechanisms");
+        RobotNetworkTables.Node node = resolveDefaultMechanismNode(mechanisms);
+        networkTables(node);
     }
 
-    private void shuffleboardDebugOnly(ShuffleboardContainer container) {
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+    public String getNetworkTablesOwnerPath() {
+        return networkTablesOwnerPath;
+    }
 
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_MOTORS)) {
-            ShuffleboardLayout motorsLayout = container.getLayout("Motors", BuiltInLayouts.kList);
-            motors.shuffleboard(motorsLayout, SendableLevel.DEBUG);
+    public void setNetworkTablesOwnerPath(String ownerPath) {
+        if (ownerPath == null) {
+            this.networkTablesOwnerPath = null;
+            return;
         }
-        if (encoder != null && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_ENCODERS)) {
-            ShuffleboardLayout encoderLayout = container.getLayout("Encoders", BuiltInLayouts.kList);
-            encoder.shuffleboard(encoderLayout, SendableLevel.DEBUG);
+        String normalized = ownerPath.trim();
+        if (normalized.isEmpty()) {
+            this.networkTablesOwnerPath = null;
+            return;
+        }
+        normalized = normalized.replace('\\', '/');
+        normalized = normalized.replaceAll("/+", "/");
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        this.networkTablesOwnerPath = normalized.isEmpty() ? null : normalized;
+    }
+
+    public String getNetworkTablesTypeName() {
+        if (this instanceof TurretMechanism) {
+            return "Turret";
+        }
+        if (this instanceof ElevatorMechanism) {
+            return "Elevator";
+        }
+        if (this instanceof ArmMechanism) {
+            return "Arm";
+        }
+        if (this instanceof FlywheelMechanism) {
+            return "Flywheel";
+        }
+        if (this instanceof SimpleMotorMechanism) {
+            return "Motor";
+        }
+        return "Mechanism";
+    }
+
+    public RobotNetworkTables.Node resolveDefaultMechanismNode(RobotNetworkTables.Node mechanismsRoot) {
+        RobotNetworkTables.Node root = mechanismsRoot;
+        String owner = getNetworkTablesOwnerPath();
+        if (owner != null && !owner.isBlank()) {
+            for (String part : owner.split("/")) {
+                String seg = part != null ? part.trim() : "";
+                if (!seg.isEmpty()) {
+                    root = root.child(seg);
+                }
+            }
+        }
+        String name = getName();
+        if (name == null || name.isBlank()) {
+            name = "Mechanism";
+        }
+        return root.child(name);
+    }
+
+    /**
+     * IntelliSense-friendly per-mechanism publishing toggles published under:
+     * {@code Athena/Mechanisms/.../<MechName>/NetworkTableConfig/...}.
+     */
+    public final RobotNetworkTables.MechanismToggles networkTablesConfig() {
+        if (robotCore == null) {
+            throw new IllegalStateException("Mechanism is not registered with a RobotCore; call robot.registerMechanism(...) before using networkTablesConfig() toggles.");
+        }
+        RobotNetworkTables nt = robotCore.networkTables();
+        RobotNetworkTables.Node mechNode = resolveDefaultMechanismNode(nt.root().child("Mechanisms"));
+        return nt.mechanismConfig(mechNode);
+    }
+
+    private void publishNetworkTables(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return;
+        }
+        RobotNetworkTables nt = node.robot();
+        if (!nt.isPublishingEnabled()) {
+            return;
         }
 
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SETPOINTS)) {
-            ShuffleboardLayout setpointLayout = container.getLayout("Setpoints", BuiltInLayouts.kList);
-            setpointLayout.addDouble("Nudge", RobotSendableSystem.rateLimit(() -> cachedNudge, period));
+        String name = getName();
+        RobotNetworkTables.Node info = node.child("Info");
+        info.putString("name", name != null ? name : "");
+        info.putString("type", getNetworkTablesTypeName());
+        info.putString("owner", getNetworkTablesOwnerPath() != null ? getNetworkTablesOwnerPath() : "");
+        info.putString("hint",
+                "Enable " + node.path() + "/NetworkTableConfig/Details (and .../Advanced) to publish more topics.");
+
+        RobotNetworkTables.MechanismToggles toggles = nt.mechanismConfig(node);
+        boolean details = toggles.detailsEnabled();
+        boolean advanced = toggles.advancedEnabled();
+        if (!details) {
+            return;
         }
 
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_OUTPUTS)) {
-            ShuffleboardLayout outputLayout = container.getLayout("Outputs", BuiltInLayouts.kList);
-            outputLayout.addDouble("PID Output", RobotSendableSystem.rateLimit(() -> cachedPidOutput, period));
-            outputLayout.addDouble("Feedforward Output", RobotSendableSystem.rateLimit(() -> cachedFeedforwardOutput, period));
+        if (toggles.motorsEnabled()) {
+            motors.networkTables(node.child("Motors"));
         }
 
-        if (RobotBase.isSimulation() && ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_SIMULATION)) {
-            ShuffleboardLayout simulationLayout = container.getLayout("Simulation", BuiltInLayouts.kList);
-            simulationLayout.addDouble("Simulation dt", RobotSendableSystem.rateLimit(() -> cachedSimulationUpdatePeriodSeconds, period));
+        if (encoder != null && toggles.encodersEnabled()) {
+            encoder.networkTables(node.child("Encoder"));
         }
 
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_CONFIG)) {
-            ShuffleboardLayout configLayout = container.getLayout("Config", BuiltInLayouts.kList);
-            configLayout.addString("Output Type", RobotSendableSystem.rateLimit(() -> outputType.name(), period));
-            configLayout.add("Use Absolute", builder ->
-                    builder.addBooleanProperty(
-                            "Use Absolute",
-                            RobotSendableSystem.rateLimit(() -> cachedUseAbsolute, period),
-                            this::setUseAbsolute));
-            configLayout.add("Setpoint As Output", builder ->
-                    builder.addBooleanProperty(
-                            "Setpoint As Output",
-                            RobotSendableSystem.rateLimit(() -> cachedSetpointAsOutput, period),
-                            this::setSetpointAsOutput));
-            configLayout.add("PID Period (s)", builder ->
-                    builder.addDoubleProperty(
-                            "PID Period (s)",
-                            RobotSendableSystem.rateLimit(() -> cachedPidPeriod, period),
-                            this::setPidPeriod));
-            configLayout.addBoolean("Feedforward Enabled", RobotSendableSystem.rateLimit(() -> cachedFeedforwardEnabled, period));
-            configLayout.addBoolean("PID Enabled", RobotSendableSystem.rateLimit(() -> cachedPidEnabled, period));
+        if (toggles.statusEnabled()) {
+            RobotNetworkTables.Node status = node.child("Status");
+            status.putBoolean("emergencyStopped", cachedEmergencyStopped);
+            status.putBoolean("override", cachedOverride);
+            status.putBoolean("atSetpoint", cachedAtSetpoint);
+            status.putBoolean("pidEnabled", cachedPidEnabled);
+            status.putBoolean("feedforwardEnabled", cachedFeedforwardEnabled);
         }
 
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_LIMIT_SWITCHES)) {
-            ShuffleboardLayout limitsLayout = container.getLayout("Limit Switches", BuiltInLayouts.kList);
-            for (GenericLimitSwitch genericLimitSwitch : limitSwitches) {
-                ShuffleboardLayout limitLayout =
-                        limitsLayout.getLayout("DIO " + genericLimitSwitch.getPort(), BuiltInLayouts.kList);
-                genericLimitSwitch.shuffleboard(limitLayout);
-                sensorSimulation.decorateSensorLayout(genericLimitSwitch, limitLayout, SendableLevel.DEBUG);
+        if (toggles.setpointsEnabled()) {
+            RobotNetworkTables.Node setpointsNode = node.child("Setpoints");
+            setpointsNode.putDouble("setpoint", cachedSetpoint);
+            if (advanced) {
+                setpointsNode.putDouble("nudge", cachedNudge);
             }
         }
 
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_COMMANDS)) {
-            ShuffleboardLayout commandsLayout = container.getLayout("Commands", BuiltInLayouts.kList);
-            commandsLayout.add("Enable/Disable PID", new InstantCommand(() -> setPidEnabled(!pidEnabled)))
-                    .withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Enable/Disable FeedForward", new InstantCommand(() -> setFeedforwardEnabled(!feedforwardEnabled)))
-                    .withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Enable/Disable Override", new InstantCommand(() -> setOverride(!override)))
-                    .withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Enable/Disable Emergency Stop", new InstantCommand(() -> setEmergencyStopped(!emergencyStopped)))
-                    .withWidget(BuiltInWidgets.kCommand);
+        if (toggles.outputsEnabled()) {
+            RobotNetworkTables.Node outputsNode = node.child("Outputs");
+            outputsNode.putDouble("output", cachedOutput);
+            if (advanced) {
+                outputsNode.putDouble("pidOutput", cachedPidOutput);
+                outputsNode.putDouble("feedforwardOutput", cachedFeedforwardOutput);
+            }
         }
 
-        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MECHANISM_CONTROLLERS)) {
-            ShuffleboardLayout controllersLayout = container.getLayout("Controllers", BuiltInLayouts.kList);
-            if (pidController != null) {
-                controllersLayout.add("PID Controller", pidController);
+        if (RobotBase.isSimulation() && toggles.simulationEnabled()) {
+            RobotNetworkTables.Node simNode = node.child("Simulation");
+            simNode.putBoolean("enabled", cachedHasSimulation);
+            if (advanced) {
+                simNode.putDouble("dtSec", cachedSimulationUpdatePeriodSeconds);
             }
-            if (profiledPIDController != null) {
-                controllersLayout.add("Profiled PID Controller", profiledPIDController);
-            }
+        }
+
+        if (advanced && toggles.sysIdEnabled()) {
+            RobotNetworkTables.Node sysid = node.child("SysId");
+            sysid.putDouble("rampRateVPerSec", cachedSysIdRampRate);
+            sysid.putDouble("stepVoltageV", cachedSysIdStepVoltage);
+            sysid.putDouble("timeoutSec", cachedSysIdTimeoutSeconds);
+            sysid.putBoolean("active", cachedSysIdActive);
         }
     }
 

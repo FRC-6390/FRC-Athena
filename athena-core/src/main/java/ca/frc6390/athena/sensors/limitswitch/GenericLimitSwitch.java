@@ -1,7 +1,7 @@
 package ca.frc6390.athena.sensors.limitswitch;
 
+import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.sensors.EnhancedDigitalInput;
-import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardLayout;
 import java.util.function.BooleanSupplier;
 public class GenericLimitSwitch extends EnhancedDigitalInput {
 
@@ -135,13 +135,15 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
     }
 
     @Override
-    public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout) {
-        super.shuffleboard(layout);
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        layout.addDouble("Block Direction", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getBlockDirectionMultiplier, period));
-        layout.addBoolean("Is Hardstop", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::isHardstop, period));
-        layout.addDouble("Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getPosition, period));
-        return layout;
+    public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
+        node = super.networkTables(node);
+        if (node == null || !node.robot().isPublishingEnabled()) {
+            return node;
+        }
+        node.putDouble("blockDirection", getBlockDirectionMultiplier());
+        node.putBoolean("hardstop", isHardstop());
+        node.putDouble("position", getPosition());
+        return node;
     }
     
 }

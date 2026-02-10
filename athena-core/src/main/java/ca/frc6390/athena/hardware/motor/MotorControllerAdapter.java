@@ -12,7 +12,6 @@ public class MotorControllerAdapter implements MotorController {
     private final MotorController raw;
     private final MotorControllerConfig config;
     private Encoder wrappedEncoder;
-    private double shuffleboardPeriodSecondsOverride = Double.NaN;
     private final int cachedId;
     private final String cachedCanbus;
     private final String cachedTypeKey;
@@ -168,24 +167,6 @@ public class MotorControllerAdapter implements MotorController {
         raw.update();
         cachedConnected = raw.isConnected();
         cachedTemperatureCelsius = raw.getTemperatureCelsius();
-    }
-
-    @Override
-    public double getShuffleboardPeriodSeconds() {
-        return Double.isFinite(shuffleboardPeriodSecondsOverride) && shuffleboardPeriodSecondsOverride > 0.0
-                ? shuffleboardPeriodSecondsOverride
-                : ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds();
-    }
-
-    @Override
-    public void setShuffleboardPeriodSeconds(double periodSeconds) {
-        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
-            shuffleboardPeriodSecondsOverride = Double.NaN;
-            raw.setShuffleboardPeriodSeconds(ca.frc6390.athena.core.RobotSendableSystem.getDefaultShuffleboardPeriodSeconds());
-            return;
-        }
-        shuffleboardPeriodSecondsOverride = periodSeconds;
-        raw.setShuffleboardPeriodSeconds(periodSeconds);
     }
 
     @Override

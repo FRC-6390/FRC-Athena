@@ -37,6 +37,11 @@ public class ChoreoAutoBackend implements AutoBackend {
     }
 
     @Override
+    public int priority(RobotAuto.AutoSource source) {
+        return source == RobotAuto.AutoSource.CHOREO ? 100 : 0;
+    }
+
+    @Override
     public boolean registerNamedCommand(String id, Supplier<Command> supplier) {
         if (id == null || id.isBlank() || supplier == null) {
             return false;
