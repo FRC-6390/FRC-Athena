@@ -50,6 +50,8 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     public Map<S, List<Binding<SP>>> bindings = new HashMap<>();
     public List<Binding<SP>> alwaysBindings = new ArrayList<>();
     public List<Binding<SP>> periodicBindings = new ArrayList<>();
+    /** Optional hooks that run once during robot init after all mechanisms/superstructures are registered. */
+    public List<Binding<SP>> initBindings = new ArrayList<>();
     public Map<S, List<Binding<SP>>> exitBindings = new HashMap<>();
     public List<Binding<SP>> exitAlwaysBindings = new ArrayList<>();
     private SP initialSetpoint;
@@ -447,6 +449,16 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         public HooksSection<S, SP> onRobotPeriodic(Binding<SP> binding) {
             Objects.requireNonNull(binding, "binding");
             owner.periodicBindings.add(binding);
+            return this;
+        }
+
+        /**
+         * Registers a hook that runs once during {@code RobotCore.robotInit()} after all mechanisms
+         * (and superstructures) have been registered with the {@code RobotCore}.
+         */
+        public HooksSection<S, SP> onInit(Binding<SP> binding) {
+            Objects.requireNonNull(binding, "binding");
+            owner.initBindings.add(binding);
             return this;
         }
     }

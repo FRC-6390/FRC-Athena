@@ -5,9 +5,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
@@ -320,8 +322,54 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (robotNetworkTables.isPublishingEnabled() && robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
             publishNetworkTablesMechanisms();
         }
+        runInitHooks();
         onRobotInit();
         registerPIDCycles();
+    }
+
+    private void runInitHooks() {
+        runMechanismInitHooks();
+        runSuperstructureInitHooks();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void runMechanismInitHooks() {
+        if (mechanisms == null || mechanisms.isEmpty()) {
+            return;
+        }
+        for (Mechanism mech : mechanisms.values()) {
+            if (mech == null) {
+                continue;
+            }
+            var cfg = mech.getSourceConfig();
+            if (cfg == null || cfg.initHooks == null || cfg.initHooks.isEmpty()) {
+                continue;
+            }
+            for (Consumer<?> hook : cfg.initHooks) {
+                if (hook == null) {
+                    continue;
+                }
+                ((Consumer<Mechanism>) hook).accept(mech);
+            }
+        }
+    }
+
+    private void runSuperstructureInitHooks() {
+        if (superstructuresByName == null || superstructuresByName.isEmpty()) {
+            return;
+        }
+        Set<SuperstructureMechanism<?, ?>> visited = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (SuperstructureMechanism<?, ?> top : superstructuresByName.values()) {
+            if (top == null) {
+                continue;
+            }
+            for (SuperstructureMechanism<?, ?> superstructure : top.flattenSuperstructures()) {
+                if (superstructure == null || !visited.add(superstructure)) {
+                    continue;
+                }
+                superstructure.runInitHooks();
+            }
+        }
     }
 
     private void startConfigServerIfNeeded() {

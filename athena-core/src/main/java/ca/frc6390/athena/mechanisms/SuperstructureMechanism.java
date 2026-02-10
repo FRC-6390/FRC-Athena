@@ -608,6 +608,50 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return sourceConfig;
     }
 
+    /**
+     * Runs any init hooks registered on the {@link SuperstructureConfig}.
+     *
+     * <p>This is invoked by {@code RobotCore.robotInit()} after registration so hooks can safely
+     * reference other mechanisms/superstructures via the context.</p>
+     */
+    @SuppressWarnings("unchecked")
+    public void runInitHooks() {
+        if (sourceConfig == null) {
+            return;
+        }
+        SuperstructureConfig<S, SP> cfg = (SuperstructureConfig<S, SP>) sourceConfig;
+        if (cfg.initBindings == null || cfg.initBindings.isEmpty()) {
+            return;
+        }
+        for (SuperstructureConfig.Binding<SP> binding : cfg.initBindings) {
+            if (binding == null) {
+                continue;
+            }
+            binding.apply(context);
+        }
+    }
+
+    /**
+     * Returns a flattened list of this superstructure and all nested superstructures.
+     */
+    public List<SuperstructureMechanism<?, ?>> flattenSuperstructures() {
+        List<SuperstructureMechanism<?, ?>> out = new ArrayList<>();
+        flattenSuperstructures(out, this);
+        return out;
+    }
+
+    private static void flattenSuperstructures(List<SuperstructureMechanism<?, ?>> out, SuperstructureMechanism<?, ?> mech) {
+        if (mech == null) {
+            return;
+        }
+        out.add(mech);
+        for (Child<?, ?> child : mech.children) {
+            if (child != null && child.superstructure != null) {
+                flattenSuperstructures(out, child.superstructure);
+            }
+        }
+    }
+
     private static void propagateRobotCore(RobotCore<?> robotCore, SuperstructureMechanism<?, ?> mech) {
         for (Child<?, ?> child : mech.children) {
             if (child.mechanism != null) {
