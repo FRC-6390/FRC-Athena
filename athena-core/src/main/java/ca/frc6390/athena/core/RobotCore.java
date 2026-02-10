@@ -26,6 +26,7 @@ import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanism;
+import ca.frc6390.athena.mechanisms.RegisterableMechanismFactory;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
 import ca.frc6390.athena.logging.TelemetryRegistry;
@@ -231,6 +232,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private boolean autoInitResetEnabled;
     private NetworkTableEntry autoInitResetEntry;
     private final List<RegisterableMechanism> configuredMechanisms;
+    private boolean configuredMechanismsRegistered;
     private final boolean timingDebugEnabled;
     private final boolean telemetryEnabled;
     private boolean mechanismsNetworkTablesPublished;
@@ -259,6 +261,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         telemetry = TelemetryRegistry.create(config.telemetryConfig());
         autoInitResetEnabled = config.autoInitResetEnabled();
         configuredMechanisms = config.mechanisms() != null ? List.copyOf(config.mechanisms()) : List.of();
+        configuredMechanismsRegistered = false;
         timingDebugEnabled = config.timingDebugEnabled();
         telemetryEnabled = config.telemetryEnabled();
         if (config.performanceMode()) {
@@ -297,6 +300,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             });
             visionSimNotifier.startPeriodic(0.02);
         }
+
+        // Make declared mechanisms available immediately after RobotCore construction (before subclass
+        // constructors run). robotInit() still calls this, but it is guarded to prevent duplicates.
+        registerConfiguredMechanisms();
     }
 
     @Override
@@ -662,6 +669,17 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (entry == null) {
                 continue;
             }
+            if (entry instanceof RegisterableMechanismFactory factory) {
+                RegisterableMechanism built = factory.build();
+                if (built == null) {
+                    continue;
+                }
+                if (built == entry) {
+                    throw new IllegalStateException("RegisterableMechanismFactory returned itself.");
+                }
+                registerMechanism(built);
+                continue;
+            }
             if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
                 registerSuperstructureInternal(superstructure);
                 RobotNetworkTables.Node superNode =
@@ -676,6 +694,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private void registerConfiguredMechanisms() {
+        if (configuredMechanismsRegistered) {
+            return;
+        }
+        configuredMechanismsRegistered = true;
         if (configuredMechanisms.isEmpty()) {
             return;
         }
@@ -830,6 +852,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         RobotNetworkTables.Node root = robotNetworkTables.root();
+        publishConfigExportUrls(root);
         drivetrain.networkTables(root.child(drive));
         if (localization != null) {
             localization.networkTables(root.child(local));
@@ -840,6 +863,35 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
         coreNetworkTablesPublished = true;
         return this;
+    }
+
+    private void publishConfigExportUrls(RobotNetworkTables.Node root) {
+        if (root == null) {
+            return;
+        }
+        RobotNetworkTables.Node cfg = root.child("Config");
+        String base = configServerBaseUrl;
+        cfg.putString("baseUrl", base != null ? base : "");
+        root.putString("configBaseUrl", base != null ? base : "");
+        if (base == null || base.isBlank()) {
+            cfg.putString("indexUrlJson", "");
+            cfg.putString("indexUrlToml", "");
+            cfg.putString("allZipUrl", "");
+            cfg.putString("mechanismsBaseUrl", "");
+            root.putString("configIndexUrlJson", "");
+            root.putString("configIndexUrlToml", "");
+            root.putString("configAllZipUrl", "");
+            root.putString("configMechanismsBaseUrl", "");
+            return;
+        }
+        cfg.putString("indexUrlJson", base + "/Athena/config/index.json");
+        cfg.putString("indexUrlToml", base + "/Athena/config/index.toml");
+        cfg.putString("allZipUrl", base + "/Athena/config/all.zip");
+        cfg.putString("mechanismsBaseUrl", base + "/Athena/config/mechanisms/");
+        root.putString("configIndexUrlJson", base + "/Athena/config/index.json");
+        root.putString("configIndexUrlToml", base + "/Athena/config/index.toml");
+        root.putString("configAllZipUrl", base + "/Athena/config/all.zip");
+        root.putString("configMechanismsBaseUrl", base + "/Athena/config/mechanisms/");
     }
 
     /**

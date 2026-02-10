@@ -2242,7 +2242,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return null;
         }
         String encoded = java.net.URLEncoder.encode(n, java.nio.charset.StandardCharsets.UTF_8);
-        return base + "/athena/config/mechanisms/" + encoded + "." + ext;
+        // Prefer the canonical /Athena path (server also exposes /athena aliases).
+        return base + "/Athena/config/mechanisms/" + encoded + "." + ext;
     }
 
     public Mechanism2d getMechanism2d() {

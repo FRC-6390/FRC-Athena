@@ -88,6 +88,8 @@ public class MechanismConfig<T extends Mechanism> {
     public List<MechanismBinding<T, ?>> exitAlwaysHooks = new ArrayList<>();
     /** Optional hooks that run every loop regardless of the active state. */
     public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
+    /** Optional hooks that run once during robot init after all mechanisms are registered. */
+    public List<Consumer<T>> initHooks = new ArrayList<>();
     /** Optional state triggers that can enqueue states when a predicate becomes true. */
     public List<StateTriggerBinding<T>> stateTriggerBindings = new ArrayList<>();
     /** Optional hooks that run every periodic loop. */
@@ -1027,6 +1029,16 @@ public class MechanismConfig<T extends Mechanism> {
         public HooksSection<T> onRobotPeriodic(Consumer<T> hook) {
             Objects.requireNonNull(hook, "hook");
             owner.periodicHooks.add(hook);
+            return this;
+        }
+
+        /**
+         * Registers a hook that runs once during {@code RobotCore.robotInit()} after all mechanisms
+         * (and superstructures) have been registered with the {@code RobotCore}.
+         */
+        public HooksSection<T> onInit(Consumer<T> hook) {
+            Objects.requireNonNull(hook, "hook");
+            owner.initHooks.add(hook);
             return this;
         }
 

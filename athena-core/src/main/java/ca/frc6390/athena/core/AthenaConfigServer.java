@@ -30,10 +30,11 @@ import com.sun.net.httpserver.HttpServer;
  * Small HTTP server that exposes data-only mechanism configs from the running robot.
  *
  * <p>Endpoints:
- * - /athena/config/index.json
- * - /athena/config/mechanisms/{name}.json
- * - /athena/config/mechanisms/{name}.toml
- * - /athena/config/all.zip
+ * - /Athena/config/index.json (also available at /athena/config/index.json)
+ * - /Athena/config/index.toml (also available at /athena/config/index.toml)
+ * - /Athena/config/mechanisms/{name}.json (also available at /athena/config/mechanisms/{name}.json)
+ * - /Athena/config/mechanisms/{name}.toml (also available at /athena/config/mechanisms/{name}.toml)
+ * - /Athena/config/all.zip (also available at /athena/config/all.zip)
  */
 public final class AthenaConfigServer {
     private static final ObjectMapper INDEX_MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
@@ -54,9 +55,17 @@ public final class AthenaConfigServer {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress(p), 0);
             AthenaConfigServer instance = new AthenaConfigServer(robot, server, p);
-            server.createContext("/athena/config/index.json", instance::handleIndex);
+            // Provide both /athena and /Athena paths for convenience (HTTP paths are case-sensitive).
+            server.createContext("/athena/config/index.json", instance::handleIndexJson);
+            server.createContext("/Athena/config/index.json", instance::handleIndexJson);
+            server.createContext("/athena/config/index.toml", instance::handleIndexToml);
+            server.createContext("/Athena/config/index.toml", instance::handleIndexToml);
+
             server.createContext("/athena/config/all.zip", instance::handleAllZip);
+            server.createContext("/Athena/config/all.zip", instance::handleAllZip);
+
             server.createContext("/athena/config/mechanisms", instance::handleMechanisms);
+            server.createContext("/Athena/config/mechanisms", instance::handleMechanisms);
             server.setExecutor(Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "AthenaConfigServer");
                 t.setDaemon(true);
@@ -86,13 +95,23 @@ public final class AthenaConfigServer {
         return "http://" + host + ":" + port;
     }
 
-    private void handleIndex(HttpExchange ex) throws IOException {
+    private static String athenaPathPrefix(URI uri) {
+        // Decide which path prefix to advertise in links. Prefer /Athena by default.
+        String path = uri != null ? uri.getPath() : "";
+        if (path != null && path.startsWith("/athena/")) {
+            return "/athena";
+        }
+        return "/Athena";
+    }
+
+    private void handleIndexJson(HttpExchange ex) throws IOException {
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
             sendText(ex, 405, "Method Not Allowed\n", "text/plain; charset=utf-8");
             return;
         }
         List<Object> mechanisms = new ArrayList<>();
         String base = baseUrl();
+        String prefix = athenaPathPrefix(ex.getRequestURI());
         for (Map.Entry<String, Mechanism> e : robot.getMechanisms().entrySet()) {
             if (e == null || e.getKey() == null || e.getValue() == null) {
                 continue;
@@ -101,11 +120,15 @@ public final class AthenaConfigServer {
             String enc = java.net.URLEncoder.encode(name, StandardCharsets.UTF_8);
             mechanisms.add(Map.of(
                     "name", name,
-                    "json", base + "/athena/config/mechanisms/" + enc + ".json",
-                    "toml", base + "/athena/config/mechanisms/" + enc + ".toml"));
+                    "json", base + prefix + "/config/mechanisms/" + enc + ".json",
+                    "toml", base + prefix + "/config/mechanisms/" + enc + ".toml"));
         }
         Map<String, Object> index = Map.of(
                 "baseUrl", base,
+                "indexJsonUrl", base + prefix + "/config/index.json",
+                "indexTomlUrl", base + prefix + "/config/index.toml",
+                "allZipUrl", base + prefix + "/config/all.zip",
+                "mechanismsBaseUrl", base + prefix + "/config/mechanisms/",
                 "mechanisms", mechanisms);
         String json;
         try {
@@ -116,6 +139,38 @@ public final class AthenaConfigServer {
         sendText(ex, 200, json + "\n", "application/json; charset=utf-8");
     }
 
+    private void handleIndexToml(HttpExchange ex) throws IOException {
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendText(ex, 405, "Method Not Allowed\n", "text/plain; charset=utf-8");
+            return;
+        }
+        String base = baseUrl();
+        String prefix = athenaPathPrefix(ex.getRequestURI());
+
+        StringBuilder sb = new StringBuilder(2048);
+        sb.append("baseUrl = ").append(tomlQuote(base)).append("\n");
+        sb.append("indexJsonUrl = ").append(tomlQuote(base + prefix + "/config/index.json")).append("\n");
+        sb.append("indexTomlUrl = ").append(tomlQuote(base + prefix + "/config/index.toml")).append("\n");
+        sb.append("allZipUrl = ").append(tomlQuote(base + prefix + "/config/all.zip")).append("\n");
+        sb.append("mechanismsBaseUrl = ").append(tomlQuote(base + prefix + "/config/mechanisms/")).append("\n");
+        sb.append("\n");
+
+        for (Map.Entry<String, Mechanism> e : robot.getMechanisms().entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            String name = e.getKey();
+            String enc = java.net.URLEncoder.encode(name, StandardCharsets.UTF_8);
+            sb.append("[[mechanisms]]\n");
+            sb.append("name = ").append(tomlQuote(name)).append("\n");
+            sb.append("json = ").append(tomlQuote(base + prefix + "/config/mechanisms/" + enc + ".json")).append("\n");
+            sb.append("toml = ").append(tomlQuote(base + prefix + "/config/mechanisms/" + enc + ".toml")).append("\n");
+            sb.append("\n");
+        }
+
+        sendText(ex, 200, sb + "\n", "application/toml; charset=utf-8");
+    }
+
     private void handleMechanisms(HttpExchange ex) throws IOException {
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
             sendText(ex, 405, "Method Not Allowed\n", "text/plain; charset=utf-8");
@@ -123,9 +178,15 @@ public final class AthenaConfigServer {
         }
         URI uri = ex.getRequestURI();
         String path = uri != null ? uri.getPath() : "";
-        // Expect: /athena/config/mechanisms/{name}.{ext}
-        String prefix = "/athena/config/mechanisms/";
-        if (!path.startsWith(prefix)) {
+        // Expect: /athena/config/mechanisms/{name}.{ext} (or /Athena/config/...)
+        String prefixLower = "/athena/config/mechanisms/";
+        String prefixUpper = "/Athena/config/mechanisms/";
+        String prefix;
+        if (path.startsWith(prefixLower)) {
+            prefix = prefixLower;
+        } else if (path.startsWith(prefixUpper)) {
+            prefix = prefixUpper;
+        } else {
             sendText(ex, 404, "Not Found\n", "text/plain; charset=utf-8");
             return;
         }
@@ -153,6 +214,30 @@ public final class AthenaConfigServer {
             return;
         }
         sendText(ex, 404, "Not Found\n", "text/plain; charset=utf-8");
+    }
+
+    private static String tomlQuote(String s) {
+        if (s == null) {
+            return "\"\"";
+        }
+        StringBuilder out = new StringBuilder(s.length() + 2);
+        out.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' || c == '"') {
+                out.append('\\').append(c);
+            } else if (c == '\n') {
+                out.append("\\n");
+            } else if (c == '\r') {
+                out.append("\\r");
+            } else if (c == '\t') {
+                out.append("\\t");
+            } else {
+                out.append(c);
+            }
+        }
+        out.append('"');
+        return out.toString();
     }
 
     private void handleAllZip(HttpExchange ex) throws IOException {
