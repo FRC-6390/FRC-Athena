@@ -115,24 +115,29 @@ public class EnhancedDigitalInput extends RunnableTrigger implements RobotSendab
 
     @Override
     public ShuffleboardLayout shuffleboard(ShuffleboardLayout layout, SendableLevel level) {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+
         if (level == SendableLevel.DEBUG) {
             if (layout == lastShuffleboardLayoutDebug) {
                 return layout;
             }
+            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
             lastShuffleboardLayoutDebug = layout;
-            lastShuffleboardLayoutComp = layout;
-        } else {
-            if (layout == lastShuffleboardLayoutComp) {
-                return layout;
-            }
-            lastShuffleboardLayoutComp = layout;
-        }
 
-        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-        if(level.equals(SendableLevel.DEBUG)){ 
+            // DEBUG after COMP: only add DEBUG-only titles (Value would already exist and would throw).
             layout.addBoolean("Inverted", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::isInverted, period));
             layout.addDouble("Port", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getPort, period));
+            if (!compAlreadyBuilt) {
+                lastShuffleboardLayoutComp = layout;
+                layout.addBoolean("Value", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAsBoolean, period));
+            }
+            return layout;
         }
+
+        if (layout == lastShuffleboardLayoutComp) {
+            return layout;
+        }
+        lastShuffleboardLayoutComp = layout;
         layout.addBoolean("Value", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAsBoolean, period));
         return layout;
     }

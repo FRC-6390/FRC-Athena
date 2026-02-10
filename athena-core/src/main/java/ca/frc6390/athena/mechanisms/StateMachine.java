@@ -270,41 +270,26 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
             if (layout == lastShuffleboardLayoutDebug) {
                 return layout;
             }
+            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
             lastShuffleboardLayoutDebug = layout;
-            lastShuffleboardLayoutComp = layout;
-        } else {
-            if (layout == lastShuffleboardLayoutComp) {
-                return layout;
+            if (!compAlreadyBuilt) {
+                lastShuffleboardLayoutComp = layout;
+                publishCommon(layout);
             }
-            lastShuffleboardLayoutComp = layout;
+            publishDebugOnly(layout);
+            return layout;
         }
 
+        if (layout == lastShuffleboardLayoutComp) {
+            return layout;
+        }
+        lastShuffleboardLayoutComp = layout;
+        publishCommon(layout);
+        return layout;
+    }
+
+    private void publishCommon(ShuffleboardLayout layout) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
-
-        if(level.equals(SendableLevel.DEBUG)){
-            layout.add("State Chooser", chooser);
-            layout.add("Set State", new InstantCommand(() -> goalState = chooser.getSelected())).withWidget(BuiltInWidgets.kCommand);
-            layout.add("Queue State", new InstantCommand(() -> queueState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
-            layout.add("Reset Queue", new InstantCommand(() -> resetQueue())).withWidget(BuiltInWidgets.kCommand);
-
-            if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.STATE_MACHINE_STATES_LIST)) {
-                ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
-                for (E state: goalState.getDeclaringClass().getEnumConstants()){
-                    Object setpoint = state.getSetpoint();
-                    if (setpoint instanceof Number number) {
-                        statesLayout.addNumber(state.name(),
-                                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(number::doubleValue, period));
-                    } else if (setpoint instanceof Boolean bool) {
-                        statesLayout.addBoolean(state.name(),
-                                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(bool::booleanValue, period));
-                    } else {
-                        statesLayout.addString(state.name(),
-                                ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> String.valueOf(setpoint), period));
-                    }
-                }
-            }
-        }
-    
         layout.addString("Goal State",
                 ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> this.getGoalState().name(), period));
         layout.addString("Next State",
@@ -313,7 +298,30 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
                 ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getNextStateQueue, period));
         layout.addBoolean("Should Change State",
                 ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::shouldChangeState, period));
+    }
 
-        return layout;
+    private void publishDebugOnly(ShuffleboardLayout layout) {
+        java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
+        layout.add("State Chooser", chooser);
+        layout.add("Set State", new InstantCommand(() -> goalState = chooser.getSelected())).withWidget(BuiltInWidgets.kCommand);
+        layout.add("Queue State", new InstantCommand(() -> queueState(chooser.getSelected()))).withWidget(BuiltInWidgets.kCommand);
+        layout.add("Reset Queue", new InstantCommand(() -> resetQueue())).withWidget(BuiltInWidgets.kCommand);
+
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.STATE_MACHINE_STATES_LIST)) {
+            ShuffleboardLayout statesLayout = layout.getLayout("States", BuiltInLayouts.kList);
+            for (E state: goalState.getDeclaringClass().getEnumConstants()){
+                Object setpoint = state.getSetpoint();
+                if (setpoint instanceof Number number) {
+                    statesLayout.addNumber(state.name(),
+                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(number::doubleValue, period));
+                } else if (setpoint instanceof Boolean bool) {
+                    statesLayout.addBoolean(state.name(),
+                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(bool::booleanValue, period));
+                } else {
+                    statesLayout.addString(state.name(),
+                            ca.frc6390.athena.core.RobotSendableSystem.rateLimit(() -> String.valueOf(setpoint), period));
+                }
+            }
+        }
     }
 }

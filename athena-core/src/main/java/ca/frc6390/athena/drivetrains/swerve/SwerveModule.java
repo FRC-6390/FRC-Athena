@@ -406,15 +406,26 @@ public class SwerveModule implements RobotSendableDevice {
             if (layout == lastShuffleboardLayoutDebug) {
                 return layout;
             }
+            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
             lastShuffleboardLayoutDebug = layout;
-            lastShuffleboardLayoutComp = layout;
-        } else {
-            if (layout == lastShuffleboardLayoutComp) {
-                return layout;
+
+            if (!compAlreadyBuilt) {
+                lastShuffleboardLayoutComp = layout;
+                publishCommon(layout);
             }
-            lastShuffleboardLayoutComp = layout;
+            publishDebugOnly(layout);
+            return layout;
         }
 
+        if (layout == lastShuffleboardLayoutComp) {
+            return layout;
+        }
+        lastShuffleboardLayoutComp = layout;
+        publishCommon(layout);
+        return layout;
+    }
+
+    private void publishCommon(ShuffleboardLayout layout) {
         layout.withProperties(Map.of("Number of columns", 1, "Number of rows", 2));
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         layout.addDouble(
@@ -425,19 +436,19 @@ public class SwerveModule implements RobotSendableDevice {
             .withSize(1, 1)
             .withPosition(1, 2);
         encoder.shuffleboard(layout.getLayout("Encoder", BuiltInLayouts.kList));
-        if(level.equals(SendableLevel.DEBUG) && ShuffleboardControls.enabled(ShuffleboardControls.Flag.SWERVE_MODULE_DEBUG)){
-            driveMotor.shuffleboard(layout.getLayout("Drive Motor", BuiltInLayouts.kList));
-            rotationMotor.shuffleboard(layout.getLayout("Steer Motor", BuiltInLayouts.kList));
-            
-            
-            ShuffleboardLayout commandsLayout = layout.getLayout("Quick Commands",BuiltInLayouts.kList);
-            commandsLayout.add("Set Offset", new InstantCommand(() -> setOffset(encoder.getRawAbsoluteValue()))).withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Zero Offset", new InstantCommand(() -> setOffset(0))).withWidget(BuiltInWidgets.kCommand);
-            commandsLayout.add("Clear Offset", new InstantCommand(() -> setOffset(startUpOffset))).withWidget(BuiltInWidgets.kCommand);
-        }
-        
+    }
 
-        return layout;
+    private void publishDebugOnly(ShuffleboardLayout layout) {
+        if (!ShuffleboardControls.enabled(ShuffleboardControls.Flag.SWERVE_MODULE_DEBUG)) {
+            return;
+        }
+        driveMotor.shuffleboard(layout.getLayout("Drive Motor", BuiltInLayouts.kList));
+        rotationMotor.shuffleboard(layout.getLayout("Steer Motor", BuiltInLayouts.kList));
+
+        ShuffleboardLayout commandsLayout = layout.getLayout("Quick Commands", BuiltInLayouts.kList);
+        commandsLayout.add("Set Offset", new InstantCommand(() -> setOffset(encoder.getRawAbsoluteValue()))).withWidget(BuiltInWidgets.kCommand);
+        commandsLayout.add("Zero Offset", new InstantCommand(() -> setOffset(0))).withWidget(BuiltInWidgets.kCommand);
+        commandsLayout.add("Clear Offset", new InstantCommand(() -> setOffset(startUpOffset))).withWidget(BuiltInWidgets.kCommand);
     }
 
     @Override

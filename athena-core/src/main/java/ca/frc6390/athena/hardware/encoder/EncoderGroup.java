@@ -161,15 +161,25 @@ public class EncoderGroup implements RobotSendableDevice {
             if (layout == lastShuffleboardLayoutDebug) {
                 return layout;
             }
+            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
             lastShuffleboardLayoutDebug = layout;
-            lastShuffleboardLayoutComp = layout;
-        } else {
-            if (layout == lastShuffleboardLayoutComp) {
-                return layout;
+            if (!compAlreadyBuilt) {
+                lastShuffleboardLayoutComp = layout;
+                publishCommon(layout);
             }
-            lastShuffleboardLayoutComp = layout;
+            // No debug-only widgets today; avoid re-adding titles.
+            return layout;
         }
 
+        if (layout == lastShuffleboardLayoutComp) {
+            return layout;
+        }
+        lastShuffleboardLayoutComp = layout;
+        publishCommon(layout);
+        return layout;
+    }
+
+    private void publishCommon(ShuffleboardLayout layout) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
         summary.addDouble("Average Position", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getCachedPosition, period));
@@ -182,9 +192,8 @@ public class EncoderGroup implements RobotSendableDevice {
             Arrays.stream(encoders)
                     .filter(Objects::nonNull)
                     .forEach(encoder ->
-                            encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), level));
+                            encoder.shuffleboard(layout.getLayout(encoder.getName(), BuiltInLayouts.kList), SendableLevel.COMP));
         }
-        return layout;
     }
 
     private double getCachedPosition() {

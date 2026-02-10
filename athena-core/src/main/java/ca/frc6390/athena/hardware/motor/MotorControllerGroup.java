@@ -152,27 +152,44 @@ public class MotorControllerGroup implements RobotSendableDevice {
             if (layout == lastShuffleboardLayoutDebug) {
                 return layout;
             }
+
+            boolean compAlreadyBuilt = (layout == lastShuffleboardLayoutComp);
             lastShuffleboardLayoutDebug = layout;
-            lastShuffleboardLayoutComp = layout;
-        } else {
-            if (layout == lastShuffleboardLayoutComp) {
-                return layout;
+            if (!compAlreadyBuilt) {
+                lastShuffleboardLayoutComp = layout;
+                publishCommon(layout);
             }
-            lastShuffleboardLayoutComp = layout;
+            publishDebugOnly(layout);
+            return layout;
         }
 
+        if (layout == lastShuffleboardLayoutComp) {
+            return layout;
+        }
+        lastShuffleboardLayoutComp = layout;
+        publishCommon(layout);
+        return layout;
+    }
+
+    private void publishCommon(ShuffleboardLayout layout) {
         java.util.function.DoubleSupplier period = this::getShuffleboardPeriodSeconds;
         ShuffleboardLayout summary = layout.getLayout("Summary", BuiltInLayouts.kList);
         summary.addBoolean("All Connected", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::allMotorsCachedConnected, period));
         summary.addDouble("Average Temp (C)", ca.frc6390.athena.core.RobotSendableSystem.rateLimit(this::getAverageCachedTemperatureCelsius, period));
-        if (encoders != null && level.equals(SendableLevel.DEBUG)) {
-            encoders.shuffleboard(layout.getLayout("Encoders", BuiltInLayouts.kList), level);
+        if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MOTOR_GROUP_PER_MOTOR)) {
+            Arrays.stream(controllers).forEach(motorController ->
+                    motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList), SendableLevel.COMP));
+        }
+    }
+
+    private void publishDebugOnly(ShuffleboardLayout layout) {
+        if (encoders != null) {
+            encoders.shuffleboard(layout.getLayout("Encoders", BuiltInLayouts.kList), SendableLevel.DEBUG);
         }
         if (ShuffleboardControls.enabled(ShuffleboardControls.Flag.MOTOR_GROUP_PER_MOTOR)) {
             Arrays.stream(controllers).forEach(motorController ->
-                    motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList), level));
+                    motorController.shuffleboard(layout.getLayout(motorController.getName(), BuiltInLayouts.kList), SendableLevel.DEBUG));
         }
-        return layout;
     }
 
     public boolean allMotorsCachedConnected() {
