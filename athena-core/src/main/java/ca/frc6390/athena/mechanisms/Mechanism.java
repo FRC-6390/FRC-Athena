@@ -72,6 +72,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final MechanismSimulationModel simulationModel;
     private final double simulationUpdatePeriodSeconds;
     private double lastSimulationTimestampSeconds = Double.NaN;
+    private double hardwareUpdatePeriodSeconds = 0.02;
+    private double lastHardwareUpdateSeconds = Double.NaN;
+    private final boolean encoderOwnedByMotorGroup;
     private final MechanismVisualization visualization;
     private final MechanismSensorSimulation sensorSimulation;
     private boolean boundsEnabled = false;
@@ -225,6 +228,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.setpointIsOutput = config.data().useSetpointAsOutput();
         this.pidPeriod = config.data().pidPeriod();
         this.motionLimits = new MotionLimits();
+        this.hardwareUpdatePeriodSeconds = sanitizeHardwareUpdatePeriod(config.data().hardwareUpdatePeriodSeconds());
+        this.encoderOwnedByMotorGroup = isEncoderOwnedByMotorGroup(this.encoder, this.motors);
+        refreshHardwareSignals(true);
 
         if (pidController != null && config.data().pidContinous()) {
             pidController.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
@@ -360,6 +366,29 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return integrated != null ? integrated : HardwareFactories.encoder(config);
     }
 
+    private static boolean isEncoderOwnedByMotorGroup(Encoder encoder, MotorControllerGroup motors) {
+        if (encoder == null || motors == null) {
+            return false;
+        }
+        for (MotorController controller : motors.getControllers()) {
+            if (controller == null) {
+                continue;
+            }
+            Encoder motorEncoder = controller.getEncoder();
+            if (motorEncoder == encoder) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static double sanitizeHardwareUpdatePeriod(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
+            return 0.02;
+        }
+        return periodSeconds;
+    }
+
     private static Encoder resolveIntegratedEncoder(EncoderConfig config, MotorControllerGroup motors) {
         if (motors == null || config.type == null) {
             return null;
@@ -424,6 +453,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.setpointIsOutput = useSetpointAsOutput;
         this.pidPeriod = pidPeriod;
         this.motionLimits = new MotionLimits();
+        this.hardwareUpdatePeriodSeconds = 0.02;
+        this.encoderOwnedByMotorGroup = isEncoderOwnedByMotorGroup(this.encoder, this.motors);
+        refreshHardwareSignals(true);
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
@@ -603,6 +635,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return motionLimits.resolveAxisLimits(MOTION_AXIS_ID);
     }
 
+    public double getHardwareUpdatePeriodSeconds() {
+        return hardwareUpdatePeriodSeconds;
+    }
+
+    public void setHardwareUpdatePeriodSeconds(double periodSeconds) {
+        this.hardwareUpdatePeriodSeconds = sanitizeHardwareUpdatePeriod(periodSeconds);
+    }
+
+    public void setHardwareUpdatePeriodMs(double periodMs) {
+        setHardwareUpdatePeriodSeconds(periodMs / 1000.0);
+    }
+
     public void setRobotCore(RobotCore<?> robotCore) {
         this.robotCore = robotCore;
     }
@@ -727,12 +771,25 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return useAbsolute ? getEncoder().getAbsoluteRotation2d() : getEncoder().getRotation2d();
     }
 
+    public Rotation2d getRotation2d(boolean poll){
+        if (encoder == null) return Rotation2d.kZero;
+        return useAbsolute ? getEncoder().getAbsoluteRotation2d(poll) : getEncoder().getRotation2d(poll);
+    }
+
     public double getPosition(){
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderPosition;
         }
         if (encoder == null) return 0;
         return useAbsolute ? getEncoder().getAbsolutePosition() : getEncoder().getPosition();
+    }
+
+    public double getPosition(boolean poll){
+        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
+            return simEncoderPosition;
+        }
+        if (encoder == null) return 0;
+        return useAbsolute ? getEncoder().getAbsolutePosition(poll) : getEncoder().getPosition(poll);
     }
 
     /**
@@ -751,6 +808,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
         if (encoder == null) return 0;
         return getEncoder().getVelocity();
+    }
+
+    public double getVelocity(boolean poll){
+        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
+            return simEncoderVelocity;
+        }
+        if (encoder == null) return 0;
+        return getEncoder().getVelocity(poll);
     }
 
     public boolean atSetpoint(){
@@ -1071,8 +1136,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         double output = 0;
 
-        boolean encoderDisconnected = encoder != null && !encoder.isCachedConnected();
-        boolean motorsDisconnected = !motors.allMotorsCachedConnected();
+        boolean encoderDisconnected = encoder != null && !encoder.isConnected();
+        boolean motorsDisconnected = !motors.allMotorsConnected();
         if (encoderDisconnected || motorsDisconnected) {
             emergencyStopped = true;
             logEmergencyStopReason(encoderDisconnected, motorsDisconnected);
@@ -1423,6 +1488,37 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return total;
     }
 
+    private boolean shouldRefreshHardwareSignals(double nowSeconds) {
+        if (simulationModel != null) {
+            return false;
+        }
+        if (Double.isNaN(lastHardwareUpdateSeconds) || !Double.isFinite(lastHardwareUpdateSeconds)) {
+            return true;
+        }
+        if (!Double.isFinite(nowSeconds)) {
+            return true;
+        }
+        if (nowSeconds < lastHardwareUpdateSeconds) {
+            return true;
+        }
+        return (nowSeconds - lastHardwareUpdateSeconds) >= hardwareUpdatePeriodSeconds;
+    }
+
+    private void refreshHardwareSignals(boolean force) {
+        if (simulationModel != null) {
+            return;
+        }
+        double nowSeconds = Timer.getFPGATimestamp();
+        if (!force && !shouldRefreshHardwareSignals(nowSeconds)) {
+            return;
+        }
+        if (encoder != null && !encoderOwnedByMotorGroup) {
+            encoder.update();
+        }
+        motors.update();
+        lastHardwareUpdateSeconds = nowSeconds;
+    }
+
     @Override
     public void periodic() {
         if (LoopTiming.shouldSampleMechanisms()) {
@@ -1453,10 +1549,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (simulationModel != null) {
             advanceSimulation(Timer.getFPGATimestamp());
         } else {
-            if (encoder != null) {
-                encoder.update();
-            }
-            motors.update();
+            refreshHardwareSignals(false);
         }
 
         sensorSimulation.update(this);

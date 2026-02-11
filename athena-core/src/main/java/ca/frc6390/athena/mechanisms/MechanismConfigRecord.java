@@ -34,6 +34,7 @@ public record MechanismConfigRecord(
         double tolerance,
         double stateMachineDelay,
         double pidPeriod,
+        double hardwareUpdatePeriodSeconds,
         double pidIZone,
         double continousMin,
         double continousMax,
@@ -83,6 +84,7 @@ public record MechanismConfigRecord(
                 Double.NaN,
                 Double.NaN,
                 0.0,
+                0.02,
                 0.0,
                 0.0,
                 0.0,
@@ -122,6 +124,7 @@ public record MechanismConfigRecord(
         private double tolerance;
         private double stateMachineDelay;
         private double pidPeriod;
+        private double hardwareUpdatePeriodSeconds;
         private double pidIZone;
         private double continousMin;
         private double continousMax;
@@ -154,6 +157,7 @@ public record MechanismConfigRecord(
             this.tolerance = base.tolerance();
             this.stateMachineDelay = base.stateMachineDelay();
             this.pidPeriod = base.pidPeriod();
+            this.hardwareUpdatePeriodSeconds = base.hardwareUpdatePeriodSeconds();
             this.pidIZone = base.pidIZone();
             this.continousMin = base.continousMin();
             this.continousMax = base.continousMax();
@@ -280,6 +284,11 @@ public record MechanismConfigRecord(
             return this;
         }
 
+        public Builder hardwareUpdatePeriodSeconds(double hardwareUpdatePeriodSeconds) {
+            this.hardwareUpdatePeriodSeconds = hardwareUpdatePeriodSeconds;
+            return this;
+        }
+
         public Builder pidIZone(double pidIZone) {
             this.pidIZone = pidIZone;
             return this;
@@ -340,6 +349,7 @@ public record MechanismConfigRecord(
                     tolerance,
                     stateMachineDelay,
                     pidPeriod,
+                    hardwareUpdatePeriodSeconds,
                     pidIZone,
                     continousMin,
                     continousMax,

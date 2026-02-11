@@ -165,24 +165,35 @@ public final class MechanismConfigExport {
     }
 
     private static MechanismSensorsConfig exportSensors(MechanismConfigRecord data) {
-        if (data == null || data.limitSwitches() == null || data.limitSwitches().isEmpty()) {
+        if (data == null) {
             return null;
         }
-        List<MechanismLimitSwitchConfig> switches = new ArrayList<>();
-        for (GenericLimitSwitchConfig sw : data.limitSwitches()) {
-            if (sw == null) {
-                continue;
-            }
-            switches.add(new MechanismLimitSwitchConfig(
-                    sw.id(),
-                    sw.inverted(),
-                    Double.isFinite(sw.position()) ? sw.position() : null,
-                    sw.isHardstop(),
-                    sw.blockDirection() != null ? sw.blockDirection().name() : null,
-                    sw.name(),
-                    sw.delaySeconds()));
+        Double hardwareUpdatePeriodMs = null;
+        if (Double.isFinite(data.hardwareUpdatePeriodSeconds())
+                && data.hardwareUpdatePeriodSeconds() > 0.0
+                && Math.abs(data.hardwareUpdatePeriodSeconds() - 0.02) > 1e-9) {
+            hardwareUpdatePeriodMs = data.hardwareUpdatePeriodSeconds() * 1000.0;
         }
-        return switches.isEmpty() ? null : new MechanismSensorsConfig(switches);
+        List<MechanismLimitSwitchConfig> switches = new ArrayList<>();
+        if (data.limitSwitches() != null) {
+            for (GenericLimitSwitchConfig sw : data.limitSwitches()) {
+                if (sw == null) {
+                    continue;
+                }
+                switches.add(new MechanismLimitSwitchConfig(
+                        sw.id(),
+                        sw.inverted(),
+                        Double.isFinite(sw.position()) ? sw.position() : null,
+                        sw.isHardstop(),
+                        sw.blockDirection() != null ? sw.blockDirection().name() : null,
+                        sw.name(),
+                        sw.delaySeconds()));
+            }
+        }
+        if (switches.isEmpty() && hardwareUpdatePeriodMs == null) {
+            return null;
+        }
+        return new MechanismSensorsConfig(switches.isEmpty() ? null : switches, hardwareUpdatePeriodMs);
     }
 
     private static MechanismControlConfig exportControl(MechanismConfig<?> cfg, MechanismConfigRecord data) {

@@ -35,6 +35,20 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
 
     double getTemperatureCelsius();
 
+    default boolean isConnected(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return isConnected();
+    }
+
+    default double getTemperatureCelsius(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getTemperatureCelsius();
+    }
+
     Encoder getEncoder();
 
     // Expanded API to match legacy usage
@@ -52,26 +66,6 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
 
     default void update() {}
 
-    // Cached accessors for logging/dashboard (override in adapters to return cached values)
-    default int getCachedId() { return getId(); }
-
-    default String getCachedCanbus() { return getCanbus(); }
-
-    default String getCachedTypeKey() {
-        MotorControllerType type = getType();
-        return type != null ? type.getKey() : "unknown";
-    }
-
-    default boolean isCachedConnected() { return isConnected(); }
-
-    default double getCachedTemperatureCelsius() { return getTemperatureCelsius(); }
-
-    default MotorNeutralMode getCachedNeutralMode() { return getNeutralMode(); }
-
-    default double getCachedCurrentLimit() { return getCurrentLimit(); }
-
-    default boolean isCachedInverted() { return isInverted(); }
-
     default MotorControllerConfig getConfig() { return null; }
 
     // Compatibility helpers
@@ -87,17 +81,18 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
             return node;
         }
 
-        node.putDouble("canId", getCachedId());
-        node.putString("canbus", getCachedCanbus());
-        node.putString("type", getCachedTypeKey());
-        node.putBoolean("connected", isCachedConnected());
-        node.putDouble("tempC", getCachedTemperatureCelsius());
-        node.putString("neutralMode", getCachedNeutralMode().name());
+        MotorControllerType type = getType();
+        node.putDouble("canId", getId());
+        node.putString("canbus", getCanbus());
+        node.putString("type", type != null ? type.getKey() : "unknown");
+        node.putBoolean("connected", isConnected());
+        node.putDouble("tempC", getTemperatureCelsius());
+        node.putString("neutralMode", getNeutralMode().name());
 
         if (nt.enabled(RobotNetworkTables.Flag.HW_MOTOR_TUNING_WIDGETS)) {
-            node.putDouble("currentLimitA", getCachedCurrentLimit());
-            node.putBoolean("inverted", isCachedInverted());
-            node.putBoolean("brakeMode", getCachedNeutralMode() == MotorNeutralMode.Brake);
+            node.putDouble("currentLimitA", getCurrentLimit());
+            node.putBoolean("inverted", isInverted());
+            node.putBoolean("brakeMode", getNeutralMode() == MotorNeutralMode.Brake);
 
             Encoder encoder = getEncoder();
             if (encoder != null) {

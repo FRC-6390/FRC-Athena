@@ -207,7 +207,7 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     public Rotation2d getEncoderPosition() {
-        return encoder.getAbsoluteRotation2d();
+        return encoder != null ? encoder.getAbsoluteRotation2d() : Rotation2d.kZero;
     }
 
     public MotorController getDriveMotorController() {
@@ -323,15 +323,16 @@ public class SwerveModule implements RobotSendableDevice {
             return;
         }
 
-        state.optimize(getState().angle);
-        state.speedMetersPerSecond *= state.angle.minus(encoder.getRotation2d()).getCos();
+        Rotation2d currentAngle = getEncoderPosition();
+        state.optimize(currentAngle);
+        state.speedMetersPerSecond *= state.angle.minus(currentAngle).getCos();
         if (driveFeedforwardEnabled && driveFeedforward != null) {
             double driveVolts = calculateFeedforwardVolts(state.speedMetersPerSecond);
             setDriveMotorVoltage(driveVolts);
         } else {
             setDriveMotor(state.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
         }
-        setRotationMotor(rotationPidController.calculate(MathUtil.angleModulus(getEncoderPosition().getRadians()), state.angle.getRadians()));
+        setRotationMotor(rotationPidController.calculate(MathUtil.angleModulus(currentAngle.getRadians()), state.angle.getRadians()));
     }
 
     public void stop() {
@@ -360,8 +361,15 @@ public class SwerveModule implements RobotSendableDevice {
         if (simulation != null) {
             simulation.applyToSensors();
         } else {
-            encoder.update();
-            driveMotor.getEncoder().update();
+            if (encoder != null) {
+                encoder.update();
+            }
+            if (driveEncoder != null && driveEncoder != encoder) {
+                driveEncoder.update();
+            }
+            if (steerEncoder != null && steerEncoder != encoder && steerEncoder != driveEncoder) {
+                steerEncoder.update();
+            }
         }
     }
 
@@ -400,7 +408,7 @@ public class SwerveModule implements RobotSendableDevice {
             return node;
         }
 
-        node.putDouble("driveMotorPosition", driveEncoder != null ? driveEncoder.getCachedPosition() : 0.0);
+        node.putDouble("driveMotorPosition", driveEncoder != null ? driveEncoder.getPosition() : 0.0);
         encoder.networkTables(node.child("Encoder"));
 
         if (nt.enabled(RobotNetworkTables.Flag.SWERVE_MODULE_DEBUG)) {

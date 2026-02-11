@@ -12,6 +12,28 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
 
     double getVelocity();
 
+    /**
+     * Returns the latest position reading. When {@code poll} is true, the encoder is refreshed
+     * before the value is returned.
+     */
+    default double getPosition(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getPosition();
+    }
+
+    /**
+     * Returns the latest velocity reading. When {@code poll} is true, the encoder is refreshed
+     * before the value is returned.
+     */
+    default double getVelocity(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getVelocity();
+    }
+
     void setPosition(double position);
 
     void setInverted(boolean inverted);
@@ -25,16 +47,48 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         return getPosition();
     }
 
+    /**
+     * Returns the latest absolute position reading. When {@code poll} is true, the encoder is
+     * refreshed before the value is returned.
+     */
+    default double getAbsolutePosition(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getAbsolutePosition();
+    }
+
     default double getAbsoluteRotations() {
         return getRotations();
+    }
+
+    default double getAbsoluteRotations(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getAbsoluteRotations();
     }
 
     default double getRotations() {
         return getPosition();
     }
 
+    default double getRotations(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getRotations();
+    }
+
     default double getRate() {
         return getVelocity();
+    }
+
+    default double getRate(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getRate();
     }
 
     default double getConversion() {
@@ -67,6 +121,13 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
 
     default boolean isConnected() {
         return true;
+    }
+
+    default boolean isConnected(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return isConnected();
     }
 
     default void setGearRatio(double gearRatio) {}
@@ -105,20 +166,21 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         return edu.wpi.first.math.geometry.Rotation2d.fromRotations(getRotations());
     }
 
+    default edu.wpi.first.math.geometry.Rotation2d getRotation2d(boolean poll) {
+        return edu.wpi.first.math.geometry.Rotation2d.fromRotations(getRotations(poll));
+    }
+
     default edu.wpi.first.math.geometry.Rotation2d getAbsoluteRotation2d() {
         return edu.wpi.first.math.geometry.Rotation2d.fromRotations(getAbsoluteRotations());
+    }
+
+    default edu.wpi.first.math.geometry.Rotation2d getAbsoluteRotation2d(boolean poll) {
+        return edu.wpi.first.math.geometry.Rotation2d.fromRotations(getAbsoluteRotations(poll));
     }
 
     default Encoder update() {
         return this;
     }
-
-    // Cached accessors for logging/dashboard (override in adapters to return cached values)
-    default double getCachedPosition() { return getPosition(); }
-
-    default double getCachedVelocity() { return getVelocity(); }
-
-    default double getCachedAbsolutePosition() { return getAbsolutePosition(); }
 
     /**
      * Returns the current position wrapped into the provided range.
@@ -134,31 +196,17 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         return MathUtil.inputModulus(getPosition(), min, max);
     }
 
-    /**
-     * Cached variant of {@link #getPositionModulus(double, double)} for logging/UI.
-     */
-    default double getCachedPositionModulus(double min, double max) {
-        return MathUtil.inputModulus(getCachedPosition(), min, max);
-    }
-
-    default double getCachedRotations() { return getRotations(); }
-
-    default double getCachedRate() { return getRate(); }
-
-    default double getCachedAbsoluteRotations() { return getAbsoluteRotations(); }
-
-    default double getCachedRawAbsoluteValue() { return getRawAbsoluteValue(); }
-
-    default double getCachedRotationDegrees() { return getRotation2d().getDegrees(); }
-
-    default double getCachedAbsoluteRotationDegrees() { return getAbsoluteRotation2d().getDegrees(); }
-
-    default boolean isCachedConnected() { return isConnected(); }
-
     EncoderConfig getConfig();
 
     default double getRawAbsoluteValue() {
         return getAbsolutePosition();
+    }
+
+    default double getRawAbsoluteValue(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getRawAbsoluteValue();
     }
 
     // Default helpers to satisfy shuffleboard calls
@@ -177,18 +225,18 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
             return node;
         }
 
-        node.putDouble("position", getCachedPosition());
-        node.putDouble("velocity", getCachedVelocity());
-        node.putDouble("absolutePosition", getCachedAbsolutePosition());
-        node.putBoolean("connected", isCachedConnected());
+        node.putDouble("position", getPosition());
+        node.putDouble("velocity", getVelocity());
+        node.putDouble("absolutePosition", getAbsolutePosition());
+        node.putBoolean("connected", isConnected());
 
         if (nt.enabled(RobotNetworkTables.Flag.HW_ENCODER_TUNING_WIDGETS)) {
-            node.putDouble("rotations", getCachedRotations());
-            node.putDouble("rate", getCachedRate());
-            node.putDouble("absoluteRotations", getCachedAbsoluteRotations());
-            node.putDouble("rawAbsolute", getCachedRawAbsoluteValue());
-            node.putDouble("rotationDeg", getCachedRotationDegrees());
-            node.putDouble("absoluteRotationDeg", getCachedAbsoluteRotationDegrees());
+            node.putDouble("rotations", getRotations());
+            node.putDouble("rate", getRate());
+            node.putDouble("absoluteRotations", getAbsoluteRotations());
+            node.putDouble("rawAbsolute", getRawAbsoluteValue());
+            node.putDouble("rotationDeg", getRotation2d().getDegrees());
+            node.putDouble("absoluteRotationDeg", getAbsoluteRotation2d().getDegrees());
             node.putBoolean("supportsSimulation", supportsSimulation());
 
             EncoderConfig cfg = getConfig();

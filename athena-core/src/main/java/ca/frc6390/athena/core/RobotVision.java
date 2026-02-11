@@ -70,6 +70,7 @@ public class RobotVision implements RobotSendableSystem {
 
    private final RobotVisionConfig config;
    private final HashMap<String, VisionCamera> cameras;
+   private final Map<String, VisionCamera> camerasView;
    private final EnumMap<CameraRole, List<VisionCamera>> camerasByRole;
    private final HashMap<String, Object> vendorCameras;
    private RobotLocalization<?> localization;
@@ -77,6 +78,7 @@ public class RobotVision implements RobotSendableSystem {
    public RobotVision(RobotVisionConfig config) {
       this.config = config;
       this.cameras = new HashMap<>();
+      this.camerasView = Collections.unmodifiableMap(cameras);
       this.camerasByRole = new EnumMap<>(CameraRole.class);
       this.vendorCameras = new HashMap<>();
 
@@ -116,7 +118,7 @@ public class RobotVision implements RobotSendableSystem {
    }
 
    public Map<String, VisionCamera> getCameras() {
-      return Collections.unmodifiableMap(cameras);
+      return camerasView;
    }
 
    public void setUseForLocalization(String key, boolean enabled) {

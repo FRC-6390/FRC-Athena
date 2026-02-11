@@ -174,10 +174,16 @@ public final class MechanismConfigApplier {
     }
 
     private static void applySensors(MechanismConfig<?> target, MechanismSensorsConfig sensors) {
-        if (sensors.limitSwitches() == null) {
+        if (sensors == null) {
             return;
         }
         target.sensors(section -> {
+            if (sensors.hardwareUpdatePeriodMs() != null && sensors.hardwareUpdatePeriodMs() > 0.0) {
+                section.hardwareUpdatePeriodMs(sensors.hardwareUpdatePeriodMs());
+            }
+            if (sensors.limitSwitches() == null) {
+                return;
+            }
             for (MechanismLimitSwitchConfig sw : sensors.limitSwitches()) {
                 if (sw == null || sw.id() == null) {
                     continue;

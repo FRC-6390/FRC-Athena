@@ -523,6 +523,22 @@ public class MechanismConfig<T extends Mechanism> {
             owner.sensorSimulationConfig = cfg;
             return this;
         }
+
+        /**
+         * Sets how often this mechanism refreshes hardware devices (encoder + motor controller updates).
+         * Use 20ms for full-rate updates, or a larger value to decimate slow devices.
+         */
+        public SensorsSection<T> hardwareUpdatePeriodSeconds(double periodSeconds) {
+            owner.updateData(builder -> builder.hardwareUpdatePeriodSeconds(periodSeconds));
+            return this;
+        }
+
+        /**
+         * Millisecond variant of {@link #hardwareUpdatePeriodSeconds(double)}.
+         */
+        public SensorsSection<T> hardwareUpdatePeriodMs(double periodMs) {
+            return hardwareUpdatePeriodSeconds(periodMs / 1000.0);
+        }
     }
 
     public static final class InputsSection<T extends Mechanism> {

@@ -39,6 +39,7 @@ public class EncoderAdapter implements Encoder {
             this.discontinuityRange = config.discontinuityRange;
             this.inverted = config.inverted;
         }
+        updateCache();
     }
 
     public static Encoder wrap(Encoder raw, EncoderConfig config) {
@@ -53,12 +54,12 @@ public class EncoderAdapter implements Encoder {
 
     @Override
     public double getPosition() {
-        return getRotations() * conversion + conversionOffset;
+        return cachedPosition;
     }
 
     @Override
     public double getVelocity() {
-        return getRate() * conversion;
+        return cachedVelocity;
     }
 
     @Override
@@ -70,6 +71,7 @@ public class EncoderAdapter implements Encoder {
             rawPosition = 0.0;
         }
         raw.setPosition(rawPosition);
+        updateCache();
     }
 
     @Override
@@ -165,33 +167,32 @@ public class EncoderAdapter implements Encoder {
 
     @Override
     public double getRotations() {
-        return (getRawPosition() - offset) * gearRatio;
+        return cachedRotations;
     }
 
     @Override
     public double getAbsolutePosition() {
-        return getAbsoluteRotations() * conversion + conversionOffset;
+        return cachedAbsolutePosition;
     }
 
     @Override
     public double getAbsoluteRotations() {
-        double rotations = (getRawAbsolutePosition() - offset) * gearRatio;
-        return applyDiscontinuity(rotations);
+        return cachedAbsoluteRotations;
     }
 
     @Override
     public Rotation2d getRotation2d() {
-        return Rotation2d.fromRotations(getRotations());
+        return Rotation2d.fromDegrees(cachedRotationDegrees);
     }
 
     @Override
     public Rotation2d getAbsoluteRotation2d() {
-        return Rotation2d.fromRotations(getAbsoluteRotations());
+        return Rotation2d.fromDegrees(cachedAbsoluteRotationDegrees);
     }
 
     @Override
     public double getRate() {
-        return getRawVelocity() * gearRatio;
+        return cachedRate;
     }
 
     @Override
@@ -201,7 +202,7 @@ public class EncoderAdapter implements Encoder {
 
     @Override
     public double getRawAbsoluteValue() {
-        return getRawAbsolutePosition();
+        return cachedRawAbsoluteValue;
     }
 
     @Override
@@ -212,68 +213,21 @@ public class EncoderAdapter implements Encoder {
     }
 
     @Override
-    public double getCachedPosition() {
-        return cachedPosition;
-    }
-
-    @Override
-    public double getCachedVelocity() {
-        return cachedVelocity;
-    }
-
-    @Override
-    public double getCachedAbsolutePosition() {
-        return cachedAbsolutePosition;
-    }
-
-    @Override
-    public double getCachedRotations() {
-        return cachedRotations;
-    }
-
-    @Override
-    public double getCachedRate() {
-        return cachedRate;
-    }
-
-    @Override
-    public double getCachedAbsoluteRotations() {
-        return cachedAbsoluteRotations;
-    }
-
-    @Override
-    public double getCachedRawAbsoluteValue() {
-        return cachedRawAbsoluteValue;
-    }
-
-    @Override
-    public double getCachedRotationDegrees() {
-        return cachedRotationDegrees;
-    }
-
-    @Override
-    public double getCachedAbsoluteRotationDegrees() {
-        return cachedAbsoluteRotationDegrees;
-    }
-
-    @Override
-    public boolean isCachedConnected() {
-        return cachedConnected;
-    }
-
-    @Override
     public void setSimulatedPosition(double rotations) {
         raw.setSimulatedPosition(rotations);
+        updateCache();
     }
 
     @Override
     public void setSimulatedVelocity(double rotationsPerSecond) {
         raw.setSimulatedVelocity(rotationsPerSecond);
+        updateCache();
     }
 
     @Override
     public void setSimulatedState(double rotations, double velocity) {
         raw.setSimulatedState(rotations, velocity);
+        updateCache();
     }
 
     @Override
@@ -284,6 +238,11 @@ public class EncoderAdapter implements Encoder {
     @Override
     public EncoderConfig getConfig() {
         return config != null ? config : raw.getConfig();
+    }
+
+    @Override
+    public boolean isConnected() {
+        return cachedConnected;
     }
 
     private double getRawPosition() {
@@ -316,12 +275,15 @@ public class EncoderAdapter implements Encoder {
 
     private void updateCache() {
         cachedConnected = raw.isConnected();
-        cachedRotations = (getRawPosition() - offset) * gearRatio;
-        cachedRate = getRawVelocity() * gearRatio;
+        double rawPosition = getRawPosition();
+        double rawVelocity = getRawVelocity();
+        double rawAbsolutePosition = getRawAbsolutePosition();
+        cachedRotations = (rawPosition - offset) * gearRatio;
+        cachedRate = rawVelocity * gearRatio;
         cachedPosition = cachedRotations * conversion + conversionOffset;
-        cachedAbsoluteRotations = applyDiscontinuity((getRawAbsolutePosition() - offset) * gearRatio);
+        cachedAbsoluteRotations = applyDiscontinuity((rawAbsolutePosition - offset) * gearRatio);
         cachedAbsolutePosition = cachedAbsoluteRotations * conversion + conversionOffset;
-        cachedRawAbsoluteValue = getRawAbsolutePosition();
+        cachedRawAbsoluteValue = rawAbsolutePosition;
         cachedRotationDegrees = Rotation2d.fromRotations(cachedRotations).getDegrees();
         cachedAbsoluteRotationDegrees = Rotation2d.fromRotations(cachedAbsoluteRotations).getDegrees();
     }

@@ -112,16 +112,7 @@ public class MotorControllerGroup implements RobotSendableDevice {
     }
 
     public double getAverageTemperatureCelsius() {
-        if (controllers.length == 0) {
-            return 0.0;
-        }
-        double sum = 0.0;
-        int count = 0;
-        for (MotorController controller : controllers) {
-            sum += controller.getTemperatureCelsius();
-            count++;
-        }
-        return count > 0 ? sum / count : 0.0;
+        return calculateAverageTemperatureCelsius();
     }
 
     @Override
@@ -139,8 +130,8 @@ public class MotorControllerGroup implements RobotSendableDevice {
 
     private void publish(RobotNetworkTables.Node node) {
         RobotNetworkTables.Node summary = node.child("Summary");
-        summary.putBoolean("allConnected", allMotorsCachedConnected());
-        summary.putDouble("avgTempC", getAverageCachedTemperatureCelsius());
+        summary.putBoolean("allConnected", allMotorsConnected());
+        summary.putDouble("avgTempC", calculateAverageTemperatureCelsius());
 
         if (encoders != null && node.robot().enabled(RobotNetworkTables.Flag.HW_ENCODER_TUNING_WIDGETS)) {
             encoders.networkTables(node.child("Encoders"));
@@ -159,23 +150,14 @@ public class MotorControllerGroup implements RobotSendableDevice {
         }
     }
 
-    public boolean allMotorsCachedConnected() {
-        for (MotorController controller : controllers) {
-            if (!controller.isCachedConnected()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private double getAverageCachedTemperatureCelsius() {
+    private double calculateAverageTemperatureCelsius() {
         if (controllers.length == 0) {
             return 0.0;
         }
         double sum = 0.0;
         int count = 0;
         for (MotorController controller : controllers) {
-            sum += controller.getCachedTemperatureCelsius();
+            sum += controller.getTemperatureCelsius();
             count++;
         }
         return count > 0 ? sum / count : 0.0;

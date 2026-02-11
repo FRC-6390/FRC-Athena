@@ -1,8 +1,10 @@
 package ca.frc6390.athena.sensors.camera.limelight;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
@@ -85,8 +87,19 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
     public NetworkTableEntry rawfiducials;
     public boolean useForLocalization = false;
 
+    private static final Double[] EMPTY_DOUBLE_ARRAY = new Double[0];
+    private static final Number[] EMPTY_NUMBER_ARRAY = new Number[0];
+    private static final Double[] DEFAULT_POSE_ESTIMATE_RAW = new Double[] {
+            Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN,
+            Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN
+    };
+
     private final VisionCamera localizationCamera;
     private final AprilTagFieldLayout fieldLayout;
+    private final Map<String, PoseEstimate> poseEstimateCache = new HashMap<>();
+    private final Map<String, PoseEstimateWithLatency> poseEstimateWithLatencyCache = new HashMap<>();
+    private final Double[] cameraPoseRobotSpaceBuffer = new Double[6];
+    private final Double[] robotOrientationBuffer = new Double[6];
     private LocalizationSnapshot latestSnapshot = LocalizationSnapshot.empty();
     private static final double DEFAULT_HORIZONTAL_FOV_DEG = 63.3;
 
@@ -226,11 +239,15 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         
         public PoseEstimateWithLatency(PoseEstimateWithLatencyType type)
         {
-            super(type.get());
+            this(type.get());
         }
 
-        private double getRawValue(int idx) {
-            Double[] raw = getRaw();
+        public PoseEstimateWithLatency(String table)
+        {
+            super(table);
+        }
+
+        private double getRawValue(Double[] raw, int idx) {
             if (raw == null || idx < 0 || idx >= raw.length) {
                 return Double.NaN;
             }
@@ -244,11 +261,19 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
          * - Newer format: [0..5]=pose, [6]=latency(ms), [7]=tagCount, [8]=tagSpan, [9]=avgTagDist(m), [10]=avgTagArea(%)
          */
         public double getLatency() {
-            return getRawValue(6);
+            return getLatency(getRaw());
+        }
+
+        public double getLatency(Double[] raw) {
+            return getRawValue(raw, 6);
         }
 
         public int getTagCount() {
-            double value = getRawValue(7);
+            return getTagCount(getRaw());
+        }
+
+        public int getTagCount(Double[] raw) {
+            double value = getRawValue(raw, 7);
             return Double.isFinite(value) ? (int) value : 0;
         }
 
@@ -260,29 +285,35 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
          * single-tag observation (tagSpan = 0).
          */
         public double getDistToTag() {
-            Double[] raw = getRaw();
+            return getDistToTag(getRaw());
+        }
+
+        public double getDistToTag(Double[] raw) {
             if (raw == null) {
                 return Double.NaN;
             }
             if (raw.length >= 11) {
-                return getRawValue(9);
+                return getRawValue(raw, 9);
             }
             if (raw.length >= 10) {
-                return getRawValue(8);
+                return getRawValue(raw, 8);
             }
             return Double.NaN;
         }
 
         public double getAvgTagArea() {
-            Double[] raw = getRaw();
+            return getAvgTagArea(getRaw());
+        }
+
+        public double getAvgTagArea(Double[] raw) {
             if (raw == null) {
                 return Double.NaN;
             }
             if (raw.length >= 11) {
-                return getRawValue(10);
+                return getRawValue(raw, 10);
             }
             if (raw.length >= 10) {
-                return getRawValue(9);
+                return getRawValue(raw, 9);
             }
             return Double.NaN;
         }
@@ -291,13 +322,8 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
 
     public class PoseEstimate
     {
-        // Default to NaN so callers can distinguish "no data" from a legitimate 0.
-        // We use 11 elements to match Limelight's extended botpose* arrays.
-        Double[] dub = new Double[]{
-                Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN,
-                Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN
-        };
-        String table;
+        private final String table;
+        private final NetworkTableEntry tableEntry;
 
         public PoseEstimate(PoseEstimateType type)
         {
@@ -307,15 +333,20 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         public PoseEstimate(String table)
         {
             this.table = table;
+            this.tableEntry = limelightTable.getEntry(table);
         }
         public Double[] getRaw()
         {
-            return limelightTable.getEntry(table).getDoubleArray(dub);
+            return tableEntry.getDoubleArray(DEFAULT_POSE_ESTIMATE_RAW);
         }
 
         public Pose2d getPose()
         {
-            Double[] poseReal = getRaw();
+            return getPose(getRaw());
+        }
+
+        public Pose2d getPose(Double[] poseReal)
+        {
             if (poseReal == null) return new Pose2d();
             if (poseReal.length < 6
                     || !Double.isFinite(poseReal[0])
@@ -330,7 +361,11 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
 
         public Pose2d getLocalizationPose()
         {
-            Double[] poseReal = getRaw();
+            return getLocalizationPose(getRaw());
+        }
+
+        public Pose2d getLocalizationPose(Double[] poseReal)
+        {
             if (poseReal == null) return new Pose2d();
             if (poseReal.length < 6
                     || !Double.isFinite(poseReal[0])
@@ -484,10 +519,11 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
             latestSnapshot = LocalizationSnapshot.empty();
             return;
         }
-        Pose2d pose = estimate.getLocalizationPose();
-        double latencySeconds = Timer.getFPGATimestamp() - (estimate.getLatency() / 1000.0);
-        int tagCount = estimate.getTagCount();
-        double distance = estimate.getDistToTag();
+        Double[] raw = estimate.getRaw();
+        Pose2d pose = estimate.getLocalizationPose(raw);
+        double latencySeconds = Timer.getFPGATimestamp() - (estimate.getLatency(raw) / 1000.0);
+        int tagCount = estimate.getTagCount(raw);
+        double distance = estimate.getDistToTag(raw);
         latestSnapshot = new LocalizationSnapshot(pose, new Pose3d(pose), latencySeconds, tagCount, distance);
     }
 
@@ -690,7 +726,7 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
      * Skew or rotation (-90 degrees to 0 degrees)
      */
     public double getTargetSkew(){
-        var data = t2d.getDoubleArray(new Double[]{});
+        var data = t2d.getDoubleArray(EMPTY_DOUBLE_ARRAY);
         if(data.length == 0) return 0;
         return data[16];
     }
@@ -699,7 +735,7 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
      * Skew or rotation (-90 degrees to 0 degrees)
      */
     public Double[] getT2D(){
-        return t2d.getDoubleArray(new Double[]{});
+        return t2d.getDoubleArray(EMPTY_DOUBLE_ARRAY);
     }
 
      /**
@@ -749,7 +785,7 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
      * 2D Crosshairs [cx0, cy0, cx1, cy1]
      */
     public Double[] getCrosshairs(){
-        return crosshairs.getDoubleArray(new Double[]{});
+        return crosshairs.getDoubleArray(EMPTY_DOUBLE_ARRAY);
     }
 
      /**
@@ -786,14 +822,12 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
      */
     public PoseEstimate getPoseEstimate(PoseEstimateType type)
     {
-        PoseEstimate estimate = new PoseEstimate(type);
-        return estimate;
+        return poseEstimateCache.computeIfAbsent(type.get(), PoseEstimate::new);
     }
 
     public PoseEstimateWithLatency getPoseEstimate(PoseEstimateWithLatencyType type)
     {
-        PoseEstimateWithLatency estimate = new PoseEstimateWithLatency(type);
-        return estimate;
+        return poseEstimateWithLatencyCache.computeIfAbsent(type.get(), PoseEstimateWithLatency::new);
     }
     
     public int getPriorityID(){
@@ -863,7 +897,7 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
     }
 
     public Number[] getRawFiducials(){
-        return rawfiducials.getNumberArray(new Number[]{});
+        return rawfiducials.getNumberArray(EMPTY_NUMBER_ARRAY);
     }
 
     /**
@@ -899,19 +933,23 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
 
     private void applyCameraTransformToNetworkTables(Transform3d transform) {
         if (transform == null) return;
-        Double[] pose = new Double[] {
-            transform.getX(),
-            transform.getY(),
-            transform.getZ(),
-            Math.toDegrees(transform.getRotation().getX()),
-            Math.toDegrees(transform.getRotation().getY()),
-            Math.toDegrees(transform.getRotation().getZ())
-        };
-        setCameraPoseRobotSpace(pose);
+        cameraPoseRobotSpaceBuffer[0] = transform.getX();
+        cameraPoseRobotSpaceBuffer[1] = transform.getY();
+        cameraPoseRobotSpaceBuffer[2] = transform.getZ();
+        cameraPoseRobotSpaceBuffer[3] = Math.toDegrees(transform.getRotation().getX());
+        cameraPoseRobotSpaceBuffer[4] = Math.toDegrees(transform.getRotation().getY());
+        cameraPoseRobotSpaceBuffer[5] = Math.toDegrees(transform.getRotation().getZ());
+        setCameraPoseRobotSpace(cameraPoseRobotSpaceBuffer);
     }
 
     public void setRobotOrientation(Pose2d pose){
-        robot_orientation_set.setDoubleArray(new Double[] {pose.getRotation().getDegrees(),0d,0d,0d,0d,0d});
+        robotOrientationBuffer[0] = pose.getRotation().getDegrees();
+        robotOrientationBuffer[1] = 0d;
+        robotOrientationBuffer[2] = 0d;
+        robotOrientationBuffer[3] = 0d;
+        robotOrientationBuffer[4] = 0d;
+        robotOrientationBuffer[5] = 0d;
+        robot_orientation_set.setDoubleArray(robotOrientationBuffer);
     }
 
     @Override
@@ -985,7 +1023,7 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
     }
 
     public Double[] getFiducialIdFilters(){
-        return fiducial_id_filters_set.getDoubleArray(new Double[]{});
+        return fiducial_id_filters_set.getDoubleArray(EMPTY_DOUBLE_ARRAY);
     }
 
     @Override

@@ -14,16 +14,61 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
 
     Rotation2d getYaw();
 
+    default Rotation2d getRoll(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getRoll();
+    }
+
+    default Rotation2d getPitch(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getPitch();
+    }
+
+    default Rotation2d getYaw(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getYaw();
+    }
+
     void setInverted(boolean inverted);
 
     default boolean isInverted() { return false; }
 
     default boolean isConnected() { return true; }
+    default boolean isConnected(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return isConnected();
+    }
 
     // Optional velocity accessors (default to zero)
     default Rotation2d getVelocityX() { return new Rotation2d(); }
     default Rotation2d getVelocityY() { return new Rotation2d(); }
     default Rotation2d getVelocityZ() { return new Rotation2d(); }
+    default Rotation2d getVelocityX(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getVelocityX();
+    }
+    default Rotation2d getVelocityY(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getVelocityY();
+    }
+    default Rotation2d getVelocityZ(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getVelocityZ();
+    }
 
     // Optional angular acceleration accessors (default to zero)
     default double getAngularAccelerationZRadiansPerSecondSquared() { return 0.0; }
@@ -35,6 +80,24 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     default double getAccelerationX() { return 0.0; }
     default double getAccelerationY() { return 0.0; }
     default double getAccelerationZ() { return 0.0; }
+    default double getAccelerationX(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getAccelerationX();
+    }
+    default double getAccelerationY(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getAccelerationY();
+    }
+    default double getAccelerationZ(boolean poll) {
+        if (poll) {
+            update();
+        }
+        return getAccelerationZ();
+    }
 
     // Optional max speed tracking helpers (default to no-op)
     default double getMaxLinearSpeed() { return 0.0; }
@@ -55,24 +118,6 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
     // Optional periodic update hook (default no-op)
     default void update() {}
 
-    // Cached accessors for logging/dashboard (override in adapters to return cached values)
-    default Rotation2d getCachedRoll() { return getRoll(); }
-    default Rotation2d getCachedPitch() { return getPitch(); }
-    default Rotation2d getCachedYaw() { return getYaw(); }
-    default Rotation2d getCachedVelocityX() { return getVelocityX(); }
-    default Rotation2d getCachedVelocityY() { return getVelocityY(); }
-    default Rotation2d getCachedVelocityZ() { return getVelocityZ(); }
-    default double getCachedAngularAccelerationZRadiansPerSecondSquared() {
-        return getAngularAccelerationZRadiansPerSecondSquared();
-    }
-    default double getCachedAngularAccelerationZDegreesPerSecondSquared() {
-        return Math.toDegrees(getCachedAngularAccelerationZRadiansPerSecondSquared());
-    }
-    default double getCachedAccelerationX() { return getAccelerationX(); }
-    default double getCachedAccelerationY() { return getAccelerationY(); }
-    default double getCachedAccelerationZ() { return getAccelerationZ(); }
-    default boolean isCachedConnected() { return isConnected(); }
-
     // Simulation hooks (default no-op)
     default void setSimulatedHeading(Rotation2d yaw, Rotation2d angularVelocityZ) {}
     default void setSimulatedReadings(Rotation2d yaw, Rotation2d pitch, Rotation2d roll,
@@ -91,12 +136,12 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
             return node;
         }
 
-        Rotation2d yaw = getCachedYaw();
-        Rotation2d pitch = getCachedPitch();
-        Rotation2d roll = getCachedRoll();
-        Rotation2d velX = getCachedVelocityX();
-        Rotation2d velY = getCachedVelocityY();
-        Rotation2d velZ = getCachedVelocityZ();
+        Rotation2d yaw = getYaw();
+        Rotation2d pitch = getPitch();
+        Rotation2d roll = getRoll();
+        Rotation2d velX = getVelocityX();
+        Rotation2d velY = getVelocityY();
+        Rotation2d velZ = getVelocityZ();
 
         node.putDouble("yawDeg", yaw != null ? yaw.getDegrees() : 0.0);
         node.putDouble("pitchDeg", pitch != null ? pitch.getDegrees() : 0.0);
@@ -104,17 +149,17 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
         node.putDouble("velXDegPerSec", velX != null ? velX.getDegrees() : 0.0);
         node.putDouble("velYDegPerSec", velY != null ? velY.getDegrees() : 0.0);
         node.putDouble("velZDegPerSec", velZ != null ? velZ.getDegrees() : 0.0);
-        node.putDouble("accelX", getCachedAccelerationX());
-        node.putDouble("accelY", getCachedAccelerationY());
-        node.putDouble("accelZ", getCachedAccelerationZ());
-        node.putBoolean("connected", isCachedConnected());
+        node.putDouble("accelX", getAccelerationX());
+        node.putDouble("accelY", getAccelerationY());
+        node.putDouble("accelZ", getAccelerationZ());
+        node.putBoolean("connected", isConnected());
 
         if (nt.enabled(RobotNetworkTables.Flag.HW_IMU_TUNING_WIDGETS)) {
             node.putBoolean("inverted", isInverted());
             node.putDouble("maxLinearSpeed", getMaxLinearSpeed());
             node.putDouble("maxRadialSpeed", getMaxRadialSpeed());
             node.putDouble("maxSpeedWindowSec", getMaxSpeedWindowSeconds());
-            node.putDouble("angularAccelZDegPerSec2", getCachedAngularAccelerationZDegreesPerSecondSquared());
+            node.putDouble("angularAccelZDegPerSec2", getAngularAccelerationZDegreesPerSecondSquared());
 
             ImuConfig cfg = getConfig();
             if (cfg != null) {

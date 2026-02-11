@@ -2,7 +2,9 @@ package ca.frc6390.athena.ctre.motor;
 
 import java.util.function.Consumer;
 
+import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
@@ -25,6 +27,7 @@ import edu.wpi.first.math.controller.PIDController;
  * CTRE motor controller wrapper for the new vendordep system.
  */
 public class CtreMotorController implements MotorController {
+    private static final int TEMPERATURE_REFRESH_INTERVAL_CYCLES = 25;
     private final TalonFX controller;
     private final MotorControllerConfig config;
     private final Encoder encoder;
@@ -35,11 +38,16 @@ public class CtreMotorController implements MotorController {
     private final Consumer<Double> setVelocity;
     private final Consumer<MotorNeutralMode> setNeutralMode;
     private final Consumer<PIDController> setPid;
+    private final StatusSignal<?> deviceTemperatureSignal;
+    private double cachedTemperatureCelsius = 0.0;
+    private boolean cachedConnected = true;
+    private int updateCycles = 0;
 
     public CtreMotorController(TalonFX controller, MotorControllerConfig config, Encoder encoder) {
         this.controller = controller;
         this.config = config;
         this.encoder = encoder;
+        this.deviceTemperatureSignal = controller.getDeviceTemp(false).clone();
         this.setSpeed = controller::set;
         this.setVoltage = controller::setVoltage;
         this.setCurrentLimit = limit -> {
@@ -62,6 +70,10 @@ public class CtreMotorController implements MotorController {
             slot0.kD = pid.getD();
             controller.getConfigurator().apply(slot0);
         };
+
+        BaseStatusSignal.setUpdateFrequencyForAll(10.0, deviceTemperatureSignal);
+        controller.optimizeBusUtilization(4.0);
+        update();
     }
 
     public static CtreMotorController fromConfig(MotorControllerConfig config) {
@@ -165,12 +177,29 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public boolean isConnected() {
-        return controller.isConnected();
+        return cachedConnected;
+    }
+
+    @Override
+    public boolean isConnected(boolean poll) {
+        if (poll) {
+            cachedConnected = controller.isConnected();
+        }
+        return cachedConnected;
     }
 
     @Override
     public double getTemperatureCelsius() {
-        return controller.getDeviceTemp(true).getValueAsDouble();
+        return cachedTemperatureCelsius;
+    }
+
+    @Override
+    public double getTemperatureCelsius(boolean poll) {
+        if (poll) {
+            deviceTemperatureSignal.refresh(false);
+            cachedTemperatureCelsius = deviceTemperatureSignal.getValueAsDouble();
+        }
+        return cachedTemperatureCelsius;
     }
 
     @Override
@@ -218,5 +247,14 @@ public class CtreMotorController implements MotorController {
         if (encoder != null) {
             encoder.update();
         }
+        updateCycles++;
+        if (updateCycles == 1 || updateCycles % TEMPERATURE_REFRESH_INTERVAL_CYCLES == 0) {
+            deviceTemperatureSignal.refresh(false);
+            cachedTemperatureCelsius = deviceTemperatureSignal.getValueAsDouble();
+        }
+        if (updateCycles >= 1_000_000) {
+            updateCycles = 0;
+        }
+        cachedConnected = controller.isConnected();
     }
 }

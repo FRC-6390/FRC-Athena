@@ -148,11 +148,11 @@ public class EncoderGroup implements RobotSendableDevice {
 
     private void publish(RobotNetworkTables.Node node) {
         RobotNetworkTables.Node summary = node.child("Summary");
-        summary.putDouble("avgPosition", getCachedPosition());
-        summary.putDouble("avgVelocity", getCachedVelocity());
-        summary.putDouble("avgRotations", getCachedRotations());
-        summary.putDouble("avgRate", getCachedRate());
-        summary.putBoolean("allConnected", allEncodersCachedConnected());
+        summary.putDouble("avgPosition", getAveragePosition());
+        summary.putDouble("avgVelocity", getAverageVelocity());
+        summary.putDouble("avgRotations", getAverageRotations());
+        summary.putDouble("avgRate", getAverageRate());
+        summary.putBoolean("allConnected", allEncodersConnected());
 
         if (node.robot().enabled(RobotNetworkTables.Flag.ENCODER_GROUP_PER_ENCODER)) {
             RobotNetworkTables.Node encNode = node.child("Encoders");
@@ -166,67 +166,56 @@ public class EncoderGroup implements RobotSendableDevice {
         }
     }
 
-    private double getCachedPosition() {
+    private double getAveragePosition() {
         double sum = 0.0;
         int count = 0;
         for (Encoder encoder : encoders) {
             if (encoder == null) {
                 continue;
             }
-            sum += encoder.getCachedPosition();
+            sum += encoder.getPosition();
             count++;
         }
         return count > 0 ? sum / count : 0.0;
     }
 
-    private double getCachedVelocity() {
+    private double getAverageVelocity() {
         double sum = 0.0;
         int count = 0;
         for (Encoder encoder : encoders) {
             if (encoder == null) {
                 continue;
             }
-            sum += encoder.getCachedVelocity();
+            sum += encoder.getVelocity();
             count++;
         }
         return count > 0 ? sum / count : 0.0;
     }
 
-    private double getCachedRotations() {
+    private double getAverageRotations() {
         double sum = 0.0;
         int count = 0;
         for (Encoder encoder : encoders) {
             if (encoder == null) {
                 continue;
             }
-            sum += encoder.getCachedRotations();
+            sum += encoder.getRotations();
             count++;
         }
         return count > 0 ? sum / count : 0.0;
     }
 
-    private double getCachedRate() {
+    private double getAverageRate() {
         double sum = 0.0;
         int count = 0;
         for (Encoder encoder : encoders) {
             if (encoder == null) {
                 continue;
             }
-            sum += encoder.getCachedRate();
+            sum += encoder.getRate();
             count++;
         }
         return count > 0 ? sum / count : 0.0;
     }
 
-    private boolean allEncodersCachedConnected() {
-        for (Encoder encoder : encoders) {
-            if (encoder == null) {
-                continue;
-            }
-            if (!encoder.isCachedConnected()) {
-                return false;
-            }
-        }
-        return true;
-    }
 }

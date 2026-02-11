@@ -27,6 +27,7 @@ public class ImuAdapter implements Imu {
         this.raw = raw;
         this.config = config != null ? config : raw.getConfig();
         this.inverted = this.config != null && this.config.inverted;
+        update();
     }
 
     public static Imu wrap(Imu raw, ImuConfig config) {
@@ -41,17 +42,17 @@ public class ImuAdapter implements Imu {
 
     @Override
     public Rotation2d getRoll() {
-        return invertRotation(raw.getRoll());
+        return cachedRoll;
     }
 
     @Override
     public Rotation2d getPitch() {
-        return invertRotation(raw.getPitch());
+        return cachedPitch;
     }
 
     @Override
     public Rotation2d getYaw() {
-        return invertRotation(raw.getYaw());
+        return cachedYaw;
     }
 
     @Override
@@ -69,22 +70,22 @@ public class ImuAdapter implements Imu {
 
     @Override
     public boolean isConnected() {
-        return raw.isConnected();
+        return cachedConnected;
     }
 
     @Override
     public Rotation2d getVelocityX() {
-        return invertRotation(raw.getVelocityX());
+        return cachedVelX;
     }
 
     @Override
     public Rotation2d getVelocityY() {
-        return invertRotation(raw.getVelocityY());
+        return cachedVelY;
     }
 
     @Override
     public Rotation2d getVelocityZ() {
-        return invertRotation(raw.getVelocityZ());
+        return cachedVelZ;
     }
 
     @Override
@@ -94,17 +95,17 @@ public class ImuAdapter implements Imu {
 
     @Override
     public double getAccelerationX() {
-        return inverted ? -raw.getAccelerationX() : raw.getAccelerationX();
+        return cachedAccelerationX;
     }
 
     @Override
     public double getAccelerationY() {
-        return inverted ? -raw.getAccelerationY() : raw.getAccelerationY();
+        return cachedAccelerationY;
     }
 
     @Override
     public double getAccelerationZ() {
-        return inverted ? -raw.getAccelerationZ() : raw.getAccelerationZ();
+        return cachedAccelerationZ;
     }
 
     @Override
@@ -171,61 +172,6 @@ public class ImuAdapter implements Imu {
         cachedAccelerationY = inverted ? -raw.getAccelerationY() : raw.getAccelerationY();
         cachedAccelerationZ = inverted ? -raw.getAccelerationZ() : raw.getAccelerationZ();
         cachedConnected = raw.isConnected();
-    }
-
-    @Override
-    public Rotation2d getCachedRoll() {
-        return cachedRoll;
-    }
-
-    @Override
-    public Rotation2d getCachedPitch() {
-        return cachedPitch;
-    }
-
-    @Override
-    public Rotation2d getCachedYaw() {
-        return cachedYaw;
-    }
-
-    @Override
-    public Rotation2d getCachedVelocityX() {
-        return cachedVelX;
-    }
-
-    @Override
-    public Rotation2d getCachedVelocityY() {
-        return cachedVelY;
-    }
-
-    @Override
-    public Rotation2d getCachedVelocityZ() {
-        return cachedVelZ;
-    }
-
-    @Override
-    public double getCachedAngularAccelerationZRadiansPerSecondSquared() {
-        return cachedAngularAccelerationZ;
-    }
-
-    @Override
-    public double getCachedAccelerationX() {
-        return cachedAccelerationX;
-    }
-
-    @Override
-    public double getCachedAccelerationY() {
-        return cachedAccelerationY;
-    }
-
-    @Override
-    public double getCachedAccelerationZ() {
-        return cachedAccelerationZ;
-    }
-
-    @Override
-    public boolean isCachedConnected() {
-        return cachedConnected;
     }
 
     @Override

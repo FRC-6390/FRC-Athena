@@ -9,17 +9,14 @@ import edu.wpi.first.math.controller.PIDController;
  * Applies shared motor configuration (inversion, limits) on top of vendor-specific controllers.
  */
 public class MotorControllerAdapter implements MotorController {
+    private static final int CONNECTION_POLL_INTERVAL_CYCLES = 10;
+    private static final int TEMPERATURE_POLL_INTERVAL_CYCLES = 25;
     private final MotorController raw;
     private final MotorControllerConfig config;
     private Encoder wrappedEncoder;
-    private final int cachedId;
-    private final String cachedCanbus;
-    private final String cachedTypeKey;
     private boolean cachedConnected;
     private double cachedTemperatureCelsius;
-    private MotorNeutralMode cachedNeutralMode;
-    private double cachedCurrentLimit;
-    private boolean cachedInverted;
+    private int updateCycles = 0;
 
     public MotorControllerAdapter(MotorController raw, MotorControllerConfig config) {
         this.raw = raw;
@@ -29,13 +26,8 @@ public class MotorControllerAdapter implements MotorController {
             EncoderConfig encoderConfig = this.config != null ? this.config.encoderConfig : null;
             this.wrappedEncoder = EncoderAdapter.wrap(encoder, encoderConfig);
         }
-        this.cachedId = raw.getId();
-        this.cachedCanbus = raw.getCanbus();
-        MotorControllerType type = raw.getType();
-        this.cachedTypeKey = type != null ? type.getKey() : "unknown";
-        this.cachedInverted = this.config != null && this.config.inverted;
-        this.cachedCurrentLimit = this.config != null ? this.config.currentLimit : raw.getCurrentLimit();
-        this.cachedNeutralMode = this.config != null ? this.config.neutralMode : raw.getNeutralMode();
+        this.cachedConnected = raw.isConnected();
+        this.cachedTemperatureCelsius = raw.getTemperatureCelsius();
     }
 
     public static MotorController wrap(MotorController raw, MotorControllerConfig config) {
@@ -78,7 +70,6 @@ public class MotorControllerAdapter implements MotorController {
         if (config != null) {
             config.currentLimit = amps;
         }
-        cachedCurrentLimit = amps;
         raw.setCurrentLimit(amps);
     }
 
@@ -97,7 +88,6 @@ public class MotorControllerAdapter implements MotorController {
         if (config != null) {
             config.neutralMode = mode;
         }
-        cachedNeutralMode = mode;
         raw.setNeutralMode(mode);
     }
 
@@ -111,12 +101,28 @@ public class MotorControllerAdapter implements MotorController {
 
     @Override
     public boolean isConnected() {
-        return raw.isConnected();
+        return cachedConnected;
+    }
+
+    @Override
+    public boolean isConnected(boolean poll) {
+        if (poll) {
+            cachedConnected = raw.isConnected();
+        }
+        return cachedConnected;
     }
 
     @Override
     public double getTemperatureCelsius() {
-        return raw.getTemperatureCelsius();
+        return cachedTemperatureCelsius;
+    }
+
+    @Override
+    public double getTemperatureCelsius(boolean poll) {
+        if (poll) {
+            cachedTemperatureCelsius = raw.getTemperatureCelsius();
+        }
+        return cachedTemperatureCelsius;
     }
 
     @Override
@@ -134,7 +140,6 @@ public class MotorControllerAdapter implements MotorController {
         if (config != null) {
             config.inverted = inverted;
         }
-        cachedInverted = inverted;
     }
 
     @Override
@@ -165,47 +170,15 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void update() {
         raw.update();
-        cachedConnected = raw.isConnected();
-        cachedTemperatureCelsius = raw.getTemperatureCelsius();
-    }
-
-    @Override
-    public int getCachedId() {
-        return cachedId;
-    }
-
-    @Override
-    public String getCachedCanbus() {
-        return cachedCanbus;
-    }
-
-    @Override
-    public String getCachedTypeKey() {
-        return cachedTypeKey;
-    }
-
-    @Override
-    public boolean isCachedConnected() {
-        return cachedConnected;
-    }
-
-    @Override
-    public double getCachedTemperatureCelsius() {
-        return cachedTemperatureCelsius;
-    }
-
-    @Override
-    public MotorNeutralMode getCachedNeutralMode() {
-        return cachedNeutralMode != null ? cachedNeutralMode : MotorNeutralMode.Coast;
-    }
-
-    @Override
-    public double getCachedCurrentLimit() {
-        return cachedCurrentLimit;
-    }
-
-    @Override
-    public boolean isCachedInverted() {
-        return cachedInverted;
+        updateCycles++;
+        if (updateCycles == 1 || updateCycles % CONNECTION_POLL_INTERVAL_CYCLES == 0) {
+            cachedConnected = raw.isConnected();
+        }
+        if (updateCycles == 1 || updateCycles % TEMPERATURE_POLL_INTERVAL_CYCLES == 0) {
+            cachedTemperatureCelsius = raw.getTemperatureCelsius();
+        }
+        if (updateCycles >= 1_000_000) {
+            updateCycles = 0;
+        }
     }
 }

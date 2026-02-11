@@ -1,6 +1,8 @@
 package ca.frc6390.athena.ctre.encoder;
 
+import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.configs.CANcoderConfiguration;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -18,21 +20,43 @@ public class CtreEncoder implements Encoder {
     private final EncoderConfig config;
     private final CANcoder cancoder;
     private final TalonFX talonFx;
+    private final StatusSignal<?> positionSignal;
+    private final StatusSignal<?> velocitySignal;
+    private final StatusSignal<?> absolutePositionSignal;
+    private final BaseStatusSignal[] refreshSignals;
     private double simPosition = 0.0;
     private double simVelocity = 0.0;
+    private double cachedPosition = 0.0;
+    private double cachedVelocity = 0.0;
+    private double cachedAbsolutePosition = 0.0;
+    private boolean cachedConnected = false;
 
     public CtreEncoder(CANcoder cancoder, EncoderConfig config) {
         this.cancoder = cancoder;
         this.talonFx = null;
         this.config = config;
+        this.positionSignal = cancoder.getPosition(false).clone();
+        this.velocitySignal = cancoder.getVelocity(false).clone();
+        this.absolutePositionSignal = cancoder.getAbsolutePosition(false).clone();
+        this.refreshSignals = new BaseStatusSignal[] { positionSignal, velocitySignal, absolutePositionSignal };
         applyConfig(config);
+        BaseStatusSignal.setUpdateFrequencyForAll(100.0, positionSignal, velocitySignal, absolutePositionSignal);
+        cancoder.optimizeBusUtilization(4.0);
+        update();
     }
 
     public CtreEncoder(TalonFX talonFx, EncoderConfig config) {
         this.talonFx = talonFx;
         this.cancoder = null;
         this.config = config;
+        this.positionSignal = talonFx.getPosition(false).clone();
+        this.velocitySignal = talonFx.getVelocity(false).clone();
+        this.absolutePositionSignal = positionSignal;
+        this.refreshSignals = new BaseStatusSignal[] { positionSignal, velocitySignal };
         applyConfig(config);
+        BaseStatusSignal.setUpdateFrequencyForAll(100.0, positionSignal, velocitySignal);
+        talonFx.optimizeBusUtilization(4.0);
+        update();
     }
 
     private void applyConfig(EncoderConfig config) {
@@ -111,13 +135,7 @@ public class CtreEncoder implements Encoder {
         if (RobotBase.isSimulation()) {
             return simPosition;
         }
-        if (cancoder != null) {
-            return cancoder.getPosition().getValueAsDouble();
-        }
-        if (talonFx != null) {
-            return talonFx.getPosition().getValueAsDouble();
-        }
-        return 0.0;
+        return cachedPosition;
     }
 
     @Override
@@ -125,13 +143,7 @@ public class CtreEncoder implements Encoder {
         if (RobotBase.isSimulation()) {
             return simVelocity;
         }
-        if (cancoder != null) {
-            return cancoder.getVelocity().getValueAsDouble();
-        }
-        if (talonFx != null) {
-            return talonFx.getVelocity().getValueAsDouble();
-        }
-        return 0.0;
+        return cachedVelocity;
     }
 
     @Override
@@ -139,13 +151,7 @@ public class CtreEncoder implements Encoder {
         if (RobotBase.isSimulation()) {
             return simPosition;
         }
-        if (cancoder != null) {
-            return cancoder.getAbsolutePosition().getValueAsDouble();
-        }
-        if (talonFx != null) {
-            return talonFx.getPosition().getValueAsDouble();
-        }
-        return 0.0;
+        return cachedAbsolutePosition;
     }
 
     @Override
@@ -165,13 +171,36 @@ public class CtreEncoder implements Encoder {
 
     @Override
     public boolean isConnected() {
+        if (RobotBase.isSimulation()) {
+            return true;
+        }
+        return cachedConnected;
+    }
+
+    @Override
+    public Encoder update() {
+        if (RobotBase.isSimulation()) {
+            cachedPosition = simPosition;
+            cachedVelocity = simVelocity;
+            cachedAbsolutePosition = simPosition;
+            cachedConnected = true;
+            return this;
+        }
+
+        BaseStatusSignal.refreshAll(refreshSignals);
+        cachedPosition = positionSignal.getValueAsDouble();
+        cachedVelocity = velocitySignal.getValueAsDouble();
+        cachedAbsolutePosition = absolutePositionSignal.getValueAsDouble();
         if (cancoder != null) {
-            return cancoder.isConnected();
+            cachedConnected = cancoder.isConnected();
+            return this;
         }
         if (talonFx != null) {
-            return talonFx.isConnected();
+            cachedConnected = talonFx.isConnected();
+            return this;
         }
-        return false;
+        cachedConnected = false;
+        return this;
     }
 
     @Override
@@ -196,17 +225,23 @@ public class CtreEncoder implements Encoder {
     @Override
     public void setSimulatedPosition(double rotations) {
         simPosition = rotations;
+        cachedPosition = rotations;
+        cachedAbsolutePosition = rotations;
     }
 
     @Override
     public void setSimulatedVelocity(double rotationsPerSecond) {
         simVelocity = rotationsPerSecond;
+        cachedVelocity = rotationsPerSecond;
     }
 
     @Override
     public void setSimulatedState(double rotations, double velocity) {
         simPosition = rotations;
         simVelocity = velocity;
+        cachedPosition = rotations;
+        cachedAbsolutePosition = rotations;
+        cachedVelocity = velocity;
     }
 
     @Override
@@ -223,6 +258,8 @@ public class CtreEncoder implements Encoder {
         }
         if (RobotBase.isSimulation()) {
             simPosition = position;
+            cachedPosition = position;
+            cachedAbsolutePosition = position;
         }
     }
 
