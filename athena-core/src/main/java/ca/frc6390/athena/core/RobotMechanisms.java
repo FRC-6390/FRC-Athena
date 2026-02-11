@@ -14,6 +14,7 @@ import ca.frc6390.athena.mechanisms.ElevatorMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.SuperstructureConfig;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.TurretMechanism;
@@ -78,13 +79,15 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
         return null;
     }
 
-    public SuperstructureMechanism<?, ?> byConfig(SuperstructureConfig<?, ?> config) {
+    @SuppressWarnings("unchecked")
+    public <S extends Enum<S> & SetpointProvider<SP>, SP> SuperstructureMechanism<S, SP> byConfig(
+            SuperstructureConfig<S, SP> config) {
         if (config == null) {
             return null;
         }
         for (SuperstructureMechanism<?, ?> superstructure : superstructuresByConfig) {
             if (superstructure != null && superstructure.getSourceConfig() == config) {
-                return superstructure;
+                return (SuperstructureMechanism<S, SP>) superstructure;
             }
         }
         return null;
@@ -99,7 +102,8 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
         return superstruct(key.name());
     }
 
-    public SuperstructureMechanism<?, ?> superstruct(SuperstructureConfig<?, ?> config) {
+    public <S extends Enum<S> & SetpointProvider<SP>, SP> SuperstructureMechanism<S, SP> superstruct(
+            SuperstructureConfig<S, SP> config) {
         return byConfig(config);
     }
 
