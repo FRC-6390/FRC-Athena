@@ -30,79 +30,75 @@ export $(cat .env | xargs)
 To publish with a specific version, append `-Pversion=<major.minor.patch>` to override the automatic increment. To pin the FRC season manually, append `-PfrcYear=<season>`.
 
 ## Autonomous Registration
-`RobotAuto` now manages both PathPlanner and Choreo routines with explicit ordering between named commands and auto definitions. Define enums for the keys you care about, register the commands, add autos, and let the chooser build the commands lazily:
+`RobotAuto` now uses a single fail-fast path API and a program context model:
+
+- Register trajectories with `path(reference, source)`.
+- Alias only when needed with `path(reference, source, id)`.
+- Build command flow in `build(ctx)` using sequence/parallel/select/wait fallback helpers.
 
 ```java
-RobotAuto autos = robot.getAutos();
-autos.registerNamedCommand("WaitForTag", Commands.waitUntil(hasTargetSupplier));
-autos.registerNamedCommand("Home", superstructure.setState(SuperstructureState.HomePID));
+public final class TestAuto implements RobotAuto.AutoProgram {
+    @Override
+    public String id() {
+        return "TestAuto";
+    }
 
-autos.registerPathPlannerAuto("LeftAuto", "CompLeftSide");
-autos.registerChoreoAuto("RightAuto", "CompRightSide");
+    @Override
+    public void register(RobotAuto.AutoRegisterCtx ctx) {
+        ctx.registerNamedCommand("Home", superstructure.homeCommand());
+        ctx.path("TestAuto", RobotAuto.TrajectorySource.CHOREO);
+    }
 
-robot.registerAutoChooser("LeftAuto");
+    @Override
+    public RobotAuto.AutoRoutine build(RobotAuto.AutoBuildCtx ctx) {
+        return custom(() -> ctx.auto(id()));
+    }
+}
+
+autos.registerProgram(this, new TestAuto());
+registerAutoChooser("TestAuto");
 ```
 
-To chain or branch autos, use the sequence/branch helpers. Choreo split trajectories can be referenced with a `.index` suffix (e.g., `CompRightSide.1`) when registering the auto:
+`path(...)` validates the reference at registration time. Bad source/file combinations throw immediately instead of silently scheduling `Commands.none()` later.
+
+### Basic path + markers
+Use the trajectory file name as id unless you intentionally alias it:
 
 ```java
-autos.registerChoreoAuto("RightAuto.1", "CompRightSide.1");
-autos.registerAutoSequence("TwoPiece", "RightAuto", "RightAuto.1");
-autos.registerAutoBranch("TwoPieceOrLeave", hasNoteSupplier, "TwoPiece", "Leave");
+ctx.path("HCDKS", RobotAuto.TrajectorySource.CHOREO);                 // id = HCDKS
+ctx.path("traj.0", RobotAuto.TrajectorySource.CHOREO, "Opening");   // id = Opening
 ```
 
-For more complex logic (branching + interrupts), build an `AutoPlan` and register it:
+### Complex branching + fallback
+Split conditions, parallel behavior, and timeout fallbacks are built in:
 
 ```java
-AutoPlan plan = AutoPlan.sequence(
-        AutoPlan.step("RightAuto"),
-        AutoPlan.branch(hasNoteSupplier, AutoPlan.step("RightAuto.1"), AutoPlan.step("Leave")));
+RobotAuto.AutoInput<Boolean> intakeBeam = RobotAuto.AutoInput.of("intakeBeam", Boolean.class);
+RobotAuto.AutoInput<Integer> routeIndex = RobotAuto.AutoInput.of("routeIndex", Integer.class);
 
-AutoPlan bailout = AutoPlan.interrupt(plan, shouldAbortSupplier, AutoPlan.step("Abort"));
-autos.registerAutoPlan("TwoPieceOrLeave", bailout);
+@Override
+public void register(RobotAuto.AutoRegisterCtx ctx) {
+    ctx.input(intakeBeam, sensors::hasNote);
+    ctx.input(routeIndex, strategy::selectedRoute);
+
+    ctx.path("CenterStart", RobotAuto.TrajectorySource.PATH_PLANNER);
+    ctx.path("PickupA", RobotAuto.TrajectorySource.PATH_PLANNER);
+    ctx.path("PickupB", RobotAuto.TrajectorySource.PATH_PLANNER);
+    ctx.path("Bailout", RobotAuto.TrajectorySource.PATH_PLANNER);
+}
+
+@Override
+public RobotAuto.AutoRoutine build(RobotAuto.AutoBuildCtx ctx) {
+    return custom(() -> ctx.sequence(
+        ctx.auto("CenterStart"),
+        ctx.selectIndex(() -> ctx.inputValue(routeIndex), "Bailout", "PickupA", "PickupB"),
+        ctx.parallel(
+            superstructure.scorePrepCommand(),
+            ctx.waitFor(() -> ctx.inputValue(intakeBeam), 0.8, superstructure.recoverCommand()))));
+}
 ```
 
-AutoPlan steps can reset odometry explicitly:
-
-```java
-AutoPlan plan = AutoPlan.sequence(
-        AutoPlan.step("RightAuto", true),
-        AutoPlan.step("RightAuto", 1, new Pose2d(1.0, 2.0, Rotation2d.fromDegrees(180))));
-```
-
-AutoPlans can also mix in custom commands:
-
-```java
-AutoPlan plan = AutoPlan.sequence(
-        AutoPlan.step("RightAuto"),
-        AutoPlan.command(trackTargetCommand),
-        AutoPlan.step("RightAuto", 1));
-```
-
-AutoPlans support parallel, race, and deadline groups:
-
-```java
-AutoPlan plan = AutoPlan.sequence(
-        AutoPlan.deadline(
-                AutoPlan.step("RightAuto"),
-                AutoPlan.command(spinUpShooter)),
-        AutoPlan.race(
-                AutoPlan.command(feedNoteCommand),
-                AutoPlan.command(waitForBeamBreak)),
-        AutoPlan.parallel(
-                AutoPlan.step("RightAuto", 1),
-                AutoPlan.command(keepAimingCommand)));
-```
-
-AutoPlans can wrap steps with timeouts or end conditions:
-
-```java
-AutoPlan plan = AutoPlan.sequence(
-        AutoPlan.withTimeout(AutoPlan.step("RightAuto"), 2.5),
-        AutoPlan.until(AutoPlan.command(trackTargetCommand), hasTagSupplier));
-```
-
-Everything works directly with strings; if you prefer enums, implement `RobotAuto.NamedCommandKey` / `RobotAuto.AutoKey` and reuse these helpers. Once the first auto is added, named-command registration locks to prevent missing dependencies. Use `setStartingPose()` for extra metadata, and call `registerAutoRoutineChooser(...)` if you want the raw routine objects on Shuffleboard.
+`ctx.auto("Path", 1)` resolves split paths (`Path.1`) directly. It uses an explicit registered split id first, then derives from base trajectory reference if needed.
 
 ## Localization Camera Auto Align
 Use the `AlignAndDriveToTagCommand` to close the loop on robot-relative translations produced by any configured localization camera. Supply tuned PID controllers, the desired standoff pose (as a `Pose2d`), a tolerance pose, and clamp limits to make the command suit your drivetrain. The command always targets one or more specific camera tables, so pass the NetworkTables names you want it to consume.

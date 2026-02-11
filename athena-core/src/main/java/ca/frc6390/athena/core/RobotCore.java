@@ -9,7 +9,6 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
@@ -332,7 +331,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         runSuperstructureInitHooks();
     }
 
-    @SuppressWarnings("unchecked")
     private void runMechanismInitHooks() {
         if (mechanisms == null || mechanisms.isEmpty()) {
             return;
@@ -342,15 +340,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 continue;
             }
             var cfg = mech.getSourceConfig();
-            if (cfg == null || cfg.initHooks == null || cfg.initHooks.isEmpty()) {
+            if (cfg == null) {
                 continue;
             }
-            for (Consumer<?> hook : cfg.initHooks) {
-                if (hook == null) {
-                    continue;
-                }
-                ((Consumer<Mechanism>) hook).accept(mech);
-            }
+            cfg.runInitHooks(mech);
         }
     }
 

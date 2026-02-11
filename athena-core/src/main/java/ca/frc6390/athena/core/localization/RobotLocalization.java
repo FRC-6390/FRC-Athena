@@ -1078,6 +1078,43 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return fieldPose;
     }
 
+    /**
+     * Checks whether the primary field pose is inside the provided axis-aligned bounding box.
+     */
+    public boolean isInBoundingBox(PoseBoundingBox2d box) {
+        return box != null && box.contains(getFieldPose());
+    }
+
+    /**
+     * Checks whether the primary field pose is inside the axis-aligned box formed by two corners.
+     */
+    public boolean isInBoundingBox(Translation2d cornerA, Translation2d cornerB) {
+        if (cornerA == null || cornerB == null) {
+            return false;
+        }
+        return isInBoundingBox(PoseBoundingBox2d.fromCorners(cornerA, cornerB));
+    }
+
+    /**
+     * Checks whether a named pose config is inside the provided axis-aligned bounding box.
+     */
+    public boolean isPoseInBoundingBox(String name, PoseBoundingBox2d box) {
+        if (name == null || box == null || !hasPoseConfig(name)) {
+            return false;
+        }
+        return box.contains(getPose2d(name));
+    }
+
+    /**
+     * Checks whether a named pose config is inside the axis-aligned box formed by two corners.
+     */
+    public boolean isPoseInBoundingBox(String name, Translation2d cornerA, Translation2d cornerB) {
+        if (name == null || cornerA == null || cornerB == null || !hasPoseConfig(name)) {
+            return false;
+        }
+        return isPoseInBoundingBox(name, PoseBoundingBox2d.fromCorners(cornerA, cornerB));
+    }
+
     public RobotLocalizationConfig getLocalizationConfig() {
         return localizationConfig;
     }

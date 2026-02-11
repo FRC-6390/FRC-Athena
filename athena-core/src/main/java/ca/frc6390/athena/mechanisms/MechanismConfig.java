@@ -89,7 +89,7 @@ public class MechanismConfig<T extends Mechanism> {
     /** Optional hooks that run every loop regardless of the active state. */
     public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
     /** Optional hooks that run once during robot init after all mechanisms are registered. */
-    public List<Consumer<T>> initHooks = new ArrayList<>();
+    public List<MechanismBinding<T, ?>> initBindings = new ArrayList<>();
     /** Optional state triggers that can enqueue states when a predicate becomes true. */
     public List<StateTriggerBinding<T>> stateTriggerBindings = new ArrayList<>();
     /** Optional hooks that run every periodic loop. */
@@ -1032,13 +1032,9 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        /**
-         * Registers a hook that runs once during {@code RobotCore.robotInit()} after all mechanisms
-         * (and superstructures) have been registered with the {@code RobotCore}.
-         */
-        public HooksSection<T> onInit(Consumer<T> hook) {
-            Objects.requireNonNull(hook, "hook");
-            owner.initHooks.add(hook);
+        public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onInit(MechanismBinding<T, E> binding) {
+            Objects.requireNonNull(binding, "binding");
+            owner.initBindings.add(binding);
             return this;
         }
 
@@ -1107,6 +1103,239 @@ public class MechanismConfig<T extends Mechanism> {
         public StateTriggerBinding {
             Objects.requireNonNull(state, "state");
             Objects.requireNonNull(trigger, "trigger");
+        }
+    }
+
+    /**
+     * Runs init hooks with a mechanism-context payload after registration.
+     */
+    @SuppressWarnings("unchecked")
+    public void runInitHooks(Mechanism mechanism) {
+        if (mechanism == null || initBindings == null || initBindings.isEmpty()) {
+            return;
+        }
+        T typedMechanism = (T) mechanism;
+        for (MechanismBinding<T, ?> binding : initBindings) {
+            if (binding == null) {
+                continue;
+            }
+            applyInitBindingRaw(typedMechanism, binding);
+        }
+    }
+
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    private void applyInitBindingRaw(
+            T mechanism,
+            MechanismBinding<T, ?> binding) {
+        MechanismBinding rawBinding = (MechanismBinding) binding;
+        rawBinding.apply(new InitMechanismContext<>(mechanism));
+    }
+
+    private final class InitMechanismContext<E extends Enum<E> & SetpointProvider<Double>> implements MechanismContext<T, E> {
+        private final T mechanism;
+        private final E state;
+        private final double baseSetpoint;
+
+        @SuppressWarnings("unchecked")
+        private InitMechanismContext(T mechanism) {
+            this.mechanism = Objects.requireNonNull(mechanism, "mechanism");
+            E resolvedState = null;
+            if (mechanism instanceof StatefulLike<?> stateful && stateful.getStateMachine() != null) {
+                Enum<?> current = stateful.getStateMachine().getGoalState();
+                if (current != null) {
+                    try {
+                        resolvedState = (E) current;
+                    } catch (ClassCastException ignored) {
+                        resolvedState = null;
+                    }
+                }
+            }
+            this.state = resolvedState;
+            this.baseSetpoint = resolvedState != null ? resolvedState.getSetpoint() : mechanism.getSetpoint();
+        }
+
+        @Override
+        public T mechanism() {
+            return mechanism;
+        }
+
+        @Override
+        public E state() {
+            return state;
+        }
+
+        @Override
+        public double baseSetpoint() {
+            return baseSetpoint;
+        }
+
+        @Override
+        public boolean input(String key) {
+            if (mechanism.hasMutableBoolValKey(key)) {
+                return mechanism.mutableBoolVal(key);
+            }
+            BooleanSupplier supplier = inputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No bool input found for key " + key);
+            }
+            return supplier.getAsBoolean();
+        }
+
+        @Override
+        public BooleanSupplier inputSupplier(String key) {
+            if (mechanism.hasMutableBoolValKey(key)) {
+                return () -> mechanism.mutableBoolVal(key);
+            }
+            BooleanSupplier supplier = inputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public double doubleInput(String key) {
+            if (mechanism.hasMutableDblValKey(key)) {
+                return mechanism.mutableDblVal(key);
+            }
+            DoubleSupplier supplier = doubleInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No double input found for key " + key);
+            }
+            return supplier.getAsDouble();
+        }
+
+        @Override
+        public DoubleSupplier doubleInputSupplier(String key) {
+            if (mechanism.hasMutableDblValKey(key)) {
+                return () -> mechanism.mutableDblVal(key);
+            }
+            DoubleSupplier supplier = doubleInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No double input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public int intVal(String key) {
+            if (mechanism.hasMutableIntValKey(key)) {
+                return mechanism.mutableIntVal(key);
+            }
+            IntSupplier supplier = intInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No int input found for key " + key);
+            }
+            return supplier.getAsInt();
+        }
+
+        @Override
+        public IntSupplier intValSupplier(String key) {
+            if (mechanism.hasMutableIntValKey(key)) {
+                return () -> mechanism.mutableIntVal(key);
+            }
+            IntSupplier supplier = intInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No int input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public String stringVal(String key) {
+            if (mechanism.hasMutableStrValKey(key)) {
+                return mechanism.mutableStrVal(key);
+            }
+            Supplier<String> supplier = stringInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No string input found for key " + key);
+            }
+            return supplier.get();
+        }
+
+        @Override
+        public Supplier<String> stringValSupplier(String key) {
+            if (mechanism.hasMutableStrValKey(key)) {
+                return () -> mechanism.mutableStrVal(key);
+            }
+            Supplier<String> supplier = stringInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No string input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public Pose2d pose2dVal(String key) {
+            if (mechanism.hasMutablePose2dValKey(key)) {
+                return mechanism.mutablePose2dVal(key);
+            }
+            Supplier<Pose2d> supplier = pose2dInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No Pose2d input found for key " + key);
+            }
+            return supplier.get();
+        }
+
+        @Override
+        public Supplier<Pose2d> pose2dValSupplier(String key) {
+            if (mechanism.hasMutablePose2dValKey(key)) {
+                return () -> mechanism.mutablePose2dVal(key);
+            }
+            Supplier<Pose2d> supplier = pose2dInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No Pose2d input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public Pose3d pose3dVal(String key) {
+            if (mechanism.hasMutablePose3dValKey(key)) {
+                return mechanism.mutablePose3dVal(key);
+            }
+            Supplier<Pose3d> supplier = pose3dInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No Pose3d input found for key " + key);
+            }
+            return supplier.get();
+        }
+
+        @Override
+        public Supplier<Pose3d> pose3dValSupplier(String key) {
+            if (mechanism.hasMutablePose3dValKey(key)) {
+                return () -> mechanism.mutablePose3dVal(key);
+            }
+            Supplier<Pose3d> supplier = pose3dInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No Pose3d input found for key " + key);
+            }
+            return supplier;
+        }
+
+        @Override
+        public <V> V objectInput(String key, Class<V> type) {
+            Supplier<?> supplier = objectInputs.get(key);
+            if (supplier == null) {
+                return null;
+            }
+            Object value = supplier.get();
+            if (value == null) {
+                return null;
+            }
+            if (!type.isInstance(value)) {
+                throw new IllegalArgumentException("Input '" + key + "' is not of type " + type.getSimpleName());
+            }
+            return type.cast(value);
+        }
+
+        @Override
+        public <V> Supplier<V> objectInputSupplier(String key, Class<V> type) {
+            Supplier<?> supplier = objectInputs.get(key);
+            if (supplier == null) {
+                throw new IllegalArgumentException("No object input found for key " + key);
+            }
+            return () -> objectInput(key, type);
         }
     }
 
