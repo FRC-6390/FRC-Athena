@@ -35,6 +35,7 @@ import com.sun.net.httpserver.HttpServer;
  * - /Athena/config/mechanisms/{name}.json (also available at /athena/config/mechanisms/{name}.json)
  * - /Athena/config/mechanisms/{name}.toml (also available at /athena/config/mechanisms/{name}.toml)
  * - /Athena/config/all.zip (also available at /athena/config/all.zip)
+ * - /Athena/auto/log (also available at /athena/auto/log)
  */
 public final class AthenaConfigServer {
     private static final ObjectMapper INDEX_MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
@@ -66,6 +67,8 @@ public final class AthenaConfigServer {
 
             server.createContext("/athena/config/mechanisms", instance::handleMechanisms);
             server.createContext("/Athena/config/mechanisms", instance::handleMechanisms);
+            server.createContext("/athena/auto/log", instance::handleAutoLog);
+            server.createContext("/Athena/auto/log", instance::handleAutoLog);
             server.setExecutor(Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "AthenaConfigServer");
                 t.setDaemon(true);
@@ -129,6 +132,7 @@ public final class AthenaConfigServer {
                 "indexTomlUrl", base + prefix + "/config/index.toml",
                 "allZipUrl", base + prefix + "/config/all.zip",
                 "mechanismsBaseUrl", base + prefix + "/config/mechanisms/",
+                "autoLogUrl", base + prefix + "/auto/log",
                 "mechanisms", mechanisms);
         String json;
         try {
@@ -153,6 +157,7 @@ public final class AthenaConfigServer {
         sb.append("indexTomlUrl = ").append(tomlQuote(base + prefix + "/config/index.toml")).append("\n");
         sb.append("allZipUrl = ").append(tomlQuote(base + prefix + "/config/all.zip")).append("\n");
         sb.append("mechanismsBaseUrl = ").append(tomlQuote(base + prefix + "/config/mechanisms/")).append("\n");
+        sb.append("autoLogUrl = ").append(tomlQuote(base + prefix + "/auto/log")).append("\n");
         sb.append("\n");
 
         for (Map.Entry<String, Mechanism> e : robot.getMechanisms().entrySet()) {
@@ -283,6 +288,87 @@ public final class AthenaConfigServer {
         try (OutputStream os = ex.getResponseBody()) {
             os.write(bytes);
         }
+    }
+
+    private void handleAutoLog(HttpExchange ex) throws IOException {
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendText(ex, 405, "Method Not Allowed\n", "text/plain; charset=utf-8");
+            return;
+        }
+
+        Map<String, String> query = parseQuery(ex.getRequestURI());
+        int requestedLimit = parsePositiveInt(query.get("limit"), 200);
+        boolean clear = parseBoolean(query.get("clear"));
+
+        RobotAuto autos = robot.getAutos();
+        List<RobotAuto.AutoTraceEvent> entries = autos.getAutoTraceLog(requestedLimit);
+        int totalCount = autos.getAutoTraceLogCount();
+        if (clear) {
+            autos.clearAutoTraceLog();
+        }
+
+        Map<String, Object> payload = Map.of(
+                "autoTraceEnabled", autos.isAutoTraceEnabled(),
+                "capacity", autos.getAutoTraceLogCapacity(),
+                "totalCount", totalCount,
+                "returnedCount", entries.size(),
+                "cleared", clear,
+                "entries", entries);
+
+        String json;
+        try {
+            json = INDEX_MAPPER.writeValueAsString(payload);
+        } catch (JsonProcessingException err) {
+            json = "{\"error\":\"failed to build auto log\"}";
+        }
+        sendText(ex, 200, json + "\n", "application/json; charset=utf-8");
+    }
+
+    private static Map<String, String> parseQuery(URI uri) {
+        if (uri == null || uri.getRawQuery() == null || uri.getRawQuery().isBlank()) {
+            return Map.of();
+        }
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        String rawQuery = uri.getRawQuery();
+        String[] pairs = rawQuery.split("&");
+        for (String pair : pairs) {
+            if (pair == null || pair.isBlank()) {
+                continue;
+            }
+            int eq = pair.indexOf('=');
+            if (eq < 0) {
+                String key = URLDecoder.decode(pair, StandardCharsets.UTF_8);
+                out.put(key, "");
+                continue;
+            }
+            String key = URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8);
+            String value = URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+            out.put(key, value);
+        }
+        return out;
+    }
+
+    private static int parsePositiveInt(String raw, int fallback) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return value > 0 ? value : fallback;
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
+    }
+
+    private static boolean parseBoolean(String raw) {
+        if (raw == null) {
+            return false;
+        }
+        String normalized = raw.trim().toLowerCase();
+        return "1".equals(normalized)
+                || "true".equals(normalized)
+                || "yes".equals(normalized)
+                || "on".equals(normalized);
     }
 
     private static void sendText(HttpExchange ex, int status, String body, String contentType) throws IOException {

@@ -26,8 +26,8 @@ public class MotorControllerAdapter implements MotorController {
             EncoderConfig encoderConfig = this.config != null ? this.config.encoderConfig : null;
             this.wrappedEncoder = EncoderAdapter.wrap(encoder, encoderConfig);
         }
-        this.cachedConnected = raw.isConnected();
-        this.cachedTemperatureCelsius = raw.getTemperatureCelsius();
+        this.cachedConnected = true;
+        this.cachedTemperatureCelsius = 0.0;
     }
 
     public static MotorController wrap(MotorController raw, MotorControllerConfig config) {

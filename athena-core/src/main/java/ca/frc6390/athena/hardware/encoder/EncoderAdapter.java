@@ -25,7 +25,7 @@ public class EncoderAdapter implements Encoder {
     private double cachedRawAbsoluteValue;
     private double cachedRotationDegrees;
     private double cachedAbsoluteRotationDegrees;
-    private boolean cachedConnected;
+    private boolean cachedConnected = true;
 
     public EncoderAdapter(Encoder raw, EncoderConfig config) {
         this.raw = raw;
@@ -39,7 +39,6 @@ public class EncoderAdapter implements Encoder {
             this.discontinuityRange = config.discontinuityRange;
             this.inverted = config.inverted;
         }
-        updateCache();
     }
 
     public static Encoder wrap(Encoder raw, EncoderConfig config) {

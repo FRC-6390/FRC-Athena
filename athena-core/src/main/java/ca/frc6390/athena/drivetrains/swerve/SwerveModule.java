@@ -237,7 +237,7 @@ public class SwerveModule implements RobotSendableDevice {
             DriverStation.reportWarning("Drive encoder not configured for swerve module; position reset skipped.", false);
         }
         if (steerEncoder != null) {
-            steerEncoder.setPosition(encoder.getAbsolutePosition());
+            steerEncoder.setPosition(encoder != null ? encoder.getAbsolutePosition() : 0.0);
         } else {
             DriverStation.reportWarning("Steer encoder not configured for swerve module; position reset skipped.", false);
         }

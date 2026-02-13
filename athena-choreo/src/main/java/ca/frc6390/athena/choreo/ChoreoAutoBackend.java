@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -72,17 +73,26 @@ public class ChoreoAutoBackend implements AutoBackend {
         AutoTrajectory trajectory = splitIndex.isPresent()
                 ? routine.trajectory(ref.name(), splitIndex.getAsInt())
                 : routine.trajectory(ref.name());
-        routine.active().onTrue(trajectory.cmd());
-        Command runRoutine = routine.cmd(trajectory.done()::getAsBoolean);
-        Command stop = Commands.runOnce(() -> {
+        Command resetRaw = splitIndex.isPresent()
+                ? currentFactory.resetOdometry(ref.name(), splitIndex.getAsInt())
+                : currentFactory.resetOdometry(ref.name());
+        Command reset = Commands.either(
+                resetRaw,
+                Commands.runOnce(() -> DriverStation.reportWarning(
+                        "Skipping Choreo odometry reset for \"" + reference
+                                + "\" because alliance is unknown.",
+                        false)),
+                () -> DriverStation.getAlliance().isPresent());
+        AtomicBoolean trajectoryFinished = new AtomicBoolean(false);
+        routine.active()
+                .onTrue(Commands.sequence(reset, trajectory.cmd())
+                        .finallyDo(interrupted -> trajectoryFinished.set(true)));
+        Command runRoutine = routine.cmd(trajectoryFinished::get);
+        return Optional.of(runRoutine.finallyDo(interrupted -> {
             if (stopFollower != null) {
                 stopFollower.run();
             }
-        });
-        Command reset = splitIndex.isPresent()
-                ? currentFactory.resetOdometry(ref.name(), splitIndex.getAsInt())
-                : currentFactory.resetOdometry(ref.name());
-        return Optional.of(Commands.sequence(reset, runRoutine, stop));
+        }));
     }
 
     @Override

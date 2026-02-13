@@ -45,6 +45,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -74,6 +75,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double lastSimulationTimestampSeconds = Double.NaN;
     private double hardwareUpdatePeriodSeconds = 0.02;
     private double lastHardwareUpdateSeconds = Double.NaN;
+    private int hardwareUpdateSlot = 0;
+    private double hardwareUpdatePhaseSeconds = 0.0;
+    private double firstHardwareRefreshDueSeconds = Double.NaN;
+    private static final double HARDWARE_REFRESH_QUANTUM_SECONDS = 0.02;
+    private static final AtomicInteger NEXT_HARDWARE_UPDATE_SLOT = new AtomicInteger(0);
     private final boolean encoderOwnedByMotorGroup;
     private final MechanismVisualization visualization;
     private final MechanismSensorSimulation sensorSimulation;
@@ -131,6 +137,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double cachedSysIdStepVoltage;
     private double cachedSysIdTimeoutSeconds;
     private boolean cachedSysIdActive;
+    private double cachedHardwareUpdatePeriodSeconds;
+    private double cachedHardwareUpdatePhaseSeconds;
+    private double cachedHardwareLastRefreshAgeSeconds = Double.NaN;
+    private double cachedHardwareNextRefreshInSeconds = Double.NaN;
+    private int cachedHardwareUpdateSlot;
     private RobotCore<?> robotCore;
     private SysIdRoutine sysIdRoutine;
     private double sysIdRampRateVoltsPerSecond = 1.0;
@@ -229,8 +240,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.pidPeriod = config.data().pidPeriod();
         this.motionLimits = new MotionLimits();
         this.hardwareUpdatePeriodSeconds = sanitizeHardwareUpdatePeriod(config.data().hardwareUpdatePeriodSeconds());
+        this.hardwareUpdateSlot = NEXT_HARDWARE_UPDATE_SLOT.getAndIncrement();
+        recomputeHardwareRefreshPhase();
         this.encoderOwnedByMotorGroup = isEncoderOwnedByMotorGroup(this.encoder, this.motors);
-        refreshHardwareSignals(true);
 
         if (pidController != null && config.data().pidContinous()) {
             pidController.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
@@ -389,6 +401,36 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return periodSeconds;
     }
 
+    private static int hardwareSlotsForPeriod(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds <= HARDWARE_REFRESH_QUANTUM_SECONDS) {
+            return 1;
+        }
+        return Math.max(1, (int) Math.floor(periodSeconds / HARDWARE_REFRESH_QUANTUM_SECONDS));
+    }
+
+    private void recomputeHardwareRefreshPhase() {
+        int slots = hardwareSlotsForPeriod(hardwareUpdatePeriodSeconds);
+        int slotWithinPeriod = Math.floorMod(hardwareUpdateSlot, slots);
+        hardwareUpdatePhaseSeconds = (hardwareUpdatePeriodSeconds / slots) * slotWithinPeriod;
+        firstHardwareRefreshDueSeconds = Double.NaN;
+    }
+
+    private double resolveNextHardwareRefreshDueSeconds(double nowSeconds) {
+        if (simulationModel != null) {
+            return Double.NaN;
+        }
+        if (Double.isFinite(lastHardwareUpdateSeconds)) {
+            return lastHardwareUpdateSeconds + hardwareUpdatePeriodSeconds;
+        }
+        if (Double.isFinite(firstHardwareRefreshDueSeconds)) {
+            return firstHardwareRefreshDueSeconds;
+        }
+        if (Double.isFinite(nowSeconds)) {
+            return nowSeconds + hardwareUpdatePhaseSeconds;
+        }
+        return Double.NaN;
+    }
+
     private static Encoder resolveIntegratedEncoder(EncoderConfig config, MotorControllerGroup motors) {
         if (motors == null || config.type == null) {
             return null;
@@ -454,8 +496,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.pidPeriod = pidPeriod;
         this.motionLimits = new MotionLimits();
         this.hardwareUpdatePeriodSeconds = 0.02;
+        this.hardwareUpdateSlot = NEXT_HARDWARE_UPDATE_SLOT.getAndIncrement();
+        recomputeHardwareRefreshPhase();
         this.encoderOwnedByMotorGroup = isEncoderOwnedByMotorGroup(this.encoder, this.motors);
-        refreshHardwareSignals(true);
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
@@ -641,6 +684,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public void setHardwareUpdatePeriodSeconds(double periodSeconds) {
         this.hardwareUpdatePeriodSeconds = sanitizeHardwareUpdatePeriod(periodSeconds);
+        recomputeHardwareRefreshPhase();
     }
 
     public void setHardwareUpdatePeriodMs(double periodMs) {
@@ -1456,6 +1500,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         cachedSysIdStepVoltage = sysIdStepVoltage;
         cachedSysIdTimeoutSeconds = sysIdTimeoutSeconds;
         cachedSysIdActive = sysIdActive;
+        cachedHardwareUpdatePeriodSeconds = hardwareUpdatePeriodSeconds;
+        cachedHardwareUpdatePhaseSeconds = hardwareUpdatePhaseSeconds;
+        cachedHardwareUpdateSlot = hardwareUpdateSlot;
+        cachedHardwareLastRefreshAgeSeconds =
+                (Double.isFinite(lastHardwareUpdateSeconds) && Double.isFinite(nowSeconds) && nowSeconds >= lastHardwareUpdateSeconds)
+                        ? (nowSeconds - lastHardwareUpdateSeconds)
+                        : Double.NaN;
+        double nextDueSeconds = resolveNextHardwareRefreshDueSeconds(nowSeconds);
+        cachedHardwareNextRefreshInSeconds =
+                (Double.isFinite(nextDueSeconds) && Double.isFinite(nowSeconds))
+                        ? Math.max(0.0, nextDueSeconds - nowSeconds)
+                        : Double.NaN;
     }
 
     private double calculateControlLoopOutput() {
@@ -1492,14 +1548,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (simulationModel != null) {
             return false;
         }
-        if (Double.isNaN(lastHardwareUpdateSeconds) || !Double.isFinite(lastHardwareUpdateSeconds)) {
-            return true;
-        }
         if (!Double.isFinite(nowSeconds)) {
             return true;
         }
+        if (Double.isNaN(lastHardwareUpdateSeconds) || !Double.isFinite(lastHardwareUpdateSeconds)) {
+            if (!Double.isFinite(firstHardwareRefreshDueSeconds)) {
+                firstHardwareRefreshDueSeconds = nowSeconds + hardwareUpdatePhaseSeconds;
+            }
+            return nowSeconds >= firstHardwareRefreshDueSeconds;
+        }
         if (nowSeconds < lastHardwareUpdateSeconds) {
-            return true;
+            firstHardwareRefreshDueSeconds = Double.NaN;
+            lastHardwareUpdateSeconds = Double.NaN;
+            return false;
         }
         return (nowSeconds - lastHardwareUpdateSeconds) >= hardwareUpdatePeriodSeconds;
     }
@@ -2168,6 +2229,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             status.putBoolean("pidEnabled", cachedPidEnabled);
             status.putBoolean("feedforwardEnabled", cachedFeedforwardEnabled);
             status.putString("outputType", String.valueOf(getOutputType()));
+            status.putDouble("hwRefreshPeriodMs", cachedHardwareUpdatePeriodSeconds * 1000.0);
+            status.putDouble("hwRefreshPhaseMs", cachedHardwareUpdatePhaseSeconds * 1000.0);
+            status.putDouble("hwRefreshSlot", cachedHardwareUpdateSlot);
+            boolean lastRefreshValid = Double.isFinite(cachedHardwareLastRefreshAgeSeconds);
+            status.putBoolean("hwLastRefreshValid", lastRefreshValid);
+            status.putDouble("hwLastRefreshAgeMs", lastRefreshValid ? cachedHardwareLastRefreshAgeSeconds * 1000.0 : -1.0);
+            boolean nextRefreshValid = Double.isFinite(cachedHardwareNextRefreshInSeconds);
+            status.putBoolean("hwNextRefreshValid", nextRefreshValid);
+            status.putDouble("hwNextRefreshInMs", nextRefreshValid ? cachedHardwareNextRefreshInSeconds * 1000.0 : -1.0);
 
             RobotNetworkTables.Node setpoint = control.child("Setpoint");
             setpoint.putDouble("value", cachedSetpoint);

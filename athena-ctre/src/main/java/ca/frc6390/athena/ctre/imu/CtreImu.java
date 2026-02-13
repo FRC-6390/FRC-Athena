@@ -5,6 +5,7 @@ import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.hardware.Pigeon2;
 
+import ca.frc6390.athena.ctre.CtreCanBusRegistry;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.imu.ImuConfig;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -60,22 +61,16 @@ public class CtreImu implements Imu {
                 accelerationZSignal
         };
 
-        BaseStatusSignal.setUpdateFrequencyForAll(
-                100.0,
-                rollSignal,
-                pitchSignal,
-                yawSignal,
-                velocityXSignal,
-                velocityYSignal,
-                velocityZSignal);
-        BaseStatusSignal.setUpdateFrequencyForAll(
-                50.0,
-                accelerationXSignal,
-                accelerationYSignal,
-                accelerationZSignal);
-        pigeon.optimizeBusUtilization(4.0);
-
-        update();
+        rollSignal.setUpdateFrequency(100.0, 0.0);
+        pitchSignal.setUpdateFrequency(100.0, 0.0);
+        yawSignal.setUpdateFrequency(100.0, 0.0);
+        velocityXSignal.setUpdateFrequency(100.0, 0.0);
+        velocityYSignal.setUpdateFrequency(100.0, 0.0);
+        velocityZSignal.setUpdateFrequency(100.0, 0.0);
+        accelerationXSignal.setUpdateFrequency(50.0, 0.0);
+        accelerationYSignal.setUpdateFrequency(50.0, 0.0);
+        accelerationZSignal.setUpdateFrequency(50.0, 0.0);
+        pigeon.optimizeBusUtilization(4.0, 0.0);
     }
 
     public static CtreImu fromConfig(ImuConfig config) {
@@ -165,9 +160,6 @@ public class CtreImu implements Imu {
     }
 
     private static CANBus resolveCanBus(String canbus) {
-        if (canbus == null || canbus.isBlank()) {
-            return new CANBus();
-        }
-        return new CANBus(canbus);
+        return CtreCanBusRegistry.resolve(canbus);
     }
 }

@@ -2,7 +2,6 @@ package ca.frc6390.athena.ctre.motor;
 
 import java.util.function.Consumer;
 
-import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
@@ -11,7 +10,9 @@ import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.PositionDutyCycle;
 import com.ctre.phoenix6.controls.VelocityDutyCycle;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import ca.frc6390.athena.ctre.CtreCanBusRegistry;
 import ca.frc6390.athena.ctre.encoder.CtreEncoder;
 import ca.frc6390.athena.ctre.encoder.CtreEncoderType;
 import ca.frc6390.athena.hardware.encoder.Encoder;
@@ -51,12 +52,10 @@ public class CtreMotorController implements MotorController {
         this.setSpeed = controller::set;
         this.setVoltage = controller::setVoltage;
         this.setCurrentLimit = limit -> {
-            TalonFXConfiguration cfg = new TalonFXConfiguration();
             CurrentLimitsConfigs current = new CurrentLimitsConfigs();
             current.SupplyCurrentLimitEnable = true;
             current.SupplyCurrentLimit = limit;
-            cfg.withCurrentLimits(current);
-            controller.getConfigurator().apply(cfg);
+            controller.getConfigurator().apply(current, 0.0);
         };
         this.setPosition = val -> controller.setControl(new PositionDutyCycle(val).withSlot(0));
         this.setVelocity = val -> controller.setControl(new VelocityDutyCycle(val).withSlot(0));
@@ -68,12 +67,11 @@ public class CtreMotorController implements MotorController {
             slot0.kP = pid.getP();
             slot0.kI = pid.getI();
             slot0.kD = pid.getD();
-            controller.getConfigurator().apply(slot0);
+            controller.getConfigurator().apply(slot0, 0.0);
         };
 
-        BaseStatusSignal.setUpdateFrequencyForAll(10.0, deviceTemperatureSignal);
-        controller.optimizeBusUtilization(4.0);
-        update();
+        deviceTemperatureSignal.setUpdateFrequency(10.0, 0.0);
+        controller.optimizeBusUtilization(4.0, 0.0);
     }
 
     public static CtreMotorController fromConfig(MotorControllerConfig config) {
@@ -82,7 +80,18 @@ public class CtreMotorController implements MotorController {
         }
 
         TalonFX talon = new TalonFX(config.id, resolveCanBus(config.canbus));
-        talon.getConfigurator().apply(new TalonFXConfiguration());
+        TalonFXConfiguration talonConfig = new TalonFXConfiguration();
+        talonConfig.CurrentLimits.SupplyCurrentLimitEnable = true;
+        talonConfig.CurrentLimits.SupplyCurrentLimit = config.currentLimit;
+        talonConfig.MotorOutput.NeutralMode = config.neutralMode == MotorNeutralMode.Brake
+                ? NeutralModeValue.Brake
+                : NeutralModeValue.Coast;
+        if (config.pid != null) {
+            talonConfig.Slot0.kP = config.pid.getP();
+            talonConfig.Slot0.kI = config.pid.getI();
+            talonConfig.Slot0.kD = config.pid.getD();
+        }
+        talon.getConfigurator().apply(talonConfig, 0.0);
         EncoderConfig encoderCfg = config.encoderConfig;
         if (encoderCfg == null) {
             encoderCfg = new EncoderConfig()
@@ -106,20 +115,11 @@ public class CtreMotorController implements MotorController {
                 ? EncoderAdapter.wrap(CtreEncoder.fromConfig(encoderCfg, talon), encoderCfg)
                 : null;
 
-        CtreMotorController controller = new CtreMotorController(talon, config, encoder);
-        controller.setCurrentLimit(config.currentLimit);
-        controller.setNeutralMode(config.neutralMode);
-        if (config.pid != null) {
-            controller.setPid(config.pid);
-        }
-        return controller;
+        return new CtreMotorController(talon, config, encoder);
     }
 
     private static CANBus resolveCanBus(String canbus) {
-        if (canbus == null || canbus.isBlank()) {
-            return new CANBus();
-        }
-        return new CANBus(canbus);
+        return CtreCanBusRegistry.resolve(canbus);
     }
 
     @Override

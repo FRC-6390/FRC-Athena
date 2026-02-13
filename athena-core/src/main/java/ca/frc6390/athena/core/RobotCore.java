@@ -1412,20 +1412,24 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             cfg.putString("indexUrlToml", "");
             cfg.putString("allZipUrl", "");
             cfg.putString("mechanismsBaseUrl", "");
+            cfg.putString("autoLogUrl", "");
             root.putString("configIndexUrlJson", "");
             root.putString("configIndexUrlToml", "");
             root.putString("configAllZipUrl", "");
             root.putString("configMechanismsBaseUrl", "");
+            root.putString("configAutoLogUrl", "");
             return;
         }
         cfg.putString("indexUrlJson", base + "/Athena/config/index.json");
         cfg.putString("indexUrlToml", base + "/Athena/config/index.toml");
         cfg.putString("allZipUrl", base + "/Athena/config/all.zip");
         cfg.putString("mechanismsBaseUrl", base + "/Athena/config/mechanisms/");
+        cfg.putString("autoLogUrl", base + "/Athena/auto/log");
         root.putString("configIndexUrlJson", base + "/Athena/config/index.json");
         root.putString("configIndexUrlToml", base + "/Athena/config/index.toml");
         root.putString("configAllZipUrl", base + "/Athena/config/all.zip");
         root.putString("configMechanismsBaseUrl", base + "/Athena/config/mechanisms/");
+        root.putString("configAutoLogUrl", base + "/Athena/auto/log");
     }
 
     private void publishPerformanceMetrics(RobotNetworkTables.Node root) {

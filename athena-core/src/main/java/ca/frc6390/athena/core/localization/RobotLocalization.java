@@ -443,8 +443,16 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         rotationController.setIZone(rotationConstants.iZone());
         rotationController.enableContinuousInput(-Math.PI, Math.PI);
 
-        PIDController translationController = new PIDController(translationConstants.kP(), translationConstants.kI(), translationConstants.kD());
-        translationController.setIZone(translationConstants.iZone());
+        PIDController xController = new PIDController(
+                translationConstants.kP(),
+                translationConstants.kI(),
+                translationConstants.kD());
+        xController.setIZone(translationConstants.iZone());
+        PIDController yController = new PIDController(
+                translationConstants.kP(),
+                translationConstants.kI(),
+                translationConstants.kD());
+        yController.setIZone(translationConstants.iZone());
 
         ChoreoBinding binding = new ChoreoBinding(
                 translationConstants,
@@ -453,15 +461,15 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 pose -> resetPose(localizationConfig.autoPoseName(), pose),
                 (desiredPose, desiredSpeeds) -> {
                     Pose2d botpose = getFieldPose();
-                    ChassisSpeeds fieldSpeeds = new ChassisSpeeds(desiredSpeeds.vxMetersPerSecond,
-                            desiredSpeeds.vyMetersPerSecond,
-                            desiredSpeeds.omegaRadiansPerSecond);
-
-                    fieldSpeeds.vxMetersPerSecond = translationController.calculate(botpose.getX(), desiredPose.getX());
-                    fieldSpeeds.vyMetersPerSecond = translationController.calculate(botpose.getY(), desiredPose.getY());
-                    fieldSpeeds.omegaRadiansPerSecond = rotationController.calculate(
+                    double xFeedback = xController.calculate(botpose.getX(), desiredPose.getX());
+                    double yFeedback = yController.calculate(botpose.getY(), desiredPose.getY());
+                    double thetaFeedback = rotationController.calculate(
                             botpose.getRotation().getRadians(),
                             desiredPose.getRotation().getRadians());
+                    ChassisSpeeds fieldSpeeds = new ChassisSpeeds(
+                            desiredSpeeds.vxMetersPerSecond + xFeedback,
+                            desiredSpeeds.vyMetersPerSecond + yFeedback,
+                            desiredSpeeds.omegaRadiansPerSecond + thetaFeedback);
 
                     ChassisSpeeds robotRelative = ChassisSpeeds.fromFieldRelativeSpeeds(
                             fieldSpeeds,

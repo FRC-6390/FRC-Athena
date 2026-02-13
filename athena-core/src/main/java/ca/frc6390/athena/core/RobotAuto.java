@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -11,9 +12,12 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.Locale;
 
 import ca.frc6390.athena.core.auto.AutoBackend;
 import ca.frc6390.athena.core.auto.AutoBackends;
@@ -21,6 +25,7 @@ import ca.frc6390.athena.core.localization.RobotLocalization;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -30,6 +35,7 @@ import edu.wpi.first.wpilibj2.command.InstantCommand;
  * Aggregates named command and autonomous routine registration for a robot.
  */
 public class RobotAuto {
+    private static final int DEFAULT_AUTO_TRACE_LOG_CAPACITY = 512;
 
     private final Map<String, Supplier<Command>> namedCommandSuppliers;
     private final Map<String, AutoRoutine> autoRoutines;
@@ -43,7 +49,13 @@ public class RobotAuto {
     private boolean registrationFinalized;
     private final Set<String> boundPathPlannerNamedCommands;
     private final Set<String> boundChoreoNamedCommands;
+    private final Object autoTraceLock;
+    private final ArrayDeque<AutoTraceEvent> autoTraceLog;
+    private final int autoTraceLogCapacity;
+    private long autoTraceSequence;
     private RobotCore<?> robotCore;
+    private boolean autoTraceEnabled;
+    private Consumer<String> autoTraceSink;
 
     public RobotAuto() {
         namedCommandSuppliers = new LinkedHashMap<>();
@@ -58,7 +70,13 @@ public class RobotAuto {
         registrationFinalized = false;
         boundPathPlannerNamedCommands = new HashSet<>();
         boundChoreoNamedCommands = new HashSet<>();
+        autoTraceLock = new Object();
+        autoTraceLog = new ArrayDeque<>();
+        autoTraceLogCapacity = DEFAULT_AUTO_TRACE_LOG_CAPACITY;
+        autoTraceSequence = 0L;
         robotCore = null;
+        autoTraceEnabled = false;
+        autoTraceSink = message -> DriverStation.reportWarning(message, false);
     }
 
     /**
@@ -111,6 +129,17 @@ public class RobotAuto {
             return new SimpleAutoInput<>(id, type);
         }
     }
+
+    /**
+     * Immutable auto-trace entry for debugging auto execution flow.
+     */
+    public record AutoTraceEvent(
+            long sequence,
+            double timestampSeconds,
+            Double xMeters,
+            Double yMeters,
+            Double headingDeg,
+            String message) {}
 
     /**
      * Source enum for trajectory-backed autos.
@@ -300,67 +329,229 @@ public class RobotAuto {
 
         default Command sequence(Command... steps) {
             Command[] commands = nonNullCommands(steps);
-            return commands.length == 0 ? Commands.none() : Commands.sequence(commands);
+            Command sequenceCommand = commands.length == 0 ? Commands.none() : Commands.sequence(commands);
+            return traceBuild("sequence", "steps=" + commands.length, sequenceCommand);
         }
 
         default Command sequence(String... autoIds) {
-            return sequence(commandsForIds(autos(), autoIds));
+            Command[] commands = commandsForIds(autos(), autoIds);
+            Command sequenceCommand = commands.length == 0 ? Commands.none() : Commands.sequence(commands);
+            return traceBuild(
+                    "sequence(autoIds)",
+                    "steps=" + commands.length + " ids=" + idsLabel(autoIds),
+                    sequenceCommand);
         }
 
         default Command parallel(Command... steps) {
             Command[] commands = nonNullCommands(steps);
-            return commands.length == 0 ? Commands.none() : Commands.parallel(commands);
+            Command parallelCommand = commands.length == 0 ? Commands.none() : Commands.parallel(commands);
+            return traceBuild("parallel", "steps=" + commands.length, parallelCommand);
         }
 
         default Command parallel(String... autoIds) {
-            return parallel(commandsForIds(autos(), autoIds));
+            Command[] commands = commandsForIds(autos(), autoIds);
+            Command parallelCommand = commands.length == 0 ? Commands.none() : Commands.parallel(commands);
+            return traceBuild(
+                    "parallel(autoIds)",
+                    "steps=" + commands.length + " ids=" + idsLabel(autoIds),
+                    parallelCommand);
         }
 
         default Command race(Command... steps) {
             Command[] commands = nonNullCommands(steps);
-            return commands.length == 0 ? Commands.none() : Commands.race(commands);
+            Command raceCommand = commands.length == 0 ? Commands.none() : Commands.race(commands);
+            return traceBuild("race", "steps=" + commands.length, raceCommand);
         }
 
         default Command race(String... autoIds) {
-            return race(commandsForIds(autos(), autoIds));
+            Command[] commands = commandsForIds(autos(), autoIds);
+            Command raceCommand = commands.length == 0 ? Commands.none() : Commands.race(commands);
+            return traceBuild(
+                    "race(autoIds)",
+                    "steps=" + commands.length + " ids=" + idsLabel(autoIds),
+                    raceCommand);
         }
 
         default Command deadline(Command deadline, Command... others) {
             Objects.requireNonNull(deadline, "deadline");
             Command[] commands = nonNullCommands(others);
-            return commands.length == 0 ? deadline : Commands.deadline(deadline, commands);
+            Command deadlineCommand = commands.length == 0 ? deadline : Commands.deadline(deadline, commands);
+            return traceBuild(
+                    "deadline",
+                    "deadline=" + commandLabel(deadline) + " others=" + commands.length,
+                    deadlineCommand);
         }
 
         default Command deadline(String deadlineAutoId, String... otherAutoIds) {
-            return deadline(auto(deadlineAutoId), commandsForIds(autos(), otherAutoIds));
+            Objects.requireNonNull(deadlineAutoId, "deadlineAutoId");
+            Command[] otherCommands = commandsForIds(autos(), otherAutoIds);
+            Command deadlineCommand = otherCommands.length == 0
+                    ? auto(deadlineAutoId)
+                    : Commands.deadline(auto(deadlineAutoId), otherCommands);
+            return traceBuild(
+                    "deadline(autoIds)",
+                    "deadline=auto(" + deadlineAutoId + ") others=" + otherCommands.length
+                            + " ids=" + idsLabel(otherAutoIds),
+                    deadlineCommand);
         }
 
         default Command select(BooleanSupplier condition, Command ifTrue, Command ifFalse) {
-            Objects.requireNonNull(condition, "condition");
-            Objects.requireNonNull(ifTrue, "ifTrue");
-            Objects.requireNonNull(ifFalse, "ifFalse");
-            return Commands.either(ifTrue, ifFalse, condition);
+            return selectWithLabels(condition, ifTrue, ifFalse, commandLabel(ifTrue), commandLabel(ifFalse));
         }
 
         default Command select(BooleanSupplier condition, String ifTrueId, String ifFalseId) {
-            return select(condition, auto(ifTrueId), auto(ifFalseId));
+            Objects.requireNonNull(ifTrueId, "ifTrueId");
+            Objects.requireNonNull(ifFalseId, "ifFalseId");
+            return selectWithLabels(
+                    condition,
+                    auto(ifTrueId),
+                    auto(ifFalseId),
+                    "auto(" + ifTrueId + ")",
+                    "auto(" + ifFalseId + ")");
+        }
+
+        private Command selectWithLabels(
+                BooleanSupplier condition,
+                Command ifTrue,
+                Command ifFalse,
+                String ifTrueLabel,
+                String ifFalseLabel) {
+            Objects.requireNonNull(condition, "condition");
+            Objects.requireNonNull(ifTrue, "ifTrue");
+            Objects.requireNonNull(ifFalse, "ifFalse");
+            Objects.requireNonNull(ifTrueLabel, "ifTrueLabel");
+            Objects.requireNonNull(ifFalseLabel, "ifFalseLabel");
+            BooleanSupplier tracedCondition = () -> {
+                boolean result = condition.getAsBoolean();
+                autos().traceAutoDecision(
+                        "select",
+                        "condition=" + result + " -> " + (result ? ifTrueLabel : ifFalseLabel));
+                return result;
+            };
+            Command selectCommand = Commands.either(ifTrue, ifFalse, tracedCondition);
+            return traceBuild(
+                    "select",
+                    "ifTrue=" + ifTrueLabel + " ifFalse=" + ifFalseLabel,
+                    selectCommand);
         }
 
         default Command selectIndex(IntSupplier selector, Command fallback, Command... options) {
             Objects.requireNonNull(selector, "selector");
             Objects.requireNonNull(fallback, "fallback");
-            Command[] resolvedOptions = nonNullCommands(options);
-            return Commands.defer(() -> {
-                int index = selector.getAsInt();
-                if (index < 0 || index >= resolvedOptions.length) {
-                    return fallback;
+            List<Command> resolvedOptions = new ArrayList<>();
+            List<String> optionLabels = new ArrayList<>();
+            if (options != null) {
+                for (Command option : options) {
+                    if (option == null) {
+                        continue;
+                    }
+                    resolvedOptions.add(option);
+                    optionLabels.add(commandLabel(option));
                 }
-                return resolvedOptions[index];
-            }, Set.of());
+            }
+            return selectIndexWithLabels(
+                    selector,
+                    fallback,
+                    commandLabel(fallback),
+                    resolvedOptions.toArray(Command[]::new),
+                    optionLabels.toArray(String[]::new));
         }
 
         default Command selectIndex(IntSupplier selector, String fallbackAutoId, String... optionAutoIds) {
-            return selectIndex(selector, auto(fallbackAutoId), commandsForIds(autos(), optionAutoIds));
+            Objects.requireNonNull(fallbackAutoId, "fallbackAutoId");
+            Command fallback = auto(fallbackAutoId);
+            List<Command> options = new ArrayList<>();
+            List<String> optionLabels = new ArrayList<>();
+            if (optionAutoIds != null) {
+                for (String optionAutoId : optionAutoIds) {
+                    if (optionAutoId == null || optionAutoId.isBlank()) {
+                        continue;
+                    }
+                    options.add(auto(optionAutoId));
+                    optionLabels.add("auto(" + optionAutoId + ")");
+                }
+            }
+            return selectIndexWithLabels(
+                    selector,
+                    fallback,
+                    "auto(" + fallbackAutoId + ")",
+                    options.toArray(Command[]::new),
+                    optionLabels.toArray(String[]::new));
+        }
+
+        private Command selectIndexWithLabels(
+                IntSupplier selector,
+                Command fallback,
+                String fallbackLabel,
+                Command[] options,
+                String[] optionLabels) {
+            Objects.requireNonNull(selector, "selector");
+            Objects.requireNonNull(fallback, "fallback");
+            Objects.requireNonNull(fallbackLabel, "fallbackLabel");
+            Objects.requireNonNull(options, "options");
+            Objects.requireNonNull(optionLabels, "optionLabels");
+            if (optionLabels.length != options.length) {
+                throw new IllegalArgumentException("optionLabels length must match options length");
+            }
+            Command selectIndexCommand = Commands.defer(() -> {
+                int index = selector.getAsInt();
+                if (index < 0 || index >= options.length) {
+                    autos().traceAutoDecision(
+                            "selectIndex",
+                            "index=" + index + " outOfRange(size=" + options.length + ") -> " + fallbackLabel);
+                    return fallback;
+                }
+                String selectedLabel = optionLabels[index];
+                autos().traceAutoDecision(
+                        "selectIndex",
+                        "index=" + index + " -> " + selectedLabel);
+                return options[index];
+            }, Set.of());
+            return traceBuild(
+                    "selectIndex",
+                    "options=" + options.length + " fallback=" + fallbackLabel,
+                    selectIndexCommand);
+        }
+
+        private static String commandLabel(Command command) {
+            if (command == null) {
+                return "<null>";
+            }
+            String name = command.getName();
+            if (name == null || name.isBlank()) {
+                return command.getClass().getSimpleName();
+            }
+            return name;
+        }
+
+        private Command traceBuild(String operation, String detail, Command command) {
+            Objects.requireNonNull(operation, "operation");
+            Objects.requireNonNull(command, "command");
+            return autos().traceAutoLifecycle("ctx." + operation, detail, command);
+        }
+
+        private static String idsLabel(String... ids) {
+            if (ids == null || ids.length == 0) {
+                return "[]";
+            }
+            StringBuilder out = new StringBuilder();
+            out.append('[');
+            boolean first = true;
+            for (String id : ids) {
+                if (id == null || id.isBlank()) {
+                    continue;
+                }
+                if (!first) {
+                    out.append(", ");
+                }
+                out.append(id);
+                first = false;
+            }
+            if (first) {
+                return "[]";
+            }
+            out.append(']');
+            return out.toString();
         }
 
         /**
@@ -370,7 +561,8 @@ public class RobotAuto {
             if (seconds < 0.0) {
                 throw new IllegalArgumentException("seconds must be >= 0");
             }
-            return seconds == 0.0 ? Commands.none() : Commands.waitSeconds(seconds);
+            Command waitCommand = seconds == 0.0 ? Commands.none() : Commands.waitSeconds(seconds);
+            return traceBuild("waitSeconds", "seconds=" + seconds, waitCommand);
         }
 
         /**
@@ -378,7 +570,8 @@ public class RobotAuto {
          */
         default Command waitUntil(BooleanSupplier condition) {
             Objects.requireNonNull(condition, "condition");
-            return Commands.waitUntil(condition);
+            Command waitCommand = Commands.waitUntil(condition);
+            return traceBuild("waitUntil", "condition=" + condition, waitCommand);
         }
 
         /**
@@ -390,9 +583,26 @@ public class RobotAuto {
             if (timeoutSeconds <= 0.0) {
                 throw new IllegalArgumentException("timeoutSeconds must be > 0");
             }
-            return Commands.race(
+            AtomicBoolean timedOut = new AtomicBoolean(false);
+            Command timeoutBranch = Commands.sequence(
+                    Commands.waitSeconds(timeoutSeconds),
+                    Commands.runOnce(() -> timedOut.set(true)),
+                    onTimeout);
+            Command waitCommand = Commands.race(
                     Commands.waitUntil(condition),
-                    Commands.sequence(Commands.waitSeconds(timeoutSeconds), onTimeout));
+                    timeoutBranch);
+            return traceBuild(
+                    "waitFor",
+                    "timeoutSeconds=" + timeoutSeconds + " fallback=" + commandLabel(onTimeout),
+                    waitCommand).finallyDo(interrupted -> {
+                        if (interrupted) {
+                            autos().traceAutoDecision("waitFor", "result=interrupted");
+                            return;
+                        }
+                        autos().traceAutoDecision(
+                                "waitFor",
+                                timedOut.get() ? "result=timeoutFallback" : "result=conditionMet");
+                    });
         }
 
         default Command waitFor(BooleanSupplier condition, double timeoutSeconds, Runnable onTimeout) {
@@ -405,7 +615,24 @@ public class RobotAuto {
             if (timeoutSeconds <= 0.0) {
                 throw new IllegalArgumentException("timeoutSeconds must be > 0");
             }
-            return Commands.waitUntil(condition).withTimeout(timeoutSeconds);
+            AtomicBoolean timedOut = new AtomicBoolean(false);
+            Command waitCommand = Commands.race(
+                    Commands.waitUntil(condition),
+                    Commands.sequence(
+                            Commands.waitSeconds(timeoutSeconds),
+                            Commands.runOnce(() -> timedOut.set(true))));
+            return traceBuild(
+                    "waitFor",
+                    "timeoutSeconds=" + timeoutSeconds + " fallback=<none>",
+                    waitCommand).finallyDo(interrupted -> {
+                        if (interrupted) {
+                            autos().traceAutoDecision("waitFor", "result=interrupted");
+                            return;
+                        }
+                        autos().traceAutoDecision(
+                                "waitFor",
+                                timedOut.get() ? "result=timeout" : "result=conditionMet");
+                    });
         }
 
         /**
@@ -423,7 +650,24 @@ public class RobotAuto {
             if (timeoutSeconds <= 0.0) {
                 throw new IllegalArgumentException("timeoutSeconds must be > 0");
             }
-            return command.withTimeout(timeoutSeconds);
+            AtomicBoolean timedOut = new AtomicBoolean(false);
+            Command timeoutCommand = Commands.race(
+                    command,
+                    Commands.sequence(
+                            Commands.waitSeconds(timeoutSeconds),
+                            Commands.runOnce(() -> timedOut.set(true))));
+            return traceBuild(
+                    "timeout",
+                    "timeoutSeconds=" + timeoutSeconds + " command=" + commandLabel(command),
+                    timeoutCommand).finallyDo(interrupted -> {
+                        if (interrupted) {
+                            autos().traceAutoDecision("timeout", "result=interrupted");
+                            return;
+                        }
+                        autos().traceAutoDecision(
+                                "timeout",
+                                timedOut.get() ? "result=timedOut" : "result=completed");
+                    });
         }
 
         /**
@@ -443,9 +687,27 @@ public class RobotAuto {
             if (timeoutSeconds <= 0.0) {
                 throw new IllegalArgumentException("timeoutSeconds must be > 0");
             }
-            return Commands.race(
+            AtomicBoolean timedOut = new AtomicBoolean(false);
+            Command timeoutCommand = Commands.race(
                     command,
-                    Commands.sequence(Commands.waitSeconds(timeoutSeconds), onTimeout));
+                    Commands.sequence(
+                            Commands.waitSeconds(timeoutSeconds),
+                            Commands.runOnce(() -> timedOut.set(true)),
+                            onTimeout));
+            return traceBuild(
+                    "timeoutWithFallback",
+                    "timeoutSeconds=" + timeoutSeconds
+                            + " command=" + commandLabel(command)
+                            + " fallback=" + commandLabel(onTimeout),
+                    timeoutCommand).finallyDo(interrupted -> {
+                        if (interrupted) {
+                            autos().traceAutoDecision("timeoutWithFallback", "result=interrupted");
+                            return;
+                        }
+                        autos().traceAutoDecision(
+                                "timeoutWithFallback",
+                                timedOut.get() ? "result=timeoutFallback" : "result=completed");
+                    });
         }
 
         /**
@@ -659,8 +921,9 @@ public class RobotAuto {
         if (namedCommandSuppliers.containsKey(id)) {
             throw new IllegalArgumentException("Named command already registered: " + id);
         }
-        namedCommandSuppliers.put(id, supplier);
-        boolean bound = bindNamedCommandToAvailableBackends(id, supplier);
+        Supplier<Command> tracedSupplier = traceNamedCommandSupplier(id, supplier);
+        namedCommandSuppliers.put(id, tracedSupplier);
+        boolean bound = bindNamedCommandToAvailableBackends(id, tracedSupplier);
         if (!bound) {
             DriverStation.reportWarning(
                     "No auto backend available; named command '" + id + "' not bound to vendor API.",
@@ -927,6 +1190,73 @@ public class RobotAuto {
         return this;
     }
 
+    public RobotAuto setAutoTraceEnabled(boolean enabled) {
+        this.autoTraceEnabled = enabled;
+        return this;
+    }
+
+    public RobotAuto enableAutoTrace() {
+        return setAutoTraceEnabled(true);
+    }
+
+    public RobotAuto disableAutoTrace() {
+        return setAutoTraceEnabled(false);
+    }
+
+    public boolean isAutoTraceEnabled() {
+        return autoTraceEnabled;
+    }
+
+    public RobotAuto setAutoTraceSink(Consumer<String> sink) {
+        this.autoTraceSink = Objects.requireNonNull(sink, "sink");
+        return this;
+    }
+
+    public List<AutoTraceEvent> getAutoTraceLog() {
+        synchronized (autoTraceLock) {
+            return List.copyOf(autoTraceLog);
+        }
+    }
+
+    public List<AutoTraceEvent> getAutoTraceLog(int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        synchronized (autoTraceLock) {
+            int size = autoTraceLog.size();
+            if (limit >= size) {
+                return List.copyOf(autoTraceLog);
+            }
+            int skip = size - limit;
+            List<AutoTraceEvent> out = new ArrayList<>(limit);
+            int i = 0;
+            for (AutoTraceEvent event : autoTraceLog) {
+                if (i++ < skip) {
+                    continue;
+                }
+                out.add(event);
+            }
+            return out;
+        }
+    }
+
+    public int getAutoTraceLogCount() {
+        synchronized (autoTraceLock) {
+            return autoTraceLog.size();
+        }
+    }
+
+    public int getAutoTraceLogCapacity() {
+        return autoTraceLogCapacity;
+    }
+
+    public RobotAuto clearAutoTraceLog() {
+        synchronized (autoTraceLock) {
+            autoTraceLog.clear();
+        }
+        return this;
+    }
+
     public RobotAuto setAutoInitReset(AutoKey key, Boolean resetOnInit) {
         Objects.requireNonNull(key, "key");
         AutoRoutine routine = autoRoutines.get(key.id());
@@ -1024,9 +1354,16 @@ public class RobotAuto {
     public Optional<Command> buildSelectedCommand() {
         finalizeRegistration();
         if (commandChooser != null) {
-            return Optional.ofNullable(commandChooser.getSelected());
+            Command selected = commandChooser.getSelected();
+            traceAuto("SELECTED command chooser -> " + commandLabel(selected));
+            return Optional.ofNullable(selected);
         }
-        return getSelectedAuto().map(AutoRoutine::createCommand);
+        return getSelectedAuto().map(routine -> {
+            traceAuto("SELECTED auto=\"" + routine.key().id()
+                    + "\" source=" + routine.source()
+                    + " reference=\"" + routine.reference() + "\"");
+            return routine.createCommand();
+        });
     }
 
     public ProfiledPIDController getXController() {
@@ -1135,7 +1472,12 @@ public class RobotAuto {
             String explicitSplitId = id + "." + split;
             AutoRoutine explicitSplit = autoRoutines.get(explicitSplitId);
             if (explicitSplit != null) {
-                return deferredCommand(explicitSplit);
+                return traceAutoLifecycle(
+                        "auto(" + explicitSplitId + ")",
+                        "splitOf=" + id
+                                + " source=" + explicitSplit.source()
+                                + " reference=\"" + explicitSplit.reference() + "\"",
+                        deferredCommand(explicitSplit));
             }
             AutoRoutine base = autoRoutines.get(id);
             if (base == null) {
@@ -1145,14 +1487,23 @@ public class RobotAuto {
                 throw new IllegalStateException("Auto split requested for CUSTOM auto: " + id + "." + split);
             }
             String splitReference = base.reference() + "." + split;
-            return Commands.defer(() -> buildPathCommand(base.source(), splitReference), Set.of());
+            Command splitCommand = Commands.defer(() -> buildPathCommand(base.source(), splitReference), Set.of());
+            return traceAutoLifecycle(
+                    "auto(" + id + "." + split + ")",
+                    "derivedFrom=" + id
+                            + " source=" + base.source()
+                            + " reference=\"" + splitReference + "\"",
+                    splitCommand);
         }
 
         AutoRoutine routine = autoRoutines.get(id);
         if (routine == null) {
             throw new IllegalStateException("Auto not registered: " + id);
         }
-        return deferredCommand(routine);
+        return traceAutoLifecycle(
+                "auto(" + id + ")",
+                "source=" + routine.source() + " reference=\"" + routine.reference() + "\"",
+                deferredCommand(routine));
     }
 
     private Optional<Pose2d> startingPoseFor(String id, OptionalInt splitIndex) {
@@ -1240,6 +1591,116 @@ public class RobotAuto {
             throw new IllegalArgumentException(fieldName + " cannot be blank");
         }
         return trimmed;
+    }
+
+    private void traceAutoDecision(String decisionType, String detail) {
+        traceAuto("DECISION " + decisionType + " | " + detail);
+    }
+
+    private Command traceAutoLifecycle(String label, String detail, Command command) {
+        Objects.requireNonNull(label, "label");
+        Objects.requireNonNull(command, "command");
+        return command
+                .beforeStarting(() -> {
+                    String suffix = (detail == null || detail.isBlank()) ? "" : " | " + detail;
+                    traceAuto("START " + label + suffix);
+                })
+                .finallyDo(interrupted -> traceAuto("END " + label + " interrupted=" + interrupted));
+    }
+
+    private void traceAuto(String message) {
+        if (!autoTraceEnabled) {
+            return;
+        }
+        String payload = "[AUTO TRACE] " + Objects.requireNonNullElse(message, "<null>");
+        AutoTraceEvent event = appendAutoTraceEvent(payload);
+        try {
+            autoTraceSink.accept(formatAutoTraceLine(event));
+        } catch (RuntimeException ex) {
+            DriverStation.reportWarning("Auto trace sink failure: " + ex.getMessage(), false);
+        }
+    }
+
+    private AutoTraceEvent appendAutoTraceEvent(String payload) {
+        Pose2d pose = currentFieldPoseOrNull();
+        Double x = pose != null ? pose.getX() : null;
+        Double y = pose != null ? pose.getY() : null;
+        Double headingDeg = pose != null ? pose.getRotation().getDegrees() : null;
+        synchronized (autoTraceLock) {
+            autoTraceSequence++;
+            AutoTraceEvent event = new AutoTraceEvent(
+                    autoTraceSequence,
+                    Timer.getFPGATimestamp(),
+                    x,
+                    y,
+                    headingDeg,
+                    payload);
+            autoTraceLog.addLast(event);
+            while (autoTraceLog.size() > autoTraceLogCapacity) {
+                autoTraceLog.removeFirst();
+            }
+            return event;
+        }
+    }
+
+    private String formatAutoTraceLine(AutoTraceEvent event) {
+        StringBuilder out = new StringBuilder(160);
+        out.append(event.message());
+        out.append(" | t=").append(formatDouble(event.timestampSeconds(), 3));
+        if (event.xMeters() != null && event.yMeters() != null && event.headingDeg() != null) {
+            out.append(" pose=(")
+                    .append(formatDouble(event.xMeters(), 3)).append(", ")
+                    .append(formatDouble(event.yMeters(), 3)).append(", ")
+                    .append(formatDouble(event.headingDeg(), 1)).append("deg)");
+        } else {
+            out.append(" pose=<unknown>");
+        }
+        return out.toString();
+    }
+
+    private static String formatDouble(double value, int decimals) {
+        return String.format(Locale.US, "%." + decimals + "f", value);
+    }
+
+    private Pose2d currentFieldPoseOrNull() {
+        RobotCore<?> core = robotCore;
+        if (core == null) {
+            return null;
+        }
+        try {
+            RobotLocalization<?> localization = core.getLocalization();
+            if (localization == null) {
+                return null;
+            }
+            return localization.getFieldPose();
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private Supplier<Command> traceNamedCommandSupplier(String id, Supplier<Command> supplier) {
+        Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(supplier, "supplier");
+        return () -> {
+            traceAuto("EVENT namedCommand(" + id + ") trigger");
+            Command command = supplier.get();
+            if (command == null) {
+                traceAutoDecision("namedCommand", "id=" + id + " returned null; using none()");
+                return Commands.none();
+            }
+            return traceAutoLifecycle("namedCommand(" + id + ")", null, command);
+        };
+    }
+
+    private static String commandLabel(Command command) {
+        if (command == null) {
+            return "<none>";
+        }
+        String name = command.getName();
+        if (name == null || name.isBlank()) {
+            return command.getClass().getSimpleName();
+        }
+        return name;
     }
 
     private void resetChoosers() {

@@ -7,6 +7,7 @@ import com.ctre.phoenix6.configs.CANcoderConfiguration;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 
+import ca.frc6390.athena.ctre.CtreCanBusRegistry;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import edu.wpi.first.math.MathUtil;
@@ -29,7 +30,7 @@ public class CtreEncoder implements Encoder {
     private double cachedPosition = 0.0;
     private double cachedVelocity = 0.0;
     private double cachedAbsolutePosition = 0.0;
-    private boolean cachedConnected = false;
+    private boolean cachedConnected = true;
 
     public CtreEncoder(CANcoder cancoder, EncoderConfig config) {
         this.cancoder = cancoder;
@@ -40,9 +41,10 @@ public class CtreEncoder implements Encoder {
         this.absolutePositionSignal = cancoder.getAbsolutePosition(false).clone();
         this.refreshSignals = new BaseStatusSignal[] { positionSignal, velocitySignal, absolutePositionSignal };
         applyConfig(config);
-        BaseStatusSignal.setUpdateFrequencyForAll(100.0, positionSignal, velocitySignal, absolutePositionSignal);
-        cancoder.optimizeBusUtilization(4.0);
-        update();
+        positionSignal.setUpdateFrequency(100.0, 0.0);
+        velocitySignal.setUpdateFrequency(100.0, 0.0);
+        absolutePositionSignal.setUpdateFrequency(100.0, 0.0);
+        cancoder.optimizeBusUtilization(4.0, 0.0);
     }
 
     public CtreEncoder(TalonFX talonFx, EncoderConfig config) {
@@ -54,9 +56,9 @@ public class CtreEncoder implements Encoder {
         this.absolutePositionSignal = positionSignal;
         this.refreshSignals = new BaseStatusSignal[] { positionSignal, velocitySignal };
         applyConfig(config);
-        BaseStatusSignal.setUpdateFrequencyForAll(100.0, positionSignal, velocitySignal);
-        talonFx.optimizeBusUtilization(4.0);
-        update();
+        positionSignal.setUpdateFrequency(100.0, 0.0);
+        velocitySignal.setUpdateFrequency(100.0, 0.0);
+        talonFx.optimizeBusUtilization(4.0, 0.0);
     }
 
     private void applyConfig(EncoderConfig config) {
@@ -67,10 +69,8 @@ public class CtreEncoder implements Encoder {
                 Double.isFinite(config.discontinuityPoint) || Double.isFinite(config.discontinuityRange);
 
         if (!hasDiscontinuityConfig) {
-            CANcoderConfiguration current = new CANcoderConfiguration();
-            cancoder.getConfigurator().refresh(current);
             config.discontinuityRange = 1.0;
-            config.discontinuityPoint = current.MagnetSensor.AbsoluteSensorDiscontinuityPoint;
+            config.discontinuityPoint = 0.5;
             return;
         }
 
@@ -94,7 +94,7 @@ public class CtreEncoder implements Encoder {
             CANcoderConfiguration cfg = new CANcoderConfiguration();
             cfg.MagnetSensor.AbsoluteSensorDiscontinuityPoint =
                     MathUtil.clamp(config.discontinuityPoint, 0.0, 1.0);
-            cancoder.getConfigurator().apply(cfg);
+            cancoder.getConfigurator().apply(cfg, 0.0);
         }
     }
 
@@ -124,10 +124,7 @@ public class CtreEncoder implements Encoder {
     }
 
     private static CANBus resolveCanBus(String canbus) {
-        if (canbus == null || canbus.isBlank()) {
-            return new CANBus();
-        }
-        return new CANBus(canbus);
+        return CtreCanBusRegistry.resolve(canbus);
     }
 
     @Override

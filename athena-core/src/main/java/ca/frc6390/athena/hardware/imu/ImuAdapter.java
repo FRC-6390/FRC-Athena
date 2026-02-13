@@ -27,7 +27,6 @@ public class ImuAdapter implements Imu {
         this.raw = raw;
         this.config = config != null ? config : raw.getConfig();
         this.inverted = this.config != null && this.config.inverted;
-        update();
     }
 
     public static Imu wrap(Imu raw, ImuConfig config) {
