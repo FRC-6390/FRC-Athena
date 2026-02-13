@@ -37,11 +37,14 @@ import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanismFactory;
+import ca.frc6390.athena.mechanisms.OutputType;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
 import ca.frc6390.athena.logging.TelemetryRegistry;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -329,6 +332,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final List<PeriodicHookRunner<T>> teleopPeriodicHookRunners;
     private final List<PeriodicHookRunner<T>> autonomousPeriodicHookRunners;
     private final List<PeriodicHookRunner<T>> testPeriodicHookRunners;
+    private final List<CoreControlLoopRunner<T>> coreControlLoopRunners;
+    private final Map<String, PIDController> coreControlLoopPids;
+    private final Map<String, OutputType> coreControlLoopPidOutputTypes;
+    private final Map<String, SimpleMotorFeedforward> coreControlLoopFeedforwards;
+    private final Map<String, OutputType> coreControlLoopFeedforwardOutputTypes;
     private static final double MECHANISM_AUTO_PUBLISH_PERIOD_SECONDS = 0.05;
     private static final int MECHANISM_AUTO_PUBLISH_BATCH_SIZE = 2;
 
@@ -377,6 +385,51 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         teleopPeriodicHookRunners = createPeriodicHookRunners(coreHooks.teleopPeriodicLoopBindings());
         autonomousPeriodicHookRunners = createPeriodicHookRunners(coreHooks.autonomousPeriodicLoopBindings());
         testPeriodicHookRunners = createPeriodicHookRunners(coreHooks.testPeriodicLoopBindings());
+        coreControlLoopRunners = createCoreControlLoopRunners(coreHooks.controlLoopBindings());
+        coreControlLoopPids = new HashMap<>();
+        coreControlLoopPidOutputTypes = new HashMap<>();
+        coreControlLoopFeedforwards = new HashMap<>();
+        coreControlLoopFeedforwardOutputTypes = new HashMap<>();
+        for (Map.Entry<String, RobotCoreHooks.PidProfile> entry : coreHooks.pidProfiles().entrySet()) {
+            if (entry == null) {
+                continue;
+            }
+            String name = entry.getKey();
+            RobotCoreHooks.PidProfile profile = entry.getValue();
+            if (name == null || name.isBlank() || profile == null) {
+                continue;
+            }
+            OutputType outputType = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
+            if (outputType != OutputType.PERCENT && outputType != OutputType.VOLTAGE) {
+                throw new IllegalStateException("Core PID profile output type must be PERCENT or VOLTAGE");
+            }
+            PIDController controller = new PIDController(profile.kP(), profile.kI(), profile.kD());
+            if (Double.isFinite(profile.iZone()) && profile.iZone() > 0.0) {
+                controller.setIZone(profile.iZone());
+            }
+            if (Double.isFinite(profile.tolerance()) && profile.tolerance() > 0.0) {
+                controller.setTolerance(profile.tolerance());
+            }
+            coreControlLoopPids.put(name, controller);
+            coreControlLoopPidOutputTypes.put(name, outputType);
+        }
+        for (Map.Entry<String, RobotCoreHooks.FeedforwardProfile> entry : coreHooks.feedforwardProfiles().entrySet()) {
+            if (entry == null) {
+                continue;
+            }
+            String name = entry.getKey();
+            RobotCoreHooks.FeedforwardProfile profile = entry.getValue();
+            SimpleMotorFeedforward ff = profile != null ? profile.feedforward() : null;
+            if (name == null || name.isBlank() || ff == null) {
+                continue;
+            }
+            OutputType outputType = profile.outputType() != null ? profile.outputType() : OutputType.VOLTAGE;
+            if (outputType != OutputType.VOLTAGE) {
+                throw new IllegalStateException("Core feedforward profile output type must be VOLTAGE");
+            }
+            coreControlLoopFeedforwards.put(name, new SimpleMotorFeedforward(ff.getKs(), ff.getKv(), ff.getKa()));
+            coreControlLoopFeedforwardOutputTypes.put(name, outputType);
+        }
 
         if (localization != null) {
             localization.attachRobotNetworkTables(robotNetworkTables);
@@ -434,6 +487,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         runSuperstructureInitHooks();
     }
 
+    private void runRegisteredPhaseHooks(RobotCoreHooks.Phase phase) {
+        runMechanismPhaseHooks(phase);
+        runSuperstructurePhaseHooks(phase);
+    }
+
     private void runMechanismInitHooks() {
         if (mechanisms == null || mechanisms.isEmpty()) {
             return;
@@ -447,6 +505,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 continue;
             }
             cfg.runInitHooks(mech);
+        }
+    }
+
+    private void runMechanismPhaseHooks(RobotCoreHooks.Phase phase) {
+        if (phase == null || mechanisms == null || mechanisms.isEmpty()) {
+            return;
+        }
+        for (Mechanism mech : mechanisms.values()) {
+            if (mech == null) {
+                continue;
+            }
+            mech.runLifecycleHooks(phase);
         }
     }
 
@@ -464,6 +534,24 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     continue;
                 }
                 superstructure.runInitHooks();
+            }
+        }
+    }
+
+    private void runSuperstructurePhaseHooks(RobotCoreHooks.Phase phase) {
+        if (phase == null || superstructuresByName == null || superstructuresByName.isEmpty()) {
+            return;
+        }
+        Set<SuperstructureMechanism<?, ?>> visited = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (SuperstructureMechanism<?, ?> top : superstructuresByName.values()) {
+            if (top == null) {
+                continue;
+            }
+            for (SuperstructureMechanism<?, ?> superstructure : top.flattenSuperstructures()) {
+                if (superstructure == null || !visited.add(superstructure)) {
+                    continue;
+                }
+                superstructure.runLifecycleHooks(phase);
             }
         }
     }
@@ -524,6 +612,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             localization.updateAutoVisualization(autos);
         }
         double t3 = Timer.getFPGATimestamp();
+        runCoreControlLoops();
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.ROBOT_PERIODIC);
         runCorePeriodicBindings(
                 RobotCoreHooks.Phase.ROBOT_PERIODIC,
                 coreHooks.periodicBindings(),
@@ -647,6 +737,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         drivetrain.getRobotSpeeds().stopSpeeds("auto");
         resetAutoInitPoseIfConfigured();
         scheduleAutonomousCommand();
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_INIT);
         resetPeriodicRunners(autonomousPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.AUTONOMOUS_INIT, coreHooks.autonomousInitBindings());
         onAutonomousInit();
@@ -654,6 +745,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void autonomousExit() {
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.AUTONOMOUS_EXIT, coreHooks.autonomousExitBindings());
         onAutonomousExit();
     }
@@ -664,6 +756,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 && !CommandScheduler.getInstance().isScheduled(autonomousCommand)) {
             drivetrain.getRobotSpeeds().stopSpeeds("auto");
         }
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_PERIODIC);
         runCorePeriodicBindings(
                 RobotCoreHooks.Phase.AUTONOMOUS_PERIODIC,
                 coreHooks.autonomousPeriodicBindings(),
@@ -677,6 +770,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         drivetrain.getRobotSpeeds().setSpeedSourceState("drive", true);
         drivetrain.getRobotSpeeds().setSpeedSourceState("auto", false);
         drivetrain.getRobotSpeeds().stopSpeeds("auto");
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_INIT);
         resetPeriodicRunners(teleopPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.TELEOP_INIT, coreHooks.teleopInitBindings());
         onTeleopInit();
@@ -684,12 +778,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void teleopExit() {
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.TELEOP_EXIT, coreHooks.teleopExitBindings());
         onTeleopExit();
     }
 
     @Override
     public final void teleopPeriodic() {
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_PERIODIC);
         runCorePeriodicBindings(
                 RobotCoreHooks.Phase.TELEOP_PERIODIC,
                 coreHooks.teleopPeriodicBindings(),
@@ -703,6 +799,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         drivetrain.getRobotSpeeds().setSpeedSourceState("drive", true);
         drivetrain.getRobotSpeeds().setSpeedSourceState("auto", false);
         drivetrain.getRobotSpeeds().stopSpeeds("auto");
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_INIT);
         resetPeriodicRunners(disabledPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.DISABLED_INIT, coreHooks.disabledInitBindings());
         onDisabledInit();
@@ -710,12 +807,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void disabledExit() {
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.DISABLED_EXIT, coreHooks.disabledExitBindings());
         onDisabledExit();
     }
 
     @Override
     public final void disabledPeriodic() {
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_PERIODIC);
         runCorePeriodicBindings(
                 RobotCoreHooks.Phase.DISABLED_PERIODIC,
                 coreHooks.disabledPeriodicBindings(),
@@ -727,6 +826,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void testInit() {
         CommandScheduler.getInstance().cancelAll();
         cancelAutonomousCommand();
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.TEST_INIT);
         resetPeriodicRunners(testPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.TEST_INIT, coreHooks.testInitBindings());
         onTestInit();
@@ -734,12 +834,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void testExit() {
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.TEST_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.TEST_EXIT, coreHooks.testExitBindings());
         onTestExit();
     }
 
     @Override
     public final void testPeriodic() {
+        runRegisteredPhaseHooks(RobotCoreHooks.Phase.TEST_PERIODIC);
         runCorePeriodicBindings(
                 RobotCoreHooks.Phase.TEST_PERIODIC,
                 coreHooks.testPeriodicBindings(),
@@ -770,6 +872,50 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             runners.add(new PeriodicHookRunner<>(binding.hook(), binding.periodMs()));
         }
         return runners;
+    }
+
+    private List<CoreControlLoopRunner<T>> createCoreControlLoopRunners(
+            List<RobotCoreHooks.ControlLoopBinding<T>> bindings) {
+        if (bindings == null || bindings.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<CoreControlLoopRunner<T>> runners = new ArrayList<>(bindings.size());
+        for (RobotCoreHooks.ControlLoopBinding<T> binding : bindings) {
+            if (binding == null || binding.loop() == null || binding.name() == null || binding.name().isBlank()) {
+                continue;
+            }
+            runners.add(new CoreControlLoopRunner<>(binding.name(), binding.periodSeconds(), binding.loop()));
+        }
+        return runners;
+    }
+
+    private void runCoreControlLoops() {
+        if (coreControlLoopRunners == null || coreControlLoopRunners.isEmpty()) {
+            return;
+        }
+        double nowSeconds = RobotTime.nowSeconds();
+        if (!Double.isFinite(nowSeconds)) {
+            nowSeconds = Timer.getFPGATimestamp();
+        }
+        coreHookContext.setPhase(RobotCoreHooks.Phase.ROBOT_PERIODIC);
+        for (CoreControlLoopRunner<T> runner : coreControlLoopRunners) {
+            if (runner == null || !runner.shouldRun(nowSeconds)) {
+                continue;
+            }
+            double dtSeconds;
+            if (Double.isNaN(runner.lastRunSeconds())) {
+                dtSeconds = runner.periodSeconds();
+            } else {
+                dtSeconds = nowSeconds - runner.lastRunSeconds();
+            }
+            if (!Double.isFinite(dtSeconds) || dtSeconds < 0.0) {
+                dtSeconds = Double.NaN;
+            }
+            coreHookContext.setControlLoopDtSeconds(dtSeconds);
+            runner.setLastOutput(runner.loop().calculate(coreHookContext));
+            runner.setLastRunSeconds(nowSeconds);
+        }
+        coreHookContext.setControlLoopDtSeconds(Double.NaN);
     }
 
     private void runCorePhaseBindings(
@@ -937,11 +1083,48 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return () -> hookObjectInput(key, type);
     }
 
+    private PIDController hookPid(String name) {
+        PIDController pid = coreControlLoopPids.get(name);
+        if (pid == null) {
+            throw new IllegalArgumentException("No PID profile found for name " + name);
+        }
+        return pid;
+    }
+
+    private SimpleMotorFeedforward hookFeedforward(String name) {
+        SimpleMotorFeedforward ff = coreControlLoopFeedforwards.get(name);
+        if (ff == null) {
+            throw new IllegalArgumentException("No feedforward profile found for name " + name);
+        }
+        return ff;
+    }
+
+    private OutputType hookPidOutputType(String name) {
+        OutputType outputType = coreControlLoopPidOutputTypes.get(name);
+        if (outputType == null) {
+            throw new IllegalArgumentException("No PID output type found for profile " + name);
+        }
+        return outputType;
+    }
+
+    private OutputType hookFeedforwardOutputType(String name) {
+        OutputType outputType = coreControlLoopFeedforwardOutputTypes.get(name);
+        if (outputType == null) {
+            throw new IllegalArgumentException("No feedforward output type found for profile " + name);
+        }
+        return outputType;
+    }
+
     private final class RobotCoreContextImpl implements RobotCoreContext<T> {
         private RobotCoreHooks.Phase phase = RobotCoreHooks.Phase.ROBOT_INIT;
+        private double controlLoopDtSeconds = Double.NaN;
 
         private void setPhase(RobotCoreHooks.Phase phase) {
             this.phase = phase != null ? phase : RobotCoreHooks.Phase.ROBOT_INIT;
+        }
+
+        private void setControlLoopDtSeconds(double dtSeconds) {
+            this.controlLoopDtSeconds = dtSeconds;
         }
 
         @Override
@@ -952,6 +1135,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         @Override
         public RobotCoreHooks.Phase phase() {
             return phase;
+        }
+
+        @Override
+        public double controlLoopDtSeconds() {
+            return controlLoopDtSeconds;
         }
 
         @Override
@@ -1022,6 +1210,81 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         @Override
         public <V> Supplier<V> objectInputSupplier(String key, Class<V> type) {
             return hookObjectInputSupplier(key, type);
+        }
+
+        @Override
+        public PIDController pid(String name) {
+            return hookPid(name);
+        }
+
+        @Override
+        public SimpleMotorFeedforward feedforward(String name) {
+            return hookFeedforward(name);
+        }
+
+        @Override
+        public OutputType pidOutputType(String name) {
+            return hookPidOutputType(name);
+        }
+
+        @Override
+        public OutputType feedforwardOutputType(String name) {
+            return hookFeedforwardOutputType(name);
+        }
+    }
+
+    private static final class CoreControlLoopRunner<T extends RobotDrivetrain<T>> {
+        private final String name;
+        private final double periodSeconds;
+        private final RobotCoreHooks.ControlLoop<T> loop;
+        private double lastRunSeconds = Double.NaN;
+        private double lastOutput;
+
+        private CoreControlLoopRunner(String name, double periodSeconds, RobotCoreHooks.ControlLoop<T> loop) {
+            this.name = name;
+            this.periodSeconds = Math.max(0.0, periodSeconds);
+            this.loop = loop;
+        }
+
+        private String name() {
+            return name;
+        }
+
+        private double periodSeconds() {
+            return periodSeconds;
+        }
+
+        private RobotCoreHooks.ControlLoop<T> loop() {
+            return loop;
+        }
+
+        private double lastRunSeconds() {
+            return lastRunSeconds;
+        }
+
+        private void setLastRunSeconds(double nowSeconds) {
+            this.lastRunSeconds = nowSeconds;
+        }
+
+        private double lastOutput() {
+            return lastOutput;
+        }
+
+        private void setLastOutput(double output) {
+            this.lastOutput = output;
+        }
+
+        private boolean shouldRun(double nowSeconds) {
+            if (!Double.isFinite(nowSeconds)) {
+                return true;
+            }
+            if (Double.isNaN(lastRunSeconds)) {
+                return true;
+            }
+            if (periodSeconds <= 0.0) {
+                return true;
+            }
+            return (nowSeconds - lastRunSeconds) >= periodSeconds;
         }
     }
 

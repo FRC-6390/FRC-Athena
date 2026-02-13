@@ -9,6 +9,7 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCore;
+import ca.frc6390.athena.core.RobotCoreHooks;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
@@ -620,15 +621,16 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             return;
         }
         SuperstructureConfig<S, SP> cfg = (SuperstructureConfig<S, SP>) sourceConfig;
-        if (cfg.initBindings == null || cfg.initBindings.isEmpty()) {
+        cfg.runInitHooks(context, stateMachine.getGoalState());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void runLifecycleHooks(RobotCoreHooks.Phase phase) {
+        if (sourceConfig == null || phase == null) {
             return;
         }
-        for (SuperstructureConfig.Binding<SP> binding : cfg.initBindings) {
-            if (binding == null) {
-                continue;
-            }
-            binding.apply(context);
-        }
+        SuperstructureConfig<S, SP> cfg = (SuperstructureConfig<S, SP>) sourceConfig;
+        cfg.runPhaseHooks(context, stateMachine.getGoalState(), phase);
     }
 
     /**

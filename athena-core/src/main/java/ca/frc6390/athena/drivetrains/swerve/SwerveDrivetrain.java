@@ -56,6 +56,8 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<SwerveDrivetrain> {
 
+  private static final double DRIFT_TURN_DEADBAND_RAD_PER_SEC = 0.05;
+
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
   public PIDController driftpid;
@@ -153,7 +155,14 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
 
 
   private double driftCorrection(ChassisSpeeds speeds) {
-    if (Math.abs(speeds.omegaRadiansPerSecond) > driftActivationSpeed && Math.abs(imu.getVelocityZ().getRadians()) > 0.5) {
+    double linearSpeed = Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+    double commandedOmega = Math.abs(speeds.omegaRadiansPerSecond);
+    double measuredOmega = Math.abs(imu.getVelocityZ().getRadians());
+
+    // Hold heading only while translating straight; never fight intentional turns.
+    if (commandedOmega > DRIFT_TURN_DEADBAND_RAD_PER_SEC
+        || measuredOmega > DRIFT_TURN_DEADBAND_RAD_PER_SEC
+        || linearSpeed < Math.max(0.0, driftActivationSpeed)) {
       desiredHeading = getIMU().getVirtualAxis("drift").getRadians();
       return 0;
     } else {

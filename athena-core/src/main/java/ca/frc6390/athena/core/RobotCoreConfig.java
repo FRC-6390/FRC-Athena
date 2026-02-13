@@ -8,6 +8,7 @@ import java.util.function.Function;
 
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
+import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrainConfig;
@@ -252,6 +253,44 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public SwerveSection speedSource(Consumer<SpeedSourceSection> section) {
+            Objects.requireNonNull(section, "section");
+            section.accept(new SpeedSourceSection(new SpeedSourceConfigurer() {
+                @Override
+                public void add(String name, boolean enabledByDefault) {
+                    config.addSpeedSource(name, enabledByDefault);
+                }
+
+                @Override
+                public void blend(
+                        String target,
+                        String source,
+                        RobotSpeeds.BlendMode blendMode,
+                        RobotSpeeds.SpeedAxis... axes) {
+                    config.addSpeedBlend(target, source, blendMode, axes);
+                }
+
+                @Override
+                public void blend(
+                        String target,
+                        String left,
+                        String right,
+                        RobotSpeeds.BlendMode blendMode,
+                        RobotSpeeds.SpeedAxis... axes) {
+                    config.addSpeedBlend(target, left, right, blendMode, axes);
+                }
+
+                @Override
+                public void blendToOutput(
+                        String source,
+                        RobotSpeeds.BlendMode blendMode,
+                        RobotSpeeds.SpeedAxis... axes) {
+                    config.addSpeedOutputBlend(source, blendMode, axes);
+                }
+            }));
+            return this;
+        }
+
         public SwerveSection simulation(Consumer<SwerveSimulationSection> section) {
             Objects.requireNonNull(section, "section");
             SwerveSimulationSection s = new SwerveSimulationSection(simulationConfig);
@@ -321,6 +360,44 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public DifferentialSection speedSource(Consumer<SpeedSourceSection> section) {
+            Objects.requireNonNull(section, "section");
+            section.accept(new SpeedSourceSection(new SpeedSourceConfigurer() {
+                @Override
+                public void add(String name, boolean enabledByDefault) {
+                    config.addSpeedSource(name, enabledByDefault);
+                }
+
+                @Override
+                public void blend(
+                        String target,
+                        String source,
+                        RobotSpeeds.BlendMode blendMode,
+                        RobotSpeeds.SpeedAxis... axes) {
+                    config.addSpeedBlend(target, source, blendMode, axes);
+                }
+
+                @Override
+                public void blend(
+                        String target,
+                        String left,
+                        String right,
+                        RobotSpeeds.BlendMode blendMode,
+                        RobotSpeeds.SpeedAxis... axes) {
+                    config.addSpeedBlend(target, left, right, blendMode, axes);
+                }
+
+                @Override
+                public void blendToOutput(
+                        String source,
+                        RobotSpeeds.BlendMode blendMode,
+                        RobotSpeeds.SpeedAxis... axes) {
+                    config.addSpeedOutputBlend(source, blendMode, axes);
+                }
+            }));
+            return this;
+        }
+
         public DifferentialSection simulation(Consumer<DifferentialSimulationSection> section) {
             Objects.requireNonNull(section, "section");
             DifferentialSimulationSection s = new DifferentialSimulationSection(simulationConfig);
@@ -370,6 +447,73 @@ public final class RobotCoreConfig {
 
         public DifferentialSimulationSection robotMomentOfInertia(double moi) {
             config = config.withRobotMomentOfInertia(moi);
+            return this;
+        }
+    }
+
+    @FunctionalInterface
+    private interface SpeedSourceConfigurer {
+        void add(String name, boolean enabledByDefault);
+
+        default void blend(
+                String target,
+                String source,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {}
+
+        default void blend(
+                String target,
+                String left,
+                String right,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {}
+
+        default void blendToOutput(
+                String source,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {}
+    }
+
+    public static final class SpeedSourceSection {
+        private final SpeedSourceConfigurer configurer;
+
+        private SpeedSourceSection(SpeedSourceConfigurer configurer) {
+            this.configurer = Objects.requireNonNull(configurer, "configurer");
+        }
+
+        public SpeedSourceSection add(String name, boolean enabledByDefault) {
+            configurer.add(name, enabledByDefault);
+            return this;
+        }
+
+        public SpeedSourceSection add(String name) {
+            return add(name, true);
+        }
+
+        public SpeedSourceSection blend(
+                String target,
+                String source,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            configurer.blend(target, source, blendMode, axes);
+            return this;
+        }
+
+        public SpeedSourceSection blend(
+                String target,
+                String left,
+                String right,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            configurer.blend(target, left, right, blendMode, axes);
+            return this;
+        }
+
+        public SpeedSourceSection blendToOutput(
+                String source,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            configurer.blendToOutput(source, blendMode, axes);
             return this;
         }
     }

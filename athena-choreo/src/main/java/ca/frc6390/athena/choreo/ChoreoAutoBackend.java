@@ -5,8 +5,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -21,15 +23,23 @@ import choreo.auto.AutoTrajectory;
 import choreo.trajectory.TrajectorySample;
 import choreo.trajectory.Trajectory;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.Subsystem;
 
 public class ChoreoAutoBackend implements AutoBackend {
+    private static final double HEADING_SETTLE_TOLERANCE_DEG = 2.0;
+    private static final double HEADING_SETTLE_TIMEOUT_SECONDS = 0.6;
+
     private volatile ChoreoAutoFactory factory;
     private volatile AutoFactory autoFactory;
     private volatile Runnable stopFollower;
+    private volatile Supplier<Pose2d> poseSupplier;
+    private volatile BiConsumer<Pose2d, ChassisSpeeds> follower;
+    private volatile Subsystem followerSubsystem;
     private final Map<String, Supplier<Command>> namedCommandSuppliers = new ConcurrentHashMap<>();
 
     @Override
@@ -88,11 +98,13 @@ public class ChoreoAutoBackend implements AutoBackend {
                 .onTrue(Commands.sequence(reset, trajectory.cmd())
                         .finallyDo(interrupted -> trajectoryFinished.set(true)));
         Command runRoutine = routine.cmd(trajectoryFinished::get);
-        return Optional.of(runRoutine.finallyDo(interrupted -> {
+        Command headingSettle = buildHeadingSettleCommand(reference, trajectory);
+        Command stop = Commands.runOnce(() -> {
             if (stopFollower != null) {
                 stopFollower.run();
             }
-        }));
+        });
+        return Optional.of(Commands.sequence(runRoutine, headingSettle, stop));
     }
 
     @Override
@@ -128,6 +140,9 @@ public class ChoreoAutoBackend implements AutoBackend {
 
         factory = createdFactory;
         this.autoFactory = autoFactory;
+        this.poseSupplier = binding.poseSupplier();
+        this.follower = binding.follower();
+        this.followerSubsystem = binding.drivetrain();
         stopFollower = () -> binding.follower().accept(binding.poseSupplier().get(), new ChassisSpeeds());
         bindNamedCommands(autoFactory);
         return Optional.of(createdFactory);
@@ -158,6 +173,53 @@ public class ChoreoAutoBackend implements AutoBackend {
         for (Map.Entry<String, Supplier<Command>> entry : namedCommandSuppliers.entrySet()) {
             factory.bind(entry.getKey(), Commands.deferredProxy(entry.getValue()));
         }
+    }
+
+    private Command buildHeadingSettleCommand(String reference, AutoTrajectory trajectory) {
+        Supplier<Pose2d> currentPoseSupplier = poseSupplier;
+        BiConsumer<Pose2d, ChassisSpeeds> follow = follower;
+        Subsystem requirement = followerSubsystem;
+        if (currentPoseSupplier == null || follow == null || requirement == null) {
+            return Commands.none();
+        }
+        return Commands.defer(() -> {
+            Optional<Pose2d> targetPoseOpt = trajectory.getFinalPose();
+            if (targetPoseOpt.isEmpty()) {
+                return Commands.none();
+            }
+            Pose2d targetPose = targetPoseOpt.get();
+            AtomicBoolean timedOut = new AtomicBoolean(false);
+            Command settle = Commands.run(
+                            () -> follow.accept(targetPose, new ChassisSpeeds()),
+                            requirement)
+                    .until(() -> {
+                        Pose2d current = currentPoseSupplier.get();
+                        double headingErrorDeg = Math.abs(MathUtil.inputModulus(
+                                targetPose.getRotation().getDegrees() - current.getRotation().getDegrees(),
+                                -180.0,
+                                180.0));
+                        return headingErrorDeg <= HEADING_SETTLE_TOLERANCE_DEG;
+                    })
+                    .withTimeout(HEADING_SETTLE_TIMEOUT_SECONDS)
+                    .beforeStarting(() -> DriverStation.reportWarning(
+                            "[Choreo] Heading settle start \"" + reference + "\"", false))
+                    .finallyDo(interrupted -> {
+                        if (interrupted) {
+                            timedOut.set(true);
+                        }
+                        Pose2d current = currentPoseSupplier.get();
+                        double headingErrorDeg = Math.abs(MathUtil.inputModulus(
+                                targetPose.getRotation().getDegrees() - current.getRotation().getDegrees(),
+                                -180.0,
+                                180.0));
+                        DriverStation.reportWarning(
+                                "[Choreo] Heading settle end \"" + reference
+                                        + "\" errorDeg=" + String.format(java.util.Locale.US, "%.2f", headingErrorDeg)
+                                        + " timeout=" + timedOut.get(),
+                                false);
+                    });
+            return settle;
+        }, Set.of(requirement));
     }
 
     private record TrajectoryRef(String name, OptionalInt splitIndex) {

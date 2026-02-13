@@ -16,6 +16,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.MotionLimits;
+import ca.frc6390.athena.core.RobotCoreHooks;
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.encoder.EncoderRegistry;
@@ -90,6 +91,10 @@ public class MechanismConfig<T extends Mechanism> {
     public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
     /** Optional hooks that run once during robot init after all mechanisms are registered. */
     public List<MechanismBinding<T, ?>> initBindings = new ArrayList<>();
+    /** Optional lifecycle hooks keyed by robot phase (RobotCore parity). */
+    public Map<RobotCoreHooks.Phase, List<LifecycleHookBinding<T>>> lifecycleBindings = new HashMap<>();
+    /** Optional hooks that run whenever a robot mode exits (before mode-specific exit hooks). */
+    public List<LifecycleHookBinding<T>> lifecycleExitBindings = new ArrayList<>();
     /** Optional state triggers that can enqueue states when a predicate becomes true. */
     public List<StateTriggerBinding<T>> stateTriggerBindings = new ArrayList<>();
     /** Optional hooks that run every periodic loop. */
@@ -1048,10 +1053,102 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onInit(MechanismBinding<T, E> binding) {
-            Objects.requireNonNull(binding, "binding");
-            owner.initBindings.add(binding);
+        private HooksSection<T> onPhase(RobotCoreHooks.Phase phase, MechanismBinding<T, ?> binding, Enum<?>... states) {
+            owner.addLifecycleBinding(phase, binding, states);
             return this;
+        }
+
+        private HooksSection<T> onPhaseExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            owner.addLifecycleExitBinding(binding, states);
+            return this;
+        }
+
+        public HooksSection<T> onInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.ROBOT_INIT, binding, states);
+        }
+
+        public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onInit(MechanismBinding<T, E> binding) {
+            return onPhase(RobotCoreHooks.Phase.ROBOT_INIT, (MechanismBinding<T, ?>) binding);
+        }
+
+        public HooksSection<T> onPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.ROBOT_PERIODIC, binding, states);
+        }
+
+        public HooksSection<T> onExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhaseExit(binding, states);
+        }
+
+        public HooksSection<T> onDisabledInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.DISABLED_INIT, binding, states);
+        }
+
+        public HooksSection<T> onDisabledPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.DISABLED_PERIODIC, binding, states);
+        }
+
+        public HooksSection<T> onDisabledExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.DISABLED_EXIT, binding, states);
+        }
+
+        public HooksSection<T> onTeleopInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.TELEOP_INIT, binding, states);
+        }
+
+        public HooksSection<T> onTeleInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onTeleopInit(binding, states);
+        }
+
+        public HooksSection<T> onTeleopPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.TELEOP_PERIODIC, binding, states);
+        }
+
+        public HooksSection<T> onTelePeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onTeleopPeriodic(binding, states);
+        }
+
+        public HooksSection<T> onTeleopExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.TELEOP_EXIT, binding, states);
+        }
+
+        public HooksSection<T> onTeleExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onTeleopExit(binding, states);
+        }
+
+        public HooksSection<T> onAutonomousInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_INIT, binding, states);
+        }
+
+        public HooksSection<T> onAutoInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onAutonomousInit(binding, states);
+        }
+
+        public HooksSection<T> onAutonomousPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_PERIODIC, binding, states);
+        }
+
+        public HooksSection<T> onAutoPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onAutonomousPeriodic(binding, states);
+        }
+
+        public HooksSection<T> onAutonomousExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_EXIT, binding, states);
+        }
+
+        public HooksSection<T> onAutoExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onAutonomousExit(binding, states);
+        }
+
+        public HooksSection<T> onTestInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.TEST_INIT, binding, states);
+        }
+
+        public HooksSection<T> onTestPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.TEST_PERIODIC, binding, states);
+        }
+
+        public HooksSection<T> onTestExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
+            return onPhase(RobotCoreHooks.Phase.TEST_EXIT, binding, states);
         }
 
         public HooksSection<T> onRobotPeriodic(Consumer<T> hook, double periodMs) {
@@ -1122,48 +1219,127 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
+    private void addLifecycleBinding(RobotCoreHooks.Phase phase, MechanismBinding<T, ?> binding, Enum<?>... states) {
+        Objects.requireNonNull(phase, "phase");
+        Objects.requireNonNull(binding, "binding");
+        lifecycleBindings
+                .computeIfAbsent(phase, unused -> new ArrayList<>())
+                .add(new LifecycleHookBinding<>(binding, copyStates(states)));
+    }
+
+    private void addLifecycleExitBinding(MechanismBinding<T, ?> binding, Enum<?>... states) {
+        Objects.requireNonNull(binding, "binding");
+        lifecycleExitBindings.add(new LifecycleHookBinding<>(binding, copyStates(states)));
+    }
+
+    private static List<Enum<?>> copyStates(Enum<?>... states) {
+        if (states == null || states.length == 0) {
+            return List.of();
+        }
+        List<Enum<?>> copied = new ArrayList<>(states.length);
+        for (Enum<?> state : states) {
+            if (state != null) {
+                copied.add(state);
+            }
+        }
+        return copied;
+    }
+
+    private static boolean isExitPhase(RobotCoreHooks.Phase phase) {
+        return phase == RobotCoreHooks.Phase.DISABLED_EXIT
+                || phase == RobotCoreHooks.Phase.TELEOP_EXIT
+                || phase == RobotCoreHooks.Phase.AUTONOMOUS_EXIT
+                || phase == RobotCoreHooks.Phase.TEST_EXIT;
+    }
+
+    private static Enum<?> resolveActiveState(Mechanism mechanism) {
+        if (!(mechanism instanceof StatefulLike<?> stateful) || stateful.getStateMachine() == null) {
+            return null;
+        }
+        return stateful.getStateMachine().getGoalState();
+    }
+
     /**
      * Runs init hooks with a mechanism-context payload after registration.
      */
-    @SuppressWarnings("unchecked")
     public void runInitHooks(Mechanism mechanism) {
-        if (mechanism == null || initBindings == null || initBindings.isEmpty()) {
+        if (mechanism == null) {
+            return;
+        }
+        runLegacyInitHooks(mechanism);
+        runPhaseHooks(mechanism, RobotCoreHooks.Phase.ROBOT_INIT);
+    }
+
+    /**
+     * Runs phase hooks with optional state filtering.
+     */
+    @SuppressWarnings("unchecked")
+    public void runPhaseHooks(Mechanism mechanism, RobotCoreHooks.Phase phase) {
+        if (mechanism == null || phase == null) {
             return;
         }
         T typedMechanism = (T) mechanism;
+        Enum<?> activeState = resolveActiveState(mechanism);
+        if (isExitPhase(phase)) {
+            runLifecycleBindings(typedMechanism, lifecycleExitBindings, activeState);
+        }
+        runLifecycleBindings(typedMechanism, lifecycleBindings.get(phase), activeState);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void runLegacyInitHooks(Mechanism mechanism) {
+        if (initBindings == null || initBindings.isEmpty()) {
+            return;
+        }
+        T typedMechanism = (T) mechanism;
+        Enum<?> activeState = resolveActiveState(mechanism);
         for (MechanismBinding<T, ?> binding : initBindings) {
             if (binding == null) {
                 continue;
             }
-            applyInitBindingRaw(typedMechanism, binding);
+            applyLifecycleBindingRaw(typedMechanism, binding, activeState);
+        }
+    }
+
+    private void runLifecycleBindings(
+            T mechanism,
+            List<LifecycleHookBinding<T>> bindings,
+            Enum<?> activeState) {
+        if (bindings == null || bindings.isEmpty()) {
+            return;
+        }
+        for (LifecycleHookBinding<T> hook : bindings) {
+            if (hook == null || hook.binding() == null || !hook.appliesTo(activeState)) {
+                continue;
+            }
+            applyLifecycleBindingRaw(mechanism, hook.binding(), activeState);
         }
     }
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
-    private void applyInitBindingRaw(
+    private void applyLifecycleBindingRaw(
             T mechanism,
-            MechanismBinding<T, ?> binding) {
+            MechanismBinding<T, ?> binding,
+            Enum<?> activeState) {
         MechanismBinding rawBinding = (MechanismBinding) binding;
-        rawBinding.apply(new InitMechanismContext<>(mechanism));
+        rawBinding.apply(new LifecycleMechanismContext<>(mechanism, activeState));
     }
 
-    private final class InitMechanismContext<E extends Enum<E> & SetpointProvider<Double>> implements MechanismContext<T, E> {
+    private final class LifecycleMechanismContext<E extends Enum<E> & SetpointProvider<Double>> implements MechanismContext<T, E> {
         private final T mechanism;
         private final E state;
         private final double baseSetpoint;
 
         @SuppressWarnings("unchecked")
-        private InitMechanismContext(T mechanism) {
+        private LifecycleMechanismContext(T mechanism, Enum<?> activeState) {
             this.mechanism = Objects.requireNonNull(mechanism, "mechanism");
+            Enum<?> stateCandidate = activeState != null ? activeState : resolveActiveState(mechanism);
             E resolvedState = null;
-            if (mechanism instanceof StatefulLike<?> stateful && stateful.getStateMachine() != null) {
-                Enum<?> current = stateful.getStateMachine().getGoalState();
-                if (current != null) {
-                    try {
-                        resolvedState = (E) current;
-                    } catch (ClassCastException ignored) {
-                        resolvedState = null;
-                    }
+            if (stateCandidate != null) {
+                try {
+                    resolvedState = (E) stateCandidate;
+                } catch (ClassCastException ignored) {
+                    resolvedState = null;
                 }
             }
             this.state = resolvedState;
@@ -1865,6 +2041,30 @@ public class MechanismConfig<T extends Mechanism> {
     public record ElevatorFeedforwardProfile(OutputType outputType, ElevatorFeedforward feedforward) {
         public ElevatorFeedforwardProfile {
             Objects.requireNonNull(feedforward, "feedforward");
+        }
+    }
+
+    public record LifecycleHookBinding<M extends Mechanism>(
+            MechanismBinding<M, ?> binding,
+            List<Enum<?>> states) {
+        public LifecycleHookBinding {
+            Objects.requireNonNull(binding, "binding");
+            states = states == null ? List.of() : List.copyOf(states);
+        }
+
+        public boolean appliesTo(Enum<?> activeState) {
+            if (states == null || states.isEmpty()) {
+                return true;
+            }
+            if (activeState == null) {
+                return false;
+            }
+            for (Enum<?> candidate : states) {
+                if (candidate == activeState || candidate.equals(activeState)) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 

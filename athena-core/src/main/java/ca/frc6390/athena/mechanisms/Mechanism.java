@@ -4,6 +4,7 @@ import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.LoopTiming;
+import ca.frc6390.athena.core.RobotCoreHooks;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
@@ -368,6 +369,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public MechanismConfig<? extends Mechanism> getSourceConfig() {
         return sourceConfig;
+    }
+
+    public void runLifecycleHooks(RobotCoreHooks.Phase phase) {
+        if (sourceConfig == null || phase == null) {
+            return;
+        }
+        sourceConfig.runPhaseHooks(this, phase);
     }
 
     private static Encoder resolveEncoder(EncoderConfig config, MotorControllerGroup motors) {

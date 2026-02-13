@@ -44,7 +44,7 @@ public final class RobotCoreHookExamples {
         return config.hooks(h -> {
             h.onInit(ctx -> {
                 RobotSpeeds speeds = ctx.drivetrain().getRobotSpeeds();
-                speeds.registerSpeedSource(tuning.speedSource(), tuning.speedSourcePriority());
+                speeds.registerSpeedSource(tuning.speedSource(), true);
                 speeds.setSpeedSourceState(tuning.speedSource(), true);
             });
 
@@ -105,7 +105,6 @@ public final class RobotCoreHookExamples {
 
     public record BoundingBoxCenterLineAssistTuning(
             String speedSource,
-            int speedSourcePriority,
             double centeringKpMpsPerMeter,
             double maxCenteringSpeedMps,
             double headingKpRadPerSecPerRad,
@@ -117,9 +116,6 @@ public final class RobotCoreHookExamples {
             Objects.requireNonNull(speedSource, "speedSource");
             if (speedSource.isBlank()) {
                 throw new IllegalArgumentException("speedSource must not be blank");
-            }
-            if (speedSourcePriority <= 0) {
-                throw new IllegalArgumentException("speedSourcePriority must be > 0");
             }
             if (!Double.isFinite(centeringKpMpsPerMeter) || centeringKpMpsPerMeter < 0.0) {
                 throw new IllegalArgumentException("centeringKpMpsPerMeter must be finite and >= 0");
@@ -144,7 +140,6 @@ public final class RobotCoreHookExamples {
         public static BoundingBoxCenterLineAssistTuning defaults() {
             return new BoundingBoxCenterLineAssistTuning(
                     "laneAssist",
-                    2,
                     1.8,
                     1.4,
                     4.5,

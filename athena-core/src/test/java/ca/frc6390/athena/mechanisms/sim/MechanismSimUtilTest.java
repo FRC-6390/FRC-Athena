@@ -35,7 +35,7 @@ final class MechanismSimUtilTest {
         double targetPos = 90.0;
         MechanismSimUtil.applyEncoderState(encoder, targetPos, 0.0);
 
-        double expectedRaw = (targetPos - 15.0) / 360.0 - 0.5;
+        double expectedRaw = (targetPos - 15.0) / 360.0 + 0.5;
         assertEquals(expectedRaw, encoder.getSimPosition(), 1e-6);
         assertEquals(targetPos, encoder.getPosition(), 1e-6);
     }
@@ -85,7 +85,7 @@ final class MechanismSimUtilTest {
 
         @Override
         public double getPosition() {
-            return ((simPosition + offset) * gearRatio) * conversion + conversionOffset;
+            return ((simPosition - offset) * gearRatio) * conversion + conversionOffset;
         }
 
         @Override
@@ -95,7 +95,7 @@ final class MechanismSimUtilTest {
 
         @Override
         public void setPosition(double position) {
-            simPosition = ((position - conversionOffset) / conversion) / gearRatio - offset;
+            simPosition = ((position - conversionOffset) / conversion) / gearRatio + offset;
         }
 
         @Override

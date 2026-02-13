@@ -1,6 +1,10 @@
 package ca.frc6390.athena.drivetrains.differential;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+
+import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DriveIDs;
@@ -61,6 +65,26 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     private SimpleMotorFeedforward driveFeedforward = null;
     /** Whether the configured drive feedforward is enabled. */
     private boolean driveFeedforwardEnabled = true;
+    /** Additional speed sources to register beyond drive/auto/feedback. */
+    private final List<SpeedSourceRegistration> speedSources = new ArrayList<>();
+    /** Ordered blend rules that write into sources. */
+    private final List<SpeedSourceBlendRegistration> speedSourceBlends = new ArrayList<>();
+    /** Ordered blend rules that write into the final drivetrain output. */
+    private final List<SpeedOutputBlendRegistration> speedOutputBlends = new ArrayList<>();
+
+    private record SpeedSourceRegistration(String name, boolean enabledByDefault) {}
+
+    private record SpeedSourceBlendRegistration(
+            String target,
+            String left,
+            String right,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis[] axes) {}
+
+    private record SpeedOutputBlendRegistration(
+            String source,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis[] axes) {}
 
     /**
      * Creates a baseline configuration using the provided IMU and track width.
@@ -311,6 +335,41 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         return this;
     }
 
+    public DifferentialDrivetrainConfig addSpeedSource(String name, boolean enabledByDefault) {
+        speedSources.add(new SpeedSourceRegistration(name, enabledByDefault));
+        return this;
+    }
+
+    public DifferentialDrivetrainConfig addSpeedBlend(
+            String target,
+            String source,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis... axes) {
+        return addSpeedBlend(target, target, source, blendMode, axes);
+    }
+
+    public DifferentialDrivetrainConfig addSpeedBlend(
+            String target,
+            String left,
+            String right,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis... axes) {
+        RobotSpeeds.SpeedAxis[] resolvedAxes =
+                axes == null ? new RobotSpeeds.SpeedAxis[0] : axes.clone();
+        speedSourceBlends.add(new SpeedSourceBlendRegistration(target, left, right, blendMode, resolvedAxes));
+        return this;
+    }
+
+    public DifferentialDrivetrainConfig addSpeedOutputBlend(
+            String source,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis... axes) {
+        RobotSpeeds.SpeedAxis[] resolvedAxes =
+                axes == null ? new RobotSpeeds.SpeedAxis[0] : axes.clone();
+        speedOutputBlends.add(new SpeedOutputBlendRegistration(source, blendMode, resolvedAxes));
+        return this;
+    }
+
     /**
      * Applies all registered configuration data to the instantiated drivetrain, wiring up motors,
      * encoders, and IMU before returning the fully constructed {@link DifferentialDrivetrain}.
@@ -409,6 +468,31 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         // dt.setFieldRelative(fieldRelative);
         // dt.driftActivationSpeed = driftActivationSpeed;
         
+        applySpeedConfig(dt.getRobotSpeeds());
         return dt;
+    }
+
+    private void applySpeedConfig(RobotSpeeds speeds) {
+        if (speeds == null) {
+            return;
+        }
+        speeds.resetBlendsToDefaults();
+        for (SpeedSourceRegistration source : speedSources) {
+            speeds.registerSpeedSource(source.name(), source.enabledByDefault());
+        }
+        for (SpeedSourceBlendRegistration blend : speedSourceBlends) {
+            speeds.blend(
+                    blend.target(),
+                    blend.left(),
+                    blend.right(),
+                    blend.blendMode(),
+                    blend.axes());
+        }
+        for (SpeedOutputBlendRegistration blend : speedOutputBlends) {
+            speeds.blendToOutput(
+                    blend.source(),
+                    blend.blendMode(),
+                    blend.axes());
+        }
     }
 }

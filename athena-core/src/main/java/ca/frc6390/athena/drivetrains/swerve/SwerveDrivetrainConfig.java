@@ -1,5 +1,9 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.EncoderIDs;
@@ -65,6 +69,26 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     private Translation2d[] locations = null;
     /** Optional physics configuration used when running drivetrain simulation. */
     private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
+    /** Additional speed sources to register beyond drive/auto/feedback. */
+    private final List<SpeedSourceRegistration> speedSources = new ArrayList<>();
+    /** Ordered blend rules that write into sources. */
+    private final List<SpeedSourceBlendRegistration> speedSourceBlends = new ArrayList<>();
+    /** Ordered blend rules that write into the final drivetrain output. */
+    private final List<SpeedOutputBlendRegistration> speedOutputBlends = new ArrayList<>();
+
+    private record SpeedSourceRegistration(String name, boolean enabledByDefault) {}
+
+    private record SpeedSourceBlendRegistration(
+            String target,
+            String left,
+            String right,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis[] axes) {}
+
+    private record SpeedOutputBlendRegistration(
+            String source,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis[] axes) {}
 
     /**
      * Creates a configuration with default hardware IDs and explicit module locations.
@@ -381,6 +405,41 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         return this;
     }
 
+    public SwerveDrivetrainConfig addSpeedSource(String name, boolean enabledByDefault) {
+        speedSources.add(new SpeedSourceRegistration(name, enabledByDefault));
+        return this;
+    }
+
+    public SwerveDrivetrainConfig addSpeedBlend(
+            String target,
+            String source,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis... axes) {
+        return addSpeedBlend(target, target, source, blendMode, axes);
+    }
+
+    public SwerveDrivetrainConfig addSpeedBlend(
+            String target,
+            String left,
+            String right,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis... axes) {
+        RobotSpeeds.SpeedAxis[] resolvedAxes =
+                axes == null ? new RobotSpeeds.SpeedAxis[0] : axes.clone();
+        speedSourceBlends.add(new SpeedSourceBlendRegistration(target, left, right, blendMode, resolvedAxes));
+        return this;
+    }
+
+    public SwerveDrivetrainConfig addSpeedOutputBlend(
+            String source,
+            RobotSpeeds.BlendMode blendMode,
+            RobotSpeeds.SpeedAxis... axes) {
+        RobotSpeeds.SpeedAxis[] resolvedAxes =
+                axes == null ? new RobotSpeeds.SpeedAxis[0] : axes.clone();
+        speedOutputBlends.add(new SpeedOutputBlendRegistration(source, blendMode, resolvedAxes));
+        return this;
+    }
+
 
     /**
      * Applies all registered configuration options to the module definitions and constructs the
@@ -449,6 +508,31 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
 
         dt.setFieldRelative(fieldRelative);
         dt.driftActivationSpeed = driftActivationSpeed;
+        applySpeedConfig(dt.getRobotSpeeds());
         return dt;
+    }
+
+    private void applySpeedConfig(RobotSpeeds speeds) {
+        if (speeds == null) {
+            return;
+        }
+        speeds.resetBlendsToDefaults();
+        for (SpeedSourceRegistration source : speedSources) {
+            speeds.registerSpeedSource(source.name(), source.enabledByDefault());
+        }
+        for (SpeedSourceBlendRegistration blend : speedSourceBlends) {
+            speeds.blend(
+                    blend.target(),
+                    blend.left(),
+                    blend.right(),
+                    blend.blendMode(),
+                    blend.axes());
+        }
+        for (SpeedOutputBlendRegistration blend : speedOutputBlends) {
+            speeds.blendToOutput(
+                    blend.source(),
+                    blend.blendMode(),
+                    blend.axes());
+        }
     }
 }

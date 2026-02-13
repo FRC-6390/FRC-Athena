@@ -11,6 +11,9 @@ import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.mechanisms.OutputType;
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 
@@ -46,6 +49,11 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         void apply(RobotCoreContext<T> context);
     }
 
+    @FunctionalInterface
+    public interface ControlLoop<T extends RobotDrivetrain<T>> {
+        double calculate(RobotCoreContext<T> context);
+    }
+
     public record PeriodicHookBinding<T extends RobotDrivetrain<T>>(
             Binding<T> hook,
             double periodMs) {
@@ -57,6 +65,30 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
     }
 
+    public record ControlLoopBinding<T extends RobotDrivetrain<T>>(
+            String name,
+            double periodSeconds,
+            ControlLoop<T> loop) {
+        public ControlLoopBinding {
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(loop, "loop");
+            if (name.isBlank()) {
+                throw new IllegalArgumentException("control loop name cannot be blank");
+            }
+            if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
+                throw new IllegalArgumentException("control loop periodSeconds must be finite and > 0");
+            }
+        }
+    }
+
+    public record PidProfile(OutputType outputType, double kP, double kI, double kD, double iZone, double tolerance) {}
+
+    public record FeedforwardProfile(OutputType outputType, SimpleMotorFeedforward feedforward) {
+        public FeedforwardProfile {
+            Objects.requireNonNull(feedforward, "feedforward");
+        }
+    }
+
     private final Map<String, BooleanSupplier> inputs;
     private final Map<String, DoubleSupplier> doubleInputs;
     private final Map<String, IntSupplier> intInputs;
@@ -64,6 +96,9 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
     private final Map<String, Supplier<Pose2d>> pose2dInputs;
     private final Map<String, Supplier<Pose3d>> pose3dInputs;
     private final Map<String, Supplier<?>> objectInputs;
+    private final List<ControlLoopBinding<T>> controlLoopBindings;
+    private final Map<String, PidProfile> pidProfiles;
+    private final Map<String, FeedforwardProfile> feedforwardProfiles;
 
     private final List<Binding<T>> initBindings;
     private final List<Binding<T>> periodicBindings;
@@ -98,6 +133,9 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         this.pose2dInputs = Map.copyOf(builder.pose2dInputs);
         this.pose3dInputs = Map.copyOf(builder.pose3dInputs);
         this.objectInputs = Map.copyOf(builder.objectInputs);
+        this.controlLoopBindings = List.copyOf(builder.controlLoopBindings);
+        this.pidProfiles = Map.copyOf(builder.pidProfiles);
+        this.feedforwardProfiles = Map.copyOf(builder.feedforwardProfiles);
 
         this.initBindings = List.copyOf(builder.initBindings);
         this.periodicBindings = List.copyOf(builder.periodicBindings);
@@ -156,6 +194,9 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         builder.pose2dInputs.putAll(pose2dInputs);
         builder.pose3dInputs.putAll(pose3dInputs);
         builder.objectInputs.putAll(objectInputs);
+        builder.controlLoopBindings.addAll(controlLoopBindings);
+        builder.pidProfiles.putAll(pidProfiles);
+        builder.feedforwardProfiles.putAll(feedforwardProfiles);
 
         builder.initBindings.addAll(initBindings);
         builder.periodicBindings.addAll(periodicBindings);
@@ -210,6 +251,18 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
 
     public Map<String, Supplier<?>> objectInputs() {
         return objectInputs;
+    }
+
+    public List<ControlLoopBinding<T>> controlLoopBindings() {
+        return controlLoopBindings;
+    }
+
+    public Map<String, PidProfile> pidProfiles() {
+        return pidProfiles;
+    }
+
+    public Map<String, FeedforwardProfile> feedforwardProfiles() {
+        return feedforwardProfiles;
     }
 
     public List<Binding<T>> initBindings() {
@@ -430,6 +483,99 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
             owner.testExitBindings.add(Objects.requireNonNull(binding, "binding"));
             return this;
         }
+
+        public HooksSection<T> controlLoop(String name, double periodMs, ControlLoop<T> loop) {
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(loop, "loop");
+            if (name.isBlank()) {
+                throw new IllegalArgumentException("control loop name cannot be blank");
+            }
+            if (!Double.isFinite(periodMs) || periodMs <= 0.0) {
+                throw new IllegalArgumentException("control loop period must be finite and > 0");
+            }
+            for (ControlLoopBinding<T> binding : owner.controlLoopBindings) {
+                if (binding != null && name.equals(binding.name())) {
+                    throw new IllegalArgumentException("control loop name already registered: " + name);
+                }
+            }
+            owner.controlLoopBindings.add(new ControlLoopBinding<>(name, periodMs / 1000.0, loop));
+            return this;
+        }
+
+        public HooksSection<T> controlLoopSeconds(String name, double periodSeconds, ControlLoop<T> loop) {
+            return controlLoop(name, periodSeconds * 1000.0, loop);
+        }
+
+        public HooksSection<T> pidProfile(String name, double kP, double kI, double kD) {
+            return pidProfile(name, OutputType.PERCENT, kP, kI, kD, Double.NaN, Double.NaN);
+        }
+
+        public HooksSection<T> pidProfile(String name, OutputType outputType, double kP, double kI, double kD) {
+            return pidProfile(name, outputType, kP, kI, kD, Double.NaN, Double.NaN);
+        }
+
+        public HooksSection<T> pidProfile(String name, double kP, double kI, double kD, double iZone) {
+            return pidProfile(name, OutputType.PERCENT, kP, kI, kD, iZone, Double.NaN);
+        }
+
+        public HooksSection<T> pidProfile(
+                String name,
+                OutputType outputType,
+                double kP,
+                double kI,
+                double kD,
+                double iZone) {
+            return pidProfile(name, outputType, kP, kI, kD, iZone, Double.NaN);
+        }
+
+        public HooksSection<T> pidProfile(
+                String name,
+                double kP,
+                double kI,
+                double kD,
+                double iZone,
+                double tolerance) {
+            return pidProfile(name, OutputType.PERCENT, kP, kI, kD, iZone, tolerance);
+        }
+
+        public HooksSection<T> pidProfile(
+                String name,
+                OutputType outputType,
+                double kP,
+                double kI,
+                double kD,
+                double iZone,
+                double tolerance) {
+            Objects.requireNonNull(name, "name");
+            if (name.isBlank()) {
+                throw new IllegalArgumentException("PID profile name cannot be blank");
+            }
+            OutputType resolvedOutput = outputType != null ? outputType : OutputType.PERCENT;
+            if (resolvedOutput != OutputType.PERCENT && resolvedOutput != OutputType.VOLTAGE) {
+                throw new IllegalArgumentException("PID profile output type must be PERCENT or VOLTAGE");
+            }
+            owner.pidProfiles.put(name, new PidProfile(resolvedOutput, kP, kI, kD, iZone, tolerance));
+            return this;
+        }
+
+        public HooksSection<T> feedforwardProfile(String name, double kS, double kV, double kA) {
+            return feedforwardProfile(name, OutputType.VOLTAGE, kS, kV, kA);
+        }
+
+        public HooksSection<T> feedforwardProfile(String name, OutputType outputType, double kS, double kV, double kA) {
+            Objects.requireNonNull(name, "name");
+            if (name.isBlank()) {
+                throw new IllegalArgumentException("feedforward profile name cannot be blank");
+            }
+            OutputType resolvedOutput = outputType != null ? outputType : OutputType.VOLTAGE;
+            if (resolvedOutput != OutputType.VOLTAGE) {
+                throw new IllegalArgumentException("feedforward profile output type must be VOLTAGE");
+            }
+            owner.feedforwardProfiles.put(
+                    name,
+                    new FeedforwardProfile(resolvedOutput, new SimpleMotorFeedforward(kS, kV, kA)));
+            return this;
+        }
     }
 
     public static final class InputsSection<T extends RobotDrivetrain<T>> {
@@ -483,6 +629,9 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         private final Map<String, Supplier<Pose2d>> pose2dInputs = new HashMap<>();
         private final Map<String, Supplier<Pose3d>> pose3dInputs = new HashMap<>();
         private final Map<String, Supplier<?>> objectInputs = new HashMap<>();
+        private final List<ControlLoopBinding<T>> controlLoopBindings = new ArrayList<>();
+        private final Map<String, PidProfile> pidProfiles = new HashMap<>();
+        private final Map<String, FeedforwardProfile> feedforwardProfiles = new HashMap<>();
 
         private final List<Binding<T>> initBindings = new ArrayList<>();
         private final List<Binding<T>> periodicBindings = new ArrayList<>();

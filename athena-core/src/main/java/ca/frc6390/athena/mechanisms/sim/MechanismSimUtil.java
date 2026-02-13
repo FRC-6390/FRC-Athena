@@ -61,7 +61,9 @@ public final class MechanismSimUtil {
         double safeConversion = conversion != 0.0 ? conversion : 1.0;
         double safeGearRatio = gearRatio != 0.0 ? gearRatio : 1.0;
 
-        double rawPosition = ((position - conversionOffset) / safeConversion) / safeGearRatio - offset;
+        // Keep simulated raw values consistent with EncoderAdapter#setPosition so sim and hardware
+        // use the same offset/gear sign conventions.
+        double rawPosition = ((position - conversionOffset) / safeConversion) / safeGearRatio + offset;
         double rawVelocity = (velocity / safeConversion) / safeGearRatio;
 
         if (!Double.isFinite(rawPosition)) {
