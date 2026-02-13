@@ -358,6 +358,24 @@ public class RobotAuto {
         }
 
         /**
+         * Waits for a fixed amount of time.
+         */
+        default Command waitSeconds(double seconds) {
+            if (seconds < 0.0) {
+                throw new IllegalArgumentException("seconds must be >= 0");
+            }
+            return seconds == 0.0 ? Commands.none() : Commands.waitSeconds(seconds);
+        }
+
+        /**
+         * Waits until the condition becomes true.
+         */
+        default Command waitUntil(BooleanSupplier condition) {
+            Objects.requireNonNull(condition, "condition");
+            return Commands.waitUntil(condition);
+        }
+
+        /**
          * Wait for a condition, then continue. If timeout elapses first, execute fallback.
          */
         default Command waitFor(BooleanSupplier condition, double timeoutSeconds, Command onTimeout) {
@@ -382,6 +400,64 @@ public class RobotAuto {
                 throw new IllegalArgumentException("timeoutSeconds must be > 0");
             }
             return Commands.waitUntil(condition).withTimeout(timeoutSeconds);
+        }
+
+        /**
+         * Wait indefinitely until the condition becomes true.
+         */
+        default Command waitFor(BooleanSupplier condition) {
+            return waitUntil(condition);
+        }
+
+        /**
+         * Applies a timeout to an arbitrary command.
+         */
+        default Command timeout(Command command, double timeoutSeconds) {
+            Objects.requireNonNull(command, "command");
+            if (timeoutSeconds <= 0.0) {
+                throw new IllegalArgumentException("timeoutSeconds must be > 0");
+            }
+            return command.withTimeout(timeoutSeconds);
+        }
+
+        /**
+         * Applies a timeout to a registered auto by id.
+         */
+        default Command timeout(String autoId, double timeoutSeconds) {
+            Objects.requireNonNull(autoId, "autoId");
+            return timeout(auto(autoId), timeoutSeconds);
+        }
+
+        /**
+         * Runs a command, and if it times out, runs fallback.
+         */
+        default Command timeout(Command command, double timeoutSeconds, Command onTimeout) {
+            Objects.requireNonNull(command, "command");
+            Objects.requireNonNull(onTimeout, "onTimeout");
+            if (timeoutSeconds <= 0.0) {
+                throw new IllegalArgumentException("timeoutSeconds must be > 0");
+            }
+            return Commands.race(
+                    command,
+                    Commands.sequence(Commands.waitSeconds(timeoutSeconds), onTimeout));
+        }
+
+        /**
+         * Runs an auto by id, and if it times out, runs fallback.
+         */
+        default Command timeout(String autoId, double timeoutSeconds, Command onTimeout) {
+            Objects.requireNonNull(autoId, "autoId");
+            return timeout(auto(autoId), timeoutSeconds, onTimeout);
+        }
+
+        default Command timeout(Command command, double timeoutSeconds, Runnable onTimeout) {
+            Objects.requireNonNull(onTimeout, "onTimeout");
+            return timeout(command, timeoutSeconds, Commands.runOnce(onTimeout));
+        }
+
+        default Command timeout(String autoId, double timeoutSeconds, Runnable onTimeout) {
+            Objects.requireNonNull(autoId, "autoId");
+            return timeout(auto(autoId), timeoutSeconds, onTimeout);
         }
 
         default AutoPlan.Context planContext() {
@@ -668,6 +744,7 @@ public class RobotAuto {
         if (programId.isBlank()) {
             throw new IllegalArgumentException("AutoProgram.id() cannot be blank for " + program.getClass().getName());
         }
+        boolean hadProgramAutoBeforeRegister = hasAuto(programId);
 
         AutoRegisterCtx regCtx = new AutoRegisterCtxImpl(robot, this);
         program.register(regCtx);
@@ -681,6 +758,16 @@ public class RobotAuto {
                     "AutoProgram id mismatch for " + program.getClass().getName()
                             + ": program.id()=\"" + programId
                             + "\", routine.key().id()=\"" + routine.key().id() + "\"");
+        }
+        // Allow register(...) to pre-register the program id (for example, ctx.path(id(), ...)).
+        // In that case, keep the registered routine as the canonical chooser entry.
+        if (hasAuto(programId)) {
+            if (hadProgramAutoBeforeRegister) {
+                throw new IllegalArgumentException(
+                        "Auto already registered before program registration: " + programId
+                                + " (program " + program.getClass().getName() + ")");
+            }
+            return this;
         }
         return registerAuto(routine);
     }
