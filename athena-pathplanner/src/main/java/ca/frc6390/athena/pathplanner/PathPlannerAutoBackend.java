@@ -98,7 +98,10 @@ public class PathPlannerAutoBackend implements AutoBackend {
 
         if (source == RobotAuto.AutoSource.CHOREO) {
             try {
-                PathPlannerPath path = PathPlannerPath.fromChoreoTrajectory(reference);
+                ChoreoRef ref = ChoreoRef.parse(reference);
+                PathPlannerPath path = ref.index().isPresent()
+                        ? PathPlannerPath.fromChoreoTrajectory(ref.name(), ref.index().getAsInt())
+                        : PathPlannerPath.fromChoreoTrajectory(ref.name());
                 return Optional.of(AutoBuilder.followPath(path));
             } catch (FileVersionException | IOException | ParseException ex) {
                 DriverStation.reportError("Could not load Choreo auto \"" + reference + "\"", ex.getStackTrace());

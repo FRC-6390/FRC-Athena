@@ -43,6 +43,7 @@ public class RobotAuto {
     private boolean registrationFinalized;
     private final Set<String> boundPathPlannerNamedCommands;
     private final Set<String> boundChoreoNamedCommands;
+    private RobotCore<?> robotCore;
 
     public RobotAuto() {
         namedCommandSuppliers = new LinkedHashMap<>();
@@ -57,6 +58,7 @@ public class RobotAuto {
         registrationFinalized = false;
         boundPathPlannerNamedCommands = new HashSet<>();
         boundChoreoNamedCommands = new HashSet<>();
+        robotCore = null;
     }
 
     /**
@@ -200,6 +202,8 @@ public class RobotAuto {
 
         /**
          * Register a trajectory by file/reference name. The chooser id defaults to the same value.
+         *
+         * <p>Signature order: {@code path(reference, source)}.</p>
          */
         default AutoRegisterCtx path(String reference, TrajectorySource source) {
             autos().registerPath(reference, source);
@@ -208,6 +212,8 @@ public class RobotAuto {
 
         /**
          * Register a trajectory by file/reference name and alias it under a different chooser id.
+         *
+         * <p>Signature order: {@code path(reference, source, id)}.</p>
          */
         default AutoRegisterCtx path(String reference, TrajectorySource source, String id) {
             autos().registerPath(reference, source, id);
@@ -507,6 +513,7 @@ public class RobotAuto {
             }
             return filtered.toArray(Command[]::new);
         }
+
     }
 
     /**
@@ -737,8 +744,35 @@ public class RobotAuto {
         return inputSupplier(key).get();
     }
 
-    public RobotAuto registerProgram(RobotCore<?> robot, AutoProgram program) {
+    /**
+     * Attaches the owning {@link RobotCore}. This is called automatically by {@link RobotCore}.
+     */
+    public RobotAuto attachRobotCore(RobotCore<?> robot) {
         Objects.requireNonNull(robot, "robot");
+        if (robotCore != null && robotCore != robot) {
+            throw new IllegalStateException(
+                    "RobotAuto is already attached to a different RobotCore instance.");
+        }
+        robotCore = robot;
+        return this;
+    }
+
+    public Optional<RobotCore<?>> robotCore() {
+        return Optional.ofNullable(robotCore);
+    }
+
+    private RobotCore<?> requireRobotCore() {
+        RobotCore<?> robot = robotCore;
+        if (robot == null) {
+            throw new IllegalStateException(
+                    "RobotAuto is not attached to a RobotCore. "
+                            + "Use autos.attachRobotCore(robot) once.");
+        }
+        return robot;
+    }
+
+    public RobotAuto registerProgram(AutoProgram program) {
+        RobotCore<?> robot = requireRobotCore();
         Objects.requireNonNull(program, "program");
         String programId = Objects.requireNonNull(program.id(), "AutoProgram.id() returned null");
         if (programId.isBlank()) {
@@ -759,21 +793,23 @@ public class RobotAuto {
                             + ": program.id()=\"" + programId
                             + "\", routine.key().id()=\"" + routine.key().id() + "\"");
         }
-        // Allow register(...) to pre-register the program id (for example, ctx.path(id(), ...)).
-        // In that case, keep the registered routine as the canonical chooser entry.
         if (hasAuto(programId)) {
             if (hadProgramAutoBeforeRegister) {
                 throw new IllegalArgumentException(
                         "Auto already registered before program registration: " + programId
                                 + " (program " + program.getClass().getName() + ")");
             }
+            // register(...) may have registered dependencies that collide with the program id.
+            // Program build output is authoritative for chooser behavior.
+            autoRoutines.put(programId, routine);
+            resetChoosers();
             return this;
         }
         return registerAuto(routine);
     }
 
-    public final RobotAuto registerPrograms(RobotCore<?> robot, AutoProgram... programs) {
-        Objects.requireNonNull(robot, "robot");
+    public final RobotAuto registerPrograms(AutoProgram... programs) {
+        requireRobotCore();
         if (programs == null) {
             return this;
         }
@@ -781,14 +817,14 @@ public class RobotAuto {
             if (program == null) {
                 continue;
             }
-            registerProgram(robot, program);
+            registerProgram(program);
         }
         return this;
     }
 
     @SafeVarargs
-    public final RobotAuto registerPrograms(RobotCore<?> robot, Class<? extends AutoProgram>... programTypes) {
-        Objects.requireNonNull(robot, "robot");
+    public final RobotAuto registerPrograms(Class<? extends AutoProgram>... programTypes) {
+        requireRobotCore();
         if (programTypes == null) {
             return this;
         }
@@ -797,7 +833,7 @@ public class RobotAuto {
                 continue;
             }
             AutoProgram program = newInstance(programType);
-            registerProgram(robot, program);
+            registerProgram(program);
         }
         return this;
     }
@@ -857,7 +893,25 @@ public class RobotAuto {
     public RobotAuto registerPath(String reference, TrajectorySource source, String id) {
         String resolvedReference = requireNonBlank(reference, "reference");
         String resolvedId = requireNonBlank(id, "id");
-        return registerPath(AutoKey.of(resolvedId), source, resolvedReference);
+        try {
+            validatePathReference(source, resolvedReference);
+            return registerAuto(path(AutoKey.of(resolvedId), source, resolvedReference));
+        } catch (IllegalArgumentException referenceError) {
+            // Common user mistake: path(aliasId, source, reference) instead of path(reference, source, aliasId).
+            // If the third argument validates as a reference, auto-correct to keep startup fail-fast but ergonomic.
+            try {
+                validatePathReference(source, resolvedId);
+            } catch (IllegalArgumentException idError) {
+                throw referenceError;
+            }
+            DriverStation.reportWarning(
+                    "Auto path registration arguments were likely swapped. "
+                            + "Expected path(reference, source, id), but received reference=\""
+                            + resolvedReference + "\" and id=\"" + resolvedId + "\". "
+                            + "Using reference=\"" + resolvedId + "\" and id=\"" + resolvedReference + "\".",
+                    false);
+            return registerAuto(path(AutoKey.of(resolvedReference), source, resolvedId));
+        }
     }
 
     public RobotAuto registerPath(AutoKey key, TrajectorySource source, String reference) {
@@ -1133,11 +1187,37 @@ public class RobotAuto {
             throw new IllegalArgumentException(
                     "Failed to validate " + source + " reference \"" + reference + "\".", ex);
         }
-        if (poses.isEmpty() || poses.get().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Auto reference \"" + reference + "\" could not be resolved for source " + source + ". "
-                            + "Registration is fail-fast; verify the file exists and source is correct.");
+        if (poses.isPresent() && !poses.get().isEmpty()) {
+            return;
         }
+
+        // For split references like "Name.1", some PathPlanner pose loaders may not expose split
+        // poses reliably even when runtime execution supports them. If the base reference validates,
+        // allow registration and defer split-index validity to runtime build.
+        //
+        // Keep CHOREO strict so invalid split indices fail-fast (e.g., Name.1 when only split 0
+        // exists) instead of silently falling back to base behavior.
+        int dot = reference.lastIndexOf('.');
+        if (source == TrajectorySource.PATH_PLANNER && dot > 0 && dot < reference.length() - 1) {
+            String maybeIndex = reference.substring(dot + 1);
+            try {
+                Integer.parseInt(maybeIndex);
+                String baseReference = reference.substring(0, dot);
+                Optional<List<Pose2d>> basePoses = backend.getAutoPoses(autoSource, baseReference);
+                if (basePoses.isPresent() && !basePoses.get().isEmpty()) {
+                    return;
+                }
+            } catch (NumberFormatException ignored) {
+                // Not a split suffix; keep fail-fast behavior below.
+            } catch (RuntimeException ex) {
+                throw new IllegalArgumentException(
+                        "Failed to validate base reference for split \"" + reference + "\".", ex);
+            }
+        }
+
+        throw new IllegalArgumentException(
+                "Auto reference \"" + reference + "\" could not be resolved for source " + source + ". "
+                        + "Registration is fail-fast; verify the file exists and source is correct.");
     }
 
     private static AutoBackend backendForSource(AutoSource source) {

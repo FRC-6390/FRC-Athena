@@ -337,7 +337,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         drivetrain = config.driveTrain.build();
         localization = drivetrain.localization(config.localizationConfig());
         vision = RobotVision.fromConfig(config.visionConfig);
-        autos = new RobotAuto();
+        autos = new RobotAuto().attachRobotCore(this);
         copilot = new RobotCopilot(drivetrain.get(), localization, RobotCopilot.inferDriveStyle(drivetrain.get()));
         mechanisms = new HashMap<>();
         registeredSuperstructures = new ArrayList<>();

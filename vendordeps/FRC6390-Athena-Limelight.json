@@ -1,7 +1,7 @@
 {
     "fileName": "FRC6390-Athena-Limelight.json",
     "name": "FRC6390 Athena Limelight",
-    "version": "2026.0.104",
+    "version": "2026.0.111",
     "frcYear": "2026",
     "uuid": "2bce0b98-1373-4c4c-8b53-04637a9550d5",
     "mavenUrls": [
@@ -12,7 +12,7 @@
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "athena-limelight",
-            "version": "2026.0.104"
+            "version": "2026.0.111"
         }
     ],
     "requires": [
