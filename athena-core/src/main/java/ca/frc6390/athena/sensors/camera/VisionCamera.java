@@ -1,7 +1,5 @@
 package ca.frc6390.athena.sensors.camera;
 
-import static ca.frc6390.athena.util.SupplierUtil.optionalDouble;
-import static ca.frc6390.athena.util.SupplierUtil.optionalInt;
 import static ca.frc6390.athena.util.SupplierUtil.wrapBoolean;
 import static ca.frc6390.athena.util.SupplierUtil.wrapConsumer;
 import static ca.frc6390.athena.util.SupplierUtil.wrapDouble;
@@ -22,6 +20,7 @@ import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.core.RobotTime;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -99,6 +98,9 @@ public class VisionCamera {
             Double confidence) {}
 
     private static final double LATENCY_TIMESTAMP_THRESHOLD_SECONDS = 5.0;
+    private static final double FALLBACK_UPDATE_WINDOW_SECONDS = 1e-3;
+    private static final Pose2d ZERO_POSE = new Pose2d();
+    private static final Pose3d ZERO_POSE3D = new Pose3d();
 
     private final VisionCameraConfig config;
     private final BooleanSupplier connectedSupplier;
@@ -137,6 +139,22 @@ public class VisionCamera {
     private double cachedYawDegrees = Double.NaN;
     private Optional<Translation2d> cachedCameraTranslation = Optional.empty();
     private List<TargetMeasurement> measurementCache = List.of();
+    private double lastUpdateTimestampSeconds = Double.NaN;
+    private Pose2d cachedPose = ZERO_POSE;
+    private Pose3d cachedPose3d = ZERO_POSE3D;
+    private double cachedLatencySeconds = 0.0;
+    private int cachedVisibleTargets = 0;
+    private double cachedAverageDistanceMeters = Double.NaN;
+    private double cachedTargetYawDegrees = Double.NaN;
+    private double cachedTargetPitchDegrees = Double.NaN;
+    private double cachedTargetDistanceMeters = Double.NaN;
+    private int cachedTagId = -1;
+    private double cachedConfidence = 1.0;
+    private double cachedPoseAmbiguity = Double.NaN;
+    private double cachedCameraPitchDegrees = Double.NaN;
+    private double cachedCameraRollDegrees = Double.NaN;
+    private boolean cachedConnected = true;
+    private boolean cachedHasTargets = false;
 
     private Matrix<N3, N1> singleStdDevs;
     private Matrix<N3, N1> multiStdDevs;
@@ -211,6 +229,20 @@ public class VisionCamera {
      * NetworkTables. Returns {@code this} to allow fluent access patterns.
      */
     public VisionCamera update() {
+        double nowSeconds = RobotTime.nowSeconds();
+        if (Double.isFinite(nowSeconds)) {
+            if (nowSeconds == lastUpdateTimestampSeconds) {
+                return this;
+            }
+        } else {
+            nowSeconds = Timer.getFPGATimestamp();
+            if (Double.isFinite(lastUpdateTimestampSeconds)
+                    && (nowSeconds - lastUpdateTimestampSeconds) < FALLBACK_UPDATE_WINDOW_SECONDS) {
+                return this;
+            }
+        }
+        lastUpdateTimestampSeconds = nowSeconds;
+
         if (updateHook != null) {
             updateHook.run();
         }
@@ -220,12 +252,26 @@ public class VisionCamera {
                 orientationConsumer.accept(pose);
             }
         }
+        cachedConnected = connectedSupplier.getAsBoolean();
+        cachedHasTargets = hasTargetsSupplier.getAsBoolean();
+        cachedPose = safePose(poseSupplier.get());
+        cachedPose3d = safePose3d(pose3dSupplier.get(), cachedPose);
+        cachedLatencySeconds = latencySupplier.getAsDouble();
+        cachedVisibleTargets = visibleTargetsSupplier.getAsInt();
+        cachedAverageDistanceMeters = averageDistanceSupplier.getAsDouble();
+        cachedTargetYawDegrees = targetYawSupplier.getAsDouble();
+        cachedTargetPitchDegrees = targetPitchSupplier.getAsDouble();
+        cachedTargetDistanceMeters = targetDistanceSupplier.getAsDouble();
+        cachedTagId = tagIdSupplier.getAsInt();
+        cachedPoseAmbiguity = poseAmbiguitySupplier.getAsDouble();
+        cachedCameraPitchDegrees = cameraPitchSupplier.getAsDouble();
+        cachedCameraRollDegrees = cameraRollSupplier.getAsDouble();
+        cachedConfidence = confidenceSupplier.getAsDouble();
         List<TargetMeasurement> measurements =
                 targetMeasurementsSupplier != null ? targetMeasurementsSupplier.get() : List.of();
-        measurementCache = measurements != null ? List.copyOf(measurements) : List.of();
-        Pose2d estimatedPose = poseSupplier.get();
+        measurementCache = measurements != null && !measurements.isEmpty() ? measurements : List.of();
         if (networkEstimatedPosePublisher != null) {
-            networkEstimatedPosePublisher.set(estimatedPose != null ? estimatedPose : new Pose2d());
+            networkEstimatedPosePublisher.set(cachedPose);
         }
         return this;
     }
@@ -236,14 +282,16 @@ public class VisionCamera {
      * @return {@code true} when the vendor feed is reachable
      */
     public boolean isConnected() {
-        return connectedSupplier.getAsBoolean();
+        update();
+        return cachedConnected;
     }
 
     /**
      * True when the camera is connected and currently reporting a valid target.
      */
     public boolean hasValidTarget() {
-        return isConnected() && hasTargetsSupplier.getAsBoolean();
+        update();
+        return cachedConnected && cachedHasTargets;
     }
 
     /**
@@ -254,8 +302,7 @@ public class VisionCamera {
      */
     public Pose2d getLocalizationPose() {
         update();
-        Pose2d pose = poseSupplier.get();
-        return pose != null ? pose : new Pose2d();
+        return cachedPose;
     }
 
     /**
@@ -263,7 +310,7 @@ public class VisionCamera {
      */
     public double getLocalizationLatency() {
         update();
-        return latencySupplier.getAsDouble();
+        return cachedLatencySeconds;
     }
 
     /**
@@ -282,9 +329,7 @@ public class VisionCamera {
      */
     public Matrix<N3, N1> getLocalizationStdDevs() {
         update();
-        int targets = visibleTargetsSupplier.getAsInt();
-        double avgDistance = averageDistanceSupplier.getAsDouble();
-        return recalculateStdDevs(targets, avgDistance, config.getTrustDistance());
+        return recalculateStdDevs(cachedVisibleTargets, cachedAverageDistanceMeters, config.getTrustDistance());
     }
 
     /**
@@ -354,17 +399,12 @@ public class VisionCamera {
     }
 
     private LocalizationData createLocalizationData() {
-        Pose2d pose = poseSupplier.get();
-        Pose3d pose3d = pose3dSupplier.get();
-        double latency = latencySupplier.getAsDouble();
         Matrix<N3, N1> stdDevs =
                 recalculateStdDevs(
-                        visibleTargetsSupplier.getAsInt(),
-                        averageDistanceSupplier.getAsDouble(),
+                        cachedVisibleTargets,
+                        cachedAverageDistanceMeters,
                         config.getTrustDistance());
-        Pose2d safePose = pose != null ? pose : new Pose2d();
-        Pose3d safePose3d = pose3d != null ? pose3d : new Pose3d(safePose);
-        return new LocalizationData(safePose, safePose3d, latency, stdDevs);
+        return new LocalizationData(cachedPose, cachedPose3d, cachedLatencySeconds, stdDevs);
     }
 
     /**
@@ -391,7 +431,7 @@ public class VisionCamera {
      * @return optional wrapping a measurement when a valid target is present
      */
     public Optional<VisionMeasurement> getLatestVisionMeasurement() {
-        return getVisionMeasurement(Timer.getFPGATimestamp());
+        return getVisionMeasurement(currentTimestampSeconds());
     }
 
     /**
@@ -401,7 +441,7 @@ public class VisionCamera {
      * @return {@code true} when a measurement was produced and forwarded
      */
     public boolean addVisionMeasurement(SwerveDrivePoseEstimator estimator) {
-        return addVisionMeasurement(estimator, Timer.getFPGATimestamp());
+        return addVisionMeasurement(estimator, currentTimestampSeconds());
     }
 
     /**
@@ -450,7 +490,7 @@ public class VisionCamera {
                         getMeasurementConfidence(),
                         getMeasurementDistance(),
                         latencySeconds,
-                        visibleTargetsSupplier.getAsInt(),
+                        cachedVisibleTargets,
                         getMeasurementAmbiguity(),
                         getCameraPitchDegrees(),
                         getCameraRollDegrees());
@@ -595,28 +635,32 @@ public class VisionCamera {
      * Vendor reported confidence associated with the current frame.
      */
     public double getMeasurementConfidence() {
-        return confidenceSupplier.getAsDouble();
+        update();
+        return cachedConfidence;
     }
 
     /**
      * Vendor reported pose ambiguity for the current frame.
      */
     public double getMeasurementAmbiguity() {
-        return poseAmbiguitySupplier.getAsDouble();
+        update();
+        return cachedPoseAmbiguity;
     }
 
     /**
      * Camera pitch in degrees when supplied by the integration.
      */
     public double getCameraPitchDegrees() {
-        return cameraPitchSupplier.getAsDouble();
+        update();
+        return cachedCameraPitchDegrees;
     }
 
     /**
      * Camera roll in degrees when supplied by the integration.
      */
     public double getCameraRollDegrees() {
-        return cameraRollSupplier.getAsDouble();
+        update();
+        return cachedCameraRollDegrees;
     }
 
     /**
@@ -627,11 +671,11 @@ public class VisionCamera {
     }
 
     private double getMeasurementDistance() {
-        double distance = targetDistanceSupplier.getAsDouble();
+        double distance = cachedTargetDistanceMeters;
         if (!Double.isNaN(distance) && Double.isFinite(distance)) {
             return distance;
         }
-        double averageDistance = averageDistanceSupplier.getAsDouble();
+        double averageDistance = cachedAverageDistanceMeters;
         return Double.isFinite(averageDistance) ? averageDistance : Double.NaN;
     }
 
@@ -699,7 +743,7 @@ public class VisionCamera {
      */
     public OptionalDouble getTargetYawDegrees() {
         update();
-        return optionalDouble(targetYawSupplier);
+        return optionalFinite(cachedTargetYawDegrees);
     }
 
     /**
@@ -708,7 +752,7 @@ public class VisionCamera {
      */
     public OptionalDouble getTargetPitchDegrees() {
         update();
-        return optionalDouble(targetPitchSupplier);
+        return optionalFinite(cachedTargetPitchDegrees);
     }
 
     /**
@@ -717,7 +761,7 @@ public class VisionCamera {
      */
     public OptionalDouble getTargetDistanceMeters() {
         update();
-        return optionalDouble(targetDistanceSupplier);
+        return optionalFinite(cachedTargetDistanceMeters);
     }
 
     /**
@@ -725,7 +769,7 @@ public class VisionCamera {
      */
     public OptionalInt getLatestTagId() {
         update();
-        return optionalInt(tagIdSupplier);
+        return cachedTagId >= 0 ? OptionalInt.of(cachedTagId) : OptionalInt.empty();
     }
 
     /**
@@ -812,16 +856,15 @@ public class VisionCamera {
 
         Matrix<N3, N1> stdDevs =
                 recalculateStdDevs(
-                        visibleTargetsSupplier.getAsInt(),
-                        averageDistanceSupplier.getAsDouble(),
+                        cachedVisibleTargets,
+                        cachedAverageDistanceMeters,
                         config.getTrustDistance());
-        Pose2d vendorPose = poseSupplier.get();
-        Pose2d safePose = vendorPose != null ? vendorPose : new Pose2d();
-        Pose3d vendorPose3d = pose3dSupplier.get();
-        Pose3d safePose3d = vendorPose3d != null ? vendorPose3d : new Pose3d(safePose);
+        Pose2d vendorPose = cachedPose;
+        Pose2d safePose = cachedPose;
+        Pose3d safePose3d = cachedPose3d;
         LocalizationData data =
-                new LocalizationData(safePose, safePose3d, latencySupplier.getAsDouble(), stdDevs);
-        double defaultConfidence = getMeasurementConfidence();
+                new LocalizationData(safePose, safePose3d, cachedLatencySeconds, stdDevs);
+        double defaultConfidence = cachedConfidence;
 
         List<TargetObservation> observations = new ArrayList<>(measurements.size());
         for (TargetMeasurement measurement : measurements) {
@@ -1000,9 +1043,9 @@ public class VisionCamera {
 
     private TargetMeasurement buildFallbackMeasurement() {
         Optional<Translation2d> translationOpt = computeFallbackCameraTranslation();
-        OptionalDouble yawOpt = optionalDouble(targetYawSupplier);
-        OptionalDouble distanceOpt = optionalDouble(targetDistanceSupplier);
-        OptionalInt tagIdOpt = optionalInt(tagIdSupplier);
+        OptionalDouble yawOpt = optionalFinite(cachedTargetYawDegrees);
+        OptionalDouble distanceOpt = optionalFinite(cachedTargetDistanceMeters);
+        OptionalInt tagIdOpt = cachedTagId >= 0 ? OptionalInt.of(cachedTagId) : OptionalInt.empty();
         boolean hasData =
                 translationOpt.isPresent()
                         || yawOpt.isPresent()
@@ -1025,8 +1068,8 @@ public class VisionCamera {
      * so we invert the supplied yaw to align with the WPILib convention where positive Y is left.
      */
     private Optional<Translation2d> computeFallbackCameraTranslation() {
-        double distanceValue = targetDistanceSupplier.getAsDouble();
-        double yawDegrees = targetYawSupplier.getAsDouble();
+        double distanceValue = cachedTargetDistanceMeters;
+        double yawDegrees = cachedTargetYawDegrees;
         if (Double.isNaN(distanceValue) || Double.isNaN(yawDegrees)) {
             cachedDistanceMeters = Double.NaN;
             cachedYawDegrees = Double.NaN;
@@ -1249,6 +1292,32 @@ public class VisionCamera {
                 estimator.addVisionMeasurement(pose2d, timestampSeconds, stdDevs);
             }
         }
+    }
+
+    private static Pose2d safePose(Pose2d pose) {
+        return pose != null ? pose : ZERO_POSE;
+    }
+
+    private static Pose3d safePose3d(Pose3d pose3d, Pose2d fallbackPose) {
+        if (pose3d != null) {
+            return pose3d;
+        }
+        if (fallbackPose != null) {
+            return new Pose3d(fallbackPose);
+        }
+        return ZERO_POSE3D;
+    }
+
+    private static double currentTimestampSeconds() {
+        double nowSeconds = RobotTime.nowSeconds();
+        if (Double.isFinite(nowSeconds)) {
+            return nowSeconds;
+        }
+        return Timer.getFPGATimestamp();
+    }
+
+    private static OptionalDouble optionalFinite(double value) {
+        return Double.isFinite(value) ? OptionalDouble.of(value) : OptionalDouble.empty();
     }
 
     private static double sanitizeWeight(double weight) {

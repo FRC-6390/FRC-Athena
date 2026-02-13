@@ -10,6 +10,7 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.networktables.StringPublisher;
 import edu.wpi.first.networktables.StringTopic;
+import edu.wpi.first.wpilibj.Timer;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -84,6 +85,11 @@ public final class RobotNetworkTables {
     private final ConcurrentHashMap<String, BooleanPublisher> booleanPublishers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, DoublePublisher> doublePublishers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, StringPublisher> stringPublishers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Boolean> lastBooleanValues = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> lastDoubleBits = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> lastStringValues = new ConcurrentHashMap<>();
+    private static final double CONFIG_REFRESH_PERIOD_SECONDS = 0.1;
+    private double lastConfigRefreshSeconds = Double.NaN;
 
     public RobotNetworkTables() {
         this(NetworkTableInstance.getDefault());
@@ -182,6 +188,19 @@ public final class RobotNetworkTables {
     private void refresh0() {
         if (!publishedConfig) {
             return;
+        }
+        double nowSeconds = RobotTime.nowSeconds();
+        if (!Double.isFinite(nowSeconds)) {
+            nowSeconds = Timer.getFPGATimestamp();
+        }
+        if (Double.isFinite(nowSeconds) && Double.isFinite(lastConfigRefreshSeconds)) {
+            double elapsed = nowSeconds - lastConfigRefreshSeconds;
+            if (elapsed >= 0.0 && elapsed < CONFIG_REFRESH_PERIOD_SECONDS) {
+                return;
+            }
+        }
+        if (Double.isFinite(nowSeconds)) {
+            lastConfigRefreshSeconds = nowSeconds;
         }
         boolean changed = false;
 
@@ -683,6 +702,10 @@ public final class RobotNetworkTables {
                 return;
             }
             String full = resolveKey(key);
+            Boolean previous = lastBooleanValues.put(full, value);
+            if (previous != null && previous.booleanValue() == value) {
+                return;
+            }
             BooleanPublisher pub = booleanPublishers.computeIfAbsent(full, p -> {
                 BooleanTopic topic = nt.getBooleanTopic(p);
                 return topic.publish();
@@ -695,6 +718,11 @@ public final class RobotNetworkTables {
                 return;
             }
             String full = resolveKey(key);
+            long bits = Double.doubleToLongBits(value);
+            Long previousBits = lastDoubleBits.put(full, bits);
+            if (previousBits != null && previousBits.longValue() == bits) {
+                return;
+            }
             DoublePublisher pub = doublePublishers.computeIfAbsent(full, p -> {
                 DoubleTopic topic = nt.getDoubleTopic(p);
                 return topic.publish();
@@ -707,11 +735,16 @@ public final class RobotNetworkTables {
                 return;
             }
             String full = resolveKey(key);
+            String safeValue = value != null ? value : "";
+            String previous = lastStringValues.put(full, safeValue);
+            if (safeValue.equals(previous)) {
+                return;
+            }
             StringPublisher pub = stringPublishers.computeIfAbsent(full, p -> {
                 StringTopic topic = nt.getStringTopic(p);
                 return topic.publish();
             });
-            pub.set(value != null ? value : "");
+            pub.set(safeValue);
         }
 
         public NetworkTable table() {

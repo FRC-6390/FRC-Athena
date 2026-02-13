@@ -76,6 +76,7 @@ public final class RobotCoreConfig {
         private boolean telemetryEnabled = true;
 
         private final List<RegisterableMechanism> mechanisms = new ArrayList<>();
+        private RobotCoreHooks<T> hooks = RobotCoreHooks.<T>empty();
 
         private Builder(String name, RobotDrivetrainConfig<T> drivetrainConfig) {
             this.name = name;
@@ -128,6 +129,20 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public Builder<T> hooks(Consumer<RobotCoreHooks.HooksSection<T>> section) {
+            if (section != null) {
+                hooks = hooks.hooks(section);
+            }
+            return this;
+        }
+
+        public Builder<T> inputs(Consumer<RobotCoreHooks.InputsSection<T>> section) {
+            if (section != null) {
+                hooks = hooks.inputs(section);
+            }
+            return this;
+        }
+
         public RobotCore.RobotCoreConfig<T> build() {
             return new RobotCore.RobotCoreConfig<>(
                     drivetrainConfig,
@@ -138,7 +153,8 @@ public final class RobotCoreConfig {
                     List.copyOf(mechanisms),
                     performanceMode,
                     timingDebugEnabled,
-                    telemetryEnabled);
+                    telemetryEnabled,
+                    hooks);
         }
     }
 

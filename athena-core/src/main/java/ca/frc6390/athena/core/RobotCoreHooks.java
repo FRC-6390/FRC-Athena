@@ -1,0 +1,516 @@
+package ca.frc6390.athena.core;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
+
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
+
+/**
+ * Immutable hook/input registry for {@link RobotCore} lifecycle phases.
+ *
+ * <p>Use {@link #hooks(Consumer)} and {@link #inputs(Consumer)} from
+ * {@link RobotCore.RobotCoreConfig} to register callbacks and external values.
+ *
+ * @param <T> drivetrain type
+ */
+public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
+
+    public enum Phase {
+        ROBOT_INIT,
+        ROBOT_PERIODIC,
+        DISABLED_INIT,
+        DISABLED_PERIODIC,
+        DISABLED_EXIT,
+        TELEOP_INIT,
+        TELEOP_PERIODIC,
+        TELEOP_EXIT,
+        AUTONOMOUS_INIT,
+        AUTONOMOUS_PERIODIC,
+        AUTONOMOUS_EXIT,
+        TEST_INIT,
+        TEST_PERIODIC,
+        TEST_EXIT,
+    }
+
+    @FunctionalInterface
+    public interface Binding<T extends RobotDrivetrain<T>> {
+        void apply(RobotCoreContext<T> context);
+    }
+
+    public record PeriodicHookBinding<T extends RobotDrivetrain<T>>(
+            Binding<T> hook,
+            double periodMs) {
+        public PeriodicHookBinding {
+            Objects.requireNonNull(hook, "hook");
+            if (!Double.isFinite(periodMs) || periodMs < 0.0) {
+                throw new IllegalArgumentException("periodMs must be finite and >= 0");
+            }
+        }
+    }
+
+    private final Map<String, BooleanSupplier> inputs;
+    private final Map<String, DoubleSupplier> doubleInputs;
+    private final Map<String, IntSupplier> intInputs;
+    private final Map<String, Supplier<String>> stringInputs;
+    private final Map<String, Supplier<Pose2d>> pose2dInputs;
+    private final Map<String, Supplier<Pose3d>> pose3dInputs;
+    private final Map<String, Supplier<?>> objectInputs;
+
+    private final List<Binding<T>> initBindings;
+    private final List<Binding<T>> periodicBindings;
+    private final List<PeriodicHookBinding<T>> periodicLoopBindings;
+    private final List<Binding<T>> exitBindings;
+
+    private final List<Binding<T>> disabledInitBindings;
+    private final List<Binding<T>> disabledPeriodicBindings;
+    private final List<PeriodicHookBinding<T>> disabledPeriodicLoopBindings;
+    private final List<Binding<T>> disabledExitBindings;
+
+    private final List<Binding<T>> teleopInitBindings;
+    private final List<Binding<T>> teleopPeriodicBindings;
+    private final List<PeriodicHookBinding<T>> teleopPeriodicLoopBindings;
+    private final List<Binding<T>> teleopExitBindings;
+
+    private final List<Binding<T>> autonomousInitBindings;
+    private final List<Binding<T>> autonomousPeriodicBindings;
+    private final List<PeriodicHookBinding<T>> autonomousPeriodicLoopBindings;
+    private final List<Binding<T>> autonomousExitBindings;
+
+    private final List<Binding<T>> testInitBindings;
+    private final List<Binding<T>> testPeriodicBindings;
+    private final List<PeriodicHookBinding<T>> testPeriodicLoopBindings;
+    private final List<Binding<T>> testExitBindings;
+
+    private RobotCoreHooks(Builder<T> builder) {
+        this.inputs = Map.copyOf(builder.inputs);
+        this.doubleInputs = Map.copyOf(builder.doubleInputs);
+        this.intInputs = Map.copyOf(builder.intInputs);
+        this.stringInputs = Map.copyOf(builder.stringInputs);
+        this.pose2dInputs = Map.copyOf(builder.pose2dInputs);
+        this.pose3dInputs = Map.copyOf(builder.pose3dInputs);
+        this.objectInputs = Map.copyOf(builder.objectInputs);
+
+        this.initBindings = List.copyOf(builder.initBindings);
+        this.periodicBindings = List.copyOf(builder.periodicBindings);
+        this.periodicLoopBindings = List.copyOf(builder.periodicLoopBindings);
+        this.exitBindings = List.copyOf(builder.exitBindings);
+
+        this.disabledInitBindings = List.copyOf(builder.disabledInitBindings);
+        this.disabledPeriodicBindings = List.copyOf(builder.disabledPeriodicBindings);
+        this.disabledPeriodicLoopBindings = List.copyOf(builder.disabledPeriodicLoopBindings);
+        this.disabledExitBindings = List.copyOf(builder.disabledExitBindings);
+
+        this.teleopInitBindings = List.copyOf(builder.teleopInitBindings);
+        this.teleopPeriodicBindings = List.copyOf(builder.teleopPeriodicBindings);
+        this.teleopPeriodicLoopBindings = List.copyOf(builder.teleopPeriodicLoopBindings);
+        this.teleopExitBindings = List.copyOf(builder.teleopExitBindings);
+
+        this.autonomousInitBindings = List.copyOf(builder.autonomousInitBindings);
+        this.autonomousPeriodicBindings = List.copyOf(builder.autonomousPeriodicBindings);
+        this.autonomousPeriodicLoopBindings = List.copyOf(builder.autonomousPeriodicLoopBindings);
+        this.autonomousExitBindings = List.copyOf(builder.autonomousExitBindings);
+
+        this.testInitBindings = List.copyOf(builder.testInitBindings);
+        this.testPeriodicBindings = List.copyOf(builder.testPeriodicBindings);
+        this.testPeriodicLoopBindings = List.copyOf(builder.testPeriodicLoopBindings);
+        this.testExitBindings = List.copyOf(builder.testExitBindings);
+    }
+
+    public static <T extends RobotDrivetrain<T>> RobotCoreHooks<T> empty() {
+        return new Builder<T>().build();
+    }
+
+    public RobotCoreHooks<T> hooks(Consumer<HooksSection<T>> section) {
+        if (section == null) {
+            return this;
+        }
+        Builder<T> copy = toBuilder();
+        section.accept(new HooksSection<>(copy));
+        return copy.build();
+    }
+
+    public RobotCoreHooks<T> inputs(Consumer<InputsSection<T>> section) {
+        if (section == null) {
+            return this;
+        }
+        Builder<T> copy = toBuilder();
+        section.accept(new InputsSection<>(copy));
+        return copy.build();
+    }
+
+    private Builder<T> toBuilder() {
+        Builder<T> builder = new Builder<>();
+        builder.inputs.putAll(inputs);
+        builder.doubleInputs.putAll(doubleInputs);
+        builder.intInputs.putAll(intInputs);
+        builder.stringInputs.putAll(stringInputs);
+        builder.pose2dInputs.putAll(pose2dInputs);
+        builder.pose3dInputs.putAll(pose3dInputs);
+        builder.objectInputs.putAll(objectInputs);
+
+        builder.initBindings.addAll(initBindings);
+        builder.periodicBindings.addAll(periodicBindings);
+        builder.periodicLoopBindings.addAll(periodicLoopBindings);
+        builder.exitBindings.addAll(exitBindings);
+
+        builder.disabledInitBindings.addAll(disabledInitBindings);
+        builder.disabledPeriodicBindings.addAll(disabledPeriodicBindings);
+        builder.disabledPeriodicLoopBindings.addAll(disabledPeriodicLoopBindings);
+        builder.disabledExitBindings.addAll(disabledExitBindings);
+
+        builder.teleopInitBindings.addAll(teleopInitBindings);
+        builder.teleopPeriodicBindings.addAll(teleopPeriodicBindings);
+        builder.teleopPeriodicLoopBindings.addAll(teleopPeriodicLoopBindings);
+        builder.teleopExitBindings.addAll(teleopExitBindings);
+
+        builder.autonomousInitBindings.addAll(autonomousInitBindings);
+        builder.autonomousPeriodicBindings.addAll(autonomousPeriodicBindings);
+        builder.autonomousPeriodicLoopBindings.addAll(autonomousPeriodicLoopBindings);
+        builder.autonomousExitBindings.addAll(autonomousExitBindings);
+
+        builder.testInitBindings.addAll(testInitBindings);
+        builder.testPeriodicBindings.addAll(testPeriodicBindings);
+        builder.testPeriodicLoopBindings.addAll(testPeriodicLoopBindings);
+        builder.testExitBindings.addAll(testExitBindings);
+        return builder;
+    }
+
+    public Map<String, BooleanSupplier> inputs() {
+        return inputs;
+    }
+
+    public Map<String, DoubleSupplier> doubleInputs() {
+        return doubleInputs;
+    }
+
+    public Map<String, IntSupplier> intInputs() {
+        return intInputs;
+    }
+
+    public Map<String, Supplier<String>> stringInputs() {
+        return stringInputs;
+    }
+
+    public Map<String, Supplier<Pose2d>> pose2dInputs() {
+        return pose2dInputs;
+    }
+
+    public Map<String, Supplier<Pose3d>> pose3dInputs() {
+        return pose3dInputs;
+    }
+
+    public Map<String, Supplier<?>> objectInputs() {
+        return objectInputs;
+    }
+
+    public List<Binding<T>> initBindings() {
+        return initBindings;
+    }
+
+    public List<Binding<T>> periodicBindings() {
+        return periodicBindings;
+    }
+
+    public List<PeriodicHookBinding<T>> periodicLoopBindings() {
+        return periodicLoopBindings;
+    }
+
+    public List<Binding<T>> exitBindings() {
+        return exitBindings;
+    }
+
+    public List<Binding<T>> disabledInitBindings() {
+        return disabledInitBindings;
+    }
+
+    public List<Binding<T>> disabledPeriodicBindings() {
+        return disabledPeriodicBindings;
+    }
+
+    public List<PeriodicHookBinding<T>> disabledPeriodicLoopBindings() {
+        return disabledPeriodicLoopBindings;
+    }
+
+    public List<Binding<T>> disabledExitBindings() {
+        return disabledExitBindings;
+    }
+
+    public List<Binding<T>> teleopInitBindings() {
+        return teleopInitBindings;
+    }
+
+    public List<Binding<T>> teleopPeriodicBindings() {
+        return teleopPeriodicBindings;
+    }
+
+    public List<PeriodicHookBinding<T>> teleopPeriodicLoopBindings() {
+        return teleopPeriodicLoopBindings;
+    }
+
+    public List<Binding<T>> teleopExitBindings() {
+        return teleopExitBindings;
+    }
+
+    public List<Binding<T>> autonomousInitBindings() {
+        return autonomousInitBindings;
+    }
+
+    public List<Binding<T>> autonomousPeriodicBindings() {
+        return autonomousPeriodicBindings;
+    }
+
+    public List<PeriodicHookBinding<T>> autonomousPeriodicLoopBindings() {
+        return autonomousPeriodicLoopBindings;
+    }
+
+    public List<Binding<T>> autonomousExitBindings() {
+        return autonomousExitBindings;
+    }
+
+    public List<Binding<T>> testInitBindings() {
+        return testInitBindings;
+    }
+
+    public List<Binding<T>> testPeriodicBindings() {
+        return testPeriodicBindings;
+    }
+
+    public List<PeriodicHookBinding<T>> testPeriodicLoopBindings() {
+        return testPeriodicLoopBindings;
+    }
+
+    public List<Binding<T>> testExitBindings() {
+        return testExitBindings;
+    }
+
+    public static final class HooksSection<T extends RobotDrivetrain<T>> {
+        private final Builder<T> owner;
+
+        private HooksSection(Builder<T> owner) {
+            this.owner = owner;
+        }
+
+        public HooksSection<T> onInit(Binding<T> binding) {
+            owner.initBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onPeriodic(Binding<T> binding) {
+            owner.periodicBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onPeriodic(Binding<T> binding, double periodMs) {
+            owner.periodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+            return this;
+        }
+
+        public HooksSection<T> onExit(Binding<T> binding) {
+            owner.exitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onDisabledInit(Binding<T> binding) {
+            owner.disabledInitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onDisabledPeriodic(Binding<T> binding) {
+            owner.disabledPeriodicBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onDisabledPeriodic(Binding<T> binding, double periodMs) {
+            owner.disabledPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+            return this;
+        }
+
+        public HooksSection<T> onDisabledExit(Binding<T> binding) {
+            owner.disabledExitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onTeleopInit(Binding<T> binding) {
+            owner.teleopInitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onTeleInit(Binding<T> binding) {
+            return onTeleopInit(binding);
+        }
+
+        public HooksSection<T> onTeleopPeriodic(Binding<T> binding) {
+            owner.teleopPeriodicBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onTelePeriodic(Binding<T> binding) {
+            return onTeleopPeriodic(binding);
+        }
+
+        public HooksSection<T> onTeleopPeriodic(Binding<T> binding, double periodMs) {
+            owner.teleopPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+            return this;
+        }
+
+        public HooksSection<T> onTelePeriodic(Binding<T> binding, double periodMs) {
+            return onTeleopPeriodic(binding, periodMs);
+        }
+
+        public HooksSection<T> onTeleopExit(Binding<T> binding) {
+            owner.teleopExitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onTeleExit(Binding<T> binding) {
+            return onTeleopExit(binding);
+        }
+
+        public HooksSection<T> onAutonomousInit(Binding<T> binding) {
+            owner.autonomousInitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onAutoInit(Binding<T> binding) {
+            return onAutonomousInit(binding);
+        }
+
+        public HooksSection<T> onAutonomousPeriodic(Binding<T> binding) {
+            owner.autonomousPeriodicBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onAutoPeriodic(Binding<T> binding) {
+            return onAutonomousPeriodic(binding);
+        }
+
+        public HooksSection<T> onAutonomousPeriodic(Binding<T> binding, double periodMs) {
+            owner.autonomousPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+            return this;
+        }
+
+        public HooksSection<T> onAutoPeriodic(Binding<T> binding, double periodMs) {
+            return onAutonomousPeriodic(binding, periodMs);
+        }
+
+        public HooksSection<T> onAutonomousExit(Binding<T> binding) {
+            owner.autonomousExitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onAutoExit(Binding<T> binding) {
+            return onAutonomousExit(binding);
+        }
+
+        public HooksSection<T> onTestInit(Binding<T> binding) {
+            owner.testInitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onTestPeriodic(Binding<T> binding) {
+            owner.testPeriodicBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+
+        public HooksSection<T> onTestPeriodic(Binding<T> binding, double periodMs) {
+            owner.testPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+            return this;
+        }
+
+        public HooksSection<T> onTestExit(Binding<T> binding) {
+            owner.testExitBindings.add(Objects.requireNonNull(binding, "binding"));
+            return this;
+        }
+    }
+
+    public static final class InputsSection<T extends RobotDrivetrain<T>> {
+        private final Builder<T> owner;
+
+        private InputsSection(Builder<T> owner) {
+            this.owner = owner;
+        }
+
+        public InputsSection<T> boolVal(String key, BooleanSupplier supplier) {
+            owner.inputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            return this;
+        }
+
+        public InputsSection<T> doubleVal(String key, DoubleSupplier supplier) {
+            owner.doubleInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            return this;
+        }
+
+        public InputsSection<T> intVal(String key, IntSupplier supplier) {
+            owner.intInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            return this;
+        }
+
+        public InputsSection<T> stringVal(String key, Supplier<String> supplier) {
+            owner.stringInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            return this;
+        }
+
+        public InputsSection<T> pose2dVal(String key, Supplier<Pose2d> supplier) {
+            owner.pose2dInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            return this;
+        }
+
+        public InputsSection<T> pose3dVal(String key, Supplier<Pose3d> supplier) {
+            owner.pose3dInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            return this;
+        }
+
+        public <V> InputsSection<T> objectVal(String key, Supplier<V> supplier) {
+            owner.objectInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            return this;
+        }
+    }
+
+    private static final class Builder<T extends RobotDrivetrain<T>> {
+        private final Map<String, BooleanSupplier> inputs = new HashMap<>();
+        private final Map<String, DoubleSupplier> doubleInputs = new HashMap<>();
+        private final Map<String, IntSupplier> intInputs = new HashMap<>();
+        private final Map<String, Supplier<String>> stringInputs = new HashMap<>();
+        private final Map<String, Supplier<Pose2d>> pose2dInputs = new HashMap<>();
+        private final Map<String, Supplier<Pose3d>> pose3dInputs = new HashMap<>();
+        private final Map<String, Supplier<?>> objectInputs = new HashMap<>();
+
+        private final List<Binding<T>> initBindings = new ArrayList<>();
+        private final List<Binding<T>> periodicBindings = new ArrayList<>();
+        private final List<PeriodicHookBinding<T>> periodicLoopBindings = new ArrayList<>();
+        private final List<Binding<T>> exitBindings = new ArrayList<>();
+
+        private final List<Binding<T>> disabledInitBindings = new ArrayList<>();
+        private final List<Binding<T>> disabledPeriodicBindings = new ArrayList<>();
+        private final List<PeriodicHookBinding<T>> disabledPeriodicLoopBindings = new ArrayList<>();
+        private final List<Binding<T>> disabledExitBindings = new ArrayList<>();
+
+        private final List<Binding<T>> teleopInitBindings = new ArrayList<>();
+        private final List<Binding<T>> teleopPeriodicBindings = new ArrayList<>();
+        private final List<PeriodicHookBinding<T>> teleopPeriodicLoopBindings = new ArrayList<>();
+        private final List<Binding<T>> teleopExitBindings = new ArrayList<>();
+
+        private final List<Binding<T>> autonomousInitBindings = new ArrayList<>();
+        private final List<Binding<T>> autonomousPeriodicBindings = new ArrayList<>();
+        private final List<PeriodicHookBinding<T>> autonomousPeriodicLoopBindings = new ArrayList<>();
+        private final List<Binding<T>> autonomousExitBindings = new ArrayList<>();
+
+        private final List<Binding<T>> testInitBindings = new ArrayList<>();
+        private final List<Binding<T>> testPeriodicBindings = new ArrayList<>();
+        private final List<PeriodicHookBinding<T>> testPeriodicLoopBindings = new ArrayList<>();
+        private final List<Binding<T>> testExitBindings = new ArrayList<>();
+
+        private RobotCoreHooks<T> build() {
+            return new RobotCoreHooks<>(this);
+        }
+    }
+}

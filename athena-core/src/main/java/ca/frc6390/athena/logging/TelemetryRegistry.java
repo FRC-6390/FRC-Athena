@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
+import ca.frc6390.athena.core.RobotTime;
 import edu.wpi.first.wpilibj.DriverStation;
 
 public final class TelemetryRegistry {
@@ -102,6 +103,11 @@ public final class TelemetryRegistry {
     }
 
     public void tick() {
+        double nowSeconds = RobotTime.nowSeconds();
+        if (Double.isFinite(nowSeconds)) {
+            tick((long) (nowSeconds * 1000.0));
+            return;
+        }
         tick(System.currentTimeMillis());
     }
 

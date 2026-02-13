@@ -194,48 +194,85 @@ public class RobotVision implements RobotSendableSystem {
    }
 
    public ArrayList<Pose2d> getCameraLocalizationPoses(){
-      ArrayList<Pose2d> poses = new ArrayList<>();
-      cameras.values().stream()
-          .filter(VisionCamera::isUseForLocalization)
-          .filter(VisionCamera::hasValidTarget)
-          .map(VisionCamera::getLocalizationPose)
-          .forEach(poses::add);
+      ArrayList<Pose2d> poses = new ArrayList<>(cameras.size());
+      for (VisionCamera camera : cameras.values()) {
+         if (camera == null || !camera.isUseForLocalization() || !camera.hasValidTarget()) {
+            continue;
+         }
+         poses.add(camera.getLocalizationPose());
+      }
       return poses;
    }
 
    public void addLocalizationPoses(Consumer<LocalizationData> estimator){
-      cameras.values().stream()
-          .filter(VisionCamera::isUseForLocalization)
-          .filter(VisionCamera::hasValidTarget)
-          .map(VisionCamera::getLocalizationData)
-          .forEach(estimator);
+      for (VisionCamera camera : cameras.values()) {
+         if (camera == null || !camera.isUseForLocalization() || !camera.hasValidTarget()) {
+            continue;
+         }
+         estimator.accept(camera.getLocalizationData());
+      }
    }
 
    public Optional<LocalizationData> getBestLocalizationData() {
-      return cameras.values().stream()
-              .filter(VisionCamera::isUseForLocalization)
-          .filter(VisionCamera::hasValidTarget)
-          .map(VisionCamera::getLocalizationData)
-          .filter(data -> data != null && data.pose2d() != null)
-              .min(Comparator.comparingDouble(RobotVision::scoreLocalizationData));
+      LocalizationData best = null;
+      double bestScore = Double.POSITIVE_INFINITY;
+      for (VisionCamera camera : cameras.values()) {
+         if (camera == null || !camera.isUseForLocalization() || !camera.hasValidTarget()) {
+            continue;
+         }
+         LocalizationData data = camera.getLocalizationData();
+         if (data == null || data.pose2d() == null) {
+            continue;
+         }
+         double score = scoreLocalizationData(data);
+         if (score < bestScore) {
+            best = data;
+            bestScore = score;
+         }
+      }
+      return Optional.ofNullable(best);
    }
 
    public Optional<VisionCamera.VisionMeasurement> getBestVisionMeasurement() {
-      return cameras.values().stream()
-              .filter(VisionCamera::isUseForLocalization)
-              .map(VisionCamera::getLatestVisionMeasurement)
-              .flatMap(Optional::stream)
-              .filter(measurement -> measurement.pose2d() != null)
-              .min(Comparator.comparingDouble(RobotVision::scoreVisionMeasurement));
+      VisionCamera.VisionMeasurement best = null;
+      double bestScore = Double.POSITIVE_INFINITY;
+      for (VisionCamera camera : cameras.values()) {
+         if (camera == null || !camera.isUseForLocalization()) {
+            continue;
+         }
+         Optional<VisionCamera.VisionMeasurement> measurementOpt = camera.getLatestVisionMeasurement();
+         if (measurementOpt.isEmpty()) {
+            continue;
+         }
+         VisionCamera.VisionMeasurement measurement = measurementOpt.get();
+         if (measurement.pose2d() == null) {
+            continue;
+         }
+         double score = scoreVisionMeasurement(measurement);
+         if (score < bestScore) {
+            best = measurement;
+            bestScore = score;
+         }
+      }
+      return Optional.ofNullable(best);
    }
 
    public List<VisionCamera.VisionMeasurement> getVisionMeasurements() {
-      return cameras.values().stream()
-              .filter(VisionCamera::isUseForLocalization)
-              .map(VisionCamera::getLatestVisionMeasurement)
-              .flatMap(Optional::stream)
-              .filter(measurement -> measurement.pose2d() != null)
-              .toList();
+      ArrayList<VisionCamera.VisionMeasurement> measurements = new ArrayList<>(cameras.size());
+      for (VisionCamera camera : cameras.values()) {
+         if (camera == null || !camera.isUseForLocalization()) {
+            continue;
+         }
+         Optional<VisionCamera.VisionMeasurement> measurementOpt = camera.getLatestVisionMeasurement();
+         if (measurementOpt.isEmpty()) {
+            continue;
+         }
+         VisionCamera.VisionMeasurement measurement = measurementOpt.get();
+         if (measurement.pose2d() != null) {
+            measurements.add(measurement);
+         }
+      }
+      return measurements;
    }
 
    private static double scoreLocalizationData(LocalizationData data) {

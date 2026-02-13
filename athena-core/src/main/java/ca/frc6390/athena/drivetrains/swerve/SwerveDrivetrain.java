@@ -7,6 +7,7 @@ import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotSpeeds;
+import ca.frc6390.athena.core.RobotTime;
 import ca.frc6390.athena.commands.control.SwerveDriveCommand;
 import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.core.RobotDrivetrain;
@@ -64,6 +65,8 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   public RobotSpeeds robotSpeeds;
   private final MotionLimits motionLimits;
   private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault().getStructArrayTopic("/Drivetrain/SwerveStates", SwerveModuleState.struct).publish();
+  private static final double SWERVE_STATE_PUBLISH_PERIOD_SECONDS = 0.1;
+  private double lastSwerveStatePublishSeconds = Double.NaN;
   private SwerveDrivetrainSimulation simulation;
   private Field2d simulationField;
   private double lastSimulationTimestamp = -1;
@@ -287,7 +290,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
 
     SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
 
-    publisher.set(states);
+    publishSwerveStatesIfDue(states);
 
     SwerveDriveKinematics.desaturateWheelSpeeds(states, getRobotSpeeds().getMaxVelocity());
 
@@ -556,9 +559,26 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds) {
     MotionLimits.DriveLimits limits = resolveDriveLimits();
     ChassisSpeeds limited = limitVelocity(speeds, limits);
-    limited = limitAcceleration(limited, limits, Timer.getFPGATimestamp());
+    double nowSeconds = RobotTime.nowSeconds();
+    if (!Double.isFinite(nowSeconds)) {
+      nowSeconds = Timer.getFPGATimestamp();
+    }
+    limited = limitAcceleration(limited, limits, nowSeconds);
     lastLimitedSpeeds = limited;
     return limited;
+  }
+
+  private void publishSwerveStatesIfDue(SwerveModuleState[] states) {
+    double nowSeconds = RobotTime.nowSeconds();
+    if (!Double.isFinite(nowSeconds)) {
+      nowSeconds = Timer.getFPGATimestamp();
+    }
+    if (Double.isFinite(lastSwerveStatePublishSeconds)
+            && (nowSeconds - lastSwerveStatePublishSeconds) < SWERVE_STATE_PUBLISH_PERIOD_SECONDS) {
+      return;
+    }
+    publisher.set(states);
+    lastSwerveStatePublishSeconds = nowSeconds;
   }
 
   private ChassisSpeeds limitVelocity(ChassisSpeeds speeds, MotionLimits.DriveLimits limits) {

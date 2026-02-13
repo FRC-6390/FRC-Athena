@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core;
 
 import java.util.HashMap;
+import java.util.Locale;
 
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 
@@ -10,7 +11,9 @@ public class RobotSpeeds {
 
         private String name;
         private int priority;
-        private ChassisSpeeds speeds = new ChassisSpeeds();
+        private double vxMetersPerSecond;
+        private double vyMetersPerSecond;
+        private double omegaRadiansPerSecond;
         private boolean enabled, enableX, enableY, enableTheta;
 
         public SpeedSource(String name, int priority){
@@ -31,19 +34,51 @@ public class RobotSpeeds {
         }
 
         public void setInputSpeeds(ChassisSpeeds speeds){
-            this.speeds = speeds;
+            if (speeds == null) {
+                setInputSpeeds(0.0, 0.0, 0.0);
+                return;
+            }
+            setInputSpeeds(
+                    speeds.vxMetersPerSecond,
+                    speeds.vyMetersPerSecond,
+                    speeds.omegaRadiansPerSecond);
+        }
+
+        public void setInputSpeeds(double vxMetersPerSecond, double vyMetersPerSecond, double omegaRadiansPerSecond) {
+            this.vxMetersPerSecond = vxMetersPerSecond;
+            this.vyMetersPerSecond = vyMetersPerSecond;
+            this.omegaRadiansPerSecond = omegaRadiansPerSecond;
+        }
+
+        public double outputVx() {
+            if (!enabled || !enableX) {
+                return 0.0;
+            }
+            return vxMetersPerSecond;
+        }
+
+        public double outputVy() {
+            if (!enabled || !enableY) {
+                return 0.0;
+            }
+            return vyMetersPerSecond;
+        }
+
+        public double outputOmega() {
+            if (!enabled || !enableTheta) {
+                return 0.0;
+            }
+            return omegaRadiansPerSecond;
         }
 
         public ChassisSpeeds getOutputSpeeds() {
-            double x = enableX ? speeds.vxMetersPerSecond : 0;
-            double y = enableY ? speeds.vyMetersPerSecond : 0;
-            double theta = enableTheta ? speeds.omegaRadiansPerSecond : 0;
-    
-            return enabled ? new ChassisSpeeds(x,y,theta) : new ChassisSpeeds();
+            return new ChassisSpeeds(outputVx(), outputVy(), outputOmega());
         }
 
         public void stop(){
-            speeds = new ChassisSpeeds();
+            vxMetersPerSecond = 0.0;
+            vyMetersPerSecond = 0.0;
+            omegaRadiansPerSecond = 0.0;
         }
 
         public boolean isEnabled() {
@@ -111,29 +146,33 @@ public class RobotSpeeds {
             throw new Error("priority level must be greater than 0, 0 is reserved for drive");
         }
 
-        sources.put(name, new SpeedSource(name, priority));
+        sources.put(normalizeKey(name), new SpeedSource(name, priority));
     }
 
     public void setSpeeds(String source, ChassisSpeeds speeds) {
-        sources.get(source.toLowerCase()).setInputSpeeds(speeds);
+        sources.get(normalizeKey(source)).setInputSpeeds(speeds);
     }
 
     public void setSpeeds(String source, double x, double y, double theta) {
-        setSpeeds(source.toLowerCase(), new ChassisSpeeds(x, y, theta));
+        sources.get(normalizeKey(source)).setInputSpeeds(x, y, theta);
     }
 
     public ChassisSpeeds getSpeeds(String source) {
-        return sources.get(source.toLowerCase()).getOutputSpeeds();
+        return sources.get(normalizeKey(source)).getOutputSpeeds();
     }
 
     public ChassisSpeeds getSpeedsAtPriorityLevel(int priority) {
-        ChassisSpeeds speeds = new ChassisSpeeds();
+        double vx = 0.0;
+        double vy = 0.0;
+        double omega = 0.0;
         for (SpeedSource source : sources.values()) {
             if (source.getPriority() == priority) {
-                speeds = speeds.plus(source.getOutputSpeeds());
+                vx += source.outputVx();
+                vy += source.outputVy();
+                omega += source.outputOmega();
             }
         }
-        return speeds;
+        return new ChassisSpeeds(vx, vy, omega);
     }
 
     public void stop(){
@@ -141,19 +180,19 @@ public class RobotSpeeds {
     }
 
     public void stopSpeeds(String source){
-        sources.get(source.toLowerCase()).stop();
+        sources.get(normalizeKey(source)).stop();
     }
 
     public void setSpeedSourceState(String source, boolean enabled){
-        sources.get(source.toLowerCase()).setEnabled(enabled);
+        sources.get(normalizeKey(source)).setEnabled(enabled);
     }
 
     public boolean isSpeedsSourceActive(String source){
-        return sources.get(source.toLowerCase()).isEnabled();
+        return sources.get(normalizeKey(source)).isEnabled();
     }
 
     public void setAxisState(String source, SpeedAxis axis, boolean enabled){
-        sources.get(source.toLowerCase()).setAxisState(axis, enabled);
+        sources.get(normalizeKey(source)).setAxisState(axis, enabled);
     }
 
     public void setAllAxisState(String source, SpeedAxis axis, boolean enabled){
@@ -161,24 +200,30 @@ public class RobotSpeeds {
     }
 
     public boolean isAxisActive(String source, SpeedAxis axis){
-        return sources.get(source).isAxisActive(axis);
+        return sources.get(normalizeKey(source)).isAxisActive(axis);
     }
 
     public ChassisSpeeds calculate(){
 
-        ChassisSpeeds nonDriveSpeeds = new ChassisSpeeds(); 
-        
+        double nonDriveVx = 0.0;
+        double nonDriveVy = 0.0;
+        double nonDriveOmega = 0.0;
+        SpeedSource driverSource = sources.get("drive");
         for (SpeedSource source : sources.values()) {
             if (source.getPriority() != 0) {
-                nonDriveSpeeds = nonDriveSpeeds.plus(source.getOutputSpeeds());
+                nonDriveVx += source.outputVx();
+                nonDriveVy += source.outputVy();
+                nonDriveOmega += source.outputOmega();
             }
         }
 
-        ChassisSpeeds tempDriver = getSpeeds("drive");
+        double driverVx = driverSource != null ? driverSource.outputVx() : 0.0;
+        double driverVy = driverSource != null ? driverSource.outputVy() : 0.0;
+        double driverOmega = driverSource != null ? driverSource.outputOmega() : 0.0;
 
-        double finalVx = combineAxis(tempDriver.vxMetersPerSecond, nonDriveSpeeds.vxMetersPerSecond);
-        double finalVy = combineAxis(tempDriver.vyMetersPerSecond, nonDriveSpeeds.vyMetersPerSecond);
-        double finalOmega = combineAxis(tempDriver.omegaRadiansPerSecond, nonDriveSpeeds.omegaRadiansPerSecond);
+        double finalVx = combineAxis(driverVx, nonDriveVx);
+        double finalVy = combineAxis(driverVy, nonDriveVy);
+        double finalOmega = combineAxis(driverOmega, nonDriveOmega);
 
         finalVx = clamp(finalVx, maxVelocity);
         finalVy = clamp(finalVy, maxVelocity);
@@ -220,5 +265,9 @@ public class RobotSpeeds {
 
     public double getMaxVelocity() {
         return maxVelocity;
+    }
+
+    private String normalizeKey(String source) {
+        return source.toLowerCase(Locale.ROOT);
     }
 }

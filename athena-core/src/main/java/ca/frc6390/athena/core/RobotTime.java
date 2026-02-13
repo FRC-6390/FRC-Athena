@@ -6,7 +6,7 @@ package ca.frc6390.athena.core;
  *
  * <p>Updated from {@link LoopTiming#beginCycle()}.</p>
  */
-final class RobotTime {
+public final class RobotTime {
     private RobotTime() {}
 
     private static volatile double nowSeconds = Double.NaN;
@@ -15,8 +15,7 @@ final class RobotTime {
         RobotTime.nowSeconds = nowSeconds;
     }
 
-    static double nowSeconds() {
+    public static double nowSeconds() {
         return nowSeconds;
     }
 }
-
