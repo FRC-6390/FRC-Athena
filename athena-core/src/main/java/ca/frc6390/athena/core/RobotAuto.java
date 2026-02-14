@@ -1,7 +1,6 @@
 package ca.frc6390.athena.core;
 
 import java.util.ArrayList;
-import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -21,6 +20,7 @@ import java.util.Locale;
 
 import ca.frc6390.athena.core.auto.AutoBackend;
 import ca.frc6390.athena.core.auto.AutoBackends;
+import ca.frc6390.athena.core.diagnostics.BoundedEventLog;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -49,10 +49,8 @@ public class RobotAuto {
     private boolean registrationFinalized;
     private final Set<String> boundPathPlannerNamedCommands;
     private final Set<String> boundChoreoNamedCommands;
-    private final Object autoTraceLock;
-    private final ArrayDeque<AutoTraceEvent> autoTraceLog;
+    private final BoundedEventLog<AutoTraceEvent> autoTraceLog;
     private final int autoTraceLogCapacity;
-    private long autoTraceSequence;
     private RobotCore<?> robotCore;
     private boolean autoTraceEnabled;
     private Consumer<String> autoTraceSink;
@@ -70,10 +68,8 @@ public class RobotAuto {
         registrationFinalized = false;
         boundPathPlannerNamedCommands = new HashSet<>();
         boundChoreoNamedCommands = new HashSet<>();
-        autoTraceLock = new Object();
-        autoTraceLog = new ArrayDeque<>();
         autoTraceLogCapacity = DEFAULT_AUTO_TRACE_LOG_CAPACITY;
-        autoTraceSequence = 0L;
+        autoTraceLog = new BoundedEventLog<>(autoTraceLogCapacity);
         robotCore = null;
         autoTraceEnabled = false;
         autoTraceSink = message -> DriverStation.reportWarning(message, false);
@@ -136,10 +132,14 @@ public class RobotAuto {
     public record AutoTraceEvent(
             long sequence,
             double timestampSeconds,
+            String systemKey,
+            String level,
+            String category,
             Double xMeters,
             Double yMeters,
             Double headingDeg,
-            String message) {}
+            String message,
+            String line) {}
 
     /**
      * Source enum for trajectory-backed autos.
@@ -1281,37 +1281,15 @@ public class RobotAuto {
     }
 
     public List<AutoTraceEvent> getAutoTraceLog() {
-        synchronized (autoTraceLock) {
-            return List.copyOf(autoTraceLog);
-        }
+        return autoTraceLog.snapshot();
     }
 
     public List<AutoTraceEvent> getAutoTraceLog(int limit) {
-        if (limit <= 0) {
-            return List.of();
-        }
-        synchronized (autoTraceLock) {
-            int size = autoTraceLog.size();
-            if (limit >= size) {
-                return List.copyOf(autoTraceLog);
-            }
-            int skip = size - limit;
-            List<AutoTraceEvent> out = new ArrayList<>(limit);
-            int i = 0;
-            for (AutoTraceEvent event : autoTraceLog) {
-                if (i++ < skip) {
-                    continue;
-                }
-                out.add(event);
-            }
-            return out;
-        }
+        return autoTraceLog.snapshot(limit);
     }
 
     public int getAutoTraceLogCount() {
-        synchronized (autoTraceLock) {
-            return autoTraceLog.size();
-        }
+        return autoTraceLog.count();
     }
 
     public int getAutoTraceLogCapacity() {
@@ -1319,9 +1297,7 @@ public class RobotAuto {
     }
 
     public RobotAuto clearAutoTraceLog() {
-        synchronized (autoTraceLock) {
-            autoTraceLog.clear();
-        }
+        autoTraceLog.clear();
         return this;
     }
 
@@ -1760,21 +1736,22 @@ public class RobotAuto {
         Double x = pose != null ? pose.getX() : null;
         Double y = pose != null ? pose.getY() : null;
         Double headingDeg = pose != null ? pose.getRotation().getDegrees() : null;
-        synchronized (autoTraceLock) {
-            autoTraceSequence++;
-            AutoTraceEvent event = new AutoTraceEvent(
-                    autoTraceSequence,
-                    Timer.getFPGATimestamp(),
-                    x,
-                    y,
-                    headingDeg,
-                    payload);
-            autoTraceLog.addLast(event);
-            while (autoTraceLog.size() > autoTraceLogCapacity) {
-                autoTraceLog.removeFirst();
-            }
-            return event;
-        }
+        String level = "INFO";
+        String category = "trace";
+        String line = "[auto] "
+                + level.toLowerCase(Locale.ROOT)
+                + " " + category + ": " + payload;
+        return autoTraceLog.append((sequence, timestampSeconds) -> new AutoTraceEvent(
+                sequence,
+                timestampSeconds,
+                "auto",
+                level,
+                category,
+                x,
+                y,
+                headingDeg,
+                payload,
+                line));
     }
 
     private String formatAutoTraceLine(AutoTraceEvent event) {

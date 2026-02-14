@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
@@ -17,6 +18,7 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
@@ -26,6 +28,7 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
 import ca.frc6390.athena.core.auto.AutoBackends;
+import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.loop.TimedRunner;
@@ -289,8 +292,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private Notifier visionSimNotifier;
     private final RobotAuto autos;
     private final RobotCopilot copilot;
-    private AthenaConfigServer configServer;
+    private AthenaRuntimeServer configServer;
     private String configServerBaseUrl;
+    private final ConfigServerSection configServerSection;
+    private final DiagnosticsSection diagnosticsSection;
+    private final Map<String, DiagnosticsChannel> diagnosticsChannels;
     private final HashMap<String, Mechanism> mechanisms;
     private final List<SuperstructureMechanism<?, ?>> registeredSuperstructures;
     private final HashMap<String, SuperstructureMechanism<?, ?>> superstructuresByName;
@@ -358,6 +364,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         registeredSuperstructures = new ArrayList<>();
         superstructuresByName = new HashMap<>();
         mechanismView = new RobotMechanisms(mechanisms, superstructuresByName, registeredSuperstructures);
+        configServerSection = new ConfigServerSection(this);
+        diagnosticsChannels = new ConcurrentHashMap<>();
+        diagnosticsSection = new DiagnosticsSection(this);
+        diagnosticsSection.core().info("lifecycle", "robot core constructed");
         scheduledCustomPidMechanisms = new HashSet<>();
         publishedMechanismsComp = new HashSet<>();
         publishedSuperstructuresComp = new HashSet<>();
@@ -449,7 +459,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             coreControlLoopFeedforwardOutputTypes.put(name, outputType);
         }
 
+        if (vision != null) {
+            vision.diagnostics(diagnosticsSection.vision());
+        }
         if (localization != null) {
+            localization.diagnostics(diagnosticsSection.localization());
             localization.attachRobotNetworkTables(robotNetworkTables);
             if (vision != null) {
                 localization.setRobotVision(vision);
@@ -483,6 +497,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void robotInit() {
+        diagnosticsSection.core().info("lifecycle", "robotInit");
         double robotInitStart = Timer.getFPGATimestamp();
         timedStartupStep("robotInit.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
         timedStartupStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded);
@@ -587,8 +602,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             return;
         }
         try {
-            configServer = AthenaConfigServer.start(this, 5806);
+            configServer = AthenaRuntimeServer.start(this, 5806);
             configServerBaseUrl = configServer.baseUrl();
+            registerDiagnosticsProvidersWithServer();
         } catch (Exception e) {
             // Config export is a convenience feature; do not fail robot init if it cannot bind.
             System.out.println("[Athena][ConfigServer] Failed to start: " + e.getMessage());
@@ -602,6 +618,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
      */
     public String getConfigServerBaseUrl() {
         return configServerBaseUrl;
+    }
+
+    /**
+     * Runtime API for publishing user-defined content via the Athena config server.
+     */
+    public ConfigServerSection configServer() {
+        return configServerSection;
     }
 
     @Override
@@ -757,6 +780,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void autonomousInit() {
+        diagnosticsSection.core().info("mode", "autonomousInit");
         prepareDrivetrainForModeTransition(false, true);
         resetAutoInitPoseIfConfigured();
         scheduleAutonomousCommand();
@@ -768,6 +792,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void autonomousExit() {
+        diagnosticsSection.core().info("mode", "autonomousExit");
         prepareDrivetrainForModeTransition(false, false);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.AUTONOMOUS_EXIT, coreHooks.autonomousExitBindings());
@@ -790,6 +815,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void teleopInit() {
+        diagnosticsSection.core().info("mode", "teleopInit");
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(true, false);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_INIT);
@@ -800,6 +826,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void teleopExit() {
+        diagnosticsSection.core().info("mode", "teleopExit");
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.TELEOP_EXIT, coreHooks.teleopExitBindings());
         onTeleopExit();
@@ -817,6 +844,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void disabledInit() {
+        diagnosticsSection.core().info("mode", "disabledInit");
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(true, false);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_INIT);
@@ -827,6 +855,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void disabledExit() {
+        diagnosticsSection.core().info("mode", "disabledExit");
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.DISABLED_EXIT, coreHooks.disabledExitBindings());
         onDisabledExit();
@@ -844,6 +873,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void testInit() {
+        diagnosticsSection.core().info("mode", "testInit");
         CommandScheduler.getInstance().cancelAll();
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(false, false);
@@ -855,6 +885,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void testExit() {
+        diagnosticsSection.core().info("mode", "testExit");
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.TEST_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.TEST_EXIT, coreHooks.testExitBindings());
         onTestExit();
@@ -1372,6 +1403,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     robotNetworkTables.root().child("Superstructures").child(s.getName() != null ? s.getName() : "Superstructure");
             robotNetworkTables.mechanismConfig(superNode);
             s.setRobotCore(this);
+            s.diagnostics().info("lifecycle", "superstructure registered");
+            registerSuperstructureDiagnosticsProviderIfReady(s);
             // Publish mechanisms under the owning superstructure name to avoid duplicates and
             // keep dashboards navigable at scale.
             s.assignDashboardOwners(s.getName());
@@ -1408,6 +1441,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                         robotNetworkTables.root().child("Superstructures").child(superstructure.getName() != null ? superstructure.getName() : "Superstructure");
                 robotNetworkTables.mechanismConfig(superNode);
                 superstructure.setRobotCore(this);
+                superstructure.diagnostics().info("lifecycle", "superstructure registered");
+                registerSuperstructureDiagnosticsProviderIfReady(superstructure);
                 superstructure.assignDashboardOwners(superstructure.getName());
             }
             registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
@@ -1472,6 +1507,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public RobotCore<T> mechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
         mechanismView.use(section);
         return this;
+    }
+
+    public RobotMechanisms mechanisms() {
+        return getMechanisms();
     }
 
     private String registerMechanismInternal(Mechanism mech) {
@@ -1549,6 +1588,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return localization;
     }
 
+    public RobotLocalization<?> localization() {
+        return getLocalization();
+    }
+
     public RobotCopilot getCopilot() {
         return copilot;
     }
@@ -1557,8 +1600,16 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return drivetrain.get();
     }
 
+    public T drivetrain() {
+        return getDrivetrain();
+    }
+
     public RobotVision getVision() {
         return vision;
+    }
+
+    public RobotVision vision() {
+        return getVision();
     }
 
     /**
@@ -1612,24 +1663,386 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             cfg.putString("indexUrlToml", "");
             cfg.putString("allZipUrl", "");
             cfg.putString("mechanismsBaseUrl", "");
+            cfg.putString("customConfigUrl", "");
+            cfg.putString("customConfigBaseUrl", "");
+            cfg.putString("diagnosticsUrl", "");
+            cfg.putString("diagnosticsBaseUrl", "");
+            cfg.putString("diagnosticsHistoryUrl", "");
             cfg.putString("autoLogUrl", "");
+            cfg.putString("mechanismLogUrl", "");
+            cfg.putString("mechanismLogBaseUrl", "");
             root.putString("configIndexUrlJson", "");
             root.putString("configIndexUrlToml", "");
             root.putString("configAllZipUrl", "");
             root.putString("configMechanismsBaseUrl", "");
+            root.putString("configCustomUrl", "");
+            root.putString("configCustomBaseUrl", "");
+            root.putString("configDiagnosticsUrl", "");
+            root.putString("configDiagnosticsBaseUrl", "");
+            root.putString("configDiagnosticsHistoryUrl", "");
             root.putString("configAutoLogUrl", "");
+            root.putString("configMechanismLogUrl", "");
+            root.putString("configMechanismLogBaseUrl", "");
             return;
         }
         cfg.putString("indexUrlJson", base + "/Athena/config/index.json");
         cfg.putString("indexUrlToml", base + "/Athena/config/index.toml");
         cfg.putString("allZipUrl", base + "/Athena/config/all.zip");
         cfg.putString("mechanismsBaseUrl", base + "/Athena/config/mechanisms/");
+        cfg.putString("customConfigUrl", base + "/Athena/config/custom");
+        cfg.putString("customConfigBaseUrl", base + "/Athena/config/custom/");
+        cfg.putString("diagnosticsUrl", base + "/Athena/diagnostics");
+        cfg.putString("diagnosticsBaseUrl", base + "/Athena/diagnostics/");
+        cfg.putString("diagnosticsHistoryUrl", base + "/Athena/diagnostics/history.json");
         cfg.putString("autoLogUrl", base + "/Athena/auto/log");
+        cfg.putString("mechanismLogUrl", base + "/Athena/mechanisms/log");
+        cfg.putString("mechanismLogBaseUrl", base + "/Athena/mechanisms/log/");
         root.putString("configIndexUrlJson", base + "/Athena/config/index.json");
         root.putString("configIndexUrlToml", base + "/Athena/config/index.toml");
         root.putString("configAllZipUrl", base + "/Athena/config/all.zip");
         root.putString("configMechanismsBaseUrl", base + "/Athena/config/mechanisms/");
+        root.putString("configCustomUrl", base + "/Athena/config/custom");
+        root.putString("configCustomBaseUrl", base + "/Athena/config/custom/");
+        root.putString("configDiagnosticsUrl", base + "/Athena/diagnostics");
+        root.putString("configDiagnosticsBaseUrl", base + "/Athena/diagnostics/");
+        root.putString("configDiagnosticsHistoryUrl", base + "/Athena/diagnostics/history.json");
         root.putString("configAutoLogUrl", base + "/Athena/auto/log");
+        root.putString("configMechanismLogUrl", base + "/Athena/mechanisms/log");
+        root.putString("configMechanismLogBaseUrl", base + "/Athena/mechanisms/log/");
+    }
+
+    private AthenaRuntimeServer ensureConfigServerReadyForCustomContent() {
+        if (configServer == null) {
+            startConfigServerIfNeeded();
+        }
+        return configServer;
+    }
+
+    private static String normalizeDiagnosticsChannelKey(String rawKey) {
+        if (rawKey == null) {
+            throw new IllegalArgumentException("diagnostics channel key must not be null");
+        }
+        String key = rawKey.trim();
+        while (key.startsWith("/")) {
+            key = key.substring(1);
+        }
+        while (key.endsWith("/")) {
+            key = key.substring(0, key.length() - 1);
+        }
+        if (key.isEmpty()) {
+            throw new IllegalArgumentException("diagnostics channel key must not be blank");
+        }
+        if (key.contains("..")) {
+            throw new IllegalArgumentException("diagnostics channel key must not contain '..'");
+        }
+        if (key.indexOf('\\') >= 0) {
+            throw new IllegalArgumentException("diagnostics channel key must not contain '\\'");
+        }
+        return key;
+    }
+
+    private DiagnosticsChannel ensureDiagnosticsChannel(String key, int capacity) {
+        String normalized = normalizeDiagnosticsChannelKey(key);
+        DiagnosticsChannel existing = diagnosticsChannels.get(normalized);
+        if (existing != null) {
+            return existing;
+        }
+        DiagnosticsChannel created = new DiagnosticsChannel(normalized, capacity);
+        DiagnosticsChannel winner = diagnosticsChannels.putIfAbsent(normalized, created);
+        DiagnosticsChannel channel = winner != null ? winner : created;
+        registerDiagnosticsChannelWithServerIfReady(normalized, channel);
+        return channel;
+    }
+
+    private void registerDiagnosticsChannelWithServerIfReady(String key, DiagnosticsChannel channel) {
+        AthenaRuntimeServer server = configServer;
+        if (server == null || key == null || channel == null) {
+            return;
+        }
+        server.registerDiagnosticsProvider(key, channel::summary, channel::snapshot, channel::clear);
+    }
+
+    private void registerSuperstructureDiagnosticsProviderIfReady(SuperstructureMechanism<?, ?> superstructure) {
+        AthenaRuntimeServer server = configServer;
+        if (server == null || superstructure == null) {
+            return;
+        }
+        String name = superstructure.getName();
+        if (name == null || name.isBlank()) {
+            name = superstructure.getClass().getSimpleName();
+        }
+        String key = "superstructures/" + normalizeDiagnosticsChannelKey(name);
+        final SuperstructureMechanism<?, ?> tracked = superstructure;
+        server.registerDiagnosticsProvider(
+                key,
+                () -> buildSuperstructureDiagnosticsSummary(tracked),
+                limit -> buildSuperstructureDiagnosticsSnapshot(tracked, limit),
+                tracked::clearDiagnosticLog);
+    }
+
+    private Map<String, Object> buildSuperstructureDiagnosticsSummary(SuperstructureMechanism<?, ?> superstructure) {
+        if (superstructure == null) {
+            return Map.of("error", "superstructure unavailable");
+        }
+        Map<String, Object> summary = new HashMap<>();
+        String name = superstructure.getName();
+        summary.put("name", name != null ? name : "");
+        Enum<?> state = superstructure.getStateMachine().getGoalState();
+        summary.put("state", state != null ? state.name() : "");
+        summary.put("atGoal", superstructure.getStateMachine().atGoalState());
+        summary.put("childrenAtGoals", superstructure.childrenAtGoals());
+        summary.put("childMechanismCount", superstructure.getMechanisms().all().size());
+        summary.put("systemKey", "superstructures/" + (name != null ? name : ""));
+        summary.put("logCount", superstructure.getDiagnosticLogCount());
+        return summary;
+    }
+
+    private Map<String, Object> buildSuperstructureDiagnosticsSnapshot(
+            SuperstructureMechanism<?, ?> superstructure,
+            int logLimit) {
+        Map<String, Object> snapshot = new HashMap<>(buildSuperstructureDiagnosticsSummary(superstructure));
+        if (superstructure == null) {
+            return snapshot;
+        }
+        int effectiveLimit = logLimit > 0 ? Math.min(logLimit, 512) : 120;
+        snapshot.put("events", superstructure.getDiagnosticEvents(effectiveLimit));
+        List<Map<String, Object>> children = new ArrayList<>();
+        for (Mechanism mechanism : superstructure.getMechanisms().all()) {
+            if (mechanism == null) {
+                continue;
+            }
+            Map<String, Object> child = new HashMap<>();
+            child.put("name", mechanism.getName());
+            child.put("atSetpoint", mechanism.atSetpoint());
+            child.put("position", mechanism.getPosition());
+            child.put("setpoint", mechanism.getSetpoint());
+            child.put("output", mechanism.getOutput());
+            int childLimit = logLimit > 0 ? Math.min(logLimit, 128) : 0;
+            child.put("diagnostics", mechanism.getDiagnosticsSnapshot(childLimit));
+            children.add(child);
+        }
+        snapshot.put("children", children);
+        return snapshot;
+    }
+
+    private void registerDiagnosticsProvidersWithServer() {
+        AthenaRuntimeServer server = configServer;
+        if (server == null) {
+            return;
+        }
+        if (localization != null) {
+            server.registerDiagnosticsProvider(
+                    "localization",
+                    localization::getDiagnosticsSummary,
+                    localization::getDiagnosticsSnapshot,
+                    localization::clearDiagnosticsLog);
+        }
+        if (vision != null) {
+            server.registerDiagnosticsProvider(
+                    "vision",
+                    vision::getDiagnosticsSummary,
+                    vision::getDiagnosticsSnapshot,
+                    vision::clearDiagnosticsLog);
+        }
+        for (Map.Entry<String, DiagnosticsChannel> entry : diagnosticsChannels.entrySet()) {
+            if (entry == null || entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            registerDiagnosticsChannelWithServerIfReady(entry.getKey(), entry.getValue());
+        }
+        for (SuperstructureMechanism<?, ?> superstructure : superstructuresByName.values()) {
+            registerSuperstructureDiagnosticsProviderIfReady(superstructure);
+        }
+    }
+
+    private final class DiagnosticsSection {
+        private final RobotCore<T> owner;
+        private static final int DEFAULT_CHANNEL_CAPACITY = 256;
+        private static final int CORE_CHANNEL_CAPACITY = 512;
+        private static final int LOCALIZATION_CHANNEL_CAPACITY = 384;
+        private static final int VISION_CHANNEL_CAPACITY = 384;
+        private static final int SUPERSTRUCTURE_CHANNEL_CAPACITY = 256;
+
+        private DiagnosticsSection(RobotCore<T> owner) {
+            this.owner = owner;
+        }
+
+        public DiagnosticsChannel channel(String key) {
+            return owner.ensureDiagnosticsChannel(key, DEFAULT_CHANNEL_CAPACITY);
+        }
+
+        public DiagnosticsChannel channel(String key, int capacity) {
+            int resolvedCapacity = capacity > 0 ? capacity : DEFAULT_CHANNEL_CAPACITY;
+            return owner.ensureDiagnosticsChannel(key, resolvedCapacity);
+        }
+
+        public DiagnosticsChannel core() {
+            return owner.ensureDiagnosticsChannel("core", CORE_CHANNEL_CAPACITY);
+        }
+
+        public DiagnosticsChannel localization() {
+            return owner.ensureDiagnosticsChannel("localization", LOCALIZATION_CHANNEL_CAPACITY);
+        }
+
+        public DiagnosticsChannel vision() {
+            return owner.ensureDiagnosticsChannel("vision", VISION_CHANNEL_CAPACITY);
+        }
+
+        public DiagnosticsChannel superstructure(SuperstructureMechanism<?, ?> superstructure) {
+            if (superstructure == null) {
+                throw new IllegalArgumentException("superstructure must not be null");
+            }
+            String name = superstructure.getName();
+            if (name == null || name.isBlank()) {
+                name = superstructure.getClass().getSimpleName();
+            }
+            return owner.ensureDiagnosticsChannel("superstructures/" + name, SUPERSTRUCTURE_CHANNEL_CAPACITY);
+        }
+
+        public boolean remove(String key) {
+            String normalized = normalizeDiagnosticsChannelKey(key);
+            DiagnosticsChannel removed = diagnosticsChannels.remove(normalized);
+            AthenaRuntimeServer server = configServer;
+            if (server != null) {
+                server.removeDiagnosticsProvider(normalized);
+            }
+            return removed != null;
+        }
+
+        public void clear() {
+            diagnosticsChannels.clear();
+            AthenaRuntimeServer server = configServer;
+            if (server != null) {
+                server.clearDiagnosticsProviders();
+                registerDiagnosticsProvidersWithServer();
+            }
+        }
+    }
+
+    public final class ConfigServerSection {
+        private final RobotCore<T> owner;
+
+        private ConfigServerSection(RobotCore<T> owner) {
+            this.owner = owner;
+        }
+
+        public boolean available() {
+            return owner.configServer != null || owner.ensureConfigServerReadyForCustomContent() != null;
+        }
+
+        public String baseUrl() {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            return server != null ? server.baseUrl() : null;
+        }
+
+        public String customUrl(String key) {
+            String base = baseUrl();
+            if (base == null || base.isBlank()) {
+                return null;
+            }
+            String encoded = java.net.URLEncoder.encode(
+                    key != null ? key : "",
+                    java.nio.charset.StandardCharsets.UTF_8);
+            return base + "/Athena/config/custom/" + encoded;
+        }
+
+        public String diagnosticsUrl() {
+            String base = baseUrl();
+            if (base == null || base.isBlank()) {
+                return null;
+            }
+            return base + "/Athena/diagnostics";
+        }
+
+        public String diagnosticsHistoryUrl() {
+            String base = baseUrl();
+            if (base == null || base.isBlank()) {
+                return null;
+            }
+            return base + "/Athena/diagnostics/history.json";
+        }
+
+        public String diagnosticsUrl(String key) {
+            String base = baseUrl();
+            if (base == null || base.isBlank()) {
+                return null;
+            }
+            String encoded = java.net.URLEncoder.encode(
+                    key != null ? key : "",
+                    java.nio.charset.StandardCharsets.UTF_8);
+            return base + "/Athena/diagnostics/" + encoded + ".json";
+        }
+
+        public ConfigServerSection json(String key, Object payload) {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            if (server != null) {
+                server.putCustomJson(key, payload);
+            }
+            return this;
+        }
+
+        public ConfigServerSection text(String key, String text) {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            if (server != null) {
+                server.putCustomText(key, text);
+            }
+            return this;
+        }
+
+        public ConfigServerSection bytes(String key, String contentType, byte[] payload) {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            if (server != null) {
+                server.putCustomBytes(key, contentType, payload);
+            }
+            return this;
+        }
+
+        public ConfigServerSection remove(String key) {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            if (server != null) {
+                server.removeCustom(key);
+            }
+            return this;
+        }
+
+        public ConfigServerSection clear() {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            if (server != null) {
+                server.clearCustom();
+            }
+            return this;
+        }
+
+        public ConfigServerSection diagnostics(
+                String key,
+                Supplier<Map<String, Object>> summarySupplier,
+                IntFunction<Map<String, Object>> snapshotSupplier) {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            if (server != null) {
+                server.registerDiagnosticsProvider(key, summarySupplier, snapshotSupplier);
+            }
+            return this;
+        }
+
+        public ConfigServerSection diagnostics(
+                String key,
+                Supplier<Map<String, Object>> summarySupplier,
+                IntFunction<Map<String, Object>> snapshotSupplier,
+                Runnable clearAction) {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            if (server != null) {
+                server.registerDiagnosticsProvider(key, summarySupplier, snapshotSupplier, clearAction);
+            }
+            return this;
+        }
+
+        public ConfigServerSection removeDiagnostics(String key) {
+            AthenaRuntimeServer server = owner.ensureConfigServerReadyForCustomContent();
+            if (server != null) {
+                server.removeDiagnosticsProvider(key);
+            }
+            return this;
+        }
     }
 
     private void publishPerformanceMetrics(RobotNetworkTables.Node root) {

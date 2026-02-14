@@ -5,6 +5,8 @@ import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.LoopTiming;
 import ca.frc6390.athena.core.RobotCoreHooks;
+import ca.frc6390.athena.core.diagnostics.BoundedEventLog;
+import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.loop.TimedRunner;
 import ca.frc6390.athena.hardware.encoder.Encoder;
@@ -45,6 +47,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -197,13 +200,35 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private String lastEmergencyStopReason = "";
     private String connectivityFaultReason = "";
     private String lastFaultReason = "";
+    private final BoundedEventLog<DiagnosticsChannel.Event> diagnosticsLog =
+            new BoundedEventLog<>(DIAGNOSTIC_LOG_CAPACITY);
+    private final DiagnosticsView diagnosticsView = new DiagnosticsView();
     private static final double EMERGENCY_STOP_LOG_PERIOD_SECONDS = 1.0;
+    private static final int DIAGNOSTIC_LOG_CAPACITY = 256;
 
     private enum RobotMode {
         TELE,
         AUTO,
         DISABLE,
         TEST,
+    }
+
+    public record MechanismLogEvent(
+            long sequence,
+            double timestampSeconds,
+            String systemKey,
+            String level,
+            String category,
+            String message,
+            String line) {
+    }
+
+    private String diagnosticsSystemKey() {
+        String mechanismName = getName();
+        if (mechanismName == null || mechanismName.isBlank()) {
+            mechanismName = getClass().getSimpleName();
+        }
+        return "mechanisms/" + mechanismName;
     }
 
     public Mechanism(MechanismConfig<? extends Mechanism> config){
@@ -673,6 +698,143 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      */
     public ControlLoopsSection loops() {
         return new ControlLoopsSection(this);
+    }
+
+    /**
+     * Structured read API: {@code mechanism.state().position()}.
+     */
+    public StateView state() {
+        return new StateView(this, false);
+    }
+
+    public static final class StateView {
+        private final Mechanism owner;
+        private final boolean poll;
+
+        private StateView(Mechanism owner, boolean poll) {
+            this.owner = owner;
+            this.poll = poll;
+        }
+
+        public StateView poll() {
+            return new StateView(owner, true);
+        }
+
+        public MotorControllerGroup motors() {
+            return owner.getMotorGroup();
+        }
+
+        public Encoder encoder() {
+            return owner.getEncoder();
+        }
+
+        public Rotation2d rotation2d() {
+            return owner.getRotation2d(poll);
+        }
+
+        public double position() {
+            return owner.getPosition(poll);
+        }
+
+        public double positionModulus(double min, double max) {
+            return owner.getPositionModulus(min, max);
+        }
+
+        public double velocity() {
+            return owner.getVelocity(poll);
+        }
+
+        public double setpoint() {
+            return owner.getSetpoint();
+        }
+
+        public double controllerSetpointPosition() {
+            return owner.getControllerSetpointPosition();
+        }
+
+        public double controllerSetpointVelocity() {
+            return owner.getControllerSetpointVelocity();
+        }
+
+        public double output() {
+            return owner.getOutput();
+        }
+
+        public double pidOutput() {
+            return owner.getPidOutput();
+        }
+
+        public double feedforwardOutput() {
+            return owner.getFeedforwardOutput();
+        }
+
+        public OutputType outputType() {
+            return owner.getOutputType();
+        }
+
+        public boolean atSetpoint() {
+            return owner.atSetpoint();
+        }
+
+        public boolean overrideActive() {
+            return owner.isOverride();
+        }
+
+        public boolean emergencyStopped() {
+            return owner.isEmergencyStopped();
+        }
+
+        public boolean useAbsolute() {
+            return owner.isUseAbsolute();
+        }
+
+        public boolean useVoltage() {
+            return owner.isUseVoltage();
+        }
+
+        public boolean pidEnabled() {
+            return owner.isPidEnabled();
+        }
+
+        public boolean feedforwardEnabled() {
+            return owner.isFeedforwardEnabled();
+        }
+
+        public double nudge() {
+            return owner.getNudge();
+        }
+
+        public double pidPeriodSeconds() {
+            return owner.getPidPeriod();
+        }
+
+        public double networkTablesPeriodSeconds() {
+            return owner.getNetworkTablesPeriodSeconds();
+        }
+
+        public double simulationUpdatePeriodSeconds() {
+            return owner.getSimulationUpdatePeriodSeconds();
+        }
+
+        public double hardwareUpdatePeriodSeconds() {
+            return owner.getHardwareUpdatePeriodSeconds();
+        }
+
+        public double minBound() {
+            return owner.getMin();
+        }
+
+        public double maxBound() {
+            return owner.getMax();
+        }
+
+        public Enum<?> activeState() {
+            return owner.getActiveState();
+        }
+
+        public GenericLimitSwitch[] limitSwitches() {
+            return owner.getLimitSwitches().clone();
+        }
     }
 
     public static final class InputsSection {
@@ -1279,6 +1441,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     public void setOverride(boolean override) {
+        if (this.override != override) {
+            appendDiagnosticLog("INFO", "control", override ? "manual override enabled" : "manual override disabled");
+        }
         this.override = override;
         if (override) {
             manualOutputActive = false;
@@ -1545,6 +1710,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     public void setSuppressMotorOutput(boolean suppressMotorOutput) {
+        if (this.suppressMotorOutput != suppressMotorOutput) {
+            appendDiagnosticLog(
+                    "INFO",
+                    "output",
+                    suppressMotorOutput ? "output suppression enabled" : "output suppression disabled");
+        }
         this.suppressMotorOutput = suppressMotorOutput;
     }
 
@@ -1626,13 +1797,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private void logEmergencyStopReason(boolean encoderDisconnected, boolean motorsDisconnected) {
         String reasonText = connectivityReasonText(encoderDisconnected, motorsDisconnected);
         double now = Timer.getFPGATimestamp();
+        boolean reasonChanged = !reasonText.equals(lastEmergencyStopReason);
         boolean shouldLog = Double.isNaN(lastEmergencyStopLogSeconds)
                 || (now - lastEmergencyStopLogSeconds) >= EMERGENCY_STOP_LOG_PERIOD_SECONDS
-                || !reasonText.equals(lastEmergencyStopReason);
+                || reasonChanged;
         if (shouldLog) {
             System.out.println("[Athena][EmergencyStop] " + getName() + ": " + reasonText);
             lastEmergencyStopLogSeconds = now;
             lastEmergencyStopReason = reasonText;
+            if (reasonChanged) {
+                appendDiagnosticLog("ERROR", "fault", reasonText);
+            }
         }
     }
 
@@ -1665,6 +1840,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             System.out.println("[Athena][EmergencyStop] " + getName() + ": " + reasonText);
             lastEmergencyStopLogSeconds = now;
             lastEmergencyStopReason = reasonText;
+            appendDiagnosticLog("INFO", "fault", reasonText);
         }
     }
 
@@ -1697,6 +1873,233 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return connectivityFaultReason;
         }
         return "";
+    }
+
+    private void appendDiagnosticLog(String level, String category, String message) {
+        String text = message != null ? message.trim() : "";
+        if (text.isEmpty()) {
+            return;
+        }
+        String lvl = level != null && !level.isBlank() ? level : "INFO";
+        String cat = category != null && !category.isBlank() ? category : "general";
+        String systemKey = diagnosticsSystemKey();
+        String mechanismName = systemKey.lastIndexOf('/') >= 0
+                ? systemKey.substring(systemKey.lastIndexOf('/') + 1)
+                : systemKey;
+        String line = "[" + mechanismName + "] "
+                + lvl.toLowerCase(java.util.Locale.ROOT)
+                + " " + cat + ": " + text;
+        diagnosticsLog.append((sequence, timestampSeconds) ->
+                new DiagnosticsChannel.Event(sequence, timestampSeconds, systemKey, lvl, cat, text, line));
+    }
+
+    private static int sanitizeDiagnosticLogLimit(int requestedLimit) {
+        if (requestedLimit <= 0) {
+            return 0;
+        }
+        return Math.min(requestedLimit, DIAGNOSTIC_LOG_CAPACITY);
+    }
+
+    public List<MechanismLogEvent> getDiagnosticLog(int requestedLimit) {
+        int limit = sanitizeDiagnosticLogLimit(requestedLimit);
+        List<DiagnosticsChannel.Event> events = diagnosticsLog.snapshot(limit);
+        List<MechanismLogEvent> logs = new ArrayList<>(events.size());
+        for (DiagnosticsChannel.Event event : events) {
+            if (event == null) {
+                continue;
+            }
+            logs.add(new MechanismLogEvent(
+                    event.sequence(),
+                    event.timestampSeconds(),
+                    event.systemKey(),
+                    event.level(),
+                    event.category(),
+                    event.message(),
+                    event.line()));
+        }
+        return logs;
+    }
+
+    public List<DiagnosticsChannel.Event> getDiagnosticEvents(int requestedLimit) {
+        int limit = sanitizeDiagnosticLogLimit(requestedLimit);
+        return diagnosticsLog.snapshot(limit);
+    }
+
+    public int getDiagnosticLogCount() {
+        return diagnosticsLog.count();
+    }
+
+    public void clearDiagnosticLog() {
+        diagnosticsLog.clear();
+    }
+
+    public Map<String, Object> getDiagnosticsSummary() {
+        return buildDiagnosticsSnapshot(0, false);
+    }
+
+    public Map<String, Object> getDiagnosticsSnapshot(int logLimit) {
+        return buildDiagnosticsSnapshot(logLimit, true);
+    }
+
+    public DiagnosticsView diagnostics() {
+        return diagnosticsView;
+    }
+
+    public final class DiagnosticsView {
+        public DiagnosticsView log(String level, String category, String message) {
+            appendDiagnosticLog(level, category, message);
+            return this;
+        }
+
+        public DiagnosticsView info(String category, String message) {
+            appendDiagnosticLog("INFO", category, message);
+            return this;
+        }
+
+        public DiagnosticsView warn(String category, String message) {
+            appendDiagnosticLog("WARN", category, message);
+            return this;
+        }
+
+        public DiagnosticsView error(String category, String message) {
+            appendDiagnosticLog("ERROR", category, message);
+            return this;
+        }
+
+        public List<DiagnosticsChannel.Event> events(int limit) {
+            return getDiagnosticEvents(limit);
+        }
+
+        public int count() {
+            return getDiagnosticLogCount();
+        }
+
+        public DiagnosticsView clear() {
+            clearDiagnosticLog();
+            return this;
+        }
+
+        public Map<String, Object> summary() {
+            return getDiagnosticsSummary();
+        }
+
+        public Map<String, Object> snapshot(int limit) {
+            return getDiagnosticsSnapshot(limit);
+        }
+    }
+
+    private Map<String, Object> buildDiagnosticsSnapshot(int logLimit, boolean includeLogs) {
+        double nowSeconds = Timer.getFPGATimestamp();
+        double position = getPosition();
+        double velocity = getVelocity();
+        double setpointValue = shouldSetpointOverride ? setPointOverride : getSetpoint();
+        double setpointWithNudge = setpointValue + getNudge();
+        boolean encoderPresent = encoder != null;
+        boolean encoderConnected = !encoderPresent || encoder.isConnected();
+        MotorController[] controllers = motors != null ? motors.getControllers() : new MotorController[0];
+        List<Map<String, Object>> motorDetails = new ArrayList<>(controllers.length);
+        int connectedMotors = 0;
+        for (MotorController controller : controllers) {
+            if (controller == null) {
+                continue;
+            }
+            boolean connected = controller.isConnected();
+            if (connected) {
+                connectedMotors++;
+            }
+            Map<String, Object> motor = new LinkedHashMap<>();
+            motor.put("id", controller.getId());
+            motor.put("canbus", controller.getCanbus());
+            motor.put("type", controller.getType() != null ? controller.getType().getKey() : "unknown");
+            motor.put("connected", connected);
+            motor.put("temperatureC", controller.getTemperatureCelsius());
+            motorDetails.add(motor);
+        }
+        List<Map<String, Object>> limitSwitchDetails = new ArrayList<>(limitSwitches.length);
+        for (GenericLimitSwitch sw : limitSwitches) {
+            if (sw == null) {
+                continue;
+            }
+            Map<String, Object> status = new LinkedHashMap<>();
+            status.put("port", sw.getPort());
+            status.put("active", sw.getAsBoolean());
+            status.put("hardstop", sw.isHardstop());
+            status.put("position", sw.getPosition());
+            status.put("blockDirection", String.valueOf(sw.getBlockDirection()));
+            limitSwitchDetails.add(status);
+        }
+        double lastHardwareAgeMs =
+                (Double.isFinite(lastHardwareUpdateSeconds) && Double.isFinite(nowSeconds) && nowSeconds >= lastHardwareUpdateSeconds)
+                        ? (nowSeconds - lastHardwareUpdateSeconds) * 1000.0
+                        : -1.0;
+        double nextHardwareMs = -1.0;
+        double nextDue = resolveNextHardwareRefreshDueSeconds(nowSeconds);
+        if (Double.isFinite(nextDue) && Double.isFinite(nowSeconds)) {
+            nextHardwareMs = Math.max(0.0, nextDue - nowSeconds) * 1000.0;
+        }
+
+        Map<String, Object> fault = new LinkedHashMap<>();
+        fault.put("emergencyStopped", emergencyStopped);
+        fault.put("manualEmergencyStop", manualEmergencyStopped);
+        fault.put("connectivityEmergencyStop", connectivityFaultEmergencyStopped);
+        fault.put("activeReason", resolveActiveFaultReason());
+        fault.put("lastReason", lastFaultReason);
+
+        Map<String, Object> control = new LinkedHashMap<>();
+        control.put("setpoint", setpointValue);
+        control.put("setpointWithNudge", setpointWithNudge);
+        control.put("nudge", nudge);
+        control.put("position", position);
+        control.put("velocity", velocity);
+        control.put("error", setpointWithNudge - position);
+        control.put("output", getOutput());
+        control.put("pidOutput", pidOutput);
+        control.put("feedforwardOutput", feedforwardOutput);
+        control.put("outputType", String.valueOf(outputType));
+        control.put("atSetpoint", atSetpoint());
+        control.put("override", override);
+        control.put("suppressOutput", suppressMotorOutput);
+        control.put("pidEnabled", pidEnabled);
+        control.put("feedforwardEnabled", feedforwardEnabled);
+        control.put("setpointAsOutput", setpointIsOutput);
+
+        Map<String, Object> hardware = new LinkedHashMap<>();
+        hardware.put("encoderPresent", encoderPresent);
+        hardware.put("encoderConnected", encoderConnected);
+        hardware.put("motorsConnected", connectedMotors == motorDetails.size());
+        hardware.put("motorCount", motorDetails.size());
+        hardware.put("connectedMotorCount", connectedMotors);
+        hardware.put("disconnectedMotorCount", Math.max(0, motorDetails.size() - connectedMotors));
+        hardware.put("averageMotorTempC", motors != null ? motors.getAverageTemperatureCelsius() : 0.0);
+        hardware.put("motors", motorDetails);
+        hardware.put("limitSwitches", limitSwitchDetails);
+
+        Map<String, Object> timing = new LinkedHashMap<>();
+        timing.put("pidPeriodMs", pidPeriod * 1000.0);
+        timing.put("hardwareUpdatePeriodMs", hardwareUpdatePeriodSeconds * 1000.0);
+        timing.put("hardwareLastRefreshAgeMs", lastHardwareAgeMs);
+        timing.put("hardwareNextRefreshInMs", nextHardwareMs);
+        timing.put("networkTablesPeriodSec", getNetworkTablesPeriodSeconds());
+        timing.put("simulation", hasSimulation());
+        timing.put("simulationUpdatePeriodSec", simulationUpdatePeriodSeconds);
+        timing.put("sysIdActive", sysIdActive);
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("name", getName());
+        snapshot.put("systemKey", diagnosticsSystemKey());
+        snapshot.put("type", getNetworkTablesTypeName());
+        snapshot.put("ownerPath", getNetworkTablesOwnerPath());
+        snapshot.put("timestampSeconds", nowSeconds);
+        snapshot.put("fault", fault);
+        snapshot.put("control", control);
+        snapshot.put("hardware", hardware);
+        snapshot.put("timing", timing);
+        snapshot.put("logCount", getDiagnosticLogCount());
+        if (includeLogs) {
+            snapshot.put("events", getDiagnosticEvents(logLimit));
+            snapshot.put("logs", getDiagnosticLog(logLimit));
+        }
+        return snapshot;
     }
 
     public GenericLimitSwitch[] getLimitSwitches() {
@@ -1734,18 +2137,33 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     public void setFeedforwardEnabled(boolean feedforwardEnabled) {
+        if (this.feedforwardEnabled != feedforwardEnabled) {
+            appendDiagnosticLog(
+                    "INFO",
+                    "control",
+                    feedforwardEnabled ? "feedforward enabled" : "feedforward disabled");
+        }
         this.feedforwardEnabled = feedforwardEnabled;
     }
 
     /**
      */
     public void setPidEnabled(boolean pidEnabled) {
+        if (this.pidEnabled != pidEnabled) {
+            appendDiagnosticLog("INFO", "control", pidEnabled ? "pid enabled" : "pid disabled");
+        }
         this.pidEnabled = pidEnabled;
     }
 
     /**
      */
     public void setEmergencyStopped(boolean emergancyStopped) {
+        if (this.manualEmergencyStopped != emergancyStopped) {
+            appendDiagnosticLog(
+                    emergancyStopped ? "ERROR" : "INFO",
+                    "fault",
+                    emergancyStopped ? "manual emergency stop enabled" : "manual emergency stop cleared");
+        }
         this.manualEmergencyStopped = emergancyStopped;
         if (emergancyStopped) {
             lastFaultReason = "manual emergency stop";
@@ -1816,6 +2234,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
         disabledControlLoops.add(name);
+        appendDiagnosticLog("WARN", "control-loop", "disabled control loop '" + name + "'");
     }
 
     /**
@@ -1825,6 +2244,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
         disabledControlLoops.remove(name);
+        appendDiagnosticLog("INFO", "control-loop", "enabled control loop '" + name + "'");
     }
 
     /**
@@ -2533,8 +2953,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 "Enable " + node.path() + "/NetworkTableConfig/Details and section flags to publish more topics.");
         String jsonUrl = resolveConfigDownloadUrl("json");
         String tomlUrl = resolveConfigDownloadUrl("toml");
+        String diagnosticsUrl = resolveDiagnosticsLogUrl();
         meta.putString("configUrlJson", jsonUrl != null ? jsonUrl : "");
         meta.putString("configUrlToml", tomlUrl != null ? tomlUrl : "");
+        meta.putString("diagnosticsUrl", diagnosticsUrl != null ? diagnosticsUrl : "");
 
         RobotNetworkTables.MechanismToggles toggles = nt.mechanismConfig(node);
         boolean details = toggles.detailsEnabled();
@@ -2598,6 +3020,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             status.putString("outputType", String.valueOf(getOutputType()));
             status.putString("faultReason", cachedFaultReason != null ? cachedFaultReason : "");
             status.putString("lastFaultReason", cachedLastFaultReason != null ? cachedLastFaultReason : "");
+            status.putDouble("diagnosticLogCount", getDiagnosticLogCount());
             status.putDouble("hwRefreshPeriodMs", cachedHardwareUpdatePeriodSeconds * 1000.0);
             status.putDouble("hwRefreshPhaseMs", cachedHardwareUpdatePhaseSeconds * 1000.0);
             status.putDouble("hwRefreshSlot", cachedHardwareUpdateSlot);
@@ -2770,6 +3193,24 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         String encoded = java.net.URLEncoder.encode(n, java.nio.charset.StandardCharsets.UTF_8);
         // Prefer the canonical /Athena path (server also exposes /athena aliases).
         return base + "/Athena/config/mechanisms/" + encoded + "." + ext;
+    }
+
+    private String resolveDiagnosticsLogUrl() {
+        RobotCore<?> core = robotCore;
+        if (core == null) {
+            return null;
+        }
+        String base = core.getConfigServerBaseUrl();
+        if (base == null || base.isBlank()) {
+            return null;
+        }
+        String n = getName();
+        if (n == null || n.isBlank()) {
+            return null;
+        }
+        String key = "mechanisms/" + n;
+        String encodedKey = java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8);
+        return base + "/Athena/diagnostics/" + encodedKey + ".json";
     }
 
     public Mechanism2d getMechanism2d() {

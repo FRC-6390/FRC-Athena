@@ -10,6 +10,8 @@ import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotCoreHooks;
+import ca.frc6390.athena.core.diagnostics.BoundedEventLog;
+import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
@@ -21,6 +23,7 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 
 /**
  * Composite mechanism that coordinates multiple stateful mechanisms using a superstate enum.
@@ -87,6 +90,10 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private final List<SuperstructureConfig.Binding<SP>> exitAlwaysBindings;
     private final SuperstructureContextImpl context;
     private S prevState;
+    private final BoundedEventLog<DiagnosticsChannel.Event> diagnosticsLog =
+            new BoundedEventLog<>(DIAGNOSTIC_LOG_CAPACITY);
+    private final DiagnosticsView diagnosticsView = new DiagnosticsView();
+    private static final int DIAGNOSTIC_LOG_CAPACITY = 256;
 
     SuperstructureMechanism(S initialState,
                             double stateMachineDelaySeconds,
@@ -149,10 +156,25 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return stateMachine;
     }
 
+    public DiagnosticsView diagnostics() {
+        return diagnosticsView;
+    }
+
+    private String diagnosticsSystemKey() {
+        String name = getName();
+        if (name == null || name.isBlank()) {
+            name = getClass().getSimpleName();
+        }
+        return "superstructures/" + name;
+    }
+
     /**
      * Queues a superstate, applying its constraint if present.
      */
     public void queueState(S state) {
+        if (state != null) {
+            appendDiagnosticLog("INFO", "state", "queued state '" + state.name() + "'");
+        }
         SuperstructureConfig.Constraint<S, SP> constraint = constraints.get(state);
         if (constraint == null) {
             stateMachine.queueState(state);
@@ -203,6 +225,9 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         if (changed) {
             applyTransitionBindings(from, current);
             applyEnterBindings(current);
+            String fromName = from != null ? from.name() : "<none>";
+            String toName = current != null ? current.name() : "<none>";
+            appendDiagnosticLog("INFO", "transition", fromName + " -> " + toName);
             prevState = current;
         }
         applyBindings(current);
@@ -582,7 +607,111 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     public void setRobotCore(RobotCore<?> robotCore) {
         this.robotCore = robotCore;
         if (robotCore != null) {
+            appendDiagnosticLog("INFO", "lifecycle", "attached to RobotCore");
+        }
+        if (robotCore != null) {
             propagateRobotCore(robotCore, this);
+        }
+    }
+
+    private void appendDiagnosticLog(String level, String category, String message) {
+        if (message == null || message.isBlank()) {
+            return;
+        }
+        String text = message.trim();
+        String lvl = level != null && !level.isBlank() ? level : "INFO";
+        String cat = category != null && !category.isBlank() ? category : "general";
+        String systemKey = diagnosticsSystemKey();
+        String systemName = systemKey.lastIndexOf('/') >= 0
+                ? systemKey.substring(systemKey.lastIndexOf('/') + 1)
+                : systemKey;
+        String line = "[" + systemName + "] "
+                + lvl.toLowerCase(java.util.Locale.ROOT)
+                + " " + cat + ": " + text;
+        diagnosticsLog.append((sequence, timestampSeconds) ->
+                new DiagnosticsChannel.Event(sequence, timestampSeconds, systemKey, lvl, cat, text, line));
+    }
+
+    private static int sanitizeDiagnosticLogLimit(int requestedLimit) {
+        if (requestedLimit <= 0) {
+            return 0;
+        }
+        return Math.min(requestedLimit, DIAGNOSTIC_LOG_CAPACITY);
+    }
+
+    public List<DiagnosticsChannel.Event> getDiagnosticEvents(int requestedLimit) {
+        int limit = sanitizeDiagnosticLogLimit(requestedLimit);
+        return diagnosticsLog.snapshot(limit);
+    }
+
+    public int getDiagnosticLogCount() {
+        return diagnosticsLog.count();
+    }
+
+    public void clearDiagnosticLog() {
+        diagnosticsLog.clear();
+    }
+
+    public Map<String, Object> getDiagnosticsSummary() {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("name", getName());
+        summary.put("systemKey", diagnosticsSystemKey());
+        Enum<?> state = stateMachine.getGoalState();
+        summary.put("state", state != null ? state.name() : "");
+        summary.put("atGoal", stateMachine.atGoalState());
+        summary.put("childrenAtGoals", childrenAtGoals());
+        summary.put("childMechanismCount", getMechanisms().all().size());
+        summary.put("logCount", getDiagnosticLogCount());
+        return summary;
+    }
+
+    public Map<String, Object> getDiagnosticsSnapshot(int requestedLimit) {
+        Map<String, Object> snapshot = new LinkedHashMap<>(getDiagnosticsSummary());
+        int limit = sanitizeDiagnosticLogLimit(requestedLimit);
+        snapshot.put("events", getDiagnosticEvents(limit));
+        return snapshot;
+    }
+
+    public final class DiagnosticsView {
+        public DiagnosticsView log(String level, String category, String message) {
+            appendDiagnosticLog(level, category, message);
+            return this;
+        }
+
+        public DiagnosticsView info(String category, String message) {
+            appendDiagnosticLog("INFO", category, message);
+            return this;
+        }
+
+        public DiagnosticsView warn(String category, String message) {
+            appendDiagnosticLog("WARN", category, message);
+            return this;
+        }
+
+        public DiagnosticsView error(String category, String message) {
+            appendDiagnosticLog("ERROR", category, message);
+            return this;
+        }
+
+        public List<DiagnosticsChannel.Event> events(int limit) {
+            return getDiagnosticEvents(limit);
+        }
+
+        public int count() {
+            return getDiagnosticLogCount();
+        }
+
+        public DiagnosticsView clear() {
+            clearDiagnosticLog();
+            return this;
+        }
+
+        public Map<String, Object> summary() {
+            return getDiagnosticsSummary();
+        }
+
+        public Map<String, Object> snapshot(int limit) {
+            return getDiagnosticsSnapshot(limit);
         }
     }
 

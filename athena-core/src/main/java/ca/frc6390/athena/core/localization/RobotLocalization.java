@@ -25,6 +25,7 @@ import ca.frc6390.athena.core.auto.ChoreoBinding;
 import ca.frc6390.athena.core.auto.HolonomicDriveBinding;
 import ca.frc6390.athena.core.auto.HolonomicFeedforward;
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
+import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.sensors.camera.VisionCamera;
 import ca.frc6390.athena.core.RobotNetworkTables;
@@ -134,6 +135,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static Field poseEstimatorQField;
     private static Field poseEstimator3dQField;
     private final RobotLocalizationFieldPublisher fieldPublisher;
+    private DiagnosticsChannel diagnosticsChannel;
+    private final DiagnosticsView diagnosticsView = new DiagnosticsView();
 
     public RobotLocalization(
             PoseEstimatorFactory<T> estimatorFactory,
@@ -191,18 +194,41 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     public RobotLocalization<T> enableVisionForLocalization(boolean visionEnabled){
+        boolean changed = this.visionEnabled != visionEnabled;
         this.visionEnabled = visionEnabled;
+        if (changed) {
+            appendDiagnosticLog(
+                    "INFO",
+                    "config",
+                    visionEnabled ? "vision localization enabled" : "vision localization disabled");
+        }
         return this;
     }
 
     public RobotLocalization<T> setRobotVision(RobotVision vision){
         this.vision = vision;
+        appendDiagnosticLog(
+                "INFO",
+                "lifecycle",
+                vision != null ? "vision attached to localization" : "vision detached from localization");
         if (vision != null) {
             vision.attachLocalization(this);
             vision.setLocalizationStdDevs(localizationConfig.getVisionStd(), localizationConfig.getVisionMultitagStd());
         }
         cameraManager.ensureCameraEntries(vision);
         return this;
+    }
+
+    public RobotLocalization<T> diagnostics(DiagnosticsChannel channel) {
+        this.diagnosticsChannel = channel;
+        if (channel != null) {
+            appendDiagnosticLog("INFO", "lifecycle", "diagnostics channel attached");
+        }
+        return this;
+    }
+
+    public DiagnosticsView diagnostics() {
+        return diagnosticsView;
     }
 
     /**
@@ -674,6 +700,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private void updateSlipState() {
         RobotLocalizationConfig.BackendConfig backend = backendConfig();
         double now = Timer.getFPGATimestamp();
+        boolean previousSlipActive = slipActive;
         if (Double.isFinite(lastUpdateTimestamp)) {
             double dt = now - lastUpdateTimestamp;
             if (dt > 0.0) {
@@ -708,6 +735,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             }
         }
         slipActive = now <= slipActiveUntilSeconds;
+        if (slipActive != previousSlipActive) {
+            appendDiagnosticLog(
+                    slipActive ? "WARN" : "INFO",
+                    "slip",
+                    slipActive ? "slip detection active" : "slip detection cleared");
+        }
         lastUpdateTimestamp = now;
         lastFieldPoseForSlip = fieldPose;
         updateProcessStdDevScale(slipActive);
@@ -1216,6 +1249,32 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return Map.copyOf(namedBoundingBoxes);
     }
 
+    /**
+     * Structured read API for localization state.
+     */
+    public StateView state() {
+        return new StateView(this);
+    }
+
+    /**
+     * Convenience primary pose alias: {@code robot.localization().pose()}.
+     */
+    public Pose2d pose() {
+        return getFieldPose();
+    }
+
+    public Pose3d pose3d() {
+        return getFieldPose3d();
+    }
+
+    public SpeedsView speeds() {
+        return new SpeedsView(this);
+    }
+
+    public BoundingBoxesView boundingBoxes() {
+        return new BoundingBoxesView(this);
+    }
+
     public Pose2d getFieldPose(){
         PoseEstimatorState primary = getPrimaryPoseState();
         if (primary != null) {
@@ -1324,6 +1383,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     public void setSuppressUpdates(boolean suppressUpdates) {
+        if (this.suppressUpdates != suppressUpdates) {
+            appendDiagnosticLog(
+                    "INFO",
+                    "control",
+                    suppressUpdates ? "localization updates suppressed" : "localization updates resumed");
+        }
         this.suppressUpdates = suppressUpdates;
     }
 
@@ -1333,6 +1398,239 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public Field2d getVisionField2d() {
         return cameraManager.getVisionField();
+    }
+
+    public static final class StateView {
+        private final RobotLocalization<?> owner;
+
+        private StateView(RobotLocalization<?> owner) {
+            this.owner = owner;
+        }
+
+        /**
+         * Forces one immediate pose-estimator pass before reading.
+         */
+        public StateView refresh() {
+            owner.updateActivePoseConfigs();
+            return this;
+        }
+
+        public Pose2d pose() {
+            return owner.getFieldPose();
+        }
+
+        public Pose3d pose3d() {
+            return owner.getFieldPose3d();
+        }
+
+        public Pose2d pose(String name) {
+            return owner.getPose2d(name);
+        }
+
+        public Pose3d pose3d(String name) {
+            return owner.getPose3d(name);
+        }
+
+        public boolean suppressUpdates() {
+            return owner.isSuppressUpdates();
+        }
+
+        public boolean hasPose(String name) {
+            return owner.hasPoseConfig(name);
+        }
+
+        public boolean poseActive(String name) {
+            return owner.isPoseActive(name);
+        }
+
+        public boolean inBoundingBox(PoseBoundingBox2d box) {
+            return owner.isInBoundingBox(box);
+        }
+
+        public boolean poseInBoundingBox(String name, PoseBoundingBox2d box) {
+            return owner.isPoseInBoundingBox(name, box);
+        }
+
+        public SpeedsView speeds() {
+            return owner.speeds();
+        }
+
+        public BoundingBoxesView boundingBoxes() {
+            return owner.boundingBoxes();
+        }
+
+        public Field2d field2d() {
+            return owner.getField2d();
+        }
+
+        public Field2d visionField2d() {
+            return owner.getVisionField2d();
+        }
+    }
+
+    public static final class SpeedsView {
+        private final RobotLocalization<?> owner;
+
+        private SpeedsView(RobotLocalization<?> owner) {
+            this.owner = owner;
+        }
+
+        public ChassisSpeeds robotRelative() {
+            return owner.getRobotRelativeSpeeds();
+        }
+
+        public ChassisSpeeds fieldRelative() {
+            return owner.getFieldRelativeSpeeds();
+        }
+
+        public double xMetersPerSecond() {
+            return owner.getXSpeedMetersPerSecond();
+        }
+
+        public double yMetersPerSecond() {
+            return owner.getYSpeedMetersPerSecond();
+        }
+
+        public double thetaRadiansPerSecond() {
+            return owner.getThetaSpeedRadiansPerSecond();
+        }
+
+        public double movementMetersPerSecond() {
+            return owner.getMovementSpeedMetersPerSecond();
+        }
+
+        public double normalizedMovement() {
+            return owner.getNormalizedMovementSpeed();
+        }
+    }
+
+    public static final class BoundingBoxesView {
+        private final RobotLocalization<?> owner;
+
+        private BoundingBoxesView(RobotLocalization<?> owner) {
+            this.owner = owner;
+        }
+
+        public Map<String, PoseBoundingBox2d> all() {
+            return owner.getBoundingBoxes();
+        }
+
+        public boolean contains(String name) {
+            return name != null && owner.getBoundingBoxes().containsKey(name);
+        }
+
+        public boolean in(String name) {
+            PoseBoundingBox2d box = owner.getBoundingBoxes().get(name);
+            return box != null && owner.isInBoundingBox(box);
+        }
+
+        public boolean in(PoseBoundingBox2d box) {
+            return owner.isInBoundingBox(box);
+        }
+    }
+
+    public final class DiagnosticsView {
+        public DiagnosticsView log(String level, String category, String message) {
+            appendDiagnosticLog(level, category, message);
+            return this;
+        }
+
+        public DiagnosticsView info(String category, String message) {
+            appendDiagnosticLog("INFO", category, message);
+            return this;
+        }
+
+        public DiagnosticsView warn(String category, String message) {
+            appendDiagnosticLog("WARN", category, message);
+            return this;
+        }
+
+        public DiagnosticsView error(String category, String message) {
+            appendDiagnosticLog("ERROR", category, message);
+            return this;
+        }
+
+        public List<DiagnosticsChannel.Event> events(int limit) {
+            DiagnosticsChannel channel = diagnosticsChannel;
+            return channel != null ? channel.events(limit) : List.of();
+        }
+
+        public int count() {
+            DiagnosticsChannel channel = diagnosticsChannel;
+            return channel != null ? channel.eventCount() : 0;
+        }
+
+        public DiagnosticsView clear() {
+            clearDiagnosticsLog();
+            return this;
+        }
+
+        public Map<String, Object> summary() {
+            return getDiagnosticsSummary();
+        }
+
+        public Map<String, Object> snapshot(int limit) {
+            return getDiagnosticsSnapshot(limit);
+        }
+    }
+
+    private void appendDiagnosticLog(String level, String category, String message) {
+        DiagnosticsChannel channel = diagnosticsChannel;
+        if (channel == null || message == null || message.isBlank()) {
+            return;
+        }
+        try {
+            channel.log(level, category, message);
+        } catch (RuntimeException ignored) {
+            // Diagnostics should never break localization updates.
+        }
+    }
+
+    public Map<String, Object> getDiagnosticsSummary() {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("poseSpace", poseSpace != null ? poseSpace.name() : "");
+        summary.put("poseCount", poseConfigs.size());
+        summary.put("primaryPose", primaryPoseName != null ? primaryPoseName : "");
+        summary.put("visionEnabled", isVisionEnabled());
+        summary.put("suppressUpdates", suppressUpdates);
+        summary.put("slipActive", slipActive);
+        summary.put("visionAcceptRate", visionAcceptRateWindow);
+        summary.put("driftRateMetersPerSec", driftRateMetersPerSec);
+        summary.put("poseJumpMeters", lastPoseJumpMeters);
+        DiagnosticsChannel channel = diagnosticsChannel;
+        if (channel != null) {
+            summary.put("channel", channel.summary());
+        }
+        return summary;
+    }
+
+    public Map<String, Object> getDiagnosticsSnapshot(int limit) {
+        int resolvedLimit = limit > 0 ? Math.min(limit, 2048) : 120;
+        Map<String, Object> snapshot = new LinkedHashMap<>(getDiagnosticsSummary());
+        Pose2d pose = getFieldPose();
+        Map<String, Object> poseNode = new LinkedHashMap<>();
+        poseNode.put("xM", pose.getX());
+        poseNode.put("yM", pose.getY());
+        poseNode.put("headingDeg", pose.getRotation().getDegrees());
+        snapshot.put("pose", poseNode);
+        ChassisSpeeds robot = getRobotRelativeSpeeds();
+        Map<String, Object> speedsNode = new LinkedHashMap<>();
+        speedsNode.put("vxMps", robot.vxMetersPerSecond);
+        speedsNode.put("vyMps", robot.vyMetersPerSecond);
+        speedsNode.put("omegaRadPerSec", robot.omegaRadiansPerSecond);
+        snapshot.put("robotSpeeds", speedsNode);
+        DiagnosticsChannel channel = diagnosticsChannel;
+        if (channel != null) {
+            snapshot.put("events", channel.events(resolvedLimit));
+        }
+        return snapshot;
+    }
+
+    public void clearDiagnosticsLog() {
+        DiagnosticsChannel channel = diagnosticsChannel;
+        if (channel != null) {
+            channel.clear();
+        }
     }
 
     @Override

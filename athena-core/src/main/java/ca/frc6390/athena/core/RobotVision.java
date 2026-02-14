@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,6 +16,7 @@ import java.util.function.Function;
 import java.util.ServiceLoader;
 
 import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.sensors.camera.CameraProvider;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.VisionCamera;
@@ -74,6 +76,8 @@ public class RobotVision implements RobotSendableSystem {
    private final EnumMap<CameraRole, List<VisionCamera>> camerasByRole;
    private final HashMap<String, Object> vendorCameras;
    private RobotLocalization<?> localization;
+   private DiagnosticsChannel diagnosticsChannel;
+   private final DiagnosticsView diagnosticsView = new DiagnosticsView();
    
    public RobotVision(RobotVisionConfig config) {
       this.config = config;
@@ -98,6 +102,25 @@ public class RobotVision implements RobotSendableSystem {
 
    public VisionCamera getCamera(String key) {
       return cameras.get(key);
+   }
+
+   /**
+    * Structured read API for robot vision state.
+    */
+   public StateView state() {
+      return new StateView(this);
+   }
+
+   public CamerasView cameras() {
+      return new CamerasView(this);
+   }
+
+   public LocalizationView localization() {
+      return new LocalizationView(this);
+   }
+
+   public ObservationsView observations() {
+      return new ObservationsView(this);
    }
 
    public RobotVisionSim createSimulation(AprilTagFieldLayout layout) {
@@ -128,11 +151,29 @@ public class RobotVision implements RobotSendableSystem {
       }
       camera.config(section);
       refreshCameraRoles(camera);
+      appendDiagnosticLog("INFO", "config", "updated runtime config for camera '" + key + "'");
       return this;
    }
 
    public void attachLocalization(RobotLocalization<?> localization) {
       this.localization = localization;
+      appendDiagnosticLog(
+            "INFO",
+            "lifecycle",
+            localization != null ? "attached localization" : "detached localization");
+   }
+
+   public RobotVision diagnostics(DiagnosticsChannel channel) {
+      this.diagnosticsChannel = channel;
+      if (channel != null) {
+         appendDiagnosticLog("INFO", "lifecycle", "diagnostics channel attached");
+         appendDiagnosticLog("INFO", "lifecycle", "camera count: " + cameras.size());
+      }
+      return this;
+   }
+
+   public DiagnosticsView diagnostics() {
+      return diagnosticsView;
    }
 
    public Map<CameraRole, List<VisionCamera>> getCamerasByRole() {
@@ -400,6 +441,7 @@ public class RobotVision implements RobotSendableSystem {
          vendorCameras.put(key, vendorInstance);
       }
       refreshCameraRoles(camera);
+      appendDiagnosticLog("INFO", "camera", "registered camera '" + key + "'");
    }
 
    private VisionCamera createCamera(ConfigurableCamera config, boolean simulation) {
@@ -417,6 +459,236 @@ public class RobotVision implements RobotSendableSystem {
       }
       for (CameraRole role : camera.getRoles()) {
          camerasByRole.computeIfAbsent(role, __ -> new ArrayList<>()).add(camera);
+      }
+   }
+
+   public static final class StateView {
+      private final RobotVision owner;
+
+      private StateView(RobotVision owner) {
+         this.owner = owner;
+      }
+
+      public CamerasView cameras() {
+         return owner.cameras();
+      }
+
+      public LocalizationView localization() {
+         return owner.localization();
+      }
+
+      public ObservationsView observations() {
+         return owner.observations();
+      }
+   }
+
+   public static final class CamerasView {
+      private final RobotVision owner;
+
+      private CamerasView(RobotVision owner) {
+         this.owner = owner;
+      }
+
+      public VisionCamera camera(String key) {
+         return owner.getCamera(key);
+      }
+
+      public Map<String, VisionCamera> all() {
+         return owner.getCameras();
+      }
+
+      public Map<CameraRole, List<VisionCamera>> byRole() {
+         return owner.getCamerasByRole();
+      }
+
+      public List<VisionCamera> forRole(CameraRole role) {
+         return owner.getCamerasForRole(role);
+      }
+
+      public Optional<VisionCamera> firstForRole(CameraRole role) {
+         return owner.getFirstCameraWithRole(role);
+      }
+
+      public <T> Optional<T> capability(String key, VisionCameraCapability capability) {
+         return owner.getCameraCapability(key, capability);
+      }
+
+      public Set<String> tables() {
+         return owner.getCameraTables();
+      }
+   }
+
+   public static final class LocalizationView {
+      private final RobotVision owner;
+
+      private LocalizationView(RobotVision owner) {
+         this.owner = owner;
+      }
+
+      public ArrayList<Pose2d> poses() {
+         return owner.getCameraLocalizationPoses();
+      }
+
+      public Optional<LocalizationData> bestData() {
+         return owner.getBestLocalizationData();
+      }
+
+      public Optional<VisionCamera.VisionMeasurement> bestMeasurement() {
+         return owner.getBestVisionMeasurement();
+      }
+
+      public List<VisionCamera.VisionMeasurement> measurements() {
+         return owner.getVisionMeasurements();
+      }
+   }
+
+   public static final class ObservationsView {
+      private final RobotVision owner;
+
+      private ObservationsView(RobotVision owner) {
+         this.owner = owner;
+      }
+
+      public Optional<VisionCamera.TargetObservation> camera(
+            String key,
+            CoordinateSpace space,
+            Pose2d robotPose,
+            Pose2d tagPose) {
+         return owner.getCameraObservation(key, space, robotPose, tagPose);
+      }
+
+      public Optional<Translation2d> translation(
+            String key,
+            CoordinateSpace space,
+            Pose2d robotPose,
+            Pose2d tagPose) {
+         return owner.getCameraTranslation(key, space, robotPose, tagPose);
+      }
+
+      public Optional<VisionCamera.TargetObservation> best(
+            CoordinateSpace space,
+            Pose2d robotPose,
+            Function<Integer, Pose2d> tagPoseLookup) {
+         return owner.getBestObservation(space, robotPose, tagPoseLookup);
+      }
+
+      public Optional<VisionCamera.TargetObservation> bestForRole(
+            CameraRole role,
+            CoordinateSpace space,
+            Pose2d robotPose,
+            Function<Integer, Pose2d> tagPoseLookup) {
+         return owner.getBestObservationForRole(role, space, robotPose, tagPoseLookup);
+      }
+   }
+
+   public final class DiagnosticsView {
+      public DiagnosticsView log(String level, String category, String message) {
+         appendDiagnosticLog(level, category, message);
+         return this;
+      }
+
+      public DiagnosticsView info(String category, String message) {
+         appendDiagnosticLog("INFO", category, message);
+         return this;
+      }
+
+      public DiagnosticsView warn(String category, String message) {
+         appendDiagnosticLog("WARN", category, message);
+         return this;
+      }
+
+      public DiagnosticsView error(String category, String message) {
+         appendDiagnosticLog("ERROR", category, message);
+         return this;
+      }
+
+      public List<DiagnosticsChannel.Event> events(int limit) {
+         DiagnosticsChannel channel = diagnosticsChannel;
+         return channel != null ? channel.events(limit) : List.of();
+      }
+
+      public int count() {
+         DiagnosticsChannel channel = diagnosticsChannel;
+         return channel != null ? channel.eventCount() : 0;
+      }
+
+      public DiagnosticsView clear() {
+         clearDiagnosticsLog();
+         return this;
+      }
+
+      public Map<String, Object> summary() {
+         return getDiagnosticsSummary();
+      }
+
+      public Map<String, Object> snapshot(int limit) {
+         return getDiagnosticsSnapshot(limit);
+      }
+   }
+
+   private void appendDiagnosticLog(String level, String category, String message) {
+      DiagnosticsChannel channel = diagnosticsChannel;
+      if (channel == null || message == null || message.isBlank()) {
+         return;
+      }
+      try {
+         channel.log(level, category, message);
+      } catch (RuntimeException ignored) {
+         // Diagnostics should never break camera updates.
+      }
+   }
+
+   public Map<String, Object> getDiagnosticsSummary() {
+      Map<String, Object> summary = new LinkedHashMap<>();
+      summary.put("cameraCount", cameras.size());
+      summary.put("hasLocalization", localization != null);
+      Map<String, Integer> roleCounts = new LinkedHashMap<>();
+      for (Map.Entry<CameraRole, List<VisionCamera>> entry : camerasByRole.entrySet()) {
+         if (entry == null || entry.getKey() == null || entry.getValue() == null) {
+            continue;
+         }
+         roleCounts.put(entry.getKey().name(), entry.getValue().size());
+      }
+      summary.put("roles", roleCounts);
+      DiagnosticsChannel channel = diagnosticsChannel;
+      if (channel != null) {
+         summary.put("channel", channel.summary());
+      }
+      return summary;
+   }
+
+   public Map<String, Object> getDiagnosticsSnapshot(int limit) {
+      int resolvedLimit = limit > 0 ? Math.min(limit, 2048) : 120;
+      Map<String, Object> snapshot = new LinkedHashMap<>(getDiagnosticsSummary());
+      List<Map<String, Object>> cameraSnapshots = new ArrayList<>();
+      for (Map.Entry<String, VisionCamera> entry : cameras.entrySet()) {
+         if (entry == null || entry.getKey() == null || entry.getValue() == null) {
+            continue;
+         }
+         VisionCamera camera = entry.getValue();
+         Map<String, Object> cameraNode = new LinkedHashMap<>();
+         cameraNode.put("key", entry.getKey());
+         cameraNode.put("table", entry.getKey());
+         cameraNode.put("connected", camera.isConnected());
+         cameraNode.put("hasValidTarget", camera.hasValidTarget());
+         cameraNode.put("useForLocalization", camera.isUseForLocalization());
+         cameraNode.put("targetCount", camera.getTargetMeasurements().size());
+         cameraNode.put("roles", camera.getRoles().stream().map(CameraRole::name).toList());
+         cameraSnapshots.add(cameraNode);
+      }
+      cameraSnapshots.sort(Comparator.comparing(m -> String.valueOf(m.get("key")), String.CASE_INSENSITIVE_ORDER));
+      snapshot.put("cameras", cameraSnapshots);
+      DiagnosticsChannel channel = diagnosticsChannel;
+      if (channel != null) {
+         snapshot.put("events", channel.events(resolvedLimit));
+      }
+      return snapshot;
+   }
+
+   public void clearDiagnosticsLog() {
+      DiagnosticsChannel channel = diagnosticsChannel;
+      if (channel != null) {
+         channel.clear();
       }
    }
 
