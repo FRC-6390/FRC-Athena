@@ -62,6 +62,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final PIDController pidController;
     private final ProfiledPIDController profiledPIDController;
     private final OutputType mainPidOutputType;
+    private final MechanismConfig.BangBangProfile mainBangBangProfile;
     private boolean useAbsolute;
     private OutputType outputType = OutputType.PERCENT;
     private final GenericLimitSwitch[] limitSwitches;
@@ -178,6 +179,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, edu.wpi.first.math.geometry.Pose3d> mutablePose3dInputs;
     private final Map<String, PIDController> controlLoopPids;
     private final Map<String, OutputType> controlLoopPidOutputTypes;
+    private final Map<String, MechanismConfig.BangBangProfile> controlLoopBangBangs;
     private final Map<String, SimpleMotorFeedforward> controlLoopFeedforwards;
     private final Map<String, OutputType> controlLoopFeedforwardOutputTypes;
     private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
@@ -231,8 +233,26 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             basePid = pid;
             resolvedMainPidOutputType = profileOutput;
         }
+        MechanismConfig.BangBangProfile resolvedMainBangBangProfile = null;
+        if (config != null && config.mainBangBangProfileName() != null) {
+            MechanismConfig.BangBangProfile profile = config.resolveMainBangBangProfile();
+            if (profile == null) {
+                throw new IllegalStateException(
+                        "Main bang-bang profile selected but not registered: " + config.mainBangBangProfileName());
+            }
+            OutputType profileOutput = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
+            if (profileOutput != OutputType.PERCENT && profileOutput != OutputType.VOLTAGE) {
+                throw new IllegalStateException("Main bang-bang profile output type must be PERCENT or VOLTAGE");
+            }
+            resolvedMainBangBangProfile = new MechanismConfig.BangBangProfile(
+                    profileOutput,
+                    sanitizeBangBangLevel(profile.highOutput()),
+                    sanitizeBangBangLevel(profile.lowOutput()),
+                    sanitizeBangBangTolerance(profile.tolerance()));
+        }
         this.pidController = basePid;
         this.mainPidOutputType = resolvedMainPidOutputType != null ? resolvedMainPidOutputType : this.outputType;
+        this.mainBangBangProfile = resolvedMainBangBangProfile;
         this.profiledPIDController = config.data().profiledPIDController();
         this.override = false;
         this.limitSwitches =
@@ -258,7 +278,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.baseProfiledConstraints =
                 profiledPIDController != null ? profiledPIDController.getConstraints() : null;
 
-        pidEnabled = pidController != null || profiledPIDController != null;
+        pidEnabled = pidController != null || profiledPIDController != null || mainBangBangProfile != null;
 
         MechanismSimulationModel model = null;
         double updatePeriod = 0.02;
@@ -318,6 +338,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.mutablePose3dInputs = new HashMap<>(this.mutablePose3dInputDefaults);
         this.controlLoopPids = new HashMap<>();
         this.controlLoopPidOutputTypes = new HashMap<>();
+        this.controlLoopBangBangs = new HashMap<>();
         this.controlLoopFeedforwards = new HashMap<>();
         this.controlLoopFeedforwardOutputTypes = new HashMap<>();
         this.controlLoops = new ArrayList<>();
@@ -343,6 +364,26 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 }
                 controlLoopPids.put(name, pid);
                 controlLoopPidOutputTypes.put(name, profileOutput);
+            }
+        }
+        if (config.controlLoopBangBangProfiles != null) {
+            for (Map.Entry<String, MechanismConfig.BangBangProfile> entry : config.controlLoopBangBangProfiles.entrySet()) {
+                String name = entry.getKey();
+                MechanismConfig.BangBangProfile profile = entry.getValue();
+                if (name == null || name.isBlank() || profile == null) {
+                    continue;
+                }
+                OutputType profileOutput = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
+                if (profileOutput != OutputType.PERCENT && profileOutput != OutputType.VOLTAGE) {
+                    throw new IllegalStateException("Bang-bang profile '" + name + "' output type must be PERCENT or VOLTAGE");
+                }
+                controlLoopBangBangs.put(
+                        name,
+                        new MechanismConfig.BangBangProfile(
+                                profileOutput,
+                                sanitizeBangBangLevel(profile.highOutput()),
+                                sanitizeBangBangLevel(profile.lowOutput()),
+                                sanitizeBangBangTolerance(profile.tolerance())));
             }
         }
         if (config.controlLoopFeedforwardProfiles != null) {
@@ -498,6 +539,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.useAbsolute = useAbsolute;
         this.outputType = useVoltage ? OutputType.VOLTAGE : OutputType.PERCENT;
         this.mainPidOutputType = this.outputType;
+        this.mainBangBangProfile = null;
         this.override = false;
         this.limitSwitches = limitSwitches;
         this.setpointIsOutput = useSetpointAsOutput;
@@ -566,6 +608,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.mutablePose3dInputs = new HashMap<>();
         this.controlLoopPids = new HashMap<>();
         this.controlLoopPidOutputTypes = new HashMap<>();
+        this.controlLoopBangBangs = new HashMap<>();
         this.controlLoopFeedforwards = new HashMap<>();
         this.controlLoopFeedforwardOutputTypes = new HashMap<>();
     }
@@ -872,7 +915,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public boolean atSetpoint(){
         return (pidController == null || pidController.atSetpoint()) &&
-           (profiledPIDController == null || profiledPIDController.atGoal());
+           (profiledPIDController == null || profiledPIDController.atGoal()) &&
+           (mainBangBangProfile == null
+                   || isBangBangWithinTolerance(mainBangBangProfile, getPidMeasurement(), getSetpoint() + getNudge()));
     }
 
     public void setSetpoint(double setpoint){
@@ -1033,11 +1078,56 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return controlLoopPidOutputTypes.getOrDefault(name, OutputType.PERCENT);
     }
 
+    public MechanismConfig.BangBangProfile getControlLoopBangBangProfile(String name) {
+        if (name == null) {
+            return null;
+        }
+        return controlLoopBangBangs.get(name);
+    }
+
     public OutputType getControlLoopFeedforwardOutputType(String name) {
         if (name == null) {
             return OutputType.VOLTAGE;
         }
         return controlLoopFeedforwardOutputTypes.getOrDefault(name, OutputType.VOLTAGE);
+    }
+
+    static double sanitizeBangBangLevel(double output) {
+        return Double.isFinite(output) ? output : 0.0;
+    }
+
+    static double sanitizeBangBangTolerance(double tolerance) {
+        if (!Double.isFinite(tolerance) || tolerance < 0.0) {
+            return 0.0;
+        }
+        return tolerance;
+    }
+
+    static boolean isBangBangWithinTolerance(
+            MechanismConfig.BangBangProfile profile,
+            double measurement,
+            double setpoint) {
+        if (profile == null || !Double.isFinite(measurement) || !Double.isFinite(setpoint)) {
+            return false;
+        }
+        double error = setpoint - measurement;
+        return Math.abs(error) <= sanitizeBangBangTolerance(profile.tolerance());
+    }
+
+    static double calculateBangBangRaw(
+            MechanismConfig.BangBangProfile profile,
+            double measurement,
+            double setpoint) {
+        if (profile == null || !Double.isFinite(measurement) || !Double.isFinite(setpoint)) {
+            return 0.0;
+        }
+        if (isBangBangWithinTolerance(profile, measurement, setpoint)) {
+            return 0.0;
+        }
+        double error = setpoint - measurement;
+        return error > 0.0
+                ? sanitizeBangBangLevel(profile.highOutput())
+                : sanitizeBangBangLevel(profile.lowOutput());
     }
 
     public boolean isSetpointAsOutput() {
@@ -1116,11 +1206,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     public double calculatePID(){
         double output = 0;
         double encoderPos = getPidMeasurement();
+        double setpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
+        double target = setpoint + getNudge();
         applyMotionLimits();
 
         if (pidController != null){
-            double setpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
-            output += toOutput(mainPidOutputType, pidController.calculate(encoderPos, setpoint + getNudge()));
+            output += toOutput(mainPidOutputType, pidController.calculate(encoderPos, target));
+        }
+
+        if (mainBangBangProfile != null) {
+            OutputType outputType = mainBangBangProfile.outputType() != null
+                    ? mainBangBangProfile.outputType()
+                    : OutputType.PERCENT;
+            output += toOutput(outputType, calculateBangBangRaw(mainBangBangProfile, encoderPos, target));
         }
 
         if(profiledPIDController != null){
@@ -1885,6 +1983,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 throw new IllegalArgumentException("No PID profile found for name " + name);
             }
             return pid;
+        }
+
+        @Override
+        public MechanismConfig.BangBangProfile bangBang(String name) {
+            MechanismConfig.BangBangProfile profile = controlLoopBangBangs.get(name);
+            if (profile == null) {
+                throw new IllegalArgumentException("No bang-bang profile found for name " + name);
+            }
+            return profile;
         }
 
         @Override

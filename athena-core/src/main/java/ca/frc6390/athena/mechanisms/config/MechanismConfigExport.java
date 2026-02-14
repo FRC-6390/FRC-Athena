@@ -247,6 +247,27 @@ public final class MechanismConfigExport {
             }
         }
 
+        List<MechanismBangBangConfig> bangBangProfiles = null;
+        if (cfg.controlLoopBangBangProfiles != null && !cfg.controlLoopBangBangProfiles.isEmpty()) {
+            bangBangProfiles = new ArrayList<>();
+            for (Map.Entry<String, MechanismConfig.BangBangProfile> e : cfg.controlLoopBangBangProfiles.entrySet()) {
+                if (e == null || e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
+                    continue;
+                }
+                MechanismConfig.BangBangProfile profile = e.getValue();
+                String outputProfile = profile.outputType() != null ? profile.outputType().name() : null;
+                bangBangProfiles.add(new MechanismBangBangConfig(
+                        e.getKey(),
+                        outputProfile,
+                        profile.highOutput(),
+                        profile.lowOutput(),
+                        profile.tolerance()));
+            }
+            if (bangBangProfiles.isEmpty()) {
+                bangBangProfiles = null;
+            }
+        }
+
         return new MechanismControlConfig(
                 output,
                 setpointAsOutput,
@@ -257,7 +278,9 @@ public final class MechanismConfigExport {
                 tolerance,
                 null,
                 null,
+                null,
                 pidProfiles,
+                bangBangProfiles,
                 ffProfiles);
     }
 

@@ -271,6 +271,32 @@ public final class MechanismConfigApplier {
             }
         }
 
+        OutputType bangBangOutputTypeHint = OutputType.PERCENT;
+        if (control.output() != null && !control.output().isBlank()) {
+            OutputType parsed = parseOutput(control.output());
+            if (parsed == OutputType.VOLTAGE || parsed == OutputType.PERCENT) {
+                bangBangOutputTypeHint = parsed;
+            }
+        }
+        final OutputType bangBangOutputTypeHintFinal = bangBangOutputTypeHint;
+
+        if (control.bangBangProfiles() != null) {
+            for (MechanismBangBangConfig profile : control.bangBangProfiles()) {
+                if (profile == null || profile.name() == null || profile.name().isBlank()) {
+                    continue;
+                }
+                OutputType profileOutput = parseBangBangOutput(profile.output(), bangBangOutputTypeHintFinal);
+                double highOutput = profile.highOutput() != null ? profile.highOutput() : 1.0;
+                double lowOutput = profile.lowOutput() != null ? profile.lowOutput() : -highOutput;
+                double tolerance = profile.tolerance() != null ? profile.tolerance() : 0.0;
+                target.control(c -> c.bangBangProfile(profile.name(), profileOutput, highOutput, lowOutput, tolerance));
+            }
+        }
+
+        if (control.bangBangProfile() != null && !control.bangBangProfile().isBlank()) {
+            target.control(c -> c.mainBangBang(control.bangBangProfile().trim()));
+        }
+
         // Feedforward profiles are used by custom loops (simple motor) and can optionally be selected
         // as a mechanism's main feedforward for mechanisms that support built-in FF.
         if (control.ffProfiles() != null) {
@@ -394,6 +420,17 @@ public final class MechanismConfigApplier {
     private static OutputType parseOutput(String value) {
         String v = value.trim().toUpperCase(Locale.ROOT);
         return OutputType.valueOf(v);
+    }
+
+    private static OutputType parseBangBangOutput(String value, OutputType fallback) {
+        OutputType parsed = fallback != null ? fallback : OutputType.PERCENT;
+        if (value != null && !value.isBlank()) {
+            parsed = parseOutput(value);
+        }
+        if (parsed != OutputType.PERCENT && parsed != OutputType.VOLTAGE) {
+            throw new IllegalArgumentException("Bang-bang profile output must be PERCENT or VOLTAGE");
+        }
+        return parsed;
     }
 
     private static BlockDirection parseBlockDirection(String value) {

@@ -62,6 +62,7 @@ public class MechanismConfig<T extends Mechanism> {
     // Selected "main" control profiles used by the built-in mechanism PID/FF implementations.
     // These are optional; teams can also drive output entirely via custom control loops.
     private String mainPidProfileName;
+    private String mainBangBangProfileName;
     private String mainSimpleFeedforwardProfileName;
     private String mainArmFeedforwardProfileName;
     private String mainElevatorFeedforwardProfileName;
@@ -105,6 +106,8 @@ public class MechanismConfig<T extends Mechanism> {
     public List<ControlLoopBinding<T>> controlLoops = new ArrayList<>();
     /** Optional named PID profiles for control-loop usage. */
     public Map<String, PidProfile> controlLoopPidProfiles = new HashMap<>();
+    /** Optional named bang-bang profiles for control-loop usage and/or main closed-loop control. */
+    public Map<String, BangBangProfile> controlLoopBangBangProfiles = new HashMap<>();
     /** Optional named simple-motor feedforward profiles for control-loop usage (and simple-motor main FF). */
     public Map<String, FeedforwardProfile> controlLoopFeedforwardProfiles = new HashMap<>();
     /** Optional named arm feedforward profiles (for ArmMechanism main FF). */
@@ -195,8 +198,19 @@ public class MechanismConfig<T extends Mechanism> {
         return controlLoopPidProfiles.get(mainPidProfileName);
     }
 
+    BangBangProfile resolveMainBangBangProfile() {
+        if (mainBangBangProfileName == null || mainBangBangProfileName.isBlank()) {
+            return null;
+        }
+        return controlLoopBangBangProfiles.get(mainBangBangProfileName);
+    }
+
     String mainPidProfileName() {
         return mainPidProfileName;
+    }
+
+    String mainBangBangProfileName() {
+        return mainBangBangProfileName;
     }
 
     String mainSimpleFeedforwardProfileName() {
@@ -828,6 +842,74 @@ public class MechanismConfig<T extends Mechanism> {
                 throw new IllegalArgumentException("main PID profile name cannot be blank");
             }
             owner.mainPidProfileName = name;
+            return this;
+        }
+
+        /**
+         * Registers a named bang-bang profile.
+         *
+         * <p>This overload creates a symmetric profile: +output when below setpoint, -output when
+         * above setpoint, and 0 inside tolerance.</p>
+         */
+        public ControlSection<T> bangBangProfile(String name, double output) {
+            return bangBangProfile(name, output, 0.0);
+        }
+
+        public ControlSection<T> bangBangProfile(String name, double output, double tolerance) {
+            return bangBangProfile(name, OutputType.PERCENT, output, -output, tolerance);
+        }
+
+        public ControlSection<T> bangBangProfile(String name, OutputType outputType, double output, double tolerance) {
+            return bangBangProfile(name, outputType, output, -output, tolerance);
+        }
+
+        /**
+         * Registers a named bang-bang profile with explicit high/low outputs.
+         *
+         * <p>{@code highOutput} is applied when measurement is below setpoint-tolerance.
+         * {@code lowOutput} is applied when measurement is above setpoint+tolerance.</p>
+         */
+        public ControlSection<T> bangBangProfile(
+                String name,
+                double highOutput,
+                double lowOutput,
+                double tolerance) {
+            return bangBangProfile(name, OutputType.PERCENT, highOutput, lowOutput, tolerance);
+        }
+
+        public ControlSection<T> bangBangProfile(
+                String name,
+                OutputType outputType,
+                double highOutput,
+                double lowOutput,
+                double tolerance) {
+            Objects.requireNonNull(name, "name");
+            if (name.isBlank()) {
+                throw new IllegalArgumentException("bang-bang profile name cannot be blank");
+            }
+            OutputType resolvedOutput = outputType != null ? outputType : OutputType.PERCENT;
+            if (resolvedOutput != OutputType.PERCENT && resolvedOutput != OutputType.VOLTAGE) {
+                throw new IllegalArgumentException("bang-bang profile output type must be PERCENT or VOLTAGE");
+            }
+            owner.controlLoopBangBangProfiles.put(
+                    name,
+                    new BangBangProfile(
+                            resolvedOutput,
+                            highOutput,
+                            lowOutput,
+                            tolerance));
+            return this;
+        }
+
+        /**
+         * Selects which named bang-bang profile should be used by the mechanism's built-in closed-loop control.
+         */
+        public ControlSection<T> mainBangBang(String name) {
+            Objects.requireNonNull(name, "name");
+            if (name.isBlank()) {
+                throw new IllegalArgumentException("main bang-bang profile name cannot be blank");
+            }
+            owner.mainBangBangProfileName = name;
             return this;
         }
 
@@ -2025,6 +2107,13 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     public record PidProfile(OutputType outputType, double kP, double kI, double kD, double iZone, double tolerance) { }
+
+    public record BangBangProfile(
+            OutputType outputType,
+            double highOutput,
+            double lowOutput,
+            double tolerance) {
+    }
 
     public record FeedforwardProfile(OutputType outputType, SimpleMotorFeedforward feedforward) {
         public FeedforwardProfile {

@@ -25,12 +25,20 @@ class MechanismConfigLoaderTest {
                 [control]
                 output = "voltage"
                 pid_profile = "pos"
+                bang_bang_profile = "pos_hold"
 
                 [[control.pid_profiles]]
                 name = "pos"
                 k_p = 1.0
                 k_i = 0.0
                 k_d = 0.0
+
+                [[control.bang_bang_profiles]]
+                name = "pos_hold"
+                output = "voltage"
+                high_output = 4.0
+                low_output = -4.0
+                tolerance = 0.2
                 """);
 
         Files.writeString(overlay, """
@@ -44,6 +52,15 @@ class MechanismConfigLoaderTest {
                 [[control.pid_profiles]]
                 name = "alt"
                 k_p = 3.0
+
+                [[control.bang_bang_profiles]]
+                name = "pos_hold"
+                high_output = 5.0
+
+                [[control.bang_bang_profiles]]
+                name = "coast"
+                high_output = 2.0
+                low_output = 0.0
                 """);
 
         MechanismConfigFile merged = MechanismConfigLoader.loadMerged(base, overlay);
@@ -57,6 +74,14 @@ class MechanismConfigLoaderTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals(2.0, pos.kP());
+
+        assertNotNull(merged.control().bangBangProfiles());
+        assertEquals(2, merged.control().bangBangProfiles().size());
+        MechanismBangBangConfig posHold = merged.control().bangBangProfiles().stream()
+                .filter(p -> "pos_hold".equals(p.name()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(5.0, posHold.highOutput());
+        assertEquals(-4.0, posHold.lowOutput());
     }
 }
-
