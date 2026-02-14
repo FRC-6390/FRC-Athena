@@ -1,6 +1,7 @@
 package ca.frc6390.athena.hardware.motor;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
+import ca.frc6390.athena.core.sections.SectionedAccess;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.controller.PIDController;
@@ -91,10 +92,7 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
      * Sectioned runtime API for output interactions on an already-built motor controller.
      */
     default MotorController output(Consumer<OutputSection> section) {
-        if (section != null) {
-            section.accept(new OutputSection(this));
-        }
-        return this;
+        return SectionedAccess.apply(this, section, () -> new OutputSection(this));
     }
 
     /**
@@ -108,10 +106,7 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
      * Sectioned config API for hardware/tuning interactions.
      */
     default MotorController config(Consumer<HardwareSection> section) {
-        if (section != null) {
-            section.accept(new HardwareSection(this));
-        }
-        return this;
+        return SectionedAccess.apply(this, section, () -> new HardwareSection(this));
     }
 
     /**

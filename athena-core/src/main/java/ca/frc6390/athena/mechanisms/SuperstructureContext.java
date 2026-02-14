@@ -1,10 +1,9 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.function.Function;
-import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotCore;
-import ca.frc6390.athena.core.RobotMechanisms;
+import ca.frc6390.athena.core.context.RobotScopedContext;
 import ca.frc6390.athena.core.input.TypedInputContext;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 
@@ -13,7 +12,7 @@ import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
  *
  * @param <SP> setpoint tuple type produced by the superstate enum
  */
-public interface SuperstructureContext<SP> extends TypedInputContext {
+public interface SuperstructureContext<SP> extends TypedInputContext, RobotScopedContext {
 
     SP setpoint();
 
@@ -21,27 +20,6 @@ public interface SuperstructureContext<SP> extends TypedInputContext {
      * Returns the robot core associated with the superstructure's child mechanisms.
      */
     RobotCore<?> robotCore();
-
-    /**
-     * Returns the global robot-wide mechanisms view (lookup by name/config/type).
-     *
-     * <p>This is the recommended way to shorten long nested access chains inside hooks/constraints:
-     * {@code ctx.robotMechanisms().turret(Turret.TURRET_CONFIG).atSetpoint()}.</p>
-     */
-    default RobotMechanisms robotMechanisms() {
-        RobotCore<?> core = robotCore();
-        if (core == null) {
-            throw new IllegalStateException("No RobotCore available in superstructure context");
-        }
-        return core.getMechanisms();
-    }
-
-    /**
-     * Sectioned interaction helper for other already-built mechanisms/superstructures.
-     */
-    default void robotMechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
-        robotMechanisms().use(section);
-    }
 
     <E extends Enum<E> & SetpointProvider<Double>> StatefulLike<E> mechanism(Function<SP, E> mapper);
 

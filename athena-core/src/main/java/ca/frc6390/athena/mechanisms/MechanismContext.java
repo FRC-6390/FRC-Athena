@@ -1,9 +1,7 @@
 package ca.frc6390.athena.mechanisms;
 
-import java.util.function.Consumer;
-
 import ca.frc6390.athena.core.RobotCore;
-import ca.frc6390.athena.core.RobotMechanisms;
+import ca.frc6390.athena.core.context.RobotScopedContext;
 import ca.frc6390.athena.core.input.TypedInputContext;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 
@@ -14,7 +12,7 @@ import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
  * @param <E> state enum type
  */
 public interface MechanismContext<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>>
-        extends TypedInputContext {
+        extends TypedInputContext, RobotScopedContext {
 
     T mechanism();
 
@@ -25,24 +23,6 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
     default RobotCore<?> robotCore() {
         RobotCore<?> core = mechanism().getRobotCore();
         return core != null ? core : RobotCore.getActiveInstance();
-    }
-
-    /**
-     * Returns the global robot-wide mechanisms view (lookup by name/config/type).
-     */
-    default RobotMechanisms robotMechanisms() {
-        RobotCore<?> core = robotCore();
-        if (core == null) {
-            throw new IllegalStateException("No RobotCore available in mechanism context");
-        }
-        return core.getMechanisms();
-    }
-
-    /**
-     * Sectioned interaction helper for other already-built mechanisms/superstructures.
-     */
-    default void robotMechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
-        robotMechanisms().use(section);
     }
 
     /**

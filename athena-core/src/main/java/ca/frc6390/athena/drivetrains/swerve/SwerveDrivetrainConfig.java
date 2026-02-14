@@ -5,6 +5,7 @@ import java.util.function.Consumer;
 import ca.frc6390.athena.drivetrains.DrivetrainSpeedSectionBase;
 import ca.frc6390.athena.drivetrains.DrivetrainSpeedConfigSupport;
 import ca.frc6390.athena.drivetrains.SectionedDrivetrainConfig;
+import ca.frc6390.athena.core.sections.SectionedAccess;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.EncoderIDs;
@@ -451,10 +452,7 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         }
 
         public ConfigSection speed(Consumer<SpeedSection> section) {
-            if (section != null) {
-                section.accept(new SpeedSection());
-            }
-            return this;
+            return SectionedAccess.apply(this, section, SpeedSection::new);
         }
 
         public SpeedSection speed() {

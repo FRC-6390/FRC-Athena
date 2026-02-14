@@ -3,9 +3,11 @@ package ca.frc6390.athena.drivetrains.differential;
 import java.util.Arrays;
 import java.util.function.Consumer;
 
-import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
+import ca.frc6390.athena.drivetrains.DrivetrainSpeedSectionBase;
 import ca.frc6390.athena.drivetrains.DrivetrainSpeedConfigSupport;
+import ca.frc6390.athena.drivetrains.SectionedDrivetrainConfig;
+import ca.frc6390.athena.core.sections.SectionedAccess;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.EncoderIDs;
@@ -28,7 +30,8 @@ import edu.wpi.first.math.controller.SimpleMotorFeedforward;
  * Builder for {@link DifferentialDrivetrain} instances. Captures the motor/encoder layout, CAN IDs,
  * inversion flags, gearing, and current limits necessary to initialize the drivetrain consistently.
  */
-public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<DifferentialDrivetrain>{
+public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<DifferentialDrivetrainConfig>
+        implements RobotDrivetrainConfig<DifferentialDrivetrain>{
    
     /** Estimated maximum linear velocity of the drivetrain (m/s). */
     private double maxVelocity;
@@ -72,11 +75,13 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         return new DifferentialDrivetrainConfig();
     }
 
-    public DifferentialDrivetrainConfig hardware(Consumer<HardwareSection> section) {
-        if (section != null) {
-            section.accept(new HardwareSection());
-        }
+    @Override
+    protected DifferentialDrivetrainConfig self() {
         return this;
+    }
+
+    public DifferentialDrivetrainConfig hardware(Consumer<HardwareSection> section) {
+        return applySection(section, HardwareSection::new);
     }
 
     public HardwareSection hardware() {
@@ -84,10 +89,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     }
 
     public DifferentialDrivetrainConfig control(Consumer<ControlSection> section) {
-        if (section != null) {
-            section.accept(new ControlSection());
-        }
-        return this;
+        return applySection(section, ControlSection::new);
     }
 
     public ControlSection control() {
@@ -95,10 +97,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     }
 
     public DifferentialDrivetrainConfig simulation(Consumer<SimulationSection> section) {
-        if (section != null) {
-            section.accept(new SimulationSection());
-        }
-        return this;
+        return applySection(section, SimulationSection::new);
     }
 
     public SimulationSection simulation() {
@@ -106,10 +105,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     }
 
     public DifferentialDrivetrainConfig speed(Consumer<SpeedSection> section) {
-        if (section != null) {
-            section.accept(new SpeedSection());
-        }
-        return this;
+        return applySection(section, SpeedSection::new);
     }
 
     public SpeedSection speed() {
@@ -117,10 +113,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     }
 
     public DifferentialDrivetrainConfig config(Consumer<ConfigSection> section) {
-        if (section != null) {
-            section.accept(new ConfigSection());
-        }
-        return this;
+        return applySection(section, ConfigSection::new);
     }
 
     public ConfigSection config() {
@@ -405,10 +398,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         }
 
         public ConfigSection speed(Consumer<SpeedSection> section) {
-            if (section != null) {
-                section.accept(new SpeedSection());
-            }
-            return this;
+            return SectionedAccess.apply(this, section, SpeedSection::new);
         }
 
         public SpeedSection speed() {
@@ -416,36 +406,13 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         }
     }
 
-    public final class SpeedSection {
-        public SpeedSection source(String name, boolean enabledByDefault) {
-            speedConfig.source(name, enabledByDefault);
-            return this;
+    public final class SpeedSection extends DrivetrainSpeedSectionBase<SpeedSection> {
+        private SpeedSection() {
+            super(speedConfig);
         }
 
-        public SpeedSection blend(
-                String target,
-                String source,
-                RobotSpeeds.BlendMode blendMode,
-                RobotSpeeds.SpeedAxis... axes) {
-            speedConfig.blend(target, source, blendMode, axes);
-            return this;
-        }
-
-        public SpeedSection blend(
-                String target,
-                String left,
-                String right,
-                RobotSpeeds.BlendMode blendMode,
-                RobotSpeeds.SpeedAxis... axes) {
-            speedConfig.blend(target, left, right, blendMode, axes);
-            return this;
-        }
-
-        public SpeedSection outputBlend(
-                String source,
-                RobotSpeeds.BlendMode blendMode,
-                RobotSpeeds.SpeedAxis... axes) {
-            speedConfig.outputBlend(source, blendMode, axes);
+        @Override
+        protected SpeedSection self() {
             return this;
         }
     }

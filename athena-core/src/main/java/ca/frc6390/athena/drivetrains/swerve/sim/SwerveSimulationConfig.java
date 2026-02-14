@@ -1,10 +1,12 @@
 package ca.frc6390.athena.drivetrains.swerve.sim;
 
+import ca.frc6390.athena.drivetrains.sim.CommonDrivetrainSimulationConfig;
+
 /**
  * Immutable container holding the physical parameters required to approximate the drivetrain in
  * simulation. Use the provided {@code with*} methods to derive tweaked copies.
  */
-public class SwerveSimulationConfig {
+public class SwerveSimulationConfig implements CommonDrivetrainSimulationConfig<SwerveSimulationConfig> {
 
     // Use real robot numbers: weigh the robot for mass, estimate yaw inertia from CAD or m*(w^2+l^2)/12, pick a tire friction that matches practice carpet (~1.1-1.3), and leave voltage at nominal battery.
     private final double robotMassKg;

@@ -1,11 +1,11 @@
 package ca.frc6390.athena.core;
 
-import java.util.function.Consumer;
-
+import ca.frc6390.athena.core.context.RobotScopedContext;
 import ca.frc6390.athena.core.input.TypedInputContext;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.logging.TelemetryRegistry;
 import ca.frc6390.athena.mechanisms.OutputType;
+import ca.frc6390.athena.mechanisms.OutputConversions;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.wpilibj.RobotController;
@@ -15,7 +15,8 @@ import edu.wpi.first.wpilibj.RobotController;
  *
  * @param <T> drivetrain type owned by the robot core
  */
-public interface RobotCoreContext<T extends RobotDrivetrain<T>> extends TypedInputContext {
+public interface RobotCoreContext<T extends RobotDrivetrain<T>>
+        extends TypedInputContext, RobotScopedContext {
 
     RobotCore<T> robotCore();
 
@@ -47,17 +48,6 @@ public interface RobotCoreContext<T extends RobotDrivetrain<T>> extends TypedInp
 
     default TelemetryRegistry telemetry() {
         return robotCore().telemetry();
-    }
-
-    default RobotMechanisms robotMechanisms() {
-        return robotCore().getMechanisms();
-    }
-
-    /**
-     * Sectioned interaction helper for already-built mechanisms/superstructures.
-     */
-    default void robotMechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
-        robotMechanisms().use(section);
     }
 
     /**
@@ -93,31 +83,19 @@ public interface RobotCoreContext<T extends RobotDrivetrain<T>> extends TypedInp
     }
 
     default double percentToVolts(double percent) {
-        return percent * batteryVoltage();
+        return OutputConversions.percentToVolts(percent, batteryVoltage());
     }
 
     default double voltsToPercent(double volts) {
-        double battery = batteryVoltage();
-        if (!Double.isFinite(battery) || Math.abs(battery) < 1e-9) {
-            return 0.0;
-        }
-        return volts / battery;
+        return OutputConversions.voltsToPercent(volts, batteryVoltage());
     }
 
     default double convertOutput(OutputType from, OutputType to, double value) {
-        OutputType resolvedFrom = from != null ? from : OutputType.VOLTAGE;
-        OutputType resolvedTo = to != null ? to : resolvedFrom;
-        if (resolvedFrom == resolvedTo) {
-            return value;
-        }
-        if (resolvedFrom == OutputType.PERCENT && resolvedTo == OutputType.VOLTAGE) {
-            return percentToVolts(value);
-        }
-        if (resolvedFrom == OutputType.VOLTAGE && resolvedTo == OutputType.PERCENT) {
-            return voltsToPercent(value);
-        }
-        throw new IllegalArgumentException(
-                "Unsupported output conversion from " + resolvedFrom + " to " + resolvedTo + " for RobotCore context");
+        return OutputConversions.convert(
+                from != null ? from : OutputType.VOLTAGE,
+                to,
+                value,
+                batteryVoltage());
     }
 
     default double pidOut(String name, double measurement, double setpoint) {

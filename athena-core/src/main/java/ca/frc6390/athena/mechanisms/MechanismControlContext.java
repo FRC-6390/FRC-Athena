@@ -1,9 +1,8 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.core.RobotCore;
-import ca.frc6390.athena.core.RobotMechanisms;
+import ca.frc6390.athena.core.context.RobotScopedContext;
 import ca.frc6390.athena.core.input.TypedInputContext;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.math.controller.PIDController;
@@ -19,7 +18,8 @@ import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
  *
  * @param <T> mechanism type
  */
-public interface MechanismControlContext<T extends Mechanism> extends TypedInputContext {
+public interface MechanismControlContext<T extends Mechanism>
+        extends TypedInputContext, RobotScopedContext {
 
     enum PositionUnit {
         ROTATIONS,
@@ -173,24 +173,6 @@ public interface MechanismControlContext<T extends Mechanism> extends TypedInput
     }
 
     /**
-     * Returns the global robot-wide mechanisms view (lookup by name/config/type).
-     */
-    default RobotMechanisms robotMechanisms() {
-        RobotCore<?> core = robotCore();
-        if (core == null) {
-            throw new IllegalStateException("No RobotCore available in mechanism control context");
-        }
-        return core.getMechanisms();
-    }
-
-    /**
-     * Sectioned interaction helper for other already-built mechanisms/superstructures.
-     */
-    default void robotMechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
-        robotMechanisms().use(section);
-    }
-
-    /**
      * Returns a named PID controller registered in the mechanism config.
      */
     PIDController pid(String name);
@@ -292,10 +274,11 @@ public interface MechanismControlContext<T extends Mechanism> extends TypedInput
      * If the mechanism uses voltage, this returns volts. Otherwise it returns percent.
      */
     default double percentToOutput(double percent) {
-        if (usesVoltage()) {
-            return percent * batteryVoltage();
-        }
-        return percent;
+        return OutputConversions.toMechanismOutput(
+                outputType(),
+                OutputType.PERCENT,
+                percent,
+                batteryVoltage());
     }
 
     /**
@@ -303,31 +286,18 @@ public interface MechanismControlContext<T extends Mechanism> extends TypedInput
      * If the mechanism uses voltage, this returns volts. Otherwise it returns percent.
      */
     default double voltsToOutput(double volts) {
-        if (usesVoltage()) {
-            return volts;
-        }
-        double vbat = batteryVoltage();
-        if (!Double.isFinite(vbat) || vbat == 0.0) {
-            return 0.0;
-        }
-        return volts / vbat;
+        return OutputConversions.toMechanismOutput(
+                outputType(),
+                OutputType.VOLTAGE,
+                volts,
+                batteryVoltage());
     }
 
     /**
      * Converts a value from the given output type into the mechanism's output space.
      */
     default double toOutput(OutputType type, double value) {
-        if (type == null) {
-            return value;
-        }
-        if (type == outputType()) {
-            return value;
-        }
-        return switch (type) {
-            case VOLTAGE -> voltsToOutput(value);
-            case PERCENT -> percentToOutput(value);
-            case POSITION, VELOCITY -> value;
-        };
+        return OutputConversions.toMechanismOutput(outputType(), type, value, batteryVoltage());
     }
 
     /**
@@ -394,24 +364,20 @@ public interface MechanismControlContext<T extends Mechanism> extends TypedInput
      * Converts a mechanism output value into percent (-1..1).
      */
     default double outputToPercent(double output) {
-        if (!usesVoltage()) {
+        if (outputType() == OutputType.POSITION || outputType() == OutputType.VELOCITY) {
             return output;
         }
-        double vbat = batteryVoltage();
-        if (!Double.isFinite(vbat) || vbat == 0.0) {
-            return 0.0;
-        }
-        return output / vbat;
+        return OutputConversions.convert(outputType(), OutputType.PERCENT, output, batteryVoltage());
     }
 
     /**
      * Converts a mechanism output value into volts.
      */
     default double outputToVolts(double output) {
-        if (usesVoltage()) {
+        if (outputType() == OutputType.POSITION || outputType() == OutputType.VELOCITY) {
             return output;
         }
-        return output * batteryVoltage();
+        return OutputConversions.convert(outputType(), OutputType.VOLTAGE, output, batteryVoltage());
     }
 
     /**

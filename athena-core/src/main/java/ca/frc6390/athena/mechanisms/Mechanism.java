@@ -6,8 +6,7 @@ import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.LoopTiming;
 import ca.frc6390.athena.core.RobotCoreHooks;
 import ca.frc6390.athena.core.input.TypedInputResolver;
-import ca.frc6390.athena.core.loop.TimedControlLoopRunner;
-import ca.frc6390.athena.core.loop.TimedPeriodicHookRunner;
+import ca.frc6390.athena.core.loop.TimedRunner;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
@@ -70,7 +69,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private static final String MOTION_AXIS_ID = "axis";
     private final MotionLimits motionLimits;
     private final TrapezoidProfile.Constraints baseProfiledConstraints;
-    private boolean override, emergencyStopped, pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput, customPIDCycle;
+    private boolean override, emergencyStopped, manualEmergencyStopped, connectivityFaultEmergencyStopped,
+            pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput, customPIDCycle;
     private double setpoint, prevSetpoint, pidOutput, feedforwardOutput, output, nudge, pidPeriod; 
     private RobotMode prevRobotMode = RobotMode.DISABLE, robotMode = RobotMode.DISABLE;
     private final MechanismSimulationModel simulationModel;
@@ -145,6 +145,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double cachedHardwareLastRefreshAgeSeconds = Double.NaN;
     private double cachedHardwareNextRefreshInSeconds = Double.NaN;
     private int cachedHardwareUpdateSlot;
+    private String cachedFaultReason = "";
+    private String cachedLastFaultReason = "";
     private RobotCore<?> robotCore;
     private SysIdRoutine sysIdRoutine;
     private double sysIdRampRateVoltsPerSecond = 1.0;
@@ -154,9 +156,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean sysIdActive = false;
     private boolean sysIdPreviousOverride = false;
     private final List<Consumer<?>> periodicHooks;
-    private final List<TimedPeriodicHookRunner<Consumer<Mechanism>>> timedPeriodicHooks;
-    private final List<TimedControlLoopRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoops;
-    private final Map<String, TimedControlLoopRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoopsByName;
+    private final List<TimedRunner<Consumer<Mechanism>>> timedPeriodicHooks;
+    private final List<TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoops;
+    private final Map<String, TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoopsByName;
     private final Set<String> disabledControlLoops;
     private final Map<String, BooleanSupplier> controlLoopInputs;
     private final Map<String, DoubleSupplier> controlLoopDoubleInputs;
@@ -193,6 +195,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double lastNetworkTablesCacheUpdateSeconds = Double.NaN;
     private double lastEmergencyStopLogSeconds = Double.NaN;
     private String lastEmergencyStopReason = "";
+    private String connectivityFaultReason = "";
+    private String lastFaultReason = "";
     private static final double EMERGENCY_STOP_LOG_PERIOD_SECONDS = 1.0;
 
     private enum RobotMode {
@@ -1311,35 +1315,30 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     protected double percentToOutput(double percent) {
-        if (outputType == OutputType.VOLTAGE) {
-            return percent * RobotController.getBatteryVoltage();
-        }
-        return percent;
+        return OutputConversions.toMechanismOutput(
+                outputType,
+                OutputType.PERCENT,
+                percent,
+                RobotController.getBatteryVoltage());
     }
 
     protected double voltsToOutput(double volts) {
-        if (outputType == OutputType.VOLTAGE) {
-            return volts;
-        }
-        double vbat = RobotController.getBatteryVoltage();
-        if (!Double.isFinite(vbat) || vbat == 0.0) {
-            return 0.0;
-        }
-        return volts / vbat;
+        return OutputConversions.toMechanismOutput(
+                outputType,
+                OutputType.VOLTAGE,
+                volts,
+                RobotController.getBatteryVoltage());
     }
 
     /**
      * Converts a value from the given output type into this mechanism's output space.
      */
     protected double toOutput(OutputType type, double value) {
-        if (type == null || type == outputType) {
-            return value;
-        }
-        return switch (type) {
-            case VOLTAGE -> voltsToOutput(value);
-            case PERCENT -> percentToOutput(value);
-            case POSITION, VELOCITY -> value;
-        };
+        return OutputConversions.toMechanismOutput(
+                outputType,
+                type,
+                value,
+                RobotController.getBatteryVoltage());
     }
 
     public OutputType getControlLoopPidOutputType(String name) {
@@ -1560,10 +1559,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         boolean encoderDisconnected = encoder != null && !encoder.isConnected();
         boolean motorsDisconnected = !motors.allMotorsConnected();
-        if (encoderDisconnected || motorsDisconnected) {
-            emergencyStopped = true;
-            logEmergencyStopReason(encoderDisconnected, motorsDisconnected);
-        }
+        updateConnectivityEmergencyStop(encoderDisconnected, motorsDisconnected);
 
         if(!customPIDCycle) updatePID();
 
@@ -1628,6 +1624,55 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void logEmergencyStopReason(boolean encoderDisconnected, boolean motorsDisconnected) {
+        String reasonText = connectivityReasonText(encoderDisconnected, motorsDisconnected);
+        double now = Timer.getFPGATimestamp();
+        boolean shouldLog = Double.isNaN(lastEmergencyStopLogSeconds)
+                || (now - lastEmergencyStopLogSeconds) >= EMERGENCY_STOP_LOG_PERIOD_SECONDS
+                || !reasonText.equals(lastEmergencyStopReason);
+        if (shouldLog) {
+            System.out.println("[Athena][EmergencyStop] " + getName() + ": " + reasonText);
+            lastEmergencyStopLogSeconds = now;
+            lastEmergencyStopReason = reasonText;
+        }
+    }
+
+    private void updateConnectivityEmergencyStop(boolean encoderDisconnected, boolean motorsDisconnected) {
+        boolean disconnected = encoderDisconnected || motorsDisconnected;
+        if (disconnected) {
+            connectivityFaultReason = connectivityReasonText(encoderDisconnected, motorsDisconnected);
+            lastFaultReason = connectivityFaultReason;
+            connectivityFaultEmergencyStopped = true;
+            refreshEmergencyStopState();
+            logEmergencyStopReason(encoderDisconnected, motorsDisconnected);
+            return;
+        }
+        if (!connectivityFaultEmergencyStopped) {
+            return;
+        }
+        connectivityFaultEmergencyStopped = false;
+        connectivityFaultReason = "";
+        refreshEmergencyStopState();
+        logEmergencyStopRecovery();
+    }
+
+    private void logEmergencyStopRecovery() {
+        String reasonText = "connectivity restored";
+        double now = Timer.getFPGATimestamp();
+        boolean shouldLog = Double.isNaN(lastEmergencyStopLogSeconds)
+                || (now - lastEmergencyStopLogSeconds) >= EMERGENCY_STOP_LOG_PERIOD_SECONDS
+                || !reasonText.equals(lastEmergencyStopReason);
+        if (shouldLog) {
+            System.out.println("[Athena][EmergencyStop] " + getName() + ": " + reasonText);
+            lastEmergencyStopLogSeconds = now;
+            lastEmergencyStopReason = reasonText;
+        }
+    }
+
+    private void refreshEmergencyStopState() {
+        emergencyStopped = manualEmergencyStopped || connectivityFaultEmergencyStopped;
+    }
+
+    private String connectivityReasonText(boolean encoderDisconnected, boolean motorsDisconnected) {
         StringBuilder reason = new StringBuilder();
         if (encoderDisconnected) {
             reason.append("encoder disconnected");
@@ -1638,16 +1683,20 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             }
             reason.append("motor controller disconnected");
         }
-        String reasonText = reason.toString();
-        double now = Timer.getFPGATimestamp();
-        boolean shouldLog = Double.isNaN(lastEmergencyStopLogSeconds)
-                || (now - lastEmergencyStopLogSeconds) >= EMERGENCY_STOP_LOG_PERIOD_SECONDS
-                || !reasonText.equals(lastEmergencyStopReason);
-        if (shouldLog) {
-            System.out.println("[Athena][EmergencyStop] " + getName() + ": " + reasonText);
-            lastEmergencyStopLogSeconds = now;
-            lastEmergencyStopReason = reasonText;
+        return reason.toString();
+    }
+
+    private String resolveActiveFaultReason() {
+        if (manualEmergencyStopped && connectivityFaultEmergencyStopped) {
+            return "manual emergency stop, " + connectivityFaultReason;
         }
+        if (manualEmergencyStopped) {
+            return "manual emergency stop";
+        }
+        if (connectivityFaultEmergencyStopped) {
+            return connectivityFaultReason;
+        }
+        return "";
     }
 
     public GenericLimitSwitch[] getLimitSwitches() {
@@ -1697,7 +1746,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     public void setEmergencyStopped(boolean emergancyStopped) {
-        this.emergencyStopped = emergancyStopped;
+        this.manualEmergencyStopped = emergancyStopped;
+        if (emergancyStopped) {
+            lastFaultReason = "manual emergency stop";
+        }
+        refreshEmergencyStopState();
     }
 
     public double getOutput() {
@@ -1854,10 +1907,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
         if (!timedPeriodicHooks.isEmpty()) {
             double nowSeconds = Timer.getFPGATimestamp();
-            double nowMs = nowSeconds * 1000.0;
-            for (TimedPeriodicHookRunner<Consumer<Mechanism>> runner : timedPeriodicHooks) {
-                if (runner.shouldRun(nowMs)) {
-                    runner.run(hook -> hook.accept(this), nowMs);
+            for (TimedRunner<Consumer<Mechanism>> runner : timedPeriodicHooks) {
+                if (runner.shouldRunSeconds(nowSeconds)) {
+                    runner.run(hook -> hook.accept(this), nowSeconds);
                 }
             }
         }
@@ -1908,6 +1960,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 (Double.isFinite(nextDueSeconds) && Double.isFinite(nowSeconds))
                         ? Math.max(0.0, nextDueSeconds - nowSeconds)
                         : Double.NaN;
+        cachedFaultReason = resolveActiveFaultReason();
+        cachedLastFaultReason = lastFaultReason;
     }
 
     private double calculateControlLoopOutput() {
@@ -1916,12 +1970,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
         double nowSeconds = Timer.getFPGATimestamp();
         double total = 0.0;
-        for (TimedControlLoopRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
+        for (TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
             if (!isControlLoopEnabled(runner.name())) {
                 runner.setLastOutput(0.0);
                 continue;
             }
-            if (runner.shouldRun(nowSeconds)) {
+            if (runner.shouldRunSeconds(nowSeconds)) {
                 double dtSeconds;
                 if (Double.isNaN(runner.lastRunSeconds())) {
                     dtSeconds = runner.periodSeconds();
@@ -1932,7 +1986,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     dtSeconds = Double.NaN;
                 }
                 controlContext.setControlLoopDtSeconds(dtSeconds);
-                runner.setLastOutput(runner.loop().calculate(controlContext));
+                runner.setLastOutput(runner.task().calculate(controlContext));
                 runner.setLastRunSeconds(nowSeconds);
             }
             total += runner.lastOutput();
@@ -2058,7 +2112,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (controlLoopsByName.containsKey(name)) {
             throw new IllegalArgumentException("control loop name already registered: " + name);
         }
-        TimedControlLoopRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner = new TimedControlLoopRunner<>(
+        TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner = new TimedRunner<>(
                 name,
                 binding.periodSeconds(),
                 (MechanismConfig.MechanismControlLoop<Mechanism>) binding.loop());
@@ -2071,7 +2125,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (binding == null) {
             return;
         }
-        timedPeriodicHooks.add(new TimedPeriodicHookRunner<>((Consumer<Mechanism>) binding.hook(), binding.periodMs()));
+        timedPeriodicHooks.add(TimedRunner.periodicMs((Consumer<Mechanism>) binding.hook(), binding.periodMs()));
     }
 
     private final class MechanismControlContextImpl implements MechanismControlContext<Mechanism> {
@@ -2542,6 +2596,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             status.putBoolean("pidEnabled", cachedPidEnabled);
             status.putBoolean("feedforwardEnabled", cachedFeedforwardEnabled);
             status.putString("outputType", String.valueOf(getOutputType()));
+            status.putString("faultReason", cachedFaultReason != null ? cachedFaultReason : "");
+            status.putString("lastFaultReason", cachedLastFaultReason != null ? cachedLastFaultReason : "");
             status.putDouble("hwRefreshPeriodMs", cachedHardwareUpdatePeriodSeconds * 1000.0);
             status.putDouble("hwRefreshPhaseMs", cachedHardwareUpdatePhaseSeconds * 1000.0);
             status.putDouble("hwRefreshSlot", cachedHardwareUpdateSlot);

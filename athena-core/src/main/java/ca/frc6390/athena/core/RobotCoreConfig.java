@@ -14,6 +14,7 @@ import ca.frc6390.athena.drivetrains.DrivetrainSpeedConfigSupport;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrainConfig;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
+import ca.frc6390.athena.drivetrains.sim.CommonDrivetrainSimulationConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrainConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
@@ -272,30 +273,47 @@ public final class RobotCoreConfig {
         }
     }
 
-    public static final class SwerveSimulationSection {
-        private SwerveSimulationConfig config;
+    private abstract static class CommonSimulationSection<
+            C extends CommonDrivetrainSimulationConfig<C>,
+            Self extends CommonSimulationSection<C, Self>> {
+        protected C config;
 
-        private SwerveSimulationSection(SwerveSimulationConfig config) {
+        protected CommonSimulationSection(C config) {
             this.config = Objects.requireNonNull(config, "config");
         }
 
-        public SwerveSimulationSection robotMassKg(double kg) {
+        protected abstract Self self();
+
+        public final Self robotMassKg(double kg) {
             config = config.withRobotMassKg(kg);
-            return this;
+            return self();
         }
 
-        public SwerveSimulationSection nominalVoltage(double volts) {
+        public final Self nominalVoltage(double volts) {
             config = config.withNominalVoltage(volts);
+            return self();
+        }
+
+        public final Self robotMomentOfInertia(double moi) {
+            config = config.withRobotMomentOfInertia(moi);
+            return self();
+        }
+    }
+
+    public static final class SwerveSimulationSection
+            extends CommonSimulationSection<SwerveSimulationConfig, SwerveSimulationSection> {
+
+        private SwerveSimulationSection(SwerveSimulationConfig config) {
+            super(config);
+        }
+
+        @Override
+        protected SwerveSimulationSection self() {
             return this;
         }
 
         public SwerveSimulationSection wheelCoefficientOfFriction(double coef) {
             config = config.withWheelCoefficientOfFriction(coef);
-            return this;
-        }
-
-        public SwerveSimulationSection robotMomentOfInertia(double moi) {
-            config = config.withRobotMomentOfInertia(moi);
             return this;
         }
 
@@ -349,20 +367,15 @@ public final class RobotCoreConfig {
         }
     }
 
-    public static final class DifferentialSimulationSection {
-        private DifferentialSimulationConfig config;
+    public static final class DifferentialSimulationSection
+            extends CommonSimulationSection<DifferentialSimulationConfig, DifferentialSimulationSection> {
 
         private DifferentialSimulationSection(DifferentialSimulationConfig config) {
-            this.config = Objects.requireNonNull(config, "config");
+            super(config);
         }
 
-        public DifferentialSimulationSection robotMassKg(double kg) {
-            config = config.withRobotMassKg(kg);
-            return this;
-        }
-
-        public DifferentialSimulationSection nominalVoltage(double volts) {
-            config = config.withNominalVoltage(volts);
+        @Override
+        protected DifferentialSimulationSection self() {
             return this;
         }
 
@@ -386,10 +399,6 @@ public final class RobotCoreConfig {
             return this;
         }
 
-        public DifferentialSimulationSection robotMomentOfInertia(double moi) {
-            config = config.withRobotMomentOfInertia(moi);
-            return this;
-        }
     }
 
     @FunctionalInterface

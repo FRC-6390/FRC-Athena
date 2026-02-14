@@ -2,6 +2,7 @@ package ca.frc6390.athena.drivetrains.differential.sim;
 
 import ca.frc6390.athena.sim.Motor;
 import ca.frc6390.athena.sim.MotorSimType;
+import ca.frc6390.athena.drivetrains.sim.CommonDrivetrainSimulationConfig;
 
 /**
  * Immutable configuration describing the physical parameters required to simulate a differential
@@ -10,7 +11,8 @@ import ca.frc6390.athena.sim.MotorSimType;
  * be filled using {@link #resolve(double, double, double, int)} based on the drivetrain builder
  * inputs.
  */
-public class DifferentialSimulationConfig {
+public class DifferentialSimulationConfig
+        implements CommonDrivetrainSimulationConfig<DifferentialSimulationConfig> {
 
     private final MotorSimType motorType;
     private final int motorsPerSide;

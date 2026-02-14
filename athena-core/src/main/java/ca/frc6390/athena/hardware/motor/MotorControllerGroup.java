@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
+import ca.frc6390.athena.core.sections.SectionedAccess;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.core.RobotNetworkTables;
@@ -35,10 +36,7 @@ public class MotorControllerGroup implements RobotSendableDevice {
      * Sectioned output API for already-built motor groups.
      */
     public MotorControllerGroup output(Consumer<OutputSection> section) {
-        if (section != null) {
-            section.accept(new OutputSection(this));
-        }
-        return this;
+        return SectionedAccess.apply(this, section, () -> new OutputSection(this));
     }
 
     /**
@@ -52,10 +50,7 @@ public class MotorControllerGroup implements RobotSendableDevice {
      * Sectioned config API for already-built motor groups.
      */
     public MotorControllerGroup config(Consumer<ConfigSection> section) {
-        if (section != null) {
-            section.accept(new ConfigSection(this));
-        }
-        return this;
+        return SectionedAccess.apply(this, section, () -> new ConfigSection(this));
     }
 
     /**
