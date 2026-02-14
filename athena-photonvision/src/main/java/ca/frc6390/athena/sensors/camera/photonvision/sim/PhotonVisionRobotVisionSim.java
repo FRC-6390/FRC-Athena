@@ -53,7 +53,7 @@ public class PhotonVisionRobotVisionSim extends RobotVisionSim {
     }
 
     private void registerCameras() {
-        for (VisionCamera camera : vision.getCameras().values()) {
+        for (VisionCamera camera : vision.cameras().all().values()) {
             if (camera.supports(VisionCameraCapability.PHOTON_VISION_CAMERA)) {
                 registerPhotonVision(camera);
             } else if (camera.supports(VisionCameraCapability.LIMELIGHT_CAMERA)) {

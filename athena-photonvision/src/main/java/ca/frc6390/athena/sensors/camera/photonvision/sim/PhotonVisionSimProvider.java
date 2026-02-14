@@ -11,7 +11,7 @@ public class PhotonVisionSimProvider implements RobotVisionSimProvider {
 
     @Override
     public boolean supports(RobotVision vision) {
-        for (VisionCamera camera : vision.getCameras().values()) {
+        for (VisionCamera camera : vision.cameras().all().values()) {
             if (camera.supports(VisionCameraCapability.PHOTON_VISION_CAMERA)
                     || camera.supports(VisionCameraCapability.LIMELIGHT_CAMERA)) {
                 return true;

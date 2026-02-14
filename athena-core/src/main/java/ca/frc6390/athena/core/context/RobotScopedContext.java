@@ -19,7 +19,7 @@ public interface RobotScopedContext {
         if (core == null) {
             throw new IllegalStateException("No RobotCore available in context");
         }
-        return core.getMechanisms();
+        return core.mechanisms();
     }
 
     /**

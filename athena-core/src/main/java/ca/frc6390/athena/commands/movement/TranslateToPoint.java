@@ -13,8 +13,8 @@ public class TranslateToPoint extends Command{
     private PIDController translationPID;
 
     public TranslateToPoint(RobotDrivetrain<?> drivetrain, double x, double y){
-        this.speeds = drivetrain.getRobotSpeeds();
-        this.imu = drivetrain.getIMU();
+        this.speeds = drivetrain.robotSpeeds();
+        this.imu = drivetrain.imu().device();
         this.translationPID = new PIDController(0, 0, 0);
         this.translationPID.enableContinuousInput(-Math.PI, Math.PI);
         this.translationPID.setTolerance(0.05);

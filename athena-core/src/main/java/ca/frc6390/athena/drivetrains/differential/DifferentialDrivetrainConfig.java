@@ -741,8 +741,8 @@ public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<Diff
         DifferentialDrivetrain dt = new DifferentialDrivetrain(resolvedImu, maxVelocity, trackWidth, lm, rm);
 
         if (driveFeedforward != null) {
-            dt.setDriveFeedforward(driveFeedforward);
-            dt.setDriveFeedforwardEnabled(driveFeedforwardEnabled);
+            dt.driveFeedforward(driveFeedforward);
+            dt.driveFeedforwardEnabled(driveFeedforwardEnabled);
         }
 
         if (simulationConfig != null) {
@@ -758,7 +758,7 @@ public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<Diff
             dt.configureSimulation(resolvedSimulation);
         }
 
-        speedConfig.apply(dt.getRobotSpeeds());
+        speedConfig.apply(dt.robotSpeeds());
         return dt;
     }
 }

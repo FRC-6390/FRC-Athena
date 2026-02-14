@@ -23,23 +23,23 @@ public interface RobotCoreContext<T extends RobotDrivetrain<T>>
     RobotCoreHooks.Phase phase();
 
     default T drivetrain() {
-        return robotCore().getDrivetrain();
+        return robotCore().drivetrain();
     }
 
     default RobotLocalization<?> localization() {
-        return robotCore().getLocalization();
+        return robotCore().localization();
     }
 
     default RobotVision vision() {
-        return robotCore().getVision();
+        return robotCore().vision();
     }
 
     default RobotAuto autos() {
-        return robotCore().getAutos();
+        return robotCore().autos();
     }
 
     default RobotCopilot copilot() {
-        return robotCore().getCopilot();
+        return robotCore().copilot();
     }
 
     default RobotNetworkTables networkTables() {

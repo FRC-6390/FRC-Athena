@@ -845,8 +845,8 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         SwerveDrivetrain dt = new SwerveDrivetrain(resolvedImu, modules);
 
         if (driveFeedforward != null) {
-            dt.setDriveFeedforward(driveFeedforward);
-            dt.setDriveFeedforwardEnabled(driveFeedforwardEnabled);
+            dt.driveFeedforward(driveFeedforward);
+            dt.driveFeedforwardEnabled(driveFeedforwardEnabled);
         }
 
         if (edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
@@ -854,13 +854,13 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         }
 
         if (driftPID != null){
-            dt.setDriftCorrectionPID(driftPID);
-            dt.setDriftCorrectionMode(true);
+            dt.driftCorrectionPid(driftPID);
+            dt.driftCorrectionEnabled(true);
         }
 
-        dt.setFieldRelative(fieldRelative);
+        dt.fieldRelative(fieldRelative);
         dt.driftActivationSpeed = driftActivationSpeed;
-        speedConfig.apply(dt.getRobotSpeeds());
+        speedConfig.apply(dt.robotSpeeds());
         return dt;
     }
 }

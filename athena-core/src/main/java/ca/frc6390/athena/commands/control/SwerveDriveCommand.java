@@ -22,7 +22,7 @@ public class SwerveDriveCommand extends Command {
     this.thetaInput = thetaInput;
     this.fieldRelative = fieldRelative;
     addRequirements(driveTrain);
-    driveTrain.setNeutralMode(MotorNeutralMode.Brake);
+    driveTrain.hardware().neutralMode(MotorNeutralMode.Brake);
   }
   
   @Override
@@ -32,20 +32,20 @@ public class SwerveDriveCommand extends Command {
   @Override
   public void execute() {
 
-    double xSpeed = xInput.getAsDouble() * driveTrain.getRobotSpeeds().getMaxVelocity();
-    double ySpeed = yInput.getAsDouble() * driveTrain.getRobotSpeeds().getMaxVelocity();
-    double thetaSpeed = thetaInput.getAsDouble() * driveTrain.getRobotSpeeds().getMaxAngularVelocity();
+    double xSpeed = xInput.getAsDouble() * driveTrain.speeds().maxVelocity();
+    double ySpeed = yInput.getAsDouble() * driveTrain.speeds().maxVelocity();
+    double thetaSpeed = thetaInput.getAsDouble() * driveTrain.speeds().maxAngularVelocity();
 
     ChassisSpeeds chassisSpeeds = fieldRelative
-        ? ChassisSpeeds.fromFieldRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.getIMU().getVirtualAxis("driver"))
+        ? ChassisSpeeds.fromFieldRelativeSpeeds(ySpeed, xSpeed, thetaSpeed, driveTrain.imu().device().getVirtualAxis("driver"))
         : new ChassisSpeeds(ySpeed, xSpeed, thetaSpeed);
 
-    driveTrain.getRobotSpeeds().setSpeeds("drive", chassisSpeeds);    
+    driveTrain.speeds().set("drive", chassisSpeeds);
   }
 
   @Override
   public void end(boolean interrupted) {
-    driveTrain.getRobotSpeeds().stopSpeeds("drive");
+    driveTrain.speeds().stop("drive");
   }
 
   @Override

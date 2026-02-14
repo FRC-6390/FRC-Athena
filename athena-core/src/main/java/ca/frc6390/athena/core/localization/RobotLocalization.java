@@ -186,7 +186,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         for (RobotLocalizationConfig.NamedBoundingBox namedBox : config.boundingBoxes()) {
             if (namedBox != null) {
-                setBoundingBox(namedBox.name(), namedBox.box());
+                zone(namedBox.name(), namedBox.box());
             }
         }
         loadPersistentState();
@@ -213,7 +213,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 vision != null ? "vision attached to localization" : "vision detached from localization");
         if (vision != null) {
             vision.attachLocalization(this);
-            vision.setLocalizationStdDevs(localizationConfig.getVisionStd(), localizationConfig.getVisionMultitagStd());
+            vision.measurements().localizationStdDevs(
+                    localizationConfig.getVisionStd(),
+                    localizationConfig.getVisionMultitagStd());
         }
         cameraManager.ensureCameraEntries(vision);
         return this;
@@ -1196,7 +1198,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     /**
      * Registers or updates a named localization bounding box for visualization and telemetry.
      */
-    public RobotLocalization<T> setBoundingBox(String name, PoseBoundingBox2d box) {
+    public RobotLocalization<T> zone(String name, PoseBoundingBox2d box) {
         String resolvedName = sanitizeBoundingBoxName(name);
         Objects.requireNonNull(box, "box");
         namedBoundingBoxes.put(resolvedName, box);
@@ -1207,14 +1209,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     /**
      * Registers or updates a named localization bounding box from opposite corners.
      */
-    public RobotLocalization<T> setBoundingBox(String name, Translation2d cornerA, Translation2d cornerB) {
-        return setBoundingBox(name, PoseBoundingBox2d.fromCorners(cornerA, cornerB));
+    public RobotLocalization<T> zone(String name, Translation2d cornerA, Translation2d cornerB) {
+        return zone(name, PoseBoundingBox2d.fromCorners(cornerA, cornerB));
     }
 
     /**
      * Removes a named localization bounding box from visualization and telemetry.
      */
-    public boolean removeBoundingBox(String name) {
+    public boolean removeZone(String name) {
         String resolvedName = sanitizeBoundingBoxName(name);
         PoseBoundingBox2d removed = namedBoundingBoxes.remove(resolvedName);
         if (removed == null) {
@@ -1231,7 +1233,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     /**
      * Clears all named localization bounding boxes from visualization and telemetry.
      */
-    public void clearBoundingBoxes() {
+    public void clearZones() {
         namedBoundingBoxes.clear();
         for (StructArrayPublisher<Pose2d> publisher : boundingBoxPublishers.values()) {
             if (publisher != null) {
@@ -1245,15 +1247,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     /**
      * Returns an immutable view of registered localization bounding boxes.
      */
-    public Map<String, PoseBoundingBox2d> getBoundingBoxes() {
+    private Map<String, PoseBoundingBox2d> zonesMap() {
         return Map.copyOf(namedBoundingBoxes);
-    }
-
-    /**
-     * Structured read API for localization state.
-     */
-    public StateView state() {
-        return new StateView(this);
     }
 
     /**
@@ -1271,8 +1266,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return new SpeedsView(this);
     }
 
-    public BoundingBoxesView boundingBoxes() {
-        return new BoundingBoxesView(this);
+    public ZonesView zones() {
+        return new ZonesView(this);
     }
 
     public Pose2d getFieldPose(){
@@ -1332,24 +1327,24 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     /**
      * Checks whether the primary field pose is inside the provided axis-aligned bounding box.
      */
-    public boolean isInBoundingBox(PoseBoundingBox2d box) {
+    public boolean inZone(PoseBoundingBox2d box) {
         return box != null && box.contains(getFieldPose());
     }
 
     /**
      * Checks whether the primary field pose is inside the axis-aligned box formed by two corners.
      */
-    public boolean isInBoundingBox(Translation2d cornerA, Translation2d cornerB) {
+    public boolean inZone(Translation2d cornerA, Translation2d cornerB) {
         if (cornerA == null || cornerB == null) {
             return false;
         }
-        return isInBoundingBox(PoseBoundingBox2d.fromCorners(cornerA, cornerB));
+        return inZone(PoseBoundingBox2d.fromCorners(cornerA, cornerB));
     }
 
     /**
      * Checks whether a named pose config is inside the provided axis-aligned bounding box.
      */
-    public boolean isPoseInBoundingBox(String name, PoseBoundingBox2d box) {
+    public boolean poseInZone(String name, PoseBoundingBox2d box) {
         if (name == null || box == null || !hasPoseConfig(name)) {
             return false;
         }
@@ -1359,11 +1354,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     /**
      * Checks whether a named pose config is inside the axis-aligned box formed by two corners.
      */
-    public boolean isPoseInBoundingBox(String name, Translation2d cornerA, Translation2d cornerB) {
+    public boolean poseInZone(String name, Translation2d cornerA, Translation2d cornerB) {
         if (name == null || cornerA == null || cornerB == null || !hasPoseConfig(name)) {
             return false;
         }
-        return isPoseInBoundingBox(name, PoseBoundingBox2d.fromCorners(cornerA, cornerB));
+        return poseInZone(name, PoseBoundingBox2d.fromCorners(cornerA, cornerB));
     }
 
     public RobotLocalizationConfig getLocalizationConfig() {
@@ -1398,74 +1393,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public Field2d getVisionField2d() {
         return cameraManager.getVisionField();
-    }
-
-    public static final class StateView {
-        private final RobotLocalization<?> owner;
-
-        private StateView(RobotLocalization<?> owner) {
-            this.owner = owner;
-        }
-
-        /**
-         * Forces one immediate pose-estimator pass before reading.
-         */
-        public StateView refresh() {
-            owner.updateActivePoseConfigs();
-            return this;
-        }
-
-        public Pose2d pose() {
-            return owner.getFieldPose();
-        }
-
-        public Pose3d pose3d() {
-            return owner.getFieldPose3d();
-        }
-
-        public Pose2d pose(String name) {
-            return owner.getPose2d(name);
-        }
-
-        public Pose3d pose3d(String name) {
-            return owner.getPose3d(name);
-        }
-
-        public boolean suppressUpdates() {
-            return owner.isSuppressUpdates();
-        }
-
-        public boolean hasPose(String name) {
-            return owner.hasPoseConfig(name);
-        }
-
-        public boolean poseActive(String name) {
-            return owner.isPoseActive(name);
-        }
-
-        public boolean inBoundingBox(PoseBoundingBox2d box) {
-            return owner.isInBoundingBox(box);
-        }
-
-        public boolean poseInBoundingBox(String name, PoseBoundingBox2d box) {
-            return owner.isPoseInBoundingBox(name, box);
-        }
-
-        public SpeedsView speeds() {
-            return owner.speeds();
-        }
-
-        public BoundingBoxesView boundingBoxes() {
-            return owner.boundingBoxes();
-        }
-
-        public Field2d field2d() {
-            return owner.getField2d();
-        }
-
-        public Field2d visionField2d() {
-            return owner.getVisionField2d();
-        }
     }
 
     public static final class SpeedsView {
@@ -1504,28 +1431,28 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
     }
 
-    public static final class BoundingBoxesView {
+    public static final class ZonesView {
         private final RobotLocalization<?> owner;
 
-        private BoundingBoxesView(RobotLocalization<?> owner) {
+        private ZonesView(RobotLocalization<?> owner) {
             this.owner = owner;
         }
 
         public Map<String, PoseBoundingBox2d> all() {
-            return owner.getBoundingBoxes();
+            return owner.zonesMap();
         }
 
         public boolean contains(String name) {
-            return name != null && owner.getBoundingBoxes().containsKey(name);
+            return name != null && owner.zonesMap().containsKey(name);
         }
 
         public boolean in(String name) {
-            PoseBoundingBox2d box = owner.getBoundingBoxes().get(name);
-            return box != null && owner.isInBoundingBox(box);
+            PoseBoundingBox2d box = owner.zonesMap().get(name);
+            return box != null && owner.inZone(box);
         }
 
         public boolean in(PoseBoundingBox2d box) {
-            return owner.isInBoundingBox(box);
+            return owner.inZone(box);
         }
     }
 
@@ -1883,18 +1810,18 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         state.lastVisionFusionUpdateSeconds = nowSeconds;
         Pose2d referencePose = state.pose2d != null ? state.pose2d : new Pose2d();
-        vision.setRobotOrientation(referencePose);
+        vision.measurements().robotOrientation(referencePose);
         boolean accepted = false;
         if (backend.useMultiVision()) {
             Optional<VisionCamera.VisionMeasurement> measurement =
-                    fuseVisionMeasurements(state, referencePose, vision.getVisionMeasurements(), backend);
+                    fuseVisionMeasurements(state, referencePose, vision.measurements().measurements(), backend);
             if (measurement.isPresent() && applyVisionMeasurement(config, state, measurement.get(), backend)) {
                 state.hasAcceptedVisionMeasurement = true;
                 state.lastVisionMeasurementTimestamp = measurement.get().timestampSeconds();
                 accepted = true;
             }
         } else {
-            Optional<VisionCamera.VisionMeasurement> measurement = vision.getBestVisionMeasurement();
+            Optional<VisionCamera.VisionMeasurement> measurement = vision.measurements().bestMeasurement();
             if (measurement.isPresent() && applyVisionMeasurement(config, state, measurement.get(), backend)) {
                 state.hasAcceptedVisionMeasurement = true;
                 state.lastVisionMeasurementTimestamp = measurement.get().timestampSeconds();

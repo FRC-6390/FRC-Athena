@@ -41,12 +41,12 @@ public class TagAlignmentBase extends Command {
     this.alignmentComplete = alignmentComplete;
     this.offsetProvider = offsetProvider;
 
-    this.xController = base.getAutos().getXController();
-    this.yController = base.getAutos().getYController();
-    this.thetaController = base.getAutos().getThetaController();
+    this.xController = base.autos().controllers().x();
+    this.yController = base.autos().controllers().y();
+    this.thetaController = base.autos().controllers().theta();
 
-    this.robotSpeeds = base.getDrivetrain().getRobotSpeeds();
-    java.util.Optional<LimeLight> limelightCapability = base.getVision().getCameraCapability(table, VisionCameraCapability.LIMELIGHT_CAMERA);
+    this.robotSpeeds = base.drivetrain().robotSpeeds();
+    java.util.Optional<LimeLight> limelightCapability = base.vision().cameras().capability(table, VisionCameraCapability.LIMELIGHT_CAMERA);
     this.camera = limelightCapability.orElseThrow(() -> new IllegalArgumentException("No Limelight camera registered for table: " + table));
    }
 

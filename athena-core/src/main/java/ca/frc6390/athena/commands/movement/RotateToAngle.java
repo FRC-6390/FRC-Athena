@@ -24,10 +24,10 @@ public class RotateToAngle extends Command{
     private final DelayedOutput delayedOutput;
 
     public RotateToAngle(RobotCore<?> base, Supplier<Rotation2d> angle){
-        this.speeds = base.getDrivetrain().getRobotSpeeds();
-        this.imu = base.getDrivetrain().getIMU();
+        this.speeds = base.drivetrain().robotSpeeds();
+        this.imu = base.drivetrain().imu().device();
         this.angle = angle;
-        this.pose = () -> base.getLocalization().getFieldPose();
+        this.pose = () -> base.localization().pose();
 
         this.rotationPID = new ProfiledPIDController(0, 0, 0, new Constraints(0, 0));
         this.rotationPID.enableContinuousInput(-Math.PI, Math.PI);

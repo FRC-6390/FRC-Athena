@@ -1,6 +1,7 @@
 package ca.frc6390.athena.drivetrains.differential;
 
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
@@ -11,6 +12,7 @@ import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.core.localization.PoseEstimatorFactory;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
+import ca.frc6390.athena.core.localization.RobotDrivetrainLocalizationFactory;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialDrivetrainSimulation;
@@ -47,10 +49,18 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
-public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivetrain<DifferentialDrivetrain> {
+public class DifferentialDrivetrain extends SubsystemBase
+        implements RobotDrivetrain<DifferentialDrivetrain>, RobotDrivetrainLocalizationFactory {
 
     private final RobotSpeeds robotSpeeds;
     private final MotionLimits motionLimits;
+    private final ControlRuntimeSection controlSection = new ControlRuntimeSection();
+    private final SpeedsRuntimeSection speedsSection = new SpeedsRuntimeSection();
+    private final ModulesRuntimeSection modulesSection = new ModulesRuntimeSection();
+    private final HardwareRuntimeSection hardwareSection = new HardwareRuntimeSection();
+    private final SysIdRuntimeSection sysIdSection = new SysIdRuntimeSection();
+    private final ImuRuntimeSection imuSection = new ImuRuntimeSection();
+    private final SimulationRuntimeSection simulationSection = new SimulationRuntimeSection();
     private final Imu imu;
     private final DifferentialDriveKinematics kinematics;
     private final DifferentialDrive drive;
@@ -97,28 +107,119 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
     }
 
     @Override
-    public Imu getIMU() {
-        return imu;
+    public DifferentialDrivetrain control(Consumer<RobotDrivetrain.ControlSection> section) {
+        if (section != null) {
+            section.accept(controlSection);
+        }
+        return this;
     }
 
     @Override
-    public void setNeutralMode(MotorNeutralMode mode) {
+    public RobotDrivetrain.ControlSection control() {
+        return controlSection;
+    }
+
+    @Override
+    public DifferentialDrivetrain speeds(Consumer<RobotDrivetrain.SpeedsSection> section) {
+        if (section != null) {
+            section.accept(speedsSection);
+        }
+        return this;
+    }
+
+    @Override
+    public RobotDrivetrain.SpeedsSection speeds() {
+        return speedsSection;
+    }
+
+    @Override
+    public DifferentialDrivetrain modules(Consumer<RobotDrivetrain.ModulesSection> section) {
+        if (section != null) {
+            section.accept(modulesSection);
+        }
+        return this;
+    }
+
+    @Override
+    public RobotDrivetrain.ModulesSection modules() {
+        return modulesSection;
+    }
+
+    @Override
+    public DifferentialDrivetrain hardware(Consumer<RobotDrivetrain.HardwareSection> section) {
+        if (section != null) {
+            section.accept(hardwareSection);
+        }
+        return this;
+    }
+
+    @Override
+    public RobotDrivetrain.HardwareSection hardware() {
+        return hardwareSection;
+    }
+
+    @Override
+    public DifferentialDrivetrain sysId(Consumer<RobotDrivetrain.SysIdSection> section) {
+        if (section != null) {
+            section.accept(sysIdSection);
+        }
+        return this;
+    }
+
+    @Override
+    public RobotDrivetrain.SysIdSection sysId() {
+        return sysIdSection;
+    }
+
+    @Override
+    public DifferentialDrivetrain imu(Consumer<RobotDrivetrain.ImuSection> section) {
+        if (section != null) {
+            section.accept(imuSection);
+        }
+        return this;
+    }
+
+    @Override
+    public RobotDrivetrain.ImuSection imu() {
+        return imuSection;
+    }
+
+    @Override
+    public DifferentialDrivetrain simulation(Consumer<RobotDrivetrain.SimulationSection> section) {
+        if (section != null) {
+            section.accept(simulationSection);
+        }
+        return this;
+    }
+
+    @Override
+    public RobotDrivetrain.SimulationSection simulation() {
+        return simulationSection;
+    }
+
+    @Override
+    public RobotSpeeds robotSpeeds() {
+        return speedsModel();
+    }
+
+    private Imu imuDevice() {
+        return imu;
+    }
+
+    private void applyNeutralMode(MotorNeutralMode mode) {
        leftMotors.setNeutralMode(mode);
        rightMotors.setNeutralMode(mode);
     }
 
-    @Override
-    public RobotSpeeds getRobotSpeeds() {
+    private RobotSpeeds speedsModel() {
         return robotSpeeds;
     }
 
-    @Override
-    public MotionLimits getMotionLimits() {
+    private MotionLimits limitsModel() {
         return motionLimits;
     }
 
-    @Override
-    public void resetDriveState() {
+    private void resetControlState() {
         robotSpeeds.stop();
         lastLimitedSpeeds = new ChassisSpeeds();
         lastMotionLimitTimestampSeconds = Double.NaN;
@@ -129,40 +230,40 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         rightMotors.stopMotors();
     }
 
-    public DifferentialDrivetrain setDriveFeedforward(SimpleMotorFeedforward feedforward) {
+    public DifferentialDrivetrain driveFeedforward(SimpleMotorFeedforward feedforward) {
         if (feedforward == null) {
             driveFeedforward = null;
-            setDriveFeedforwardEnabled(false);
+            driveFeedforwardEnabled(false);
             return this;
         }
         driveFeedforward = new SimpleMotorFeedForwardsSendable(
                 feedforward.getKs(),
                 feedforward.getKv(),
                 feedforward.getKa());
-        setDriveFeedforwardEnabled(true);
+        driveFeedforwardEnabled(true);
         return this;
     }
 
-    public void setDriveFeedforwardEnabled(boolean enabled) {
+    public void driveFeedforwardEnabled(boolean enabled) {
         driveFeedforwardEnabled = driveFeedforward != null && enabled;
         if (!driveFeedforwardEnabled) {
             resetFeedforwardState();
         }
     }
 
-    public boolean isDriveFeedforwardEnabled() {
+    public boolean driveFeedforwardEnabled() {
         return driveFeedforwardEnabled;
     }
 
-    public boolean hasDriveFeedforward() {
+    public boolean driveFeedforwardConfigured() {
         return driveFeedforward != null;
     }
 
-    public double getSysIdRampRateVoltsPerSecond() {
+    private double sysIdRampRateVoltsPerSecond() {
         return sysIdRampRateVoltsPerSecond;
     }
 
-    public void setSysIdRampRateVoltsPerSecond(double rampRate) {
+    private void sysIdRampRateVoltsPerSecond(double rampRate) {
         if (!Double.isFinite(rampRate) || rampRate <= 0.0) {
             return;
         }
@@ -170,11 +271,11 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         invalidateSysIdRoutine();
     }
 
-    public double getSysIdStepVoltage() {
+    private double sysIdStepVoltage() {
         return sysIdStepVoltage;
     }
 
-    public void setSysIdStepVoltage(double stepVoltage) {
+    private void sysIdStepVoltage(double stepVoltage) {
         if (!Double.isFinite(stepVoltage) || stepVoltage <= 0.0) {
             return;
         }
@@ -182,11 +283,11 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         invalidateSysIdRoutine();
     }
 
-    public double getSysIdTimeoutSeconds() {
+    private double sysIdTimeoutSeconds() {
         return sysIdTimeoutSeconds;
     }
 
-    public void setSysIdTimeoutSeconds(double timeoutSeconds) {
+    private void sysIdTimeoutSeconds(double timeoutSeconds) {
         if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0.0) {
             return;
         }
@@ -194,7 +295,7 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         invalidateSysIdRoutine();
     }
 
-    public boolean isSysIdActive() {
+    private boolean sysIdActive() {
         return sysIdActive;
     }
 
@@ -218,7 +319,7 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
             return;
         }
 
-        ChassisSpeeds speeds = getRobotSpeeds().calculate();
+        ChassisSpeeds speeds = robotSpeeds.calculate();
         speeds = applyMotionLimits(speeds);
         if (driveFeedforwardEnabled && driveFeedforward != null) {
             DifferentialDriveWheelSpeeds wheelSpeeds = kinematics.toWheelSpeeds(speeds);
@@ -243,22 +344,12 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         }
     }
 
-    public Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier thetaInput){
+    private Command driveCommand(DoubleSupplier xInput, DoubleSupplier thetaInput){
         return new TankDriveCommand(this, xInput, thetaInput);
     }
 
-    public void setDriveCommand(DoubleSupplier xInput, DoubleSupplier thetaInput){
-        this.setDefaultCommand(getDriveCommand(xInput, thetaInput));
-    }
-
-    @Override
-    public Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
-        return getDriveCommand(xInput, thetaInput);
-    }
-
-    @Override
-    public void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
-        this.setDefaultCommand(getDriveCommand(xInput, yInput, thetaInput));
+    private Command driveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
+        return driveCommand(xInput, thetaInput);
     }
     
     @Override
@@ -282,19 +373,14 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         }
     }
 
-    @Override
-    public DifferentialDrivetrain get() {
-        return this;
-    }
-
-    public DifferentialDriveWheelPositions getPositions(){
+    private DifferentialDriveWheelPositions positions(){
      double leftPosition = leftEncoders != null ? leftEncoders.getPosition() : 0;
      double rightPosition = rightEncoders != null ? rightEncoders.getPosition() : 0;
      return new DifferentialDriveWheelPositions(leftPosition, rightPosition);
     }
 
      @Override
-    public RobotLocalization<DifferentialDriveWheelPositions> localization(RobotLocalizationConfig config) {
+    public RobotLocalization<DifferentialDriveWheelPositions> createLocalization(RobotLocalizationConfig config) {
         RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defaults();
         PoseEstimatorFactory<DifferentialDriveWheelPositions> factory = new PoseEstimatorFactory<>() {
             @Override
@@ -302,7 +388,7 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
                     Pose2d startPose,
                     Matrix<N3, N1> stateStdDevs,
                     Matrix<N3, N1> visionStdDevs) {
-                DifferentialDriveWheelPositions positions = getPositions();
+                DifferentialDriveWheelPositions positions = positions();
                 return new DifferentialDrivePoseEstimator(
                         kinematics,
                         imu.getYaw(),
@@ -318,7 +404,7 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
                     Pose3d startPose,
                     Matrix<N4, N1> stateStdDevs,
                     Matrix<N4, N1> visionStdDevs) {
-                DifferentialDriveWheelPositions positions = getPositions();
+                DifferentialDriveWheelPositions positions = positions();
                 Rotation3d gyroRotation = getImuRotation3d();
                 return new DifferentialDrivePoseEstimator3d(
                         kinematics,
@@ -331,7 +417,7 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
             }
         };
 
-        return new RobotLocalization<>(factory, effectiveConfig, getRobotSpeeds(), imu, this::getPositions);
+        return new RobotLocalization<>(factory, effectiveConfig, robotSpeeds, imu, this::positions);
     }
 
     @Override
@@ -348,17 +434,17 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
 
         if (driveFeedforward != null && nt.enabled(RobotNetworkTables.Flag.DRIVETRAIN_SPEED_WIDGETS)) {
             RobotNetworkTables.Node ff = node.child("DriveFeedforward");
-            ff.putBoolean("enabled", isDriveFeedforwardEnabled());
+            ff.putBoolean("enabled", driveFeedforwardEnabled());
         }
 
         RobotNetworkTables.Node sysid = node.child("SysId");
-        sysid.putDouble("rampRateVPerSec", getSysIdRampRateVoltsPerSecond());
-        sysid.putDouble("stepVoltageV", getSysIdStepVoltage());
-        sysid.putDouble("timeoutSec", getSysIdTimeoutSeconds());
-        sysid.putBoolean("active", isSysIdActive());
+        sysid.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
+        sysid.putDouble("stepVoltageV", sysIdStepVoltage());
+        sysid.putDouble("timeoutSec", sysIdTimeoutSeconds());
+        sysid.putBoolean("active", sysIdActive());
 
         if (simulation != null) {
-            Pose2d pose = getSimulatedPose();
+            Pose2d pose = simulationPose();
             RobotNetworkTables.Node simNode = node.child("Sim");
             simNode.putDouble("xM", pose.getX());
             simNode.putDouble("yM", pose.getY());
@@ -384,15 +470,15 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         return this;
     }
 
-    public boolean hasSimulation() {
+    private boolean simulationEnabled() {
         return simulation != null;
     }
 
-    public Pose2d getSimulatedPose() {
+    private Pose2d simulationPose() {
         return simulation != null ? simulation.getPose() : new Pose2d();
     }
 
-    public void resetSimulationPose(Pose2d pose) {
+    private void simulationPose(Pose2d pose) {
         if (simulation != null) {
             simulation.resetPose(pose);
         }
@@ -582,6 +668,185 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
             return lastValue - maxDelta;
         }
         return value;
+    }
+
+    public final class ControlRuntimeSection implements RobotDrivetrain.ControlSection {
+        @Override
+        public Command command(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput) {
+            return driveCommand(xInput, yInput, thetaInput);
+        }
+
+        @Override
+        public void defaultCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput) {
+            setDefaultCommand(driveCommand(xInput, yInput, thetaInput));
+        }
+
+        @Override
+        public void reset() {
+            resetControlState();
+        }
+
+        @Override
+        public void stop() {
+            robotSpeeds.stop();
+            leftMotors.stopMotors();
+            rightMotors.stopMotors();
+        }
+    }
+
+    public final class SpeedsRuntimeSection implements RobotDrivetrain.SpeedsSection {
+        @Override
+        public MotionLimits limits() {
+            return limitsModel();
+        }
+
+        @Override
+        public ChassisSpeeds get(String source) {
+            return speedsModel().getSpeeds(source);
+        }
+
+        @Override
+        public ChassisSpeeds getInput(String source) {
+            return speedsModel().getInputSpeeds(source);
+        }
+
+        @Override
+        public RobotDrivetrain.SpeedsSection set(String source, ChassisSpeeds speeds) {
+            speedsModel().setSpeeds(source, speeds);
+            return this;
+        }
+
+        @Override
+        public RobotDrivetrain.SpeedsSection set(String source, double x, double y, double theta) {
+            speedsModel().setSpeeds(source, x, y, theta);
+            return this;
+        }
+
+        @Override
+        public RobotDrivetrain.SpeedsSection stop(String source) {
+            speedsModel().stopSpeeds(source);
+            return this;
+        }
+
+        @Override
+        public RobotDrivetrain.SpeedsSection stop() {
+            speedsModel().stop();
+            return this;
+        }
+
+        @Override
+        public RobotDrivetrain.SpeedsSection enabled(String source, boolean enabled) {
+            speedsModel().setSpeedSourceState(source, enabled);
+            return this;
+        }
+
+        @Override
+        public boolean enabled(String source) {
+            return speedsModel().isSpeedsSourceActive(source);
+        }
+
+        @Override
+        public double maxVelocity() {
+            return speedsModel().getMaxVelocity();
+        }
+
+        @Override
+        public double maxAngularVelocity() {
+            return speedsModel().getMaxAngularVelocity();
+        }
+
+        @Override
+        public Set<String> sources() {
+            return speedsModel().getSpeedSources();
+        }
+    }
+
+    public final class ModulesRuntimeSection implements RobotDrivetrain.ModulesSection {
+        public MotorControllerGroup leftMotors() {
+            return leftMotors;
+        }
+
+        public MotorControllerGroup rightMotors() {
+            return rightMotors;
+        }
+    }
+
+    public final class HardwareRuntimeSection implements RobotDrivetrain.HardwareSection {
+        @Override
+        public void neutralMode(MotorNeutralMode mode) {
+            applyNeutralMode(mode);
+        }
+    }
+
+    public final class SysIdRuntimeSection implements RobotDrivetrain.SysIdSection {
+        @Override
+        public double rampRateVoltsPerSecond() {
+            return sysIdRampRateVoltsPerSecond();
+        }
+
+        @Override
+        public void rampRateVoltsPerSecond(double voltsPerSecond) {
+            sysIdRampRateVoltsPerSecond(voltsPerSecond);
+        }
+
+        @Override
+        public double stepVoltage() {
+            return sysIdStepVoltage();
+        }
+
+        @Override
+        public void stepVoltage(double volts) {
+            sysIdStepVoltage(volts);
+        }
+
+        @Override
+        public double timeoutSeconds() {
+            return sysIdTimeoutSeconds();
+        }
+
+        @Override
+        public void timeoutSeconds(double seconds) {
+            sysIdTimeoutSeconds(seconds);
+        }
+
+        @Override
+        public boolean active() {
+            return sysIdActive();
+        }
+
+        @Override
+        public Command quasistatic(SysIdRoutine.Direction direction) {
+            return sysIdCommand(() -> getSysIdRoutine().quasistatic(direction));
+        }
+
+        @Override
+        public Command dynamic(SysIdRoutine.Direction direction) {
+            return sysIdCommand(() -> getSysIdRoutine().dynamic(direction));
+        }
+    }
+
+    public final class ImuRuntimeSection implements RobotDrivetrain.ImuSection {
+        @Override
+        public Imu device() {
+            return imuDevice();
+        }
+    }
+
+    public final class SimulationRuntimeSection implements RobotDrivetrain.SimulationSection {
+        @Override
+        public boolean enabled() {
+            return simulationEnabled();
+        }
+
+        @Override
+        public Pose2d pose() {
+            return simulationPose();
+        }
+
+        @Override
+        public void pose(Pose2d pose) {
+            simulationPose(pose);
+        }
     }
 
 }

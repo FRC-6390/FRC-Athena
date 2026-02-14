@@ -39,7 +39,7 @@ public class SwerveDrivetrainSimulation {
             states[i] = moduleSimulations[i].getModuleState();
         }
 
-        ChassisSpeeds measured = drivetrain.getKinematics().toChassisSpeeds(states);
+        ChassisSpeeds measured = drivetrain.kinematicsModel().toChassisSpeeds(states);
 
         double vx = measured.vxMetersPerSecond;
         double vy = measured.vyMetersPerSecond;
@@ -62,8 +62,8 @@ public class SwerveDrivetrainSimulation {
             vy = lastChassisSpeeds.vyMetersPerSecond + dvy * scale;
         }
 
-        double maxVelCapability = drivetrain.getRobotSpeeds().getMaxVelocity();
-        double maxOmegaCapability = drivetrain.getRobotSpeeds().getMaxAngularVelocity();
+        double maxVelCapability = drivetrain.speeds().maxVelocity();
+        double maxOmegaCapability = drivetrain.speeds().maxAngularVelocity();
         double speedScale = config.getMaxSpeedScale();
         if (!Double.isFinite(speedScale) || speedScale <= 0.0) {
             speedScale = 1.0;
@@ -102,7 +102,7 @@ public class SwerveDrivetrainSimulation {
         pose = pose.exp(twist);
         lastChassisSpeeds = chassisSpeeds;
 
-        drivetrain.getIMU().setSimulatedHeading(pose.getRotation(), Rotation2d.fromRadians(chassisSpeeds.omegaRadiansPerSecond));
+        drivetrain.imu().device().setSimulatedHeading(pose.getRotation(), Rotation2d.fromRadians(chassisSpeeds.omegaRadiansPerSecond));
         return chassisSpeeds;
     }
 
@@ -115,7 +115,7 @@ public class SwerveDrivetrainSimulation {
         for (SwerveModuleSimulation moduleSimulation : moduleSimulations) {
             moduleSimulation.reset(0, 0);
         }
-        drivetrain.getIMU().setSimulatedHeading(pose.getRotation(), Rotation2d.fromDegrees(0));
+        drivetrain.imu().device().setSimulatedHeading(pose.getRotation(), Rotation2d.fromDegrees(0));
     }
 
     public SwerveModulePosition[] getModulePositions() {

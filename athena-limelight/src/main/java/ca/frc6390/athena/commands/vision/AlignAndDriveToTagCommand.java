@@ -229,13 +229,13 @@ public class AlignAndDriveToTagCommand extends Command {
                 maxAngularVelocityRadPerSec > 0.0 ? maxAngularVelocityRadPerSec : Double.POSITIVE_INFINITY;
         this.timeoutSeconds = timeoutSeconds;
 
-        RobotDrivetrain<?> drivetrain = Objects.requireNonNull(robotBase.getDrivetrain(), "robotBase.getDrivetrain()");
-        this.robotSpeeds = Objects.requireNonNull(drivetrain.getRobotSpeeds(), "robotSpeeds");
-        this.robotVision = robotBase.getVision();
+        RobotDrivetrain<?> drivetrain = Objects.requireNonNull(robotBase.drivetrain(), "robotBase.drivetrain()");
+        this.robotSpeeds = Objects.requireNonNull(drivetrain.robotSpeeds(), "robotSpeeds");
+        this.robotVision = robotBase.vision();
         if (robotVision == null) {
             throw new IllegalArgumentException("Robot base does not expose a vision system.");
         }
-        this.localization = robotBase.getLocalization();
+        this.localization = robotBase.localization();
 
         this.cameraSources = new ArrayList<>();
         this.cameraTables = sanitiseCameraTables(cameraTables);
@@ -323,7 +323,7 @@ public class AlignAndDriveToTagCommand extends Command {
 
     private void updateCameraSources() {
         cameraSources.clear();
-        Map<String, VisionCamera> cameras = robotVision.getCameras();
+        Map<String, VisionCamera> cameras = robotVision.cameras().all();
         if (cameras.isEmpty()) {
             return;
         }

@@ -66,27 +66,27 @@ public final class RobotCoreHookExamples {
 
         return config.hooks(h -> {
             h.onInit(ctx -> {
-                RobotSpeeds speeds = ctx.drivetrain().getRobotSpeeds();
+                RobotSpeeds speeds = ctx.drivetrain().robotSpeeds();
                 speeds.registerSpeedSource(tuning.speedSource(), true);
                 speeds.setSpeedSourceState(tuning.speedSource(), true);
                 PoseBoundingBox2d zone = zoneSupplier.get();
                 if (ctx.localization() != null && zone != null) {
-                    ctx.localization().setBoundingBox(zoneName, zone);
+                    ctx.localization().zone(zoneName, zone);
                     state.lastPublishedZone = zone;
                 }
             });
 
             // This runs from RobotCore.robotPeriodic() (phase ROBOT_PERIODIC).
             h.onPeriodic(ctx -> {
-                RobotSpeeds speeds = ctx.drivetrain().getRobotSpeeds();
+                RobotSpeeds speeds = ctx.drivetrain().robotSpeeds();
                 PoseBoundingBox2d zone = zoneSupplier.get();
 
                 if (ctx.localization() != null) {
                     if (zone == null && state.lastPublishedZone != null) {
-                        ctx.localization().removeBoundingBox(zoneName);
+                        ctx.localization().removeZone(zoneName);
                         state.lastPublishedZone = null;
                     } else if (zone != null && !zone.equals(state.lastPublishedZone)) {
-                        ctx.localization().setBoundingBox(zoneName, zone);
+                        ctx.localization().zone(zoneName, zone);
                         state.lastPublishedZone = zone;
                     }
                 }
@@ -139,7 +139,7 @@ public final class RobotCoreHookExamples {
                 speeds.setSpeeds(tuning.speedSource(), assistRobotRelative);
             });
 
-            h.onExit(ctx -> stopAssist(ctx.drivetrain().getRobotSpeeds(), tuning, state));
+            h.onExit(ctx -> stopAssist(ctx.drivetrain().robotSpeeds(), tuning, state));
         });
     }
 

@@ -224,7 +224,7 @@ public final class AthenaRuntimeServer {
         List<Object> mechanisms = new ArrayList<>();
         String base = baseUrl();
         String prefix = athenaPathPrefix(ex.getRequestURI());
-        for (Map.Entry<String, Mechanism> e : robot.getMechanisms().entrySet()) {
+        for (Map.Entry<String, Mechanism> e : robot.mechanisms().entrySet()) {
             if (e == null || e.getKey() == null || e.getValue() == null) {
                 continue;
             }
@@ -284,7 +284,7 @@ public final class AthenaRuntimeServer {
         sb.append("mechanismLogBaseUrl = ").append(tomlQuote(base + prefix + "/mechanisms/log/")).append("\n");
         sb.append("\n");
 
-        for (Map.Entry<String, Mechanism> e : robot.getMechanisms().entrySet()) {
+        for (Map.Entry<String, Mechanism> e : robot.mechanisms().entrySet()) {
             if (e == null || e.getKey() == null || e.getValue() == null) {
                 continue;
             }
@@ -329,7 +329,7 @@ public final class AthenaRuntimeServer {
         String rawName = tail.substring(0, dot);
         String ext = tail.substring(dot + 1).toLowerCase();
         String name = URLDecoder.decode(rawName, StandardCharsets.UTF_8);
-        Mechanism mech = robot.getMechanisms().get(name);
+        Mechanism mech = robot.mechanisms().get(name);
         if (mech == null) {
             sendText(ex, 404, "Unknown mechanism '" + name + "'\n", "text/plain; charset=utf-8");
             return;
@@ -383,12 +383,12 @@ public final class AthenaRuntimeServer {
             zip.putNextEntry(index);
             String idx = INDEX_MAPPER.writeValueAsString(Map.of(
                     "baseUrl", baseUrl(),
-                    "mechanisms", robot.getMechanisms().keySet(),
+                    "mechanisms", robot.mechanisms().keySet(),
                     "custom", customEntries.keySet()));
             zip.write((idx + "\n").getBytes(StandardCharsets.UTF_8));
             zip.closeEntry();
 
-            for (Map.Entry<String, Mechanism> e : robot.getMechanisms().entrySet()) {
+            for (Map.Entry<String, Mechanism> e : robot.mechanisms().entrySet()) {
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
@@ -951,7 +951,7 @@ public final class AthenaRuntimeServer {
         Map<String, DiagnosticsProviderEntry> out = new LinkedHashMap<>();
         out.put("auto", autoDiagnosticsProvider());
 
-        List<String> mechanismNames = new ArrayList<>(robot.getMechanisms().keySet());
+        List<String> mechanismNames = new ArrayList<>(robot.mechanisms().keySet());
         mechanismNames.sort(String::compareToIgnoreCase);
         for (String mechanismName : mechanismNames) {
             if (mechanismName == null || mechanismName.isBlank()) {
@@ -980,7 +980,7 @@ public final class AthenaRuntimeServer {
             if (mechanismName.isBlank()) {
                 return null;
             }
-            Mechanism mechanism = robot.getMechanisms().get(mechanismName);
+            Mechanism mechanism = robot.mechanisms().get(mechanismName);
             if (mechanism == null) {
                 return null;
             }
@@ -992,40 +992,40 @@ public final class AthenaRuntimeServer {
     private DiagnosticsProviderEntry autoDiagnosticsProvider() {
         return new DiagnosticsProviderEntry(
                 () -> {
-                    RobotAuto autos = robot.getAutos();
+                    RobotAuto autos = robot.autos();
                     Map<String, Object> summary = new LinkedHashMap<>();
-                    summary.put("autoTraceEnabled", autos.isAutoTraceEnabled());
-                    summary.put("capacity", autos.getAutoTraceLogCapacity());
-                    summary.put("totalCount", autos.getAutoTraceLogCount());
+                    summary.put("autoTraceEnabled", autos.trace().enabled());
+                    summary.put("capacity", autos.trace().capacity());
+                    summary.put("totalCount", autos.trace().count());
                     return summary;
                 },
                 limit -> {
-                    RobotAuto autos = robot.getAutos();
+                    RobotAuto autos = robot.autos();
                     int requestedLimit = limit > 0 ? limit : 200;
-                    List<RobotAuto.AutoTraceEvent> entries = autos.getAutoTraceLog(requestedLimit);
+                    List<RobotAuto.AutoTraceEvent> entries = autos.trace().events(requestedLimit);
                     Map<String, Object> diagnostics = new LinkedHashMap<>();
-                    diagnostics.put("autoTraceEnabled", autos.isAutoTraceEnabled());
-                    diagnostics.put("capacity", autos.getAutoTraceLogCapacity());
-                    diagnostics.put("totalCount", autos.getAutoTraceLogCount());
+                    diagnostics.put("autoTraceEnabled", autos.trace().enabled());
+                    diagnostics.put("capacity", autos.trace().capacity());
+                    diagnostics.put("totalCount", autos.trace().count());
                     diagnostics.put("returnedCount", entries.size());
                     diagnostics.put("entries", entries);
                     diagnostics.put("events", entries);
                     return diagnostics;
                 },
-                () -> robot.getAutos().clearAutoTraceLog());
+                () -> robot.autos().trace().clear());
     }
 
     private DiagnosticsProviderEntry mechanismDiagnosticsProvider(String mechanismName) {
         return new DiagnosticsProviderEntry(
                 () -> {
-                    Mechanism mechanism = robot.getMechanisms().get(mechanismName);
+                    Mechanism mechanism = robot.mechanisms().get(mechanismName);
                     if (mechanism == null) {
                         return Map.of("error", "mechanism unavailable");
                     }
                     return mechanism.diagnostics().summary();
                 },
                 limit -> {
-                    Mechanism mechanism = robot.getMechanisms().get(mechanismName);
+                    Mechanism mechanism = robot.mechanisms().get(mechanismName);
                     if (mechanism == null) {
                         return Map.of("error", "mechanism unavailable");
                     }
@@ -1033,7 +1033,7 @@ public final class AthenaRuntimeServer {
                     return mechanism.diagnostics().snapshot(requestedLimit);
                 },
                 () -> {
-                    Mechanism mechanism = robot.getMechanisms().get(mechanismName);
+                    Mechanism mechanism = robot.mechanisms().get(mechanismName);
                     if (mechanism != null) {
                         mechanism.diagnostics().clear();
                     }
@@ -1068,16 +1068,16 @@ public final class AthenaRuntimeServer {
         int requestedLimit = parsePositiveInt(query.get("limit"), 200);
         boolean clear = parseBoolean(query.get("clear"));
 
-        RobotAuto autos = robot.getAutos();
-        List<RobotAuto.AutoTraceEvent> entries = autos.getAutoTraceLog(requestedLimit);
-        int totalCount = autos.getAutoTraceLogCount();
+        RobotAuto autos = robot.autos();
+        List<RobotAuto.AutoTraceEvent> entries = autos.trace().events(requestedLimit);
+        int totalCount = autos.trace().count();
         if (clear) {
-            autos.clearAutoTraceLog();
+            autos.trace().clear();
         }
 
         Map<String, Object> payload = Map.of(
-                "autoTraceEnabled", autos.isAutoTraceEnabled(),
-                "capacity", autos.getAutoTraceLogCapacity(),
+                "autoTraceEnabled", autos.trace().enabled(),
+                "capacity", autos.trace().capacity(),
                 "totalCount", totalCount,
                 "returnedCount", entries.size(),
                 "cleared", clear,
@@ -1131,7 +1131,7 @@ public final class AthenaRuntimeServer {
         }
         String rawName = tail.substring(0, tail.length() - ".json".length());
         String name = URLDecoder.decode(rawName, StandardCharsets.UTF_8);
-        Mechanism mechanism = robot.getMechanisms().get(name);
+        Mechanism mechanism = robot.mechanisms().get(name);
         if (mechanism == null) {
             sendText(ex, 404, "Unknown mechanism '" + name + "'\n", "text/plain; charset=utf-8");
             return;
@@ -1168,14 +1168,14 @@ public final class AthenaRuntimeServer {
     private void sendMechanismLogIndexJson(HttpExchange ex, URI uri) throws IOException {
         String base = baseUrl();
         String prefix = athenaPathPrefix(uri);
-        List<String> names = new ArrayList<>(robot.getMechanisms().keySet());
+        List<String> names = new ArrayList<>(robot.mechanisms().keySet());
         names.sort(String::compareToIgnoreCase);
         List<Object> mechanisms = new ArrayList<>();
         for (String name : names) {
             if (name == null) {
                 continue;
             }
-            Mechanism mechanism = robot.getMechanisms().get(name);
+            Mechanism mechanism = robot.mechanisms().get(name);
             if (mechanism == null) {
                 continue;
             }

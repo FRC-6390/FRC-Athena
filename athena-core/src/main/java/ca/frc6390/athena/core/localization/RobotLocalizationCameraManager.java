@@ -58,7 +58,7 @@ final class RobotVisionCameraManager {
         if (vision == null) {
             return;
         }
-        Map<String, VisionCamera> cameras = vision.getCameras();
+        Map<String, VisionCamera> cameras = vision.cameras().all();
         for (Map.Entry<String, VisionCamera> entry : cameras.entrySet()) {
             cameraDisplayStates.computeIfAbsent(entry.getKey(), key -> createCameraDisplayState(key, entry.getValue()));
         }
@@ -82,7 +82,7 @@ final class RobotVisionCameraManager {
         }
         ensureCameraEntries(vision);
         for (CameraDisplayState state : cameraDisplayStates.values()) {
-            VisionCamera camera = vision.getCamera(state.key);
+            VisionCamera camera = vision.cameras().camera(state.key);
             if (camera == null) {
                 state.visionCameraPoseObject.setPoses(EMPTY_POSES);
                 state.localizationEstimatedPoseObject.setPoses(EMPTY_POSES);

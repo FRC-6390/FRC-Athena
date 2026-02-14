@@ -33,6 +33,7 @@ import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.loop.TimedRunner;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
+import ca.frc6390.athena.core.localization.RobotDrivetrainLocalizationFactory;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrainConfig;
@@ -284,7 +285,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
-    private final RobotDrivetrain<T> drivetrain;
+    private final T drivetrain;
     private final RobotLocalization<?> localization;
     private final RobotVision vision;
     private final RobotNetworkTables robotNetworkTables = new RobotNetworkTables();
@@ -355,11 +356,12 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         double constructorStart = Timer.getFPGATimestamp();
         activeInstance = this;
         drivetrain = timedStartupStep("constructor.driveTrain.build", () -> config.driveTrain.build());
-        localization = timedStartupStep("constructor.localization.create",
-                () -> drivetrain.localization(config.localizationConfig()));
+        localization = timedStartupStep(
+                "constructor.localization.create",
+                () -> createLocalizationForDrivetrain(drivetrain, config.localizationConfig()));
         vision = timedStartupStep("constructor.vision.create", () -> RobotVision.fromConfig(config.visionConfig));
         autos = new RobotAuto().attachRobotCore(this);
-        copilot = new RobotCopilot(drivetrain.get(), localization, RobotCopilot.inferDriveStyle(drivetrain.get()));
+        copilot = new RobotCopilot(drivetrain, localization, RobotCopilot.inferDriveStyle(drivetrain));
         mechanisms = new HashMap<>();
         registeredSuperstructures = new ArrayList<>();
         superstructuresByName = new HashMap<>();
@@ -476,7 +478,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         if (localization != null) {
             String autoPose = config.localizationConfig().autoPoseName();
-            autos.setAutoPlanResetter(pose -> Commands.runOnce(() -> localization.resetPose(autoPose, pose)));
+            autos.reset().poseResetter(pose -> Commands.runOnce(() -> localization.resetPose(autoPose, pose)));
         }
 
         if (vision != null && edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
@@ -502,7 +504,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         timedStartupStep("robotInit.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
         timedStartupStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded);
         timedStartupStep("robotInit.configureAutos", () -> configureAutos(autos));
-        timedStartupStep("robotInit.autos.finalizeRegistration", autos::finalizeRegistration);
+        timedStartupStep("robotInit.autos.finalizeRegistration", () -> autos.execution().prepare());
         timedStartupStep("robotInit.ensureAutoChooserPublished", this::ensureAutoChooserPublished);
         timedStartupStep("robotInit.publishConfig", robotNetworkTables::publishConfig);
         if (robotNetworkTables.isPublishingEnabled() && robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
@@ -611,13 +613,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             configServer = null;
             configServerBaseUrl = null;
         }
-    }
-
-    /**
-     * Returns the config server base URL (if available) used to build per-mechanism download links.
-     */
-    public String getConfigServerBaseUrl() {
-        return configServerBaseUrl;
     }
 
     /**
@@ -1282,7 +1277,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return this;
     }
 
-    public static RobotCore<?> getActiveInstance() {
+    public static RobotCore<?> activeInstance() {
         return activeInstance;
     }
 
@@ -1325,12 +1320,23 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     protected void configureAutos(RobotAuto auto) {}
 
     protected Command createAutonomousCommand() {
-        return autos.buildSelectedCommand().orElse(null);
+        return autos.execution().selectedCommand().orElse(null);
+    }
+
+    private static RobotLocalization<?> createLocalizationForDrivetrain(
+            RobotDrivetrain<?> drivetrain,
+            RobotLocalizationConfig localizationConfig) {
+        if (drivetrain instanceof RobotDrivetrainLocalizationFactory factory) {
+            return factory.createLocalization(localizationConfig);
+        }
+        throw new IllegalStateException(
+                "Drivetrain " + drivetrain.getClass().getName()
+                        + " does not implement RobotDrivetrainLocalizationFactory.");
     }
 
     private void prepareDrivetrainForModeTransition(boolean driveEnabled, boolean autoEnabled) {
-        drivetrain.resetDriveState();
-        RobotSpeeds speeds = drivetrain.getRobotSpeeds();
+        drivetrain.control().reset();
+        RobotSpeeds speeds = drivetrain.robotSpeeds();
         speeds.setSpeedSourceState(RobotSpeeds.DRIVE_SOURCE, driveEnabled);
         speeds.setSpeedSourceState(RobotSpeeds.AUTO_SOURCE, autoEnabled);
         speeds.stop();
@@ -1350,7 +1356,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             autonomousCommand.cancel();
             autonomousCommand = null;
         }
-        getDrivetrain().getRobotSpeeds().stopSpeeds("auto");
+        drivetrain().speeds().stop("auto");
     }
 
     private void scheduleCustomPidCycle(Mechanism mechanism) {
@@ -1461,17 +1467,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         registerMechanism(configuredMechanisms.toArray(RegisterableMechanism[]::new));
     }
 
-    /**
-     * Returns the registered mechanism with the given name, or {@code null} if not found.
-     */
-    public Mechanism getMechanism(String name) {
+    public Mechanism mechanism(String name) {
         return mechanisms.get(name);
     }
 
-    /**
-     * Returns the first registered mechanism assignable to the requested type, or {@code null}.
-     */
-    public <M extends Mechanism> M getMechanism(Class<M> type) {
+    public <M extends Mechanism> M mechanism(Class<M> type) {
         if (type == null) {
             return null;
         }
@@ -1481,21 +1481,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
         }
         return null;
-    }
-
-    /**
-     * Returns an unmodifiable view of all registered mechanisms keyed by name.
-     */
-    public RobotMechanisms getMechanisms() {
-        return mechanismView;
-    }
-
-    /**
-     * Convenience alias for {@link #getMechanisms()} to enable fluent access patterns like
-     * {@code robot.getMechanism().turret("Turret")}.
-     */
-    public RobotMechanisms getMechanism() {
-        return mechanismView;
     }
 
     /**
@@ -1510,7 +1495,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     public RobotMechanisms mechanisms() {
-        return getMechanisms();
+        return mechanismView;
     }
 
     private String registerMechanismInternal(Mechanism mech) {
@@ -1584,32 +1569,24 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return candidate;
     }
 
-    public RobotLocalization<?> getLocalization() {
+    public RobotLocalization<?> localization() {
         return localization;
     }
 
-    public RobotLocalization<?> localization() {
-        return getLocalization();
-    }
-
-    public RobotCopilot getCopilot() {
+    public RobotCopilot copilot() {
         return copilot;
     }
 
-    public T getDrivetrain() {
-        return drivetrain.get();
-    }
-
     public T drivetrain() {
-        return getDrivetrain();
-    }
-
-    public RobotVision getVision() {
-        return vision;
+        return drivetrain;
     }
 
     public RobotVision vision() {
-        return getVision();
+        return vision;
+    }
+
+    public RobotAuto autos() {
+        return autos;
     }
 
     /**
@@ -1839,9 +1816,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (vision != null) {
             server.registerDiagnosticsProvider(
                     "vision",
-                    vision::getDiagnosticsSummary,
-                    vision::getDiagnosticsSnapshot,
-                    vision::clearDiagnosticsLog);
+                    () -> vision.diagnostics().summary(),
+                    limit -> vision.diagnostics().snapshot(limit),
+                    () -> vision.diagnostics().clear());
         }
         for (Map.Entry<String, DiagnosticsChannel> entry : diagnosticsChannels.entrySet()) {
             if (entry == null || entry.getKey() == null || entry.getValue() == null) {
@@ -2210,25 +2187,25 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public RotateToAngle rotateBy(double degrees) {
         return new RotateToAngle(
                 this,
-                getDrivetrain().getIMU().getYaw().plus(Rotation2d.fromDegrees(degrees)));
+                drivetrain().imu().device().getYaw().plus(Rotation2d.fromDegrees(degrees)));
     }
 
-    public RobotSpeeds getRobotSpeeds() {
-        return drivetrain.getRobotSpeeds();
+    public RobotSpeeds robotSpeeds() {
+        return drivetrain.robotSpeeds();
     }
 
-    public Imu getIMU() {
-        return drivetrain.getIMU();
+    public Imu imu() {
+        return drivetrain.imu().device();
     }
 
     public SendableChooser<Command> registerAutoChooser(RobotAuto.AutoKey defaultAuto) {
-        SendableChooser<Command> chooser = autos.createCommandChooser(defaultAuto);
+        SendableChooser<Command> chooser = autos.selection().commandChooser(defaultAuto);
         SmartDashboard.putData("Auto Chooser", chooser);
         return chooser;
     }
 
     public SendableChooser<RobotAuto.AutoRoutine> registerAutoRoutineChooser(RobotAuto.AutoKey defaultAuto) {
-        SendableChooser<RobotAuto.AutoRoutine> chooser = autos.createChooser(defaultAuto);
+        SendableChooser<RobotAuto.AutoRoutine> chooser = autos.selection().chooser(defaultAuto);
         SmartDashboard.putData("Auto Routine Chooser", chooser);
         return chooser;
     }
@@ -2241,15 +2218,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return registerAutoChooser(RobotAuto.AutoKey.of(defaultsAuto));
     }
 
-    public RobotAuto getAutos() {
-        return autos;
-    }
-
     private void ensureAutoChooserPublished() {
-        if (autos.getAutoChooser() != null || autos.getCommandChooser() != null) {
+        if (autos.selection().chooser().isPresent() || autos.selection().commandChooser().isPresent()) {
             return;
         }
-        autos.getAutos().stream()
+        autos.routines().all().stream()
                 .findFirst()
                 .map(RobotAuto.AutoRoutine::key)
                 .ifPresent(this::registerAutoChooser);
@@ -2267,12 +2240,12 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public ChassisSpeeds createRobotRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
         return ChassisSpeeds.fromRobotRelativeSpeeds(
-                new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getFieldPose().getRotation());
+                new ChassisSpeeds(xSpeed, ySpeed, rot), localization().pose().getRotation());
     }
 
     public ChassisSpeeds createFieldRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
         return ChassisSpeeds.fromFieldRelativeSpeeds(
-                new ChassisSpeeds(xSpeed, ySpeed, rot), getLocalization().getFieldPose().getRotation());
+                new ChassisSpeeds(xSpeed, ySpeed, rot), localization().pose().getRotation());
     }
 
     private boolean isAutoInitResetEnabled() {
@@ -2287,7 +2260,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (localization == null) {
             return;
         }
-        autos.getSelectedAuto().ifPresent(routine -> {
+        autos.selection().selected().ifPresent(routine -> {
             Boolean override = routine.autoInitResetOverride();
             boolean shouldReset = override != null ? override : isAutoInitResetEnabled();
             if (!shouldReset || !routine.hasStartingPose()) {

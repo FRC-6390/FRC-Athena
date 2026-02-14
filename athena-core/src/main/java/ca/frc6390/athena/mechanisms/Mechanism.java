@@ -3713,7 +3713,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (core == null) {
             return null;
         }
-        String base = core.getConfigServerBaseUrl();
+        String base = core.configServer().baseUrl();
         if (base == null || base.isBlank()) {
             return null;
         }
@@ -3731,7 +3731,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (core == null) {
             return null;
         }
-        String base = core.getConfigServerBaseUrl();
+        String base = core.configServer().baseUrl();
         if (base == null || base.isBlank()) {
             return null;
         }

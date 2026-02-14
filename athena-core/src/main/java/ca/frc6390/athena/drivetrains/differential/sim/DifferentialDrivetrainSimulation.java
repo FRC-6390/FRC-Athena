@@ -35,7 +35,7 @@ public class DifferentialDrivetrainSimulation {
         this.config = config;
         this.leftEncoders = leftEncoders;
         this.rightEncoders = rightEncoders;
-        this.imu = drivetrain.getIMU();
+        this.imu = drivetrain.imu().device();
 
         DCMotor motorModel = resolveMotor(config.getMotorType(), config.getMotorsPerSide());
 

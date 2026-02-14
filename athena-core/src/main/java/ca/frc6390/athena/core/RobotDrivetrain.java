@@ -1,40 +1,156 @@
 package ca.frc6390.athena.core;
 
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.controllers.EnhancedXboxController;
-import ca.frc6390.athena.core.localization.RobotLocalization;
-import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
 public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSendableSystem, Subsystem {
-    
+
     public interface RobotDrivetrainConfig<T extends RobotDrivetrain<T>> {
         T build();
     }
 
-    T get();
-    Imu getIMU();
-    void setNeutralMode(MotorNeutralMode mode);
-    MotionLimits getMotionLimits();
-    RobotSpeeds getRobotSpeeds();
-    void update();
-    default void resetDriveState() {
-        getRobotSpeeds().stop();
-    }
-    Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
-    void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
-    RobotLocalization<?> localization(RobotLocalizationConfig config);
+    interface ControlSection {
+        Command command(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
 
-    default void setDriveCommand(EnhancedXboxController driverController) {
-        setDriveCommand(driverController.leftX, driverController.leftY, driverController.rightX);
+        void defaultCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
+
+        default void defaultCommand(EnhancedXboxController driverController) {
+            defaultCommand(driverController.leftX, driverController.leftY, driverController.rightX);
+        }
+
+        void reset();
+
+        void stop();
     }
+
+    interface SpeedsSection {
+        MotionLimits limits();
+
+        ChassisSpeeds get(String source);
+
+        ChassisSpeeds getInput(String source);
+
+        SpeedsSection set(String source, ChassisSpeeds speeds);
+
+        SpeedsSection set(String source, double x, double y, double theta);
+
+        SpeedsSection stop(String source);
+
+        SpeedsSection stop();
+
+        SpeedsSection enabled(String source, boolean enabled);
+
+        boolean enabled(String source);
+
+        double maxVelocity();
+
+        double maxAngularVelocity();
+
+        Set<String> sources();
+
+        default ChassisSpeeds input(String source) {
+            return getInput(source);
+        }
+
+        default ChassisSpeeds output(String source) {
+            return get(source);
+        }
+
+        default SpeedsSection output(String source, ChassisSpeeds speeds) {
+            return set(source, speeds);
+        }
+
+        default SpeedsSection sourceEnabled(String source, boolean enabled) {
+            return enabled(source, enabled);
+        }
+
+        default boolean sourceEnabled(String source) {
+            return enabled(source);
+        }
+    }
+
+    interface ModulesSection {
+    }
+
+    interface HardwareSection {
+        void neutralMode(MotorNeutralMode mode);
+    }
+
+    interface SysIdSection {
+        double rampRateVoltsPerSecond();
+
+        void rampRateVoltsPerSecond(double voltsPerSecond);
+
+        double stepVoltage();
+
+        void stepVoltage(double volts);
+
+        double timeoutSeconds();
+
+        void timeoutSeconds(double seconds);
+
+        boolean active();
+
+        Command quasistatic(SysIdRoutine.Direction direction);
+
+        Command dynamic(SysIdRoutine.Direction direction);
+    }
+
+    interface ImuSection {
+        Imu device();
+    }
+
+    interface SimulationSection {
+        boolean enabled();
+
+        Pose2d pose();
+
+        void pose(Pose2d pose);
+    }
+
+    T control(Consumer<ControlSection> section);
+
+    ControlSection control();
+
+    T speeds(Consumer<SpeedsSection> section);
+
+    SpeedsSection speeds();
+
+    T modules(Consumer<ModulesSection> section);
+
+    ModulesSection modules();
+
+    T hardware(Consumer<HardwareSection> section);
+
+    HardwareSection hardware();
+
+    T sysId(Consumer<SysIdSection> section);
+
+    SysIdSection sysId();
+
+    T imu(Consumer<ImuSection> section);
+
+    ImuSection imu();
+
+    T simulation(Consumer<SimulationSection> section);
+
+    SimulationSection simulation();
+
+    RobotSpeeds robotSpeeds();
+
+    void update();
 
     @Override
     default RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
@@ -46,18 +162,19 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
             return node;
         }
 
-        if (getIMU() != null) {
-            getIMU().networkTables(node.child("IMU"));
+        Imu imu = imu().device();
+        if (imu != null) {
+            imu.networkTables(node.child("IMU"));
         }
 
         if (nt.enabled(RobotNetworkTables.Flag.DRIVETRAIN_SPEED_WIDGETS)) {
             RobotNetworkTables.Node speeds = node.child("RobotSpeeds");
-            RobotSpeeds robotSpeeds = getRobotSpeeds();
-            for (String source : robotSpeeds.getSpeedSources()) {
+            for (String source : speeds().sources()) {
                 RobotNetworkTables.Node sourceNode = speeds.child(source);
-                ChassisSpeeds input = robotSpeeds.getInputSpeeds(source);
-                ChassisSpeeds output = robotSpeeds.getSpeeds(source);
-                sourceNode.putBoolean("enabled", robotSpeeds.isSpeedsSourceActive(source));
+                ChassisSpeeds input = speeds().getInput(source);
+                ChassisSpeeds output = speeds().get(source);
+                RobotSpeeds robotSpeeds = robotSpeeds();
+                sourceNode.putBoolean("enabled", speeds().enabled(source));
                 sourceNode.putBoolean("axisXEnabled", robotSpeeds.isAxisActive(source, RobotSpeeds.SpeedAxis.X));
                 sourceNode.putBoolean("axisYEnabled", robotSpeeds.isAxisActive(source, RobotSpeeds.SpeedAxis.Y));
                 sourceNode.putBoolean("axisThetaEnabled", robotSpeeds.isAxisActive(source, RobotSpeeds.SpeedAxis.Theta));

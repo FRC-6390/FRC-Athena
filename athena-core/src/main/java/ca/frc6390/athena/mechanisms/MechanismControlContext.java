@@ -169,7 +169,7 @@ public interface MechanismControlContext<T extends Mechanism>
 
     default RobotCore<?> robotCore() {
         RobotCore<?> core = mechanism().getRobotCore();
-        return core != null ? core : RobotCore.getActiveInstance();
+        return core != null ? core : RobotCore.activeInstance();
     }
 
     /**

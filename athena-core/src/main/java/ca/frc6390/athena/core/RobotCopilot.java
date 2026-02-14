@@ -66,18 +66,18 @@ public class RobotCopilot {
                         MotionLimits motionLimits) {
         this.drivetrain = Objects.requireNonNull(drivetrain, "drivetrain");
         this.localization = localization;
-        this.robotSpeeds = drivetrain.getRobotSpeeds();
+        this.robotSpeeds = drivetrain.robotSpeeds();
         this.driveStyle = driveStyle != null ? driveStyle : DriveStyle.HOLONOMIC;
         RobotLocalizationConfig config = localization != null ? localization.getLocalizationConfig() : null;
         this.defaultTranslationPid = config != null ? config.translation() : new HolonomicPidConstants(0, 0, 0);
         this.defaultRotationPid = config != null ? config.rotation() : new HolonomicPidConstants(0, 0, 0);
-        this.motionLimits = motionLimits != null ? motionLimits : drivetrain.getMotionLimits();
+        this.motionLimits = motionLimits != null ? motionLimits : resolveMotionLimits(drivetrain);
     }
 
     public static RobotCopilot from(RobotCore<?> core) {
         Objects.requireNonNull(core, "core");
-        RobotDrivetrain<?> drivetrain = core.getDrivetrain();
-        RobotLocalization<?> localization = core.getLocalization();
+        RobotDrivetrain<?> drivetrain = core.drivetrain();
+        RobotLocalization<?> localization = core.localization();
         return new RobotCopilot(drivetrain, localization, inferDriveStyle(drivetrain));
     }
 
@@ -93,6 +93,11 @@ public class RobotCopilot {
 
     public DriveStyle getDriveStyle() {
         return driveStyle;
+    }
+
+    private static MotionLimits resolveMotionLimits(RobotDrivetrain<?> drivetrain) {
+        MotionLimits limits = drivetrain.speeds().limits();
+        return limits != null ? limits : new MotionLimits();
     }
 
     public DriveToPoseConfig defaultDriveToPoseConfig() {

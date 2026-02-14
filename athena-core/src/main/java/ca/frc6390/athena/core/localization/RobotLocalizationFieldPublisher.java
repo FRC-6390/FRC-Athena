@@ -105,14 +105,14 @@ final class RobotLocalizationFieldPublisher {
             clearPlannedPath();
             return;
         }
-        String selectedId = autos.getSelectedAuto()
+        String selectedId = autos.selection().selected()
                 .map(routine -> routine.key().id())
                 .orElse(null);
         if (Objects.equals(selectedId, lastPlannedAutoId) && !isPlannedPathEmpty()) {
             return;
         }
         lastPlannedAutoId = selectedId;
-        autos.getSelectedAutoPoses()
+        autos.selection().selectedPoses()
                 .filter(list -> !list.isEmpty())
                 .ifPresentOrElse(this::setPlannedPath, this::clearPlannedPath);
     }
@@ -246,7 +246,7 @@ final class RobotLocalizationFieldPublisher {
         }
         RobotVision vision = visionSupplier != null ? visionSupplier.get() : null;
         if (vision != null) {
-            for (VisionCamera camera : vision.getCameras().values()) {
+            for (VisionCamera camera : vision.cameras().all().values()) {
                 var layout = camera != null ? camera.getConfig().getFieldLayout() : null;
                 if (layout != null) {
                     return layout.getFieldLength();
@@ -262,7 +262,7 @@ final class RobotLocalizationFieldPublisher {
         }
         RobotVision vision = visionSupplier != null ? visionSupplier.get() : null;
         if (vision != null) {
-            for (VisionCamera camera : vision.getCameras().values()) {
+            for (VisionCamera camera : vision.cameras().all().values()) {
                 var layout = camera != null ? camera.getConfig().getFieldLayout() : null;
                 if (layout != null) {
                     return layout.getFieldWidth();

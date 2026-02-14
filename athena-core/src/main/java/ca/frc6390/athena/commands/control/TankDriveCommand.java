@@ -19,7 +19,7 @@ public class TankDriveCommand extends Command {
     this.xInput = xInput;
     this.thetaInput = thetaInput;
     addRequirements(driveTrain);
-    driveTrain.setNeutralMode(MotorNeutralMode.Brake);
+    driveTrain.hardware().neutralMode(MotorNeutralMode.Brake);
   }
   
   @Override
@@ -29,18 +29,18 @@ public class TankDriveCommand extends Command {
   @Override
   public void execute() {
 
-    double xSpeed = xInput.getAsDouble() * driveTrain.getRobotSpeeds().getMaxVelocity();
-    double thetaSpeed = thetaInput.getAsDouble() * driveTrain.getRobotSpeeds().getMaxVelocity();
+    double xSpeed = xInput.getAsDouble() * driveTrain.speeds().maxVelocity();
+    double thetaSpeed = thetaInput.getAsDouble() * driveTrain.speeds().maxVelocity();
 
 
     ChassisSpeeds chassisSpeeds = new ChassisSpeeds(xSpeed, 0, thetaSpeed);
 
-    driveTrain.getRobotSpeeds().setSpeeds("drive", chassisSpeeds);    
+    driveTrain.speeds().set("drive", chassisSpeeds);
   }
 
   @Override
   public void end(boolean interrupted) {
-    driveTrain.getRobotSpeeds().stopSpeeds("drive");
+    driveTrain.speeds().stop("drive");
   }
 
   @Override

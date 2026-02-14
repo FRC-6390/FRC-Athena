@@ -51,6 +51,15 @@ public class RobotAuto {
     private final Set<String> boundChoreoNamedCommands;
     private final BoundedEventLog<AutoTraceEvent> autoTraceLog;
     private final int autoTraceLogCapacity;
+    private final RegistrySection registrySection = new RegistrySection();
+    private final CommandsSection commandsSection = new CommandsSection();
+    private final InputsSection inputsSection = new InputsSection();
+    private final RoutinesSection routinesSection = new RoutinesSection();
+    private final SelectionSection selectionSection = new SelectionSection();
+    private final ExecutionSection executionSection = new ExecutionSection();
+    private final TraceSection traceSection = new TraceSection();
+    private final ResetSection resetSection = new ResetSection();
+    private final ControllersSection controllersSection = new ControllersSection();
     private RobotCore<?> robotCore;
     private boolean autoTraceEnabled;
     private Consumer<String> autoTraceSink;
@@ -73,6 +82,56 @@ public class RobotAuto {
         robotCore = null;
         autoTraceEnabled = false;
         autoTraceSink = message -> DriverStation.reportWarning(message, false);
+    }
+
+    public RobotAuto controllers(Consumer<ControllersSection> section) {
+        if (section != null) {
+            section.accept(controllersSection);
+        }
+        return this;
+    }
+
+    public ControllersSection controllers() {
+        return controllersSection;
+    }
+
+    public RobotAuto registry(Consumer<RegistrySection> section) {
+        if (section != null) {
+            section.accept(registrySection);
+        }
+        return this;
+    }
+
+    public RegistrySection registry() {
+        return registrySection;
+    }
+
+    public CommandsSection commands() {
+        return commandsSection;
+    }
+
+    public InputsSection inputs() {
+        return inputsSection;
+    }
+
+    public RoutinesSection routines() {
+        return routinesSection;
+    }
+
+    public SelectionSection selection() {
+        return selectionSection;
+    }
+
+    public ExecutionSection execution() {
+        return executionSection;
+    }
+
+    public TraceSection trace() {
+        return traceSection;
+    }
+
+    public ResetSection reset() {
+        return resetSection;
     }
 
     /**
@@ -168,35 +227,35 @@ public class RobotAuto {
         RobotAuto autos();
 
         default RobotMechanisms mechanisms() {
-            return robot().getMechanisms();
+            return robot().mechanisms();
         }
 
         default RobotLocalization<?> localization() {
-            return robot().getLocalization();
+            return robot().localization();
         }
 
         default RobotVision vision() {
-            return robot().getVision();
+            return robot().vision();
         }
 
         default RobotDrivetrain<?> drivetrain() {
-            return robot().getDrivetrain();
+            return robot().drivetrain();
         }
 
         default boolean hasNamedCommand(String id) {
-            return autos().hasNamedCommand(id);
+            return autos().registry().hasCommand(id);
         }
 
         default boolean hasAuto(String id) {
-            return autos().hasAuto(id);
+            return autos().registry().hasRoutine(id);
         }
 
         default boolean hasInput(String id) {
-            return autos().hasInput(id);
+            return autos().registry().hasInput(id);
         }
 
         default <T> Supplier<T> input(AutoInput<T> key) {
-            return autos().inputSupplier(key);
+            return autos().inputs().supplier(key);
         }
 
         default <T> T inputValue(AutoInput<T> key) {
@@ -210,22 +269,22 @@ public class RobotAuto {
      */
     public interface AutoRegisterCtx extends AutoRuntimeCtx {
         default AutoRegisterCtx registerNamedCommand(String id, Supplier<Command> supplier) {
-            autos().registerNamedCommand(id, supplier);
+            autos().registry().command(id, supplier);
             return this;
         }
 
         default AutoRegisterCtx registerNamedCommand(String id, Command command) {
-            autos().registerNamedCommand(id, command);
+            autos().registry().command(id, command);
             return this;
         }
 
         default AutoRegisterCtx registerNamedCommand(String id, Runnable action) {
-            autos().registerNamedCommand(id, action);
+            autos().registry().command(id, action);
             return this;
         }
 
         default <T> AutoRegisterCtx input(AutoInput<T> key, Supplier<T> supplier) {
-            autos().registerInput(key, supplier);
+            autos().registry().input(key, supplier);
             return this;
         }
 
@@ -235,7 +294,7 @@ public class RobotAuto {
          * <p>Signature order: {@code path(reference, source)}.</p>
          */
         default AutoRegisterCtx path(String reference, TrajectorySource source) {
-            autos().registerPath(reference, source);
+            autos().registry().path(reference, source);
             return this;
         }
 
@@ -245,17 +304,17 @@ public class RobotAuto {
          * <p>Signature order: {@code path(reference, source, id)}.</p>
          */
         default AutoRegisterCtx path(String reference, TrajectorySource source, String id) {
-            autos().registerPath(reference, source, id);
+            autos().registry().path(reference, source, id);
             return this;
         }
 
         default AutoRegisterCtx custom(String id, Supplier<Command> factory) {
-            autos().registerAuto(id, factory);
+            autos().registry().routine(id, factory);
             return this;
         }
 
         default AutoRegisterCtx registerAuto(AutoRoutine routine) {
-            autos().registerAuto(routine);
+            autos().registry().routine(routine);
             return this;
         }
 
@@ -825,7 +884,7 @@ public class RobotAuto {
 
         @Override
         public boolean hasAuto(String id) {
-            return id != null && (scopedAutos.containsKey(id) || autos.hasAuto(id));
+            return id != null && (scopedAutos.containsKey(id) || autos.routines().has(id));
         }
 
         @Override
@@ -852,7 +911,7 @@ public class RobotAuto {
 
         @Override
         public boolean hasAuto(String id) {
-            return id != null && (scopedAutos.containsKey(id) || autos.hasAuto(id));
+            return id != null && (scopedAutos.containsKey(id) || autos.routines().has(id));
         }
 
         @Override
@@ -972,15 +1031,15 @@ public class RobotAuto {
         }
     }
 
-    public RobotAuto registerNamedCommand(NamedCommandKey key, Command command) {
+    private RobotAuto registerNamedCommand(NamedCommandKey key, Command command) {
         return registerNamedCommand(key, () -> command);
     }
 
-    public RobotAuto registerNamedCommand(String id, Command command) {
+    private RobotAuto registerNamedCommand(String id, Command command) {
         return registerNamedCommand(NamedCommandKey.of(id), command);
     }
 
-    public RobotAuto registerNamedCommand(NamedCommandKey key, Supplier<Command> supplier) {
+    private RobotAuto registerNamedCommand(NamedCommandKey key, Supplier<Command> supplier) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(supplier, "supplier");
         String id = requireNonBlank(key.id(), "named command id");
@@ -1003,20 +1062,20 @@ public class RobotAuto {
         return this;
     }
 
-    public RobotAuto registerNamedCommand(String id, Supplier<Command> supplier) {
+    private RobotAuto registerNamedCommand(String id, Supplier<Command> supplier) {
         return registerNamedCommand(NamedCommandKey.of(id), supplier);
     }
 
-    public RobotAuto registerNamedCommand(NamedCommandKey key, Runnable action) {
+    private RobotAuto registerNamedCommand(NamedCommandKey key, Runnable action) {
         Objects.requireNonNull(action, "action");
         return registerNamedCommand(key, new InstantCommand(action));
     }
 
-    public RobotAuto registerNamedCommand(String id, Runnable action) {
+    private RobotAuto registerNamedCommand(String id, Runnable action) {
         return registerNamedCommand(NamedCommandKey.of(id), action);
     }
 
-    public <T> RobotAuto registerInput(AutoInput<T> key, Supplier<T> supplier) {
+    private <T> RobotAuto registerInput(AutoInput<T> key, Supplier<T> supplier) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(supplier, "supplier");
         String id = requireNonBlank(key.id(), "auto input id");
@@ -1028,31 +1087,31 @@ public class RobotAuto {
         return this;
     }
 
-    public boolean hasNamedCommand(NamedCommandKey key) {
+    private boolean hasNamedCommand(NamedCommandKey key) {
         return key != null && namedCommandSuppliers.containsKey(key.id());
     }
 
-    public boolean hasNamedCommand(String id) {
+    private boolean hasNamedCommand(String id) {
         return id != null && namedCommandSuppliers.containsKey(id);
     }
 
-    public boolean hasAuto(AutoKey key) {
+    private boolean hasAuto(AutoKey key) {
         return key != null && autoRoutines.containsKey(key.id());
     }
 
-    public boolean hasAuto(String id) {
+    private boolean hasAuto(String id) {
         return id != null && autoRoutines.containsKey(id);
     }
 
-    public boolean hasInput(AutoInput<?> key) {
+    private boolean hasInput(AutoInput<?> key) {
         return key != null && autoInputs.containsKey(key.id());
     }
 
-    public boolean hasInput(String id) {
+    private boolean hasInput(String id) {
         return id != null && autoInputs.containsKey(id);
     }
 
-    public <T> Supplier<T> inputSupplier(AutoInput<T> key) {
+    private <T> Supplier<T> inputSupplier(AutoInput<T> key) {
         Objects.requireNonNull(key, "key");
         AutoInputBinding<?> binding = autoInputs.get(key.id());
         if (binding == null) {
@@ -1069,14 +1128,14 @@ public class RobotAuto {
         return typed;
     }
 
-    public <T> T inputValue(AutoInput<T> key) {
+    private <T> T inputValue(AutoInput<T> key) {
         return inputSupplier(key).get();
     }
 
     /**
      * Attaches the owning {@link RobotCore}. This is called automatically by {@link RobotCore}.
      */
-    public RobotAuto attachRobotCore(RobotCore<?> robot) {
+    RobotAuto attachRobotCore(RobotCore<?> robot) {
         Objects.requireNonNull(robot, "robot");
         if (robotCore != null && robotCore != robot) {
             throw new IllegalStateException(
@@ -1086,7 +1145,7 @@ public class RobotAuto {
         return this;
     }
 
-    public Optional<RobotCore<?>> robotCore() {
+    private Optional<RobotCore<?>> robotCore() {
         return Optional.ofNullable(robotCore);
     }
 
@@ -1095,12 +1154,12 @@ public class RobotAuto {
         if (robot == null) {
             throw new IllegalStateException(
                     "RobotAuto is not attached to a RobotCore. "
-                            + "Use autos.attachRobotCore(robot) once.");
+                            + "It must be attached by RobotCore during startup.");
         }
         return robot;
     }
 
-    public RobotAuto registerProgram(AutoProgram program) {
+    private RobotAuto registerProgram(AutoProgram program) {
         RobotCore<?> robot = requireRobotCore();
         Objects.requireNonNull(program, "program");
         String programId = Objects.requireNonNull(program.id(), "AutoProgram.id() returned null");
@@ -1139,7 +1198,7 @@ public class RobotAuto {
         return registerAuto(routine);
     }
 
-    public final RobotAuto registerPrograms(AutoProgram... programs) {
+    private final RobotAuto registerPrograms(AutoProgram... programs) {
         requireRobotCore();
         if (programs == null) {
             return this;
@@ -1154,7 +1213,7 @@ public class RobotAuto {
     }
 
     @SafeVarargs
-    public final RobotAuto registerPrograms(Class<? extends AutoProgram>... programTypes) {
+    private final RobotAuto registerPrograms(Class<? extends AutoProgram>... programTypes) {
         requireRobotCore();
         if (programTypes == null) {
             return this;
@@ -1180,7 +1239,7 @@ public class RobotAuto {
         }
     }
 
-    public RobotAuto registerAuto(AutoRoutine routine) {
+    private RobotAuto registerAuto(AutoRoutine routine) {
         Objects.requireNonNull(routine, "routine");
         String id = requireNonBlank(routine.key().id(), "auto id");
         if (autoRoutines.containsKey(id)) {
@@ -1191,7 +1250,7 @@ public class RobotAuto {
         return this;
     }
 
-    public RobotAuto registerAutos(AutoRoutine... routines) {
+    private RobotAuto registerAutos(AutoRoutine... routines) {
         if (routines == null) {
             return this;
         }
@@ -1203,25 +1262,25 @@ public class RobotAuto {
         return this;
     }
 
-    public RobotAuto registerAuto(AutoKey key, Supplier<Command> factory) {
+    private RobotAuto registerAuto(AutoKey key, Supplier<Command> factory) {
         return registerAuto(custom(key, factory));
     }
 
-    public RobotAuto registerAuto(String id, Supplier<Command> factory) {
+    private RobotAuto registerAuto(String id, Supplier<Command> factory) {
         return registerAuto(AutoKey.of(id), factory);
     }
 
     /**
      * Register a trajectory-backed auto. The chooser id defaults to {@code reference}.
      */
-    public RobotAuto registerPath(String reference, TrajectorySource source) {
+    private RobotAuto registerPath(String reference, TrajectorySource source) {
         return registerPath(reference, source, reference);
     }
 
     /**
      * Register a trajectory-backed auto with an alias id.
      */
-    public RobotAuto registerPath(String reference, TrajectorySource source, String id) {
+    private RobotAuto registerPath(String reference, TrajectorySource source, String id) {
         String resolvedReference = requireNonBlank(reference, "reference");
         String resolvedId = requireNonBlank(id, "id");
         try {
@@ -1245,7 +1304,7 @@ public class RobotAuto {
         }
     }
 
-    public RobotAuto registerPath(AutoKey key, TrajectorySource source, String reference) {
+    private RobotAuto registerPath(AutoKey key, TrajectorySource source, String reference) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(source, "source");
         String resolvedReference = requireNonBlank(reference, "reference");
@@ -1253,55 +1312,55 @@ public class RobotAuto {
         return registerAuto(path(key, source, resolvedReference));
     }
 
-    public RobotAuto setAutoPlanResetter(java.util.function.Function<Pose2d, Command> resetter) {
+    private RobotAuto setAutoPlanResetter(java.util.function.Function<Pose2d, Command> resetter) {
         this.autoPlanResetter = resetter;
         return this;
     }
 
-    public RobotAuto setAutoTraceEnabled(boolean enabled) {
+    private RobotAuto setAutoTraceEnabled(boolean enabled) {
         this.autoTraceEnabled = enabled;
         return this;
     }
 
-    public RobotAuto enableAutoTrace() {
+    private RobotAuto enableAutoTrace() {
         return setAutoTraceEnabled(true);
     }
 
-    public RobotAuto disableAutoTrace() {
+    private RobotAuto disableAutoTrace() {
         return setAutoTraceEnabled(false);
     }
 
-    public boolean isAutoTraceEnabled() {
+    private boolean isAutoTraceEnabled() {
         return autoTraceEnabled;
     }
 
-    public RobotAuto setAutoTraceSink(Consumer<String> sink) {
+    private RobotAuto setAutoTraceSink(Consumer<String> sink) {
         this.autoTraceSink = Objects.requireNonNull(sink, "sink");
         return this;
     }
 
-    public List<AutoTraceEvent> getAutoTraceLog() {
+    private List<AutoTraceEvent> getAutoTraceLog() {
         return autoTraceLog.snapshot();
     }
 
-    public List<AutoTraceEvent> getAutoTraceLog(int limit) {
+    private List<AutoTraceEvent> getAutoTraceLog(int limit) {
         return autoTraceLog.snapshot(limit);
     }
 
-    public int getAutoTraceLogCount() {
+    private int getAutoTraceLogCount() {
         return autoTraceLog.count();
     }
 
-    public int getAutoTraceLogCapacity() {
+    private int getAutoTraceLogCapacity() {
         return autoTraceLogCapacity;
     }
 
-    public RobotAuto clearAutoTraceLog() {
+    private RobotAuto clearAutoTraceLog() {
         autoTraceLog.clear();
         return this;
     }
 
-    public RobotAuto setAutoInitReset(AutoKey key, Boolean resetOnInit) {
+    private RobotAuto setAutoInitReset(AutoKey key, Boolean resetOnInit) {
         Objects.requireNonNull(key, "key");
         AutoRoutine routine = autoRoutines.get(key.id());
         if (routine == null) {
@@ -1312,29 +1371,29 @@ public class RobotAuto {
         return this;
     }
 
-    public RobotAuto setAutoInitReset(String id, Boolean resetOnInit) {
+    private RobotAuto setAutoInitReset(String id, Boolean resetOnInit) {
         return setAutoInitReset(AutoKey.of(id), resetOnInit);
     }
 
-    public Optional<AutoRoutine> getAuto(AutoKey key) {
+    private Optional<AutoRoutine> getAuto(AutoKey key) {
         if (key == null) {
             return Optional.empty();
         }
         return Optional.ofNullable(autoRoutines.get(key.id()));
     }
 
-    public Optional<AutoRoutine> getAuto(String id) {
+    private Optional<AutoRoutine> getAuto(String id) {
         if (id == null) {
             return Optional.empty();
         }
         return Optional.ofNullable(autoRoutines.get(id));
     }
 
-    public Collection<AutoRoutine> getAutos() {
+    private Collection<AutoRoutine> getAutos() {
         return Collections.unmodifiableCollection(autoRoutines.values());
     }
 
-    public SendableChooser<AutoRoutine> createChooser(AutoKey defaultAuto) {
+    private SendableChooser<AutoRoutine> createChooser(AutoKey defaultAuto) {
         Objects.requireNonNull(defaultAuto, "defaultAuto");
         if (autoRoutines.isEmpty()) {
             throw new IllegalStateException("No autos registered.");
@@ -1356,11 +1415,11 @@ public class RobotAuto {
         return chooser;
     }
 
-    public SendableChooser<AutoRoutine> getAutoChooser() {
+    private SendableChooser<AutoRoutine> getAutoChooser() {
         return chooser;
     }
 
-    public SendableChooser<Command> createCommandChooser(AutoKey defaultAuto) {
+    private SendableChooser<Command> createCommandChooser(AutoKey defaultAuto) {
         createChooser(defaultAuto);
         AutoRoutine defaultRoutine = autoRoutines.get(defaultAuto.id());
         SendableChooser<Command> newChooser = new SendableChooser<>();
@@ -1375,19 +1434,19 @@ public class RobotAuto {
         return newChooser;
     }
 
-    public SendableChooser<Command> getCommandChooser() {
+    private SendableChooser<Command> getCommandChooser() {
         return commandChooser;
     }
 
-    public Optional<AutoRoutine> getSelectedAuto() {
+    private Optional<AutoRoutine> getSelectedAuto() {
         return Optional.ofNullable(chooser).map(SendableChooser::getSelected);
     }
 
-    public Optional<List<Pose2d>> getSelectedAutoPoses() {
+    private Optional<List<Pose2d>> getSelectedAutoPoses() {
         return getSelectedAuto().flatMap(this::getAutoPoses);
     }
 
-    public Optional<List<Pose2d>> getAutoPoses(AutoRoutine routine) {
+    private Optional<List<Pose2d>> getAutoPoses(AutoRoutine routine) {
         if (routine == null || routine.source() == AutoSource.CUSTOM) {
             return Optional.empty();
         }
@@ -1395,8 +1454,7 @@ public class RobotAuto {
                 .flatMap(backend -> backend.getAutoPoses(routine.source(), routine.reference()));
     }
 
-    public Optional<Command> buildSelectedCommand() {
-        finalizeRegistration();
+    private Optional<Command> buildSelectedCommand() {
         if (commandChooser != null) {
             Command selected = commandChooser.getSelected();
             traceAuto("SELECTED command chooser -> " + commandLabel(selected));
@@ -1410,19 +1468,19 @@ public class RobotAuto {
         });
     }
 
-    public ProfiledPIDController getXController() {
+    private ProfiledPIDController getXController() {
         return xController;
     }
 
-    public ProfiledPIDController getYController() {
+    private ProfiledPIDController getYController() {
         return yController;
     }
 
-    public ProfiledPIDController getThetaController() {
+    private ProfiledPIDController getThetaController() {
         return thetaController;
     }
 
-    public RobotAuto setPoseControllers(ProfiledPIDController xController,
+    private RobotAuto setPoseControllers(ProfiledPIDController xController,
                                         ProfiledPIDController yController,
                                         ProfiledPIDController thetaController) {
         this.xController = xController;
@@ -1431,7 +1489,7 @@ public class RobotAuto {
         return this;
     }
 
-    public RobotAuto setStartingPose(AutoKey key, Pose2d pose) {
+    private RobotAuto setStartingPose(AutoKey key, Pose2d pose) {
         Objects.requireNonNull(key, "key");
         AutoRoutine routine = autoRoutines.get(key.id());
         if (routine == null) {
@@ -1443,7 +1501,7 @@ public class RobotAuto {
         return this;
     }
 
-    public RobotAuto setStartingPose(String autoId, Pose2d pose) {
+    private RobotAuto setStartingPose(String autoId, Pose2d pose) {
         return setStartingPose(AutoKey.of(autoId), pose);
     }
 
@@ -1480,7 +1538,7 @@ public class RobotAuto {
      *
      * <p>This is safe to call multiple times.</p>
      */
-    public void finalizeRegistration() {
+    private void finalizeRegistration() {
         if (registrationFinalized) {
             return;
         }
@@ -1779,7 +1837,7 @@ public class RobotAuto {
             return null;
         }
         try {
-            RobotLocalization<?> localization = core.getLocalization();
+            RobotLocalization<?> localization = core.localization();
             if (localization == null) {
                 return null;
             }
@@ -1817,5 +1875,302 @@ public class RobotAuto {
     private void resetChoosers() {
         chooser = null;
         commandChooser = null;
+    }
+
+    public final class RegistrySection {
+        public RobotAuto program(AutoProgram program) {
+            return registerProgram(program);
+        }
+
+        public RobotAuto programs(AutoProgram... programs) {
+            return registerPrograms(programs);
+        }
+
+        @SafeVarargs
+        public final RobotAuto programTypes(Class<? extends AutoProgram>... types) {
+            return registerPrograms(types);
+        }
+
+        public RobotAuto command(NamedCommandKey key, Command command) {
+            return registerNamedCommand(key, command);
+        }
+
+        public RobotAuto command(String id, Command command) {
+            return registerNamedCommand(id, command);
+        }
+
+        public RobotAuto command(NamedCommandKey key, Supplier<Command> supplier) {
+            return registerNamedCommand(key, supplier);
+        }
+
+        public RobotAuto command(String id, Supplier<Command> supplier) {
+            return registerNamedCommand(id, supplier);
+        }
+
+        public RobotAuto command(NamedCommandKey key, Runnable action) {
+            return registerNamedCommand(key, action);
+        }
+
+        public RobotAuto command(String id, Runnable action) {
+            return registerNamedCommand(id, action);
+        }
+
+        public <T> RobotAuto input(AutoInput<T> key, Supplier<T> supplier) {
+            return registerInput(key, supplier);
+        }
+
+        public RobotAuto routine(AutoRoutine routine) {
+            return registerAuto(routine);
+        }
+
+        public RobotAuto routines(AutoRoutine... routines) {
+            return registerAutos(routines);
+        }
+
+        public RobotAuto routine(AutoKey key, Supplier<Command> factory) {
+            return registerAuto(key, factory);
+        }
+
+        public RobotAuto routine(String id, Supplier<Command> factory) {
+            return registerAuto(id, factory);
+        }
+
+        public RobotAuto path(String reference, TrajectorySource source) {
+            return registerPath(reference, source);
+        }
+
+        public RobotAuto path(String reference, TrajectorySource source, String id) {
+            return registerPath(reference, source, id);
+        }
+
+        public RobotAuto path(AutoKey key, TrajectorySource source, String reference) {
+            return registerPath(key, source, reference);
+        }
+
+        public boolean hasCommand(String id) {
+            return hasNamedCommand(id);
+        }
+
+        public boolean hasRoutine(String id) {
+            return hasAuto(id);
+        }
+
+        public boolean hasInput(String id) {
+            return RobotAuto.this.hasInput(id);
+        }
+    }
+
+    public final class CommandsSection {
+        public RobotAuto put(NamedCommandKey key, Command command) {
+            return registry().command(key, command);
+        }
+
+        public RobotAuto put(String id, Command command) {
+            return registry().command(id, command);
+        }
+
+        public RobotAuto put(NamedCommandKey key, Supplier<Command> supplier) {
+            return registry().command(key, supplier);
+        }
+
+        public RobotAuto put(String id, Supplier<Command> supplier) {
+            return registry().command(id, supplier);
+        }
+
+        public RobotAuto put(NamedCommandKey key, Runnable action) {
+            return registry().command(key, action);
+        }
+
+        public RobotAuto put(String id, Runnable action) {
+            return registry().command(id, action);
+        }
+
+        public boolean has(String id) {
+            return registry().hasCommand(id);
+        }
+    }
+
+    public final class InputsSection {
+        public <T> RobotAuto put(AutoInput<T> key, Supplier<T> supplier) {
+            return registry().input(key, supplier);
+        }
+
+        public boolean has(String id) {
+            return registry().hasInput(id);
+        }
+
+        public <T> Supplier<T> supplier(AutoInput<T> key) {
+            return inputSupplier(key);
+        }
+
+        public <T> T value(AutoInput<T> key) {
+            return inputValue(key);
+        }
+    }
+
+    public final class RoutinesSection {
+        public RobotAuto put(AutoRoutine routine) {
+            return registry().routine(routine);
+        }
+
+        public RobotAuto put(AutoRoutine... routines) {
+            return registry().routines(routines);
+        }
+
+        public RobotAuto put(AutoKey key, Supplier<Command> factory) {
+            return registry().routine(key, factory);
+        }
+
+        public RobotAuto put(String id, Supplier<Command> factory) {
+            return registry().routine(id, factory);
+        }
+
+        public RobotAuto path(String reference, TrajectorySource source) {
+            return registry().path(reference, source);
+        }
+
+        public RobotAuto path(String reference, TrajectorySource source, String id) {
+            return registry().path(reference, source, id);
+        }
+
+        public RobotAuto path(AutoKey key, TrajectorySource source, String reference) {
+            return registry().path(key, source, reference);
+        }
+
+        public boolean has(String id) {
+            return registry().hasRoutine(id);
+        }
+
+        public Optional<AutoRoutine> one(String id) {
+            return getAuto(id);
+        }
+
+        public Collection<AutoRoutine> all() {
+            return getAutos();
+        }
+
+        public Optional<List<Pose2d>> poses(AutoRoutine routine) {
+            return getAutoPoses(routine);
+        }
+
+        public RobotAuto startingPose(AutoKey key, Pose2d pose) {
+            return setStartingPose(key, pose);
+        }
+
+        public RobotAuto startingPose(String id, Pose2d pose) {
+            return setStartingPose(id, pose);
+        }
+    }
+
+    public final class SelectionSection {
+        public SendableChooser<AutoRoutine> chooser(AutoKey defaultAuto) {
+            return createChooser(defaultAuto);
+        }
+
+        public SendableChooser<Command> commandChooser(AutoKey defaultAuto) {
+            return createCommandChooser(defaultAuto);
+        }
+
+        public Optional<SendableChooser<AutoRoutine>> chooser() {
+            return Optional.ofNullable(chooser);
+        }
+
+        public Optional<SendableChooser<Command>> commandChooser() {
+            return Optional.ofNullable(commandChooser);
+        }
+
+        public Optional<AutoRoutine> selected() {
+            return getSelectedAuto();
+        }
+
+        public Optional<List<Pose2d>> selectedPoses() {
+            return getSelectedAutoPoses();
+        }
+    }
+
+    public final class ExecutionSection {
+        public Optional<Command> selectedCommand() {
+            return buildSelectedCommand();
+        }
+
+        public void prepare() {
+            finalizeRegistration();
+        }
+    }
+
+    public final class TraceSection {
+        public TraceSection enabled(boolean enabled) {
+            autoTraceEnabled = enabled;
+            return this;
+        }
+
+        public boolean enabled() {
+            return autoTraceEnabled;
+        }
+
+        public TraceSection sink(Consumer<String> sink) {
+            autoTraceSink = Objects.requireNonNull(sink, "sink");
+            return this;
+        }
+
+        public List<AutoTraceEvent> events() {
+            return autoTraceLog.snapshot();
+        }
+
+        public List<AutoTraceEvent> events(int limit) {
+            return autoTraceLog.snapshot(limit);
+        }
+
+        public int count() {
+            return autoTraceLog.count();
+        }
+
+        public int capacity() {
+            return autoTraceLogCapacity;
+        }
+
+        public TraceSection clear() {
+            autoTraceLog.clear();
+            return this;
+        }
+    }
+
+    public final class ResetSection {
+        public RobotAuto poseResetter(java.util.function.Function<Pose2d, Command> resetter) {
+            autoPlanResetter = resetter;
+            return RobotAuto.this;
+        }
+
+        public RobotAuto autoInit(AutoKey key, Boolean resetOnInit) {
+            return setAutoInitReset(key, resetOnInit);
+        }
+
+        public RobotAuto autoInit(String id, Boolean resetOnInit) {
+            return setAutoInitReset(id, resetOnInit);
+        }
+    }
+
+    public final class ControllersSection {
+        public ProfiledPIDController x() {
+            return xController;
+        }
+
+        public ProfiledPIDController y() {
+            return yController;
+        }
+
+        public ProfiledPIDController theta() {
+            return thetaController;
+        }
+
+        public ControllersSection pose(
+                ProfiledPIDController x,
+                ProfiledPIDController y,
+                ProfiledPIDController theta) {
+            xController = x;
+            yController = y;
+            thetaController = theta;
+            return this;
+        }
     }
 }
