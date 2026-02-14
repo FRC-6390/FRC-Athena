@@ -6,11 +6,14 @@ import java.util.concurrent.ConcurrentMap;
 import com.ctre.phoenix6.CANBus;
 
 /**
- * Reuses CANBus handles across CTRE devices to avoid repeated bus object setup at startup.
+ * Reuses CANBus handles across CTRE devices.
+ *
+ * <p>For roboRIO hardware we always resolve to an explicit {@code "rio"} bus
+ * instead of relying on the empty-string default bus selection.</p>
  */
 public final class CtreCanBusRegistry {
     private static final String RIO_KEY = "rio";
-    private static final CANBus RIO_BUS = new CANBus();
+    private static final CANBus RIO_BUS = CANBus.roboRIO();
     private static final ConcurrentMap<String, CANBus> BUS_CACHE = new ConcurrentHashMap<>();
 
     private CtreCanBusRegistry() {}
@@ -27,6 +30,7 @@ public final class CtreCanBusRegistry {
         if (canbus == null || canbus.isBlank()) {
             return RIO_KEY;
         }
-        return canbus.trim();
+        String normalized = canbus.trim();
+        return normalized.equalsIgnoreCase(RIO_KEY) ? RIO_KEY : normalized;
     }
 }

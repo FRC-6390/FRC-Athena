@@ -40,12 +40,16 @@ public final class RobotCoreHookExamples {
         Objects.requireNonNull(tuning, "tuning");
 
         LaneAssistState state = new LaneAssistState();
+        String zoneName = tuning.speedSource() + "Zone";
 
         return config.hooks(h -> {
             h.onInit(ctx -> {
                 RobotSpeeds speeds = ctx.drivetrain().getRobotSpeeds();
                 speeds.registerSpeedSource(tuning.speedSource(), true);
                 speeds.setSpeedSourceState(tuning.speedSource(), true);
+                if (ctx.localization() != null) {
+                    ctx.localization().setBoundingBox(zoneName, zone);
+                }
             });
 
             // This runs from RobotCore.robotPeriodic() (phase ROBOT_PERIODIC).

@@ -117,6 +117,18 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
         return motionLimits;
     }
 
+    @Override
+    public void resetDriveState() {
+        robotSpeeds.stop();
+        lastLimitedSpeeds = new ChassisSpeeds();
+        lastMotionLimitTimestampSeconds = Double.NaN;
+        lastLeftCommand = 0.0;
+        lastRightCommand = 0.0;
+        resetFeedforwardState();
+        leftMotors.stopMotors();
+        rightMotors.stopMotors();
+    }
+
     public DifferentialDrivetrain setDriveFeedforward(SimpleMotorFeedforward feedforward) {
         if (feedforward == null) {
             driveFeedforward = null;

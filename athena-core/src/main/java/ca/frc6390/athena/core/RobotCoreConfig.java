@@ -565,6 +565,21 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public LocalizationSection boundingBox(
+                String name,
+                ca.frc6390.athena.core.localization.PoseBoundingBox2d box) {
+            config.addBoundingBox(name, box);
+            return this;
+        }
+
+        public LocalizationSection boundingBox(
+                String name,
+                edu.wpi.first.math.geometry.Translation2d cornerA,
+                edu.wpi.first.math.geometry.Translation2d cornerB) {
+            config.addBoundingBox(name, cornerA, cornerB);
+            return this;
+        }
+
         public LocalizationSection autoPoseName(String name) {
             config.setAutoPoseName(name);
             return this;

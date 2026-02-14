@@ -2,10 +2,12 @@ package ca.frc6390.athena.core.localization;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
@@ -21,6 +23,7 @@ public class RobotLocalizationConfig {
     private PoseSpace poseSpace;
     private BackendConfig backend;
     private List<PoseConfig> poseConfigs;
+    private List<NamedBoundingBox> boundingBoxes;
     private String autoPoseName;
 
     public enum PoseSpace {
@@ -171,6 +174,10 @@ public class RobotLocalizationConfig {
 
     public List<PoseConfig> poseConfigs() {
         return poseConfigs != null ? List.copyOf(poseConfigs) : List.of();
+    }
+
+    public List<NamedBoundingBox> boundingBoxes() {
+        return boundingBoxes != null ? List.copyOf(boundingBoxes) : List.of();
     }
 
     public RobotLocalizationConfig setAutoPlannerPID(double tP, double tI, double tD, double rP, double rI, double rD){
@@ -325,6 +332,32 @@ public class RobotLocalizationConfig {
         return this;
     }
 
+    public RobotLocalizationConfig setBoundingBoxes(List<NamedBoundingBox> boundingBoxes) {
+        this.boundingBoxes = boundingBoxes != null ? new ArrayList<>(boundingBoxes) : new ArrayList<>();
+        return this;
+    }
+
+    public RobotLocalizationConfig addBoundingBox(String name, PoseBoundingBox2d box) {
+        if (box == null) {
+            return this;
+        }
+        if (boundingBoxes == null) {
+            boundingBoxes = new ArrayList<>();
+        }
+        boundingBoxes.add(new NamedBoundingBox(name, box));
+        return this;
+    }
+
+    public RobotLocalizationConfig addBoundingBox(
+            String name,
+            Translation2d cornerA,
+            Translation2d cornerB) {
+        if (cornerA == null || cornerB == null) {
+            return this;
+        }
+        return addBoundingBox(name, PoseBoundingBox2d.fromCorners(cornerA, cornerB));
+    }
+
     public RobotLocalizationConfig setAutoPoseName(String autoPoseName) {
         this.autoPoseName = autoPoseName;
         normalize();
@@ -415,10 +448,26 @@ public class RobotLocalizationConfig {
         poseSpace = poseSpace != null ? poseSpace : PoseSpace.TWO_D;
         backend = backend != null ? backend : BackendConfig.defualt();
         poseConfigs = poseConfigs != null ? new ArrayList<>(poseConfigs) : new ArrayList<>();
+        boundingBoxes = boundingBoxes != null ? new ArrayList<>(boundingBoxes) : new ArrayList<>();
         stateStdDevs = stateStdDevs != null ? stateStdDevs : StdDevs.defaults();
         visionStdDevs = visionStdDevs != null ? visionStdDevs : StdDevs.defaults();
         visionMultiStdDevs = visionMultiStdDevs != null ? visionMultiStdDevs : StdDevs.defaults();
         autoPoseName = (autoPoseName == null || autoPoseName.isBlank()) ? "field" : autoPoseName;
+    }
+
+    public record NamedBoundingBox(String name, PoseBoundingBox2d box) {
+        public NamedBoundingBox {
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(box, "box");
+            String resolved = name.trim();
+            if (resolved.isEmpty()) {
+                throw new IllegalArgumentException("bounding box name must not be blank");
+            }
+            if (resolved.indexOf('/') >= 0 || resolved.indexOf('\\') >= 0) {
+                throw new IllegalArgumentException("bounding box name must not contain '/' or '\\'");
+            }
+            name = resolved;
+        }
     }
 
     public record StdDevs(double x, double y, double z, double theta) {

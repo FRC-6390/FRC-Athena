@@ -280,6 +280,18 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
   }
 
   @Override
+  public void resetDriveState() {
+    robotSpeeds.stop();
+    lastCommandedSpeeds = new ChassisSpeeds();
+    lastLimitedSpeeds = new ChassisSpeeds();
+    lastMotionLimitTimestampSeconds = Double.NaN;
+    desiredHeading = getIMU().getVirtualAxis("drift").getRadians();
+    for (SwerveModule module : swerveModules) {
+      module.stop();
+    }
+  }
+
+  @Override
   public void update() {
     imu.update();
     

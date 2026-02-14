@@ -1,7 +1,9 @@
 package ca.frc6390.athena.core.localization;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -20,6 +22,7 @@ final class RobotLocalizationFieldPublisher {
     private final Supplier<RobotVision> visionSupplier;
     private FieldObject2d plannedPathObject;
     private FieldObject2d actualPathObject;
+    private final Map<String, FieldObject2d> boundingBoxObjects = new HashMap<>();
     private final List<Pose2d> actualPathPoses = new ArrayList<>();
     private double actualPathSpacingMeters = 0.1;
     private double actualPathMinIntervalSeconds = 0.1;
@@ -61,6 +64,40 @@ final class RobotLocalizationFieldPublisher {
 
     void clearRobotPose() {
         field.getObject("Robot").setPoses(List.of());
+    }
+
+    void setBoundingBoxes(Map<String, PoseBoundingBox2d> boxes) {
+        if (boxes == null || boxes.isEmpty()) {
+            clearBoundingBoxes();
+            return;
+        }
+
+        boundingBoxObjects.entrySet().removeIf(entry -> {
+            if (boxes.containsKey(entry.getKey())) {
+                return false;
+            }
+            entry.getValue().setPoses(List.of());
+            return true;
+        });
+
+        for (Map.Entry<String, PoseBoundingBox2d> entry : boxes.entrySet()) {
+            String key = entry.getKey();
+            PoseBoundingBox2d box = entry.getValue();
+            if (key == null || key.isBlank() || box == null) {
+                continue;
+            }
+            FieldObject2d object = boundingBoxObjects.computeIfAbsent(
+                    key,
+                    id -> field.getObject("BoundingBoxes/" + id));
+            object.setPoses(toBoundingBoxPath(box));
+        }
+    }
+
+    void clearBoundingBoxes() {
+        for (FieldObject2d object : boundingBoxObjects.values()) {
+            object.setPoses(List.of());
+        }
+        boundingBoxObjects.clear();
     }
 
     void updateAutoVisualization(RobotAuto autos) {
@@ -255,5 +292,14 @@ final class RobotLocalizationFieldPublisher {
             }
         }
         return result;
+    }
+
+    private static List<Pose2d> toBoundingBoxPath(PoseBoundingBox2d box) {
+        Rotation2d heading = new Rotation2d();
+        Pose2d bottomLeft = new Pose2d(box.minX(), box.minY(), heading);
+        Pose2d bottomRight = new Pose2d(box.maxX(), box.minY(), heading);
+        Pose2d topRight = new Pose2d(box.maxX(), box.maxY(), heading);
+        Pose2d topLeft = new Pose2d(box.minX(), box.maxY(), heading);
+        return List.of(bottomLeft, bottomRight, topRight, topLeft, bottomLeft);
     }
 }

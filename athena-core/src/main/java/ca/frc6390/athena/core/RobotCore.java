@@ -339,12 +339,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final Map<String, OutputType> coreControlLoopFeedforwardOutputTypes;
     private static final double MECHANISM_AUTO_PUBLISH_PERIOD_SECONDS = 0.05;
     private static final int MECHANISM_AUTO_PUBLISH_BATCH_SIZE = 2;
+    private static final double STARTUP_LOG_THRESHOLD_SECONDS = 0.05;
 
     public RobotCore(RobotCoreConfig<T> config) {
+        double constructorStart = Timer.getFPGATimestamp();
         activeInstance = this;
-        drivetrain = config.driveTrain.build();
-        localization = drivetrain.localization(config.localizationConfig());
-        vision = RobotVision.fromConfig(config.visionConfig);
+        drivetrain = timedStartupStep("constructor.driveTrain.build", () -> config.driveTrain.build());
+        localization = timedStartupStep("constructor.localization.create",
+                () -> drivetrain.localization(config.localizationConfig()));
+        vision = timedStartupStep("constructor.vision.create", () -> RobotVision.fromConfig(config.visionConfig));
         autos = new RobotAuto().attachRobotCore(this);
         copilot = new RobotCopilot(drivetrain.get(), localization, RobotCopilot.inferDriveStyle(drivetrain.get()));
         mechanisms = new HashMap<>();
@@ -440,7 +443,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         // Choreo auto configuration should not depend on vision. Only attempt configuration when the
         // backend exists to avoid warning spam for projects that do not include Athena Choreo.
         if (localization != null && AutoBackends.forSource(RobotAuto.AutoSource.CHOREO).isPresent()) {
-            localization.configureChoreo(drivetrain);
+            timedStartupStep("constructor.localization.configureChoreo", () -> localization.configureChoreo(drivetrain));
         }
         if (localization != null) {
             String autoPose = config.localizationConfig().autoPoseName();
@@ -459,27 +462,35 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
         // Make declared mechanisms available immediately after RobotCore construction (before subclass
         // constructors run). robotInit() still calls this, but it is guarded to prevent duplicates.
-        registerConfiguredMechanisms();
+        timedStartupStep("constructor.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
+        logStartupDuration("constructor.total", Timer.getFPGATimestamp() - constructorStart);
     }
 
     @Override
     public final void robotInit() {
-        registerConfiguredMechanisms();
-        startConfigServerIfNeeded();
-        configureAutos(autos);
-        autos.finalizeRegistration();
-        ensureAutoChooserPublished();
-        robotNetworkTables.publishConfig();
+        double robotInitStart = Timer.getFPGATimestamp();
+        timedStartupStep("robotInit.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
+        timedStartupStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded);
+        timedStartupStep("robotInit.configureAutos", () -> configureAutos(autos));
+        timedStartupStep("robotInit.autos.finalizeRegistration", autos::finalizeRegistration);
+        timedStartupStep("robotInit.ensureAutoChooserPublished", this::ensureAutoChooserPublished);
+        timedStartupStep("robotInit.publishConfig", robotNetworkTables::publishConfig);
         if (robotNetworkTables.isPublishingEnabled() && robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
-            publishNetworkTables();
+            timedStartupStep("robotInit.publishNetworkTables", () -> {
+                publishNetworkTables();
+            });
         }
         if (robotNetworkTables.isPublishingEnabled() && robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
-            publishNetworkTablesMechanisms();
+            timedStartupStep("robotInit.publishNetworkTablesMechanisms", () -> {
+                publishNetworkTablesMechanisms();
+            });
         }
-        runInitHooks();
-        runCorePhaseBindings(RobotCoreHooks.Phase.ROBOT_INIT, coreHooks.initBindings());
-        onRobotInit();
-        registerPIDCycles();
+        timedStartupStep("robotInit.runInitHooks", this::runInitHooks);
+        timedStartupStep("robotInit.runCorePhaseBindings",
+                () -> runCorePhaseBindings(RobotCoreHooks.Phase.ROBOT_INIT, coreHooks.initBindings()));
+        timedStartupStep("robotInit.onRobotInit", this::onRobotInit);
+        timedStartupStep("robotInit.registerPIDCycles", this::registerPIDCycles);
+        logStartupDuration("robotInit.total", Timer.getFPGATimestamp() - robotInitStart);
     }
 
     private void runInitHooks() {
@@ -731,10 +742,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void autonomousInit() {
-        drivetrain.getRobotSpeeds().setSpeedSourceState("drive", false);
-        drivetrain.getRobotSpeeds().stopSpeeds("drive");
-        drivetrain.getRobotSpeeds().setSpeedSourceState("auto", true);
-        drivetrain.getRobotSpeeds().stopSpeeds("auto");
+        prepareDrivetrainForModeTransition(false, true);
         resetAutoInitPoseIfConfigured();
         scheduleAutonomousCommand();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_INIT);
@@ -745,6 +753,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void autonomousExit() {
+        prepareDrivetrainForModeTransition(false, false);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.AUTONOMOUS_EXIT, coreHooks.autonomousExitBindings());
         onAutonomousExit();
@@ -754,7 +763,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void autonomousPeriodic() {
         if (autonomousCommand != null
                 && !CommandScheduler.getInstance().isScheduled(autonomousCommand)) {
-            drivetrain.getRobotSpeeds().stopSpeeds("auto");
+            prepareDrivetrainForModeTransition(false, true);
         }
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_PERIODIC);
         runCorePeriodicBindings(
@@ -767,9 +776,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void teleopInit() {
         cancelAutonomousCommand();
-        drivetrain.getRobotSpeeds().setSpeedSourceState("drive", true);
-        drivetrain.getRobotSpeeds().setSpeedSourceState("auto", false);
-        drivetrain.getRobotSpeeds().stopSpeeds("auto");
+        prepareDrivetrainForModeTransition(true, false);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_INIT);
         resetPeriodicRunners(teleopPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.TELEOP_INIT, coreHooks.teleopInitBindings());
@@ -796,9 +803,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void disabledInit() {
         cancelAutonomousCommand();
-        drivetrain.getRobotSpeeds().setSpeedSourceState("drive", true);
-        drivetrain.getRobotSpeeds().setSpeedSourceState("auto", false);
-        drivetrain.getRobotSpeeds().stopSpeeds("auto");
+        prepareDrivetrainForModeTransition(true, false);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_INIT);
         resetPeriodicRunners(disabledPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.DISABLED_INIT, coreHooks.disabledInitBindings());
@@ -826,6 +831,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void testInit() {
         CommandScheduler.getInstance().cancelAll();
         cancelAutonomousCommand();
+        prepareDrivetrainForModeTransition(false, false);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.TEST_INIT);
         resetPeriodicRunners(testPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.TEST_INIT, coreHooks.testInitBindings());
@@ -980,6 +986,36 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             nowSeconds = Timer.getFPGATimestamp();
         }
         return nowSeconds * 1000.0;
+    }
+
+    private static void logStartupDuration(String step, double elapsedSeconds) {
+        if (!Double.isFinite(elapsedSeconds) || elapsedSeconds < STARTUP_LOG_THRESHOLD_SECONDS) {
+            return;
+        }
+        System.out.printf(
+                java.util.Locale.US,
+                "[Athena][Startup] %s took %.3fs%n",
+                step,
+                elapsedSeconds);
+    }
+
+    private static void timedStartupStep(String step, Runnable action) {
+        if (action == null) {
+            return;
+        }
+        double start = Timer.getFPGATimestamp();
+        action.run();
+        logStartupDuration(step, Timer.getFPGATimestamp() - start);
+    }
+
+    private static <R> R timedStartupStep(String step, Supplier<R> action) {
+        if (action == null) {
+            return null;
+        }
+        double start = Timer.getFPGATimestamp();
+        R result = action.get();
+        logStartupDuration(step, Timer.getFPGATimestamp() - start);
+        return result;
     }
 
     private boolean hookInput(String key) {
@@ -1377,6 +1413,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     protected Command createAutonomousCommand() {
         return autos.buildSelectedCommand().orElse(null);
+    }
+
+    private void prepareDrivetrainForModeTransition(boolean driveEnabled, boolean autoEnabled) {
+        drivetrain.resetDriveState();
+        RobotSpeeds speeds = drivetrain.getRobotSpeeds();
+        speeds.setSpeedSourceState(RobotSpeeds.DRIVE_SOURCE, driveEnabled);
+        speeds.setSpeedSourceState(RobotSpeeds.AUTO_SOURCE, autoEnabled);
+        speeds.stop();
     }
 
     private void scheduleAutonomousCommand() {

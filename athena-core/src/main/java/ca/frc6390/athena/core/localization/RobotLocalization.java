@@ -4,10 +4,12 @@ import java.lang.reflect.Field;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -41,6 +43,7 @@ import edu.wpi.first.math.util.Units;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.networktables.StructPublisher;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
@@ -90,6 +93,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private final Map<String, PoseConfig> poseConfigs = new HashMap<>();
     private final Map<String, PoseEstimatorState> poseStates = new HashMap<>();
     private final Map<String, StructPublisher<Pose2d>> poseStructPublishers = new HashMap<>();
+    private final LinkedHashMap<String, PoseBoundingBox2d> namedBoundingBoxes = new LinkedHashMap<>();
+    private final Map<String, StructArrayPublisher<Pose2d>> boundingBoxPublishers = new HashMap<>();
     private String primaryPoseName;
     private boolean slipActive = false;
     private double slipActiveUntilSeconds = Double.NEGATIVE_INFINITY;
@@ -168,6 +173,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         } else {
             for (PoseConfig poseConfig : configs) {
                 registerPoseConfig(poseConfig);
+            }
+        }
+        for (RobotLocalizationConfig.NamedBoundingBox namedBox : config.boundingBoxes()) {
+            if (namedBox != null) {
+                setBoundingBox(namedBox.name(), namedBox.box());
             }
         }
         loadPersistentState();
@@ -1078,6 +1088,62 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return fieldPublisher.getObject(id);
     }
 
+    /**
+     * Registers or updates a named localization bounding box for visualization and telemetry.
+     */
+    public RobotLocalization<T> setBoundingBox(String name, PoseBoundingBox2d box) {
+        String resolvedName = sanitizeBoundingBoxName(name);
+        Objects.requireNonNull(box, "box");
+        namedBoundingBoxes.put(resolvedName, box);
+        fieldPublisher.setBoundingBoxes(namedBoundingBoxes);
+        return this;
+    }
+
+    /**
+     * Registers or updates a named localization bounding box from opposite corners.
+     */
+    public RobotLocalization<T> setBoundingBox(String name, Translation2d cornerA, Translation2d cornerB) {
+        return setBoundingBox(name, PoseBoundingBox2d.fromCorners(cornerA, cornerB));
+    }
+
+    /**
+     * Removes a named localization bounding box from visualization and telemetry.
+     */
+    public boolean removeBoundingBox(String name) {
+        String resolvedName = sanitizeBoundingBoxName(name);
+        PoseBoundingBox2d removed = namedBoundingBoxes.remove(resolvedName);
+        if (removed == null) {
+            return false;
+        }
+        StructArrayPublisher<Pose2d> publisher = boundingBoxPublishers.remove(resolvedName);
+        if (publisher != null) {
+            publisher.close();
+        }
+        fieldPublisher.setBoundingBoxes(namedBoundingBoxes);
+        return true;
+    }
+
+    /**
+     * Clears all named localization bounding boxes from visualization and telemetry.
+     */
+    public void clearBoundingBoxes() {
+        namedBoundingBoxes.clear();
+        for (StructArrayPublisher<Pose2d> publisher : boundingBoxPublishers.values()) {
+            if (publisher != null) {
+                publisher.close();
+            }
+        }
+        boundingBoxPublishers.clear();
+        fieldPublisher.clearBoundingBoxes();
+    }
+
+    /**
+     * Returns an immutable view of registered localization bounding boxes.
+     */
+    public Map<String, PoseBoundingBox2d> getBoundingBoxes() {
+        return Map.copyOf(namedBoundingBoxes);
+    }
+
     public Pose2d getFieldPose(){
         PoseEstimatorState primary = getPrimaryPoseState();
         if (primary != null) {
@@ -1167,6 +1233,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         posesNode.putDouble("yM", pose.getY());
         posesNode.putDouble("rotDeg", pose.getRotation().getDegrees());
 
+        publishBoundingBoxes(node, pose);
+
         // Field2d is a localization concern (not vision). Publish it only when explicitly enabled.
         if (nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET)) {
             if (!fieldPublisher.isFieldPublished()) {
@@ -1175,6 +1243,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 fieldPublisher.publishFieldOnce();
             }
             fieldPublisher.setRobotPose(pose);
+            fieldPublisher.setBoundingBoxes(namedBoundingBoxes);
+        } else {
+            fieldPublisher.clearBoundingBoxes();
         }
 
         if (nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_HEALTH_WIDGETS)) {
@@ -1250,6 +1321,69 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             poseStructPublishers.put(name, publisher);
         }
         publisher.set(pose);
+    }
+
+    private void publishBoundingBoxes(RobotNetworkTables.Node localizationNode, Pose2d currentPose) {
+        RobotNetworkTables nt = robotNetworkTables;
+        if (nt == null || !nt.isPublishingEnabled()) {
+            return;
+        }
+
+        RobotNetworkTables.Node boxesNode = localizationNode.child("BoundingBoxes");
+        Set<String> activeNames = Set.copyOf(namedBoundingBoxes.keySet());
+        boundingBoxPublishers.entrySet().removeIf(entry -> {
+            if (activeNames.contains(entry.getKey())) {
+                return false;
+            }
+            StructArrayPublisher<Pose2d> publisher = entry.getValue();
+            if (publisher != null) {
+                publisher.close();
+            }
+            return true;
+        });
+
+        for (Map.Entry<String, PoseBoundingBox2d> entry : namedBoundingBoxes.entrySet()) {
+            String name = entry.getKey();
+            PoseBoundingBox2d box = entry.getValue();
+            if (name == null || name.isBlank() || box == null) {
+                continue;
+            }
+            RobotNetworkTables.Node boxNode = boxesNode.child(name);
+            boxNode.putDouble("minX", box.minX());
+            boxNode.putDouble("minY", box.minY());
+            boxNode.putDouble("maxX", box.maxX());
+            boxNode.putDouble("maxY", box.maxY());
+            boxNode.putBoolean("containsPrimaryPose", box.contains(currentPose));
+
+            StructArrayPublisher<Pose2d> publisher = boundingBoxPublishers.computeIfAbsent(name, key ->
+                    NetworkTableInstance.getDefault()
+                            .getStructArrayTopic("Athena/Localization/BoundingBoxes/" + key + "/Trajectory", Pose2d.struct)
+                            .publish());
+            publisher.set(toBoundingBoxTrajectory(box));
+        }
+    }
+
+    private static Pose2d[] toBoundingBoxTrajectory(PoseBoundingBox2d box) {
+        Rotation2d heading = new Rotation2d();
+        Pose2d bottomLeft = new Pose2d(box.minX(), box.minY(), heading);
+        Pose2d bottomRight = new Pose2d(box.maxX(), box.minY(), heading);
+        Pose2d topRight = new Pose2d(box.maxX(), box.maxY(), heading);
+        Pose2d topLeft = new Pose2d(box.minX(), box.maxY(), heading);
+        return new Pose2d[] { bottomLeft, bottomRight, topRight, topLeft, bottomLeft };
+    }
+
+    private static String sanitizeBoundingBoxName(String name) {
+        if (name == null) {
+            throw new IllegalArgumentException("bounding box name must not be null");
+        }
+        String resolved = name.trim();
+        if (resolved.isEmpty()) {
+            throw new IllegalArgumentException("bounding box name must not be blank");
+        }
+        if (resolved.indexOf('/') >= 0 || resolved.indexOf('\\') >= 0) {
+            throw new IllegalArgumentException("bounding box name must not contain '/' or '\\'");
+        }
+        return resolved;
     }
 
     private void updatePoseFromConfig(PoseConfig config, PoseEstimatorState state) {

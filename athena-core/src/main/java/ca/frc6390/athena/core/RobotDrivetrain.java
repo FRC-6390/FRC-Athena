@@ -9,6 +9,7 @@ import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 
@@ -24,6 +25,9 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
     MotionLimits getMotionLimits();
     RobotSpeeds getRobotSpeeds();
     void update();
+    default void resetDriveState() {
+        getRobotSpeeds().stop();
+    }
     Command getDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
     void setDriveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
     RobotLocalization<?> localization(RobotLocalizationConfig config);
@@ -48,13 +52,22 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
 
         if (nt.enabled(RobotNetworkTables.Flag.DRIVETRAIN_SPEED_WIDGETS)) {
             RobotNetworkTables.Node speeds = node.child("RobotSpeeds");
-            speeds.child("drive").putDouble("vxMps", getRobotSpeeds().getSpeeds("drive").vxMetersPerSecond);
-            speeds.child("drive").putDouble("vyMps", getRobotSpeeds().getSpeeds("drive").vyMetersPerSecond);
-            speeds.child("drive").putDouble("omegaRadPerSec", getRobotSpeeds().getSpeeds("drive").omegaRadiansPerSecond);
-
-            speeds.child("feedback").putDouble("vxMps", getRobotSpeeds().getSpeeds("feedback").vxMetersPerSecond);
-            speeds.child("feedback").putDouble("vyMps", getRobotSpeeds().getSpeeds("feedback").vyMetersPerSecond);
-            speeds.child("feedback").putDouble("omegaRadPerSec", getRobotSpeeds().getSpeeds("feedback").omegaRadiansPerSecond);
+            RobotSpeeds robotSpeeds = getRobotSpeeds();
+            for (String source : robotSpeeds.getSpeedSources()) {
+                RobotNetworkTables.Node sourceNode = speeds.child(source);
+                ChassisSpeeds input = robotSpeeds.getInputSpeeds(source);
+                ChassisSpeeds output = robotSpeeds.getSpeeds(source);
+                sourceNode.putBoolean("enabled", robotSpeeds.isSpeedsSourceActive(source));
+                sourceNode.putBoolean("axisXEnabled", robotSpeeds.isAxisActive(source, RobotSpeeds.SpeedAxis.X));
+                sourceNode.putBoolean("axisYEnabled", robotSpeeds.isAxisActive(source, RobotSpeeds.SpeedAxis.Y));
+                sourceNode.putBoolean("axisThetaEnabled", robotSpeeds.isAxisActive(source, RobotSpeeds.SpeedAxis.Theta));
+                sourceNode.child("input").putDouble("vxMps", input.vxMetersPerSecond);
+                sourceNode.child("input").putDouble("vyMps", input.vyMetersPerSecond);
+                sourceNode.child("input").putDouble("omegaRadPerSec", input.omegaRadiansPerSecond);
+                sourceNode.putDouble("vxMps", output.vxMetersPerSecond);
+                sourceNode.putDouble("vyMps", output.vyMetersPerSecond);
+                sourceNode.putDouble("omegaRadPerSec", output.omegaRadiansPerSecond);
+            }
         }
 
         // Commands are intentionally not published here; dashboards can invoke actions via your own bindings.

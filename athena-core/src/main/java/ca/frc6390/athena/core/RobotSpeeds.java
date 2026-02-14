@@ -170,6 +170,10 @@ public class RobotSpeeds {
             return new ChassisSpeeds(outputVx(), outputVy(), outputOmega());
         }
 
+        public ChassisSpeeds getInputSpeeds() {
+            return new ChassisSpeeds(vxMetersPerSecond, vyMetersPerSecond, omegaRadiansPerSecond);
+        }
+
         public void stop() {
             vxMetersPerSecond = 0.0;
             vyMetersPerSecond = 0.0;
@@ -381,6 +385,14 @@ public class RobotSpeeds {
 
     public ChassisSpeeds getSpeeds(String source) {
         return speedSource(source).getOutputSpeeds();
+    }
+
+    public ChassisSpeeds getInputSpeeds(String source) {
+        return speedSource(source).getInputSpeeds();
+    }
+
+    public Set<String> getSpeedSources() {
+        return Set.copyOf(sources.keySet());
     }
 
     public void stop() {

@@ -4,12 +4,15 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import com.revrobotics.PersistMode;
+import com.revrobotics.REVLibError;
 import com.revrobotics.ResetMode;
 import com.revrobotics.AbsoluteEncoder;
+import com.revrobotics.spark.SparkBase;
 import com.revrobotics.spark.SparkBase.ControlType;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
+import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.spark.config.SparkFlexConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
@@ -23,6 +26,7 @@ import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerType;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.wpilibj.DriverStation;
 
 /**
  * REV motor controller wrapper for the new vendordep system.
@@ -31,6 +35,7 @@ public class RevMotorController implements MotorController {
     private static final ResetMode INITIAL_RESET_MODE = ResetMode.kResetSafeParameters;
     private static final ResetMode UPDATE_RESET_MODE = ResetMode.kNoResetSafeParameters;
     private static final PersistMode RUNTIME_PERSIST_MODE = PersistMode.kNoPersistParameters;
+    private static final int CAN_TIMEOUT_MS = 50;
 
     private final MotorControllerConfig config;
     private final Encoder encoder;
@@ -90,6 +95,7 @@ public class RevMotorController implements MotorController {
 
     private static RevMotorController createSparkMax(MotorControllerConfig config, MotorType motorType) {
         SparkMax controller = new SparkMax(config.id, motorType);
+        setCanTimeout(controller, config.id);
         SparkMaxConfig cfg = new SparkMaxConfig();
         cfg.idleMode(config.neutralMode == MotorNeutralMode.Brake
                 ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake
@@ -98,7 +104,7 @@ public class RevMotorController implements MotorController {
         if (config.pid != null) {
             cfg.closedLoop.pid(config.pid.getP(), config.pid.getI(), config.pid.getD());
         }
-        controller.configure(cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE);
+        applyConfig(controller, cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "initial");
 
         EncoderConfig encoderCfg = config.encoderConfig;
         Encoder encoder = null;
@@ -136,7 +142,7 @@ public class RevMotorController implements MotorController {
                 limit -> {
                     SparkMaxConfig update = new SparkMaxConfig();
                     update.smartCurrentLimit((int) Math.round(limit));
-                    controller.configure(update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE);
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "currentLimit");
                 },
                 val -> controller.getClosedLoopController().setSetpoint(val, ControlType.kPosition),
                 val -> controller.getClosedLoopController().setSetpoint(val * 60.0, ControlType.kVelocity),
@@ -145,12 +151,12 @@ public class RevMotorController implements MotorController {
                     update.idleMode(mode == MotorNeutralMode.Brake
                             ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake
                             : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast);
-                    controller.configure(update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE);
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "neutralMode");
                 },
                 pid -> {
                     SparkMaxConfig update = new SparkMaxConfig();
                     update.closedLoop.pid(pid.getP(), pid.getI(), pid.getD());
-                    controller.configure(update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE);
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "pid");
                 },
                 controller::setInverted,
                 () -> !controller.hasActiveFault(),
@@ -160,6 +166,7 @@ public class RevMotorController implements MotorController {
 
     private static RevMotorController createSparkFlex(MotorControllerConfig config, MotorType motorType) {
         SparkFlex controller = new SparkFlex(config.id, motorType);
+        setCanTimeout(controller, config.id);
         SparkFlexConfig cfg = new SparkFlexConfig();
         cfg.idleMode(config.neutralMode == MotorNeutralMode.Brake
                 ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake
@@ -168,7 +175,7 @@ public class RevMotorController implements MotorController {
         if (config.pid != null) {
             cfg.closedLoop.pid(config.pid.getP(), config.pid.getI(), config.pid.getD());
         }
-        controller.configure(cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE);
+        applyConfig(controller, cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "initial");
 
         EncoderConfig encoderCfg = config.encoderConfig;
         Encoder encoder = null;
@@ -206,7 +213,7 @@ public class RevMotorController implements MotorController {
                 limit -> {
                     SparkFlexConfig update = new SparkFlexConfig();
                     update.smartCurrentLimit((int) Math.round(limit));
-                    controller.configure(update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE);
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "currentLimit");
                 },
                 val -> controller.getClosedLoopController().setSetpoint(val, ControlType.kPosition),
                 val -> controller.getClosedLoopController().setSetpoint(val * 60.0, ControlType.kVelocity),
@@ -215,12 +222,12 @@ public class RevMotorController implements MotorController {
                     update.idleMode(mode == MotorNeutralMode.Brake
                             ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake
                             : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast);
-                    controller.configure(update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE);
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "neutralMode");
                 },
                 pid -> {
                     SparkFlexConfig update = new SparkFlexConfig();
                     update.closedLoop.pid(pid.getP(), pid.getI(), pid.getD());
-                    controller.configure(update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE);
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "pid");
                 },
                 controller::setInverted,
                 () -> !controller.hasActiveFault(),
@@ -336,5 +343,30 @@ public class RevMotorController implements MotorController {
         } catch (RuntimeException ex) {
             return null;
         }
+    }
+
+    private static void setCanTimeout(SparkBase controller, int deviceId) {
+        REVLibError status = controller.setCANTimeout(CAN_TIMEOUT_MS);
+        if (status != REVLibError.kOk) {
+            DriverStation.reportWarning(
+                    "[Athena][REV] Failed to set CAN timeout for device " + deviceId + ": " + status,
+                    false);
+        }
+    }
+
+    private static void applyConfig(
+            SparkBase controller,
+            SparkBaseConfig config,
+            ResetMode resetMode,
+            PersistMode persistMode,
+            int deviceId,
+            String phase) {
+        REVLibError status = controller.configure(config, resetMode, persistMode);
+        if (status == REVLibError.kOk) {
+            return;
+        }
+        DriverStation.reportWarning(
+                "[Athena][REV] Configure " + phase + " failed for device " + deviceId + ": " + status,
+                false);
     }
 }
