@@ -279,6 +279,7 @@ public class EncoderAdapter implements Encoder {
         double rawAbsolutePosition = getRawAbsolutePosition();
         cachedRotations = (rawPosition - offset) * gearRatio;
         cachedRate = rawVelocity * gearRatio;
+        cachedVelocity = cachedRate * conversion;
         cachedPosition = cachedRotations * conversion + conversionOffset;
         cachedAbsoluteRotations = applyDiscontinuity((rawAbsolutePosition - offset) * gearRatio);
         cachedAbsolutePosition = cachedAbsoluteRotations * conversion + conversionOffset;
