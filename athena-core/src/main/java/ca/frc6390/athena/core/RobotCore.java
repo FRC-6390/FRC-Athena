@@ -570,7 +570,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (top == null) {
                 continue;
             }
-            for (SuperstructureMechanism<?, ?> superstructure : top.flattenSuperstructures()) {
+            for (SuperstructureMechanism<?, ?> superstructure : top.children().superstructures()) {
                 if (superstructure == null || !visited.add(superstructure)) {
                     continue;
                 }
@@ -588,7 +588,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (top == null) {
                 continue;
             }
-            for (SuperstructureMechanism<?, ?> superstructure : top.flattenSuperstructures()) {
+            for (SuperstructureMechanism<?, ?> superstructure : top.children().superstructures()) {
                 if (superstructure == null || !visited.add(superstructure)) {
                     continue;
                 }
@@ -730,7 +730,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (!needsRefresh && !needsInitialPublish) {
                 continue;
             }
-            mech.networkTables(mech.resolveDefaultMechanismNode(mechanismsNode));
+            mech.networkTables(mech.networkTables().resolveNode(mechanismsNode));
             publishedMechanismsComp.add(name);
             if (needsRefresh) {
                 remainingMechanismRefreshCount--;
@@ -1354,13 +1354,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private void scheduleCustomPidCycle(Mechanism mechanism) {
-        if (!mechanism.isCustomPIDCycle()) {
+        if (!mechanism.customPidCycle()) {
             return;
         }
         if (!scheduledCustomPidMechanisms.add(mechanism)) {
             return;
         }
-        double period = mechanism.getPidPeriod();
+        double period = mechanism.pidPeriodSeconds();
         if (!(period > 0.0)) {
             period = 0.02;
         }
@@ -1378,7 +1378,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             registerMechanismInternal(mech);
             // Ensure per-mechanism NetworkTableConfig entries exist under the mechanism itself.
             RobotNetworkTables.Node mechNode =
-                    mech.resolveDefaultMechanismNode(robotNetworkTables.root().child("Mechanisms"));
+                    mech.networkTables().resolveNode(robotNetworkTables.root().child("Mechanisms"));
             robotNetworkTables.mechanismConfig(mechNode);
             mech.setRobotCore(this);
             scheduleCustomPidCycle(mech);
@@ -1407,8 +1407,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             registerSuperstructureDiagnosticsProviderIfReady(s);
             // Publish mechanisms under the owning superstructure name to avoid duplicates and
             // keep dashboards navigable at scale.
-            s.assignDashboardOwners(s.getName());
-            registerMechanism(s.getMechanisms().all().toArray(Mechanism[]::new));
+            s.networkTables().ownerPath(s.getName());
+            registerMechanism(s.children().all().toArray(Mechanism[]::new));
         }
         return this;
     }
@@ -1443,7 +1443,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 superstructure.setRobotCore(this);
                 superstructure.diagnostics().info("lifecycle", "superstructure registered");
                 registerSuperstructureDiagnosticsProviderIfReady(superstructure);
-                superstructure.assignDashboardOwners(superstructure.getName());
+                superstructure.networkTables().ownerPath(superstructure.getName());
             }
             registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
         }
@@ -1617,7 +1617,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
      *
      * <p>Per-mechanism controls live on each mechanism under
      * {@code Athena/Mechanisms/.../<MechName>/NetworkTableConfig/...} and can be accessed via
-     * {@code mech.networkTablesConfig()}.</p>
+     * {@code mech.networkTables().toggles()}.</p>
      */
     public final RobotNetworkTables networkTables() {
         return robotNetworkTables;
@@ -1777,7 +1777,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 key,
                 () -> buildSuperstructureDiagnosticsSummary(tracked),
                 limit -> buildSuperstructureDiagnosticsSnapshot(tracked, limit),
-                tracked::clearDiagnosticLog);
+                () -> tracked.diagnostics().clear());
     }
 
     private Map<String, Object> buildSuperstructureDiagnosticsSummary(SuperstructureMechanism<?, ?> superstructure) {
@@ -1787,13 +1787,12 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         Map<String, Object> summary = new HashMap<>();
         String name = superstructure.getName();
         summary.put("name", name != null ? name : "");
-        Enum<?> state = superstructure.getStateMachine().getGoalState();
+        Enum<?> state = superstructure.stateMachine().goal();
         summary.put("state", state != null ? state.name() : "");
-        summary.put("atGoal", superstructure.getStateMachine().atGoalState());
-        summary.put("childrenAtGoals", superstructure.childrenAtGoals());
-        summary.put("childMechanismCount", superstructure.getMechanisms().all().size());
+        summary.put("atGoal", superstructure.stateMachine().atGoal());
+        summary.put("childMechanismCount", superstructure.children().all().size());
         summary.put("systemKey", "superstructures/" + (name != null ? name : ""));
-        summary.put("logCount", superstructure.getDiagnosticLogCount());
+        summary.put("logCount", superstructure.diagnostics().count());
         return summary;
     }
 
@@ -1805,20 +1804,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             return snapshot;
         }
         int effectiveLimit = logLimit > 0 ? Math.min(logLimit, 512) : 120;
-        snapshot.put("events", superstructure.getDiagnosticEvents(effectiveLimit));
+        snapshot.put("events", superstructure.diagnostics().events(effectiveLimit));
         List<Map<String, Object>> children = new ArrayList<>();
-        for (Mechanism mechanism : superstructure.getMechanisms().all()) {
+        for (Mechanism mechanism : superstructure.children().all()) {
             if (mechanism == null) {
                 continue;
             }
             Map<String, Object> child = new HashMap<>();
             child.put("name", mechanism.getName());
             child.put("atSetpoint", mechanism.atSetpoint());
-            child.put("position", mechanism.getPosition());
-            child.put("setpoint", mechanism.getSetpoint());
-            child.put("output", mechanism.getOutput());
+            child.put("position", mechanism.position());
+            child.put("setpoint", mechanism.setpoint());
+            child.put("output", mechanism.output());
             int childLimit = logLimit > 0 ? Math.min(logLimit, 128) : 0;
-            child.put("diagnostics", mechanism.getDiagnosticsSnapshot(childLimit));
+            child.put("diagnostics", mechanism.diagnostics().snapshot(childLimit));
             children.add(child);
         }
         snapshot.put("children", children);
@@ -2187,7 +2186,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (mech == null) {
                 continue;
             }
-            mech.networkTables(mech.resolveDefaultMechanismNode(mechanismsNode));
+            mech.networkTables(mech.networkTables().resolveNode(mechanismsNode));
         }
 
         RobotNetworkTables.Node supersNode = robotNetworkTables.root().child("Superstructures");
@@ -2262,7 +2261,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public void resetPIDs() {
         for (Mechanism mech : mechanisms.values()) {
-            mech.resetPID();
+            mech.control().resetPid();
         }
     }
 

@@ -103,7 +103,7 @@ public final class ExampleCompositeSuperstructure {
     public static SuperstructureMechanism<SuperState, SuperTuple> buildSuperstructure() {
         // Elevator config (stub PID/FF; replace with tuned values + motors/encoders).
         MechanismConfig<StatefulMechanism<ElevatorState>> elevator =
-                MechanismConfig.statefulGeneric(ElevatorState.HomeReset);
+                MechanismConfig.stateMachineGeneric(ElevatorState.HomeReset);
         elevator.control(c -> c.setpointAsOutput(true));
         elevator.stateMachineDelay(0.04);
         elevator.stateGraph(StateGraph.create(ElevatorState.class)
@@ -113,7 +113,7 @@ public final class ExampleCompositeSuperstructure {
 
         // End effector config (stub; replace with real arm/wrist mechanism configs if you have them).
         MechanismConfig<StatefulMechanism<EndEffectorState>> eff =
-                MechanismConfig.statefulGeneric(EndEffectorState.Home);
+                MechanismConfig.stateMachineGeneric(EndEffectorState.Home);
         eff.control(c -> c.setpointAsOutput(true));
         eff.stateMachineDelay(0.02);
         eff.stateGraph(StateGraph.create(EndEffectorState.class)
@@ -130,23 +130,23 @@ public final class ExampleCompositeSuperstructure {
                 // - Stow before intaking from high states (queue Home first if not clear)
                 .constraints(c -> c
                         .state(SuperState.Intaking,
-                                ctx -> ctx.getMechanisms().generic(SuperTuple::elev).getStateMachine().atState(ElevatorState.Intaking)
-                                        || ctx.getMechanisms().generic(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home),
+                                ctx -> ctx.mechanisms().generic(SuperTuple::elev).stateMachine().at(ElevatorState.Intaking)
+                                        || ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home),
                                 SuperState.Home)
                         // - Keep end effector home before lifting to high nodes
                         .state(SuperState.L3,
-                                ctx -> ctx.getMechanisms().generic(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home, EndEffectorState.L3))
+                                ctx -> ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home, EndEffectorState.L3))
                         .state(SuperState.L4,
-                                ctx -> ctx.getMechanisms().generic(SuperTuple::eff).getStateMachine().atState(EndEffectorState.Home, EndEffectorState.L4))
+                                ctx -> ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home, EndEffectorState.L4))
                         // - Score waits for both children to be at goal
                         .state(SuperState.Score,
-                                ctx -> ctx.getMechanisms().generic(SuperTuple::elev).getStateMachine().atGoalState()
-                                        && ctx.getMechanisms().generic(SuperTuple::eff).getStateMachine().atGoalState()))
+                                ctx -> ctx.mechanisms().generic(SuperTuple::elev).stateMachine().atGoal()
+                                        && ctx.mechanisms().generic(SuperTuple::eff).stateMachine().atGoal()))
                 .sim(sim -> {
                     // Anchor end effector visualization to the elevator carriage height.
                     sim.attach(SuperTuple::eff, ctx -> {
-                        var elevMech = ctx.getMechanisms().generic(SuperTuple::elev);
-                        double z = elevMech.getPosition();
+                        var elevMech = ctx.mechanisms().generic(SuperTuple::elev);
+                        double z = elevMech.position();
                         return new Pose3d(0.0, 0.0, z, new Rotation3d());
                     });
                 });

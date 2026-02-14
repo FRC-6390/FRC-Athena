@@ -18,11 +18,11 @@ public class ArmMechanism extends Mechanism {
         if (feedforward != null) {
             this.feedforward = new ArmFeedforwardSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
             this.feedforwardOutputType = feedforwardOutputType != null ? feedforwardOutputType : OutputType.VOLTAGE;
-            setFeedforwardEnabled(true);
+            control().feedforwardEnabled(true);
         } else {
             this.feedforward = null;
             this.feedforwardOutputType = null;
-            setFeedforwardEnabled(false);
+            control().feedforwardEnabled(false);
         }
     }
 
@@ -31,7 +31,10 @@ public class ArmMechanism extends Mechanism {
         if (feedforward == null) {
             return 0.0;
         }
-        double valueVolts = feedforward.calculate(getControllerSetpointPosition(), getControllerSetpointVelocity());
+        double valueVolts =
+                feedforward.calculate(
+                        controllerSetpointPosition(),
+                        controllerSetpointVelocity());
         return toOutput(feedforwardOutputType, valueVolts);
     }
 
@@ -51,31 +54,26 @@ public class ArmMechanism extends Mechanism {
         return super.networkTables(node);
     }
 
-    public ArmMechanism publishNetworkTables(String ownerHint) {
-        super.publishNetworkTables(ownerHint);
-        return this;
-    }
-    
     public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ArmMechanism implements StatefulLike<E> {
 
-        private final StatefulMechanismCore<StatefulArmMechanism<E>, E> stateCore;
+        private final StatefulMechanismCore<StatefulArmMechanism<E>, E> stateMachineCore;
 
         public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config,
                                     ArmFeedforward feedforward,
                                     OutputType feedforwardOutputType,
                                     E initialState) {
             super(config, feedforward, feedforwardOutputType);
-            stateCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
         }
 
         @Override
-        public StatefulMechanismCore<StatefulArmMechanism<E>, E> stateCore() {
-            return stateCore;
+        public StatefulLike.StateMachineSection<E> stateMachine() {
+            return new StatefulLike.StateMachineSection<>(stateMachineCore);
         }
 
         @Override
         public void update() {
-            setSuppressMotorOutput(updateStateCore(this));
+            stateMachineCore.updateMechanism(this);
             super.update();
         }
 
@@ -84,14 +82,9 @@ public class ArmMechanism extends Mechanism {
             if (node == null) {
                 return null;
             }
-            getStateMachine().networkTables(node.child("StateMachine"));
+            stateMachineCore.getStateMachine().networkTables(node.child("StateMachine"));
             return super.networkTables(node);
         }
 
-        @SuppressWarnings("unchecked")
-        public StatefulArmMechanism<E> publishNetworkTables(String ownerHint) {
-            super.publishNetworkTables(ownerHint);
-            return this;
-        }
     }
 }

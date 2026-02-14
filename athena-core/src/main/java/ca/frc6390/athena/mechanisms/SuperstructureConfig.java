@@ -27,7 +27,7 @@ import ca.frc6390.athena.mechanisms.Mechanism;
  * Declarative config for a superstructure that coordinates multiple stateful mechanisms.
  * Callers map each superstate setpoint to the child mechanism state via a mapper function
  * (for example, {@code mechanisms(m -> m.mechanism(ELEVATOR_CONFIG, SuperTuple::elev))}). Constraints can
- * reference the child mechanisms through {@link SuperstructureContext#getMechanisms()} without
+ * reference the child mechanisms through {@link SuperstructureContext#mechanisms()} without
  * naming them explicitly, and can optionally insert transition states before a guarded state.
  *
  * @param <S> superstate enum type

@@ -18,11 +18,11 @@ public class ElevatorMechanism extends Mechanism {
         if (feedforward != null) {
             this.feedforward = new ElevatorFeedForwardsSendable(feedforward.getKs(),feedforward.getKg(),feedforward.getKv(),feedforward.getKa());
             this.feedforwardOutputType = feedforwardOutputType != null ? feedforwardOutputType : OutputType.VOLTAGE;
-            setFeedforwardEnabled(true);
+            control().feedforwardEnabled(true);
         } else {
             this.feedforward = null;
             this.feedforwardOutputType = null;
-            setFeedforwardEnabled(false);
+            control().feedforwardEnabled(false);
         }
         if (config.elevatorSimulationParameters() != null) {
             MechanismConfig.ElevatorSimulationParameters params = config.elevatorSimulationParameters();
@@ -52,7 +52,7 @@ public class ElevatorMechanism extends Mechanism {
         if (feedforward == null) {
             return 0.0;
         }
-        double valueVolts = feedforward.calculate(getControllerSetpointVelocity());
+        double valueVolts = feedforward.calculate(controllerSetpointVelocity());
         return toOutput(feedforwardOutputType, valueVolts);
     }
 
@@ -72,31 +72,26 @@ public class ElevatorMechanism extends Mechanism {
         return super.networkTables(node);
     }
 
-    public ElevatorMechanism publishNetworkTables(String ownerHint) {
-        super.publishNetworkTables(ownerHint);
-        return this;
-    }
-    
     public static class StatefulElevatorMechanism<E extends Enum<E> & StateMachine.SetpointProvider<Double>> extends ElevatorMechanism implements StatefulLike<E> {
 
-        private final StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateCore;
+        private final StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateMachineCore;
 
         public StatefulElevatorMechanism(MechanismConfig<StatefulElevatorMechanism<E>> config,
                                          ElevatorFeedforward feedforward,
                                          OutputType feedforwardOutputType,
                                          E initialState) {
             super(config, feedforward, feedforwardOutputType);
-            stateCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
         }
 
         @Override
-        public StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateCore() {
-            return stateCore;
+        public StatefulLike.StateMachineSection<E> stateMachine() {
+            return new StatefulLike.StateMachineSection<>(stateMachineCore);
         }
 
         @Override
         public void update() {
-            setSuppressMotorOutput(updateStateCore(this));
+            stateMachineCore.updateMechanism(this);
             super.update();
         }
 
@@ -105,15 +100,10 @@ public class ElevatorMechanism extends Mechanism {
             if (node == null) {
                 return null;
             }
-            getStateMachine().networkTables(node.child("StateMachine"));
+            stateMachineCore.getStateMachine().networkTables(node.child("StateMachine"));
             return super.networkTables(node);
         }
 
-        @SuppressWarnings("unchecked")
-        public StatefulElevatorMechanism<E> publishNetworkTables(String ownerHint) {
-            super.publishNetworkTables(ownerHint);
-            return this;
-        }
     }
 
 }

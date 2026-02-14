@@ -3,6 +3,8 @@ package ca.frc6390.athena.mechanisms;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
@@ -22,12 +24,14 @@ import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.Queue;
 
 /**
  * Composite mechanism that coordinates multiple stateful mechanisms using a superstate enum.
- * Constraints reference child mechanisms via {@link SuperstructureContext#getMechanisms()} using
+ * Constraints reference child mechanisms via {@link SuperstructureContext#mechanisms()} using
  * the same mapper supplied to the config.
  */
 public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
@@ -46,7 +50,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             this.mechanism = mechanism;
             this.superstructure = null;
             StatefulLike<M> stateful = (StatefulLike<M>) mechanism;
-            this.stateMachine = castMachine(stateful.getStateMachine());
+            this.stateMachine = castMachine(stateful.stateMachine().machine());
             this.mapper = castMapper(mapper);
             this.stateType = stateType;
         }
@@ -54,7 +58,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> Child(SuperstructureMechanism<CS, CSP> superstructure, Function<SP, CS> mapper, Class<CS> stateType) {
             this.mechanism = null;
             this.superstructure = superstructure;
-            this.stateMachine = castMachine(superstructure.getStateMachine());
+            this.stateMachine = castMachine(superstructure.stateMachine().machine());
             this.mapper = castMapper(mapper);
             this.stateType = stateType;
         }
@@ -89,6 +93,9 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private final Map<S, List<SuperstructureConfig.Binding<SP>>> exitBindings;
     private final List<SuperstructureConfig.Binding<SP>> exitAlwaysBindings;
     private final SuperstructureContextImpl context;
+    private final Queue<SP> queuedSetpoints = new ArrayDeque<>();
+    private SP queuedSetpoint;
+    private SP lastAppliedSetpoint;
     private S prevState;
     private final BoundedEventLog<DiagnosticsChannel.Event> diagnosticsLog =
             new BoundedEventLog<>(DIAGNOSTIC_LOG_CAPACITY);
@@ -142,18 +149,56 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         this.periodicBindings = periodicBindings;
         this.exitBindings = exitBindings;
         this.exitAlwaysBindings = exitAlwaysBindings;
-        this.stateMachine = new StateMachine<>(initialState, this::childrenAtGoals);
+        this.stateMachine = new StateMachine<>(initialState, this::childrenAtGoalsInternal);
         this.stateMachine.setAtStateDelay(stateMachineDelaySeconds);
         this.context = new SuperstructureContextImpl();
-        applySetpoints(initialState.getSetpoint());
+        lastAppliedSetpoint = initialState.getSetpoint();
+        applySetpoints(lastAppliedSetpoint);
         this.prevState = initialState;
     }
 
-    /**
-     * State machine driving the composite.
-     */
-    public StateMachine<SP, S> getStateMachine() {
-        return stateMachine;
+    public SuperstructureMechanism<S, SP> stateMachine(Consumer<StateMachineSection<S, SP>> section) {
+        if (section != null) {
+            section.accept(stateMachine());
+        }
+        return this;
+    }
+
+    public StateMachineSection<S, SP> stateMachine() {
+        return new StateMachineSection<>(this);
+    }
+
+    public SuperstructureMechanism<S, SP> input(Consumer<InputSection> section) {
+        if (section != null) {
+            section.accept(input());
+        }
+        return this;
+    }
+
+    public InputSection input() {
+        return new InputSection(this);
+    }
+
+    public SuperstructureMechanism<S, SP> children(Consumer<ChildrenSection<SP>> section) {
+        if (section != null) {
+            section.accept(children());
+        }
+        return this;
+    }
+
+    public ChildrenSection<SP> children() {
+        return new ChildrenSection<>(this);
+    }
+
+    public SuperstructureMechanism<S, SP> networkTables(Consumer<NetworkTablesSection> section) {
+        if (section != null) {
+            section.accept(networkTables());
+        }
+        return this;
+    }
+
+    public NetworkTablesSection networkTables() {
+        return new NetworkTablesSection(this);
     }
 
     public DiagnosticsView diagnostics() {
@@ -168,10 +213,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return "superstructures/" + name;
     }
 
-    /**
-     * Queues a superstate, applying its constraint if present.
-     */
-    public void queueState(S state) {
+    private void queueStateInternal(S state) {
         if (state != null) {
             appendDiagnosticLog("INFO", "state", "queued state '" + state.name() + "'");
         }
@@ -180,7 +222,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             stateMachine.queueState(state);
             return;
         }
-        java.util.function.BooleanSupplier guard = () -> constraint.guard.test(context);
+        BooleanSupplier guard = () -> constraint.guard.test(context);
         if (!constraint.transitionStates.isEmpty() && !guard.getAsBoolean()) {
             for (S transition : constraint.transitionStates) {
                 stateMachine.queueState(transition);
@@ -189,17 +231,36 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         stateMachine.queueState(state, guard);
     }
 
-    /**
-     * Returns true when every child mechanism reports its goal state achieved.
-     */
-    public boolean childrenAtGoals() {
+    private void queueSetpointInternal(SP setpoint) {
+        if (setpoint == null) {
+            return;
+        }
+        queuedSetpoints.add(setpoint);
+    }
+
+    private void requestStateInternal(S target) {
+        if (target == null) {
+            return;
+        }
+        queuedSetpoint = null;
+        queuedSetpoints.clear();
+        stateMachine.requestState(target);
+    }
+
+    private void clearStateMachineInternal() {
+        queuedSetpoint = null;
+        queuedSetpoints.clear();
+        stateMachine.resetQueue();
+    }
+
+    private boolean childrenAtGoalsInternal() {
         for (Child<SP, ?> child : children) {
             if (child.mechanism instanceof StatefulLike<?> stateful) {
-                if (!stateful.getStateMachine().atGoalState()) {
+                if (!stateful.stateMachine().atGoal()) {
                     return false;
                 }
             } else if (child.superstructure != null) {
-                if (!child.superstructure.childrenAtGoals()) {
+                if (!child.superstructure.stateMachine().atGoal()) {
                     return false;
                 }
             }
@@ -214,13 +275,15 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     public void periodic() {
         applyPeriodicBindings();
         stateMachine.update();
+        updateQueuedSetpoint();
+        applySetpointsIfChanged();
         applyAttachments();
         S current = stateMachine.getGoalState();
         boolean changed = !Objects.equals(current, prevState);
         S from = prevState;
         if (changed) {
             applyExitBindings(from);
-            applySetpoints(stateMachine.getGoalStateSetpoint());
+            applySetpointsIfChanged();
         }
         if (changed) {
             applyTransitionBindings(from, current);
@@ -231,6 +294,32 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             prevState = current;
         }
         applyBindings(current);
+    }
+
+    private SP currentSetpoint() {
+        return queuedSetpoint != null ? queuedSetpoint : stateMachine.getGoalStateSetpoint();
+    }
+
+    private void applySetpointsIfChanged() {
+        SP current = currentSetpoint();
+        if (Objects.equals(lastAppliedSetpoint, current)) {
+            return;
+        }
+        applySetpoints(current);
+        lastAppliedSetpoint = current;
+    }
+
+    private void updateQueuedSetpoint() {
+        if (!stateMachine.atGoalState()) {
+            return;
+        }
+        if (queuedSetpoint == null) {
+            if (!queuedSetpoints.isEmpty()) {
+                queuedSetpoint = queuedSetpoints.poll();
+            }
+            return;
+        }
+        queuedSetpoint = queuedSetpoints.poll();
     }
 
     private void applyEnterBindings(S state) {
@@ -319,7 +408,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                 return;
             }
             var pose = attachment.poseSupplier.apply(context);
-            mech.setVisualizationRootOverride(pose);
+            mech.visualization().rootOverride(pose);
         } catch (Exception ignored) {
             // If the mapper does not resolve, skip silently.
         }
@@ -454,11 +543,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     /**
      * Typed accessors for common mechanism subclasses.
      */
-        public Mechanisms getMechanisms() {
-            return new Mechanisms();
-        }
-
-        public final class Mechanisms implements SuperstructureMechanismsView<SP> {
+        private final class MechanismsView implements SuperstructureMechanismsView<SP> {
             @SuppressWarnings("unchecked")
             @Override
             public <E extends Enum<E> & SetpointProvider<Double>> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
@@ -511,72 +596,72 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
         @Override
         public boolean input(String key) {
-            return SuperstructureMechanism.this.input(key);
+            return SuperstructureMechanism.this.input().bool(key);
         }
 
         @Override
         public java.util.function.BooleanSupplier inputSupplier(String key) {
-            return SuperstructureMechanism.this.inputSupplier(key);
+            return SuperstructureMechanism.this.input().boolSupplier(key);
         }
 
         @Override
         public double doubleInput(String key) {
-            return SuperstructureMechanism.this.doubleInput(key);
+            return SuperstructureMechanism.this.input().dbl(key);
         }
 
         @Override
         public DoubleSupplier doubleInputSupplier(String key) {
-            return SuperstructureMechanism.this.doubleInputSupplier(key);
+            return SuperstructureMechanism.this.input().dblSupplier(key);
         }
 
         @Override
         public int intVal(String key) {
-            return SuperstructureMechanism.this.intVal(key);
+            return SuperstructureMechanism.this.input().integer(key);
         }
 
         @Override
         public IntSupplier intValSupplier(String key) {
-            return SuperstructureMechanism.this.intValSupplier(key);
+            return SuperstructureMechanism.this.input().integerSupplier(key);
         }
 
         @Override
         public String stringVal(String key) {
-            return SuperstructureMechanism.this.stringVal(key);
+            return SuperstructureMechanism.this.input().string(key);
         }
 
         @Override
         public Supplier<String> stringValSupplier(String key) {
-            return SuperstructureMechanism.this.stringValSupplier(key);
+            return SuperstructureMechanism.this.input().stringSupplier(key);
         }
 
         @Override
         public Pose2d pose2dVal(String key) {
-            return SuperstructureMechanism.this.pose2dVal(key);
+            return SuperstructureMechanism.this.input().pose2d(key);
         }
 
         @Override
         public Supplier<Pose2d> pose2dValSupplier(String key) {
-            return SuperstructureMechanism.this.pose2dValSupplier(key);
+            return SuperstructureMechanism.this.input().pose2dSupplier(key);
         }
 
         @Override
         public Pose3d pose3dVal(String key) {
-            return SuperstructureMechanism.this.pose3dVal(key);
+            return SuperstructureMechanism.this.input().pose3d(key);
         }
 
         @Override
         public Supplier<Pose3d> pose3dValSupplier(String key) {
-            return SuperstructureMechanism.this.pose3dValSupplier(key);
+            return SuperstructureMechanism.this.input().pose3dSupplier(key);
         }
 
         @Override
         public <T> T objectInput(String key, Class<T> type) {
-            return SuperstructureMechanism.this.objectInput(key, type);
+            return SuperstructureMechanism.this.input().object(key, type);
         }
 
         @Override
         public <T> Supplier<T> objectInputSupplier(String key, Class<T> type) {
-            return SuperstructureMechanism.this.objectInputSupplier(key, type);
+            return SuperstructureMechanism.this.input().objectSupplier(key, type);
         }
 
         /**
@@ -599,9 +684,182 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
     }
 
+    public static final class ChildrenSection<SP> {
+        private final SuperstructureMechanism<?, SP> owner;
+
+        private ChildrenSection(SuperstructureMechanism<?, SP> owner) {
+            this.owner = owner;
+        }
+
+        public SuperstructureMechanismsView<SP> mechanisms() {
+            return owner.new MechanismsView();
+        }
+
+        public List<Mechanism> all() {
+            return mechanisms().all();
+        }
+
+        public List<SuperstructureMechanism<?, ?>> superstructures() {
+            List<SuperstructureMechanism<?, ?>> out = new ArrayList<>();
+            flattenSuperstructures(out, owner);
+            return out;
+        }
+
+        public <T> T key(String name, Class<T> type) {
+            Objects.requireNonNull(type, "type");
+            if (name == null || name.isBlank()) {
+                return null;
+            }
+            if (SuperstructureMechanism.class.isAssignableFrom(type)) {
+                for (SuperstructureMechanism<?, ?> superstructure : superstructures()) {
+                    if (superstructure == null || superstructure.getName() == null) {
+                        continue;
+                    }
+                    if (!name.equals(superstructure.getName())) {
+                        continue;
+                    }
+                    if (!type.isInstance(superstructure)) {
+                        throw new IllegalArgumentException("Child superstructure '" + name + "' is not a "
+                                + type.getSimpleName() + " (was " + superstructure.getClass().getSimpleName() + ")");
+                    }
+                    return type.cast(superstructure);
+                }
+                return null;
+            }
+            for (Mechanism mechanism : all()) {
+                if (mechanism == null || mechanism.getName() == null) {
+                    continue;
+                }
+                if (!name.equals(mechanism.getName())) {
+                    continue;
+                }
+                if (!type.isInstance(mechanism)) {
+                    throw new IllegalArgumentException("Child mechanism '" + name + "' is not a "
+                            + type.getSimpleName() + " (was " + mechanism.getClass().getSimpleName() + ")");
+                }
+                return type.cast(mechanism);
+            }
+            return null;
+        }
+
+        public <T> T key(Enum<?> key, Class<T> type) {
+            Objects.requireNonNull(key, "key");
+            return key(key.name(), type);
+        }
+
+        public <T> T key(MechanismConfig<?> config, Class<T> type) {
+            Objects.requireNonNull(type, "type");
+            if (config == null) {
+                return null;
+            }
+            for (Mechanism mechanism : all()) {
+                if (mechanism == null || mechanism.getSourceConfig() != config) {
+                    continue;
+                }
+                if (!type.isInstance(mechanism)) {
+                    throw new IllegalArgumentException("Child mechanism built from config is not a "
+                            + type.getSimpleName() + " (was " + mechanism.getClass().getSimpleName() + ")");
+                }
+                return type.cast(mechanism);
+            }
+            return null;
+        }
+
+        public <T> T key(SuperstructureConfig<?, ?> config, Class<T> type) {
+            Objects.requireNonNull(type, "type");
+            if (config == null) {
+                return null;
+            }
+            for (SuperstructureMechanism<?, ?> superstructure : superstructures()) {
+                if (superstructure == null || superstructure.getSourceConfig() != config) {
+                    continue;
+                }
+                if (!type.isInstance(superstructure)) {
+                    throw new IllegalArgumentException("Child superstructure built from config is not a "
+                            + type.getSimpleName() + " (was " + superstructure.getClass().getSimpleName() + ")");
+                }
+                return type.cast(superstructure);
+            }
+            return null;
+        }
+
+        public SuperstructureMechanism<?, ?> superstructure(String name) {
+            return key(name, SuperstructureMechanism.class);
+        }
+
+        public SuperstructureMechanism<?, ?> superstructure(Enum<?> key) {
+            return key(key, SuperstructureMechanism.class);
+        }
+
+        public <S extends Enum<S> & SetpointProvider<CSP>, CSP> SuperstructureMechanism<S, CSP> superstructure(
+                SuperstructureConfig<S, CSP> config) {
+            return key(config, SuperstructureMechanism.class);
+        }
+
+        public TurretMechanism turret(String name) {
+            return key(name, TurretMechanism.class);
+        }
+
+        public TurretMechanism turret(Enum<?> key) {
+            return key(key, TurretMechanism.class);
+        }
+
+        public TurretMechanism turret(MechanismConfig<?> config) {
+            return key(config, TurretMechanism.class);
+        }
+
+        public ElevatorMechanism elevator(String name) {
+            return key(name, ElevatorMechanism.class);
+        }
+
+        public ElevatorMechanism elevator(Enum<?> key) {
+            return key(key, ElevatorMechanism.class);
+        }
+
+        public ElevatorMechanism elevator(MechanismConfig<?> config) {
+            return key(config, ElevatorMechanism.class);
+        }
+
+        public ArmMechanism arm(String name) {
+            return key(name, ArmMechanism.class);
+        }
+
+        public ArmMechanism arm(Enum<?> key) {
+            return key(key, ArmMechanism.class);
+        }
+
+        public ArmMechanism arm(MechanismConfig<?> config) {
+            return key(config, ArmMechanism.class);
+        }
+
+        public FlywheelMechanism flywheel(String name) {
+            return key(name, FlywheelMechanism.class);
+        }
+
+        public FlywheelMechanism flywheel(Enum<?> key) {
+            return key(key, FlywheelMechanism.class);
+        }
+
+        public FlywheelMechanism flywheel(MechanismConfig<?> config) {
+            return key(config, FlywheelMechanism.class);
+        }
+
+        public Mechanism generic(String name) {
+            return key(name, Mechanism.class);
+        }
+
+        public Mechanism generic(Enum<?> key) {
+            return key(key, Mechanism.class);
+        }
+
+        public Mechanism generic(MechanismConfig<?> config) {
+            return key(config, Mechanism.class);
+        }
+    }
+
     @Override
     public List<Mechanism> flattenForRegistration() {
-        return getMechanisms().all();
+        return children().all();
     }
 
     public void setRobotCore(RobotCore<?> robotCore) {
@@ -639,36 +897,35 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return Math.min(requestedLimit, DIAGNOSTIC_LOG_CAPACITY);
     }
 
-    public List<DiagnosticsChannel.Event> getDiagnosticEvents(int requestedLimit) {
+    private List<DiagnosticsChannel.Event> diagnosticEvents(int requestedLimit) {
         int limit = sanitizeDiagnosticLogLimit(requestedLimit);
         return diagnosticsLog.snapshot(limit);
     }
 
-    public int getDiagnosticLogCount() {
+    private int diagnosticLogCount() {
         return diagnosticsLog.count();
     }
 
-    public void clearDiagnosticLog() {
+    private void clearDiagnosticLog() {
         diagnosticsLog.clear();
     }
 
-    public Map<String, Object> getDiagnosticsSummary() {
+    private Map<String, Object> diagnosticsSummary() {
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("name", getName());
         summary.put("systemKey", diagnosticsSystemKey());
-        Enum<?> state = stateMachine.getGoalState();
+        Enum<?> state = stateMachine().goal();
         summary.put("state", state != null ? state.name() : "");
-        summary.put("atGoal", stateMachine.atGoalState());
-        summary.put("childrenAtGoals", childrenAtGoals());
-        summary.put("childMechanismCount", getMechanisms().all().size());
-        summary.put("logCount", getDiagnosticLogCount());
+        summary.put("atGoal", stateMachine().atGoal());
+        summary.put("childMechanismCount", children().all().size());
+        summary.put("logCount", diagnosticLogCount());
         return summary;
     }
 
-    public Map<String, Object> getDiagnosticsSnapshot(int requestedLimit) {
-        Map<String, Object> snapshot = new LinkedHashMap<>(getDiagnosticsSummary());
+    private Map<String, Object> diagnosticsSnapshot(int requestedLimit) {
+        Map<String, Object> snapshot = new LinkedHashMap<>(diagnosticsSummary());
         int limit = sanitizeDiagnosticLogLimit(requestedLimit);
-        snapshot.put("events", getDiagnosticEvents(limit));
+        snapshot.put("events", diagnosticEvents(limit));
         return snapshot;
     }
 
@@ -694,11 +951,11 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
 
         public List<DiagnosticsChannel.Event> events(int limit) {
-            return getDiagnosticEvents(limit);
+            return diagnosticEvents(limit);
         }
 
         public int count() {
-            return getDiagnosticLogCount();
+            return diagnosticLogCount();
         }
 
         public DiagnosticsView clear() {
@@ -707,21 +964,176 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
 
         public Map<String, Object> summary() {
-            return getDiagnosticsSummary();
+            return diagnosticsSummary();
         }
 
         public Map<String, Object> snapshot(int limit) {
-            return getDiagnosticsSnapshot(limit);
+            return diagnosticsSnapshot(limit);
         }
     }
 
-    /**
-     * Assigns a dashboard owner path to all child mechanisms (including nested superstructures).
-     *
-     * <p>This is used by RobotCore to publish mechanisms under Athena/Mechanisms in a structured
-     * tree (Owner -> Type -> Name) and avoid duplicate widgets across multiple tabs.</p>
-     */
-    public void assignDashboardOwners(String ownerPath) {
+    public static final class NetworkTablesSection {
+        private final SuperstructureMechanism<?, ?> owner;
+
+        private NetworkTablesSection(SuperstructureMechanism<?, ?> owner) {
+            this.owner = owner;
+        }
+
+        public NetworkTablesSection ownerPath(String ownerPath) {
+            owner.assignDashboardOwnerPath(ownerPath);
+            return this;
+        }
+    }
+
+    public static final class InputSection {
+        private final SuperstructureMechanism<?, ?> owner;
+
+        private InputSection(SuperstructureMechanism<?, ?> owner) {
+            this.owner = owner;
+        }
+
+        public boolean bool(String key) {
+            return owner.boolInput(key);
+        }
+
+        public BooleanSupplier boolSupplier(String key) {
+            return owner.boolInputSupplier(key);
+        }
+
+        public double dbl(String key) {
+            return owner.doubleInputValue(key);
+        }
+
+        public DoubleSupplier dblSupplier(String key) {
+            return owner.doubleInputSupplierValue(key);
+        }
+
+        public int integer(String key) {
+            return owner.intInputValue(key);
+        }
+
+        public IntSupplier integerSupplier(String key) {
+            return owner.intInputSupplierValue(key);
+        }
+
+        public String string(String key) {
+            return owner.stringInputValue(key);
+        }
+
+        public Supplier<String> stringSupplier(String key) {
+            return owner.stringInputSupplierValue(key);
+        }
+
+        public Pose2d pose2d(String key) {
+            return owner.pose2dInputValue(key);
+        }
+
+        public Supplier<Pose2d> pose2dSupplier(String key) {
+            return owner.pose2dInputSupplierValue(key);
+        }
+
+        public Pose3d pose3d(String key) {
+            return owner.pose3dInputValue(key);
+        }
+
+        public Supplier<Pose3d> pose3dSupplier(String key) {
+            return owner.pose3dInputSupplierValue(key);
+        }
+
+        public <T> T object(String key, Class<T> type) {
+            return owner.objectInputValue(key, type);
+        }
+
+        public <T> Supplier<T> objectSupplier(String key, Class<T> type) {
+            return owner.objectInputSupplierValue(key, type);
+        }
+    }
+
+    public static final class StateMachineSection<S extends Enum<S> & SetpointProvider<SP>, SP> {
+        private final SuperstructureMechanism<S, SP> owner;
+
+        private StateMachineSection(SuperstructureMechanism<S, SP> owner) {
+            this.owner = owner;
+        }
+
+        public StateMachineSection<S, SP> queue(S state) {
+            owner.queueStateInternal(state);
+            return this;
+        }
+
+        public StateMachineSection<S, SP> queue(SP setpoint) {
+            owner.queueSetpointInternal(setpoint);
+            return this;
+        }
+
+        public StateMachineSection<S, SP> request(S target) {
+            owner.requestStateInternal(target);
+            return this;
+        }
+
+        public StateMachineSection<S, SP> clear() {
+            owner.clearStateMachineInternal();
+            return this;
+        }
+
+        public StateMachineSection<S, SP> graph(StateGraph<S> graph) {
+            owner.stateMachine.setStateGraph(graph);
+            return this;
+        }
+
+        public S goal() {
+            return owner.stateMachine.getGoalState();
+        }
+
+        public S next() {
+            return owner.stateMachine.getNextState();
+        }
+
+        public String queue() {
+            return owner.stateMachine.getNextStateQueue();
+        }
+
+        public boolean atGoal() {
+            return owner.stateMachine.atGoalState();
+        }
+
+        @SafeVarargs
+        public final boolean at(S... states) {
+            return owner.stateMachine.atState(states);
+        }
+
+        public SP setpoint() {
+            return owner.currentSetpoint();
+        }
+
+        public StateGraph<S> graph() {
+            return owner.stateMachine.getStateGraph();
+        }
+
+        public StateMachine<SP, S> machine() {
+            return owner.stateMachine;
+        }
+
+        public StateMachineSnapshot<SP, S> snapshot() {
+            return new StateMachineSnapshot<>(
+                    goal(),
+                    next(),
+                    queue(),
+                    atGoal(),
+                    setpoint(),
+                    graph());
+        }
+    }
+
+    public record StateMachineSnapshot<SP, S extends Enum<S> & SetpointProvider<SP>>(
+            S goal,
+            S next,
+            String queue,
+            boolean atGoal,
+            SP setpoint,
+            StateGraph<S> graph) {}
+
+    private void assignDashboardOwnerPath(String ownerPath) {
         String base = ownerPath;
         if (base == null || base.isBlank()) {
             String n = getName();
@@ -767,15 +1179,6 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         cfg.runPhaseHooks(context, stateMachine.getGoalState(), phase);
     }
 
-    /**
-     * Returns a flattened list of this superstructure and all nested superstructures.
-     */
-    public List<SuperstructureMechanism<?, ?>> flattenSuperstructures() {
-        List<SuperstructureMechanism<?, ?>> out = new ArrayList<>();
-        flattenSuperstructures(out, this);
-        return out;
-    }
-
     private static void flattenSuperstructures(List<SuperstructureMechanism<?, ?>> out, SuperstructureMechanism<?, ?> mech) {
         if (mech == null) {
             return;
@@ -804,7 +1207,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private static void propagateDashboardOwner(String ownerPath, SuperstructureMechanism<?, ?> mech) {
         for (Child<?, ?> child : mech.children) {
             if (child.mechanism != null) {
-                child.mechanism.setNetworkTablesOwnerPath(ownerPath);
+                child.mechanism.networkTables().ownerPath(ownerPath);
             }
             if (child.superstructure != null) {
                 SuperstructureMechanism<?, ?> nested = child.superstructure;
@@ -817,59 +1220,59 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
     }
 
-    public boolean input(String key) {
+    private boolean boolInput(String key) {
         return inputResolver.boolVal(key);
     }
 
-    public java.util.function.BooleanSupplier inputSupplier(String key) {
+    private BooleanSupplier boolInputSupplier(String key) {
         return inputResolver.boolSupplier(key);
     }
 
-    public double doubleInput(String key) {
+    private double doubleInputValue(String key) {
         return inputResolver.doubleVal(key);
     }
 
-    public DoubleSupplier doubleInputSupplier(String key) {
+    private DoubleSupplier doubleInputSupplierValue(String key) {
         return inputResolver.doubleSupplier(key);
     }
 
-    public int intVal(String key) {
+    private int intInputValue(String key) {
         return inputResolver.intVal(key);
     }
 
-    public IntSupplier intValSupplier(String key) {
+    private IntSupplier intInputSupplierValue(String key) {
         return inputResolver.intSupplier(key);
     }
 
-    public String stringVal(String key) {
+    private String stringInputValue(String key) {
         return inputResolver.stringVal(key);
     }
 
-    public Supplier<String> stringValSupplier(String key) {
+    private Supplier<String> stringInputSupplierValue(String key) {
         return inputResolver.stringSupplier(key);
     }
 
-    public Pose2d pose2dVal(String key) {
+    private Pose2d pose2dInputValue(String key) {
         return inputResolver.pose2dVal(key);
     }
 
-    public Supplier<Pose2d> pose2dValSupplier(String key) {
+    private Supplier<Pose2d> pose2dInputSupplierValue(String key) {
         return inputResolver.pose2dSupplier(key);
     }
 
-    public Pose3d pose3dVal(String key) {
+    private Pose3d pose3dInputValue(String key) {
         return inputResolver.pose3dVal(key);
     }
 
-    public Supplier<Pose3d> pose3dValSupplier(String key) {
+    private Supplier<Pose3d> pose3dInputSupplierValue(String key) {
         return inputResolver.pose3dSupplier(key);
     }
 
-    public <T> T objectInput(String key, Class<T> type) {
+    private <T> T objectInputValue(String key, Class<T> type) {
         return inputResolver.objectVal(key, type);
     }
 
-    public <T> Supplier<T> objectInputSupplier(String key, Class<T> type) {
+    private <T> Supplier<T> objectInputSupplierValue(String key, Class<T> type) {
         return inputResolver.objectSupplier(key, type);
     }
 
@@ -887,7 +1290,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         @Override
         public SP setpoint() {
             SP override = overrideSetpoint;
-            return override != null ? override : stateMachine.getGoalStateSetpoint();
+            return override != null ? override : currentSetpoint();
         }
 
         @Override
@@ -895,7 +1298,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             if (SuperstructureMechanism.this.robotCore != null) {
                 return SuperstructureMechanism.this.robotCore;
             }
-            for (Mechanism mech : getMechanisms().all()) {
+            for (Mechanism mech : mechanisms().all()) {
                 RobotCore<?> core = mech.getRobotCore();
                 if (core != null) {
                     return core;
@@ -958,86 +1361,73 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
 
         @Override
-        public SuperstructureMechanismsView<SP> getMechanisms() {
-            return SuperstructureMechanism.this.getMechanisms();
+        public SuperstructureMechanismsView<SP> mechanisms() {
+            return SuperstructureMechanism.this.children().mechanisms();
         }
 
         @Override
         public boolean input(String key) {
-            return SuperstructureMechanism.this.input(key);
+            return SuperstructureMechanism.this.input().bool(key);
         }
 
         @Override
         public double doubleInput(String key) {
-            return SuperstructureMechanism.this.doubleInput(key);
+            return SuperstructureMechanism.this.input().dbl(key);
         }
 
         @Override
         public DoubleSupplier doubleInputSupplier(String key) {
-            return SuperstructureMechanism.this.doubleInputSupplier(key);
+            return SuperstructureMechanism.this.input().dblSupplier(key);
         }
 
         @Override
         public int intVal(String key) {
-            return SuperstructureMechanism.this.intVal(key);
+            return SuperstructureMechanism.this.input().integer(key);
         }
 
         @Override
         public IntSupplier intValSupplier(String key) {
-            return SuperstructureMechanism.this.intValSupplier(key);
+            return SuperstructureMechanism.this.input().integerSupplier(key);
         }
 
         @Override
         public String stringVal(String key) {
-            return SuperstructureMechanism.this.stringVal(key);
+            return SuperstructureMechanism.this.input().string(key);
         }
 
         @Override
         public Supplier<String> stringValSupplier(String key) {
-            return SuperstructureMechanism.this.stringValSupplier(key);
+            return SuperstructureMechanism.this.input().stringSupplier(key);
         }
 
         @Override
         public Pose2d pose2dVal(String key) {
-            return SuperstructureMechanism.this.pose2dVal(key);
+            return SuperstructureMechanism.this.input().pose2d(key);
         }
 
         @Override
         public Supplier<Pose2d> pose2dValSupplier(String key) {
-            return SuperstructureMechanism.this.pose2dValSupplier(key);
+            return SuperstructureMechanism.this.input().pose2dSupplier(key);
         }
 
         @Override
         public Pose3d pose3dVal(String key) {
-            return SuperstructureMechanism.this.pose3dVal(key);
+            return SuperstructureMechanism.this.input().pose3d(key);
         }
 
         @Override
         public Supplier<Pose3d> pose3dValSupplier(String key) {
-            return SuperstructureMechanism.this.pose3dValSupplier(key);
+            return SuperstructureMechanism.this.input().pose3dSupplier(key);
         }
 
         @Override
         public <T> T objectInput(String key, Class<T> type) {
-            return SuperstructureMechanism.this.objectInput(key, type);
+            return SuperstructureMechanism.this.input().object(key, type);
         }
 
         @Override
         public <T> Supplier<T> objectInputSupplier(String key, Class<T> type) {
-            return SuperstructureMechanism.this.objectInputSupplier(key, type);
-        }
-
-        @Override
-        public <E extends Enum<E> & SetpointProvider<Double>> double mappedSetpoint(Function<SP, E> mapper) {
-            SP setpoint = setpoint();
-            if (setpoint == null) {
-                return Double.NaN;
-            }
-            E state = mapper.apply(setpoint);
-            if (state == null) {
-                return Double.NaN;
-            }
-            return state.getSetpoint();
+            return SuperstructureMechanism.this.input().objectSupplier(key, type);
         }
 
     }

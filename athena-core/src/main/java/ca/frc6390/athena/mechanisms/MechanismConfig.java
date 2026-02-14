@@ -515,7 +515,7 @@ public class MechanismConfig<T extends Mechanism> {
 
         /**
          * Declares a mutable boolean input with a default value.
-         * Other mechanisms/superstructures can set it via {@link Mechanism#setBoolVal(String, boolean)}.
+         * Other mechanisms/superstructures can set it via {@link Mechanism#input()} and {@code bool(...)}.
          */
         public InputsSection<T> boolVal(String key, boolean defaultValue) {
             String k = Objects.requireNonNull(key, "key");
@@ -758,7 +758,8 @@ public class MechanismConfig<T extends Mechanism> {
             }
             return controlLoop(loopName, periodMs, ctx -> {
                 double measurement = ctx.mechanism().getPidMeasurement();
-                double setpoint = ctx.mechanism().getSetpoint() + ctx.mechanism().getNudge();
+                double setpoint =
+                        ctx.mechanism().setpoint() + ctx.mechanism().nudge();
                 double output = 0.0;
                 if (hasPid) {
                     output += ctx.pidOut(normalizedName, measurement, setpoint);
@@ -1393,10 +1394,10 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     private static Enum<?> resolveActiveState(Mechanism mechanism) {
-        if (!(mechanism instanceof StatefulLike<?> stateful) || stateful.getStateMachine() == null) {
+        if (!(mechanism instanceof StatefulLike<?> stateful)) {
             return null;
         }
-        return stateful.getStateMachine().getGoalState();
+        return stateful.stateMachine().goal();
     }
 
     /**
@@ -1465,10 +1466,10 @@ public class MechanismConfig<T extends Mechanism> {
         rawBinding.apply(new LifecycleMechanismContext<>(mechanism, activeState));
     }
 
-    private final class LifecycleMechanismContext<E extends Enum<E> & SetpointProvider<Double>> implements MechanismContext<T, E> {
-        private final T mechanism;
-        private final E state;
-        private final double baseSetpoint;
+        private final class LifecycleMechanismContext<E extends Enum<E> & SetpointProvider<Double>> implements MechanismContext<T, E> {
+            private final T mechanism;
+            private final E state;
+            private final double setpoint;
         private final TypedInputResolver inputsView;
 
         @SuppressWarnings("unchecked")
@@ -1484,7 +1485,9 @@ public class MechanismConfig<T extends Mechanism> {
                 }
             }
             this.state = resolvedState;
-            this.baseSetpoint = resolvedState != null ? resolvedState.getSetpoint() : mechanism.getSetpoint();
+            this.setpoint = resolvedState != null
+                    ? resolvedState.getSetpoint()
+                    : mechanism.setpoint();
             this.inputsView = new TypedInputResolver(
                     "LifecycleMechanismContext",
                     TypedInputResolver.ValueMode.STRICT,
@@ -1569,8 +1572,8 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         @Override
-        public double baseSetpoint() {
-            return baseSetpoint;
+        public double setpoint() {
+            return setpoint;
         }
 
         @Override
@@ -1844,15 +1847,15 @@ public class MechanismConfig<T extends Mechanism> {
      * @param initialState starting state when the mechanism is constructed
      * @param <E> state enum type that provides setpoints
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> statefulGeneric(E initialState){
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> stateMachineGeneric(E initialState){
         return custom(config -> new StatefulMechanism<>(config, initialState));
     }
 
     /**
-     * Named variant of {@link #statefulGeneric(Enum)}.
+     * Named variant of {@link #stateMachineGeneric(Enum)}.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> statefulGeneric(String name, E initialState) {
-        return statefulGeneric(initialState).named(name);
+    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> stateMachineGeneric(String name, E initialState) {
+        return stateMachineGeneric(initialState).named(name);
     }
 
     /**
@@ -1863,7 +1866,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @param <E> state enum type that provides setpoints
      * @param <T> concrete mechanism type returned from the factory
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulMechanism<E>> MechanismConfig<T> stateful(BiFunction<MechanismConfig<T>, E, T> factory, E initialState) {
+    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulMechanism<E>> MechanismConfig<T> stateMachine(BiFunction<MechanismConfig<T>, E, T> factory, E initialState) {
         return custom(config -> factory.apply(config, initialState));
     }
 
@@ -2677,8 +2680,8 @@ public class MechanismConfig<T extends Mechanism> {
             mechanism.setName(mechanismName);
         }
 
-        if (stateGraph != null && mechanism instanceof StatefulMechanism<?> statefulMechanism) {
-            applyStateGraph(statefulMechanism, stateGraph);
+        if (stateGraph != null && mechanism instanceof StatefulLike<?> stateful) {
+            applyStateGraph(stateful, stateGraph);
         }
 
         return mechanism;
@@ -2703,11 +2706,11 @@ public class MechanismConfig<T extends Mechanism> {
 
     @SuppressWarnings("unchecked")
     private static <E extends Enum<E> & StateMachine.SetpointProvider<Double>> void applyStateGraph(
-            StatefulMechanism<?> statefulMechanism,
+            StatefulLike<?> stateful,
             StateGraph<?> stateGraph) {
-        StatefulMechanism<E> typedMechanism = (StatefulMechanism<E>) statefulMechanism;
+        StatefulLike<E> typedMechanism = (StatefulLike<E>) stateful;
         StateGraph<E> typedGraph = (StateGraph<E>) stateGraph;
-        typedMechanism.setStateGraph(typedGraph);
+        typedMechanism.stateMachine().graph(typedGraph);
     }
 
     /**

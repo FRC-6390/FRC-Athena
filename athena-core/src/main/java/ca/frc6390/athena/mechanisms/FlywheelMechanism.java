@@ -20,24 +20,24 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
     public static class StatefulFlywheelMechanism<E extends Enum<E> & SetpointProvider<Double>>
             extends FlywheelMechanism implements StatefulLike<E> {
 
-        private final StatefulMechanismCore<StatefulFlywheelMechanism<E>, E> stateCore;
+        private final StatefulMechanismCore<StatefulFlywheelMechanism<E>, E> stateMachineCore;
 
         public StatefulFlywheelMechanism(MechanismConfig<StatefulFlywheelMechanism<E>> config,
                                          SimpleMotorFeedforward feedforward,
                                          OutputType feedforwardOutputType,
                                          E initialState) {
             super(config, feedforward, feedforwardOutputType);
-            stateCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
         }
 
         @Override
-        public StatefulMechanismCore<StatefulFlywheelMechanism<E>, E> stateCore() {
-            return stateCore;
+        public StatefulLike.StateMachineSection<E> stateMachine() {
+            return new StatefulLike.StateMachineSection<>(stateMachineCore);
         }
 
         @Override
         public void update() {
-            setSuppressMotorOutput(updateStateCore(this));
+            stateMachineCore.updateMechanism(this);
             super.update();
         }
 
@@ -46,19 +46,14 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
             if (node == null) {
                 return null;
             }
-            getStateMachine().networkTables(node.child("StateMachine"));
+            stateMachineCore.getStateMachine().networkTables(node.child("StateMachine"));
             return super.networkTables(node);
         }
 
-        @SuppressWarnings("unchecked")
-        public StatefulFlywheelMechanism<E> publishNetworkTables(String ownerHint) {
-            super.publishNetworkTables(ownerHint);
-            return this;
-        }
     }
 
     @Override
     protected double getPidMeasurement() {
-        return getVelocity();
+        return velocity();
     }
 }

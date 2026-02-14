@@ -79,7 +79,7 @@ public final class MechanismSimulationConfig {
         if (mechanism == null) {
             return output;
         }
-        MotorControllerGroup group = mechanism.getMotorGroup();
+        MotorControllerGroup group = mechanism.motors().device();
         if (group == null) {
             return output;
         }
@@ -386,7 +386,7 @@ public final class MechanismSimulationConfig {
             throw new IllegalStateException("Cannot derive simulation motor without a mechanism reference");
         }
 
-        MotorControllerGroup group = mechanism.getMotorGroup();
+        MotorControllerGroup group = mechanism.motors().device();
         if (group == null) {
             throw new IllegalStateException("Cannot derive simulation motor without a motor group");
         }
@@ -850,8 +850,8 @@ public final class MechanismSimulationConfig {
 
         @Override
         public void update(double dtSeconds) {
-            double output = applyMotorInversion(mechanism, mechanism.getOutput());
-            double voltage = mechanism.isOutputVoltage() ? output : output * nominalVoltage;
+            double output = applyMotorInversion(mechanism, mechanism.output());
+            double voltage = mechanism.outputIsVoltage() ? output : output * nominalVoltage;
             voltage = MathUtil.clamp(voltage, -nominalVoltage, nominalVoltage);
             sim.setInputVoltage(voltage);
             sim.update(dtSeconds);
@@ -907,8 +907,8 @@ public final class MechanismSimulationConfig {
 
         @Override
         public void update(double dtSeconds) {
-            double output = applyMotorInversion(mechanism, mechanism.getOutput());
-            double voltage = mechanism.isOutputVoltage() ? output : output * nominalVoltage;
+            double output = applyMotorInversion(mechanism, mechanism.output());
+            double voltage = mechanism.outputIsVoltage() ? output : output * nominalVoltage;
             voltage = MathUtil.clamp(voltage, -nominalVoltage, nominalVoltage);
             sim.setInputVoltage(voltage);
             sim.update(dtSeconds);
@@ -957,8 +957,8 @@ public final class MechanismSimulationConfig {
 
         @Override
         public void update(double dtSeconds) {
-            double output = applyMotorInversion(mechanism, mechanism.getOutput());
-            double voltage = mechanism.isOutputVoltage() ? output : output * nominalVoltage;
+            double output = applyMotorInversion(mechanism, mechanism.output());
+            double voltage = mechanism.outputIsVoltage() ? output : output * nominalVoltage;
             voltage = MathUtil.clamp(voltage, -nominalVoltage, nominalVoltage);
             double clampedDt = dtSeconds;
             if (clampedDt < 0.0) {

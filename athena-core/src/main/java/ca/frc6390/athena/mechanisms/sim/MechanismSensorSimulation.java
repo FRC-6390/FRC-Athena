@@ -55,7 +55,7 @@ public final class MechanismSensorSimulation {
         if (mechanism == null) {
             return EMPTY;
         }
-        GenericLimitSwitch[] switches = mechanism.getLimitSwitches();
+        GenericLimitSwitch[] switches = mechanism.limitSwitches();
         if (switches == null || switches.length == 0) {
             return EMPTY;
         }
@@ -106,8 +106,8 @@ public final class MechanismSensorSimulation {
         MechanismSensorSimulationConfig.EvaluationContext context =
                 new MechanismSensorSimulationConfig.EvaluationContext(
                         mechanism,
-                        mechanism.getPosition(),
-                        mechanism.getVelocity());
+                        mechanism.position(),
+                        mechanism.velocity());
         for (SensorRuntime sensor : sensors) {
             sensor.update(context);
         }
@@ -238,7 +238,7 @@ public final class MechanismSensorSimulation {
 	            // Put simulation config alongside the mechanism itself:
 	            // Athena/Mechanisms/.../<MechName>/Simulation/Sensors/<SensorName>/...
 	            RobotNetworkTables.Node mechNode =
-	                    mechanism.resolveDefaultMechanismNode(nt.root().child("Mechanisms"));
+	                    mechanism.networkTables().resolveNode(nt.root().child("Mechanisms"));
 	            return mechNode
 	                    .child("Simulation")
 	                    .child("Sensors")

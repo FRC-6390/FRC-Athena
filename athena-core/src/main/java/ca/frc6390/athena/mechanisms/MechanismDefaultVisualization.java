@@ -43,13 +43,13 @@ final class MechanismDefaultVisualization {
     }
 
     private static Pose3d positionBottomPose(Mechanism mechanism) {
-        double normalized = MechanismTravelRange.normalize(mechanism, mechanism.getPosition());
+        double normalized = MechanismTravelRange.normalize(mechanism, mechanism.position());
         double bottom = bottomFor(normalized, POSITION_HEIGHT_METERS);
         return new Pose3d(new Translation3d(0.0, bottom, 0.0), new Rotation3d());
     }
 
     private static Pose3d setpointBottomPose(Mechanism mechanism) {
-        double normalized = MechanismTravelRange.normalize(mechanism, mechanism.getSetpoint());
+        double normalized = MechanismTravelRange.normalize(mechanism, mechanism.setpoint());
         double bottom = bottomFor(normalized, SETPOINT_HEIGHT_METERS);
         return new Pose3d(new Translation3d(0.0, bottom, 0.0), new Rotation3d());
     }

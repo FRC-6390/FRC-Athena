@@ -67,14 +67,14 @@ final class ElevatorMechanismVisualization {
     }
 
     private static Pose3d carriageBottomPose(ElevatorMechanism mechanism) {
-        double normalized = MechanismTravelRange.normalize(mechanism, mechanism.getPosition());
+        double normalized = MechanismTravelRange.normalize(mechanism, mechanism.position());
         double centerY = normalized * RENDER_SPAN_METERS;
         double bottom = MathUtil.clamp(centerY - (CARRIAGE_HEIGHT_METERS / 2.0), 0.0, POLE_HEIGHT_METERS - CARRIAGE_HEIGHT_METERS);
         return new Pose3d(new Translation3d(0.0, bottom, 0.0), new Rotation3d());
     }
 
     private static Pose3d setpointBottomPose(ElevatorMechanism mechanism) {
-        double normalized = MechanismTravelRange.normalize(mechanism, mechanism.getSetpoint());
+        double normalized = MechanismTravelRange.normalize(mechanism, mechanism.setpoint());
         double centerY = normalized * RENDER_SPAN_METERS;
         double bottom = MathUtil.clamp(centerY - (SETPOINT_HEIGHT_METERS / 2.0), 0.0, POLE_HEIGHT_METERS - SETPOINT_HEIGHT_METERS);
         return new Pose3d(new Translation3d(0.0, bottom, 0.0), new Rotation3d());

@@ -73,7 +73,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final MotionLimits motionLimits;
     private final TrapezoidProfile.Constraints baseProfiledConstraints;
     private boolean override, emergencyStopped, manualEmergencyStopped, connectivityFaultEmergencyStopped,
-            pidEnabled, feedforwardEnabled, setpointIsOutput, suppressMotorOutput, customPIDCycle;
+            pidEnabled, feedforwardEnabled, setpointIsOutput, customPIDCycle;
     private double setpoint, prevSetpoint, pidOutput, feedforwardOutput, output, nudge, pidPeriod; 
     private RobotMode prevRobotMode = RobotMode.DISABLE, robotMode = RobotMode.DISABLE;
     private final MechanismSimulationModel simulationModel;
@@ -192,8 +192,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
     private  boolean shouldCustomEncoder = false;
     private  DoubleSupplier customEncoderPos;
-    private boolean shouldSetpointOverride = false;
-    private double setPointOverride = 0;
     private boolean networkTablesEnabled;
     private double lastNetworkTablesCacheUpdateSeconds = Double.NaN;
     private double lastEmergencyStopLogSeconds = Double.NaN;
@@ -649,26 +647,39 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
-    /**
-     * Sectioned runtime API for mutable mechanism inputs declared in {@link MechanismConfig#inputs}.
-     */
-    public Mechanism inputs(Consumer<InputsSection> section) {
+    public Mechanism input(Consumer<InputSection> section) {
         if (section != null) {
-            section.accept(new InputsSection(this));
+            section.accept(new InputSection(this));
         }
         return this;
     }
 
-    /**
-     * Non-lambda section accessor for mutable mechanism inputs.
-     */
-    public InputsSection inputs() {
-        return new InputsSection(this);
+    public InputSection input() {
+        return new InputSection(this);
     }
 
-    /**
-     * Sectioned runtime API for output/control operations on an already-built mechanism.
-     */
+    public Mechanism motors(Consumer<MotorsSection> section) {
+        if (section != null) {
+            section.accept(new MotorsSection(this));
+        }
+        return this;
+    }
+
+    public MotorsSection motors() {
+        return new MotorsSection(this);
+    }
+
+    public Mechanism encoder(Consumer<EncoderSection> section) {
+        if (section != null) {
+            section.accept(new EncoderSection(this));
+        }
+        return this;
+    }
+
+    public EncoderSection encoder() {
+        return new EncoderSection(this);
+    }
+
     public Mechanism control(Consumer<ControlSection> section) {
         if (section != null) {
             section.accept(new ControlSection(this));
@@ -676,232 +687,571 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return this;
     }
 
-    /**
-     * Non-lambda section accessor for output/control operations.
-     */
     public ControlSection control() {
         return new ControlSection(this);
     }
 
-    /**
-     * Sectioned runtime API for named control-loop enable/disable interactions.
-     */
-    public Mechanism loops(Consumer<ControlLoopsSection> section) {
+    public Mechanism loops(Consumer<LoopsSection> section) {
         if (section != null) {
-            section.accept(new ControlLoopsSection(this));
+            section.accept(new LoopsSection(this));
         }
         return this;
     }
 
-    /**
-     * Non-lambda section accessor for control-loop toggles.
-     */
-    public ControlLoopsSection loops() {
-        return new ControlLoopsSection(this);
+    public LoopsSection loops() {
+        return new LoopsSection(this);
     }
 
-    /**
-     * Structured read API: {@code mechanism.state().position()}.
-     */
-    public StateView state() {
-        return new StateView(this, false);
+    public Mechanism sysId(Consumer<SysIdSection> section) {
+        if (section != null) {
+            section.accept(new SysIdSection(this));
+        }
+        return this;
     }
 
-    public static final class StateView {
+    public SysIdSection sysId() {
+        return new SysIdSection(this);
+    }
+
+    public Mechanism sim(Consumer<SimulationSection> section) {
+        if (section != null) {
+            section.accept(new SimulationSection(this));
+        }
+        return this;
+    }
+
+    public SimulationSection sim() {
+        return new SimulationSection(this);
+    }
+
+    public Mechanism networkTables(Consumer<NetworkTablesSection> section) {
+        if (section != null) {
+            section.accept(new NetworkTablesSection(this));
+        }
+        return this;
+    }
+
+    public NetworkTablesSection networkTables() {
+        return new NetworkTablesSection(this);
+    }
+
+    public Mechanism visualization(Consumer<VisualizationSection> section) {
+        if (section != null) {
+            section.accept(new VisualizationSection(this));
+        }
+        return this;
+    }
+
+    public VisualizationSection visualization() {
+        return new VisualizationSection(this);
+    }
+
+    public Mechanism setpoint(double value) {
+        control().setpoint(value);
+        return this;
+    }
+
+    public Mechanism output(double value) {
+        control().output(value);
+        return this;
+    }
+
+    public Mechanism speed(double value) {
+        control().speed(value);
+        return this;
+    }
+
+    public Mechanism voltage(double value) {
+        control().voltage(value);
+        return this;
+    }
+
+    public Mechanism manualOverride(boolean enabled) {
+        control().manualOverride(enabled);
+        return this;
+    }
+
+    public boolean manualOverride() {
+        return override;
+    }
+
+    public double position() {
+        return readPosition(false);
+    }
+
+    public Rotation2d rotation2d() {
+        return readRotation2d(false);
+    }
+
+    public double velocity() {
+        return readVelocity(false);
+    }
+
+    public double setpoint() {
+        return setpoint;
+    }
+
+    public double output() {
+        return readOutput();
+    }
+
+    public double controllerSetpointPosition() {
+        return getControllerSetpointPosition();
+    }
+
+    public double controllerSetpointVelocity() {
+        return getControllerSetpointVelocity();
+    }
+
+    public double pidOutput() {
+        return getPidOutput();
+    }
+
+    public double feedforwardOutput() {
+        return getFeedforwardOutput();
+    }
+
+    public OutputType outputType() {
+        return outputType;
+    }
+
+    public boolean emergencyStopped() {
+        return emergencyStopped;
+    }
+
+    public boolean useAbsolute() {
+        return useAbsolute;
+    }
+
+    public boolean useVoltage() {
+        return outputType == OutputType.VOLTAGE;
+    }
+
+    public boolean pidEnabled() {
+        return pidEnabled;
+    }
+
+    public boolean feedforwardEnabled() {
+        return feedforwardEnabled;
+    }
+
+    public double nudge() {
+        return nudge;
+    }
+
+    public double pidPeriodSeconds() {
+        return pidPeriod;
+    }
+
+    public double networkTablesPeriodSeconds() {
+        return readNetworkTablesPeriodSeconds();
+    }
+
+    public double simulationUpdatePeriodSeconds() {
+        return getSimulationUpdatePeriodSeconds();
+    }
+
+    public double hardwareUpdatePeriodSeconds() {
+        return hardwareUpdatePeriodSeconds;
+    }
+
+    public boolean setpointAsOutput() {
+        return setpointIsOutput;
+    }
+
+    public boolean customPidCycle() {
+        return customPIDCycle;
+    }
+
+    public boolean outputIsVoltage() {
+        return isOutputVoltage();
+    }
+
+    public double minBound() {
+        return minBound;
+    }
+
+    public double maxBound() {
+        return maxBound;
+    }
+
+    public Enum<?> activeState() {
+        return getActiveState();
+    }
+
+    public GenericLimitSwitch[] limitSwitches() {
+        return limitSwitches.clone();
+    }
+
+    public static final class InputSection {
         private final Mechanism owner;
-        private final boolean poll;
 
-        private StateView(Mechanism owner, boolean poll) {
-            this.owner = owner;
-            this.poll = poll;
-        }
-
-        public StateView poll() {
-            return new StateView(owner, true);
-        }
-
-        public MotorControllerGroup motors() {
-            return owner.getMotorGroup();
-        }
-
-        public Encoder encoder() {
-            return owner.getEncoder();
-        }
-
-        public Rotation2d rotation2d() {
-            return owner.getRotation2d(poll);
-        }
-
-        public double position() {
-            return owner.getPosition(poll);
-        }
-
-        public double positionModulus(double min, double max) {
-            return owner.getPositionModulus(min, max);
-        }
-
-        public double velocity() {
-            return owner.getVelocity(poll);
-        }
-
-        public double setpoint() {
-            return owner.getSetpoint();
-        }
-
-        public double controllerSetpointPosition() {
-            return owner.getControllerSetpointPosition();
-        }
-
-        public double controllerSetpointVelocity() {
-            return owner.getControllerSetpointVelocity();
-        }
-
-        public double output() {
-            return owner.getOutput();
-        }
-
-        public double pidOutput() {
-            return owner.getPidOutput();
-        }
-
-        public double feedforwardOutput() {
-            return owner.getFeedforwardOutput();
-        }
-
-        public OutputType outputType() {
-            return owner.getOutputType();
-        }
-
-        public boolean atSetpoint() {
-            return owner.atSetpoint();
-        }
-
-        public boolean overrideActive() {
-            return owner.isOverride();
-        }
-
-        public boolean emergencyStopped() {
-            return owner.isEmergencyStopped();
-        }
-
-        public boolean useAbsolute() {
-            return owner.isUseAbsolute();
-        }
-
-        public boolean useVoltage() {
-            return owner.isUseVoltage();
-        }
-
-        public boolean pidEnabled() {
-            return owner.isPidEnabled();
-        }
-
-        public boolean feedforwardEnabled() {
-            return owner.isFeedforwardEnabled();
-        }
-
-        public double nudge() {
-            return owner.getNudge();
-        }
-
-        public double pidPeriodSeconds() {
-            return owner.getPidPeriod();
-        }
-
-        public double networkTablesPeriodSeconds() {
-            return owner.getNetworkTablesPeriodSeconds();
-        }
-
-        public double simulationUpdatePeriodSeconds() {
-            return owner.getSimulationUpdatePeriodSeconds();
-        }
-
-        public double hardwareUpdatePeriodSeconds() {
-            return owner.getHardwareUpdatePeriodSeconds();
-        }
-
-        public double minBound() {
-            return owner.getMin();
-        }
-
-        public double maxBound() {
-            return owner.getMax();
-        }
-
-        public Enum<?> activeState() {
-            return owner.getActiveState();
-        }
-
-        public GenericLimitSwitch[] limitSwitches() {
-            return owner.getLimitSwitches().clone();
-        }
-    }
-
-    public static final class InputsSection {
-        private final Mechanism owner;
-
-        private InputsSection(Mechanism owner) {
+        private InputSection(Mechanism owner) {
             this.owner = owner;
         }
 
-        public InputsSection bool(String key, boolean value) {
+        public InputSection bool(String key, boolean value) {
             owner.setBoolVal(key, value);
             return this;
         }
 
-        public InputsSection resetBool(String key) {
+        public InputSection resetBool(String key) {
             owner.resetBoolVal(key);
             return this;
         }
 
-        public InputsSection dbl(String key, double value) {
+        public InputSection dbl(String key, double value) {
             owner.setDoubleVal(key, value);
             return this;
         }
 
-        public InputsSection resetDouble(String key) {
+        public InputSection resetDouble(String key) {
             owner.resetDoubleVal(key);
             return this;
         }
 
-        public InputsSection integer(String key, int value) {
+        public InputSection integer(String key, int value) {
             owner.setIntVal(key, value);
             return this;
         }
 
-        public InputsSection resetInt(String key) {
+        public InputSection resetInt(String key) {
             owner.resetIntVal(key);
             return this;
         }
 
-        public InputsSection string(String key, String value) {
+        public InputSection string(String key, String value) {
             owner.setStringVal(key, value);
             return this;
         }
 
-        public InputsSection resetString(String key) {
+        public InputSection resetString(String key) {
             owner.resetStringVal(key);
             return this;
         }
 
-        public InputsSection pose2d(String key, edu.wpi.first.math.geometry.Pose2d value) {
+        public InputSection pose2d(String key, edu.wpi.first.math.geometry.Pose2d value) {
             owner.setPose2dVal(key, value);
             return this;
         }
 
-        public InputsSection resetPose2d(String key) {
+        public InputSection resetPose2d(String key) {
             owner.resetPose2dVal(key);
             return this;
         }
 
-        public InputsSection pose3d(String key, edu.wpi.first.math.geometry.Pose3d value) {
+        public InputSection pose3d(String key, edu.wpi.first.math.geometry.Pose3d value) {
             owner.setPose3dVal(key, value);
             return this;
         }
 
-        public InputsSection resetPose3d(String key) {
+        public InputSection resetPose3d(String key) {
             owner.resetPose3dVal(key);
             return this;
+        }
+
+        public boolean hasBool(String key) {
+            return owner.hasMutableBoolValKey(key);
+        }
+
+        public boolean hasDouble(String key) {
+            return owner.hasMutableDblValKey(key);
+        }
+
+        public boolean hasInt(String key) {
+            return owner.hasMutableIntValKey(key);
+        }
+
+        public boolean hasString(String key) {
+            return owner.hasMutableStrValKey(key);
+        }
+
+        public boolean hasPose2d(String key) {
+            return owner.hasMutablePose2dValKey(key);
+        }
+
+        public boolean hasPose3d(String key) {
+            return owner.hasMutablePose3dValKey(key);
+        }
+
+        public boolean bool(String key) {
+            if (!hasBool(key)) {
+                throw new IllegalArgumentException("Mutable bool input key not declared in config: " + key);
+            }
+            return owner.mutableBoolVal(key);
+        }
+
+        public double dbl(String key) {
+            if (!hasDouble(key)) {
+                throw new IllegalArgumentException("Mutable double input key not declared in config: " + key);
+            }
+            return owner.mutableDblVal(key);
+        }
+
+        public int integer(String key) {
+            if (!hasInt(key)) {
+                throw new IllegalArgumentException("Mutable int input key not declared in config: " + key);
+            }
+            return owner.mutableIntVal(key);
+        }
+
+        public String string(String key) {
+            if (!hasString(key)) {
+                throw new IllegalArgumentException("Mutable string input key not declared in config: " + key);
+            }
+            return owner.mutableStrVal(key);
+        }
+
+        public edu.wpi.first.math.geometry.Pose2d pose2d(String key) {
+            if (!hasPose2d(key)) {
+                throw new IllegalArgumentException("Mutable Pose2d input key not declared in config: " + key);
+            }
+            return owner.mutablePose2dVal(key);
+        }
+
+        public edu.wpi.first.math.geometry.Pose3d pose3d(String key) {
+            if (!hasPose3d(key)) {
+                throw new IllegalArgumentException("Mutable Pose3d input key not declared in config: " + key);
+            }
+            return owner.mutablePose3dVal(key);
+        }
+    }
+
+    public static final class MotorsSection {
+        private final Mechanism owner;
+
+        private MotorsSection(Mechanism owner) {
+            this.owner = owner;
+        }
+
+        public MotorsSection speed(double value) {
+            owner.motors.setSpeed(value);
+            return this;
+        }
+
+        public MotorsSection voltage(double value) {
+            owner.motors.setVoltage(value);
+            return this;
+        }
+
+        public MotorsSection position(double value) {
+            owner.motors.setPosition(value);
+            return this;
+        }
+
+        public MotorsSection velocity(double value) {
+            owner.motors.setVelocity(value);
+            return this;
+        }
+
+        public MotorsSection stop() {
+            owner.motors.stopMotors();
+            return this;
+        }
+
+        public MotorsSection currentLimit(double amps) {
+            owner.motors.setCurrentLimit(amps);
+            return this;
+        }
+
+        public MotorsSection neutralMode(MotorNeutralMode mode) {
+            owner.motors.setNeutralMode(mode);
+            return this;
+        }
+
+        public MotorsSection output(Consumer<MotorControllerGroup.OutputSection> section) {
+            if (section != null) {
+                owner.motors.output(section);
+            }
+            return this;
+        }
+
+        public MotorsSection config(Consumer<MotorControllerGroup.ConfigSection> section) {
+            if (section != null) {
+                owner.motors.config(section);
+            }
+            return this;
+        }
+
+        public MotorControllerGroup.OutputSection output() {
+            return owner.motors.output();
+        }
+
+        public MotorControllerGroup.ConfigSection config() {
+            return owner.motors.config();
+        }
+
+        public MotorsSection motionLimits(MotionLimits.AxisLimits limits) {
+            owner.setMotionLimits(limits);
+            return this;
+        }
+
+        public MotorsSection motionLimits(double maxVelocity, double maxAcceleration) {
+            owner.setMotionLimits(maxVelocity, maxAcceleration);
+            return this;
+        }
+
+        public MotorsSection motionLimitsProvider(MotionLimits.AxisLimitsProvider provider) {
+            owner.registerMotionLimitsProvider(provider);
+            return this;
+        }
+
+        public MotorsSection hardwareUpdatePeriodSeconds(double seconds) {
+            owner.setHardwareUpdatePeriodSeconds(seconds);
+            return this;
+        }
+
+        public MotorsSection hardwareUpdatePeriodMs(double ms) {
+            owner.setHardwareUpdatePeriodMs(ms);
+            return this;
+        }
+
+        public MotorControllerGroup device() {
+            return owner.motors;
+        }
+
+        public MotorController[] controllers() {
+            return owner.motors.getControllers();
+        }
+
+        public ca.frc6390.athena.hardware.encoder.EncoderGroup encoderGroup() {
+            return owner.motors.getEncoderGroup();
+        }
+
+        public boolean allConnected() {
+            return owner.motors.allMotorsConnected();
+        }
+
+        public double averageTemperatureCelsius() {
+            return owner.motors.getAverageTemperatureCelsius();
+        }
+
+        public MotorsStateView state() {
+            return new MotorsStateView(owner, false);
+        }
+    }
+
+    public static final class MotorsStateView {
+        private final Mechanism owner;
+        private final boolean poll;
+
+        private MotorsStateView(Mechanism owner, boolean poll) {
+            this.owner = owner;
+            this.poll = poll;
+        }
+
+        public MotorsStateView poll() {
+            return new MotorsStateView(owner, true);
+        }
+
+        public boolean allConnected() {
+            return owner.motors.allMotorsConnected();
+        }
+
+        public double averageTemperatureCelsius() {
+            return owner.motors.getAverageTemperatureCelsius();
+        }
+
+        public MotionLimits.AxisLimits motionLimits() {
+            return owner.resolveMotionLimits();
+        }
+
+        public double hardwareUpdatePeriodSeconds() {
+            return owner.hardwareUpdatePeriodSeconds;
+        }
+
+        public double maxFreeSpeedMetersPerSecond() {
+            return owner.calculateMaxFreeSpeed();
+        }
+
+        public GenericLimitSwitch[] limitSwitches() {
+            return owner.limitSwitches.clone();
+        }
+    }
+
+    public static final class EncoderSection {
+        private final Mechanism owner;
+
+        private EncoderSection(Mechanism owner) {
+            this.owner = owner;
+        }
+
+        public EncoderSection useAbsolute(boolean enabled) {
+            owner.useAbsolute = enabled;
+            return this;
+        }
+
+        public boolean useAbsolute() {
+            return owner.useAbsolute;
+        }
+
+        public EncoderSection position(double value) {
+            owner.writeEncoderPosition(value);
+            return this;
+        }
+
+        public EncoderSection simState(double position, double velocity) {
+            owner.setSimulatedEncoderState(position, velocity);
+            return this;
+        }
+
+        public EncoderSection clearSimState() {
+            owner.clearSimulatedEncoderState();
+            return this;
+        }
+
+        public EncoderSection config(Consumer<Encoder.RuntimeSection> section) {
+            if (owner.encoder != null && section != null) {
+                owner.encoder.config(section);
+            }
+            return this;
+        }
+
+        public EncoderSection sim(Consumer<Encoder.SimulationSection> section) {
+            if (owner.encoder != null && section != null) {
+                owner.encoder.sim(section);
+            }
+            return this;
+        }
+
+        public double position() {
+            return owner.readPosition(false);
+        }
+
+        public double position(boolean poll) {
+            return owner.readPosition(poll);
+        }
+
+        public double velocity() {
+            return owner.readVelocity(false);
+        }
+
+        public double velocity(boolean poll) {
+            return owner.readVelocity(poll);
+        }
+
+        public Rotation2d rotation2d() {
+            return owner.readRotation2d(false);
+        }
+
+        public Rotation2d rotation2d(boolean poll) {
+            return owner.readRotation2d(poll);
+        }
+
+        public double positionModulus(double min, double max) {
+            return owner.readPositionModulus(min, max);
+        }
+
+        public Encoder.MeasurementsView measurements() {
+            return owner.encoder != null ? owner.encoder.measurements() : null;
+        }
+
+        public Encoder.StatusView status() {
+            return owner.encoder != null ? owner.encoder.status() : null;
+        }
+
+        public Encoder device() {
+            return owner.encoder;
         }
     }
 
@@ -952,11 +1302,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return this;
         }
 
-        public ControlSection suppressOutput(boolean suppressMotorOutput) {
-            owner.setSuppressMotorOutput(suppressMotorOutput);
-            return this;
-        }
-
         public ControlSection pidEnabled(boolean enabled) {
             owner.setPidEnabled(enabled);
             return this;
@@ -974,6 +1319,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         public ControlSection nudge(double nudge) {
             owner.setNudge(nudge);
+            return this;
+        }
+
+        public ControlSection clearNudge() {
+            owner.setNudge(0.0);
             return this;
         }
 
@@ -997,85 +1347,235 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return this;
         }
 
-        public ControlSection currentLimit(double currentLimit) {
-            owner.setCurrentLimit(currentLimit);
+        public ControlSection pidPeriodSeconds(double periodSeconds) {
+            owner.setPidPeriod(periodSeconds);
             return this;
         }
 
-        public ControlSection neutralMode(MotorNeutralMode mode) {
-            owner.setMotorNeutralMode(mode);
+        public ControlSection customPidCycle(boolean enabled) {
+            owner.setCustomPIDCycle(enabled);
             return this;
         }
     }
 
-    public static final class ControlLoopsSection {
+    public static final class LoopsSection {
         private final Mechanism owner;
 
-        private ControlLoopsSection(Mechanism owner) {
+        private LoopsSection(Mechanism owner) {
             this.owner = owner;
         }
 
-        public ControlLoopsSection enable(String name) {
+        public LoopsSection enable(String name) {
             owner.enableControlLoop(name);
             return this;
         }
 
-        public ControlLoopsSection disable(String name) {
+        public LoopsSection disable(String name) {
             owner.disableControlLoop(name);
             return this;
         }
 
-        public ControlLoopsSection enabled(String name, boolean enabled) {
+        public LoopsSection enabled(String name, boolean enabled) {
             owner.setControlLoopEnabled(name, enabled);
             return this;
+        }
+
+        public boolean enabled(String name) {
+            return owner.isControlLoopEnabled(name);
+        }
+
+        public Set<String> names() {
+            return java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<>(owner.controlLoopsByName.keySet()));
+        }
+
+        public Map<String, Boolean> states() {
+            Map<String, Boolean> states = new LinkedHashMap<>();
+            for (String name : owner.controlLoopsByName.keySet()) {
+                states.put(name, !owner.disabledControlLoops.contains(name));
+            }
+            return java.util.Collections.unmodifiableMap(states);
+        }
+    }
+
+    public static final class SysIdSection {
+        private final Mechanism owner;
+
+        private SysIdSection(Mechanism owner) {
+            this.owner = owner;
+        }
+
+        public SysIdSection rampRateVoltsPerSecond(double value) {
+            owner.setSysIdRampRateVoltsPerSecond(value);
+            return this;
+        }
+
+        public SysIdSection stepVoltage(double value) {
+            owner.setSysIdStepVoltage(value);
+            return this;
+        }
+
+        public SysIdSection timeoutSeconds(double value) {
+            owner.setSysIdTimeoutSeconds(value);
+            return this;
+        }
+
+        public double rampRateVoltsPerSecond() {
+            return owner.sysIdRampRateVoltsPerSecond;
+        }
+
+        public double stepVoltage() {
+            return owner.sysIdStepVoltage;
+        }
+
+        public double timeoutSeconds() {
+            return owner.sysIdTimeoutSeconds;
+        }
+
+        public boolean active() {
+            return owner.sysIdActive;
+        }
+    }
+
+    public static final class SimulationSection {
+        private final Mechanism owner;
+
+        private SimulationSection(Mechanism owner) {
+            this.owner = owner;
+        }
+
+        public SimulationSection reset() {
+            owner.resetSimulation();
+            return this;
+        }
+
+        public SimulationSection encoderState(double position, double velocity) {
+            owner.setSimulatedEncoderState(position, velocity);
+            return this;
+        }
+
+        public SimulationSection clearEncoderState() {
+            owner.clearSimulatedEncoderState();
+            return this;
+        }
+
+        private boolean hasSimulation() {
+            return owner.simulationModel != null;
+        }
+
+        public double updatePeriodSeconds() {
+            return owner.simulationUpdatePeriodSeconds;
+        }
+    }
+
+    public static final class NetworkTablesSection {
+        private final Mechanism owner;
+
+        private NetworkTablesSection(Mechanism owner) {
+            this.owner = owner;
+        }
+
+        public NetworkTablesSection periodSeconds(double periodSeconds) {
+            owner.setNetworkTablesPeriodSeconds(periodSeconds);
+            return this;
+        }
+
+        public double periodSeconds() {
+            return owner.readNetworkTablesPeriodSeconds();
+        }
+
+        public NetworkTablesSection ownerPath(String ownerPath) {
+            owner.setNetworkTablesOwnerPath(ownerPath);
+            return this;
+        }
+
+        public String ownerPath() {
+            return owner.networkTablesOwnerPath;
+        }
+
+        public NetworkTablesSection publishHint(String ownerHint) {
+            owner.publishNetworkTablesHint(ownerHint);
+            return this;
+        }
+
+        public RobotNetworkTables.MechanismToggles toggles() {
+            return owner.networkTablesConfig();
+        }
+
+        public String typeName() {
+            return owner.getNetworkTablesTypeName();
+        }
+
+        public RobotNetworkTables.Node resolveNode(RobotNetworkTables.Node mechanismsRoot) {
+            return owner.resolveDefaultMechanismNode(mechanismsRoot);
+        }
+    }
+
+    public static final class VisualizationSection {
+        private final Mechanism owner;
+
+        private VisualizationSection(Mechanism owner) {
+            this.owner = owner;
+        }
+
+        public VisualizationSection rootOverride(Pose3d pose) {
+            owner.setVisualizationRootOverride(pose);
+            return this;
+        }
+
+        public Mechanism2d mechanism2d() {
+            return owner.getMechanism2d();
+        }
+
+        public Map<String, Pose3d> mechanism3dPoses() {
+            return owner.getMechanism3dPoses();
         }
     }
 
     /**
      */
-    public void setBoolVal(String key, boolean value) {
+    private void setBoolVal(String key, boolean value) {
         requireMutableKey(key, mutableBoolInputDefaults);
         mutableBoolInputs.put(key, value);
     }
 
     /**
      */
-    public void resetBoolVal(String key) {
+    private void resetBoolVal(String key) {
         requireMutableKey(key, mutableBoolInputDefaults);
         mutableBoolInputs.put(key, mutableBoolInputDefaults.get(key));
     }
 
     /**
      */
-    public void setDoubleVal(String key, double value) {
+    private void setDoubleVal(String key, double value) {
         requireMutableKey(key, mutableDoubleInputDefaults);
         mutableDoubleInputs.put(key, value);
     }
 
     /**
      */
-    public void resetDoubleVal(String key) {
+    private void resetDoubleVal(String key) {
         requireMutableKey(key, mutableDoubleInputDefaults);
         mutableDoubleInputs.put(key, mutableDoubleInputDefaults.get(key));
     }
 
     /**
      */
-    public void setIntVal(String key, int value) {
+    private void setIntVal(String key, int value) {
         requireMutableKey(key, mutableIntInputDefaults);
         mutableIntInputs.put(key, value);
     }
 
     /**
      */
-    public void resetIntVal(String key) {
+    private void resetIntVal(String key) {
         requireMutableKey(key, mutableIntInputDefaults);
         mutableIntInputs.put(key, mutableIntInputDefaults.get(key));
     }
 
     /**
      */
-    public void setStringVal(String key, String value) {
+    private void setStringVal(String key, String value) {
         requireMutableKey(key, mutableStringInputDefaults);
         if (value == null) {
             throw new IllegalArgumentException("string input value cannot be null");
@@ -1085,14 +1585,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void resetStringVal(String key) {
+    private void resetStringVal(String key) {
         requireMutableKey(key, mutableStringInputDefaults);
         mutableStringInputs.put(key, mutableStringInputDefaults.get(key));
     }
 
     /**
      */
-    public void setPose2dVal(String key, edu.wpi.first.math.geometry.Pose2d value) {
+    private void setPose2dVal(String key, edu.wpi.first.math.geometry.Pose2d value) {
         requireMutableKey(key, mutablePose2dInputDefaults);
         if (value == null) {
             throw new IllegalArgumentException("Pose2d input value cannot be null");
@@ -1102,14 +1602,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void resetPose2dVal(String key) {
+    private void resetPose2dVal(String key) {
         requireMutableKey(key, mutablePose2dInputDefaults);
         mutablePose2dInputs.put(key, mutablePose2dInputDefaults.get(key));
     }
 
     /**
      */
-    public void setPose3dVal(String key, edu.wpi.first.math.geometry.Pose3d value) {
+    private void setPose3dVal(String key, edu.wpi.first.math.geometry.Pose3d value) {
         requireMutableKey(key, mutablePose3dInputDefaults);
         if (value == null) {
             throw new IllegalArgumentException("Pose3d input value cannot be null");
@@ -1119,45 +1619,45 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void resetPose3dVal(String key) {
+    private void resetPose3dVal(String key) {
         requireMutableKey(key, mutablePose3dInputDefaults);
         mutablePose3dInputs.put(key, mutablePose3dInputDefaults.get(key));
     }
 
-    public MotionLimits getMotionLimits() {
+    private MotionLimits getMotionLimits() {
         return motionLimits;
     }
 
-    public Mechanism setMotionLimits(MotionLimits.AxisLimits limits) {
+    private Mechanism setMotionLimits(MotionLimits.AxisLimits limits) {
         motionLimits.setBaseAxisLimits(MOTION_AXIS_ID, limits);
         return this;
     }
 
-    public Mechanism setMotionLimits(double maxVelocity, double maxAcceleration) {
+    private Mechanism setMotionLimits(double maxVelocity, double maxAcceleration) {
         return setMotionLimits(new MotionLimits.AxisLimits(maxVelocity, maxAcceleration));
     }
 
-    public Mechanism registerMotionLimitsProvider(MotionLimits.AxisLimitsProvider provider) {
+    private Mechanism registerMotionLimitsProvider(MotionLimits.AxisLimitsProvider provider) {
         if (provider != null) {
             motionLimits.registerAxisProvider(MOTION_AXIS_ID, provider);
         }
         return this;
     }
 
-    public MotionLimits.AxisLimits resolveMotionLimits() {
+    private MotionLimits.AxisLimits resolveMotionLimits() {
         return motionLimits.resolveAxisLimits(MOTION_AXIS_ID);
     }
 
-    public double getHardwareUpdatePeriodSeconds() {
+    private double getHardwareUpdatePeriodSeconds() {
         return hardwareUpdatePeriodSeconds;
     }
 
-    public void setHardwareUpdatePeriodSeconds(double periodSeconds) {
+    private void setHardwareUpdatePeriodSeconds(double periodSeconds) {
         this.hardwareUpdatePeriodSeconds = sanitizeHardwareUpdatePeriod(periodSeconds);
         recomputeHardwareRefreshPhase();
     }
 
-    public void setHardwareUpdatePeriodMs(double periodMs) {
+    private void setHardwareUpdatePeriodMs(double periodMs) {
         setHardwareUpdatePeriodSeconds(periodMs / 1000.0);
     }
 
@@ -1169,11 +1669,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return robotCore;
     }
 
-    public double getSysIdRampRateVoltsPerSecond() {
+    private double getSysIdRampRateVoltsPerSecond() {
         return sysIdRampRateVoltsPerSecond;
     }
 
-    public void setSysIdRampRateVoltsPerSecond(double rampRate) {
+    private void setSysIdRampRateVoltsPerSecond(double rampRate) {
         if (!Double.isFinite(rampRate) || rampRate <= 0.0) {
             return;
         }
@@ -1181,11 +1681,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         invalidateSysIdRoutine();
     }
 
-    public double getSysIdStepVoltage() {
+    private double getSysIdStepVoltage() {
         return sysIdStepVoltage;
     }
 
-    public void setSysIdStepVoltage(double stepVoltage) {
+    private void setSysIdStepVoltage(double stepVoltage) {
         if (!Double.isFinite(stepVoltage) || stepVoltage <= 0.0) {
             return;
         }
@@ -1193,11 +1693,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         invalidateSysIdRoutine();
     }
 
-    public double getSysIdTimeoutSeconds() {
+    private double getSysIdTimeoutSeconds() {
         return sysIdTimeoutSeconds;
     }
 
-    public void setSysIdTimeoutSeconds(double timeoutSeconds) {
+    private void setSysIdTimeoutSeconds(double timeoutSeconds) {
         if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0.0) {
             return;
         }
@@ -1205,11 +1705,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         invalidateSysIdRoutine();
     }
 
-    public boolean isSysIdActive() {
+    private boolean isSysIdActive() {
         return sysIdActive;
     }
 
-    public double calculateMaxFreeSpeed(){
+    private double calculateMaxFreeSpeed(){
         if (encoder == null) {
             return 0;
         }
@@ -1219,11 +1719,73 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return wheelCircumferenceMeters * (wheelRPM / 60.0);
     }
 
+    private Rotation2d readRotation2d(boolean poll) {
+        if (encoder == null) {
+            return Rotation2d.kZero;
+        }
+        return useAbsolute
+                ? encoder.getAbsoluteRotation2d(poll)
+                : encoder.getRotation2d(poll);
+    }
+
+    private double readPosition(boolean poll) {
+        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
+            return simEncoderPosition;
+        }
+        if (encoder == null) {
+            return 0.0;
+        }
+        return useAbsolute
+                ? encoder.getAbsolutePosition(poll)
+                : encoder.getPosition(poll);
+    }
+
+    private double readPositionModulus(double min, double max) {
+        return MathUtil.inputModulus(readPosition(false), min, max);
+    }
+
+    private double readVelocity(boolean poll) {
+        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
+            return simEncoderVelocity;
+        }
+        if (encoder == null) {
+            return 0.0;
+        }
+        return encoder.getVelocity(poll);
+    }
+
+    private double readOutput() {
+        if (override) {
+            return manualOutputActive ? manualOutput : 0.0;
+        }
+        if (RobotBase.isSimulation() && lastOutputValid) {
+            return lastOutput;
+        }
+        return output;
+    }
+
+    private void writeEncoderPosition(double position) {
+        if (encoder != null) {
+            encoder.setPosition(position);
+        }
+    }
+
+    private double readNetworkTablesPeriodSeconds() {
+        RobotNetworkTables nt = lastRobotNetworkTables;
+        if (nt == null && robotCore != null) {
+            nt = robotCore.networkTables();
+        }
+        double defaultPeriod = nt != null ? nt.getDefaultPeriodSeconds() : 1.0;
+        return Double.isFinite(networkTablesPeriodSecondsOverride) && networkTablesPeriodSecondsOverride > 0.0
+                ? networkTablesPeriodSecondsOverride
+                : defaultPeriod;
+    }
+
     /**
      */
-    public void setVoltage(double voltage){
+    private void setVoltage(double voltage){
         recordOutput(voltage, true);
-        if (emergencyStopped || suppressMotorOutput) {
+        if (emergencyStopped) {
             motors.stopMotors();
             return;
         }
@@ -1232,9 +1794,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void setSpeed(double speed){
+    private void setSpeed(double speed){
         recordOutput(speed, false);
-        if (emergencyStopped || suppressMotorOutput) {
+        if (emergencyStopped) {
             motors.stopMotors();
             return;
         }
@@ -1246,13 +1808,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      */
     /**
      */
-    public void setOutput(double output) {
+    private void setOutput(double output) {
         setOverride(true);
         switch (outputType) {
             case VOLTAGE -> setVoltage(output);
             case POSITION -> {
                 recordOutput(output, false);
-                if (emergencyStopped || suppressMotorOutput) {
+                if (emergencyStopped) {
                     motors.stopMotors();
                     return;
                 }
@@ -1260,7 +1822,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             }
             case VELOCITY -> {
                 recordOutput(output, false);
-                if (emergencyStopped || suppressMotorOutput) {
+                if (emergencyStopped) {
                     motors.stopMotors();
                     return;
                 }
@@ -1275,30 +1837,30 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      */
     /**
      */
-    public void setMotors(double speed){
+    private void setMotors(double speed){
         setOverride(true);
         setSpeed(speed);
     }
 
-    public MotorControllerGroup getMotorGroup(){
+    private MotorControllerGroup getMotorGroup(){
         return motors;
     }
 
-    public Encoder getEncoder(){
+    private Encoder getEncoder(){
        return encoder;
     }
 
-    public Rotation2d getRotation2d(){
+    private Rotation2d getRotation2d(){
         if (encoder == null) return Rotation2d.kZero;
         return useAbsolute ? getEncoder().getAbsoluteRotation2d() : getEncoder().getRotation2d();
     }
 
-    public Rotation2d getRotation2d(boolean poll){
+    private Rotation2d getRotation2d(boolean poll){
         if (encoder == null) return Rotation2d.kZero;
         return useAbsolute ? getEncoder().getAbsoluteRotation2d(poll) : getEncoder().getRotation2d(poll);
     }
 
-    public double getPosition(){
+    private double getPosition(){
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderPosition;
         }
@@ -1306,7 +1868,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return useAbsolute ? getEncoder().getAbsolutePosition() : getEncoder().getPosition();
     }
 
-    public double getPosition(boolean poll){
+    private double getPosition(boolean poll){
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderPosition;
         }
@@ -1320,11 +1882,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      * This does not change the underlying sensor; it is just a view for dashboards/logging and
      * angle math. Units match {@link #getPosition()}.
      */
-    public double getPositionModulus(double min, double max) {
+    private double getPositionModulus(double min, double max) {
         return MathUtil.inputModulus(getPosition(), min, max);
     }
 
-    public double getVelocity(){
+    private double getVelocity(){
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderVelocity;
         }
@@ -1332,7 +1894,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return getEncoder().getVelocity();
     }
 
-    public double getVelocity(boolean poll){
+    private double getVelocity(boolean poll){
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderVelocity;
         }
@@ -1347,16 +1909,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void setSetpoint(double setpoint){
+    private void setSetpoint(double setpoint){
         this.setpoint = applyBounds(setpoint);
     }
 
-    public double getSetpoint(){
+    private double getSetpoint(){
         return setpoint;
-    }
-
-    protected double getBaseSetpoint() {
-        return getSetpoint();
     }
 
     protected Enum<?> getActiveState() {
@@ -1368,7 +1926,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      */
     /**
      */
-    public Mechanism setBounds(double min, double max) {
+    protected Mechanism setBounds(double min, double max) {
         if (Double.isFinite(min) && Double.isFinite(max) && max > min) {
             this.minBound = min;
             this.maxBound = max;
@@ -1385,7 +1943,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      */
     /**
      */
-    public Mechanism clearBounds() {
+    protected Mechanism clearBounds() {
         this.boundsEnabled = false;
         this.minBound = Double.NaN;
         this.maxBound = Double.NaN;
@@ -1411,11 +1969,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return maxBound;
     }
 
-    public double getControllerSetpointVelocity(){
+    private double getControllerSetpointVelocity(){
         return profiledPIDController != null ? profiledPIDController.getSetpoint().velocity : pidController != null ? pidController.getSetpoint() : 0;
     }
 
-    public double getControllerSetpointPosition(){
+    private double getControllerSetpointPosition(){
         return profiledPIDController != null ? profiledPIDController.getSetpoint().position : pidController != null ? pidController.getSetpoint() : 0;
     }
 
@@ -1430,17 +1988,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
 
 
-    public boolean isOverride() {
+    private boolean isOverride() {
         return override;
     }
 
-    public boolean isEmergencyStopped() {
+    private boolean isEmergencyStopped() {
         return emergencyStopped;
     }
 
     /**
      */
-    public void setOverride(boolean override) {
+    private void setOverride(boolean override) {
         if (this.override != override) {
             appendDiagnosticLog("INFO", "control", override ? "manual override enabled" : "manual override disabled");
         }
@@ -1452,27 +2010,27 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
-    public boolean isUseAbsolute() {
+    private boolean isUseAbsolute() {
         return useAbsolute;
     }
 
     /**
      */
-    public void setUseAbsolute(boolean useAbsolute) {
+    private void setUseAbsolute(boolean useAbsolute) {
         this.useAbsolute = useAbsolute;
     }
 
-    public boolean isUseVoltage() {
+    private boolean isUseVoltage() {
         return outputType == OutputType.VOLTAGE;
     }
 
-    public OutputType getOutputType() {
+    private OutputType getOutputType() {
         return outputType;
     }
 
     /**
      */
-    public void setOutputType(OutputType outputType) {
+    private void setOutputType(OutputType outputType) {
         if (outputType == null) {
             return;
         }
@@ -1506,21 +2064,21 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 RobotController.getBatteryVoltage());
     }
 
-    public OutputType getControlLoopPidOutputType(String name) {
+    OutputType getControlLoopPidOutputType(String name) {
         if (name == null) {
             return OutputType.PERCENT;
         }
         return controlLoopPidOutputTypes.getOrDefault(name, OutputType.PERCENT);
     }
 
-    public MechanismConfig.BangBangProfile getControlLoopBangBangProfile(String name) {
+    MechanismConfig.BangBangProfile getControlLoopBangBangProfile(String name) {
         if (name == null) {
             return null;
         }
         return controlLoopBangBangs.get(name);
     }
 
-    public OutputType getControlLoopFeedforwardOutputType(String name) {
+    OutputType getControlLoopFeedforwardOutputType(String name) {
         if (name == null) {
             return OutputType.VOLTAGE;
         }
@@ -1565,23 +2123,23 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 : sanitizeBangBangLevel(profile.lowOutput());
     }
 
-    public boolean isSetpointAsOutput() {
+    private boolean isSetpointAsOutput() {
         return setpointIsOutput;
     }
 
     /**
      */
-    public void setSetpointAsOutput(boolean setpointAsOutput) {
+    private void setSetpointAsOutput(boolean setpointAsOutput) {
         this.setpointIsOutput = setpointAsOutput;
     }
 
-    public void setPidPeriod(double pidPeriod) {
+    private void setPidPeriod(double pidPeriod) {
         if (!Double.isFinite(pidPeriod)) {
             return;
         }
         this.pidPeriod = pidPeriod;
     }
-    public boolean isOutputVoltage() {
+    private boolean isOutputVoltage() {
         if (override && manualOutputActive) {
             return manualOutputIsVoltage;
         }
@@ -1591,11 +2149,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return isUseVoltage();
     }
 
-    public boolean isCustomPIDCycle() {
+    private boolean isCustomPIDCycle() {
         return customPIDCycle;
     }
 
-    public void setCustomPIDCycle(boolean customPIDCycle) {
+    private void setCustomPIDCycle(boolean customPIDCycle) {
         this.customPIDCycle = customPIDCycle;
     }
 
@@ -1605,7 +2163,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void setEncoderPosition(double position){
+    private void setEncoderPosition(double position){
         if(encoder != null){
             encoder.setPosition(position);
         }
@@ -1613,41 +2171,29 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void resetPID(){
+    private void resetPID(){
         if(pidController != null) pidController.reset();
         if(profiledPIDController != null) profiledPIDController.reset(getPosition(), getVelocity());
         this.output = 0;
     }
 
-    public PIDController getPIDController()
+    private PIDController getPIDController()
     {
         return pidController;
     }
-
-
-    public void setSetpointOverride(boolean should)
-    {
-        shouldSetpointOverride = should;
-    }
-
-    public void setPointOverride(double setpoint)
-    {
-        setPointOverride = applyBounds(setpoint);
-    }
-
-    public double getMin()
+    private double getMin()
     {
         return minBound;
     }
-    public double getMax()
+    private double getMax()
     {
         return maxBound;
     }
 
-    public double calculatePID(){
+    private double calculatePID(){
         double output = 0;
         double encoderPos = getPidMeasurement();
-        double setpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
+        double setpoint = getSetpoint();
         double target = setpoint + getNudge();
         applyMotionLimits();
 
@@ -1697,26 +2243,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void outputMotor(double output) {
-        if (!suppressMotorOutput){
-            switch (outputType) {
-                case VOLTAGE -> setVoltage(output);
-                case POSITION -> motors.setPosition(output);
-                case VELOCITY -> motors.setVelocity(output);
-                case PERCENT -> setSpeed(output);
-            }
+        switch (outputType) {
+            case VOLTAGE -> setVoltage(output);
+            case POSITION -> motors.setPosition(output);
+            case VELOCITY -> motors.setVelocity(output);
+            case PERCENT -> setSpeed(output);
         }
-    }
-
-    /**
-     */
-    public void setSuppressMotorOutput(boolean suppressMotorOutput) {
-        if (this.suppressMotorOutput != suppressMotorOutput) {
-            appendDiagnosticLog(
-                    "INFO",
-                    "output",
-                    suppressMotorOutput ? "output suppression enabled" : "output suppression disabled");
-        }
-        this.suppressMotorOutput = suppressMotorOutput;
     }
 
     public void updatePID(){
@@ -1745,7 +2277,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         this.output = output;
 
-        this.prevSetpoint = shouldSetpointOverride ? setPointOverride : getSetpoint();
+        this.prevSetpoint = getSetpoint();
 
         // Apply limit switch encoder zeroing regardless of control mode. Previously, override
         // short-circuited the update loop and would skip zeroing entirely.
@@ -1900,7 +2432,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return Math.min(requestedLimit, DIAGNOSTIC_LOG_CAPACITY);
     }
 
-    public List<MechanismLogEvent> getDiagnosticLog(int requestedLimit) {
+    private List<MechanismLogEvent> getDiagnosticLog(int requestedLimit) {
         int limit = sanitizeDiagnosticLogLimit(requestedLimit);
         List<DiagnosticsChannel.Event> events = diagnosticsLog.snapshot(limit);
         List<MechanismLogEvent> logs = new ArrayList<>(events.size());
@@ -1920,24 +2452,24 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return logs;
     }
 
-    public List<DiagnosticsChannel.Event> getDiagnosticEvents(int requestedLimit) {
+    private List<DiagnosticsChannel.Event> getDiagnosticEvents(int requestedLimit) {
         int limit = sanitizeDiagnosticLogLimit(requestedLimit);
         return diagnosticsLog.snapshot(limit);
     }
 
-    public int getDiagnosticLogCount() {
+    private int getDiagnosticLogCount() {
         return diagnosticsLog.count();
     }
 
-    public void clearDiagnosticLog() {
+    private void clearDiagnosticLog() {
         diagnosticsLog.clear();
     }
 
-    public Map<String, Object> getDiagnosticsSummary() {
+    private Map<String, Object> getDiagnosticsSummary() {
         return buildDiagnosticsSnapshot(0, false);
     }
 
-    public Map<String, Object> getDiagnosticsSnapshot(int logLimit) {
+    private Map<String, Object> getDiagnosticsSnapshot(int logLimit) {
         return buildDiagnosticsSnapshot(logLimit, true);
     }
 
@@ -1992,7 +2524,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         double nowSeconds = Timer.getFPGATimestamp();
         double position = getPosition();
         double velocity = getVelocity();
-        double setpointValue = shouldSetpointOverride ? setPointOverride : getSetpoint();
+        double setpointValue = getSetpoint();
         double setpointWithNudge = setpointValue + getNudge();
         boolean encoderPresent = encoder != null;
         boolean encoderConnected = !encoderPresent || encoder.isConnected();
@@ -2058,7 +2590,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         control.put("outputType", String.valueOf(outputType));
         control.put("atSetpoint", atSetpoint());
         control.put("override", override);
-        control.put("suppressOutput", suppressMotorOutput);
         control.put("pidEnabled", pidEnabled);
         control.put("feedforwardEnabled", feedforwardEnabled);
         control.put("setpointAsOutput", setpointIsOutput);
@@ -2102,41 +2633,41 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return snapshot;
     }
 
-    public GenericLimitSwitch[] getLimitSwitches() {
+    private GenericLimitSwitch[] getLimitSwitches() {
         return limitSwitches;
     }
 
     /**
      */
-    public void setCurrentLimit(double currentLimit){
+    private void setCurrentLimit(double currentLimit){
         motors.setCurrentLimit(currentLimit);
     }
 
     /**
      */
-    public void setMotorNeutralMode(MotorNeutralMode mode){
+    private void setMotorNeutralMode(MotorNeutralMode mode){
         motors.setNeutralMode(mode);
     }
 
-    public boolean isFeedforwardEnabled() {
+    private boolean isFeedforwardEnabled() {
         return feedforwardEnabled;
     }
 
-    public boolean isPidEnabled() {
+    private boolean isPidEnabled() {
         return pidEnabled;
     }
 
-    public double getPidOutput() {
+    private double getPidOutput() {
         return pidOutput;
     }
 
-    public double getFeedforwardOutput() {
+    private double getFeedforwardOutput() {
         return feedforwardOutput;
     }
 
     /**
      */
-    public void setFeedforwardEnabled(boolean feedforwardEnabled) {
+    private void setFeedforwardEnabled(boolean feedforwardEnabled) {
         if (this.feedforwardEnabled != feedforwardEnabled) {
             appendDiagnosticLog(
                     "INFO",
@@ -2148,7 +2679,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void setPidEnabled(boolean pidEnabled) {
+    private void setPidEnabled(boolean pidEnabled) {
         if (this.pidEnabled != pidEnabled) {
             appendDiagnosticLog("INFO", "control", pidEnabled ? "pid enabled" : "pid disabled");
         }
@@ -2157,7 +2688,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void setEmergencyStopped(boolean emergancyStopped) {
+    private void setEmergencyStopped(boolean emergancyStopped) {
         if (this.manualEmergencyStopped != emergancyStopped) {
             appendDiagnosticLog(
                     emergancyStopped ? "ERROR" : "INFO",
@@ -2171,7 +2702,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         refreshEmergencyStopState();
     }
 
-    public double getOutput() {
+    private double getOutput() {
         if (override) {
             return manualOutputActive ? manualOutput : 0.0;
         }
@@ -2183,7 +2714,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void setNudge(double nudge){
+    private void setNudge(double nudge){
         this.nudge = nudge;
     }
 
@@ -2199,15 +2730,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         manualOutputIsVoltage = outputIsVoltage;
     }
 
-    public double getNudge() {
+    private double getNudge() {
         return nudge;
     }
 
-    public double getPidPeriod() {
+    private double getPidPeriod() {
         return pidPeriod;
     }
 
-    public double getNetworkTablesPeriodSeconds() {
+    private double getNetworkTablesPeriodSeconds() {
         RobotNetworkTables nt = lastRobotNetworkTables;
         if (nt == null && robotCore != null) {
             nt = robotCore.networkTables();
@@ -2218,7 +2749,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 : defaultPeriod;
     }
 
-    public void setNetworkTablesPeriodSeconds(double periodSeconds) {
+    private void setNetworkTablesPeriodSeconds(double periodSeconds) {
         if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
             // Reset to global default.
             this.networkTablesPeriodSecondsOverride = Double.NaN;
@@ -2229,7 +2760,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void disableControlLoop(String name) {
+    private void disableControlLoop(String name) {
         if (name == null || !controlLoopsByName.containsKey(name)) {
             return;
         }
@@ -2239,7 +2770,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void enableControlLoop(String name) {
+    private void enableControlLoop(String name) {
         if (name == null || !controlLoopsByName.containsKey(name)) {
             return;
         }
@@ -2249,7 +2780,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     /**
      */
-    public void setControlLoopEnabled(String name, boolean enabled) {
+    private void setControlLoopEnabled(String name, boolean enabled) {
         if (enabled) {
             enableControlLoop(name);
         } else {
@@ -2257,18 +2788,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
-    public boolean isControlLoopEnabled(String name) {
+    private boolean isControlLoopEnabled(String name) {
         if (name == null || !controlLoopsByName.containsKey(name)) {
             return false;
         }
         return !disabledControlLoops.contains(name);
     }
 
-    public boolean hasSimulation() {
+    private boolean hasSimulation() {
         return simulationModel != null;
     }
 
-    public double getSimulationUpdatePeriodSeconds() {
+    private double getSimulationUpdatePeriodSeconds() {
         return simulationUpdatePeriodSeconds;
     }
 
@@ -2280,7 +2811,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         MechanismConfigIO.save(path, MechanismConfigIO.snapshot(this));
     }
 
-    public void resetSimulation() {
+    private void resetSimulation() {
         if (simulationModel == null) {
             return;
         }
@@ -2633,8 +3164,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         @Override
-        public double baseSetpoint() {
-            return getBaseSetpoint();
+        public double setpoint() {
+            return Mechanism.this.setpoint();
         }
 
         @Override
@@ -2758,7 +3289,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         // Simulation updates are executed within periodic() to keep sensor data fresh before control.
     }
 
-    public Mechanism publishNetworkTables(String ownerHint) {
+    private Mechanism publishNetworkTablesHint(String ownerHint) {
         recordNetworkTablesRequest(ownerHint);
         publishToDefaultMechanismsNode();
         return this;
@@ -2860,11 +3391,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         networkTables(node);
     }
 
-    public String getNetworkTablesOwnerPath() {
+    private String getNetworkTablesOwnerPath() {
         return networkTablesOwnerPath;
     }
 
-    public void setNetworkTablesOwnerPath(String ownerPath) {
+    private void setNetworkTablesOwnerPath(String ownerPath) {
         if (ownerPath == null) {
             this.networkTablesOwnerPath = null;
             return;
@@ -2885,7 +3416,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.networkTablesOwnerPath = normalized.isEmpty() ? null : normalized;
     }
 
-    public String getNetworkTablesTypeName() {
+    private String getNetworkTablesTypeName() {
         if (this instanceof TurretMechanism) {
             return "Turret";
         }
@@ -2904,7 +3435,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return "Mechanism";
     }
 
-    public RobotNetworkTables.Node resolveDefaultMechanismNode(RobotNetworkTables.Node mechanismsRoot) {
+    private RobotNetworkTables.Node resolveDefaultMechanismNode(RobotNetworkTables.Node mechanismsRoot) {
         RobotNetworkTables.Node root = mechanismsRoot;
         String owner = getNetworkTablesOwnerPath();
         if (owner != null && !owner.isBlank()) {
@@ -2926,7 +3457,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      * IntelliSense-friendly per-mechanism publishing toggles published under:
      * {@code Athena/Mechanisms/.../<MechName>/NetworkTableConfig/...}.
      */
-    public final RobotNetworkTables.MechanismToggles networkTablesConfig() {
+    private final RobotNetworkTables.MechanismToggles networkTablesConfig() {
         if (robotCore == null) {
             throw new IllegalStateException("Mechanism is not registered with a RobotCore; call robot.registerMechanism(...) before using networkTablesConfig() toggles.");
         }
@@ -3213,11 +3744,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return base + "/Athena/diagnostics/" + encodedKey + ".json";
     }
 
-    public Mechanism2d getMechanism2d() {
+    private Mechanism2d getMechanism2d() {
         return visualization != null ? visualization.mechanism2d() : null;
     }
 
-    public Map<String, Pose3d> getMechanism3dPoses() {
+    private Map<String, Pose3d> getMechanism3dPoses() {
         return visualization != null ? visualization.poses() : Map.of();
     }
 
@@ -3226,17 +3757,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
      * Overrides the root pose used for visualization. Pass {@code null} to clear and fall back
      * to the configured root pose supplier.
      */
-    public void setVisualizationRootOverride(Pose3d pose) {
+    private void setVisualizationRootOverride(Pose3d pose) {
         this.visualizationRootOverride = pose;
     }
 
-    public void setSimulatedEncoderState(double position, double velocity) {
+    private void setSimulatedEncoderState(double position, double velocity) {
         this.simEncoderOverride = true;
         this.simEncoderPosition = position;
         this.simEncoderVelocity = velocity;
     }
 
-    public void clearSimulatedEncoderState() {
+    private void clearSimulatedEncoderState() {
         this.simEncoderOverride = false;
     }
 

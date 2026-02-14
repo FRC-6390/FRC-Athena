@@ -1022,7 +1022,7 @@ public final class AthenaRuntimeServer {
                     if (mechanism == null) {
                         return Map.of("error", "mechanism unavailable");
                     }
-                    return mechanism.getDiagnosticsSummary();
+                    return mechanism.diagnostics().summary();
                 },
                 limit -> {
                     Mechanism mechanism = robot.getMechanisms().get(mechanismName);
@@ -1030,12 +1030,12 @@ public final class AthenaRuntimeServer {
                         return Map.of("error", "mechanism unavailable");
                     }
                     int requestedLimit = limit > 0 ? Math.min(limit, 2048) : 120;
-                    return mechanism.getDiagnosticsSnapshot(requestedLimit);
+                    return mechanism.diagnostics().snapshot(requestedLimit);
                 },
                 () -> {
                     Mechanism mechanism = robot.getMechanisms().get(mechanismName);
                     if (mechanism != null) {
-                        mechanism.clearDiagnosticLog();
+                        mechanism.diagnostics().clear();
                     }
                 });
     }
@@ -1143,7 +1143,7 @@ public final class AthenaRuntimeServer {
         }
         boolean clear = parseBoolean(query.get("clear"));
         if (clear) {
-            mechanism.clearDiagnosticLog();
+            mechanism.diagnostics().clear();
         }
 
         String base = baseUrl();
@@ -1154,7 +1154,7 @@ public final class AthenaRuntimeServer {
         payload.put("logUrl", base + athenaPrefix + "/mechanisms/log/" + encodedName + ".json");
         payload.put("limit", limit);
         payload.put("cleared", clear);
-        payload.put("diagnostics", mechanism.getDiagnosticsSnapshot(limit));
+        payload.put("diagnostics", mechanism.diagnostics().snapshot(limit));
 
         String json;
         try {
@@ -1183,7 +1183,7 @@ public final class AthenaRuntimeServer {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("name", name);
             entry.put("logJson", base + prefix + "/mechanisms/log/" + encodedName + ".json");
-            entry.put("summary", mechanism.getDiagnosticsSummary());
+            entry.put("summary", mechanism.diagnostics().summary());
             mechanisms.add(entry);
         }
         Map<String, Object> payload = new LinkedHashMap<>();

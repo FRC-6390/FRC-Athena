@@ -129,15 +129,15 @@ public final class ExampleTurretSuperstructure {
         }
 
         public void requestTrack() {
-            superstructure.getStateMachine().requestState(SuperState.TRACK);
+            superstructure.stateMachine().request(SuperState.TRACK);
         }
 
         public void requestFire() {
-            superstructure.getStateMachine().requestState(SuperState.FIRE);
+            superstructure.stateMachine().request(SuperState.FIRE);
         }
 
         public void requestStowed() {
-            superstructure.getStateMachine().requestState(SuperState.STOWED);
+            superstructure.stateMachine().request(SuperState.STOWED);
         }
     }
 
@@ -163,7 +163,7 @@ public final class ExampleTurretSuperstructure {
                         .sim(sim -> sim.simpleMotor(new MechanismConfig.SimpleMotorSimulationParameters()
                                 .momentOfInertia(0.02)))
                         .hooks(h -> h.stateAction(
-                                (TurretMechanism.StatefulTurretMechanism<TurretState> mech) -> mech.setSetpoint(targetHeadingRad[0]),
+                                (TurretMechanism.StatefulTurretMechanism<TurretState> mech) -> mech.setpoint(targetHeadingRad[0]),
                                 TurretState.TARGET));
 
         TurretMechanism.StatefulTurretMechanism<TurretState> turret = turretConfig.build();

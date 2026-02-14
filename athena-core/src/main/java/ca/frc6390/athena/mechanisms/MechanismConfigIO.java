@@ -7,6 +7,7 @@ import ca.frc6390.athena.hardware.encoder.EncoderRegistry;
 import ca.frc6390.athena.hardware.encoder.EncoderType;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorControllerType;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.hardware.motor.MotorRegistry;
@@ -63,9 +64,8 @@ public final class MechanismConfigIO {
             return null;
         }
         List<MotorControllerConfig> motors = new ArrayList<>();
-        MotorController[] controllers = mechanism.getMotorGroup() != null
-                ? mechanism.getMotorGroup().getControllers()
-                : new MotorController[0];
+        MotorControllerGroup motorGroup = mechanism.motors().device();
+        MotorController[] controllers = motorGroup != null ? motorGroup.getControllers() : new MotorController[0];
         for (MotorController controller : controllers) {
             MotorControllerConfig config = controller.getConfig();
             if (config != null) {
@@ -80,7 +80,7 @@ public final class MechanismConfigIO {
                 motors.add(fallback);
             }
         }
-        Encoder encoder = mechanism.getEncoder();
+        Encoder encoder = mechanism.encoder().device();
         EncoderConfig encoderConfig = encoder != null ? encoder.getConfig() : null;
         MotorNeutralMode neutralMode = controllers.length > 0 ? controllers[0].getNeutralMode() : MotorNeutralMode.Coast;
         double currentLimit = controllers.length > 0 ? controllers[0].getCurrentLimit() : Double.NaN;
@@ -89,15 +89,15 @@ public final class MechanismConfigIO {
         double conversion = encoder != null ? encoder.getConversion() : 1.0;
         double conversionOffset = encoder != null ? encoder.getConversionOffset() : 0.0;
         double offset = encoder != null ? encoder.getOffset() : 0.0;
-        MotionLimits.AxisLimits limits = mechanism.resolveMotionLimits();
+        MotionLimits.AxisLimits limits = mechanism.motors().state().motionLimits();
         return MechanismConfigRecord.defaults().toBuilder()
                 .motors(motors)
                 .encoder(encoderConfig)
-                .useAbsolute(mechanism.isUseAbsolute())
-                .outputType(mechanism.getOutputType())
-                .useSetpointAsOutput(mechanism.isSetpointAsOutput())
-                .customPIDCycle(mechanism.isCustomPIDCycle())
-                .pidPeriod(mechanism.getPidPeriod())
+                .useAbsolute(mechanism.encoder().useAbsolute())
+                .outputType(mechanism.outputType())
+                .useSetpointAsOutput(mechanism.setpointAsOutput())
+                .customPIDCycle(mechanism.customPidCycle())
+                .pidPeriod(mechanism.pidPeriodSeconds())
                 .motorCurrentLimit(currentLimit)
                 .motorNeutralMode(neutralMode)
                 .canbus(canbus)
@@ -120,37 +120,39 @@ public final class MechanismConfigIO {
         if (mechanism == null || record == null) {
             return;
         }
-        mechanism.setUseAbsolute(record.useAbsolute());
+        mechanism.encoder().useAbsolute(record.useAbsolute());
         if (record.outputType() != null) {
-            mechanism.setOutputType(record.outputType());
+            mechanism.control().outputType(record.outputType());
         } else {
-            mechanism.setOutputType(record.useVoltage() ? OutputType.VOLTAGE : OutputType.PERCENT);
+            mechanism.control().outputType(record.useVoltage() ? OutputType.VOLTAGE : OutputType.PERCENT);
         }
-        mechanism.setSetpointAsOutput(record.useSetpointAsOutput());
-        mechanism.setCustomPIDCycle(record.customPIDCycle());
-        mechanism.setPidPeriod(record.pidPeriod());
+        mechanism.control().setpointAsOutput(record.useSetpointAsOutput());
+        mechanism.control().customPidCycle(record.customPIDCycle());
+        mechanism.control().pidPeriodSeconds(record.pidPeriod());
         if (record.motionLimits() != null) {
-            mechanism.setMotionLimits(record.motionLimits());
+            mechanism.motors().motionLimits(record.motionLimits());
         }
         if (Double.isFinite(record.minBound()) && Double.isFinite(record.maxBound())) {
-            mechanism.setBounds(record.minBound(), record.maxBound());
+            mechanism.control().bounds(record.minBound(), record.maxBound());
         } else {
-            mechanism.clearBounds();
+            mechanism.control().clearBounds();
         }
         if (record.motorCurrentLimit() > 0.0) {
-            mechanism.setCurrentLimit(record.motorCurrentLimit());
+            mechanism.motors().currentLimit(record.motorCurrentLimit());
         }
         if (record.motorNeutralMode() != null) {
-            mechanism.setMotorNeutralMode(record.motorNeutralMode());
+            mechanism.motors().neutralMode(record.motorNeutralMode());
         }
-        if (record.encoder() != null && mechanism.getEncoder() != null) {
-            applyEncoderConfig(mechanism.getEncoder(), record.encoder());
+        Encoder mechanismEncoder = mechanism.encoder().device();
+        if (record.encoder() != null && mechanismEncoder != null) {
+            applyEncoderConfig(mechanismEncoder, record.encoder());
         }
         if (record.motors() == null || record.motors().isEmpty()) {
             return;
         }
-        if (mechanism.getMotorGroup() != null) {
-            for (MotorController controller : mechanism.getMotorGroup().getControllers()) {
+        MotorControllerGroup group = mechanism.motors().device();
+        if (group != null) {
+            for (MotorController controller : group.getControllers()) {
                 record.motors().stream()
                         .filter(motor -> motor.id() == controller.getId())
                         .findFirst()

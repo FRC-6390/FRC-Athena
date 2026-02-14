@@ -54,14 +54,14 @@ public final class MechanismVisualizationDefaults {
                         new Color8Bit(Color.kLightGray), DEFAULT_LINE_WEIGHT)
                 .addNode("Carriage", "Elevator",
                         mech -> {
-                            double normalized = MechanismTravelRange.normalize(mech, mech.getPosition());
+                            double normalized = MechanismTravelRange.normalize(mech, mech.position());
                             double height = MathUtil.clamp(normalized, 0.0, 1.0) * trackHeightMeters;
                             return new Pose3d(new Translation3d(0.0, height, 0.0), new Rotation3d());
                         },
                         ACTUAL_COLOR, DEFAULT_LINE_WEIGHT)
                 .addNode("CarriageSetpoint", "Elevator",
                         mech -> {
-                            double normalized = MechanismTravelRange.normalize(mech, mech.getSetpoint());
+                            double normalized = MechanismTravelRange.normalize(mech, mech.setpoint());
                             double height = MathUtil.clamp(normalized, 0.0, 1.0) * trackHeightMeters;
                             return new Pose3d(new Translation3d(0.0, height, 0.0), new Rotation3d());
                         },
@@ -76,7 +76,7 @@ public final class MechanismVisualizationDefaults {
                 .withStaticRootPose(new Pose3d(new Translation3d(1.0, 0.4, 0.0), new Rotation3d()))
                 .addNode("ArmActual", "Arm",
                         mech -> {
-                            double angle = toRadians(mech, mech.getPosition());
+                            double angle = toRadians(mech, mech.position());
                             return new Pose3d(
                                     new Translation3d(armLengthMeters, 0.0, 0.0),
                                     new Rotation3d(0.0, 0.0, angle));
@@ -84,7 +84,7 @@ public final class MechanismVisualizationDefaults {
                         ACTUAL_COLOR, DEFAULT_LINE_WEIGHT + 1.0)
                 .addNode("ArmSetpoint", "Arm",
                         mech -> {
-                            double angle = toRadians(mech, mech.getSetpoint());
+                            double angle = toRadians(mech, mech.setpoint());
                             return new Pose3d(
                                     new Translation3d(armLengthMeters, 0.0, 0.0),
                                     new Rotation3d(0.0, 0.0, angle));
@@ -100,7 +100,7 @@ public final class MechanismVisualizationDefaults {
                 .withStaticRootPose(new Pose3d(new Translation3d(1.0, 1.0, 0.0), new Rotation3d()))
                 .addNode("RotorActual", "Rotor",
                         mech -> {
-                            double angle = mech.getPosition();
+                            double angle = mech.position();
                             return new Pose3d(
                                     new Translation3d(radiusMeters, 0.0, 0.0),
                                     new Rotation3d(0.0, 0.0, angle));
@@ -108,7 +108,7 @@ public final class MechanismVisualizationDefaults {
                         ACTUAL_COLOR, DEFAULT_LINE_WEIGHT + 1.0)
                 .addNode("RotorSetpoint", "Rotor",
                         mech -> {
-                            double angle = mech.getSetpoint();
+                            double angle = mech.setpoint();
                             return new Pose3d(
                                     new Translation3d(radiusMeters, 0.0, 0.0),
                                     new Rotation3d(0.0, 0.0, angle));
@@ -126,7 +126,7 @@ public final class MechanismVisualizationDefaults {
         addRing(builder, "Flywheel", "FlywheelRing", radiusMeters, 24, ringColor, false);
         builder.addNode("FlywheelMarker", "Flywheel",
                 mech -> {
-                    double angle = wrapRadians(toRadians(mech, mech.getPosition()));
+                    double angle = wrapRadians(toRadians(mech, mech.position()));
                     double x = radiusMeters * Math.cos(angle);
                     double y = radiusMeters * Math.sin(angle);
                     return new Pose3d(new Translation3d(x, y, 0.0), new Rotation3d());
@@ -144,7 +144,7 @@ public final class MechanismVisualizationDefaults {
         addRing(builder, "Turret", "TurretRing", radiusMeters, 32, ringColor, TURRET_RING_XZ_PLANE);
         builder.addNode("TurretForward", "Turret",
                 mech -> {
-                    double angle = wrapRadians(toRadians(turret, turret.getPosition()) + TURRET_FORWARD_OFFSET_RAD);
+                    double angle = wrapRadians(toRadians(turret, turret.position()) + TURRET_FORWARD_OFFSET_RAD);
                     double x = radiusMeters * Math.cos(angle);
                     double y = radiusMeters * Math.sin(angle);
                     return new Pose3d(new Translation3d(x, y, 0.0), new Rotation3d(0,0,0));
@@ -158,8 +158,8 @@ public final class MechanismVisualizationDefaults {
     }
 
     private static double toRadians(Mechanism mechanism, double value) {
-        if (mechanism != null && mechanism.getEncoder() != null) {
-            double conversion = mechanism.getEncoder().getConversion();
+        if (mechanism != null && mechanism.encoder().device() != null) {
+            double conversion = mechanism.encoder().device().getConversion();
             if (Math.abs(conversion - 360.0) < 1e-3) {
                 return Math.toRadians(value);
             }

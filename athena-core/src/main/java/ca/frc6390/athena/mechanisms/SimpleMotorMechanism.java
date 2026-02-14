@@ -19,11 +19,11 @@ public class SimpleMotorMechanism  extends Mechanism  {
         if (feedforward != null) {
             this.feedforward = new SimpleMotorFeedForwardsSendable(feedforward.getKs(), feedforward.getKv(), feedforward.getKa());
             this.feedforwardOutputType = feedforwardOutputType != null ? feedforwardOutputType : OutputType.VOLTAGE;
-            setFeedforwardEnabled(true);
+            control().feedforwardEnabled(true);
         } else {
             this.feedforward = null;
             this.feedforwardOutputType = null;
-            setFeedforwardEnabled(false);
+            control().feedforwardEnabled(false);
         }
     }
 
@@ -32,7 +32,7 @@ public class SimpleMotorMechanism  extends Mechanism  {
         if (feedforward == null) {
             return 0.0;
         }
-        double valueVolts = feedforward.calculate(getControllerSetpointVelocity());
+        double valueVolts = feedforward.calculate(controllerSetpointVelocity());
         return toOutput(feedforwardOutputType, valueVolts);
     }
 
@@ -51,30 +51,26 @@ public class SimpleMotorMechanism  extends Mechanism  {
         return super.networkTables(node);
     }
 
-    public SimpleMotorMechanism publishNetworkTables(String ownerHint) {
-        super.publishNetworkTables(ownerHint);
-        return this;
-    }
     public static class StatefulSimpleMotorMechanism<E extends Enum<E> & SetpointProvider<Double>> extends SimpleMotorMechanism implements StatefulLike<E> {
     
-        private final StatefulMechanismCore<StatefulSimpleMotorMechanism<E>, E> stateCore;
+        private final StatefulMechanismCore<StatefulSimpleMotorMechanism<E>, E> stateMachineCore;
 
         public StatefulSimpleMotorMechanism(MechanismConfig<StatefulSimpleMotorMechanism<E>> config,
                                             SimpleMotorFeedforward feedforward,
                                             OutputType feedforwardOutputType,
                                             E initialState) {
             super(config, feedforward, feedforwardOutputType);
-            stateCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
         }
 
         @Override
-        public StatefulMechanismCore<StatefulSimpleMotorMechanism<E>, E> stateCore() {
-            return stateCore;
+        public StatefulLike.StateMachineSection<E> stateMachine() {
+            return new StatefulLike.StateMachineSection<>(stateMachineCore);
         }
 
         @Override
         public void update() {
-            setSuppressMotorOutput(updateStateCore(this));
+            stateMachineCore.updateMechanism(this);
             super.update();
         }
 
@@ -83,14 +79,9 @@ public class SimpleMotorMechanism  extends Mechanism  {
             if (node == null) {
                 return null;
             }
-            getStateMachine().networkTables(node.child("StateMachine"));
+            stateMachineCore.getStateMachine().networkTables(node.child("StateMachine"));
             return super.networkTables(node);
         }
 
-        @SuppressWarnings("unchecked")
-        public StatefulSimpleMotorMechanism<E> publishNetworkTables(String ownerHint) {
-            super.publishNetworkTables(ownerHint);
-            return this;
-        }
     }
 }

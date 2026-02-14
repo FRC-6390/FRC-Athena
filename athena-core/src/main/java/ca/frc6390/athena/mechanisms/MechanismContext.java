@@ -18,7 +18,7 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
 
     E state();
 
-    double baseSetpoint();
+    double setpoint();
 
     default RobotCore<?> robotCore() {
         RobotCore<?> core = mechanism().getRobotCore();
@@ -29,20 +29,20 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
      * Disables a named control loop on the owning mechanism.
      */
     default void disableControlLoop(String name) {
-        mechanism().disableControlLoop(name);
+        mechanism().loops().disable(name);
     }
 
     /**
      * Enables a named control loop on the owning mechanism.
      */
     default void enableControlLoop(String name) {
-        mechanism().enableControlLoop(name);
+        mechanism().loops().enable(name);
     }
 
     /**
      * Returns whether a named control loop is enabled on the owning mechanism.
      */
     default boolean isControlLoopEnabled(String name) {
-        return mechanism().isControlLoopEnabled(name);
+        return mechanism().loops().enabled(name);
     }
 }

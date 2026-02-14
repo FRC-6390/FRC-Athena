@@ -71,7 +71,7 @@ public final class MechanismTravelRange {
             double seededMin = Double.POSITIVE_INFINITY;
             double seededMax = Double.NEGATIVE_INFINITY;
 
-            for (GenericLimitSwitch limit : mechanism.getLimitSwitches()) {
+            for (GenericLimitSwitch limit : mechanism.limitSwitches()) {
                 double position = limit.getPosition();
                 if (!Double.isFinite(position)) {
                     continue;
@@ -98,8 +98,8 @@ public final class MechanismTravelRange {
                 return;
             }
 
-            double position = mechanism.getPosition();
-            double setpoint = mechanism.getSetpoint();
+            double position = mechanism.position();
+            double setpoint = mechanism.setpoint();
             double seedValue;
             if (Double.isFinite(position)) {
                 seedValue = position;

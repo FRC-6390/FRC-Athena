@@ -177,7 +177,7 @@ public final class MechanismVisualizationConfig {
         if (mechanism == null || !Double.isFinite(lengthMeters) || lengthMeters <= 0.0) {
             return Pose3d.kZero;
         }
-        double angle = toRadians(mechanism, mechanism.getPosition()) + headingOffsetRad;
+        double angle = toRadians(mechanism, mechanism.position()) + headingOffsetRad;
         if (!Double.isFinite(angle)) {
             return Pose3d.kZero;
         }
@@ -187,8 +187,8 @@ public final class MechanismVisualizationConfig {
     }
 
     private static double toRadians(Mechanism mechanism, double value) {
-        if (mechanism != null && mechanism.getEncoder() != null) {
-            double conversion = mechanism.getEncoder().getConversion();
+        if (mechanism != null && mechanism.encoder().device() != null) {
+            double conversion = mechanism.encoder().device().getConversion();
             if (Math.abs(conversion - 360.0) < 1e-3) {
                 return Math.toRadians(value);
             }

@@ -49,7 +49,7 @@ public interface MechanismControlContext<T extends Mechanism>
      * Returns the motor group for the mechanism, if any.
      */
     default MotorControllerGroup motorGroup() {
-        return mechanism().getMotorGroup();
+        return mechanism().motors().device();
     }
 
     /**
@@ -64,7 +64,7 @@ public interface MechanismControlContext<T extends Mechanism>
      * Returns the primary encoder for the mechanism, if any.
      */
     default Encoder encoder() {
-        return mechanism().getEncoder();
+        return mechanism().encoder().device();
     }
 
     /**
@@ -158,9 +158,9 @@ public interface MechanismControlContext<T extends Mechanism>
     }
 
     /**
-     * Base setpoint for the mechanism, excluding any runtime overrides.
+     * Current mechanism setpoint.
      */
-    double baseSetpoint();
+    double setpoint();
 
     /**
      * Active state for stateful mechanisms, or {@code null} if none exists.
@@ -258,11 +258,11 @@ public interface MechanismControlContext<T extends Mechanism>
     }
 
     default boolean usesVoltage() {
-        return mechanism().isUseVoltage();
+        return mechanism().useVoltage();
     }
 
     default OutputType outputType() {
-        return mechanism().getOutputType();
+        return mechanism().outputType();
     }
 
     default double batteryVoltage() {
@@ -312,7 +312,7 @@ public interface MechanismControlContext<T extends Mechanism>
             case RADIANS -> value / (2.0 * Math.PI);
             case DEGREES -> value / 360.0;
             case ENCODER_UNITS -> {
-                Encoder encoder = mechanism().getEncoder();
+                Encoder encoder = mechanism().encoder().device();
                 double conversion = encoder != null ? encoder.getConversion() : 0.0;
                 if (!Double.isFinite(conversion) || conversion == 0.0) {
                     yield 0.0;
@@ -334,7 +334,7 @@ public interface MechanismControlContext<T extends Mechanism>
             case RAD_PER_SEC -> value / (2.0 * Math.PI);
             case DEG_PER_SEC -> value / 360.0;
             case ENCODER_UNITS_PER_SEC -> {
-                Encoder encoder = mechanism().getEncoder();
+                Encoder encoder = mechanism().encoder().device();
                 double conversion = encoder != null ? encoder.getConversion() : 0.0;
                 if (!Double.isFinite(conversion) || conversion == 0.0) {
                     yield 0.0;
@@ -396,15 +396,15 @@ public interface MechanismControlContext<T extends Mechanism>
     }
 
     default void disableControlLoop(String name) {
-        mechanism().disableControlLoop(name);
+        mechanism().loops().disable(name);
     }
 
     default void enableControlLoop(String name) {
-        mechanism().enableControlLoop(name);
+        mechanism().loops().enable(name);
     }
 
     default boolean isControlLoopEnabled(String name) {
-        return mechanism().isControlLoopEnabled(name);
+        return mechanism().loops().enabled(name);
     }
     
 }

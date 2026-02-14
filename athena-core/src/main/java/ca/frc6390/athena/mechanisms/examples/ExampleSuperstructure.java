@@ -54,7 +54,7 @@ public final class ExampleSuperstructure {
             BooleanSupplier wristReady) {
 
         return MechanismConfig
-                .statefulGeneric(SuperStructureState.STOWED)
+                .stateMachineGeneric(SuperStructureState.STOWED)
                 .stateMachineDelay(0.05)
                 .stateGraph(buildGraph(armReady, elevatorReady, wristReady));
     }
@@ -74,7 +74,7 @@ public final class ExampleSuperstructure {
             BooleanSupplier elevatorReady,
             BooleanSupplier wristReady) {
 
-        superStructure.setStateGraph(buildGraph(armReady, elevatorReady, wristReady));
+        superStructure.stateMachine().graph(buildGraph(armReady, elevatorReady, wristReady));
     }
 
     private static StateGraph<SuperStructureState> buildGraph(

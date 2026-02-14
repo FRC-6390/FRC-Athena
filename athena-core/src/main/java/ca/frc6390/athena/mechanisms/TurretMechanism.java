@@ -71,7 +71,7 @@ public class TurretMechanism extends SimpleMotorMechanism {
 
     /** Current turret heading. */
     public Rotation2d getRotation() {
-        return getRotation2d();
+        return rotation2d();
     }
 
     /** Convenience for retrieving the current heading in radians. */
@@ -81,7 +81,7 @@ public class TurretMechanism extends SimpleMotorMechanism {
 
     /** Sets the turret setpoint in radians. */
     public void setRotationRadians(double radians) {
-        setSetpoint(applyBounds(radians));
+        setpoint(applyBounds(radians));
     }
 
     /**
@@ -111,7 +111,7 @@ public class TurretMechanism extends SimpleMotorMechanism {
 
     /** Nudges the turret relative to its current setpoint. */
     public void incrementRotation(Rotation2d delta) {
-        setRotationRadians(getSetpoint() + delta.getRadians());
+        setRotationRadians(setpoint() + delta.getRadians());
     }
 
     /**
@@ -222,7 +222,7 @@ public class TurretMechanism extends SimpleMotorMechanism {
 
     /** Removes any configured rotation bounds. */
     public TurretMechanism clearRotationBounds() {
-        super.clearBounds();
+        control().clearBounds();
         return this;
     }
 
@@ -263,11 +263,6 @@ public class TurretMechanism extends SimpleMotorMechanism {
         }
 
         return MathUtil.clamp(best, min, max);
-    }
-
-    public TurretMechanism publishNetworkTables(String ownerHint) {
-        super.publishNetworkTables(ownerHint);
-        return this;
     }
 
     @Override
@@ -313,24 +308,24 @@ public class TurretMechanism extends SimpleMotorMechanism {
 
     public static class StatefulTurretMechanism<E extends Enum<E> & SetpointProvider<Double>> extends TurretMechanism implements StatefulLike<E> {
 
-        private final StatefulMechanismCore<StatefulTurretMechanism<E>, E> stateCore;
+        private final StatefulMechanismCore<StatefulTurretMechanism<E>, E> stateMachineCore;
 
         public StatefulTurretMechanism(MechanismConfig<StatefulTurretMechanism<E>> config,
                                         SimpleMotorFeedforward feedforward,
                                         OutputType feedforwardOutputType,
                                         E initialState) {
             super(config, feedforward, feedforwardOutputType);
-            stateCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
         }
 
         @Override
-        public StatefulMechanismCore<StatefulTurretMechanism<E>, E> stateCore() {
-            return stateCore;
+        public StatefulLike.StateMachineSection<E> stateMachine() {
+            return new StatefulLike.StateMachineSection<>(stateMachineCore);
         }
 
         @Override
         public void update() {
-            setSuppressMotorOutput(updateStateCore(this));
+            stateMachineCore.updateMechanism(this);
             super.update();
         }
 
@@ -340,15 +335,9 @@ public class TurretMechanism extends SimpleMotorMechanism {
             if (node == null) {
                 return null;
             }
-            getStateMachine().networkTables(node.child("StateMachine"));
+            stateMachineCore.getStateMachine().networkTables(node.child("StateMachine"));
             return super.networkTables(node);
         }
 
-        @Override
-        @SuppressWarnings("unchecked")
-        public StatefulTurretMechanism<E> publishNetworkTables(String ownerHint) {
-            super.publishNetworkTables(ownerHint);
-            return this;
-        }
     }
 }

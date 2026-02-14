@@ -28,10 +28,6 @@ public interface SuperstructureContext<SP> extends TypedInputContext, RobotScope
     /**
      * Returns a typed accessor for child mechanisms and nested superstructures.
      */
-    SuperstructureMechanismsView<SP> getMechanisms();
+    SuperstructureMechanismsView<SP> mechanisms();
 
-    /**
-     * Returns the base setpoint mapped from the current superstate setpoint.
-     */
-    <E extends Enum<E> & StateMachine.SetpointProvider<Double>> double mappedSetpoint(Function<SP, E> mapper);
 }

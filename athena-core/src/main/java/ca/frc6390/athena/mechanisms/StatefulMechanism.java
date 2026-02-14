@@ -1,8 +1,10 @@
 package ca.frc6390.athena.mechanisms;
 
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
@@ -17,38 +19,27 @@ import edu.wpi.first.math.geometry.Pose3d;
 
 public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> extends Mechanism implements StatefulLike<E> {
         
-    private final StatefulMechanismCore<StatefulMechanism<E>, E> stateCore;
+    private final StatefulMechanismCore<StatefulMechanism<E>, E> stateMachineCore;
 
     public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
         super(config);
-        stateCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+        stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
     }
 
     @Override
-    public StatefulMechanismCore<StatefulMechanism<E>, E> stateCore() {
-        return stateCore;
-    }
-
-    @Override
-    protected double getBaseSetpoint() {
-        return stateCore.getBaseSetpoint();
+    public StatefulLike.StateMachineSection<E> stateMachine() {
+        return new StatefulLike.StateMachineSection<>(stateMachineCore);
     }
 
     @Override
     protected Enum<?> getActiveState() {
-        return stateCore.getStateMachine().getGoalState();
+        return stateMachineCore.getStateMachine().getGoalState();
     }
 
     @Override
     public void update() {
-        setSuppressMotorOutput(updateStateCore(this));
+        stateMachineCore.updateMechanism(this);
         super.update();
-    }
-
-    @SuppressWarnings("unchecked")
-    public StatefulMechanism<E> publishNetworkTables(String ownerHint) {
-        super.publishNetworkTables(ownerHint);
-        return this;
     }
 
     @Override
@@ -57,7 +48,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             return null;
         }
         // Publish state machine topics alongside the mechanism topics.
-        getStateMachine().networkTables(node.child("Control").child("StateMachine"));
+        stateMachineCore.getStateMachine().networkTables(node.child("Control").child("StateMachine"));
         return super.networkTables(node);
     }
 
@@ -79,8 +70,8 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         private final Map<String, Supplier<?>> objectInputs;
         private final List<StateTriggerRunner<T, E>> stateTriggers;
         private final MechanismContextImpl context = new MechanismContextImpl();
-        private DoubleSupplier setpointOverride;
-        private BooleanSupplier outputSuppressor;
+        private final Queue<Double> queuedSetpoints = new ArrayDeque<>();
+        private Double queuedSetpoint;
         private E previousState;
 
         public static <T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>>
@@ -190,65 +181,74 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         }
 
         public double getSetpoint() {
-            DoubleSupplier override = setpointOverride;
-            if (override != null) {
-                return override.getAsDouble();
+            if (queuedSetpoint != null) {
+                return queuedSetpoint.doubleValue();
             }
             return stateMachine.getGoalState().getSetpoint();
         }
 
-        public double getBaseSetpoint() {
-            return stateMachine.getGoalState().getSetpoint();
+        public void queueSetpoint(double setpoint) {
+            if (!Double.isFinite(setpoint)) {
+                return;
+            }
+            queuedSetpoints.add(setpoint);
         }
 
-        public void setSetpointOverride(DoubleSupplier override) {
-            this.setpointOverride = override;
+        public void requestState(E target) {
+            Objects.requireNonNull(target, "target");
+            queuedSetpoints.clear();
+            queuedSetpoint = null;
+            stateMachine.requestState(target);
         }
 
-        public void clearSetpointOverride() {
-            this.setpointOverride = null;
-        }
-
-        public void setOutputSuppressor(BooleanSupplier suppressor) {
-            this.outputSuppressor = suppressor;
-        }
-
-        public void clearOutputSuppressor() {
-            this.outputSuppressor = null;
+        public void clear() {
+            queuedSetpoints.clear();
+            queuedSetpoint = null;
+            stateMachine.resetQueue();
         }
 
         @SuppressWarnings("unchecked")
-        public boolean updateMechanism(Mechanism mechanism) {
-            return update((T) mechanism);
+        public void updateMechanism(Mechanism mechanism) {
+            update((T) mechanism);
         }
 
-        public boolean update(T instance) {
+        public void update(T instance) {
             // Update the context with the current goal state so triggers can examine live mechanism data.
-            context.update(instance, stateMachine.getGoalState(), getBaseSetpoint());
+            context.update(instance, stateMachine.getGoalState(), getSetpoint());
             evaluateStateTriggers();
             stateMachine.update();
+            updateQueuedSetpoint();
+            instance.control().setpoint(getSetpoint());
             E currentState = stateMachine.getGoalState();
             boolean changed = !Objects.equals(currentState, previousState);
             E from = previousState;
             if (changed) {
                 applyExitHooks(instance, from);
             }
-            context.update(instance, currentState, getBaseSetpoint());
+            context.update(instance, currentState, getSetpoint());
             if (changed) {
                 applyTransitionHooks(instance, from, currentState);
                 applyEnterHooks(currentState);
                 previousState = currentState;
             }
             applyHooks(currentState);
-            boolean suppress = false;
             Function<T, Boolean> action = stateActions.get(currentState);
             if (action != null) {
-                suppress = action.apply(instance);
+                action.apply(instance);
             }
-            if (outputSuppressor != null && outputSuppressor.getAsBoolean()) {
-                suppress = true;
+        }
+
+        private void updateQueuedSetpoint() {
+            if (!stateMachine.atGoalState()) {
+                return;
             }
-            return suppress;
+            if (queuedSetpoint == null) {
+                if (!queuedSetpoints.isEmpty()) {
+                    queuedSetpoint = queuedSetpoints.poll();
+                }
+                return;
+            }
+            queuedSetpoint = queuedSetpoints.poll();
         }
 
         private static final class StateTriggerRunner<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
@@ -337,7 +337,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         private final class MechanismContextImpl implements MechanismContext<T, E> {
             private T mechanism;
             private E state;
-            private double baseSetpoint;
+            private double setpoint;
             private final TypedInputResolver inputsView = new TypedInputResolver(
                     "StatefulMechanismContext",
                     TypedInputResolver.ValueMode.STRICT,
@@ -410,10 +410,10 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
                     pose3dInputs,
                     objectInputs);
 
-            private void update(T mechanism, E state, double baseSetpoint) {
+            private void update(T mechanism, E state, double setpoint) {
                 this.mechanism = mechanism;
                 this.state = state;
-                this.baseSetpoint = baseSetpoint;
+                this.setpoint = setpoint;
             }
 
             @Override
@@ -427,8 +427,8 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             }
 
             @Override
-            public double baseSetpoint() {
-                return baseSetpoint;
+            public double setpoint() {
+                return setpoint;
             }
 
             @Override

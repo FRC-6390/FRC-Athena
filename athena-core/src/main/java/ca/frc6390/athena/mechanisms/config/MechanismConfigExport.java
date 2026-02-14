@@ -35,7 +35,7 @@ public final class MechanismConfigExport {
         if (cfg == null) {
             return new MechanismConfigFile(
                     mechanism.getName(),
-                    mechanism.getNetworkTablesTypeName(),
+                    mechanism.networkTables().typeName(),
                     null,
                     null,
                     null,
@@ -44,7 +44,7 @@ public final class MechanismConfigExport {
                     null,
                     null);
         }
-        MechanismConfigFile file = export(cfg, mechanism.getNetworkTablesTypeName());
+        MechanismConfigFile file = export(cfg, mechanism.networkTables().typeName());
         // Prefer the runtime mechanism name (RobotCore enforces uniqueness and may suffix unnamed mechs).
         return new MechanismConfigFile(
                 mechanism.getName(),
