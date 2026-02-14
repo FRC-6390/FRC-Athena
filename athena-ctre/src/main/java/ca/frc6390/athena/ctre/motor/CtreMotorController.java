@@ -13,6 +13,7 @@ import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import ca.frc6390.athena.ctre.CtreCanBusRegistry;
+import ca.frc6390.athena.ctre.CtreConfigValidator;
 import ca.frc6390.athena.ctre.encoder.CtreEncoder;
 import ca.frc6390.athena.ctre.encoder.CtreEncoderType;
 import ca.frc6390.athena.hardware.encoder.Encoder;
@@ -78,6 +79,7 @@ public class CtreMotorController implements MotorController {
         if (config == null || !(config.type() instanceof CtreMotorControllerType)) {
             throw new IllegalArgumentException("CTRE motor controller config required");
         }
+        CtreConfigValidator.validateDeviceIdentity("TalonFX", config.id(), config.canbus());
 
         TalonFX talon = new TalonFX(config.id(), resolveCanBus(config.canbus()));
         TalonFXConfiguration talonConfig = new TalonFXConfiguration();

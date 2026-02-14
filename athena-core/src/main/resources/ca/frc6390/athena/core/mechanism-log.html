@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Athena Mechanism Logs</title>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 16px; background: #f5f7fb; color: #111827; }
+    h1 { margin: 0 0 12px; font-size: 20px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    select, input, button { font: inherit; padding: 6px 8px; border: 1px solid #c7d2fe; border-radius: 6px; background: #ffffff; }
+    button { cursor: pointer; }
+    .grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 980px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .card { background: #ffffff; border: 1px solid #dbe4ff; border-radius: 10px; padding: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .card h2 { margin: 0 0 8px; font-size: 14px; }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.35; max-height: 430px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid #e5e7eb; text-align: left; padding: 4px 6px; vertical-align: top; }
+    th { position: sticky; top: 0; background: #eef2ff; }
+    #logTableWrap { max-height: 430px; overflow: auto; }
+    .muted { color: #4b5563; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Athena Mechanism Diagnostics</h1>
+  <div class="toolbar">
+    <label>Mechanism <select id="mechSelect"></select></label>
+    <label>Log limit <input id="limitInput" type="number" min="10" max="512" step="10" value="120"></label>
+    <label><input id="autoRefresh" type="checkbox" checked> Auto refresh</label>
+    <button id="refreshBtn" type="button">Refresh</button>
+    <button id="clearBtn" type="button">Clear Log</button>
+  </div>
+  <div class="muted" id="statusLine">Loading...</div>
+  <div class="grid">
+    <section class="card">
+      <h2>Diagnostics</h2>
+      <pre id="diagOut"></pre>
+    </section>
+    <section class="card">
+      <h2>Recent Events</h2>
+      <div id="logTableWrap">
+        <table>
+          <thead>
+            <tr><th>#</th><th>t(s)</th><th>Level</th><th>Category</th><th>Message</th></tr>
+          </thead>
+          <tbody id="logRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script>
+    const logBase = window.location.pathname.replace(/\/$/, "");
+    const mechSelect = document.getElementById("mechSelect");
+    const limitInput = document.getElementById("limitInput");
+    const autoRefresh = document.getElementById("autoRefresh");
+    const statusLine = document.getElementById("statusLine");
+    const diagOut = document.getElementById("diagOut");
+    const logRows = document.getElementById("logRows");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const clearBtn = document.getElementById("clearBtn");
+
+    async function fetchJson(url) {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status + " for " + url);
+      }
+      return await response.json();
+    }
+
+    function currentMech() {
+      return mechSelect.value || "";
+    }
+
+    function logLimit() {
+      const value = Number(limitInput.value);
+      if (!Number.isFinite(value) || value <= 0) return 120;
+      return Math.max(10, Math.min(512, Math.floor(value)));
+    }
+
+    async function refreshMechanismList() {
+      const data = await fetchJson(logBase + "?format=json");
+      const mechanisms = Array.isArray(data.mechanisms) ? data.mechanisms : [];
+      const previous = currentMech();
+      mechSelect.innerHTML = "";
+      for (const entry of mechanisms) {
+        const option = document.createElement("option");
+        option.value = entry.name || "";
+        option.textContent = entry.name || "";
+        mechSelect.appendChild(option);
+      }
+      if (!currentMech() && mechanisms.length > 0) {
+        mechSelect.value = mechanisms[0].name || "";
+      } else if (previous) {
+        mechSelect.value = previous;
+      }
+      statusLine.textContent = "Loaded " + mechanisms.length + " mechanism(s)";
+    }
+
+    function renderLogs(logs) {
+      logRows.innerHTML = "";
+      for (const event of logs) {
+        const tr = document.createElement("tr");
+        const seq = document.createElement("td");
+        const ts = document.createElement("td");
+        const lvl = document.createElement("td");
+        const cat = document.createElement("td");
+        const msg = document.createElement("td");
+        seq.textContent = String(event.sequence ?? "");
+        ts.textContent = Number(event.timestampSeconds ?? 0).toFixed(3);
+        lvl.textContent = String(event.level ?? "");
+        cat.textContent = String(event.category ?? "");
+        msg.textContent = String(event.message ?? "");
+        tr.appendChild(seq);
+        tr.appendChild(ts);
+        tr.appendChild(lvl);
+        tr.appendChild(cat);
+        tr.appendChild(msg);
+        logRows.appendChild(tr);
+      }
+    }
+
+    async function refreshDetail(clearLog) {
+      const name = currentMech();
+      if (!name) {
+        diagOut.textContent = "No mechanisms are currently registered.";
+        logRows.innerHTML = "";
+        return;
+      }
+      const params = new URLSearchParams();
+      params.set("limit", String(logLimit()));
+      if (clearLog) params.set("clear", "1");
+      const url = logBase + "/" + encodeURIComponent(name) + ".json?" + params.toString();
+      const payload = await fetchJson(url);
+      const diagnostics = payload.diagnostics || {};
+      const logs = Array.isArray(diagnostics.logs) ? diagnostics.logs : [];
+      const diagnosticsWithoutLogs = Object.assign({}, diagnostics);
+      delete diagnosticsWithoutLogs.logs;
+      diagOut.textContent = JSON.stringify(diagnosticsWithoutLogs, null, 2);
+      renderLogs(logs);
+      statusLine.textContent = "Updated " + name + " at " + new Date().toLocaleTimeString();
+    }
+
+    refreshBtn.addEventListener("click", () => refreshDetail(false).catch(err => statusLine.textContent = String(err)));
+    clearBtn.addEventListener("click", () => refreshDetail(true).catch(err => statusLine.textContent = String(err)));
+    mechSelect.addEventListener("change", () => refreshDetail(false).catch(err => statusLine.textContent = String(err)));
+
+    async function tick() {
+      try {
+        await refreshMechanismList();
+        await refreshDetail(false);
+      } catch (err) {
+        statusLine.textContent = String(err);
+      }
+    }
+
+    setInterval(() => {
+      if (!autoRefresh.checked) return;
+      refreshDetail(false).catch(err => statusLine.textContent = String(err));
+    }, 1000);
+
+    tick();
+  </script>
+</body>
+</html>

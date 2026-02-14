@@ -9,6 +9,7 @@ import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.hardware.Pigeon2;
 
 import ca.frc6390.athena.ctre.CtreCanBusRegistry;
+import ca.frc6390.athena.ctre.CtreConfigValidator;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.imu.ImuConfig;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -106,6 +107,7 @@ public class CtreImu implements Imu {
         if (config == null || !(config.type() instanceof CtreImuType)) {
             throw new IllegalArgumentException("CTRE IMU config required");
         }
+        CtreConfigValidator.validateDeviceIdentity("Pigeon2", config.id(), config.canbus());
 
         Pigeon2 pigeon = new Pigeon2(config.id(), resolveCanBus(config.canbus()));
         return new CtreImu(pigeon, config);

@@ -8,6 +8,7 @@ import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 
 import ca.frc6390.athena.ctre.CtreCanBusRegistry;
+import ca.frc6390.athena.ctre.CtreConfigValidator;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import edu.wpi.first.math.MathUtil;
@@ -109,6 +110,7 @@ public class CtreEncoder implements Encoder {
         CtreEncoderType type = (CtreEncoderType) config.type();
         switch (type) {
             case CANCODER -> {
+                CtreConfigValidator.validateDeviceIdentity("CANcoder", config.id(), config.canbus());
                 CANcoder encoder = new CANcoder(config.id(), resolveCanBus(config.canbus()));
                 return new CtreEncoder(encoder, config);
             }
@@ -116,6 +118,7 @@ public class CtreEncoder implements Encoder {
                 if (talonFx == null) {
                     throw new IllegalArgumentException("TalonFX reference required for integrated encoder");
                 }
+                CtreConfigValidator.validateDeviceIdentity("TalonFX", config.id(), config.canbus());
                 return new CtreEncoder(talonFx, config);
             }
             default -> throw new IllegalArgumentException("Unsupported CTRE encoder type: " + type);
