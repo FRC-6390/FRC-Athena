@@ -17,9 +17,10 @@ public record MechanismControlConfig(
         Double pidContinuousMax,
         Double tolerance,
         String pidProfile,
+        String bangBangProfile,
         String ffProfile,
         List<MechanismPidConfig> pidProfiles,
+        List<MechanismBangBangConfig> bangBangProfiles,
         List<MechanismFeedforwardConfig> ffProfiles
 ) {
 }
-

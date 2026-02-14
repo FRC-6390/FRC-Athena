@@ -235,6 +235,11 @@ public interface MechanismControlContext<T extends Mechanism> {
     PIDController pid(String name);
 
     /**
+     * Returns a named bang-bang profile registered in the mechanism config.
+     */
+    MechanismConfig.BangBangProfile bangBang(String name);
+
+    /**
      * Returns a named feedforward registered in the mechanism config.
      */
     SimpleMotorFeedforward feedforward(String name);
@@ -252,6 +257,19 @@ public interface MechanismControlContext<T extends Mechanism> {
         }
         double raw = controller.calculate(measurement, setpoint);
         OutputType from = mechanism().getControlLoopPidOutputType(name);
+        return toOutput(from, raw);
+    }
+
+    /**
+     * Computes bang-bang output for the named profile and converts it into the mechanism output space.
+     */
+    default double bangBangOut(String name, double measurement, double setpoint) {
+        MechanismConfig.BangBangProfile profile = bangBang(name);
+        if (profile == null) {
+            return 0.0;
+        }
+        OutputType from = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
+        double raw = Mechanism.calculateBangBangRaw(profile, measurement, setpoint);
         return toOutput(from, raw);
     }
 
