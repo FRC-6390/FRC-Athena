@@ -106,6 +106,16 @@ public class VirtualImu implements Imu {
     }
 
     @Override
+    public double getXSpeedMetersPerSecond() {
+        return useSimulatedReadings ? 0.0 : delegate.getXSpeedMetersPerSecond();
+    }
+
+    @Override
+    public double getYSpeedMetersPerSecond() {
+        return useSimulatedReadings ? 0.0 : delegate.getYSpeedMetersPerSecond();
+    }
+
+    @Override
     public double getAngularAccelerationZRadiansPerSecondSquared() {
         return cachedAngularAccelerationZ;
     }
@@ -287,17 +297,12 @@ public class VirtualImu implements Imu {
     }
 
     private double computeLinearSpeed() {
-        Rotation2d velX = getVelocityX();
-        Rotation2d velY = getVelocityY();
-        double vx = velX != null ? velX.getRadians() : 0.0;
-        double vy = velY != null ? velY.getRadians() : 0.0;
-        double speed = Math.hypot(vx, vy);
+        double speed = getMovementSpeedMetersPerSecond();
         return Double.isFinite(speed) ? speed : 0.0;
     }
 
     private double computeRadialSpeed() {
-        Rotation2d velZ = getVelocityZ();
-        double omega = velZ != null ? Math.abs(velZ.getRadians()) : 0.0;
+        double omega = Math.abs(getThetaSpeedRadiansPerSecond());
         return Double.isFinite(omega) ? omega : 0.0;
     }
 

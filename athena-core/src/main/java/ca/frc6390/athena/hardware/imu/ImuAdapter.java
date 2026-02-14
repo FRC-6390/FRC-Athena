@@ -15,6 +15,8 @@ public class ImuAdapter implements Imu {
     private Rotation2d cachedVelX = new Rotation2d();
     private Rotation2d cachedVelY = new Rotation2d();
     private Rotation2d cachedVelZ = new Rotation2d();
+    private double cachedXSpeedMetersPerSecond;
+    private double cachedYSpeedMetersPerSecond;
     private double cachedAngularAccelerationZ;
     private double cachedAccelerationX;
     private double cachedAccelerationY;
@@ -26,7 +28,7 @@ public class ImuAdapter implements Imu {
     public ImuAdapter(Imu raw, ImuConfig config) {
         this.raw = raw;
         this.config = config != null ? config : raw.getConfig();
-        this.inverted = this.config != null && this.config.inverted;
+        this.inverted = this.config != null && this.config.inverted();
     }
 
     public static Imu wrap(Imu raw, ImuConfig config) {
@@ -58,7 +60,7 @@ public class ImuAdapter implements Imu {
     public void setInverted(boolean inverted) {
         this.inverted = inverted;
         if (config != null) {
-            config.inverted = inverted;
+            config.setInverted(inverted);
         }
     }
 
@@ -90,6 +92,16 @@ public class ImuAdapter implements Imu {
     @Override
     public double getAngularAccelerationZRadiansPerSecondSquared() {
         return cachedAngularAccelerationZ;
+    }
+
+    @Override
+    public double getXSpeedMetersPerSecond() {
+        return cachedXSpeedMetersPerSecond;
+    }
+
+    @Override
+    public double getYSpeedMetersPerSecond() {
+        return cachedYSpeedMetersPerSecond;
     }
 
     @Override
@@ -166,6 +178,10 @@ public class ImuAdapter implements Imu {
         cachedVelX = invertRotation(raw.getVelocityX());
         cachedVelY = invertRotation(raw.getVelocityY());
         cachedVelZ = invertRotation(raw.getVelocityZ());
+        double xMetersPerSecond = raw.getXSpeedMetersPerSecond();
+        double yMetersPerSecond = raw.getYSpeedMetersPerSecond();
+        cachedXSpeedMetersPerSecond = inverted ? -xMetersPerSecond : xMetersPerSecond;
+        cachedYSpeedMetersPerSecond = inverted ? -yMetersPerSecond : yMetersPerSecond;
         updateAngularAcceleration();
         cachedAccelerationX = inverted ? -raw.getAccelerationX() : raw.getAccelerationX();
         cachedAccelerationY = inverted ? -raw.getAccelerationY() : raw.getAccelerationY();

@@ -3,11 +3,13 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotMechanisms;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
@@ -185,6 +187,13 @@ public interface MechanismControlContext<T extends Mechanism> {
         return core.getMechanisms();
     }
 
+    /**
+     * Sectioned interaction helper for other already-built mechanisms/superstructures.
+     */
+    default void robotMechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
+        robotMechanisms().use(section);
+    }
+
     boolean input(String key);
 
     BooleanSupplier inputSupplier(String key);
@@ -235,6 +244,13 @@ public interface MechanismControlContext<T extends Mechanism> {
     PIDController pid(String name);
 
     /**
+     * Returns a named profiled PID controller registered in the mechanism config, if present.
+     */
+    default ProfiledPIDController profiledPid(String name) {
+        return null;
+    }
+
+    /**
      * Returns a named bang-bang profile registered in the mechanism config.
      */
     MechanismConfig.BangBangProfile bangBang(String name);
@@ -251,11 +267,17 @@ public interface MechanismControlContext<T extends Mechanism> {
      * handles the conversion to the mechanism's configured output type.</p>
      */
     default double pidOut(String name, double measurement, double setpoint) {
-        PIDController controller = pid(name);
-        if (controller == null) {
-            return 0.0;
+        ProfiledPIDController profiled = profiledPid(name);
+        double raw;
+        if (profiled != null) {
+            raw = profiled.calculate(measurement, setpoint);
+        } else {
+            PIDController controller = pid(name);
+            if (controller == null) {
+                return 0.0;
+            }
+            raw = controller.calculate(measurement, setpoint);
         }
-        double raw = controller.calculate(measurement, setpoint);
         OutputType from = mechanism().getControlLoopPidOutputType(name);
         return toOutput(from, raw);
     }

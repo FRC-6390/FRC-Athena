@@ -480,27 +480,32 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
 
     private VisionCamera createVisionCamera() {
         VisionCameraConfig cameraConfig =
-                new VisionCameraConfig(config.getTable(), config.getSoftware())
-                        .setUseForLocalization(config.useForLocalization())
-                        .setTrustDistance(config.trustDistance())
-                        .setHasTargetsSupplier(this::hasValidTarget)
-                        .setPoseSupplier(this::supplyLocalizationPose)
-                        .setPose3dSupplier(this::supplyLocalizationPose3d)
-                        .setLatencySupplier(this::supplyLocalizationLatency)
-                        .setVisibleTargetsSupplier(this::supplyVisibleTargets)
-                        .setAverageDistanceSupplier(this::supplyAverageDistance)
-                        .setOrientationConsumer(this::setRobotOrientation)
-                        .setUpdateHook(this::refreshLocalizationSnapshot)
-                        .setRobotToCameraTransform(config.cameraRobotSpace())
-                        .setDisplayHorizontalFov(DEFAULT_HORIZONTAL_FOV_DEG)
-                        .setDisplayRangeMeters(Math.max(config.trustDistance(), 2.0))
-                        .setConfidenceSupplier(config::confidence)
-                        .setTargetYawSupplier(this::supplyTargetYaw)
-                        .setTargetPitchSupplier(this::supplyTargetPitch)
-                        .setTagDistanceSupplier(this::supplyPrimaryTagDistance)
-                        .setTagIdSupplier(this::supplyPrimaryTagId)
-                        .setRoles(config.roles())
-                        .setFieldLayout(fieldLayout);
+                VisionCameraConfig.create(config.getTable(), config.getSoftware())
+                        .localization(l -> l
+                                .useForLocalization(config.useForLocalization())
+                                .trustDistance(config.trustDistance())
+                                .confidenceSupplier(config::confidence)
+                                .roles(config.roles()))
+                        .sources(s -> s
+                                .hasTargetsSupplier(this::hasValidTarget)
+                                .poseSupplier(this::supplyLocalizationPose)
+                                .pose3dSupplier(this::supplyLocalizationPose3d)
+                                .latencySupplier(this::supplyLocalizationLatency)
+                                .visibleTargetsSupplier(this::supplyVisibleTargets)
+                                .averageDistanceSupplier(this::supplyAverageDistance)
+                                .orientationConsumer(this::setRobotOrientation)
+                                .updateHook(this::refreshLocalizationSnapshot))
+                        .transform(t -> t.robotToCameraTransform(config.cameraRobotSpace()))
+                        .simulation(s -> s
+                                .vfield(v -> v
+                                        .horizontalFov(DEFAULT_HORIZONTAL_FOV_DEG)
+                                        .rangeMeters(Math.max(config.trustDistance(), 2.0))))
+                        .targets(t -> t
+                                .targetYawSupplier(this::supplyTargetYaw)
+                                .targetPitchSupplier(this::supplyTargetPitch)
+                                .tagDistanceSupplier(this::supplyPrimaryTagDistance)
+                                .tagIdSupplier(this::supplyPrimaryTagId)
+                                .fieldLayout(fieldLayout));
 
         VisionCamera camera = new VisionCamera(cameraConfig);
         camera.registerCapability(VisionCameraCapability.LIMELIGHT_CAMERA, this);
@@ -1031,8 +1036,9 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         return localizationCamera.getLocalizationStdDevs();
     }
     
-    public void setStdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
-        localizationCamera.setStdDevs(single, multi);
+    public LimeLight stdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
+        localizationCamera.config().stdDevs(single, multi);
+        return this;
     }
 
     public Matrix<N3, N1> getSingleStdDev() {
@@ -1046,12 +1052,13 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         return localizationCamera;
     }
 
-    public void setUseForLocalization(boolean useForLocalization) {
+    public LimeLight useForLocalization(boolean useForLocalization) {
         this.useForLocalization = useForLocalization;
-        localizationCamera.setUseForLocalization(useForLocalization);
+        localizationCamera.config().useForLocalization(useForLocalization);
+        return this;
     }
 
     public boolean isUseForLocalization() {
-        return useForLocalization;
+        return localizationCamera.isUseForLocalization();
     }
 }

@@ -13,13 +13,10 @@ import edu.wpi.first.math.controller.SimpleMotorFeedforward;
  */
 public class FlywheelMechanism extends SimpleMotorMechanism {
 
-    private final boolean useVelocityPid;
-
     public FlywheelMechanism(MechanismConfig<? extends FlywheelMechanism> config,
                              SimpleMotorFeedforward feedforward,
                              OutputType feedforwardOutputType) {
         super(config, feedforward, feedforwardOutputType);
-        this.useVelocityPid = config.data().pidUseVelocity();
     }
 
     public static class StatefulFlywheelMechanism<E extends Enum<E> & SetpointProvider<Double>>
@@ -103,6 +100,6 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
 
     @Override
     protected double getPidMeasurement() {
-        return useVelocityPid ? getVelocity() : super.getPidMeasurement();
+        return getVelocity();
     }
 }

@@ -431,7 +431,7 @@ public class SwerveDrivetrain extends SubsystemBase implements RobotDrivetrain<S
 
   @Override
   public RobotLocalization<SwerveModulePosition[]> localization(RobotLocalizationConfig config) {
-    RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defualt();
+    RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defaults();
     RobotLocalizationConfig.BackendConfig backend = effectiveConfig.backend();
     PoseEstimatorFactory<SwerveModulePosition[]> factory = new PoseEstimatorFactory<>() {
       @Override

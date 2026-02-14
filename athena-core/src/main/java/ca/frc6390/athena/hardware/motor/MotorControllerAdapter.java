@@ -23,7 +23,7 @@ public class MotorControllerAdapter implements MotorController {
         this.config = config != null ? config : raw.getConfig();
         Encoder encoder = raw.getEncoder();
         if (encoder != null) {
-            EncoderConfig encoderConfig = this.config != null ? this.config.encoderConfig : null;
+            EncoderConfig encoderConfig = this.config != null ? this.config.encoderConfig() : null;
             this.wrappedEncoder = EncoderAdapter.wrap(encoder, encoderConfig);
         }
         this.cachedConnected = true;
@@ -68,7 +68,7 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void setCurrentLimit(double amps) {
         if (config != null) {
-            config.currentLimit = amps;
+            config.setCurrentLimit(amps);
         }
         raw.setCurrentLimit(amps);
     }
@@ -86,7 +86,7 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void setNeutralMode(MotorNeutralMode mode) {
         if (config != null) {
-            config.neutralMode = mode;
+            config.setNeutralMode(mode);
         }
         raw.setNeutralMode(mode);
     }
@@ -94,7 +94,7 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void setPid(PIDController pid) {
         if (config != null) {
-            config.pid = pid;
+            config.setPid(pid);
         }
         raw.setPid(pid);
     }
@@ -132,24 +132,24 @@ public class MotorControllerAdapter implements MotorController {
 
     @Override
     public boolean isInverted() {
-        return config != null && config.inverted;
+        return config != null && config.inverted();
     }
 
     @Override
     public void setInverted(boolean inverted) {
         if (config != null) {
-            config.inverted = inverted;
+            config.setInverted(inverted);
         }
     }
 
     @Override
     public double getCurrentLimit() {
-        return config != null ? config.currentLimit : raw.getCurrentLimit();
+        return config != null ? config.currentLimit() : raw.getCurrentLimit();
     }
 
     @Override
     public MotorNeutralMode getNeutralMode() {
-        return config != null ? config.neutralMode : raw.getNeutralMode();
+        return config != null ? config.neutralMode() : raw.getNeutralMode();
     }
 
     @Override

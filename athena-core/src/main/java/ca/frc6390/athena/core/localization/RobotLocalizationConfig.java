@@ -3,6 +3,7 @@ package ca.frc6390.athena.core.localization;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import edu.wpi.first.math.Matrix;
@@ -80,7 +81,7 @@ public class RobotLocalizationConfig {
                 new HolonomicPidConstants(0, 0, 0),
                 true,
                 PoseSpace.TWO_D,
-                BackendConfig.defualt(),
+                BackendConfig.defaults(),
                 List.of());
     }
 
@@ -93,11 +94,486 @@ public class RobotLocalizationConfig {
     }
 
     public static RobotLocalizationConfig vision(double vXStd, double vYStda, double vThetaStd){
-        return new RobotLocalizationConfig().setVision(vXStd, vYStda, vThetaStd).setVisionEnabled(true);
+        return create().estimation(e -> e.vision(vXStd, vYStda, vThetaStd).visionEnabled(true));
     }
 
-    public static RobotLocalizationConfig defualt(){
+    public static RobotLocalizationConfig defaults(){
         return new RobotLocalizationConfig();
+    }
+
+    public static RobotLocalizationConfig create() {
+        return defaults();
+    }
+
+    public RobotLocalizationConfig estimation(Consumer<EstimationSection> section) {
+        if (section != null) {
+            section.accept(new EstimationSection());
+        }
+        return this;
+    }
+
+    public EstimationSection estimation() {
+        return new EstimationSection();
+    }
+
+    public RobotLocalizationConfig planner(Consumer<PlannerSection> section) {
+        if (section != null) {
+            section.accept(new PlannerSection());
+        }
+        return this;
+    }
+
+    public PlannerSection planner() {
+        return new PlannerSection();
+    }
+
+    public RobotLocalizationConfig backendConfig(Consumer<BackendSection> section) {
+        if (section != null) {
+            section.accept(new BackendSection());
+        }
+        return this;
+    }
+
+    public BackendSection backendConfig() {
+        return new BackendSection();
+    }
+
+    public RobotLocalizationConfig poses(Consumer<PosesSection> section) {
+        if (section != null) {
+            section.accept(new PosesSection());
+        }
+        return this;
+    }
+
+    public PosesSection poses() {
+        return new PosesSection();
+    }
+
+    public RobotLocalizationConfig config(Consumer<ConfigSection> section) {
+        if (section != null) {
+            section.accept(new ConfigSection());
+        }
+        return this;
+    }
+
+    public ConfigSection config() {
+        return new ConfigSection();
+    }
+
+    public final class ConfigSection {
+        public ConfigSection autoPlannerPid(
+                double tP,
+                double tI,
+                double tD,
+                double rP,
+                double rI,
+                double rD) {
+            applyAutoPlannerPID(tP, tI, tD, rP, rI, rD);
+            return this;
+        }
+
+        public ConfigSection autoPlannerPid(
+                HolonomicPidConstants translationConstants,
+                HolonomicPidConstants rotationConstants) {
+            applyAutoPlannerPID(translationConstants, rotationConstants);
+            return this;
+        }
+
+        public ConfigSection vision(double vXStd, double vYStd, double vThetaStd) {
+            applyVision(vXStd, vYStd, vThetaStd);
+            return this;
+        }
+
+        public ConfigSection vision(double vXStd, double vYStd, double vZStd, double vThetaStd) {
+            applyVision(vXStd, vYStd, vZStd, vThetaStd);
+            return this;
+        }
+
+        public ConfigSection visionMultitag(double vXStd, double vYStd, double vThetaStd) {
+            applyVisionMultitag(vXStd, vYStd, vThetaStd);
+            return this;
+        }
+
+        public ConfigSection visionMultitag(double vXStd, double vYStd, double vZStd, double vThetaStd) {
+            applyVisionMultitag(vXStd, vYStd, vZStd, vThetaStd);
+            return this;
+        }
+
+        public ConfigSection visionEnabled(boolean enabled) {
+            applyVisionEnabled(enabled);
+            return this;
+        }
+
+        public ConfigSection poseSpace(PoseSpace space) {
+            applyPoseSpace(space);
+            return this;
+        }
+
+        public ConfigSection zStd(double value) {
+            applyZStd(value);
+            return this;
+        }
+
+        public ConfigSection visionZStd(double value) {
+            applyVisionZStd(value);
+            return this;
+        }
+
+        public ConfigSection visionMultiZStd(double value) {
+            applyVisionMultiZStd(value);
+            return this;
+        }
+
+        public ConfigSection use3d() {
+            RobotLocalizationConfig.this.use3d();
+            return this;
+        }
+
+        public ConfigSection use2d() {
+            RobotLocalizationConfig.this.use2d();
+            return this;
+        }
+
+        public ConfigSection backend(BackendConfig backendConfig) {
+            applyBackend(backendConfig);
+            return this;
+        }
+
+        public ConfigSection poseConfigs(List<PoseConfig> configs) {
+            applyPoseConfigs(configs);
+            return this;
+        }
+
+        public ConfigSection pose(PoseConfig poseConfig) {
+            addPoseConfig(poseConfig);
+            return this;
+        }
+
+        public ConfigSection boundingBoxes(List<NamedBoundingBox> boxes) {
+            applyBoundingBoxes(boxes);
+            return this;
+        }
+
+        public ConfigSection boundingBox(String name, PoseBoundingBox2d box) {
+            addBoundingBox(name, box);
+            return this;
+        }
+
+        public ConfigSection boundingBox(String name, Translation2d cornerA, Translation2d cornerB) {
+            addBoundingBox(name, cornerA, cornerB);
+            return this;
+        }
+
+        public ConfigSection autoPoseName(String name) {
+            applyAutoPoseName(name);
+            return this;
+        }
+
+        public ConfigSection slipStrategy(BackendConfig.SlipStrategy strategy) {
+            applySlipStrategy(strategy);
+            return this;
+        }
+
+        public ConfigSection slipThreshold(double value) {
+            applySlipThreshold(value);
+            return this;
+        }
+
+        public ConfigSection slipYawRateThreshold(double value) {
+            applySlipYawRateThreshold(value);
+            return this;
+        }
+
+        public ConfigSection slipYawRateDisagreement(double value) {
+            applySlipYawRateDisagreement(value);
+            return this;
+        }
+
+        public ConfigSection slipAccelThreshold(double value) {
+            applySlipAccelThreshold(value);
+            return this;
+        }
+
+        public ConfigSection slipAccelDisagreement(double value) {
+            applySlipAccelDisagreement(value);
+            return this;
+        }
+
+        public ConfigSection slipHoldSeconds(double value) {
+            applySlipHoldSeconds(value);
+            return this;
+        }
+
+        public ConfigSection slipVisionStdDevScale(double value) {
+            applySlipVisionStdDevScale(value);
+            return this;
+        }
+
+        public ConfigSection slipProcessStdDevScale(double value) {
+            applySlipProcessStdDevScale(value);
+            return this;
+        }
+
+        public ConfigSection imuStrategy(BackendConfig.ImuStrategy strategy) {
+            applyImuStrategy(strategy);
+            return this;
+        }
+
+        public ConfigSection visionStrategy(BackendConfig.VisionStrategy strategy) {
+            applyVisionStrategy(strategy);
+            return this;
+        }
+
+        public ConfigSection visionFusionMaxSeparationSeconds(double value) {
+            applyVisionFusionMaxSeparationSeconds(value);
+            return this;
+        }
+
+        public ConfigSection visionFusionMinWeight(double value) {
+            applyVisionFusionMinWeight(value);
+            return this;
+        }
+
+        public ConfigSection visionFusionDistanceWeight(double value) {
+            applyVisionFusionDistanceWeight(value);
+            return this;
+        }
+
+        public ConfigSection visionFusionLatencyWeight(double value) {
+            applyVisionFusionLatencyWeight(value);
+            return this;
+        }
+
+        public ConfigSection visionFusionConfidenceExponent(double value) {
+            applyVisionFusionConfidenceExponent(value);
+            return this;
+        }
+
+        public ConfigSection poseJumpMeters(double value) {
+            applyPoseJumpMeters(value);
+            return this;
+        }
+
+        public ConfigSection poseJumpHoldSeconds(double value) {
+            applyPoseJumpHoldSeconds(value);
+            return this;
+        }
+
+        public ConfigSection poseJumpAgreementMeters(double value) {
+            applyPoseJumpAgreementMeters(value);
+            return this;
+        }
+    }
+
+    public final class EstimationSection {
+        public EstimationSection vision(double vXStd, double vYStd, double vThetaStd) {
+            applyVision(vXStd, vYStd, vThetaStd);
+            return this;
+        }
+
+        public EstimationSection vision(double vXStd, double vYStd, double vZStd, double vThetaStd) {
+            applyVision(vXStd, vYStd, vZStd, vThetaStd);
+            return this;
+        }
+
+        public EstimationSection visionMultitag(double vXStd, double vYStd, double vThetaStd) {
+            applyVisionMultitag(vXStd, vYStd, vThetaStd);
+            return this;
+        }
+
+        public EstimationSection visionMultitag(double vXStd, double vYStd, double vZStd, double vThetaStd) {
+            applyVisionMultitag(vXStd, vYStd, vZStd, vThetaStd);
+            return this;
+        }
+
+        public EstimationSection visionEnabled(boolean enabled) {
+            applyVisionEnabled(enabled);
+            return this;
+        }
+
+        public EstimationSection poseSpace(PoseSpace space) {
+            applyPoseSpace(space);
+            return this;
+        }
+
+        public EstimationSection use3d() {
+            RobotLocalizationConfig.this.use3d();
+            return this;
+        }
+
+        public EstimationSection use2d() {
+            RobotLocalizationConfig.this.use2d();
+            return this;
+        }
+
+        public EstimationSection zStd(double value) {
+            applyZStd(value);
+            return this;
+        }
+
+        public EstimationSection visionZStd(double value) {
+            applyVisionZStd(value);
+            return this;
+        }
+
+        public EstimationSection visionMultiZStd(double value) {
+            applyVisionMultiZStd(value);
+            return this;
+        }
+    }
+
+    public final class PlannerSection {
+        public PlannerSection autoPlannerPid(
+                double tP,
+                double tI,
+                double tD,
+                double rP,
+                double rI,
+                double rD) {
+            applyAutoPlannerPID(tP, tI, tD, rP, rI, rD);
+            return this;
+        }
+
+        public PlannerSection autoPlannerPid(
+                HolonomicPidConstants translationConstants,
+                HolonomicPidConstants rotationConstants) {
+            applyAutoPlannerPID(translationConstants, rotationConstants);
+            return this;
+        }
+    }
+
+    public final class BackendSection {
+        public BackendSection config(BackendConfig backendConfig) {
+            applyBackend(backendConfig);
+            return this;
+        }
+
+        public BackendSection slipStrategy(BackendConfig.SlipStrategy strategy) {
+            applySlipStrategy(strategy);
+            return this;
+        }
+
+        public BackendSection slipThreshold(double value) {
+            applySlipThreshold(value);
+            return this;
+        }
+
+        public BackendSection slipYawRateThreshold(double value) {
+            applySlipYawRateThreshold(value);
+            return this;
+        }
+
+        public BackendSection slipYawRateDisagreement(double value) {
+            applySlipYawRateDisagreement(value);
+            return this;
+        }
+
+        public BackendSection slipAccelThreshold(double value) {
+            applySlipAccelThreshold(value);
+            return this;
+        }
+
+        public BackendSection slipAccelDisagreement(double value) {
+            applySlipAccelDisagreement(value);
+            return this;
+        }
+
+        public BackendSection slipHoldSeconds(double value) {
+            applySlipHoldSeconds(value);
+            return this;
+        }
+
+        public BackendSection slipVisionStdDevScale(double value) {
+            applySlipVisionStdDevScale(value);
+            return this;
+        }
+
+        public BackendSection slipProcessStdDevScale(double value) {
+            applySlipProcessStdDevScale(value);
+            return this;
+        }
+
+        public BackendSection imuStrategy(BackendConfig.ImuStrategy strategy) {
+            applyImuStrategy(strategy);
+            return this;
+        }
+
+        public BackendSection visionStrategy(BackendConfig.VisionStrategy strategy) {
+            applyVisionStrategy(strategy);
+            return this;
+        }
+
+        public BackendSection visionFusionMaxSeparationSeconds(double value) {
+            applyVisionFusionMaxSeparationSeconds(value);
+            return this;
+        }
+
+        public BackendSection visionFusionMinWeight(double value) {
+            applyVisionFusionMinWeight(value);
+            return this;
+        }
+
+        public BackendSection visionFusionDistanceWeight(double value) {
+            applyVisionFusionDistanceWeight(value);
+            return this;
+        }
+
+        public BackendSection visionFusionLatencyWeight(double value) {
+            applyVisionFusionLatencyWeight(value);
+            return this;
+        }
+
+        public BackendSection visionFusionConfidenceExponent(double value) {
+            applyVisionFusionConfidenceExponent(value);
+            return this;
+        }
+
+        public BackendSection poseJumpMeters(double value) {
+            applyPoseJumpMeters(value);
+            return this;
+        }
+
+        public BackendSection poseJumpHoldSeconds(double value) {
+            applyPoseJumpHoldSeconds(value);
+            return this;
+        }
+
+        public BackendSection poseJumpAgreementMeters(double value) {
+            applyPoseJumpAgreementMeters(value);
+            return this;
+        }
+    }
+
+    public final class PosesSection {
+        public PosesSection poseConfigs(List<PoseConfig> configs) {
+            applyPoseConfigs(configs);
+            return this;
+        }
+
+        public PosesSection pose(PoseConfig poseConfig) {
+            addPoseConfig(poseConfig);
+            return this;
+        }
+
+        public PosesSection boundingBoxes(List<NamedBoundingBox> boxes) {
+            applyBoundingBoxes(boxes);
+            return this;
+        }
+
+        public PosesSection boundingBox(String name, PoseBoundingBox2d box) {
+            addBoundingBox(name, box);
+            return this;
+        }
+
+        public PosesSection boundingBox(String name, Translation2d cornerA, Translation2d cornerB) {
+            addBoundingBox(name, cornerA, cornerB);
+            return this;
+        }
+
+        public PosesSection autoPoseName(String name) {
+            applyAutoPoseName(name);
+            return this;
+        }
     }
 
     public double xStd() {
@@ -165,7 +641,7 @@ public class RobotLocalizationConfig {
     }
 
     public BackendConfig backend() {
-        return backend != null ? backend : BackendConfig.defualt();
+        return backend != null ? backend : BackendConfig.defaults();
     }
 
     public String autoPoseName() {
@@ -180,35 +656,35 @@ public class RobotLocalizationConfig {
         return boundingBoxes != null ? List.copyOf(boundingBoxes) : List.of();
     }
 
-    public RobotLocalizationConfig setAutoPlannerPID(double tP, double tI, double tD, double rP, double rI, double rD){
-        return setAutoPlannerPID(new HolonomicPidConstants(tP, tI, tD), new HolonomicPidConstants(rP, rI, rD));
+    private RobotLocalizationConfig applyAutoPlannerPID(double tP, double tI, double tD, double rP, double rI, double rD){
+        return applyAutoPlannerPID(new HolonomicPidConstants(tP, tI, tD), new HolonomicPidConstants(rP, rI, rD));
     }
 
-    public RobotLocalizationConfig setAutoPlannerPID(HolonomicPidConstants translation, HolonomicPidConstants rotation){
+    private RobotLocalizationConfig applyAutoPlannerPID(HolonomicPidConstants translation, HolonomicPidConstants rotation){
         this.translation = translation;
         this.rotation = rotation;
         return this;
     }
 
-    public RobotLocalizationConfig setVision(double vXStd, double vYStda, double vThetaStd){
-        return setVision(vXStd, vYStda, vXStd, vThetaStd);
+    private RobotLocalizationConfig applyVision(double vXStd, double vYStda, double vThetaStd){
+        return applyVision(vXStd, vYStda, vXStd, vThetaStd);
     }
 
-    public RobotLocalizationConfig setVision(double vXStd, double vYStda, double vZStd, double vThetaStd) {
+    private RobotLocalizationConfig applyVision(double vXStd, double vYStda, double vZStd, double vThetaStd) {
         this.visionStdDevs = new StdDevs(vXStd, vYStda, vZStd, vThetaStd);
         return this;
     }
 
-    public RobotLocalizationConfig setVisionMultitag(double v2XStd, double v2YStda, double v2ThetaStd){
-        return setVisionMultitag(v2XStd, v2YStda, v2XStd, v2ThetaStd);
+    private RobotLocalizationConfig applyVisionMultitag(double v2XStd, double v2YStda, double v2ThetaStd){
+        return applyVisionMultitag(v2XStd, v2YStda, v2XStd, v2ThetaStd);
     }
 
-    public RobotLocalizationConfig setVisionMultitag(double v2XStd, double v2YStda, double v2ZStd, double v2ThetaStd){
+    private RobotLocalizationConfig applyVisionMultitag(double v2XStd, double v2YStda, double v2ZStd, double v2ThetaStd){
         this.visionMultiStdDevs = new StdDevs(v2XStd, v2YStda, v2ZStd, v2ThetaStd);
         return this;
     }
 
-    public RobotLocalizationConfig setVisionEnabled(boolean useVision){
+    private RobotLocalizationConfig applyVisionEnabled(boolean useVision){
         this.useVision = useVision;
         return this;
     }
@@ -269,13 +745,13 @@ public class RobotLocalizationConfig {
                 Units.degreesToRadians(visionMultiStdDevs.theta()));
     }
 
-    public RobotLocalizationConfig setPoseSpace(PoseSpace poseSpace) {
+    private RobotLocalizationConfig applyPoseSpace(PoseSpace poseSpace) {
         this.poseSpace = poseSpace;
         normalize();
         return this;
     }
 
-    public RobotLocalizationConfig setZStd(double zStd) {
+    private RobotLocalizationConfig applyZStd(double zStd) {
         this.stateStdDevs = new StdDevs(
                 stateStdDevs.x(),
                 stateStdDevs.y(),
@@ -284,7 +760,7 @@ public class RobotLocalizationConfig {
         return this;
     }
 
-    public RobotLocalizationConfig setVisionZStd(double vZStd) {
+    private RobotLocalizationConfig applyVisionZStd(double vZStd) {
         this.visionStdDevs = new StdDevs(
                 visionStdDevs.x(),
                 visionStdDevs.y(),
@@ -293,7 +769,7 @@ public class RobotLocalizationConfig {
         return this;
     }
 
-    public RobotLocalizationConfig setVisionMultiZStd(double v2ZStd) {
+    private RobotLocalizationConfig applyVisionMultiZStd(double v2ZStd) {
         this.visionMultiStdDevs = new StdDevs(
                 visionMultiStdDevs.x(),
                 visionMultiStdDevs.y(),
@@ -302,26 +778,26 @@ public class RobotLocalizationConfig {
         return this;
     }
 
-    public RobotLocalizationConfig use3d() {
-        return setPoseSpace(PoseSpace.THREE_D);
+    private RobotLocalizationConfig use3d() {
+        return applyPoseSpace(PoseSpace.THREE_D);
     }
 
-    public RobotLocalizationConfig use2d() {
-        return setPoseSpace(PoseSpace.TWO_D);
+    private RobotLocalizationConfig use2d() {
+        return applyPoseSpace(PoseSpace.TWO_D);
     }
 
-    public RobotLocalizationConfig setBackend(BackendConfig backend) {
+    private RobotLocalizationConfig applyBackend(BackendConfig backend) {
         this.backend = backend;
         normalize();
         return this;
     }
 
-    public RobotLocalizationConfig setPoseConfigs(List<PoseConfig> poseConfigs) {
+    private RobotLocalizationConfig applyPoseConfigs(List<PoseConfig> poseConfigs) {
         this.poseConfigs = poseConfigs != null ? new ArrayList<>(poseConfigs) : new ArrayList<>();
         return this;
     }
 
-    public RobotLocalizationConfig addPoseConfig(PoseConfig poseConfig) {
+    private RobotLocalizationConfig addPoseConfig(PoseConfig poseConfig) {
         if (poseConfig == null) {
             return this;
         }
@@ -332,23 +808,31 @@ public class RobotLocalizationConfig {
         return this;
     }
 
-    public RobotLocalizationConfig setBoundingBoxes(List<NamedBoundingBox> boundingBoxes) {
+    private RobotLocalizationConfig applyBoundingBoxes(List<NamedBoundingBox> boundingBoxes) {
         this.boundingBoxes = boundingBoxes != null ? new ArrayList<>(boundingBoxes) : new ArrayList<>();
         return this;
     }
 
-    public RobotLocalizationConfig addBoundingBox(String name, PoseBoundingBox2d box) {
+    private RobotLocalizationConfig addBoundingBox(String name, PoseBoundingBox2d box) {
         if (box == null) {
             return this;
         }
         if (boundingBoxes == null) {
             boundingBoxes = new ArrayList<>();
         }
-        boundingBoxes.add(new NamedBoundingBox(name, box));
+        NamedBoundingBox namedBoundingBox = new NamedBoundingBox(name, box);
+        for (int i = 0; i < boundingBoxes.size(); i++) {
+            NamedBoundingBox existing = boundingBoxes.get(i);
+            if (existing != null && existing.name().equals(namedBoundingBox.name())) {
+                boundingBoxes.set(i, namedBoundingBox);
+                return this;
+            }
+        }
+        boundingBoxes.add(namedBoundingBox);
         return this;
     }
 
-    public RobotLocalizationConfig addBoundingBox(
+    private RobotLocalizationConfig addBoundingBox(
             String name,
             Translation2d cornerA,
             Translation2d cornerB) {
@@ -358,86 +842,86 @@ public class RobotLocalizationConfig {
         return addBoundingBox(name, PoseBoundingBox2d.fromCorners(cornerA, cornerB));
     }
 
-    public RobotLocalizationConfig setAutoPoseName(String autoPoseName) {
+    private RobotLocalizationConfig applyAutoPoseName(String autoPoseName) {
         this.autoPoseName = autoPoseName;
         normalize();
         return this;
     }
 
-    public RobotLocalizationConfig setSlipStrategy(BackendConfig.SlipStrategy slipStrategy) {
-        return setBackend(backend().withSlipStrategy(slipStrategy));
+    private RobotLocalizationConfig applySlipStrategy(BackendConfig.SlipStrategy slipStrategy) {
+        return applyBackend(backend().withSlipStrategy(slipStrategy));
     }
 
-    public RobotLocalizationConfig setSlipThreshold(double slipThreshold) {
-        return setBackend(backend().withSlipThreshold(slipThreshold));
+    private RobotLocalizationConfig applySlipThreshold(double slipThreshold) {
+        return applyBackend(backend().withSlipThreshold(slipThreshold));
     }
 
-    public RobotLocalizationConfig setSlipYawRateThreshold(double slipYawRateThreshold) {
-        return setBackend(backend().withSlipYawRateThreshold(slipYawRateThreshold));
+    private RobotLocalizationConfig applySlipYawRateThreshold(double slipYawRateThreshold) {
+        return applyBackend(backend().withSlipYawRateThreshold(slipYawRateThreshold));
     }
 
-    public RobotLocalizationConfig setSlipYawRateDisagreement(double slipYawRateDisagreement) {
-        return setBackend(backend().withSlipYawRateDisagreement(slipYawRateDisagreement));
+    private RobotLocalizationConfig applySlipYawRateDisagreement(double slipYawRateDisagreement) {
+        return applyBackend(backend().withSlipYawRateDisagreement(slipYawRateDisagreement));
     }
 
-    public RobotLocalizationConfig setSlipAccelThreshold(double slipAccelThreshold) {
-        return setBackend(backend().withSlipAccelThreshold(slipAccelThreshold));
+    private RobotLocalizationConfig applySlipAccelThreshold(double slipAccelThreshold) {
+        return applyBackend(backend().withSlipAccelThreshold(slipAccelThreshold));
     }
 
-    public RobotLocalizationConfig setSlipAccelDisagreement(double slipAccelDisagreement) {
-        return setBackend(backend().withSlipAccelDisagreement(slipAccelDisagreement));
+    private RobotLocalizationConfig applySlipAccelDisagreement(double slipAccelDisagreement) {
+        return applyBackend(backend().withSlipAccelDisagreement(slipAccelDisagreement));
     }
 
-    public RobotLocalizationConfig setSlipHoldSeconds(double slipHoldSeconds) {
-        return setBackend(backend().withSlipHoldSeconds(slipHoldSeconds));
+    private RobotLocalizationConfig applySlipHoldSeconds(double slipHoldSeconds) {
+        return applyBackend(backend().withSlipHoldSeconds(slipHoldSeconds));
     }
 
-    public RobotLocalizationConfig setSlipVisionStdDevScale(double slipVisionStdDevScale) {
-        return setBackend(backend().withSlipVisionStdDevScale(slipVisionStdDevScale));
+    private RobotLocalizationConfig applySlipVisionStdDevScale(double slipVisionStdDevScale) {
+        return applyBackend(backend().withSlipVisionStdDevScale(slipVisionStdDevScale));
     }
 
-    public RobotLocalizationConfig setSlipProcessStdDevScale(double slipProcessStdDevScale) {
-        return setBackend(backend().withSlipProcessStdDevScale(slipProcessStdDevScale));
+    private RobotLocalizationConfig applySlipProcessStdDevScale(double slipProcessStdDevScale) {
+        return applyBackend(backend().withSlipProcessStdDevScale(slipProcessStdDevScale));
     }
 
-    public RobotLocalizationConfig setImuStrategy(BackendConfig.ImuStrategy imuStrategy) {
-        return setBackend(backend().withImuStrategy(imuStrategy));
+    private RobotLocalizationConfig applyImuStrategy(BackendConfig.ImuStrategy imuStrategy) {
+        return applyBackend(backend().withImuStrategy(imuStrategy));
     }
 
-    public RobotLocalizationConfig setVisionStrategy(BackendConfig.VisionStrategy visionStrategy) {
-        return setBackend(backend().withVisionStrategy(visionStrategy));
+    private RobotLocalizationConfig applyVisionStrategy(BackendConfig.VisionStrategy visionStrategy) {
+        return applyBackend(backend().withVisionStrategy(visionStrategy));
     }
 
-    public RobotLocalizationConfig setVisionFusionMaxSeparationSeconds(double visionFusionMaxSeparationSeconds) {
-        return setBackend(backend().withVisionFusionMaxSeparationSeconds(visionFusionMaxSeparationSeconds));
+    private RobotLocalizationConfig applyVisionFusionMaxSeparationSeconds(double visionFusionMaxSeparationSeconds) {
+        return applyBackend(backend().withVisionFusionMaxSeparationSeconds(visionFusionMaxSeparationSeconds));
     }
 
-    public RobotLocalizationConfig setVisionFusionMinWeight(double visionFusionMinWeight) {
-        return setBackend(backend().withVisionFusionMinWeight(visionFusionMinWeight));
+    private RobotLocalizationConfig applyVisionFusionMinWeight(double visionFusionMinWeight) {
+        return applyBackend(backend().withVisionFusionMinWeight(visionFusionMinWeight));
     }
 
-    public RobotLocalizationConfig setVisionFusionDistanceWeight(double visionFusionDistanceWeight) {
-        return setBackend(backend().withVisionFusionDistanceWeight(visionFusionDistanceWeight));
+    private RobotLocalizationConfig applyVisionFusionDistanceWeight(double visionFusionDistanceWeight) {
+        return applyBackend(backend().withVisionFusionDistanceWeight(visionFusionDistanceWeight));
     }
 
-    public RobotLocalizationConfig setVisionFusionLatencyWeight(double visionFusionLatencyWeight) {
-        return setBackend(backend().withVisionFusionLatencyWeight(visionFusionLatencyWeight));
+    private RobotLocalizationConfig applyVisionFusionLatencyWeight(double visionFusionLatencyWeight) {
+        return applyBackend(backend().withVisionFusionLatencyWeight(visionFusionLatencyWeight));
     }
 
-    public RobotLocalizationConfig setVisionFusionConfidenceExponent(double visionFusionConfidenceExponent) {
-        return setBackend(backend().withVisionFusionConfidenceExponent(visionFusionConfidenceExponent));
+    private RobotLocalizationConfig applyVisionFusionConfidenceExponent(double visionFusionConfidenceExponent) {
+        return applyBackend(backend().withVisionFusionConfidenceExponent(visionFusionConfidenceExponent));
     }
 
-    public RobotLocalizationConfig setPoseJumpMeters(double poseJumpMeters) {
-        return setBackend(backend().withPoseJumpMeters(poseJumpMeters));
+    private RobotLocalizationConfig applyPoseJumpMeters(double poseJumpMeters) {
+        return applyBackend(backend().withPoseJumpMeters(poseJumpMeters));
     }
 
-    public RobotLocalizationConfig setPoseJumpHoldSeconds(double poseJumpHoldSeconds) {
-        return setBackend(backend().withPoseJumpHoldSeconds(poseJumpHoldSeconds));
+    private RobotLocalizationConfig applyPoseJumpHoldSeconds(double poseJumpHoldSeconds) {
+        return applyBackend(backend().withPoseJumpHoldSeconds(poseJumpHoldSeconds));
     }
 
-    public RobotLocalizationConfig setPoseJumpAgreementMeters(double poseJumpAgreementMeters) {
-        return setBackend(backend().withPoseJumpAgreementMeters(poseJumpAgreementMeters));
+    private RobotLocalizationConfig applyPoseJumpAgreementMeters(double poseJumpAgreementMeters) {
+        return applyBackend(backend().withPoseJumpAgreementMeters(poseJumpAgreementMeters));
     }
 
     public boolean isVisionEnabled() {
@@ -446,7 +930,7 @@ public class RobotLocalizationConfig {
 
     private void normalize() {
         poseSpace = poseSpace != null ? poseSpace : PoseSpace.TWO_D;
-        backend = backend != null ? backend : BackendConfig.defualt();
+        backend = backend != null ? backend : BackendConfig.defaults();
         poseConfigs = poseConfigs != null ? new ArrayList<>(poseConfigs) : new ArrayList<>();
         boundingBoxes = boundingBoxes != null ? new ArrayList<>(boundingBoxes) : new ArrayList<>();
         stateStdDevs = stateStdDevs != null ? stateStdDevs : StdDevs.defaults();
@@ -529,7 +1013,7 @@ public class RobotLocalizationConfig {
             MULTI
         }
 
-        public static BackendConfig defualt() {
+        public static BackendConfig defaults() {
             return new BackendConfig(
                     SlipStrategy.OFF,
                     ImuStrategy.VIRTUAL_AXES,

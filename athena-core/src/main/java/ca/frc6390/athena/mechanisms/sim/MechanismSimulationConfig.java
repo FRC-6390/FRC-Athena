@@ -405,7 +405,7 @@ public final class MechanismSimulationConfig {
                 continue;
             }
             motorCount++;
-            MotorControllerType controllerType = controller.getMotorControllerType();
+            MotorControllerType controllerType = controller.getType();
             if (controllerType == null) {
                 continue;
             }

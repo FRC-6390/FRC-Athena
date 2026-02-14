@@ -69,49 +69,49 @@ public record PhotonVisionConfig(
     /**
      * Returns a copy with a different AprilTag field layout.
      */
-    public PhotonVisionConfig setFieldLayout(AprilTagFields fieldLayout){
+    public PhotonVisionConfig withFieldLayout(AprilTagFields fieldLayout){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with an updated camera transform.
      */
-    public PhotonVisionConfig setCameraRobotSpace(Transform3d cameraRobotSpace){
+    public PhotonVisionConfig withCameraRobotSpace(Transform3d cameraRobotSpace){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with the same transform (legacy helper retained for compatibility).
      */
-    public PhotonVisionConfig setCameraRobotSpace(double x){
+    public PhotonVisionConfig withCameraRobotSpace(double x){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy using the provided NetworkTables table.
      */
-    public PhotonVisionConfig setTable(String table){
+    public PhotonVisionConfig withTable(String table){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with a new primary pose strategy.
      */
-    public PhotonVisionConfig setPoseStrategy(PoseStrategy poseStrategy){
+    public PhotonVisionConfig withPoseStrategy(PoseStrategy poseStrategy){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with a fallback pose strategy used when multi-tag estimates fail.
      */
-    public PhotonVisionConfig setMultiTagPoseStrategyFallback(PoseStrategy poseStrategyFallback){
+    public PhotonVisionConfig withMultiTagPoseStrategyFallback(PoseStrategy poseStrategyFallback){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with a filtered list of tags used for localization.
      */
-    public PhotonVisionConfig setLocalizationTagFilter(Integer... filteredTags){
+    public PhotonVisionConfig withLocalizationTagFilter(Integer... filteredTags){
         var list = new ArrayList<>(Arrays.asList(filteredTags));
         list.add(-1);
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, list,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
@@ -120,14 +120,14 @@ public record PhotonVisionConfig(
     /**
      * Returns a copy toggling whether PhotonVision contributes to localization.
      */
-    public PhotonVisionConfig setUseForLocalization(boolean useForLocalization){
+    public PhotonVisionConfig withUseForLocalization(boolean useForLocalization){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with an updated trust distance (meters).
      */
-    public PhotonVisionConfig setTrustDistance(double trustDistance){
+    public PhotonVisionConfig withTrustDistance(double trustDistance){
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
@@ -145,35 +145,35 @@ public record PhotonVisionConfig(
     /**
      * Returns a copy with an entirely new set of roles.
      */
-    public PhotonVisionConfig setRoles(EnumSet<CameraRole> roles) {
+    public PhotonVisionConfig withRoles(EnumSet<CameraRole> roles) {
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, filteredTags, fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, roles != null ? copyRoles(roles) : EnumSet.noneOf(CameraRole.class), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with an updated pipeline confidence [0, 1].
      */
-    public PhotonVisionConfig setConfidence(double confidence) {
+    public PhotonVisionConfig withConfidence(double confidence) {
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, filteredTags, fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with updated simulated field-of-view angles (degrees).
      */
-    public PhotonVisionConfig setSimFov(double horizontalDeg, double verticalDeg) {
+    public PhotonVisionConfig withSimFov(double horizontalDeg, double verticalDeg) {
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, filteredTags, fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, horizontalDeg, verticalDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
     }
 
     /**
      * Returns a copy with updated simulated camera resolution (pixels).
      */
-    public PhotonVisionConfig setSimResolution(int width, int height) {
+    public PhotonVisionConfig withSimResolution(int width, int height) {
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, filteredTags, fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, width, height, simMaxTargets);
     }
 
     /**
      * Returns a copy with an updated maximum number of simulated targets per frame.
      */
-    public PhotonVisionConfig setSimMaxTargets(int maxTargets) {
+    public PhotonVisionConfig withSimMaxTargets(int maxTargets) {
         return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy, filteredTags, fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, maxTargets);
     }
 

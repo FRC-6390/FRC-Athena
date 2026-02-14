@@ -65,7 +65,7 @@ public final class TelemetryRegistry {
     }
 
     public static TelemetryRegistry create(TelemetryConfig config) {
-        TelemetryConfig resolved = config != null ? config : TelemetryConfig.defualt();
+        TelemetryConfig resolved = config != null ? config : TelemetryConfig.defaults();
         TelemetrySink disk = resolved.isDiskEnabled()
                 ? new DataLogTelemetrySink(resolved.diskPrefix())
                 : null;
@@ -353,7 +353,7 @@ public final class TelemetryRegistry {
             String diskPrefix,
             String networkTablePrefix) {
 
-        public static TelemetryConfig defualt() {
+        public static TelemetryConfig defaults() {
             return new TelemetryConfig(
                     DEFAULT_PERIOD_MS,
                     true,

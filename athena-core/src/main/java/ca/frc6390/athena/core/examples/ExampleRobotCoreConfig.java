@@ -19,13 +19,13 @@ public final class ExampleRobotCoreConfig {
         // NOTE: This is intentionally minimal and may need additional drivetrain module configs
         // to be runnable on a real robot. It exists mainly to ensure the "happy path" API compiles.
         SwerveDrivetrainConfig drivetrain = SwerveDrivetrainConfig.standard(0.6)
-                .setIMU(AthenaImu.PIGEON2, false)
-                .setFieldRelative(true);
+                .hardware(h -> h.imu(AthenaImu.PIGEON2, false))
+                .control(c -> c.fieldRelative(true));
 
         RobotLocalizationConfig localization = RobotLocalizationConfig.vision(0.8, 0.8, 9999)
-                .setAutoPlannerPID(7, 0, 0, 2, 0, 0)
-                .setVisionEnabled(true)
-                .setAutoPoseName("field");
+                .planner(p -> p.autoPlannerPid(7, 0, 0, 2, 0, 0))
+                .estimation(e -> e.visionEnabled(true))
+                .poses(p -> p.autoPoseName("field"));
 
         return RobotCore.RobotCoreConfig.<SwerveDrivetrain>swerve(drivetrain)
                 .setLocalization(localization)

@@ -511,38 +511,6 @@ public final class RobotNetworkTables {
             return this;
         }
 
-        // Backwards-compatible names (older Athena dashboards/tools).
-        public boolean encodersEnabled() {
-            return encoderEnabled();
-        }
-
-        public boolean statusEnabled() {
-            return controlEnabled();
-        }
-
-        public boolean setpointsEnabled() {
-            return controlEnabled();
-        }
-
-        public boolean outputsEnabled() {
-            return controlEnabled();
-        }
-
-        public MechanismToggles encoders(boolean enabled) {
-            return encoder(enabled);
-        }
-
-        public MechanismToggles status(boolean enabled) {
-            return control(enabled);
-        }
-
-        public MechanismToggles setpoints(boolean enabled) {
-            return control(enabled);
-        }
-
-        public MechanismToggles outputs(boolean enabled) {
-            return control(enabled);
-        }
     }
 
     private MechanismToggles createMechanismToggles(Node mechanismNode) {
@@ -572,32 +540,6 @@ public final class RobotNetworkTables {
         NetworkTableEntry inputsEntry = cfg.entry("Inputs");
         NetworkTableEntry simulationEntry = cfg.entry("Simulation");
         NetworkTableEntry sysIdEntry = cfg.entry("SysId");
-
-        // Best-effort migration from older toggle keys (keeps existing dashboard toggles working).
-        NetworkTableEntry legacyEncoders = cfg.entry("Encoders");
-        NetworkTableEntry legacyStatus = cfg.entry("Status");
-        NetworkTableEntry legacySetpoints = cfg.entry("Setpoints");
-        NetworkTableEntry legacyOutputs = cfg.entry("Outputs");
-        if (encoderEntry.getType() == NetworkTableType.kUnassigned && legacyEncoders.getType() != NetworkTableType.kUnassigned) {
-            encoderEntry.setBoolean(legacyEncoders.getBoolean(encoderDefault));
-        }
-        if (controlEntry.getType() == NetworkTableType.kUnassigned) {
-            boolean legacyControl = false;
-            if (legacyStatus.getType() != NetworkTableType.kUnassigned) {
-                legacyControl |= legacyStatus.getBoolean(controlDefault);
-            }
-            if (legacySetpoints.getType() != NetworkTableType.kUnassigned) {
-                legacyControl |= legacySetpoints.getBoolean(controlDefault);
-            }
-            if (legacyOutputs.getType() != NetworkTableType.kUnassigned) {
-                legacyControl |= legacyOutputs.getBoolean(controlDefault);
-            }
-            if (legacyStatus.getType() != NetworkTableType.kUnassigned
-                    || legacySetpoints.getType() != NetworkTableType.kUnassigned
-                    || legacyOutputs.getType() != NetworkTableType.kUnassigned) {
-                controlEntry.setBoolean(legacyControl);
-            }
-        }
 
         initIfAbsent(detailsEntry, detailsDefault);
         initIfAbsent(advancedEntry, advancedDefault);

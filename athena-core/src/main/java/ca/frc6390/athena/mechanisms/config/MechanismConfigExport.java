@@ -202,7 +202,6 @@ public final class MechanismConfigExport {
         }
         String output = data.outputType() != null ? data.outputType().name() : null;
         Boolean setpointAsOutput = data.useSetpointAsOutput();
-        Boolean pidUseVelocity = data.pidUseVelocity();
         Boolean pidContinuous = data.pidContinous();
         Double pidContinuousMin = Double.isFinite(data.continousMin()) ? data.continousMin() : null;
         Double pidContinuousMax = Double.isFinite(data.continousMax()) ? data.continousMax() : null;
@@ -271,14 +270,10 @@ public final class MechanismConfigExport {
         return new MechanismControlConfig(
                 output,
                 setpointAsOutput,
-                pidUseVelocity,
                 pidContinuous,
                 pidContinuousMin,
                 pidContinuousMax,
                 tolerance,
-                null,
-                null,
-                null,
                 pidProfiles,
                 bangBangProfiles,
                 ffProfiles);

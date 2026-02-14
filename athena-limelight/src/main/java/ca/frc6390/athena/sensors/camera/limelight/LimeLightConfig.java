@@ -67,7 +67,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy of this configuration with an updated camera transform.
      */
-    public LimeLightConfig setCameraTransform(Transform3d cameraRobotSpace){
+    public LimeLightConfig withCameraTransform(Transform3d cameraRobotSpace){
         return new LimeLightConfig(
                 table,
                 cameraRobotSpace,
@@ -83,7 +83,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy of this configuration with a different pose estimation strategy.
      */
-    public LimeLightConfig setPoseEstimateType(PoseEstimateWithLatencyType localizationEstimator){
+    public LimeLightConfig withPoseEstimateType(PoseEstimateWithLatencyType localizationEstimator){
         return new LimeLightConfig(
                 table,
                 cameraRobotSpace,
@@ -99,7 +99,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy of this configuration with a list of tags excluded from localization.
      */
-    public LimeLightConfig setLocalizationTagFilter(int... filteredTags){
+    public LimeLightConfig withLocalizationTagFilter(int... filteredTags){
         return new LimeLightConfig(
                 table,
                 cameraRobotSpace,
@@ -115,7 +115,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy with an updated underlying AprilTag field layout.
      */
-    public LimeLightConfig setFieldLayout(AprilTagFields fieldLayout) {
+    public LimeLightConfig withFieldLayout(AprilTagFields fieldLayout) {
         return new LimeLightConfig(
                 table,
                 cameraRobotSpace,
@@ -131,7 +131,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy that toggles whether Limelight measurements feed localization.
      */
-    public LimeLightConfig setUseForLocalization(boolean useForLocalization){
+    public LimeLightConfig withUseForLocalization(boolean useForLocalization){
         return new LimeLightConfig(
                 table,
                 cameraRobotSpace,
@@ -147,7 +147,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy with an updated trust distance (meters).
      */
-    public LimeLightConfig setTrustDistance(double trustDistance){
+    public LimeLightConfig withTrustDistance(double trustDistance){
         return new LimeLightConfig(
                 table,
                 cameraRobotSpace,
@@ -183,7 +183,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy with an entirely new set of roles.
      */
-    public LimeLightConfig setRoles(EnumSet<CameraRole> newRoles) {
+    public LimeLightConfig withRoles(EnumSet<CameraRole> newRoles) {
         EnumSet<CameraRole> copy = newRoles != null ? copyRoles(newRoles) : EnumSet.noneOf(CameraRole.class);
         return new LimeLightConfig(
                 table,
@@ -200,7 +200,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy with an updated pipeline confidence [0, 1].
      */
-    public LimeLightConfig setConfidence(double confidence) {
+    public LimeLightConfig withConfidence(double confidence) {
         return new LimeLightConfig(
                 table,
                 cameraRobotSpace,
@@ -226,7 +226,7 @@ public record LimeLightConfig(
     /**
      * Returns a copy with the robot-space camera transform replaced.
      */
-    public LimeLightConfig setCameraRobotSpace(Transform3d transform) {
+    public LimeLightConfig withCameraRobotSpace(Transform3d transform) {
         return new LimeLightConfig(
                 table,
                 transform,

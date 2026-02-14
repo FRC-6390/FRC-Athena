@@ -5,20 +5,16 @@ import java.util.List;
 /**
  * Control configuration for the mechanism.
  *
- * <p>This focuses on "base" control: output type and optional PID/FF profiles that can be selected
- * by name. Custom loops and hooks remain code-only.
+ * <p>This focuses on "base" control and named controller registrations. Custom loops and hooks
+ * remain code-only.
  */
 public record MechanismControlConfig(
         String output,
         Boolean setpointAsOutput,
-        Boolean pidUseVelocity,
         Boolean pidContinuous,
         Double pidContinuousMin,
         Double pidContinuousMax,
         Double tolerance,
-        String pidProfile,
-        String bangBangProfile,
-        String ffProfile,
         List<MechanismPidConfig> pidProfiles,
         List<MechanismBangBangConfig> bangBangProfiles,
         List<MechanismFeedforwardConfig> ffProfiles

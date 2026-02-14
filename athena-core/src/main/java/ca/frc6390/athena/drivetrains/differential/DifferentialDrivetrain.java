@@ -295,7 +295,7 @@ public class DifferentialDrivetrain extends SubsystemBase implements RobotDrivet
 
      @Override
     public RobotLocalization<DifferentialDriveWheelPositions> localization(RobotLocalizationConfig config) {
-        RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defualt();
+        RobotLocalizationConfig effectiveConfig = config != null ? config : RobotLocalizationConfig.defaults();
         PoseEstimatorFactory<DifferentialDriveWheelPositions> factory = new PoseEstimatorFactory<>() {
             @Override
             public DifferentialDrivePoseEstimator create2d(

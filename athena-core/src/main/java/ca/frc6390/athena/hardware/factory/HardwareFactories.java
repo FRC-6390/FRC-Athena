@@ -23,34 +23,43 @@ public final class HardwareFactories {
     private HardwareFactories() {}
 
     public static MotorController motor(MotorControllerConfig config) {
+        if (config == null || config.type() == null) {
+            throw new IllegalArgumentException("Motor controller config type is required.");
+        }
         MotorController raw = MOTOR_FACTORIES.stream()
                 .map(ServiceLoader.Provider::get)
-                .filter(f -> f.supports(config.type))
+                .filter(f -> f.supports(config.type()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(
-                        "No motor factory for type: " + config.type.getKey()))
+                        "No motor factory for type: " + config.type().getKey()))
                 .create(config);
         return ca.frc6390.athena.hardware.motor.MotorControllerAdapter.wrap(raw, config);
     }
 
     public static Encoder encoder(EncoderConfig config) {
+        if (config == null || config.type() == null) {
+            throw new IllegalArgumentException("Encoder config type is required.");
+        }
         Encoder raw = ENCODER_FACTORIES.stream()
                 .map(ServiceLoader.Provider::get)
-                .filter(f -> f.supports(config.type))
+                .filter(f -> f.supports(config.type()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(
-                        "No encoder factory for type: " + config.type.getKey()))
+                        "No encoder factory for type: " + config.type().getKey()))
                 .create(config);
         return ca.frc6390.athena.hardware.encoder.EncoderAdapter.wrap(raw, config);
     }
 
     public static Imu imu(ImuConfig config) {
+        if (config == null || config.type() == null) {
+            throw new IllegalArgumentException("IMU config type is required.");
+        }
         Imu raw = IMU_FACTORIES.stream()
                 .map(ServiceLoader.Provider::get)
-                .filter(f -> f.supports(config.type))
+                .filter(f -> f.supports(config.type()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(
-                        "No IMU factory for type: " + config.type.getKey()))
+                        "No IMU factory for type: " + config.type().getKey()))
                 .create(config);
         return ca.frc6390.athena.hardware.imu.ImuAdapter.wrap(raw, config);
     }

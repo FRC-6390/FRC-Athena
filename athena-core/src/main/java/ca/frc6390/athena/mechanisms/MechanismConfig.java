@@ -59,13 +59,6 @@ public class MechanismConfig<T extends Mechanism> {
 
     private MechanismConfigRecord data = MechanismConfigRecord.defaults();
     private String mechanismName;
-    // Selected "main" control profiles used by the built-in mechanism PID/FF implementations.
-    // These are optional; teams can also drive output entirely via custom control loops.
-    private String mainPidProfileName;
-    private String mainBangBangProfileName;
-    private String mainSimpleFeedforwardProfileName;
-    private String mainArmFeedforwardProfileName;
-    private String mainElevatorFeedforwardProfileName;
     /**
      * When true, turret factory helpers will auto-enable continuous PID input for unbounded turrets
      * using the configured encoder conversion as the wrap span (e.g. 360 degrees, 2*pi radians).
@@ -106,13 +99,13 @@ public class MechanismConfig<T extends Mechanism> {
     public List<ControlLoopBinding<T>> controlLoops = new ArrayList<>();
     /** Optional named PID profiles for control-loop usage. */
     public Map<String, PidProfile> controlLoopPidProfiles = new HashMap<>();
-    /** Optional named bang-bang profiles for control-loop usage and/or main closed-loop control. */
+    /** Optional named bang-bang profiles for control-loop usage. */
     public Map<String, BangBangProfile> controlLoopBangBangProfiles = new HashMap<>();
-    /** Optional named simple-motor feedforward profiles for control-loop usage (and simple-motor main FF). */
+    /** Optional named simple-motor feedforward profiles for control-loop usage. */
     public Map<String, FeedforwardProfile> controlLoopFeedforwardProfiles = new HashMap<>();
-    /** Optional named arm feedforward profiles (for ArmMechanism main FF). */
+    /** Optional named arm feedforward profiles for control-loop usage. */
     public Map<String, ArmFeedforwardProfile> armFeedforwardProfiles = new HashMap<>();
-    /** Optional named elevator feedforward profiles (for ElevatorMechanism main FF). */
+    /** Optional named elevator feedforward profiles for control-loop usage. */
     public Map<String, ElevatorFeedforwardProfile> elevatorFeedforwardProfiles = new HashMap<>();
     /** Optional boolean inputs exposed to state hooks. */
     public Map<String, BooleanSupplier> inputs = new HashMap<>();
@@ -158,73 +151,6 @@ public class MechanismConfig<T extends Mechanism> {
     public MechanismSensorSimulationConfig sensorSimulationConfig = null;
     public boolean shouldCustomEncoder = false;
     public DoubleSupplier customEncoderPos;
-    FeedforwardProfile resolveMainSimpleFeedforwardProfile() {
-        if (mainSimpleFeedforwardProfileName == null || mainSimpleFeedforwardProfileName.isBlank()) {
-            return null;
-        }
-        FeedforwardProfile profile = controlLoopFeedforwardProfiles.get(mainSimpleFeedforwardProfileName);
-        if (profile == null) {
-            throw new IllegalStateException("Main feedforward profile selected but not registered: " + mainSimpleFeedforwardProfileName);
-        }
-        return profile;
-    }
-
-    ArmFeedforwardProfile resolveMainArmFeedforwardProfile() {
-        if (mainArmFeedforwardProfileName == null || mainArmFeedforwardProfileName.isBlank()) {
-            return null;
-        }
-        ArmFeedforwardProfile profile = armFeedforwardProfiles.get(mainArmFeedforwardProfileName);
-        if (profile == null) {
-            throw new IllegalStateException("Main arm feedforward profile selected but not registered: " + mainArmFeedforwardProfileName);
-        }
-        return profile;
-    }
-
-    ElevatorFeedforwardProfile resolveMainElevatorFeedforwardProfile() {
-        if (mainElevatorFeedforwardProfileName == null || mainElevatorFeedforwardProfileName.isBlank()) {
-            return null;
-        }
-        ElevatorFeedforwardProfile profile = elevatorFeedforwardProfiles.get(mainElevatorFeedforwardProfileName);
-        if (profile == null) {
-            throw new IllegalStateException("Main elevator feedforward profile selected but not registered: " + mainElevatorFeedforwardProfileName);
-        }
-        return profile;
-    }
-
-    PidProfile resolveMainPidProfile() {
-        if (mainPidProfileName == null || mainPidProfileName.isBlank()) {
-            return null;
-        }
-        return controlLoopPidProfiles.get(mainPidProfileName);
-    }
-
-    BangBangProfile resolveMainBangBangProfile() {
-        if (mainBangBangProfileName == null || mainBangBangProfileName.isBlank()) {
-            return null;
-        }
-        return controlLoopBangBangProfiles.get(mainBangBangProfileName);
-    }
-
-    String mainPidProfileName() {
-        return mainPidProfileName;
-    }
-
-    String mainBangBangProfileName() {
-        return mainBangBangProfileName;
-    }
-
-    String mainSimpleFeedforwardProfileName() {
-        return mainSimpleFeedforwardProfileName;
-    }
-
-    String mainArmFeedforwardProfileName() {
-        return mainArmFeedforwardProfileName;
-    }
-
-    String mainElevatorFeedforwardProfileName() {
-        return mainElevatorFeedforwardProfileName;
-    }
-
     /**
      * Loads a JSON/TOML deploy-file mechanism config into this builder and applies it using
      * {@link MechanismConfigApplier}. This is intended for teams to keep hardware/constants in deploy
@@ -333,7 +259,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         public MotorsSection<T> add(AthenaMotor motor, int id) {
-            owner.data.motors().add(new MotorControllerConfig(motor.resolveController(), id));
+            owner.data.motors().add(MotorControllerConfig.create(motor.resolveController(), id));
             return this;
         }
 
@@ -341,7 +267,7 @@ public class MechanismConfig<T extends Mechanism> {
          * Adds a motor controller using a {@link MotorControllerType} registry key (data-only / deploy-friendly).
          */
         public MotorsSection<T> add(MotorControllerType type, int id) {
-            owner.data.motors().add(new MotorControllerConfig(type, id));
+            owner.data.motors().add(MotorControllerConfig.create(type, id));
             return this;
         }
 
@@ -408,7 +334,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         public EncoderSection<T> encoder(AthenaEncoder type, int id) {
-            config(ca.frc6390.athena.hardware.encoder.EncoderConfig.type(type.resolve(), id));
+            config(ca.frc6390.athena.hardware.encoder.EncoderConfig.create(type.resolve(), id));
             return this;
         }
 
@@ -757,11 +683,6 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        public ControlSection<T> pidUseVelocity(boolean useVelocity) {
-            owner.updateData(builder -> builder.pidUseVelocity(useVelocity));
-            return this;
-        }
-
         public ControlSection<T> setpointAsOutput(boolean enabled) {
             owner.updateData(builder -> builder.useSetpointAsOutput(enabled));
             return this;
@@ -795,104 +716,217 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         /**
-         * Registers a named PID profile for use by custom control loops and/or the mechanism's main PID.
-         *
-         * <p>Output type defaults to {@link OutputType#PERCENT}. Most teams will want {@link OutputType#VOLTAGE}
-         * if they tune gains in volts.</p>
+         * Registers a periodic loop bound to the uniquely named controller entry.
          */
-        public ControlSection<T> pidProfile(String name, double kP, double kI, double kD) {
-            return pidProfile(name, OutputType.PERCENT, kP, kI, kD, Double.NaN, Double.NaN);
+        public ControlSection<T> periodic(String name) {
+            return registerPeriodic(name, periodMillisFromConfig(), name);
         }
 
-        public ControlSection<T> pidProfile(String name, OutputType outputType, double kP, double kI, double kD) {
-            return pidProfile(name, outputType, kP, kI, kD, Double.NaN, Double.NaN);
+        /**
+         * Registers a periodic loop with explicit period (milliseconds) bound to the uniquely named
+         * controller entry.
+         */
+        public ControlSection<T> periodic(String name, double periodMs) {
+            return registerPeriodic(name, periodMs, name);
         }
 
-        public ControlSection<T> pidProfile(String name, double kP, double kI, double kD, double iZone) {
-            return pidProfile(name, OutputType.PERCENT, kP, kI, kD, iZone, Double.NaN);
-        }
-
-        public ControlSection<T> pidProfile(String name, OutputType outputType, double kP, double kI, double kD, double iZone) {
-            return pidProfile(name, outputType, kP, kI, kD, iZone, Double.NaN);
-        }
-
-        public ControlSection<T> pidProfile(String name, double kP, double kI, double kD, double iZone, double tolerance) {
-            return pidProfile(name, OutputType.PERCENT, kP, kI, kD, iZone, tolerance);
-        }
-
-        public ControlSection<T> pidProfile(String name, OutputType outputType, double kP, double kI, double kD, double iZone, double tolerance) {
-            Objects.requireNonNull(name, "name");
-            if (name.isBlank()) {
-                throw new IllegalArgumentException("PID profile name cannot be blank");
+        private ControlSection<T> registerPeriodic(
+                String loopName,
+                double periodMs,
+                String controllerName) {
+            String normalizedName = normalizeName(controllerName);
+            if (normalizedName == null) {
+                throw new IllegalArgumentException("periodic controller name cannot be blank");
             }
+            boolean hasPid = owner.controlLoopPidProfiles.containsKey(normalizedName);
+            boolean hasBangBang = owner.controlLoopBangBangProfiles.containsKey(normalizedName);
+            boolean hasFf = owner.controlLoopFeedforwardProfiles.containsKey(normalizedName);
+            int matches = (hasPid ? 1 : 0) + (hasBangBang ? 1 : 0) + (hasFf ? 1 : 0);
+            if (matches == 0) {
+                throw new IllegalArgumentException("No controller registered with name: " + normalizedName);
+            }
+            if (matches > 1) {
+                throw new IllegalStateException(
+                        "Controller name '" + normalizedName + "' collides across control registries");
+            }
+            return controlLoop(loopName, periodMs, ctx -> {
+                double measurement = ctx.mechanism().getPidMeasurement();
+                double setpoint = ctx.mechanism().getSetpoint() + ctx.mechanism().getNudge();
+                double output = 0.0;
+                if (hasPid) {
+                    output += ctx.pidOut(normalizedName, measurement, setpoint);
+                }
+                if (hasBangBang) {
+                    output += ctx.bangBangOut(normalizedName, measurement, setpoint);
+                }
+                if (hasFf) {
+                    output += ctx.feedforwardOut(normalizedName, setpoint);
+                }
+                return output;
+            });
+        }
+
+        private static String normalizeName(String name) {
+            if (name == null) {
+                return null;
+            }
+            String trimmed = name.trim();
+            return trimmed.isEmpty() ? null : trimmed;
+        }
+
+        private double periodMillisFromConfig() {
+            double configured = owner.data.pidPeriod();
+            double seconds = (Double.isFinite(configured) && configured > 0.0) ? configured : 0.02;
+            return seconds * 1000.0;
+        }
+
+        public ControlSection<T> pid(String name, double kP, double kI, double kD) {
+            return registerPid(name, OutputType.PERCENT, kP, kI, kD, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+        }
+
+        public ControlSection<T> pid(String name, OutputType outputType, double kP, double kI, double kD) {
+            return registerPid(name, outputType, kP, kI, kD, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+        }
+
+        public ControlSection<T> pid(String name, double kP, double kI, double kD, double iZone, double tolerance) {
+            return registerPid(name, OutputType.PERCENT, kP, kI, kD, iZone, tolerance, Double.NaN, Double.NaN);
+        }
+
+        public ControlSection<T> pid(String name, OutputType outputType, double kP, double kI, double kD, double iZone, double tolerance) {
+            return registerPid(name, outputType, kP, kI, kD, iZone, tolerance, Double.NaN, Double.NaN);
+        }
+
+        public ControlSection<T> pid(String name, Consumer<PidBuilder> builder) {
+            Objects.requireNonNull(name, "name");
+            PidBuilder spec = new PidBuilder();
+            if (builder != null) {
+                builder.accept(spec);
+            }
+            return registerPid(
+                    name,
+                    spec.outputType,
+                    spec.kP,
+                    spec.kI,
+                    spec.kD,
+                    spec.iZone,
+                    spec.tolerance,
+                    spec.maxVelocity,
+                    spec.maxAcceleration);
+        }
+
+        public ControlSection<T> bangBang(String name, double output) {
+            return registerBangBang(name, OutputType.PERCENT, output, -output, 0.0);
+        }
+
+        public ControlSection<T> bangBang(String name, double output, double tolerance) {
+            return registerBangBang(name, OutputType.PERCENT, output, -output, tolerance);
+        }
+
+        public ControlSection<T> bangBang(String name, OutputType outputType, double output, double tolerance) {
+            return registerBangBang(name, outputType, output, -output, tolerance);
+        }
+
+        public ControlSection<T> bangBang(String name, OutputType outputType, double highOutput, double lowOutput, double tolerance) {
+            return registerBangBang(name, outputType, highOutput, lowOutput, tolerance);
+        }
+
+        public ControlSection<T> bangBang(String name, Consumer<BangBangBuilder> builder) {
+            Objects.requireNonNull(name, "name");
+            BangBangBuilder spec = new BangBangBuilder();
+            if (builder != null) {
+                builder.accept(spec);
+            }
+            double high = spec.highOutputSet ? spec.highOutput : spec.outputLevel;
+            double low;
+            if (spec.lowOutputSet) {
+                low = spec.lowOutput;
+            } else if (spec.highOutputSet) {
+                low = -high;
+            } else {
+                low = -spec.outputLevel;
+            }
+            return registerBangBang(name, spec.outputType, high, low, spec.tolerance);
+        }
+
+        public ControlSection<T> ff(String name, double kS, double kV, double kA) {
+            return registerFeedforward(name, OutputType.VOLTAGE, kS, kV, kA);
+        }
+
+        public ControlSection<T> ff(String name, OutputType outputType, double kS, double kV, double kA) {
+            return registerFeedforward(name, outputType, kS, kV, kA);
+        }
+
+        public ControlSection<T> ff(String name, Consumer<FeedforwardBuilder> builder) {
+            Objects.requireNonNull(name, "name");
+            FeedforwardBuilder spec = new FeedforwardBuilder();
+            if (builder != null) {
+                builder.accept(spec);
+            }
+            return registerFeedforward(name, spec.outputType, spec.kS, spec.kV, spec.kA);
+        }
+
+        private ControlSection<T> registerPid(
+                String name,
+                OutputType outputType,
+                double kP,
+                double kI,
+                double kD,
+                double iZone,
+                double tolerance,
+                double maxVelocity,
+                double maxAcceleration) {
+            Objects.requireNonNull(name, "name");
+            String normalized = normalizeName(name);
+            if (normalized == null) {
+                throw new IllegalArgumentException("PID name cannot be blank");
+            }
+            assertControllerNameAvailable(normalized, "PID");
             OutputType resolvedOutput = outputType != null ? outputType : OutputType.PERCENT;
             if (resolvedOutput != OutputType.PERCENT && resolvedOutput != OutputType.VOLTAGE) {
-                throw new IllegalArgumentException("PID profile output type must be PERCENT or VOLTAGE");
+                throw new IllegalArgumentException("PID output type must be PERCENT or VOLTAGE");
             }
-            owner.controlLoopPidProfiles.put(name, new PidProfile(resolvedOutput, kP, kI, kD, iZone, tolerance));
+            boolean hasProfiledVelocity = Double.isFinite(maxVelocity) && maxVelocity > 0.0;
+            boolean hasProfiledAcceleration = Double.isFinite(maxAcceleration) && maxAcceleration > 0.0;
+            if (hasProfiledVelocity != hasProfiledAcceleration) {
+                throw new IllegalArgumentException(
+                        "PID constraints require both maxVelocity and maxAcceleration (both > 0)");
+            }
+            if ((Double.isFinite(maxVelocity) && maxVelocity <= 0.0)
+                    || (Double.isFinite(maxAcceleration) && maxAcceleration <= 0.0)) {
+                throw new IllegalArgumentException("PID constraints must be > 0 when provided");
+            }
+            owner.controlLoopPidProfiles.put(
+                    normalized,
+                    new PidProfile(
+                            resolvedOutput,
+                            kP,
+                            kI,
+                            kD,
+                            iZone,
+                            tolerance,
+                            maxVelocity,
+                            maxAcceleration));
             return this;
         }
 
-        /**
-         * Selects which named PID profile should be used by the mechanism's built-in PID (if any).
-         */
-        public ControlSection<T> mainPid(String name) {
-            Objects.requireNonNull(name, "name");
-            if (name.isBlank()) {
-                throw new IllegalArgumentException("main PID profile name cannot be blank");
-            }
-            owner.mainPidProfileName = name;
-            return this;
-        }
-
-        /**
-         * Registers a named bang-bang profile.
-         *
-         * <p>This overload creates a symmetric profile: +output when below setpoint, -output when
-         * above setpoint, and 0 inside tolerance.</p>
-         */
-        public ControlSection<T> bangBangProfile(String name, double output) {
-            return bangBangProfile(name, output, 0.0);
-        }
-
-        public ControlSection<T> bangBangProfile(String name, double output, double tolerance) {
-            return bangBangProfile(name, OutputType.PERCENT, output, -output, tolerance);
-        }
-
-        public ControlSection<T> bangBangProfile(String name, OutputType outputType, double output, double tolerance) {
-            return bangBangProfile(name, outputType, output, -output, tolerance);
-        }
-
-        /**
-         * Registers a named bang-bang profile with explicit high/low outputs.
-         *
-         * <p>{@code highOutput} is applied when measurement is below setpoint-tolerance.
-         * {@code lowOutput} is applied when measurement is above setpoint+tolerance.</p>
-         */
-        public ControlSection<T> bangBangProfile(
-                String name,
-                double highOutput,
-                double lowOutput,
-                double tolerance) {
-            return bangBangProfile(name, OutputType.PERCENT, highOutput, lowOutput, tolerance);
-        }
-
-        public ControlSection<T> bangBangProfile(
+        private ControlSection<T> registerBangBang(
                 String name,
                 OutputType outputType,
                 double highOutput,
                 double lowOutput,
                 double tolerance) {
             Objects.requireNonNull(name, "name");
-            if (name.isBlank()) {
-                throw new IllegalArgumentException("bang-bang profile name cannot be blank");
+            String normalized = normalizeName(name);
+            if (normalized == null) {
+                throw new IllegalArgumentException("bang-bang name cannot be blank");
             }
+            assertControllerNameAvailable(normalized, "bang-bang");
             OutputType resolvedOutput = outputType != null ? outputType : OutputType.PERCENT;
             if (resolvedOutput != OutputType.PERCENT && resolvedOutput != OutputType.VOLTAGE) {
-                throw new IllegalArgumentException("bang-bang profile output type must be PERCENT or VOLTAGE");
+                throw new IllegalArgumentException("bang-bang output type must be PERCENT or VOLTAGE");
             }
             owner.controlLoopBangBangProfiles.put(
-                    name,
+                    normalized,
                     new BangBangProfile(
                             resolvedOutput,
                             highOutput,
@@ -901,37 +935,30 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        /**
-         * Selects which named bang-bang profile should be used by the mechanism's built-in closed-loop control.
-         */
-        public ControlSection<T> mainBangBang(String name) {
+        private ControlSection<T> registerFeedforward(
+                String name,
+                OutputType outputType,
+                double kS,
+                double kV,
+                double kA) {
             Objects.requireNonNull(name, "name");
-            if (name.isBlank()) {
-                throw new IllegalArgumentException("main bang-bang profile name cannot be blank");
+            String normalized = normalizeName(name);
+            if (normalized == null) {
+                throw new IllegalArgumentException("feedforward name cannot be blank");
             }
-            owner.mainBangBangProfileName = name;
-            return this;
-        }
-
-        public ControlSection<T> feedforwardProfile(String name, double kS, double kV, double kA) {
-            return feedforwardProfile(name, OutputType.VOLTAGE, kS, kV, kA);
-        }
-
-        public ControlSection<T> feedforwardProfile(String name, OutputType outputType, double kS, double kV, double kA) {
-            Objects.requireNonNull(name, "name");
-            if (name.isBlank()) {
-                throw new IllegalArgumentException("feedforward profile name cannot be blank");
-            }
+            assertControllerNameAvailable(normalized, "feedforward");
             OutputType resolvedOutput = outputType != null ? outputType : OutputType.VOLTAGE;
             if (resolvedOutput != OutputType.VOLTAGE) {
-                throw new IllegalArgumentException("feedforward profile output type must be VOLTAGE");
+                throw new IllegalArgumentException("feedforward output type must be VOLTAGE");
             }
-            owner.controlLoopFeedforwardProfiles.put(name, new FeedforwardProfile(resolvedOutput, new SimpleMotorFeedforward(kS, kV, kA)));
+            owner.controlLoopFeedforwardProfiles.put(
+                    normalized,
+                    new FeedforwardProfile(resolvedOutput, new SimpleMotorFeedforward(kS, kV, kA)));
             return this;
         }
 
         /**
-         * Registers a named arm feedforward profile (usable by ArmMechanism main FF).
+         * Registers a named arm feedforward profile for loop use.
          */
         public ControlSection<T> armFeedforwardProfile(String name, double kS, double kG, double kV, double kA) {
             return armFeedforwardProfile(name, OutputType.VOLTAGE, new ArmFeedforward(kS, kG, kV, kA));
@@ -943,6 +970,7 @@ public class MechanismConfig<T extends Mechanism> {
                 throw new IllegalArgumentException("arm feedforward profile name cannot be blank");
             }
             Objects.requireNonNull(feedforward, "feedforward");
+            assertControllerNameAvailable(name, "arm feedforward");
             OutputType resolvedOutput = outputType != null ? outputType : OutputType.VOLTAGE;
             if (resolvedOutput != OutputType.VOLTAGE) {
                 throw new IllegalArgumentException("arm feedforward profile output type must be VOLTAGE");
@@ -952,7 +980,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         /**
-         * Registers a named elevator feedforward profile (usable by ElevatorMechanism main FF).
+         * Registers a named elevator feedforward profile for loop use.
          */
         public ControlSection<T> elevatorFeedforwardProfile(String name, double kS, double kG, double kV, double kA) {
             return elevatorFeedforwardProfile(name, OutputType.VOLTAGE, new ElevatorFeedforward(kS, kG, kV, kA));
@@ -964,6 +992,7 @@ public class MechanismConfig<T extends Mechanism> {
                 throw new IllegalArgumentException("elevator feedforward profile name cannot be blank");
             }
             Objects.requireNonNull(feedforward, "feedforward");
+            assertControllerNameAvailable(name, "elevator feedforward");
             OutputType resolvedOutput = outputType != null ? outputType : OutputType.VOLTAGE;
             if (resolvedOutput != OutputType.VOLTAGE) {
                 throw new IllegalArgumentException("elevator feedforward profile output type must be VOLTAGE");
@@ -972,36 +1001,135 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        /**
-         * Selects which named simple-motor feedforward profile should be used by the mechanism's built-in FF
-         * (SimpleMotorMechanism/Flywheel/Turret).
-         */
-        public ControlSection<T> mainSimpleFeedforward(String name) {
-            Objects.requireNonNull(name, "name");
-            if (name.isBlank()) {
-                throw new IllegalArgumentException("main feedforward profile name cannot be blank");
+        private void assertControllerNameAvailable(String name, String kind) {
+            String normalized = normalizeName(name);
+            if (normalized == null) {
+                throw new IllegalArgumentException(kind + " name cannot be blank");
             }
-            owner.mainSimpleFeedforwardProfileName = name;
-            return this;
+            if (owner.controlLoopPidProfiles.containsKey(normalized)
+                    || owner.controlLoopBangBangProfiles.containsKey(normalized)
+                    || owner.controlLoopFeedforwardProfiles.containsKey(normalized)
+                    || owner.armFeedforwardProfiles.containsKey(normalized)
+                    || owner.elevatorFeedforwardProfiles.containsKey(normalized)) {
+                throw new IllegalArgumentException(
+                        "Controller name already registered: " + normalized + " (must be unique across all controllers)");
+            }
         }
 
-        public ControlSection<T> mainArmFeedforward(String name) {
-            Objects.requireNonNull(name, "name");
-            if (name.isBlank()) {
-                throw new IllegalArgumentException("main arm feedforward profile name cannot be blank");
+        public static final class PidBuilder {
+            private OutputType outputType = OutputType.PERCENT;
+            private double kP = 0.0;
+            private double kI = 0.0;
+            private double kD = 0.0;
+            private double iZone = Double.NaN;
+            private double tolerance = Double.NaN;
+            private double maxVelocity = Double.NaN;
+            private double maxAcceleration = Double.NaN;
+
+            public PidBuilder output(OutputType outputType) {
+                this.outputType = outputType != null ? outputType : OutputType.PERCENT;
+                return this;
             }
-            owner.mainArmFeedforwardProfileName = name;
-            return this;
+
+            public PidBuilder kp(double kP) {
+                this.kP = kP;
+                return this;
+            }
+
+            public PidBuilder ki(double kI) {
+                this.kI = kI;
+                return this;
+            }
+
+            public PidBuilder kd(double kD) {
+                this.kD = kD;
+                return this;
+            }
+
+            public PidBuilder iZone(double iZone) {
+                this.iZone = iZone;
+                return this;
+            }
+
+            public PidBuilder tolerance(double tolerance) {
+                this.tolerance = tolerance;
+                return this;
+            }
+
+            /**
+             * Enables a profiled PID controller for this PID entry.
+             */
+            public PidBuilder constraints(double maxVelocity, double maxAcceleration) {
+                this.maxVelocity = maxVelocity;
+                this.maxAcceleration = maxAcceleration;
+                return this;
+            }
         }
 
-        public ControlSection<T> mainElevatorFeedforward(String name) {
-            Objects.requireNonNull(name, "name");
-            if (name.isBlank()) {
-                throw new IllegalArgumentException("main elevator feedforward profile name cannot be blank");
+        public static final class FeedforwardBuilder {
+            private OutputType outputType = OutputType.VOLTAGE;
+            private double kS = 0.0;
+            private double kV = 0.0;
+            private double kA = 0.0;
+
+            public FeedforwardBuilder output(OutputType outputType) {
+                this.outputType = outputType != null ? outputType : OutputType.VOLTAGE;
+                return this;
             }
-            owner.mainElevatorFeedforwardProfileName = name;
-            return this;
+
+            public FeedforwardBuilder ks(double kS) {
+                this.kS = kS;
+                return this;
+            }
+
+            public FeedforwardBuilder kv(double kV) {
+                this.kV = kV;
+                return this;
+            }
+
+            public FeedforwardBuilder ka(double kA) {
+                this.kA = kA;
+                return this;
+            }
         }
+
+        public static final class BangBangBuilder {
+            private OutputType outputType = OutputType.PERCENT;
+            private double outputLevel = 0.0;
+            private double highOutput = 0.0;
+            private double lowOutput = 0.0;
+            private boolean highOutputSet;
+            private boolean lowOutputSet;
+            private double tolerance = 0.0;
+
+            public BangBangBuilder output(OutputType outputType) {
+                this.outputType = outputType != null ? outputType : OutputType.PERCENT;
+                return this;
+            }
+
+            public BangBangBuilder level(double outputLevel) {
+                this.outputLevel = outputLevel;
+                return this;
+            }
+
+            public BangBangBuilder high(double highOutput) {
+                this.highOutput = highOutput;
+                this.highOutputSet = true;
+                return this;
+            }
+
+            public BangBangBuilder low(double lowOutput) {
+                this.lowOutput = lowOutput;
+                this.lowOutputSet = true;
+                return this;
+            }
+
+            public BangBangBuilder tolerance(double tolerance) {
+                this.tolerance = tolerance;
+                return this;
+            }
+        }
+
     }
 
     public static final class SimSection<T extends Mechanism> {
@@ -1691,16 +1819,10 @@ public class MechanismConfig<T extends Mechanism> {
     /**
      * Creates a configuration that will build an {@link ElevatorMechanism} with optional feedforward control.
      *
-     * <p>Feedforward is selected via {@link #control(Consumer)} using
-     * {@code .elevatorFeedforwardProfile(...).mainElevatorFeedforward(...)}.</p>
+     * <p>Control behavior is defined via explicit periodic/custom control loops.</p>
      */
     public static MechanismConfig<ElevatorMechanism> elevator() {
-        return custom(config -> {
-            ElevatorFeedforwardProfile ff = config.resolveMainElevatorFeedforwardProfile();
-            return new ElevatorMechanism(config,
-                    ff != null ? ff.feedforward() : null,
-                    ff != null ? ff.outputType() : null);
-        });
+        return custom(config -> new ElevatorMechanism(config, null, null));
     }
 
     /**
@@ -1718,20 +1840,13 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Builds a stateful elevator configuration with an initial state and feedforward gains.
+     * Builds a stateful elevator configuration with an initial state.
      *
-     * @param feedforward feedforward model tuned for the elevator
      * @param initialState state machine starting point
      * @param <E> state enum type that provides setpoints
      */
     public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(E initialState) {
-        return custom(config -> {
-            ElevatorFeedforwardProfile ff = config.resolveMainElevatorFeedforwardProfile();
-            return new StatefulElevatorMechanism<>(config,
-                    ff != null ? ff.feedforward() : null,
-                    ff != null ? ff.outputType() : null,
-                    initialState);
-        });
+        return custom(config -> new StatefulElevatorMechanism<>(config, null, null, initialState));
     }
 
     /**
@@ -1751,20 +1866,13 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Builds a stateful arm configuration that uses the provided feedforward model.
+     * Builds a stateful arm configuration with an initial state.
      *
-     * @param feedforward feedforward model tuned for the arm
      * @param initialState starting state for the state machine
      * @param <E> state enum type that provides setpoints
      */
     public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulArmMechanism<E>> statefulArm(E initialState) {
-        return custom(config -> {
-            ArmFeedforwardProfile ff = config.resolveMainArmFeedforwardProfile();
-            return new StatefulArmMechanism<>(config,
-                    ff != null ? ff.feedforward() : null,
-                    ff != null ? ff.outputType() : null,
-                    initialState);
-        });
+        return custom(config -> new StatefulArmMechanism<>(config, null, null, initialState));
     }
 
     /**
@@ -1784,22 +1892,15 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Builds a stateful turret configuration (simple motor with continuous rotation) with feedforward support.
+     * Builds a stateful turret configuration (simple motor with continuous rotation).
      *
-     * @param feedforward feedforward model tuned for the mechanism
      * @param initialState starting state for the state machine
      * @param <E> state enum type that provides setpoints
      */
     public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(E initialState) {
         MechanismConfig<StatefulTurretMechanism<E>> cfg =
                 MechanismConfig.<StatefulTurretMechanism<E>>custom(
-                        config -> {
-                            FeedforwardProfile ff = config.resolveMainSimpleFeedforwardProfile();
-                            return new StatefulTurretMechanism<>(config,
-                                    ff != null ? ff.feedforward() : null,
-                                    ff != null ? ff.outputType() : null,
-                                    initialState);
-                        });
+                        config -> new StatefulTurretMechanism<>(config, null, null, initialState));
         cfg.autoContinuousPidForUnboundedTurret = true;
         return cfg;
     }
@@ -1827,20 +1928,13 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Builds a stateful flywheel configuration with feedforward support.
+     * Builds a stateful flywheel configuration with an initial state.
      *
-     * @param feedforward feedforward model tuned for the flywheel
      * @param initialState starting state for the state machine
      * @param <E> state enum type that provides setpoints
      */
     public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulFlywheelMechanism<E>> statefulFlywheel(E initialState) {
-        return custom(config -> {
-            FeedforwardProfile ff = config.resolveMainSimpleFeedforwardProfile();
-            return new StatefulFlywheelMechanism<>(config,
-                    ff != null ? ff.feedforward() : null,
-                    ff != null ? ff.outputType() : null,
-                    initialState);
-        });
+        return custom(config -> new StatefulFlywheelMechanism<>(config, null, null, initialState));
     }
 
     /**
@@ -1861,17 +1955,10 @@ public class MechanismConfig<T extends Mechanism> {
 
     /**
      * Creates a turret configuration that yields a {@link TurretMechanism}.
-     *
-     * @param feedforward feedforward model tuned for the mechanism
      */
     public static MechanismConfig<TurretMechanism> turret() {
         MechanismConfig<TurretMechanism> cfg =
-                MechanismConfig.<TurretMechanism>custom(config -> {
-                    FeedforwardProfile ff = config.resolveMainSimpleFeedforwardProfile();
-                    return new TurretMechanism(config,
-                            ff != null ? ff.feedforward() : null,
-                            ff != null ? ff.outputType() : null);
-                });
+                MechanismConfig.<TurretMechanism>custom(config -> new TurretMechanism(config, null, null));
         cfg.autoContinuousPidForUnboundedTurret = true;
         return cfg;
     }
@@ -1886,7 +1973,6 @@ public class MechanismConfig<T extends Mechanism> {
     /**
      * Creates a turret configuration backed by a caller-supplied factory.
      *
-     * @param feedforward feedforward model to pass through to the factory
      * @param factory constructor logic for the concrete mechanism
      * @param <T> concrete mechanism type created by the factory
      */
@@ -1922,16 +2008,9 @@ public class MechanismConfig<T extends Mechanism> {
 
     /**
      * Creates a flywheel configuration that yields a {@link FlywheelMechanism}.
-     *
-     * @param feedforward feedforward model tuned for the flywheel
      */
     public static MechanismConfig<FlywheelMechanism> flywheel() {
-        return custom(config -> {
-            FeedforwardProfile ff = config.resolveMainSimpleFeedforwardProfile();
-            return new FlywheelMechanism(config,
-                    ff != null ? ff.feedforward() : null,
-                    ff != null ? ff.outputType() : null);
-        });
+        return custom(config -> new FlywheelMechanism(config, null, null));
     }
 
     /**
@@ -1951,16 +2030,10 @@ public class MechanismConfig<T extends Mechanism> {
     /**
      * Creates a configuration that builds a classic {@link ArmMechanism} with optional feedforward control.
      *
-     * <p>Feedforward is selected via {@link #control(Consumer)} using
-     * {@code .armFeedforwardProfile(...).mainArmFeedforward(...)}.</p>
+     * <p>Control behavior is defined via explicit periodic/custom control loops.</p>
      */
     public static MechanismConfig<ArmMechanism> arm() {
-        return custom(config -> {
-            ArmFeedforwardProfile ff = config.resolveMainArmFeedforwardProfile();
-            return new ArmMechanism(config,
-                    ff != null ? ff.feedforward() : null,
-                    ff != null ? ff.outputType() : null);
-        });
+        return custom(config -> new ArmMechanism(config, null, null));
     }
 
     /**
@@ -2106,7 +2179,15 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
-    public record PidProfile(OutputType outputType, double kP, double kI, double kD, double iZone, double tolerance) { }
+    public record PidProfile(
+            OutputType outputType,
+            double kP,
+            double kI,
+            double kD,
+            double iZone,
+            double tolerance,
+            double maxVelocity,
+            double maxAcceleration) { }
 
     public record BangBangProfile(
             OutputType outputType,

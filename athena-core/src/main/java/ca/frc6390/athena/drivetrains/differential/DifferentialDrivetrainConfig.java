@@ -3,6 +3,7 @@ package ca.frc6390.athena.drivetrains.differential;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
@@ -86,6 +87,388 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
             RobotSpeeds.BlendMode blendMode,
             RobotSpeeds.SpeedAxis[] axes) {}
 
+    public static DifferentialDrivetrainConfig create() {
+        return new DifferentialDrivetrainConfig();
+    }
+
+    public DifferentialDrivetrainConfig hardware(Consumer<HardwareSection> section) {
+        if (section != null) {
+            section.accept(new HardwareSection());
+        }
+        return this;
+    }
+
+    public HardwareSection hardware() {
+        return new HardwareSection();
+    }
+
+    public DifferentialDrivetrainConfig control(Consumer<ControlSection> section) {
+        if (section != null) {
+            section.accept(new ControlSection());
+        }
+        return this;
+    }
+
+    public ControlSection control() {
+        return new ControlSection();
+    }
+
+    public DifferentialDrivetrainConfig simulation(Consumer<SimulationSection> section) {
+        if (section != null) {
+            section.accept(new SimulationSection());
+        }
+        return this;
+    }
+
+    public SimulationSection simulation() {
+        return new SimulationSection();
+    }
+
+    public DifferentialDrivetrainConfig speed(Consumer<SpeedSection> section) {
+        if (section != null) {
+            section.accept(new SpeedSection());
+        }
+        return this;
+    }
+
+    public SpeedSection speed() {
+        return new SpeedSection();
+    }
+
+    public DifferentialDrivetrainConfig config(Consumer<ConfigSection> section) {
+        if (section != null) {
+            section.accept(new ConfigSection());
+        }
+        return this;
+    }
+
+    public ConfigSection config() {
+        return new ConfigSection();
+    }
+
+    public final class HardwareSection {
+        public HardwareSection imu(AthenaImu imuType, boolean inverted) {
+            applyImu(imuType, inverted);
+            return this;
+        }
+
+        public HardwareSection trackWidth(double meters) {
+            applyTrackWidth(meters);
+            return this;
+        }
+
+        public HardwareSection leftMotors(AthenaMotor motor, int... ids) {
+            applyLeftMotors(motor, ids);
+            return this;
+        }
+
+        public HardwareSection rightMotors(AthenaMotor motor, int... ids) {
+            applyRightMotors(motor, ids);
+            return this;
+        }
+
+        public HardwareSection leftMotors(MotorControllerConfig... configs) {
+            applyLeftMotors(configs);
+            return this;
+        }
+
+        public HardwareSection rightMotors(MotorControllerConfig... configs) {
+            applyRightMotors(configs);
+            return this;
+        }
+
+        public HardwareSection leftEncoders(EncoderType encoderType, int... ids) {
+            applyLeftEncoders(encoderType, ids);
+            return this;
+        }
+
+        public HardwareSection rightEncoders(EncoderType encoderType, int... ids) {
+            applyRightEncoders(encoderType, ids);
+            return this;
+        }
+
+        public HardwareSection leftEncoders(EncoderConfig... configs) {
+            applyLeftEncoders(configs);
+            return this;
+        }
+
+        public HardwareSection rightEncoders(EncoderConfig... configs) {
+            applyRightEncoders(configs);
+            return this;
+        }
+
+        public HardwareSection gearRatio(double ratio) {
+            applyGearRatio(ratio);
+            return this;
+        }
+
+        public HardwareSection wheelDiameter(double meters) {
+            applyWheelDiameter(meters);
+            return this;
+        }
+
+        public HardwareSection driveIds(int[] ids) {
+            applyDriveIds(ids);
+            return this;
+        }
+
+        public HardwareSection encoderIds(int[] ids) {
+            applyEncoderIds(ids);
+            return this;
+        }
+
+        public HardwareSection driveIds(DriveIDs ids) {
+            applyDriveIds(ids);
+            return this;
+        }
+
+        public HardwareSection encoderIds(EncoderIDs ids) {
+            applyEncoderIds(ids);
+            return this;
+        }
+
+        public HardwareSection imuId(int id) {
+            applyImuId(id);
+            return this;
+        }
+
+        public HardwareSection ids(DrivetrainIDs ids) {
+            applyIds(ids);
+            return this;
+        }
+
+        public HardwareSection driveInverted(boolean inverted) {
+            applyDriveInverted(inverted);
+            return this;
+        }
+
+        public HardwareSection encoderInverted(boolean inverted) {
+            applyEncoderInverted(inverted);
+            return this;
+        }
+
+        public HardwareSection currentLimit(double amps) {
+            applyCurrentLimit(amps);
+            return this;
+        }
+
+        public HardwareSection canbus(String bus) {
+            applyCanbus(bus);
+            return this;
+        }
+
+        public HardwareSection maxVelocity(double metersPerSecond) {
+            applyMaxVelocity(metersPerSecond);
+            return this;
+        }
+    }
+
+    public final class ControlSection {
+        public ControlSection driveFeedforward(SimpleMotorFeedforward feedforward) {
+            applyDriveFeedforward(feedforward);
+            return this;
+        }
+
+        public ControlSection driveFeedforward(double kS, double kV, double kA) {
+            applyDriveFeedforward(kS, kV, kA);
+            return this;
+        }
+
+        public ControlSection driveFeedforwardEnabled(boolean enabled) {
+            applyDriveFeedforwardEnabled(enabled);
+            return this;
+        }
+    }
+
+    public final class SimulationSection {
+        public SimulationSection config(DifferentialSimulationConfig simulation) {
+            applySimulationConfig(simulation);
+            return this;
+        }
+    }
+
+    public final class ConfigSection {
+        public ConfigSection imu(AthenaImu imuType, boolean inverted) {
+            applyImu(imuType, inverted);
+            return this;
+        }
+
+        public ConfigSection trackWidth(double meters) {
+            applyTrackWidth(meters);
+            return this;
+        }
+
+        public ConfigSection leftMotors(AthenaMotor motor, int... ids) {
+            applyLeftMotors(motor, ids);
+            return this;
+        }
+
+        public ConfigSection rightMotors(AthenaMotor motor, int... ids) {
+            applyRightMotors(motor, ids);
+            return this;
+        }
+
+        public ConfigSection leftMotors(MotorControllerConfig... configs) {
+            applyLeftMotors(configs);
+            return this;
+        }
+
+        public ConfigSection rightMotors(MotorControllerConfig... configs) {
+            applyRightMotors(configs);
+            return this;
+        }
+
+        public ConfigSection leftEncoders(EncoderType encoderType, int... ids) {
+            applyLeftEncoders(encoderType, ids);
+            return this;
+        }
+
+        public ConfigSection rightEncoders(EncoderType encoderType, int... ids) {
+            applyRightEncoders(encoderType, ids);
+            return this;
+        }
+
+        public ConfigSection leftEncoders(EncoderConfig... configs) {
+            applyLeftEncoders(configs);
+            return this;
+        }
+
+        public ConfigSection rightEncoders(EncoderConfig... configs) {
+            applyRightEncoders(configs);
+            return this;
+        }
+
+        public ConfigSection gearRatio(double ratio) {
+            applyGearRatio(ratio);
+            return this;
+        }
+
+        public ConfigSection wheelDiameter(double meters) {
+            applyWheelDiameter(meters);
+            return this;
+        }
+
+        public ConfigSection driveFeedforward(SimpleMotorFeedforward feedforward) {
+            applyDriveFeedforward(feedforward);
+            return this;
+        }
+
+        public ConfigSection driveFeedforward(double kS, double kV, double kA) {
+            applyDriveFeedforward(kS, kV, kA);
+            return this;
+        }
+
+        public ConfigSection driveFeedforwardEnabled(boolean enabled) {
+            applyDriveFeedforwardEnabled(enabled);
+            return this;
+        }
+
+        public ConfigSection simulationConfig(DifferentialSimulationConfig simulation) {
+            applySimulationConfig(simulation);
+            return this;
+        }
+
+        public ConfigSection driveIds(int[] ids) {
+            applyDriveIds(ids);
+            return this;
+        }
+
+        public ConfigSection encoderIds(int[] ids) {
+            applyEncoderIds(ids);
+            return this;
+        }
+
+        public ConfigSection driveIds(DriveIDs ids) {
+            applyDriveIds(ids);
+            return this;
+        }
+
+        public ConfigSection encoderIds(EncoderIDs ids) {
+            applyEncoderIds(ids);
+            return this;
+        }
+
+        public ConfigSection imuId(int id) {
+            applyImuId(id);
+            return this;
+        }
+
+        public ConfigSection ids(DrivetrainIDs ids) {
+            applyIds(ids);
+            return this;
+        }
+
+        public ConfigSection driveInverted(boolean inverted) {
+            applyDriveInverted(inverted);
+            return this;
+        }
+
+        public ConfigSection encoderInverted(boolean inverted) {
+            applyEncoderInverted(inverted);
+            return this;
+        }
+
+        public ConfigSection currentLimit(double amps) {
+            applyCurrentLimit(amps);
+            return this;
+        }
+
+        public ConfigSection canbus(String bus) {
+            applyCanbus(bus);
+            return this;
+        }
+
+        public ConfigSection maxVelocity(double metersPerSecond) {
+            applyMaxVelocity(metersPerSecond);
+            return this;
+        }
+
+        public ConfigSection speed(Consumer<SpeedSection> section) {
+            if (section != null) {
+                section.accept(new SpeedSection());
+            }
+            return this;
+        }
+
+        public SpeedSection speed() {
+            return new SpeedSection();
+        }
+    }
+
+    public final class SpeedSection {
+        public SpeedSection source(String name, boolean enabledByDefault) {
+            addSpeedSource(name, enabledByDefault);
+            return this;
+        }
+
+        public SpeedSection blend(
+                String target,
+                String source,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            addSpeedBlend(target, source, blendMode, axes);
+            return this;
+        }
+
+        public SpeedSection blend(
+                String target,
+                String left,
+                String right,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            addSpeedBlend(target, left, right, blendMode, axes);
+            return this;
+        }
+
+        public SpeedSection outputBlend(
+                String source,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            addSpeedOutputBlend(source, blendMode, axes);
+            return this;
+        }
+    }
+
     /**
      * Creates a baseline configuration using the provided IMU and track width.
      *
@@ -93,8 +476,8 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      * @param inverted true if yaw output should be inverted
      * @param trackWidth distance between left/right wheel centers in meters
      */
-    public static DifferentialDrivetrainConfig defualt(AthenaImu type, boolean inverted, double trackWidth){
-        return new DifferentialDrivetrainConfig().setIMU(type, inverted).setTrackWidth(trackWidth);
+    public static DifferentialDrivetrainConfig defaults(AthenaImu type, boolean inverted, double trackWidth){
+        return create().hardware(h -> h.imu(type, inverted).trackWidth(trackWidth));
     }
 
     /**
@@ -103,22 +486,24 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      * @param type IMU platform installed on the robot
      * @param trackWidth distance between left/right wheel centers in meters
      */
-    public static DifferentialDrivetrainConfig defualt(AthenaImu type, double trackWidth){
-        return new DifferentialDrivetrainConfig().setIMU(type, false).setTrackWidth(trackWidth);
+    public static DifferentialDrivetrainConfig defaults(AthenaImu type, double trackWidth){
+        return create().hardware(h -> h.imu(type, false).trackWidth(trackWidth));
     }
 
     /**
      * Declares the IMU used by the drivetrain and whether its heading is inverted.
      */
-    public DifferentialDrivetrainConfig setIMU(AthenaImu imu, boolean inverted){
-        this.imu = new ImuConfig(imu.resolve(), DrivetrainIDs.DUAL_MOTOR_DIFFERENTIAL.getGyro()).setInverted(inverted);
+    private DifferentialDrivetrainConfig applyImu(AthenaImu imu, boolean inverted){
+        this.imu = ImuConfig
+                .create(imu.resolve(), DrivetrainIDs.DUAL_MOTOR_DIFFERENTIAL.getGyro())
+                .hardware(h -> h.inverted(inverted));
         return this;
     }
 
     /**
      * Defines the physical track width (meters).
      */
-    public DifferentialDrivetrainConfig setTrackWidth(double trackWidth){
+    private DifferentialDrivetrainConfig applyTrackWidth(double trackWidth){
         this.trackWidth = trackWidth;
         return this;
     }
@@ -127,22 +512,26 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      * Configures left-side motors using the provided {@link Motor} helper and CAN IDs. Negative IDs
      * invert that motor.
      */
-    public DifferentialDrivetrainConfig setLeftMotors(AthenaMotor motor, int... ids){
-        return setLeftMotors(Arrays.stream(ids).mapToObj(id -> new MotorControllerConfig(motor.resolveController(), id)).toArray(MotorControllerConfig[]::new));        
+    private DifferentialDrivetrainConfig applyLeftMotors(AthenaMotor motor, int... ids){
+        return applyLeftMotors(Arrays.stream(ids)
+                .mapToObj(id -> MotorControllerConfig.create(motor.resolveController(), id))
+                .toArray(MotorControllerConfig[]::new));
     }
 
     /**
      * Configures right-side motors using the provided {@link Motor} helper and CAN IDs. Negative IDs
      * invert that motor.
      */
-    public DifferentialDrivetrainConfig setRightMotors(AthenaMotor motor, int... ids){
-        return setRightMotors(Arrays.stream(ids).mapToObj(id -> new MotorControllerConfig(motor.resolveController(), id)).toArray(MotorControllerConfig[]::new));        
+    private DifferentialDrivetrainConfig applyRightMotors(AthenaMotor motor, int... ids){
+        return applyRightMotors(Arrays.stream(ids)
+                .mapToObj(id -> MotorControllerConfig.create(motor.resolveController(), id))
+                .toArray(MotorControllerConfig[]::new));
     }
 
     /**
      * Supplies fully constructed motor controller configs for the left side.
      */
-    public DifferentialDrivetrainConfig setLeftMotors(MotorControllerConfig... config){
+    private DifferentialDrivetrainConfig applyLeftMotors(MotorControllerConfig... config){
         this.leftMotors = config;
         return this;
     }
@@ -150,7 +539,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Supplies fully constructed motor controller configs for the right side.
      */
-    public DifferentialDrivetrainConfig setRightMotors(MotorControllerConfig... config){
+    private DifferentialDrivetrainConfig applyRightMotors(MotorControllerConfig... config){
         this.rightMotors = config;
         return this;
     }
@@ -158,21 +547,25 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Configures left encoders using the provided type and hardware IDs. Negative IDs invert the encoder.
      */
-    public DifferentialDrivetrainConfig setLeftEncoders(EncoderType encoder, int... ids){
-        return setLeftMotors(Arrays.stream(ids).mapToObj(id -> EncoderConfig.type(encoder, id)).toArray(MotorControllerConfig[]::new));        
+    private DifferentialDrivetrainConfig applyLeftEncoders(EncoderType encoder, int... ids){
+        return applyLeftEncoders(Arrays.stream(ids)
+                .mapToObj(id -> EncoderConfig.create(encoder, id))
+                .toArray(EncoderConfig[]::new));
     }
 
     /**
      * Configures right encoders using the provided type and hardware IDs. Negative IDs invert the encoder.
      */
-    public DifferentialDrivetrainConfig setRightEncoders(EncoderType encoder, int... ids){
-        return setRightMotors(Arrays.stream(ids).mapToObj(id -> EncoderConfig.type(encoder, id)).toArray(MotorControllerConfig[]::new));        
+    private DifferentialDrivetrainConfig applyRightEncoders(EncoderType encoder, int... ids){
+        return applyRightEncoders(Arrays.stream(ids)
+                .mapToObj(id -> EncoderConfig.create(encoder, id))
+                .toArray(EncoderConfig[]::new));
     }
 
     /**
      * Supplies fully constructed encoder configs for the left side.
      */
-    public DifferentialDrivetrainConfig setLeftEncoders(EncoderConfig... config){
+    private DifferentialDrivetrainConfig applyLeftEncoders(EncoderConfig... config){
         this.leftEncoders = config;
         return this;
     }
@@ -180,7 +573,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Supplies fully constructed encoder configs for the right side.
      */
-    public DifferentialDrivetrainConfig setRightEncoders(EncoderConfig... config){
+    private DifferentialDrivetrainConfig applyRightEncoders(EncoderConfig... config){
         this.rightEncoders = config;
         return this;
     }
@@ -188,7 +581,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Defines the gear ratio from motor rotations to wheel rotations.
      */
-    public DifferentialDrivetrainConfig setGearRatio(double gearRatio){
+    private DifferentialDrivetrainConfig applyGearRatio(double gearRatio){
         this.gearRatio = gearRatio;
         return this;
     }
@@ -196,7 +589,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Declares the physical wheel diameter used for distance conversions (meters).
      */
-    public DifferentialDrivetrainConfig setWheelDiameter(double wheelDiameterMeters){
+    private DifferentialDrivetrainConfig applyWheelDiameter(double wheelDiameterMeters){
         this.wheelDiameterMeters = wheelDiameterMeters;
         return this;
     }
@@ -204,7 +597,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Provides drive feedforward gains used to compute voltage setpoints.
      */
-    public DifferentialDrivetrainConfig setDriveFeedforward(SimpleMotorFeedforward feedforward) {
+    private DifferentialDrivetrainConfig applyDriveFeedforward(SimpleMotorFeedforward feedforward) {
         this.driveFeedforward = feedforward;
         return this;
     }
@@ -212,14 +605,14 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Convenience helper to configure drive feedforward gains.
      */
-    public DifferentialDrivetrainConfig setDriveFeedforward(double kS, double kV, double kA) {
-        return setDriveFeedforward(new SimpleMotorFeedforward(kS, kV, kA));
+    private DifferentialDrivetrainConfig applyDriveFeedforward(double kS, double kV, double kA) {
+        return applyDriveFeedforward(new SimpleMotorFeedforward(kS, kV, kA));
     }
 
     /**
      * Enables or disables the configured drive feedforward.
      */
-    public DifferentialDrivetrainConfig setDriveFeedforwardEnabled(boolean enabled) {
+    private DifferentialDrivetrainConfig applyDriveFeedforwardEnabled(boolean enabled) {
         this.driveFeedforwardEnabled = enabled;
         return this;
     }
@@ -228,29 +621,15 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
      * Supplies a custom simulation configuration. Provide {@code null} to disable drivetrain
      * simulation.
      */
-    public DifferentialDrivetrainConfig setSimulationConfig(DifferentialSimulationConfig simulationConfig){
+    private DifferentialDrivetrainConfig applySimulationConfig(DifferentialSimulationConfig simulationConfig){
         this.simulationConfig = simulationConfig;
         return this;
     }
 
-    // public DifferentialDrivetrainConfig setDriftPID(double kP, double kI, double kd){
-    //     return setDriftPID(new PIDController(kP, kI, kd));
-    // }
-    
-    // public DifferentialDrivetrainConfig setDriftPID(PIDController driftPID){
-    //     this.driftPID = driftPID;
-    //     return this;
-    // }
-
-    // public DifferentialDrivetrainConfig setDriftActivationSpeed(double driftActivationSpeed){
-    //     this.driftActivationSpeed = driftActivationSpeed;
-    //     return this;
-    // }
-
     /**
      * Overrides the drive motor CAN IDs (left followed by right). Negative IDs invert the controller.
      */
-    public DifferentialDrivetrainConfig setDriveIds(int[] driveIds){
+    private DifferentialDrivetrainConfig applyDriveIds(int[] driveIds){
         this.driveIds = driveIds;
         return this;
     } 
@@ -258,7 +637,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Overrides the encoder IDs (left followed by right). Negative IDs invert the encoder.
      */
-    public DifferentialDrivetrainConfig setEncoderIds(int[] encoderIds){
+    private DifferentialDrivetrainConfig applyEncoderIds(int[] encoderIds){
         this.encoderIds = encoderIds;
         return this;
     } 
@@ -266,39 +645,39 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Populates motor IDs using one of the {@link DriveIDs} presets.
      */
-    public DifferentialDrivetrainConfig setDriveIds(DriveIDs driveIds){
-       return setDriveIds(driveIds.getIDs());
+    private DifferentialDrivetrainConfig applyDriveIds(DriveIDs driveIds){
+       return applyDriveIds(driveIds.getIDs());
     } 
 
     /**
      * Populates encoder IDs using one of the {@link EncoderIDs} presets.
      */
-    public DifferentialDrivetrainConfig setEncoderIds(EncoderIDs encoderIds){
-        return setEncoderIds(encoderIds.getIDs());
+    private DifferentialDrivetrainConfig applyEncoderIds(EncoderIDs encoderIds){
+        return applyEncoderIds(encoderIds.getIDs());
     } 
 
     /**
      * Sets the CAN ID used by the IMU.
      */
-    public DifferentialDrivetrainConfig setIMUId(int id){
-        this.imu = this.imu.setId(id);
+    private DifferentialDrivetrainConfig applyImuId(int id){
+        this.imu = this.imu.hardware(h -> h.id(id));
         return this;
     }
 
     /**
      * Applies a bundled {@link DrivetrainIDs} preset covering motors, encoders, and gyro.
      */
-    public DifferentialDrivetrainConfig setIds(DrivetrainIDs ids){
-        setDriveIds(ids.getDrive());
-        setEncoderIds(ids.getEncoders());
-        setIMUId(ids.getGyro());
+    private DifferentialDrivetrainConfig applyIds(DrivetrainIDs ids){
+        applyDriveIds(ids.getDrive());
+        applyEncoderIds(ids.getEncoders());
+        applyImuId(ids.getGyro());
         return this;
     } 
 
     /**
      * Sets whether the drive motors should be inverted.
      */
-    public DifferentialDrivetrainConfig setDriveInverted(boolean driveInverted){
+    private DifferentialDrivetrainConfig applyDriveInverted(boolean driveInverted){
         this.driveInverted = driveInverted;
         return this;
     } 
@@ -306,7 +685,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Sets whether the encoders should be inverted.
      */
-    public DifferentialDrivetrainConfig setEncoderInverted(boolean encoderInverted){
+    private DifferentialDrivetrainConfig applyEncoderInverted(boolean encoderInverted){
         this.encoderInverted = encoderInverted;
         return this;
     } 
@@ -314,7 +693,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Applies the current limit (amps) to both sides of the drivetrain.
      */
-    public DifferentialDrivetrainConfig setCurrentLimit(double currentLimit){
+    private DifferentialDrivetrainConfig applyCurrentLimit(double currentLimit){
         this.currentLimit = currentLimit;
         return this;
     } 
@@ -322,7 +701,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Sets the CAN bus shared by all drivetrain devices.
      */
-    public DifferentialDrivetrainConfig setCanbus(String canbus){
+    private DifferentialDrivetrainConfig applyCanbus(String canbus){
         this.canbus = canbus;
         return this;
     } 
@@ -330,17 +709,17 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     /**
      * Declares the estimated maximum linear velocity (m/s) used for motion planning.
      */
-    public DifferentialDrivetrainConfig setMaxVelocity(double maxVelocity) {
+    private DifferentialDrivetrainConfig applyMaxVelocity(double maxVelocity) {
         this.maxVelocity = maxVelocity;
         return this;
     }
 
-    public DifferentialDrivetrainConfig addSpeedSource(String name, boolean enabledByDefault) {
+    private DifferentialDrivetrainConfig addSpeedSource(String name, boolean enabledByDefault) {
         speedSources.add(new SpeedSourceRegistration(name, enabledByDefault));
         return this;
     }
 
-    public DifferentialDrivetrainConfig addSpeedBlend(
+    private DifferentialDrivetrainConfig addSpeedBlend(
             String target,
             String source,
             RobotSpeeds.BlendMode blendMode,
@@ -348,7 +727,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         return addSpeedBlend(target, target, source, blendMode, axes);
     }
 
-    public DifferentialDrivetrainConfig addSpeedBlend(
+    private DifferentialDrivetrainConfig addSpeedBlend(
             String target,
             String left,
             String right,
@@ -360,7 +739,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         return this;
     }
 
-    public DifferentialDrivetrainConfig addSpeedOutputBlend(
+    private DifferentialDrivetrainConfig addSpeedOutputBlend(
             String source,
             RobotSpeeds.BlendMode blendMode,
             RobotSpeeds.SpeedAxis... axes) {
@@ -421,7 +800,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         }
 
         if (imu != null) {
-            imu = imu.setCanbus(canbus);
+            imu = imu.hardware(h -> h.canbus(canbus));
         }
 
         MotorController[] leftControllers =
@@ -460,14 +839,6 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
             dt.configureSimulation(resolvedSimulation);
         }
 
-        // if (driftPID != null){
-        //     dt.setDriftCorrectionPID(driftPID);
-        //     dt.setDriftCorrectionMode(true);
-        // }
-
-        // dt.setFieldRelative(fieldRelative);
-        // dt.driftActivationSpeed = driftActivationSpeed;
-        
         applySpeedConfig(dt.getRobotSpeeds());
         return dt;
     }

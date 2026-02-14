@@ -88,10 +88,570 @@ public class VisionCameraConfig implements ConfigurableCamera {
         this.software = software;
     }
 
+    public static VisionCameraConfig create(String table, CameraSoftware software) {
+        return new VisionCameraConfig(table, software);
+    }
+
+    public VisionCameraConfig sources(Consumer<SourcesSection> section) {
+        if (section != null) {
+            section.accept(new SourcesSection());
+        }
+        return this;
+    }
+
+    public SourcesSection sources() {
+        return new SourcesSection();
+    }
+
+    public VisionCameraConfig localization(Consumer<LocalizationSection> section) {
+        if (section != null) {
+            section.accept(new LocalizationSection());
+        }
+        return this;
+    }
+
+    public LocalizationSection localization() {
+        return new LocalizationSection();
+    }
+
+    public VisionCameraConfig transform(Consumer<TransformSection> section) {
+        if (section != null) {
+            section.accept(new TransformSection());
+        }
+        return this;
+    }
+
+    public TransformSection transform() {
+        return new TransformSection();
+    }
+
+    public VisionCameraConfig targets(Consumer<TargetsSection> section) {
+        if (section != null) {
+            section.accept(new TargetsSection());
+        }
+        return this;
+    }
+
+    public TargetsSection targets() {
+        return new TargetsSection();
+    }
+
+    public VisionCameraConfig simulation(Consumer<SimulationSection> section) {
+        if (section != null) {
+            section.accept(new SimulationSection());
+        }
+        return this;
+    }
+
+    public SimulationSection simulation() {
+        return new SimulationSection();
+    }
+
+    public VisionCameraConfig capability(Consumer<CapabilitiesSection> section) {
+        if (section != null) {
+            section.accept(new CapabilitiesSection());
+        }
+        return this;
+    }
+
+    public CapabilitiesSection capability() {
+        return new CapabilitiesSection();
+    }
+
+    public VisionCameraConfig config(Consumer<ConfigSection> section) {
+        if (section != null) {
+            section.accept(new ConfigSection());
+        }
+        return this;
+    }
+
+    public ConfigSection config() {
+        return new ConfigSection();
+    }
+
+    public final class ConfigSection {
+        public ConfigSection connectedSupplier(BooleanSupplier supplier) {
+            applyConnectedSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection hasTargetsSupplier(BooleanSupplier supplier) {
+            applyHasTargetsSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection poseSupplier(Supplier<Pose2d> supplier) {
+            applyPoseSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection pose3dSupplier(Supplier<Pose3d> supplier) {
+            applyPose3dSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection latencySupplier(DoubleSupplier supplier) {
+            applyLatencySupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection maxLatencySeconds(double seconds) {
+            applyMaxLatencySeconds(seconds);
+            return this;
+        }
+
+        public ConfigSection stdDevConfidenceExponent(double exponent) {
+            applyStdDevConfidenceExponent(exponent);
+            return this;
+        }
+
+        public ConfigSection stdDevLatencyWeight(double weight) {
+            applyStdDevLatencyWeight(weight);
+            return this;
+        }
+
+        public ConfigSection stdDevDistanceWeight(double weight) {
+            applyStdDevDistanceWeight(weight);
+            return this;
+        }
+
+        public ConfigSection stdDevTagCountWeight(double weight) {
+            applyStdDevTagCountWeight(weight);
+            return this;
+        }
+
+        public ConfigSection stdDevAmbiguityWeight(double weight) {
+            applyStdDevAmbiguityWeight(weight);
+            return this;
+        }
+
+        public ConfigSection stdDevPitchWeight(double weight) {
+            applyStdDevPitchWeight(weight);
+            return this;
+        }
+
+        public ConfigSection stdDevRollWeight(double weight) {
+            applyStdDevRollWeight(weight);
+            return this;
+        }
+
+        public ConfigSection stdDevBaseScale(double scale) {
+            applyStdDevBaseScale(scale);
+            return this;
+        }
+
+        public ConfigSection stdDevMinScale(double minScale) {
+            applyStdDevMinScale(minScale);
+            return this;
+        }
+
+        public ConfigSection visionWeightMultiplier(double multiplier) {
+            applyVisionWeightMultiplier(multiplier);
+            return this;
+        }
+
+        public ConfigSection visibleTargetsSupplier(IntSupplier supplier) {
+            applyVisibleTargetsSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection averageDistanceSupplier(DoubleSupplier supplier) {
+            applyAverageDistanceSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection tagPoseResolver(IntFunction<Pose2d> resolver) {
+            applyTagPoseResolver(resolver);
+            return this;
+        }
+
+        public ConfigSection fieldLayout(AprilTagFieldLayout layout) {
+            applyFieldLayout(layout);
+            return this;
+        }
+
+        public ConfigSection orientationConsumer(Consumer<Pose2d> consumer) {
+            applyOrientationConsumer(consumer);
+            return this;
+        }
+
+        public ConfigSection orientationSupplier(Supplier<Pose2d> supplier) {
+            applyOrientationSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection updateHook(Runnable hook) {
+            applyUpdateHook(hook);
+            return this;
+        }
+
+        public ConfigSection useForLocalization(boolean enabled) {
+            applyUseForLocalization(enabled);
+            return this;
+        }
+
+        public ConfigSection trustDistance(double meters) {
+            applyTrustDistance(meters);
+            return this;
+        }
+
+        public ConfigSection singleStdDevs(Matrix<N3, N1> stdDevs) {
+            applySingleStdDevs(stdDevs);
+            return this;
+        }
+
+        public ConfigSection multiStdDevs(Matrix<N3, N1> stdDevs) {
+            applyMultiStdDevs(stdDevs);
+            return this;
+        }
+
+        public ConfigSection cameraToRobotTranslation(Translation2d translation) {
+            applyCameraToRobotTranslation(translation);
+            return this;
+        }
+
+        public ConfigSection robotToCameraTransform(Transform3d transform) {
+            applyRobotToCameraTransform(transform);
+            return this;
+        }
+
+        public ConfigSection cameraToRobotTransform(Transform3d transform) {
+            applyCameraToRobotTransform(transform);
+            return this;
+        }
+
+        public ConfigSection targetYawSupplier(DoubleSupplier supplier) {
+            applyTargetYawSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection targetPitchSupplier(DoubleSupplier supplier) {
+            applyTargetPitchSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection poseAmbiguitySupplier(DoubleSupplier supplier) {
+            applyPoseAmbiguitySupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection cameraPitchSupplier(DoubleSupplier supplier) {
+            applyCameraPitchSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection cameraRollSupplier(DoubleSupplier supplier) {
+            applyCameraRollSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection confidenceSupplier(DoubleSupplier supplier) {
+            applyConfidenceSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection role(CameraRole role) {
+            addRole(role);
+            return this;
+        }
+
+        public ConfigSection roles(EnumSet<CameraRole> roleSet) {
+            applyRoles(roleSet);
+            return this;
+        }
+
+        public ConfigSection tagDistanceSupplier(DoubleSupplier supplier) {
+            applyTagDistanceSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection tagIdSupplier(IntSupplier supplier) {
+            applyTagIdSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection targetMeasurementsSupplier(
+                Supplier<List<VisionCamera.TargetMeasurement>> supplier) {
+            applyTargetMeasurementsSupplier(supplier);
+            return this;
+        }
+
+        public ConfigSection simulationVFieldHorizontalFov(double degrees) {
+            applyDisplayHorizontalFov(degrees);
+            return this;
+        }
+
+        public ConfigSection simulationVFieldRangeMeters(double meters) {
+            applyDisplayRangeMeters(meters);
+            return this;
+        }
+
+        public ConfigSection simulationPublishPoseTopic(boolean enabled) {
+            applyPublishPoseTopic(enabled);
+            return this;
+        }
+
+        public ConfigSection capability(VisionCameraCapability capabilityKey, Object capability) {
+            addCapability(capabilityKey, capability);
+            return this;
+        }
+    }
+
+    public final class SourcesSection {
+        public SourcesSection connectedSupplier(BooleanSupplier supplier) {
+            applyConnectedSupplier(supplier);
+            return this;
+        }
+
+        public SourcesSection hasTargetsSupplier(BooleanSupplier supplier) {
+            applyHasTargetsSupplier(supplier);
+            return this;
+        }
+
+        public SourcesSection poseSupplier(Supplier<Pose2d> supplier) {
+            applyPoseSupplier(supplier);
+            return this;
+        }
+
+        public SourcesSection pose3dSupplier(Supplier<Pose3d> supplier) {
+            applyPose3dSupplier(supplier);
+            return this;
+        }
+
+        public SourcesSection latencySupplier(DoubleSupplier supplier) {
+            applyLatencySupplier(supplier);
+            return this;
+        }
+
+        public SourcesSection visibleTargetsSupplier(IntSupplier supplier) {
+            applyVisibleTargetsSupplier(supplier);
+            return this;
+        }
+
+        public SourcesSection averageDistanceSupplier(DoubleSupplier supplier) {
+            applyAverageDistanceSupplier(supplier);
+            return this;
+        }
+
+        public SourcesSection orientationConsumer(Consumer<Pose2d> consumer) {
+            applyOrientationConsumer(consumer);
+            return this;
+        }
+
+        public SourcesSection orientationSupplier(Supplier<Pose2d> supplier) {
+            applyOrientationSupplier(supplier);
+            return this;
+        }
+
+        public SourcesSection updateHook(Runnable hook) {
+            applyUpdateHook(hook);
+            return this;
+        }
+    }
+
+    public final class LocalizationSection {
+        public LocalizationSection useForLocalization(boolean enabled) {
+            applyUseForLocalization(enabled);
+            return this;
+        }
+
+        public LocalizationSection trustDistance(double meters) {
+            applyTrustDistance(meters);
+            return this;
+        }
+
+        public LocalizationSection singleStdDevs(Matrix<N3, N1> stdDevs) {
+            applySingleStdDevs(stdDevs);
+            return this;
+        }
+
+        public LocalizationSection multiStdDevs(Matrix<N3, N1> stdDevs) {
+            applyMultiStdDevs(stdDevs);
+            return this;
+        }
+
+        public LocalizationSection maxLatencySeconds(double seconds) {
+            applyMaxLatencySeconds(seconds);
+            return this;
+        }
+
+        public LocalizationSection stdDevConfidenceExponent(double exponent) {
+            applyStdDevConfidenceExponent(exponent);
+            return this;
+        }
+
+        public LocalizationSection stdDevLatencyWeight(double weight) {
+            applyStdDevLatencyWeight(weight);
+            return this;
+        }
+
+        public LocalizationSection stdDevDistanceWeight(double weight) {
+            applyStdDevDistanceWeight(weight);
+            return this;
+        }
+
+        public LocalizationSection stdDevTagCountWeight(double weight) {
+            applyStdDevTagCountWeight(weight);
+            return this;
+        }
+
+        public LocalizationSection stdDevAmbiguityWeight(double weight) {
+            applyStdDevAmbiguityWeight(weight);
+            return this;
+        }
+
+        public LocalizationSection stdDevPitchWeight(double weight) {
+            applyStdDevPitchWeight(weight);
+            return this;
+        }
+
+        public LocalizationSection stdDevRollWeight(double weight) {
+            applyStdDevRollWeight(weight);
+            return this;
+        }
+
+        public LocalizationSection stdDevBaseScale(double scale) {
+            applyStdDevBaseScale(scale);
+            return this;
+        }
+
+        public LocalizationSection stdDevMinScale(double minScale) {
+            applyStdDevMinScale(minScale);
+            return this;
+        }
+
+        public LocalizationSection visionWeightMultiplier(double multiplier) {
+            applyVisionWeightMultiplier(multiplier);
+            return this;
+        }
+
+        public LocalizationSection confidenceSupplier(DoubleSupplier supplier) {
+            applyConfidenceSupplier(supplier);
+            return this;
+        }
+
+        public LocalizationSection role(CameraRole role) {
+            addRole(role);
+            return this;
+        }
+
+        public LocalizationSection roles(EnumSet<CameraRole> roleSet) {
+            applyRoles(roleSet);
+            return this;
+        }
+    }
+
+    public final class TransformSection {
+        public TransformSection cameraToRobotTranslation(Translation2d translation) {
+            applyCameraToRobotTranslation(translation);
+            return this;
+        }
+
+        public TransformSection robotToCameraTransform(Transform3d transform) {
+            applyRobotToCameraTransform(transform);
+            return this;
+        }
+
+        public TransformSection cameraToRobotTransform(Transform3d transform) {
+            applyCameraToRobotTransform(transform);
+            return this;
+        }
+    }
+
+    public final class TargetsSection {
+        public TargetsSection targetYawSupplier(DoubleSupplier supplier) {
+            applyTargetYawSupplier(supplier);
+            return this;
+        }
+
+        public TargetsSection targetPitchSupplier(DoubleSupplier supplier) {
+            applyTargetPitchSupplier(supplier);
+            return this;
+        }
+
+        public TargetsSection tagDistanceSupplier(DoubleSupplier supplier) {
+            applyTagDistanceSupplier(supplier);
+            return this;
+        }
+
+        public TargetsSection tagIdSupplier(IntSupplier supplier) {
+            applyTagIdSupplier(supplier);
+            return this;
+        }
+
+        public TargetsSection poseAmbiguitySupplier(DoubleSupplier supplier) {
+            applyPoseAmbiguitySupplier(supplier);
+            return this;
+        }
+
+        public TargetsSection cameraPitchSupplier(DoubleSupplier supplier) {
+            applyCameraPitchSupplier(supplier);
+            return this;
+        }
+
+        public TargetsSection cameraRollSupplier(DoubleSupplier supplier) {
+            applyCameraRollSupplier(supplier);
+            return this;
+        }
+
+        public TargetsSection targetMeasurementsSupplier(
+                Supplier<List<VisionCamera.TargetMeasurement>> supplier) {
+            applyTargetMeasurementsSupplier(supplier);
+            return this;
+        }
+
+        public TargetsSection tagPoseResolver(IntFunction<Pose2d> resolver) {
+            applyTagPoseResolver(resolver);
+            return this;
+        }
+
+        public TargetsSection fieldLayout(AprilTagFieldLayout layout) {
+            applyFieldLayout(layout);
+            return this;
+        }
+    }
+
+    public final class SimulationSection {
+        public SimulationSection vfield(Consumer<VFieldSection> section) {
+            if (section != null) {
+                section.accept(new VFieldSection());
+            }
+            return this;
+        }
+
+        public VFieldSection vfield() {
+            return new VFieldSection();
+        }
+
+        public SimulationSection publishPoseTopic(boolean enabled) {
+            applyPublishPoseTopic(enabled);
+            return this;
+        }
+    }
+
+    public final class VFieldSection {
+        public VFieldSection horizontalFov(double degrees) {
+            applyDisplayHorizontalFov(degrees);
+            return this;
+        }
+
+        public VFieldSection rangeMeters(double meters) {
+            applyDisplayRangeMeters(meters);
+            return this;
+        }
+    }
+
+    public final class CapabilitiesSection {
+        public CapabilitiesSection capability(VisionCameraCapability capabilityKey, Object capability) {
+            addCapability(capabilityKey, capability);
+            return this;
+        }
+    }
+
     /**
      * Supplies a connectivity predicate so dashboards can reflect whether the camera is online.
      */
-    public VisionCameraConfig setConnectedSupplier(BooleanSupplier supplier) {
+    private VisionCameraConfig applyConnectedSupplier(BooleanSupplier supplier) {
         this.connectedSupplier = supplier != null ? supplier : () -> true;
         return this;
     }
@@ -99,7 +659,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies a predicate that reports whether the camera currently sees viable targets.
      */
-    public VisionCameraConfig setHasTargetsSupplier(BooleanSupplier supplier) {
+    private VisionCameraConfig applyHasTargetsSupplier(BooleanSupplier supplier) {
         this.hasTargetsSupplier = supplier != null ? supplier : () -> false;
         return this;
     }
@@ -107,7 +667,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the 2D pose estimate reported by the camera.
      */
-    public VisionCameraConfig setPoseSupplier(Supplier<Pose2d> supplier) {
+    private VisionCameraConfig applyPoseSupplier(Supplier<Pose2d> supplier) {
         this.poseSupplier = supplier != null ? supplier : Pose2d::new;
         return this;
     }
@@ -115,7 +675,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the full 3D pose estimate reported by the camera.
      */
-    public VisionCameraConfig setPose3dSupplier(Supplier<Pose3d> supplier) {
+    private VisionCameraConfig applyPose3dSupplier(Supplier<Pose3d> supplier) {
         this.pose3dSupplier = supplier != null ? supplier : Pose3d::new;
         return this;
     }
@@ -123,7 +683,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the latency (seconds) between image capture and pose estimation.
      */
-    public VisionCameraConfig setLatencySupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyLatencySupplier(DoubleSupplier supplier) {
         this.latencySupplier = supplier != null ? supplier : () -> 0.0;
         return this;
     }
@@ -132,7 +692,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
      * Sets the maximum latency (seconds) to accept for localization measurements.
      * Use a non-positive value to disable gating.
      */
-    public VisionCameraConfig setMaxLatencySeconds(double maxLatencySeconds) {
+    private VisionCameraConfig applyMaxLatencySeconds(double maxLatencySeconds) {
         this.maxLatencySeconds = maxLatencySeconds;
         return this;
     }
@@ -140,7 +700,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Scales pose std devs using the camera confidence (power curve). Zero disables scaling.
      */
-    public VisionCameraConfig setStdDevConfidenceExponent(double exponent) {
+    private VisionCameraConfig applyStdDevConfidenceExponent(double exponent) {
         this.stdDevConfidenceExponent = exponent;
         return this;
     }
@@ -148,7 +708,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Scales pose std devs using (1 + weight * latencySeconds). Zero disables scaling.
      */
-    public VisionCameraConfig setStdDevLatencyWeight(double weight) {
+    private VisionCameraConfig applyStdDevLatencyWeight(double weight) {
         this.stdDevLatencyWeight = weight;
         return this;
     }
@@ -156,7 +716,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Scales pose std devs using (1 + weight * distanceMeters). Zero disables scaling.
      */
-    public VisionCameraConfig setStdDevDistanceWeight(double weight) {
+    private VisionCameraConfig applyStdDevDistanceWeight(double weight) {
         this.stdDevDistanceWeight = weight;
         return this;
     }
@@ -164,7 +724,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Scales pose std devs using (1 + weight * (visibleTargets - 1)) in the denominator. Zero disables scaling.
      */
-    public VisionCameraConfig setStdDevTagCountWeight(double weight) {
+    private VisionCameraConfig applyStdDevTagCountWeight(double weight) {
         this.stdDevTagCountWeight = weight;
         return this;
     }
@@ -172,7 +732,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Scales pose std devs using (1 + weight * ambiguity). Zero disables scaling.
      */
-    public VisionCameraConfig setStdDevAmbiguityWeight(double weight) {
+    private VisionCameraConfig applyStdDevAmbiguityWeight(double weight) {
         this.stdDevAmbiguityWeight = weight;
         return this;
     }
@@ -180,7 +740,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Scales pose std devs using (1 + weight * |pitchDegrees|). Zero disables scaling.
      */
-    public VisionCameraConfig setStdDevPitchWeight(double weight) {
+    private VisionCameraConfig applyStdDevPitchWeight(double weight) {
         this.stdDevPitchWeight = weight;
         return this;
     }
@@ -188,7 +748,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Scales pose std devs using (1 + weight * |rollDegrees|). Zero disables scaling.
      */
-    public VisionCameraConfig setStdDevRollWeight(double weight) {
+    private VisionCameraConfig applyStdDevRollWeight(double weight) {
         this.stdDevRollWeight = weight;
         return this;
     }
@@ -196,7 +756,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Scales pose std devs using a constant multiplier for this camera. One disables scaling.
      */
-    public VisionCameraConfig setStdDevBaseScale(double scale) {
+    private VisionCameraConfig applyStdDevBaseScale(double scale) {
         this.stdDevBaseScale = scale;
         return this;
     }
@@ -204,7 +764,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Sets the minimum scale applied to std devs after dynamic adjustments.
      */
-    public VisionCameraConfig setStdDevMinScale(double minScale) {
+    private VisionCameraConfig applyStdDevMinScale(double minScale) {
         this.stdDevMinScale = minScale;
         return this;
     }
@@ -212,7 +772,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Sets a per-camera weight multiplier applied during multi-camera fusion.
      */
-    public VisionCameraConfig setVisionWeightMultiplier(double weight) {
+    private VisionCameraConfig applyVisionWeightMultiplier(double weight) {
         this.visionWeightMultiplier = weight;
         return this;
     }
@@ -220,7 +780,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the number of fiducial targets currently visible.
      */
-    public VisionCameraConfig setVisibleTargetsSupplier(IntSupplier supplier) {
+    private VisionCameraConfig applyVisibleTargetsSupplier(IntSupplier supplier) {
         this.visibleTargetsSupplier = supplier != null ? supplier : () -> 0;
         return this;
     }
@@ -228,7 +788,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the average distance (meters) from the camera to all detected targets.
      */
-    public VisionCameraConfig setAverageDistanceSupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyAverageDistanceSupplier(DoubleSupplier supplier) {
         this.averageDistanceSupplier = supplier != null ? supplier : () -> Double.MAX_VALUE;
         return this;
     }
@@ -238,7 +798,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
      *
      * @param resolver callback mapping fiducial IDs to poses, or {@code null} to disable auto lookup
      */
-    public VisionCameraConfig setTagPoseResolver(IntFunction<Pose2d> resolver) {
+    private VisionCameraConfig applyTagPoseResolver(IntFunction<Pose2d> resolver) {
         this.tagPoseResolver = resolver;
         return this;
     }
@@ -248,7 +808,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
      *
      * @param layout field layout used to translate tag identifiers into poses
      */
-    public VisionCameraConfig setFieldLayout(AprilTagFieldLayout layout) {
+    private VisionCameraConfig applyFieldLayout(AprilTagFieldLayout layout) {
         this.fieldLayout = layout;
         if (layout == null) {
             this.tagPoseResolver = id -> null;
@@ -261,7 +821,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Provides a callback that accepts a new robot orientation when the camera pipeline refines it.
      */
-    public VisionCameraConfig setOrientationConsumer(Consumer<Pose2d> consumer) {
+    private VisionCameraConfig applyOrientationConsumer(Consumer<Pose2d> consumer) {
         this.orientationConsumer = consumer != null ? consumer : pose -> {};
         return this;
     }
@@ -269,7 +829,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies an alternate orientation estimate that can be merged with the camera pose.
      */
-    public VisionCameraConfig setOrientationSupplier(Supplier<Pose2d> supplier) {
+    private VisionCameraConfig applyOrientationSupplier(Supplier<Pose2d> supplier) {
         this.orientationSupplier = supplier;
         return this;
     }
@@ -277,7 +837,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Registers a hook that runs after the camera updates its internal data structures.
      */
-    public VisionCameraConfig setUpdateHook(Runnable hook) {
+    private VisionCameraConfig applyUpdateHook(Runnable hook) {
         this.updateHook = hook;
         return this;
     }
@@ -285,7 +845,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Flags whether this camera should contribute to robot pose estimation.
      */
-    public VisionCameraConfig setUseForLocalization(boolean useForLocalization) {
+    private VisionCameraConfig applyUseForLocalization(boolean useForLocalization) {
         this.useForLocalization = useForLocalization;
         return this;
     }
@@ -294,7 +854,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
      * Sets the maximum distance (meters) at which vision measurements are trusted without scaling
      * their uncertainty.
      */
-    public VisionCameraConfig setTrustDistance(double trustDistance) {
+    private VisionCameraConfig applyTrustDistance(double trustDistance) {
         this.trustDistance = trustDistance;
         if (Double.isNaN(displayRangeMeters) || displayRangeMeters <= 0.0) {
             displayRangeMeters = trustDistance;
@@ -305,7 +865,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the single-tag measurement standard deviations (x, y, theta).
      */
-    public VisionCameraConfig setSingleStdDevs(Matrix<N3, N1> singleStdDevs) {
+    private VisionCameraConfig applySingleStdDevs(Matrix<N3, N1> singleStdDevs) {
         this.singleStdDevs = singleStdDevs != null ? singleStdDevs : this.singleStdDevs;
         return this;
     }
@@ -313,7 +873,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the multi-tag measurement standard deviations (x, y, theta).
      */
-    public VisionCameraConfig setMultiStdDevs(Matrix<N3, N1> multiStdDevs) {
+    private VisionCameraConfig applyMultiStdDevs(Matrix<N3, N1> multiStdDevs) {
         this.multiStdDevs = multiStdDevs != null ? multiStdDevs : this.multiStdDevs;
         return this;
     }
@@ -322,7 +882,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
      * Sets the camera-to-robot translation using a planar offset (meters). Rotation and height
      * components remain unchanged.
      */
-    public VisionCameraConfig setCameraToRobotTranslation(Translation2d translation) {
+    private VisionCameraConfig applyCameraToRobotTranslation(Translation2d translation) {
         Translation2d value = translation != null ? translation : new Translation2d();
         robotToCameraTransform = new Transform3d(
                 value.getX(),
@@ -336,7 +896,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Sets the transform from robot origin to camera origin directly.
      */
-    public VisionCameraConfig setRobotToCameraTransform(Transform3d transform) {
+    private VisionCameraConfig applyRobotToCameraTransform(Transform3d transform) {
         Transform3d value = transform != null ? transform : new Transform3d();
         this.robotToCameraTransform = value;
         this.cameraToRobotTransform = value.inverse();
@@ -346,7 +906,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Sets the transform from camera origin to robot origin directly.
      */
-    public VisionCameraConfig setCameraToRobotTransform(Transform3d transform) {
+    private VisionCameraConfig applyCameraToRobotTransform(Transform3d transform) {
         Transform3d value = transform != null ? transform : new Transform3d();
         this.cameraToRobotTransform = value;
         this.robotToCameraTransform = value.inverse();
@@ -356,7 +916,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the yaw (horizontal offset) to the best target in degrees.
      */
-    public VisionCameraConfig setTargetYawSupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyTargetYawSupplier(DoubleSupplier supplier) {
         this.targetYawSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
@@ -364,7 +924,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the pitch (vertical offset) to the best target in degrees.
      */
-    public VisionCameraConfig setTargetPitchSupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyTargetPitchSupplier(DoubleSupplier supplier) {
         this.targetPitchSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
@@ -372,7 +932,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the pose ambiguity reported by the vision pipeline (0-1, higher is worse).
      */
-    public VisionCameraConfig setPoseAmbiguitySupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyPoseAmbiguitySupplier(DoubleSupplier supplier) {
         this.poseAmbiguitySupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
@@ -380,7 +940,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the camera pitch in degrees.
      */
-    public VisionCameraConfig setCameraPitchSupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyCameraPitchSupplier(DoubleSupplier supplier) {
         this.cameraPitchSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
@@ -388,7 +948,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the camera roll in degrees.
      */
-    public VisionCameraConfig setCameraRollSupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyCameraRollSupplier(DoubleSupplier supplier) {
         this.cameraRollSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
@@ -396,7 +956,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the overall confidence value [0, 1] returned by the camera pipeline.
      */
-    public VisionCameraConfig setConfidenceSupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyConfidenceSupplier(DoubleSupplier supplier) {
         this.confidenceSupplier = supplier != null ? supplier : () -> 1.0;
         return this;
     }
@@ -404,7 +964,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Adds an operational role for the camera (aiming, localization, driver camera, etc.).
      */
-    public VisionCameraConfig addRole(CameraRole role) {
+    private VisionCameraConfig addRole(CameraRole role) {
         if (role != null) {
             roles.add(role);
         }
@@ -414,7 +974,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Replaces the camera's role set entirely.
      */
-    public VisionCameraConfig setRoles(EnumSet<CameraRole> roles) {
+    private VisionCameraConfig applyRoles(EnumSet<CameraRole> roles) {
         this.roles = roles != null ? EnumSet.copyOf(roles) : EnumSet.noneOf(CameraRole.class);
         return this;
     }
@@ -422,7 +982,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the distance (meters) to the best tag, if available.
      */
-    public VisionCameraConfig setTagDistanceSupplier(DoubleSupplier supplier) {
+    private VisionCameraConfig applyTagDistanceSupplier(DoubleSupplier supplier) {
         this.targetDistanceSupplier = supplier != null ? supplier : () -> Double.NaN;
         return this;
     }
@@ -430,7 +990,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the ID of the best tag being tracked (-1 when none).
      */
-    public VisionCameraConfig setTagIdSupplier(IntSupplier supplier) {
+    private VisionCameraConfig applyTagIdSupplier(IntSupplier supplier) {
         this.tagIdSupplier = supplier != null ? supplier : () -> -1;
         return this;
     }
@@ -438,7 +998,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Supplies the full list of per-target measurements returned by the camera.
      */
-    public VisionCameraConfig setTargetMeasurementsSupplier(
+    private VisionCameraConfig applyTargetMeasurementsSupplier(
             Supplier<List<VisionCamera.TargetMeasurement>> supplier) {
         this.targetMeasurementsSupplier = supplier != null ? supplier : List::of;
         return this;
@@ -447,7 +1007,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Sets the horizontal field of view (degrees) used by dashboards to scale overlays.
      */
-    public VisionCameraConfig setDisplayHorizontalFov(double degrees) {
+    private VisionCameraConfig applyDisplayHorizontalFov(double degrees) {
         this.displayHorizontalFovDeg = degrees;
         return this;
     }
@@ -455,7 +1015,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
     /**
      * Sets the render range (meters) used by dashboards for front-panel visualization.
      */
-    public VisionCameraConfig setDisplayRangeMeters(double rangeMeters) {
+    private VisionCameraConfig applyDisplayRangeMeters(double rangeMeters) {
         this.displayRangeMeters = rangeMeters;
         return this;
     }
@@ -464,7 +1024,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
      * Enables publishing an estimated pose topic for dashboards. Disabled by default to avoid
      * creating stray NetworkTables paths.
      */
-    public VisionCameraConfig setPublishPoseTopic(boolean enabled) {
+    private VisionCameraConfig applyPublishPoseTopic(boolean enabled) {
         this.publishPoseTopic = enabled;
         return this;
     }
@@ -478,7 +1038,7 @@ public class VisionCameraConfig implements ConfigurableCamera {
      *
      * @throws IllegalArgumentException if the capability instance does not match the expected type
      */
-    public VisionCameraConfig addCapability(VisionCameraCapability capabilityKey, Object capability) {
+    private VisionCameraConfig addCapability(VisionCameraCapability capabilityKey, Object capability) {
         if (capabilityKey != null && capability != null) {
             if (!capabilityKey.getType().isInstance(capability)) {
                 throw new IllegalArgumentException(

@@ -24,8 +24,6 @@ class MechanismConfigLoaderTest {
 
                 [control]
                 output = "voltage"
-                pid_profile = "pos"
-                bang_bang_profile = "pos_hold"
 
                 [[control.pid_profiles]]
                 name = "pos"
@@ -42,9 +40,6 @@ class MechanismConfigLoaderTest {
                 """);
 
         Files.writeString(overlay, """
-                [control]
-                pid_profile = "pos"
-
                 [[control.pid_profiles]]
                 name = "pos"
                 k_p = 2.0

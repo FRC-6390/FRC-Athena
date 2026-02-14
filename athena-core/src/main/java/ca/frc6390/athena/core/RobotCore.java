@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
@@ -80,10 +81,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         public static RobotCoreConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
             return new RobotCoreConfig<>(
                     config,
-                    RobotLocalizationConfig.defualt(),
-                    RobotVisionConfig.defualt(),
+                    RobotLocalizationConfig.defaults(),
+                    RobotVisionConfig.defaults(),
                     true,
-                    TelemetryRegistry.TelemetryConfig.defualt(),
+                    TelemetryRegistry.TelemetryConfig.defaults(),
                     List.of(),
                     false,
                     false,
@@ -94,10 +95,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         public static RobotCoreConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
             return new RobotCoreConfig<>(
                     config,
-                    RobotLocalizationConfig.defualt(),
-                    RobotVisionConfig.defualt(),
+                    RobotLocalizationConfig.defaults(),
+                    RobotVisionConfig.defaults(),
                     true,
-                    TelemetryRegistry.TelemetryConfig.defualt(),
+                    TelemetryRegistry.TelemetryConfig.defaults(),
                     List.of(),
                     false,
                     false,
@@ -137,7 +138,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
-                    RobotVisionConfig.defualt().addCameras(cameras),
+                    RobotVisionConfig.defaults().addCameras(cameras),
                     autoInitResetEnabled,
                     telemetryConfig,
                     mechanisms,
@@ -1581,6 +1582,17 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return mechanismView;
     }
 
+    /**
+     * Sectioned runtime interaction API over registered mechanisms/superstructures.
+     *
+     * <p>This mirrors the section-lambda style used by config builders but operates on live
+     * subsystem instances after registration.</p>
+     */
+    public RobotCore<T> mechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
+        mechanismView.use(section);
+        return this;
+    }
+
     private String registerMechanismInternal(Mechanism mech) {
         String name = mech.getName();
         String trimmed = name != null ? name.trim() : "";
@@ -1932,8 +1944,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return registerAutoRoutineChooser(RobotAuto.AutoKey.of(defaultAuto));
     }
 
-    public SendableChooser<Command> registerAutoChooser(String defualtAuto) {
-        return registerAutoChooser(RobotAuto.AutoKey.of(defualtAuto));
+    public SendableChooser<Command> registerAutoChooser(String defaultsAuto) {
+        return registerAutoChooser(RobotAuto.AutoKey.of(defaultsAuto));
     }
 
     public RobotAuto getAutos() {

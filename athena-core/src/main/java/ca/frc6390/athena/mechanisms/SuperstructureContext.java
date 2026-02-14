@@ -3,6 +3,7 @@ package ca.frc6390.athena.mechanisms;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCore;
@@ -37,6 +38,13 @@ public interface SuperstructureContext<SP> {
             throw new IllegalStateException("No RobotCore available in superstructure context");
         }
         return core.getMechanisms();
+    }
+
+    /**
+     * Sectioned interaction helper for other already-built mechanisms/superstructures.
+     */
+    default void robotMechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
+        robotMechanisms().use(section);
     }
 
     <E extends Enum<E> & SetpointProvider<Double>> StatefulLike<E> mechanism(Function<SP, E> mapper);

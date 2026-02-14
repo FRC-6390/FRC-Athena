@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanisms;
 
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
@@ -39,6 +40,13 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
             throw new IllegalStateException("No RobotCore available in mechanism context");
         }
         return core.getMechanisms();
+    }
+
+    /**
+     * Sectioned interaction helper for other already-built mechanisms/superstructures.
+     */
+    default void robotMechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
+        robotMechanisms().use(section);
     }
 
     boolean input(String key);

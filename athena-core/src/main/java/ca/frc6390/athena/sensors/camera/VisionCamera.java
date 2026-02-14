@@ -128,7 +128,19 @@ public class VisionCamera {
     private final Rotation2d cameraYawRelativeToRobot;
     private final double displayHorizontalFovDeg;
     private final double displayRangeMeters;
-    private final double visionWeightMultiplier;
+    private double visionWeightMultiplier;
+    private boolean useForLocalization;
+    private double trustDistance;
+    private double maxLatencySeconds;
+    private double stdDevConfidenceExponent;
+    private double stdDevLatencyWeight;
+    private double stdDevDistanceWeight;
+    private double stdDevTagCountWeight;
+    private double stdDevAmbiguityWeight;
+    private double stdDevPitchWeight;
+    private double stdDevRollWeight;
+    private double stdDevBaseScale;
+    private double stdDevMinScale;
     private final EnumSet<VisionCameraConfig.CameraRole> roles;
     private final EnumMap<VisionCameraCapability, Object> capabilities =
             new EnumMap<>(VisionCameraCapability.class);
@@ -200,9 +212,21 @@ public class VisionCamera {
         this.roles = configRoles.isEmpty()
                 ? EnumSet.noneOf(VisionCameraConfig.CameraRole.class)
                 : EnumSet.copyOf(configRoles);
-        if (config.isUseForLocalization()) {
+        this.useForLocalization = config.isUseForLocalization();
+        if (useForLocalization) {
             this.roles.add(VisionCameraConfig.CameraRole.LOCALIZATION);
         }
+        this.trustDistance = config.getTrustDistance();
+        this.maxLatencySeconds = config.getMaxLatencySeconds();
+        this.stdDevConfidenceExponent = config.getStdDevConfidenceExponent();
+        this.stdDevLatencyWeight = config.getStdDevLatencyWeight();
+        this.stdDevDistanceWeight = config.getStdDevDistanceWeight();
+        this.stdDevTagCountWeight = config.getStdDevTagCountWeight();
+        this.stdDevAmbiguityWeight = config.getStdDevAmbiguityWeight();
+        this.stdDevPitchWeight = config.getStdDevPitchWeight();
+        this.stdDevRollWeight = config.getStdDevRollWeight();
+        this.stdDevBaseScale = config.getStdDevBaseScale();
+        this.stdDevMinScale = config.getStdDevMinScale();
         this.singleStdDevs = config.getSingleStdDevs();
         this.multiStdDevs = config.getMultiTagStdDevs();
         capabilities.putAll(config.capabilities());
@@ -222,6 +246,84 @@ public class VisionCamera {
      */
     public VisionCameraConfig getConfig() {
         return config;
+    }
+
+    public VisionCamera config(Consumer<RuntimeSection> section) {
+        if (section != null) {
+            section.accept(new RuntimeSection());
+        }
+        return this;
+    }
+
+    public RuntimeSection config() {
+        return new RuntimeSection();
+    }
+
+    public final class RuntimeSection {
+        public RuntimeSection useForLocalization(boolean enabled) {
+            useForLocalization = enabled;
+            if (enabled) {
+                roles.add(VisionCameraConfig.CameraRole.LOCALIZATION);
+            } else {
+                roles.remove(VisionCameraConfig.CameraRole.LOCALIZATION);
+            }
+            return this;
+        }
+
+        public RuntimeSection trustDistance(double meters) {
+            trustDistance = Math.max(0.0, meters);
+            return this;
+        }
+
+        public RuntimeSection stdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
+            if (single != null) {
+                singleStdDevs = single;
+            }
+            if (multi != null) {
+                multiStdDevs = multi;
+            }
+            return this;
+        }
+
+        public RuntimeSection singleStdDevs(Matrix<N3, N1> single) {
+            stdDevs(single, null);
+            return this;
+        }
+
+        public RuntimeSection multiStdDevs(Matrix<N3, N1> multi) {
+            stdDevs(null, multi);
+            return this;
+        }
+
+        public RuntimeSection stdDevAmbiguityWeight(double weight) {
+            stdDevAmbiguityWeight = weight;
+            return this;
+        }
+
+        public RuntimeSection stdDevDistanceWeight(double weight) {
+            stdDevDistanceWeight = weight;
+            return this;
+        }
+
+        public RuntimeSection stdDevLatencyWeight(double weight) {
+            stdDevLatencyWeight = weight;
+            return this;
+        }
+
+        public RuntimeSection stdDevPitchWeight(double weight) {
+            stdDevPitchWeight = weight;
+            return this;
+        }
+
+        public RuntimeSection stdDevRollWeight(double weight) {
+            stdDevRollWeight = weight;
+            return this;
+        }
+
+        public RuntimeSection visionWeightMultiplier(double weight) {
+            visionWeightMultiplier = sanitizeWeight(weight);
+            return this;
+        }
     }
 
     /**
@@ -329,22 +431,14 @@ public class VisionCamera {
      */
     public Matrix<N3, N1> getLocalizationStdDevs() {
         update();
-        return recalculateStdDevs(cachedVisibleTargets, cachedAverageDistanceMeters, config.getTrustDistance());
+        return recalculateStdDevs(cachedVisibleTargets, cachedAverageDistanceMeters, trustDistance);
     }
 
     /**
-     * Overrides the single and multi-tag standard deviation matrices used when estimating pose.
-     *
-     * @param single single-target standard deviation matrix
-     * @param multi multi-target standard deviation matrix
+     * Returns the current trust distance threshold (meters) used for single-tag covariance gating.
      */
-    public void setStdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
-        if (single != null) {
-            singleStdDevs = single;
-        }
-        if (multi != null) {
-            multiStdDevs = multi;
-        }
+    public double getTrustDistance() {
+        return trustDistance;
     }
 
     /**
@@ -403,7 +497,7 @@ public class VisionCamera {
                 recalculateStdDevs(
                         cachedVisibleTargets,
                         cachedAverageDistanceMeters,
-                        config.getTrustDistance());
+                        trustDistance);
         return new LocalizationData(cachedPose, cachedPose3d, cachedLatencySeconds, stdDevs);
     }
 
@@ -479,7 +573,6 @@ public class VisionCamera {
         if (Double.isNaN(timestampSeconds) || Double.isInfinite(timestampSeconds)) {
             return Optional.empty();
         }
-        double maxLatencySeconds = config.getMaxLatencySeconds();
         if (Double.isFinite(maxLatencySeconds) && maxLatencySeconds > 0.0 && latencySeconds > maxLatencySeconds) {
             return Optional.empty();
         }
@@ -520,40 +613,40 @@ public class VisionCamera {
             return null;
         }
         double scale = 1.0;
-        double baseScale = config.getStdDevBaseScale();
+        double baseScale = stdDevBaseScale;
         if (Double.isFinite(baseScale) && baseScale > 0.0) {
             scale *= baseScale;
         }
-        double confidenceExponent = config.getStdDevConfidenceExponent();
+        double confidenceExponent = stdDevConfidenceExponent;
         if (confidenceExponent > 0.0 && Double.isFinite(confidence)) {
             double clamped = Math.max(0.05, Math.min(1.0, confidence));
             scale /= Math.pow(clamped, confidenceExponent);
         }
-        double latencyWeight = config.getStdDevLatencyWeight();
+        double latencyWeight = stdDevLatencyWeight;
         if (latencyWeight > 0.0 && Double.isFinite(latencySeconds)) {
             scale *= (1.0 + latencyWeight * latencySeconds);
         }
-        double distanceWeight = config.getStdDevDistanceWeight();
+        double distanceWeight = stdDevDistanceWeight;
         if (distanceWeight > 0.0 && Double.isFinite(distanceMeters)) {
             scale *= (1.0 + distanceWeight * distanceMeters);
         }
-        double tagCountWeight = config.getStdDevTagCountWeight();
+        double tagCountWeight = stdDevTagCountWeight;
         if (tagCountWeight > 0.0 && visibleTargets > 1) {
             scale /= (1.0 + tagCountWeight * (visibleTargets - 1));
         }
-        double ambiguityWeight = config.getStdDevAmbiguityWeight();
+        double ambiguityWeight = stdDevAmbiguityWeight;
         if (ambiguityWeight > 0.0 && Double.isFinite(ambiguity)) {
             scale *= (1.0 + ambiguityWeight * Math.max(0.0, ambiguity));
         }
-        double pitchWeight = config.getStdDevPitchWeight();
+        double pitchWeight = stdDevPitchWeight;
         if (pitchWeight > 0.0 && Double.isFinite(cameraPitchDegrees)) {
             scale *= (1.0 + pitchWeight * Math.abs(cameraPitchDegrees));
         }
-        double rollWeight = config.getStdDevRollWeight();
+        double rollWeight = stdDevRollWeight;
         if (rollWeight > 0.0 && Double.isFinite(cameraRollDegrees)) {
             scale *= (1.0 + rollWeight * Math.abs(cameraRollDegrees));
         }
-        double minScale = config.getStdDevMinScale();
+        double minScale = stdDevMinScale;
         if (Double.isFinite(minScale) && minScale > 0.0) {
             scale = Math.max(minScale, scale);
         }
@@ -567,21 +660,7 @@ public class VisionCamera {
      * Returns whether this camera currently participates in robot localization.
      */
     public boolean isUseForLocalization() {
-        return config.isUseForLocalization();
-    }
-
-    /**
-     * Enables or disables use of the camera for pose estimation.
-     *
-     * @param useForLocalization {@code true} when the camera should contribute to localization
-     */
-    public void setUseForLocalization(boolean useForLocalization) {
-        config.setUseForLocalization(useForLocalization);
-        if (useForLocalization) {
-            roles.add(VisionCameraConfig.CameraRole.LOCALIZATION);
-        } else {
-            roles.remove(VisionCameraConfig.CameraRole.LOCALIZATION);
-        }
+        return useForLocalization;
     }
 
     /**
@@ -691,36 +770,6 @@ public class VisionCamera {
      */
     public Transform3d getRobotToCameraTransform() {
         return robotToCameraTransform;
-    }
-
-    public VisionCamera setStdDevAmbiguityWeight(double weight) {
-        config.setStdDevAmbiguityWeight(weight);
-        return this;
-    }
-
-    public VisionCamera setStdDevDistanceWeight(double weight) {
-        config.setStdDevDistanceWeight(weight);
-        return this;
-    }
-
-    public VisionCamera setStdDevLatencyWeight(double weight) {
-        config.setStdDevLatencyWeight(weight);
-        return this;
-    }
-
-    public VisionCamera setStdDevPitchWeight(double weight) {
-        config.setStdDevPitchWeight(weight);
-        return this;
-    }
-
-    public VisionCamera setStdDevRollWeight(double weight) {
-        config.setStdDevRollWeight(weight);
-        return this;
-    }
-
-    public VisionCamera setVisionWeightMultiplier(double weight) {
-        config.setVisionWeightMultiplier(weight);
-        return this;
     }
 
     /**
@@ -858,7 +907,7 @@ public class VisionCamera {
                 recalculateStdDevs(
                         cachedVisibleTargets,
                         cachedAverageDistanceMeters,
-                        config.getTrustDistance());
+                        trustDistance);
         Pose2d vendorPose = cachedPose;
         Pose2d safePose = cachedPose;
         Pose3d safePose3d = cachedPose3d;

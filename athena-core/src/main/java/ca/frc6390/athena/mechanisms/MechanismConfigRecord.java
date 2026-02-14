@@ -19,7 +19,6 @@ public record MechanismConfigRecord(
         boolean useVoltage,
         OutputType outputType,
         boolean useSetpointAsOutput,
-        boolean pidUseVelocity,
         boolean customPIDCycle,
         boolean pidContinous,
         double motorCurrentLimit,
@@ -73,7 +72,6 @@ public record MechanismConfigRecord(
                 false,
                 false,
                 false,
-                false,
                 40.0,
                 MotorNeutralMode.Brake,
                 "rio",
@@ -109,7 +107,6 @@ public record MechanismConfigRecord(
         private boolean useVoltage;
         private OutputType outputType;
         private boolean useSetpointAsOutput;
-        private boolean pidUseVelocity;
         private boolean customPIDCycle;
         private boolean pidContinous;
         private double motorCurrentLimit;
@@ -142,7 +139,6 @@ public record MechanismConfigRecord(
             this.useVoltage = base.useVoltage();
             this.outputType = base.outputType();
             this.useSetpointAsOutput = base.useSetpointAsOutput();
-            this.pidUseVelocity = base.pidUseVelocity();
             this.customPIDCycle = base.customPIDCycle();
             this.pidContinous = base.pidContinous();
             this.motorCurrentLimit = base.motorCurrentLimit();
@@ -206,11 +202,6 @@ public record MechanismConfigRecord(
 
         public Builder useSetpointAsOutput(boolean useSetpointAsOutput) {
             this.useSetpointAsOutput = useSetpointAsOutput;
-            return this;
-        }
-
-        public Builder pidUseVelocity(boolean pidUseVelocity) {
-            this.pidUseVelocity = pidUseVelocity;
             return this;
         }
 
@@ -334,7 +325,6 @@ public record MechanismConfigRecord(
                     useVoltage,
                     outputType,
                     useSetpointAsOutput,
-                    pidUseVelocity,
                     customPIDCycle,
                     pidContinous,
                     motorCurrentLimit,

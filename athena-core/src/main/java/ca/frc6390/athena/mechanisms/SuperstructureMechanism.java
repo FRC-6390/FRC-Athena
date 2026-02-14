@@ -318,22 +318,19 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         meta.putString("type", "Superstructure");
         meta.putString("owner", "");
         meta.putString("hint",
-                "Enable " + node.path() + "/NetworkTableConfig/Details (and .../Advanced) to publish more topics.");
+                "Enable " + node.path() + "/NetworkTableConfig/Details and section flags to publish more topics.");
 
         RobotNetworkTables.MechanismToggles toggles = nt.mechanismConfig(node);
         boolean details = toggles.detailsEnabled();
-        boolean advanced = toggles.advancedEnabled();
         if (!details) {
             return node;
         }
 
         if (toggles.controlEnabled()) {
             stateMachine.networkTables(node.child("Control").child("StateMachine"));
-            if (advanced) {
-                RobotNetworkTables.Node status = node.child("Control").child("Status");
-                S state = stateMachine.getGoalState();
-                status.putString("state", state != null ? state.name() : "");
-            }
+            RobotNetworkTables.Node status = node.child("Control").child("Status");
+            S state = stateMachine.getGoalState();
+            status.putString("state", state != null ? state.name() : "");
         }
 
         if (toggles.inputsEnabled()) {

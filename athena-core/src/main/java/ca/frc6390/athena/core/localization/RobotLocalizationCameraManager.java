@@ -121,7 +121,7 @@ final class RobotVisionCameraManager {
         boolean defaultUseForLocalization = camera.isUseForLocalization();
         NetworkTableEntry useForLocalizationEntry = initIfAbsent(cfg.entry("UseForLocalization"), defaultUseForLocalization);
 
-        double trustDistance = camera.getConfig().getTrustDistance();
+        double trustDistance = camera.getTrustDistance();
         NetworkTableEntry trustDistanceEntry = initIfAbsent(cfg.entry("TrustDistanceMeters"), trustDistance);
 
         double singleStdX = camera.getSingleStdDev().get(0, 0);
@@ -182,24 +182,24 @@ final class RobotVisionCameraManager {
                 : currentUse;
         if (desiredUse != currentUse) {
             if (vision != null) {
-                vision.setUseForLocalization(state.key, desiredUse);
+                vision.camera(state.key, runtime -> runtime.useForLocalization(desiredUse));
             } else {
-                camera.setUseForLocalization(desiredUse);
+                camera.config().useForLocalization(desiredUse);
             }
         }
         if (state.useForLocalizationEntry != null) {
             state.useForLocalizationEntry.setBoolean(desiredUse);
         }
 
-        double currentTrust = camera.getConfig().getTrustDistance();
+        double currentTrust = camera.getTrustDistance();
         double desiredTrust = state.trustDistanceEntry != null
                 ? state.trustDistanceEntry.getDouble(currentTrust)
                 : currentTrust;
         if (Math.abs(desiredTrust - currentTrust) > stdEpsilon) {
-            camera.getConfig().setTrustDistance(Math.max(0.0, desiredTrust));
+            camera.config().trustDistance(desiredTrust);
         }
         if (state.trustDistanceEntry != null) {
-            state.trustDistanceEntry.setDouble(camera.getConfig().getTrustDistance());
+            state.trustDistanceEntry.setDouble(camera.getTrustDistance());
         }
 
         Matrix<N3, N1> singleStd = camera.getSingleStdDev();
@@ -212,8 +212,7 @@ final class RobotVisionCameraManager {
                 || Math.abs(desiredSingleY - singleStd.get(1, 0)) > stdEpsilon
                 || Math.abs(desiredSingleThetaRad - singleStd.get(2, 0)) > Math.toRadians(0.01)) {
             Matrix<N3, N1> updatedSingle = VecBuilder.fill(desiredSingleX, desiredSingleY, desiredSingleThetaRad);
-            camera.getConfig().setSingleStdDevs(updatedSingle);
-            camera.setStdDevs(updatedSingle, null);
+            camera.config().singleStdDevs(updatedSingle);
         }
 
         Matrix<N3, N1> multiStd = camera.getMultiStdDev();
@@ -226,8 +225,7 @@ final class RobotVisionCameraManager {
                 || Math.abs(desiredMultiY - multiStd.get(1, 0)) > stdEpsilon
                 || Math.abs(desiredMultiThetaRad - multiStd.get(2, 0)) > Math.toRadians(0.01)) {
             Matrix<N3, N1> updatedMulti = VecBuilder.fill(desiredMultiX, desiredMultiY, desiredMultiThetaRad);
-            camera.getConfig().setMultiStdDevs(updatedMulti);
-            camera.setStdDevs(null, updatedMulti);
+            camera.config().multiStdDevs(updatedMulti);
         }
     }
 

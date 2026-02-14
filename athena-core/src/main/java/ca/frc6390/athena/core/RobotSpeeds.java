@@ -370,11 +370,6 @@ public class RobotSpeeds {
         return List.copyOf(outputBlendRules);
     }
 
-    // Compatibility helper (legacy interaction API now maps to source-target blend).
-    public void addInteraction(String sourceA, String sourceB, BlendMode blendMode, SpeedAxis... axes) {
-        blend(sourceA, sourceA, sourceB, blendMode, axes);
-    }
-
     public void setSpeeds(String source, ChassisSpeeds speeds) {
         speedSource(source).setInputSpeeds(speeds);
     }

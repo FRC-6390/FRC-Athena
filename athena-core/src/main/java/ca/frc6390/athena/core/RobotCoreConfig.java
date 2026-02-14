@@ -67,9 +67,9 @@ public final class RobotCoreConfig {
         private final String name;
         private final RobotDrivetrainConfig<T> drivetrainConfig;
 
-        private RobotLocalizationConfig localizationConfig = RobotLocalizationConfig.defualt();
-        private RobotVisionConfig visionConfig = RobotVisionConfig.defualt();
-        private TelemetryRegistry.TelemetryConfig telemetryConfig = TelemetryRegistry.TelemetryConfig.defualt();
+        private RobotLocalizationConfig localizationConfig = RobotLocalizationConfig.defaults();
+        private RobotVisionConfig visionConfig = RobotVisionConfig.defaults();
+        private TelemetryRegistry.TelemetryConfig telemetryConfig = TelemetryRegistry.TelemetryConfig.defaults();
 
         private boolean autoInitResetEnabled = true;
         private boolean performanceMode = false;
@@ -88,7 +88,7 @@ public final class RobotCoreConfig {
             Objects.requireNonNull(section, "section");
             LocalizationSection l = new LocalizationSection(localizationConfig != null
                     ? localizationConfig
-                    : RobotLocalizationConfig.defualt());
+                    : RobotLocalizationConfig.defaults());
             section.accept(l);
             localizationConfig = l.config;
             return this;
@@ -96,7 +96,7 @@ public final class RobotCoreConfig {
 
         public Builder<T> vision(Consumer<VisionSection> section) {
             Objects.requireNonNull(section, "section");
-            VisionSection v = new VisionSection(visionConfig != null ? visionConfig : RobotVisionConfig.defualt());
+            VisionSection v = new VisionSection(visionConfig != null ? visionConfig : RobotVisionConfig.defaults());
             section.accept(v);
             visionConfig = v.config;
             return this;
@@ -110,7 +110,7 @@ public final class RobotCoreConfig {
             Objects.requireNonNull(section, "section");
             TelemetrySection t = new TelemetrySection(telemetryConfig != null
                     ? telemetryConfig
-                    : TelemetryRegistry.TelemetryConfig.defualt());
+                    : TelemetryRegistry.TelemetryConfig.defaults());
             section.accept(t);
             telemetryConfig = t.config;
             return this;
@@ -147,10 +147,10 @@ public final class RobotCoreConfig {
         public RobotCore.RobotCoreConfig<T> build() {
             return new RobotCore.RobotCoreConfig<>(
                     drivetrainConfig,
-                    localizationConfig != null ? localizationConfig : RobotLocalizationConfig.defualt(),
-                    visionConfig != null ? visionConfig : RobotVisionConfig.defualt(),
+                    localizationConfig != null ? localizationConfig : RobotLocalizationConfig.defaults(),
+                    visionConfig != null ? visionConfig : RobotVisionConfig.defaults(),
                     autoInitResetEnabled,
-                    telemetryConfig != null ? telemetryConfig : TelemetryRegistry.TelemetryConfig.defualt(),
+                    telemetryConfig != null ? telemetryConfig : TelemetryRegistry.TelemetryConfig.defaults(),
                     List.copyOf(mechanisms),
                     performanceMode,
                     timingDebugEnabled,
@@ -200,47 +200,47 @@ public final class RobotCoreConfig {
         }
 
         public SwerveSection moduleLocations(double trackWidthMeters) {
-            config.setModuleLocations(trackWidthMeters);
+            config.hardware().moduleLocations(trackWidthMeters);
             return this;
         }
 
         public SwerveSection moduleLocations(double trackWidthMeters, double wheelbaseMeters) {
-            config.setModuleLocations(trackWidthMeters, wheelbaseMeters);
+            config.hardware().moduleLocations(trackWidthMeters, wheelbaseMeters);
             return this;
         }
 
         public SwerveSection imu(AthenaImu imu, boolean inverted) {
-            config.setIMU(imu, inverted);
+            config.hardware().imu(imu, inverted);
             return this;
         }
 
         public SwerveSection ids(RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs ids) {
-            config.setIds(ids);
+            config.hardware().ids(ids);
             return this;
         }
 
         public SwerveSection canbus(String canbus) {
-            config.setCanbus(canbus);
+            config.hardware().canbus(canbus);
             return this;
         }
 
         public SwerveSection modules(SwerveModuleConfig... modules) {
-            config.modules(modules);
+            config.hardware().modules(modules);
             return this;
         }
 
         public SwerveSection encoderOffsets(double... offsets) {
-            config.setEncoderOffset(offsets);
+            config.hardware().encoderOffsets(offsets);
             return this;
         }
 
         public SwerveSection driveCurrentLimit(double amps) {
-            config.setDriveCurrentLimit(amps);
+            config.hardware().driveCurrentLimit(amps);
             return this;
         }
 
         public SwerveSection steerCurrentLimit(double amps) {
-            config.setSteerCurrentLimit(amps);
+            config.hardware().steerCurrentLimit(amps);
             return this;
         }
 
@@ -249,7 +249,7 @@ public final class RobotCoreConfig {
         }
 
         public SwerveSection fieldRelative(boolean enabled) {
-            config.setFieldRelative(enabled);
+            config.control().fieldRelative(enabled);
             return this;
         }
 
@@ -258,7 +258,7 @@ public final class RobotCoreConfig {
             section.accept(new SpeedSourceSection(new SpeedSourceConfigurer() {
                 @Override
                 public void add(String name, boolean enabledByDefault) {
-                    config.addSpeedSource(name, enabledByDefault);
+                    config.speed().source(name, enabledByDefault);
                 }
 
                 @Override
@@ -267,7 +267,7 @@ public final class RobotCoreConfig {
                         String source,
                         RobotSpeeds.BlendMode blendMode,
                         RobotSpeeds.SpeedAxis... axes) {
-                    config.addSpeedBlend(target, source, blendMode, axes);
+                    config.speed().blend(target, source, blendMode, axes);
                 }
 
                 @Override
@@ -277,7 +277,7 @@ public final class RobotCoreConfig {
                         String right,
                         RobotSpeeds.BlendMode blendMode,
                         RobotSpeeds.SpeedAxis... axes) {
-                    config.addSpeedBlend(target, left, right, blendMode, axes);
+                    config.speed().blend(target, left, right, blendMode, axes);
                 }
 
                 @Override
@@ -285,7 +285,7 @@ public final class RobotCoreConfig {
                         String source,
                         RobotSpeeds.BlendMode blendMode,
                         RobotSpeeds.SpeedAxis... axes) {
-                    config.addSpeedOutputBlend(source, blendMode, axes);
+                    config.speed().outputBlend(source, blendMode, axes);
                 }
             }));
             return this;
@@ -296,7 +296,7 @@ public final class RobotCoreConfig {
             SwerveSimulationSection s = new SwerveSimulationSection(simulationConfig);
             section.accept(s);
             simulationConfig = s.config;
-            config.setSimulationConfig(simulationConfig);
+            config.simulation().config(simulationConfig);
             return this;
         }
     }
@@ -341,22 +341,22 @@ public final class RobotCoreConfig {
         private DifferentialSection() {}
 
         public DifferentialSection imu(AthenaImu imu, boolean inverted) {
-            config.setIMU(imu, inverted);
+            config.hardware().imu(imu, inverted);
             return this;
         }
 
         public DifferentialSection trackWidthMeters(double meters) {
-            config.setTrackWidth(meters);
+            config.hardware().trackWidth(meters);
             return this;
         }
 
         public DifferentialSection canbus(String canbus) {
-            config.setCanbus(canbus);
+            config.hardware().canbus(canbus);
             return this;
         }
 
         public DifferentialSection currentLimit(double amps) {
-            config.setCurrentLimit(amps);
+            config.hardware().currentLimit(amps);
             return this;
         }
 
@@ -365,7 +365,7 @@ public final class RobotCoreConfig {
             section.accept(new SpeedSourceSection(new SpeedSourceConfigurer() {
                 @Override
                 public void add(String name, boolean enabledByDefault) {
-                    config.addSpeedSource(name, enabledByDefault);
+                    config.speed().source(name, enabledByDefault);
                 }
 
                 @Override
@@ -374,7 +374,7 @@ public final class RobotCoreConfig {
                         String source,
                         RobotSpeeds.BlendMode blendMode,
                         RobotSpeeds.SpeedAxis... axes) {
-                    config.addSpeedBlend(target, source, blendMode, axes);
+                    config.speed().blend(target, source, blendMode, axes);
                 }
 
                 @Override
@@ -384,7 +384,7 @@ public final class RobotCoreConfig {
                         String right,
                         RobotSpeeds.BlendMode blendMode,
                         RobotSpeeds.SpeedAxis... axes) {
-                    config.addSpeedBlend(target, left, right, blendMode, axes);
+                    config.speed().blend(target, left, right, blendMode, axes);
                 }
 
                 @Override
@@ -392,7 +392,7 @@ public final class RobotCoreConfig {
                         String source,
                         RobotSpeeds.BlendMode blendMode,
                         RobotSpeeds.SpeedAxis... axes) {
-                    config.addSpeedOutputBlend(source, blendMode, axes);
+                    config.speed().outputBlend(source, blendMode, axes);
                 }
             }));
             return this;
@@ -403,7 +403,7 @@ public final class RobotCoreConfig {
             DifferentialSimulationSection s = new DifferentialSimulationSection(simulationConfig);
             section.accept(s);
             simulationConfig = s.config;
-            config.setSimulationConfig(simulationConfig);
+            config.simulation().config(simulationConfig);
             return this;
         }
     }
@@ -536,39 +536,39 @@ public final class RobotCoreConfig {
         }
 
         public LocalizationSection visionStdDevs(double vXStd, double vYStd, double vThetaStd) {
-            config.setVision(vXStd, vYStd, vThetaStd);
+            config.estimation().vision(vXStd, vYStd, vThetaStd);
             return this;
         }
 
         public LocalizationSection autoPlannerPid(double tP, double tI, double tD, double rP, double rI, double rD) {
-            config.setAutoPlannerPID(tP, tI, tD, rP, rI, rD);
+            config.planner().autoPlannerPid(tP, tI, tD, rP, rI, rD);
             return this;
         }
 
         public LocalizationSection visionEnabled(boolean enabled) {
-            config.setVisionEnabled(enabled);
+            config.estimation().visionEnabled(enabled);
             return this;
         }
 
         public LocalizationSection use3d() {
-            config.use3d();
+            config.estimation().use3d();
             return this;
         }
 
         public LocalizationSection use2d() {
-            config.use2d();
+            config.estimation().use2d();
             return this;
         }
 
         public LocalizationSection poseConfig(ca.frc6390.athena.core.localization.PoseConfig poseConfig) {
-            config.addPoseConfig(poseConfig);
+            config.poses().pose(poseConfig);
             return this;
         }
 
         public LocalizationSection boundingBox(
                 String name,
                 ca.frc6390.athena.core.localization.PoseBoundingBox2d box) {
-            config.addBoundingBox(name, box);
+            config.poses().boundingBox(name, box);
             return this;
         }
 
@@ -576,12 +576,12 @@ public final class RobotCoreConfig {
                 String name,
                 edu.wpi.first.math.geometry.Translation2d cornerA,
                 edu.wpi.first.math.geometry.Translation2d cornerB) {
-            config.addBoundingBox(name, cornerA, cornerB);
+            config.poses().boundingBox(name, cornerA, cornerB);
             return this;
         }
 
         public LocalizationSection autoPoseName(String name) {
-            config.setAutoPoseName(name);
+            config.poses().autoPoseName(name);
             return this;
         }
     }

@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.encoder;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.MathUtil;
+import java.util.function.Consumer;
 
 /**
  * Vendor-agnostic encoder interface for the new vendordep system.
@@ -34,12 +35,20 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         return getVelocity();
     }
 
+    /**
+     */
     void setPosition(double position);
 
+    /**
+     */
     void setInverted(boolean inverted);
 
+    /**
+     */
     void setConversion(double conversion);
 
+    /**
+     */
     void setOffset(double offset);
 
     // Expanded capability to match legacy usage
@@ -130,28 +139,46 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         return isConnected();
     }
 
+    /**
+     */
     default void setGearRatio(double gearRatio) {}
 
+    /**
+     */
     default void setConversionOffset(double conversionOffset) {}
 
+    /**
+     */
     default void setDiscontinuityPoint(double discontinuityPoint) {}
 
+    /**
+     */
     default void setDiscontinuityRange(double discontinuityRange) {}
 
+    /**
+     */
     default void setDiscontinuity(double discontinuityPoint, double discontinuityRange) {
         setDiscontinuityPoint(discontinuityPoint);
         setDiscontinuityRange(discontinuityRange);
     }
 
+    /**
+     */
     default void setRotations(double rotations) {
         setPosition(rotations);
     }
 
     // Simulation hooks
+    /**
+     */
     default void setSimulatedPosition(double rotations) {}
 
+    /**
+     */
     default void setSimulatedVelocity(double rotationsPerSecond) {}
 
+    /**
+     */
     default void setSimulatedState(double rotations, double velocity) {}
 
     /**
@@ -180,6 +207,44 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
 
     default Encoder update() {
         return this;
+    }
+
+    /**
+     * Sectioned config API for tuning/interacting with an already-built encoder.
+     */
+    default Encoder config(Consumer<RuntimeSection> section) {
+        if (section != null) {
+            section.accept(new RuntimeSection(this));
+        }
+        return this;
+    }
+
+    /**
+     * Convenience accessor for non-lambda config chaining.
+     */
+    default RuntimeSection config() {
+        return new RuntimeSection(this);
+    }
+
+    /**
+     * Sectioned runtime API for simulation interactions.
+     */
+    default Encoder sim(Consumer<SimulationSection> section) {
+        if (section != null) {
+            section.accept(new SimulationSection(this));
+        }
+        return this;
+    }
+
+    /**
+     * Structured read API: {@code encoder.measurements().position()}.
+     */
+    default MeasurementsView measurements() {
+        return new MeasurementsView(this, false);
+    }
+
+    default StatusView status() {
+        return new StatusView(this, false);
     }
 
     /**
@@ -212,7 +277,186 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
     // Default helpers to satisfy shuffleboard calls
     default String getName() {
         EncoderConfig cfg = getConfig();
-        return cfg != null ? (cfg.canbus + "\\" + cfg.id + "\\" + (cfg.type != null ? cfg.type.getKey() : "encoder")) : "encoder";
+        return cfg != null
+                ? (cfg.canbus() + "\\" + cfg.id() + "\\" + (cfg.type() != null ? cfg.type().getKey() : "encoder"))
+                : "encoder";
+    }
+
+    final class RuntimeSection {
+        private final Encoder owner;
+
+        RuntimeSection(Encoder owner) {
+            this.owner = owner;
+        }
+
+        public RuntimeSection poll() {
+            owner.update();
+            return this;
+        }
+
+        public RuntimeSection position(double position) {
+            owner.setPosition(position);
+            return this;
+        }
+
+        public RuntimeSection rotations(double rotations) {
+            owner.setRotations(rotations);
+            return this;
+        }
+
+        public RuntimeSection inverted(boolean inverted) {
+            owner.setInverted(inverted);
+            return this;
+        }
+
+        public RuntimeSection conversion(double conversion) {
+            owner.setConversion(conversion);
+            return this;
+        }
+
+        public RuntimeSection offset(double offset) {
+            owner.setOffset(offset);
+            return this;
+        }
+
+        public RuntimeSection gearRatio(double gearRatio) {
+            owner.setGearRatio(gearRatio);
+            return this;
+        }
+
+        public RuntimeSection conversionOffset(double conversionOffset) {
+            owner.setConversionOffset(conversionOffset);
+            return this;
+        }
+
+        public RuntimeSection discontinuityPoint(double discontinuityPoint) {
+            owner.setDiscontinuityPoint(discontinuityPoint);
+            return this;
+        }
+
+        public RuntimeSection discontinuityRange(double discontinuityRange) {
+            owner.setDiscontinuityRange(discontinuityRange);
+            return this;
+        }
+
+        public RuntimeSection discontinuity(double discontinuityPoint, double discontinuityRange) {
+            owner.setDiscontinuity(discontinuityPoint, discontinuityRange);
+            return this;
+        }
+    }
+
+    final class SimulationSection {
+        private final Encoder owner;
+
+        SimulationSection(Encoder owner) {
+            this.owner = owner;
+        }
+
+        public SimulationSection position(double rotations) {
+            owner.setSimulatedPosition(rotations);
+            return this;
+        }
+
+        public SimulationSection velocity(double rotationsPerSecond) {
+            owner.setSimulatedVelocity(rotationsPerSecond);
+            return this;
+        }
+
+        public SimulationSection state(double rotations, double velocity) {
+            owner.setSimulatedState(rotations, velocity);
+            return this;
+        }
+    }
+
+    final class MeasurementsView {
+        private final Encoder owner;
+        private final boolean poll;
+
+        MeasurementsView(Encoder owner, boolean poll) {
+            this.owner = owner;
+            this.poll = poll;
+        }
+
+        public MeasurementsView poll() {
+            return new MeasurementsView(owner, true);
+        }
+
+        public double position() {
+            return owner.getPosition(poll);
+        }
+
+        public double velocity() {
+            return owner.getVelocity(poll);
+        }
+
+        public double absolutePosition() {
+            return owner.getAbsolutePosition(poll);
+        }
+
+        public double rotations() {
+            return owner.getRotations(poll);
+        }
+
+        public double absoluteRotations() {
+            return owner.getAbsoluteRotations(poll);
+        }
+
+        public double rate() {
+            return owner.getRate(poll);
+        }
+
+        public double rawAbsolute() {
+            return owner.getRawAbsoluteValue(poll);
+        }
+
+        public edu.wpi.first.math.geometry.Rotation2d rotation2d() {
+            return owner.getRotation2d(poll);
+        }
+
+        public edu.wpi.first.math.geometry.Rotation2d absoluteRotation2d() {
+            return owner.getAbsoluteRotation2d(poll);
+        }
+    }
+
+    final class StatusView {
+        private final Encoder owner;
+        private final boolean poll;
+
+        StatusView(Encoder owner, boolean poll) {
+            this.owner = owner;
+            this.poll = poll;
+        }
+
+        public StatusView poll() {
+            return new StatusView(owner, true);
+        }
+
+        public boolean connected() {
+            return owner.isConnected(poll);
+        }
+
+        public boolean inverted() {
+            return owner.isInverted();
+        }
+
+        public boolean supportsSimulation() {
+            return owner.supportsSimulation();
+        }
+
+        public int canId() {
+            EncoderConfig cfg = owner.getConfig();
+            return cfg != null ? cfg.id() : -1;
+        }
+
+        public String canbus() {
+            EncoderConfig cfg = owner.getConfig();
+            return cfg != null ? cfg.canbus() : "";
+        }
+
+        public String typeKey() {
+            EncoderConfig cfg = owner.getConfig();
+            return cfg != null && cfg.type() != null ? cfg.type().getKey() : "unknown";
+        }
     }
 
     @Override
@@ -241,9 +485,9 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
 
             EncoderConfig cfg = getConfig();
             if (cfg != null) {
-                node.putDouble("canId", cfg.id);
-                node.putString("canbus", cfg.canbus != null ? cfg.canbus : "");
-                node.putString("type", cfg.type != null ? cfg.type.getKey() : "unknown");
+                node.putDouble("canId", cfg.id());
+                node.putString("canbus", cfg.canbus() != null ? cfg.canbus() : "");
+                node.putString("type", cfg.type() != null ? cfg.type().getKey() : "unknown");
             }
         }
 

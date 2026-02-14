@@ -1,6 +1,7 @@
 package ca.frc6390.athena.hardware.motor;
 
 import java.util.Arrays;
+import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
@@ -28,6 +29,40 @@ public class MotorControllerGroup implements RobotSendableDevice {
     public static MotorControllerGroup fromConfigs(MotorControllerConfig... configs) {
         return new MotorControllerGroup(
                 Arrays.stream(configs).map(HardwareFactories::motor).toArray(MotorController[]::new));
+    }
+
+    /**
+     * Sectioned output API for already-built motor groups.
+     */
+    public MotorControllerGroup output(Consumer<OutputSection> section) {
+        if (section != null) {
+            section.accept(new OutputSection(this));
+        }
+        return this;
+    }
+
+    /**
+     * Non-lambda section accessor for output interactions.
+     */
+    public OutputSection output() {
+        return new OutputSection(this);
+    }
+
+    /**
+     * Sectioned config API for already-built motor groups.
+     */
+    public MotorControllerGroup config(Consumer<ConfigSection> section) {
+        if (section != null) {
+            section.accept(new ConfigSection(this));
+        }
+        return this;
+    }
+
+    /**
+     * Non-lambda section accessor for hardware config interactions.
+     */
+    public ConfigSection config() {
+        return new ConfigSection(this);
     }
 
     public MotorController[] getControllers() {
@@ -161,5 +196,66 @@ public class MotorControllerGroup implements RobotSendableDevice {
             count++;
         }
         return count > 0 ? sum / count : 0.0;
+    }
+
+    public static final class OutputSection {
+        private final MotorControllerGroup owner;
+
+        private OutputSection(MotorControllerGroup owner) {
+            this.owner = owner;
+        }
+
+        public OutputSection speed(double speed) {
+            owner.setSpeed(speed);
+            return this;
+        }
+
+        public OutputSection voltage(double voltage) {
+            owner.setVoltage(voltage);
+            return this;
+        }
+
+        public OutputSection position(double position) {
+            owner.setPosition(position);
+            return this;
+        }
+
+        public OutputSection velocity(double rotationsPerSecond) {
+            owner.setVelocity(rotationsPerSecond);
+            return this;
+        }
+
+        public OutputSection stop() {
+            owner.stopMotors();
+            return this;
+        }
+    }
+
+    public static final class ConfigSection {
+        private final MotorControllerGroup owner;
+
+        private ConfigSection(MotorControllerGroup owner) {
+            this.owner = owner;
+        }
+
+        public ConfigSection neutralMode(MotorNeutralMode mode) {
+            owner.setNeutralMode(mode);
+            return this;
+        }
+
+        public ConfigSection currentLimit(double amps) {
+            owner.setCurrentLimit(amps);
+            return this;
+        }
+
+        public ConfigSection pid(PIDController pid) {
+            owner.setPid(pid);
+            return this;
+        }
+
+        public ConfigSection pid(double p, double i, double d) {
+            owner.setPid(p, i, d);
+            return this;
+        }
     }
 }

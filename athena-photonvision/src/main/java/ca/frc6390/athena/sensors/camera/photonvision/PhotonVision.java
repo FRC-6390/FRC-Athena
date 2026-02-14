@@ -110,7 +110,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
     }
 
     public PhotonVision(String table, Transform3d pose) {
-        this(PhotonVisionConfig.table(table).setCameraRobotSpace(pose));
+        this(PhotonVisionConfig.table(table).withCameraRobotSpace(pose));
     }
 
     public PhotonVisionConfig getConfig() {
@@ -119,32 +119,37 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
 
     private VisionCamera createVisionCamera() {
         VisionCameraConfig cameraConfig =
-                new VisionCameraConfig(config.getTable(), config.getSoftware())
-                        .setUseForLocalization(config.useForLocalization())
-                        .setTrustDistance(config.trustDistance())
-                        .setConnectedSupplier(this::isConnected)
-                        .setHasTargetsSupplier(this::computeHasTargets)
-                        .setPoseSupplier(this::supplyLocalizationPose)
-                        .setPose3dSupplier(this::supplyLocalizationPose3d)
-                        .setLatencySupplier(this::supplyLocalizationLatency)
-                        .setVisibleTargetsSupplier(this::supplyVisibleTargets)
-                        .setAverageDistanceSupplier(this::supplyAverageDistance)
-                        .setOrientationConsumer(this::setRobotOrientation)
-                        .setUpdateHook(this::refreshLocalizationSnapshot)
-                        .setRobotToCameraTransform(config.cameraRobotSpace())
-                        .setDisplayHorizontalFov(config.simHorizontalFovDeg())
-                        .setDisplayRangeMeters(Math.max(config.trustDistance(), 2.0))
-                        .setConfidenceSupplier(config::confidence)
-                        .setRoles(config.roles())
-                        .setTargetPitchSupplier(this::supplyTargetPitch)
-                        .setTargetYawSupplier(this::supplyTargetYaw)
-                        .setTagDistanceSupplier(this::supplyTargetDistance)
-                        .setTagIdSupplier(this::supplyTargetId)
-                        .setPoseAmbiguitySupplier(this::supplyPoseAmbiguity)
-                        .setCameraPitchSupplier(this::supplyCameraPitch)
-                        .setCameraRollSupplier(this::supplyCameraRoll)
-                        .setTargetMeasurementsSupplier(this::supplyTargetMeasurements)
-                        .setFieldLayout(fieldLayout);
+                VisionCameraConfig.create(config.getTable(), config.getSoftware())
+                        .localization(l -> l
+                                .useForLocalization(config.useForLocalization())
+                                .trustDistance(config.trustDistance())
+                                .confidenceSupplier(config::confidence)
+                                .roles(config.roles()))
+                        .sources(s -> s
+                                .connectedSupplier(this::isConnected)
+                                .hasTargetsSupplier(this::computeHasTargets)
+                                .poseSupplier(this::supplyLocalizationPose)
+                                .pose3dSupplier(this::supplyLocalizationPose3d)
+                                .latencySupplier(this::supplyLocalizationLatency)
+                                .visibleTargetsSupplier(this::supplyVisibleTargets)
+                                .averageDistanceSupplier(this::supplyAverageDistance)
+                                .orientationConsumer(this::setRobotOrientation)
+                                .updateHook(this::refreshLocalizationSnapshot))
+                        .transform(t -> t.robotToCameraTransform(config.cameraRobotSpace()))
+                        .simulation(s -> s
+                                .vfield(v -> v
+                                        .horizontalFov(config.simHorizontalFovDeg())
+                                        .rangeMeters(Math.max(config.trustDistance(), 2.0))))
+                        .targets(t -> t
+                                .targetPitchSupplier(this::supplyTargetPitch)
+                                .targetYawSupplier(this::supplyTargetYaw)
+                                .tagDistanceSupplier(this::supplyTargetDistance)
+                                .tagIdSupplier(this::supplyTargetId)
+                                .poseAmbiguitySupplier(this::supplyPoseAmbiguity)
+                                .cameraPitchSupplier(this::supplyCameraPitch)
+                                .cameraRollSupplier(this::supplyCameraRoll)
+                                .targetMeasurementsSupplier(this::supplyTargetMeasurements)
+                                .fieldLayout(fieldLayout));
         return new VisionCamera(cameraConfig)
                 .registerCapability(VisionCameraCapability.PHOTON_VISION_CAMERA, this)
                 .registerCapability(VisionCameraCapability.LOCALIZATION_SOURCE, this)
@@ -463,8 +468,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         return localizationCamera.getLocalizationStdDevs();
     }
 
-    public void setStdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
-        localizationCamera.setStdDevs(single, multi);
+    public PhotonVision stdDevs(Matrix<N3, N1> single, Matrix<N3, N1> multi) {
+        localizationCamera.config().stdDevs(single, multi);
+        return this;
     }
 
     public Matrix<N3, N1> getSingleStdDev() {
@@ -476,11 +482,12 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
     }
     
     public boolean isUseForLocalization() {
-        return useForLocalization;
+        return localizationCamera.isUseForLocalization();
     }
 
-    public void setUseForLocalization(boolean useForLocalization) {
+    public PhotonVision useForLocalization(boolean useForLocalization) {
         this.useForLocalization = useForLocalization;
-        localizationCamera.setUseForLocalization(useForLocalization);
+        localizationCamera.config().useForLocalization(useForLocalization);
+        return this;
     }
 }

@@ -84,7 +84,7 @@ public class SwerveModule implements RobotSendableDevice {
         }
 
         public SwerveModuleConfig setEncoder(EncoderType encoder){
-            EncoderConfig cfg = encoder() != null ? encoder().setType(encoder) : EncoderConfig.type(encoder, 0);
+            EncoderConfig cfg = encoder() != null ? encoder().setType(encoder) : EncoderConfig.create(encoder, 0);
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, cfg, sim);
         }
 

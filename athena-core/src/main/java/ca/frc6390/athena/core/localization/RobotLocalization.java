@@ -117,6 +117,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private NetworkTableEntry driftRateNtEntry;
     private NetworkTableEntry visionAcceptanceNtEntry;
     private NetworkTableEntry slipActiveNtEntry;
+    private ChassisSpeeds fieldRelativeSpeeds = new ChassisSpeeds();
+    private ChassisSpeeds robotRelativeSpeeds = new ChassisSpeeds();
+    private double normalizedMovementSpeed = 0.0;
+    private Pose2d lastVelocityPose = new Pose2d();
+    private double lastVelocityTimestamp = Double.NaN;
 
     private final RobotLocalizationPersistence persistence;
     private final RobotVisionCameraManager cameraManager;
@@ -167,6 +172,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
         this.persistence = new RobotLocalizationPersistence(this.poseSpace);
         persistence.updateSnapshot(fieldPose, fieldPose3d, imu.getVirtualAxis("driver"));
+        resetVelocityTracking(fieldPose);
         List<PoseConfig> configs = config.poseConfigs();
         if (configs.isEmpty()) {
             registerPoseConfig(defaultPoseConfig());
@@ -353,7 +359,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     private Rotation2d getYaw(String axisId, RobotLocalizationConfig.BackendConfig backend) {
         RobotLocalizationConfig.BackendConfig resolved =
-                backend != null ? backend : RobotLocalizationConfig.BackendConfig.defualt();
+                backend != null ? backend : RobotLocalizationConfig.BackendConfig.defaults();
         if (resolved.imuStrategy() == RobotLocalizationConfig.BackendConfig.ImuStrategy.RAW_YAW) {
             return imu.getYaw();
         }
@@ -362,7 +368,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     private RobotLocalizationConfig.BackendConfig backendConfig() {
         RobotLocalizationConfig.BackendConfig base =
-                localizationConfig != null ? localizationConfig.backend() : RobotLocalizationConfig.BackendConfig.defualt();
+                localizationConfig != null ? localizationConfig.backend() : RobotLocalizationConfig.BackendConfig.defaults();
         if (backendOverrideEnabledEntry != null && backendOverrideEnabledEntry.getBoolean(false)) {
             return applyBackendOverride(base);
         }
@@ -375,7 +381,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     private boolean isVisionEnabled(RobotLocalizationConfig.BackendConfig backend) {
         RobotLocalizationConfig.BackendConfig resolved =
-                backend != null ? backend : RobotLocalizationConfig.BackendConfig.defualt();
+                backend != null ? backend : RobotLocalizationConfig.BackendConfig.defaults();
         return resolved.resolveVisionEnabled(visionEnabled);
     }
 
@@ -529,6 +535,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (isPrimaryPose(config)) {
             imu.setVirtualAxis("field", pose.getRotation());
             setPrimaryPose(state);
+            resetVelocityTracking(pose);
             resetVisionTracking(state);
             persistRobotState(true);
         }
@@ -559,6 +566,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (isPrimaryPose(config)) {
             imu.setVirtualAxis("field", pose2d.getRotation());
             setPrimaryPose(state);
+            resetVelocityTracking(pose2d);
             resetVisionTracking(state);
             persistRobotState(true);
         }
@@ -1075,6 +1083,70 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         fieldPose3d = state.pose3d != null ? state.pose3d : new Pose3d(fieldPose);
     }
 
+    private void resetVelocityTracking(Pose2d pose) {
+        lastVelocityPose = pose != null ? pose : new Pose2d();
+        lastVelocityTimestamp = Timer.getFPGATimestamp();
+        fieldRelativeSpeeds = new ChassisSpeeds();
+        robotRelativeSpeeds = new ChassisSpeeds();
+        normalizedMovementSpeed = 0.0;
+    }
+
+    private void updateVelocityTracking(Pose2d pose) {
+        Pose2d currentPose = pose != null ? pose : new Pose2d();
+        double nowSeconds = Timer.getFPGATimestamp();
+        if (!Double.isFinite(lastVelocityTimestamp)) {
+            resetVelocityTracking(currentPose);
+            return;
+        }
+
+        double dt = nowSeconds - lastVelocityTimestamp;
+        if (!Double.isFinite(dt) || dt <= 1e-6) {
+            lastVelocityPose = currentPose;
+            lastVelocityTimestamp = nowSeconds;
+            return;
+        }
+
+        double fieldVx = (currentPose.getX() - lastVelocityPose.getX()) / dt;
+        double fieldVy = (currentPose.getY() - lastVelocityPose.getY()) / dt;
+        double deltaTheta =
+                currentPose.getRotation().minus(lastVelocityPose.getRotation()).getRadians();
+        double omega = deltaTheta / dt;
+
+        if (!Double.isFinite(fieldVx)) {
+            fieldVx = 0.0;
+        }
+        if (!Double.isFinite(fieldVy)) {
+            fieldVy = 0.0;
+        }
+        if (!Double.isFinite(omega)) {
+            omega = 0.0;
+        }
+
+        fieldRelativeSpeeds = new ChassisSpeeds(fieldVx, fieldVy, omega);
+        robotRelativeSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(fieldVx, fieldVy, omega, currentPose.getRotation());
+        normalizedMovementSpeed = normalizeMovementSpeed(Math.hypot(
+                robotRelativeSpeeds.vxMetersPerSecond,
+                robotRelativeSpeeds.vyMetersPerSecond));
+
+        lastVelocityPose = currentPose;
+        lastVelocityTimestamp = nowSeconds;
+    }
+
+    private double normalizeMovementSpeed(double movementSpeedMetersPerSecond) {
+        if (!Double.isFinite(movementSpeedMetersPerSecond) || movementSpeedMetersPerSecond <= 0.0) {
+            return 0.0;
+        }
+        double maxSpeedMetersPerSecond = robotSpeeds != null ? robotSpeeds.getMaxVelocity() : Double.NaN;
+        if (!Double.isFinite(maxSpeedMetersPerSecond) || maxSpeedMetersPerSecond <= 1e-9) {
+            return 1.0;
+        }
+        double normalized = movementSpeedMetersPerSecond / maxSpeedMetersPerSecond;
+        if (!Double.isFinite(normalized)) {
+            return 0.0;
+        }
+        return Math.max(0.0, Math.min(1.0, normalized));
+    }
+
     private void resetVisionTracking(PoseEstimatorState state) {
         if (state == null) {
             return;
@@ -1150,6 +1222,52 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             setPrimaryPose(primary);
         }
         return fieldPose;
+    }
+
+    /**
+     * Returns estimated chassis speeds in the robot frame derived from primary pose deltas.
+     */
+    public ChassisSpeeds getRobotRelativeSpeeds() {
+        ChassisSpeeds speeds = robotRelativeSpeeds;
+        return new ChassisSpeeds(
+                speeds.vxMetersPerSecond,
+                speeds.vyMetersPerSecond,
+                speeds.omegaRadiansPerSecond);
+    }
+
+    /**
+     * Returns estimated chassis speeds in the field frame derived from primary pose deltas.
+     */
+    public ChassisSpeeds getFieldRelativeSpeeds() {
+        ChassisSpeeds speeds = fieldRelativeSpeeds;
+        return new ChassisSpeeds(
+                speeds.vxMetersPerSecond,
+                speeds.vyMetersPerSecond,
+                speeds.omegaRadiansPerSecond);
+    }
+
+    public double getXSpeedMetersPerSecond() {
+        return robotRelativeSpeeds.vxMetersPerSecond;
+    }
+
+    public double getYSpeedMetersPerSecond() {
+        return robotRelativeSpeeds.vyMetersPerSecond;
+    }
+
+    public double getThetaSpeedRadiansPerSecond() {
+        return robotRelativeSpeeds.omegaRadiansPerSecond;
+    }
+
+    public double getMovementSpeedMetersPerSecond() {
+        return Math.hypot(getXSpeedMetersPerSecond(), getYSpeedMetersPerSecond());
+    }
+
+    public double getNormalizedMovementSpeed() {
+        return normalizedMovementSpeed;
+    }
+
+    public double getNormalizedSpeed() {
+        return getNormalizedMovementSpeed();
     }
 
     /**
@@ -1232,6 +1350,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         posesNode.putDouble("xM", pose.getX());
         posesNode.putDouble("yM", pose.getY());
         posesNode.putDouble("rotDeg", pose.getRotation().getDegrees());
+
+        RobotNetworkTables.Node speedsNode = node.child("Speeds");
+        speedsNode.putDouble("robotVxMps", robotRelativeSpeeds.vxMetersPerSecond);
+        speedsNode.putDouble("robotVyMps", robotRelativeSpeeds.vyMetersPerSecond);
+        speedsNode.putDouble("robotOmegaRadPerSec", robotRelativeSpeeds.omegaRadiansPerSecond);
+        speedsNode.putDouble("fieldVxMps", fieldRelativeSpeeds.vxMetersPerSecond);
+        speedsNode.putDouble("fieldVyMps", fieldRelativeSpeeds.vyMetersPerSecond);
+        speedsNode.putDouble("fieldOmegaRadPerSec", fieldRelativeSpeeds.omegaRadiansPerSecond);
+        speedsNode.putDouble("movementMps", getMovementSpeedMetersPerSecond());
+        speedsNode.putDouble("movementNormalized", normalizedMovementSpeed);
+        speedsNode.putDouble("normalizedSpeed", getNormalizedSpeed());
 
         publishBoundingBoxes(node, pose);
 
@@ -1531,6 +1660,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
         if (isPrimary) {
             setPrimaryPose(state);
+            updateVelocityTracking(pose);
             RobotNetworkTables nt = robotNetworkTables;
             boolean fieldEnabled = nt != null && nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET);
             if (fieldEnabled) {

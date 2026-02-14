@@ -45,8 +45,6 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
             return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
         }
 
-        /** @deprecated Use {@link #setHardstop(boolean, BlockDirection)} instead. */
-        @Deprecated(forRemoval = false)
         public GenericLimitSwitchConfig setHardstop(boolean isHardstop, int blockDirection){
             return setHardstop(isHardstop, BlockDirection.fromMultiplier(blockDirection));
         }
@@ -120,8 +118,6 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
         this.blockDirection = blockDirection != null ? blockDirection : BlockDirection.None;
     }
 
-    /** @deprecated Use {@link #setBlockDirection(BlockDirection)} instead. */
-    @Deprecated(forRemoval = false)
     public void setBlockDirection(int blockDirection) {
         setBlockDirection(BlockDirection.fromMultiplier(blockDirection));
     }

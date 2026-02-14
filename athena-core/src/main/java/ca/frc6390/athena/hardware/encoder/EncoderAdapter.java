@@ -31,13 +31,13 @@ public class EncoderAdapter implements Encoder {
         this.raw = raw;
         this.config = config;
         if (config != null) {
-            this.gearRatio = config.gearRatio;
-            this.offset = config.offset;
-            this.conversion = config.conversion;
-            this.conversionOffset = config.conversionOffset;
-            this.discontinuityPoint = config.discontinuityPoint;
-            this.discontinuityRange = config.discontinuityRange;
-            this.inverted = config.inverted;
+            this.gearRatio = config.gearRatio();
+            this.offset = config.offset();
+            this.conversion = config.conversion();
+            this.conversionOffset = config.conversionOffset();
+            this.discontinuityPoint = config.discontinuityPoint();
+            this.discontinuityRange = config.discontinuityRange();
+            this.inverted = config.inverted();
         }
     }
 
@@ -77,7 +77,7 @@ public class EncoderAdapter implements Encoder {
     public void setInverted(boolean inverted) {
         this.inverted = inverted;
         if (config != null) {
-            config.inverted = inverted;
+            config.setInverted(inverted);
         }
     }
 
@@ -85,7 +85,7 @@ public class EncoderAdapter implements Encoder {
     public void setConversion(double conversion) {
         this.conversion = conversion;
         if (config != null) {
-            config.conversion = conversion;
+            config.setConversion(conversion);
         }
     }
 
@@ -93,7 +93,7 @@ public class EncoderAdapter implements Encoder {
     public void setOffset(double offset) {
         this.offset = offset;
         if (config != null) {
-            config.offset = offset;
+            config.setOffset(offset);
         }
     }
 
@@ -101,7 +101,7 @@ public class EncoderAdapter implements Encoder {
     public void setGearRatio(double gearRatio) {
         this.gearRatio = gearRatio;
         if (config != null) {
-            config.gearRatio = gearRatio;
+            config.setGearRatio(gearRatio);
         }
     }
 
@@ -109,7 +109,7 @@ public class EncoderAdapter implements Encoder {
     public void setConversionOffset(double conversionOffset) {
         this.conversionOffset = conversionOffset;
         if (config != null) {
-            config.conversionOffset = conversionOffset;
+            config.setConversionOffset(conversionOffset);
         }
     }
 
@@ -117,7 +117,7 @@ public class EncoderAdapter implements Encoder {
     public void setDiscontinuityPoint(double discontinuityPoint) {
         this.discontinuityPoint = discontinuityPoint;
         if (config != null) {
-            config.discontinuityPoint = discontinuityPoint;
+            config.setDiscontinuityPoint(discontinuityPoint);
         }
     }
 
@@ -125,7 +125,7 @@ public class EncoderAdapter implements Encoder {
     public void setDiscontinuityRange(double discontinuityRange) {
         this.discontinuityRange = discontinuityRange;
         if (config != null) {
-            config.discontinuityRange = discontinuityRange;
+            config.setDiscontinuityRange(discontinuityRange);
         }
     }
 

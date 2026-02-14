@@ -2,6 +2,7 @@ package ca.frc6390.athena.drivetrains.swerve;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
@@ -90,13 +91,445 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
             RobotSpeeds.BlendMode blendMode,
             RobotSpeeds.SpeedAxis[] axes) {}
 
+    public static SwerveDrivetrainConfig create() {
+        return new SwerveDrivetrainConfig();
+    }
+
+    public SwerveDrivetrainConfig hardware(Consumer<HardwareSection> section) {
+        if (section != null) {
+            section.accept(new HardwareSection());
+        }
+        return this;
+    }
+
+    public HardwareSection hardware() {
+        return new HardwareSection();
+    }
+
+    public SwerveDrivetrainConfig control(Consumer<ControlSection> section) {
+        if (section != null) {
+            section.accept(new ControlSection());
+        }
+        return this;
+    }
+
+    public ControlSection control() {
+        return new ControlSection();
+    }
+
+    public SwerveDrivetrainConfig simulation(Consumer<SimulationSection> section) {
+        if (section != null) {
+            section.accept(new SimulationSection());
+        }
+        return this;
+    }
+
+    public SimulationSection simulation() {
+        return new SimulationSection();
+    }
+
+    public SwerveDrivetrainConfig speed(Consumer<SpeedSection> section) {
+        if (section != null) {
+            section.accept(new SpeedSection());
+        }
+        return this;
+    }
+
+    public SpeedSection speed() {
+        return new SpeedSection();
+    }
+
+    public SwerveDrivetrainConfig config(Consumer<ConfigSection> section) {
+        if (section != null) {
+            section.accept(new ConfigSection());
+        }
+        return this;
+    }
+
+    public ConfigSection config() {
+        return new ConfigSection();
+    }
+
+    public final class HardwareSection {
+        public HardwareSection imu(AthenaImu imuType, boolean inverted) {
+            applyImu(imuType, inverted);
+            return this;
+        }
+
+        public HardwareSection modules(SwerveModuleConfig... moduleConfigs) {
+            SwerveDrivetrainConfig.this.modules(moduleConfigs);
+            return this;
+        }
+
+        public HardwareSection driveIds(int[] ids) {
+            applyDriveIds(ids);
+            return this;
+        }
+
+        public HardwareSection steerIds(int[] ids) {
+            applySteerIds(ids);
+            return this;
+        }
+
+        public HardwareSection encoderIds(int[] ids) {
+            applyEncoderIds(ids);
+            return this;
+        }
+
+        public HardwareSection driveIds(DriveIDs ids) {
+            applyDriveIds(ids);
+            return this;
+        }
+
+        public HardwareSection steerIds(SteerIDs ids) {
+            applySteerIds(ids);
+            return this;
+        }
+
+        public HardwareSection encoderIds(EncoderIDs ids) {
+            applyEncoderIds(ids);
+            return this;
+        }
+
+        public HardwareSection imuId(int id) {
+            applyImuId(id);
+            return this;
+        }
+
+        public HardwareSection ids(DrivetrainIDs ids) {
+            applyIds(ids);
+            return this;
+        }
+
+        public HardwareSection driveInverted(boolean inverted) {
+            applyDriveInverted(inverted);
+            return this;
+        }
+
+        public HardwareSection steerInverted(boolean inverted) {
+            applySteerInverted(inverted);
+            return this;
+        }
+
+        public HardwareSection encoderInverted(boolean inverted) {
+            applyEncoderInverted(inverted);
+            return this;
+        }
+
+        public HardwareSection currentLimit(double amps) {
+            applyCurrentLimit(amps);
+            return this;
+        }
+
+        public HardwareSection currentLimit(double driveAmps, double steerAmps) {
+            applyCurrentLimit(driveAmps, steerAmps);
+            return this;
+        }
+
+        public HardwareSection driveCurrentLimit(double amps) {
+            applyDriveCurrentLimit(amps);
+            return this;
+        }
+
+        public HardwareSection steerCurrentLimit(double amps) {
+            applySteerCurrentLimit(amps);
+            return this;
+        }
+
+        public HardwareSection encoderOffsets(double... offsets) {
+            applyEncoderOffsets(offsets);
+            return this;
+        }
+
+        public HardwareSection canbus(String bus) {
+            applyCanbus(bus);
+            return this;
+        }
+
+        public HardwareSection moduleLocations(Translation2d[] moduleLocations) {
+            applyModuleLocations(moduleLocations);
+            return this;
+        }
+
+        public HardwareSection moduleLocations(double trackWidthMeters, double wheelbaseMeters) {
+            applyModuleLocations(trackWidthMeters, wheelbaseMeters);
+            return this;
+        }
+
+        public HardwareSection moduleLocations(double trackWidthMeters) {
+            applyModuleLocations(trackWidthMeters);
+            return this;
+        }
+    }
+
+    public final class ControlSection {
+        public ControlSection driftPid(double kP, double kI, double kD) {
+            applyDriftPid(kP, kI, kD);
+            return this;
+        }
+
+        public ControlSection driftPid(PIDController pid) {
+            applyDriftPid(pid);
+            return this;
+        }
+
+        public ControlSection driftActivationSpeed(double speedMetersPerSecond) {
+            applyDriftActivationSpeed(speedMetersPerSecond);
+            return this;
+        }
+
+        public ControlSection fieldRelative(boolean enabled) {
+            applyFieldRelative(enabled);
+            return this;
+        }
+
+        public ControlSection rotationPid(double kP, double kI, double kD) {
+            applyRotationPid(kP, kI, kD);
+            return this;
+        }
+
+        public ControlSection rotationPid(PIDController pid) {
+            applyRotationPid(pid);
+            return this;
+        }
+
+        public ControlSection driveFeedforward(SimpleMotorFeedforward feedforward) {
+            applyDriveFeedforward(feedforward);
+            return this;
+        }
+
+        public ControlSection driveFeedforward(double kS, double kV, double kA) {
+            applyDriveFeedforward(kS, kV, kA);
+            return this;
+        }
+
+        public ControlSection driveFeedforwardEnabled(boolean enabled) {
+            applyDriveFeedforwardEnabled(enabled);
+            return this;
+        }
+    }
+
+    public final class SimulationSection {
+        public SimulationSection config(SwerveSimulationConfig simulation) {
+            applySimulationConfig(simulation);
+            return this;
+        }
+    }
+
+    public final class ConfigSection {
+        public ConfigSection imu(AthenaImu imuType, boolean inverted) {
+            applyImu(imuType, inverted);
+            return this;
+        }
+
+        public ConfigSection modules(SwerveModuleConfig... moduleConfigs) {
+            SwerveDrivetrainConfig.this.modules(moduleConfigs);
+            return this;
+        }
+
+        public ConfigSection driftPid(double kP, double kI, double kD) {
+            applyDriftPid(kP, kI, kD);
+            return this;
+        }
+
+        public ConfigSection driftPid(PIDController pid) {
+            applyDriftPid(pid);
+            return this;
+        }
+
+        public ConfigSection driftActivationSpeed(double speedMetersPerSecond) {
+            applyDriftActivationSpeed(speedMetersPerSecond);
+            return this;
+        }
+
+        public ConfigSection fieldRelative(boolean enabled) {
+            applyFieldRelative(enabled);
+            return this;
+        }
+
+        public ConfigSection driveIds(int[] ids) {
+            applyDriveIds(ids);
+            return this;
+        }
+
+        public ConfigSection steerIds(int[] ids) {
+            applySteerIds(ids);
+            return this;
+        }
+
+        public ConfigSection encoderIds(int[] ids) {
+            applyEncoderIds(ids);
+            return this;
+        }
+
+        public ConfigSection driveIds(DriveIDs ids) {
+            applyDriveIds(ids);
+            return this;
+        }
+
+        public ConfigSection steerIds(SteerIDs ids) {
+            applySteerIds(ids);
+            return this;
+        }
+
+        public ConfigSection encoderIds(EncoderIDs ids) {
+            applyEncoderIds(ids);
+            return this;
+        }
+
+        public ConfigSection imuId(int id) {
+            applyImuId(id);
+            return this;
+        }
+
+        public ConfigSection ids(DrivetrainIDs ids) {
+            applyIds(ids);
+            return this;
+        }
+
+        public ConfigSection driveInverted(boolean inverted) {
+            applyDriveInverted(inverted);
+            return this;
+        }
+
+        public ConfigSection steerInverted(boolean inverted) {
+            applySteerInverted(inverted);
+            return this;
+        }
+
+        public ConfigSection encoderInverted(boolean inverted) {
+            applyEncoderInverted(inverted);
+            return this;
+        }
+
+        public ConfigSection rotationPid(double kP, double kI, double kD) {
+            applyRotationPid(kP, kI, kD);
+            return this;
+        }
+
+        public ConfigSection rotationPid(PIDController pid) {
+            applyRotationPid(pid);
+            return this;
+        }
+
+        public ConfigSection driveFeedforward(SimpleMotorFeedforward feedforward) {
+            applyDriveFeedforward(feedforward);
+            return this;
+        }
+
+        public ConfigSection driveFeedforward(double kS, double kV, double kA) {
+            applyDriveFeedforward(kS, kV, kA);
+            return this;
+        }
+
+        public ConfigSection driveFeedforwardEnabled(boolean enabled) {
+            applyDriveFeedforwardEnabled(enabled);
+            return this;
+        }
+
+        public ConfigSection currentLimit(double amps) {
+            applyCurrentLimit(amps);
+            return this;
+        }
+
+        public ConfigSection currentLimit(double driveAmps, double steerAmps) {
+            applyCurrentLimit(driveAmps, steerAmps);
+            return this;
+        }
+
+        public ConfigSection driveCurrentLimit(double amps) {
+            applyDriveCurrentLimit(amps);
+            return this;
+        }
+
+        public ConfigSection steerCurrentLimit(double amps) {
+            applySteerCurrentLimit(amps);
+            return this;
+        }
+
+        public ConfigSection encoderOffsets(double... offsets) {
+            applyEncoderOffsets(offsets);
+            return this;
+        }
+
+        public ConfigSection canbus(String bus) {
+            applyCanbus(bus);
+            return this;
+        }
+
+        public ConfigSection moduleLocations(Translation2d[] moduleLocations) {
+            applyModuleLocations(moduleLocations);
+            return this;
+        }
+
+        public ConfigSection moduleLocations(double trackWidthMeters, double wheelbaseMeters) {
+            applyModuleLocations(trackWidthMeters, wheelbaseMeters);
+            return this;
+        }
+
+        public ConfigSection moduleLocations(double trackWidthMeters) {
+            applyModuleLocations(trackWidthMeters);
+            return this;
+        }
+
+        public ConfigSection simulationConfig(SwerveSimulationConfig simulation) {
+            applySimulationConfig(simulation);
+            return this;
+        }
+
+        public ConfigSection speed(Consumer<SpeedSection> section) {
+            if (section != null) {
+                section.accept(new SpeedSection());
+            }
+            return this;
+        }
+
+        public SpeedSection speed() {
+            return new SpeedSection();
+        }
+    }
+
+    public final class SpeedSection {
+        public SpeedSection source(String name, boolean enabledByDefault) {
+            addSpeedSource(name, enabledByDefault);
+            return this;
+        }
+
+        public SpeedSection blend(
+                String target,
+                String source,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            addSpeedBlend(target, source, blendMode, axes);
+            return this;
+        }
+
+        public SpeedSection blend(
+                String target,
+                String left,
+                String right,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            addSpeedBlend(target, left, right, blendMode, axes);
+            return this;
+        }
+
+        public SpeedSection outputBlend(
+                String source,
+                RobotSpeeds.BlendMode blendMode,
+                RobotSpeeds.SpeedAxis... axes) {
+            addSpeedOutputBlend(source, blendMode, axes);
+            return this;
+        }
+    }
+
     /**
      * Creates a configuration with default hardware IDs and explicit module locations.
      *
      * @param locations module corner offsets relative to robot center (FL, FR, BL, BR)
      */
-    public static SwerveDrivetrainConfig defualt(Translation2d[] locations){
-        return new SwerveDrivetrainConfig().setModuleLocations(locations);
+    public static SwerveDrivetrainConfig defaults(Translation2d[] locations){
+        return create().hardware(h -> h.moduleLocations(locations));
     }
 
     /**
@@ -104,8 +537,8 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
      *
      * @param trackWidth distance (meters) between left and right modules
      */
-    public static SwerveDrivetrainConfig defualt(double trackWidth){
-        return new SwerveDrivetrainConfig().setModuleLocations(trackWidth);
+    public static SwerveDrivetrainConfig defaults(double trackWidth){
+        return create().hardware(h -> h.moduleLocations(trackWidth));
     }
 
     /**
@@ -114,29 +547,32 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
      * @param trackWidth distance (meters) between left and right modules
      * @param wheelbase distance (meters) between front and back modules
      */
-    public static SwerveDrivetrainConfig defualt(double trackWidth, double wheelbase){
-        return new SwerveDrivetrainConfig().setModuleLocations(trackWidth, wheelbase);
+    public static SwerveDrivetrainConfig defaults(double trackWidth, double wheelbase){
+        return create().hardware(h -> h.moduleLocations(trackWidth, wheelbase));
     }
 
     /**
      * Configures the standard team drivetrain IDs while using the provided module locations.
      */
     public static SwerveDrivetrainConfig standard(Translation2d[] locations){
-        return SwerveDrivetrainConfig.defualt(locations).setIds(DrivetrainIDs.SWERVE_CHASSIS_STANDARD);
+        return SwerveDrivetrainConfig.defaults(locations)
+                .hardware(h -> h.ids(DrivetrainIDs.SWERVE_CHASSIS_STANDARD));
     }
 
     /**
      * Configures the standard team drivetrain IDs while assuming a square footprint.
      */
     public static SwerveDrivetrainConfig standard(double trackWidth){
-        return SwerveDrivetrainConfig.defualt(trackWidth).setIds(DrivetrainIDs.SWERVE_CHASSIS_STANDARD);
+        return SwerveDrivetrainConfig.defaults(trackWidth)
+                .hardware(h -> h.ids(DrivetrainIDs.SWERVE_CHASSIS_STANDARD));
     }
 
     /**
      * Configures the standard team drivetrain IDs while assuming a rectangular footprint.
      */
     public static SwerveDrivetrainConfig standard(double trackWidth, double wheelbase){
-        return SwerveDrivetrainConfig.defualt(trackWidth, wheelbase).setIds(DrivetrainIDs.SWERVE_CHASSIS_STANDARD);
+        return SwerveDrivetrainConfig.defaults(trackWidth, wheelbase)
+                .hardware(h -> h.ids(DrivetrainIDs.SWERVE_CHASSIS_STANDARD));
     }
 
     /**
@@ -145,8 +581,10 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
      * @param imu IMU type installed on the robot
      * @param inverted true if yaw should be inverted
      */
-    public SwerveDrivetrainConfig setIMU(AthenaImu imu, boolean inverted){
-        this.imu = new ImuConfig(imu.resolve(), DrivetrainIDs.SWERVE_CHASSIS_STANDARD.getGyro()).setInverted(inverted);
+    private SwerveDrivetrainConfig applyImu(AthenaImu imu, boolean inverted){
+        this.imu = ImuConfig
+                .create(imu.resolve(), DrivetrainIDs.SWERVE_CHASSIS_STANDARD.getGyro())
+                .hardware(h -> h.inverted(inverted));
         return this;
     }
 
@@ -156,7 +594,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
      *
      * @param modules one module definition per corner, or a single definition to clone
      */
-    public SwerveDrivetrainConfig modules(SwerveModuleConfig... modules){
+    private SwerveDrivetrainConfig modules(SwerveModuleConfig... modules){
         if (modules.length == 1) {
             modules = new SwerveModuleConfig[]{
                 new SwerveModuleConfig(modules[0]),
@@ -172,14 +610,14 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Creates a drift-correction PID controller using the provided gains.
      */
-    public SwerveDrivetrainConfig setDriftPID(double kP, double kI, double kd){
-        return setDriftPID(new PIDController(kP, kI, kd));
+    private SwerveDrivetrainConfig applyDriftPid(double kP, double kI, double kd){
+        return applyDriftPid(new PIDController(kP, kI, kd));
     }
     
     /**
      * Supplies a fully constructed drift-correction PID controller.
      */
-    public SwerveDrivetrainConfig setDriftPID(PIDController driftPID){
+    private SwerveDrivetrainConfig applyDriftPid(PIDController driftPID){
         this.driftPID = driftPID;
         return this;
     }
@@ -187,7 +625,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Sets the minimum drive speed (m/s) required before drift correction engages.
      */
-    public SwerveDrivetrainConfig setDriftActivationSpeed(double driftActivationSpeed){
+    private SwerveDrivetrainConfig applyDriftActivationSpeed(double driftActivationSpeed){
         this.driftActivationSpeed = driftActivationSpeed;
         return this;
     }
@@ -195,7 +633,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Controls whether the drivetrain interprets inputs as field-relative by default.
      */
-    public SwerveDrivetrainConfig setFieldRelative(boolean fieldRelative){
+    private SwerveDrivetrainConfig applyFieldRelative(boolean fieldRelative){
         this.fieldRelative = fieldRelative;
         return this;
     }
@@ -203,7 +641,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Sets the CAN IDs used for drive motors (FL, FR, BL, BR). Negative IDs invert that motor.
      */
-    public SwerveDrivetrainConfig setDriveIds(int[] driveIds){
+    private SwerveDrivetrainConfig applyDriveIds(int[] driveIds){
         this.driveIds = driveIds;
         return this;
     } 
@@ -211,7 +649,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Sets the CAN IDs used for steering motors (FL, FR, BL, BR). Negative IDs invert that motor.
      */
-    public SwerveDrivetrainConfig setSteerIds(int[] steerIDs){
+    private SwerveDrivetrainConfig applySteerIds(int[] steerIDs){
         this.steerIDs = steerIDs;
         return this;
     } 
@@ -219,7 +657,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Sets the CAN IDs used for steering encoders (FL, FR, BL, BR). Negative IDs invert that encoder.
      */
-    public SwerveDrivetrainConfig setEncoderIds(int[] encoderIds){
+    private SwerveDrivetrainConfig applyEncoderIds(int[] encoderIds){
         this.encoderIds = encoderIds;
         return this;
     } 
@@ -227,28 +665,28 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Populates drive motor IDs from a {@link DriveIDs} preset.
      */
-    public SwerveDrivetrainConfig setDriveIds(DriveIDs driveIds){
-       return setDriveIds(driveIds.getIDs());
+    private SwerveDrivetrainConfig applyDriveIds(DriveIDs driveIds){
+       return applyDriveIds(driveIds.getIDs());
     } 
 
     /**
      * Populates steer motor IDs from a {@link SteerIDs} preset.
      */
-    public SwerveDrivetrainConfig setSteerIds(SteerIDs steerIDs){
-        return setSteerIds(steerIDs.getIDs());
+    private SwerveDrivetrainConfig applySteerIds(SteerIDs steerIDs){
+        return applySteerIds(steerIDs.getIDs());
     } 
 
     /**
      * Populates encoder IDs from an {@link EncoderIDs} preset.
      */
-    public SwerveDrivetrainConfig setEncoderIds(EncoderIDs encoderIds){
-        return setEncoderIds(encoderIds.getIDs());
+    private SwerveDrivetrainConfig applyEncoderIds(EncoderIDs encoderIds){
+        return applyEncoderIds(encoderIds.getIDs());
     } 
 
     /**
      * Declares the CAN device ID used by the IMU.
      */
-    public SwerveDrivetrainConfig setIMUId(int id){
+    private SwerveDrivetrainConfig applyImuId(int id){
         gryoId = id;
         return this;
     }
@@ -256,18 +694,18 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Applies a common {@link DrivetrainIDs} preset covering drive, steer, encoder, and gyro IDs.
      */
-    public SwerveDrivetrainConfig setIds(DrivetrainIDs ids){
-        setDriveIds(ids.getDrive());
-        setSteerIds(ids.getSteer());
-        setEncoderIds(ids.getEncoders());
-        setIMUId(ids.getGyro());
+    private SwerveDrivetrainConfig applyIds(DrivetrainIDs ids){
+        applyDriveIds(ids.getDrive());
+        applySteerIds(ids.getSteer());
+        applyEncoderIds(ids.getEncoders());
+        applyImuId(ids.getGyro());
         return this;
     } 
 
     /**
      * Sets whether drive motors should be inverted.
      */
-    public SwerveDrivetrainConfig setDriveInverted(boolean driveInverted){
+    private SwerveDrivetrainConfig applyDriveInverted(boolean driveInverted){
         this.driveInverted = driveInverted;
         return this;
     } 
@@ -275,7 +713,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Sets whether steer motors should be inverted.
      */
-    public SwerveDrivetrainConfig setSteerInverted(boolean steerInverted){
+    private SwerveDrivetrainConfig applySteerInverted(boolean steerInverted){
         this.steerInverted = steerInverted;
         return this;
     } 
@@ -283,7 +721,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Sets whether steering encoders should be inverted.
      */
-    public SwerveDrivetrainConfig setEncoderInverted(boolean encoderInverted){
+    private SwerveDrivetrainConfig applyEncoderInverted(boolean encoderInverted){
         this.encoderInverted = encoderInverted;
         return this;
     } 
@@ -291,14 +729,14 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Creates a rotation PID controller used for heading control with the provided gains.
      */
-    public SwerveDrivetrainConfig setRotationPID(double kP, double kI, double kd){
-        return setRotationPID(new PIDController(kP, kI, kd));
+    private SwerveDrivetrainConfig applyRotationPid(double kP, double kI, double kd){
+        return applyRotationPid(new PIDController(kP, kI, kd));
     }
     
     /**
      * Supplies a fully constructed rotation PID controller.
      */
-    public SwerveDrivetrainConfig setRotationPID(PIDController rotationPID){
+    private SwerveDrivetrainConfig applyRotationPid(PIDController rotationPID){
         this.rotationPID = rotationPID;
         return this;
     }
@@ -306,7 +744,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Provides drive feedforward gains used to compute voltage setpoints.
      */
-    public SwerveDrivetrainConfig setDriveFeedforward(SimpleMotorFeedforward feedforward) {
+    private SwerveDrivetrainConfig applyDriveFeedforward(SimpleMotorFeedforward feedforward) {
         this.driveFeedforward = feedforward;
         return this;
     }
@@ -314,14 +752,14 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Convenience helper to configure drive feedforward gains.
      */
-    public SwerveDrivetrainConfig setDriveFeedforward(double kS, double kV, double kA) {
-        return setDriveFeedforward(new SimpleMotorFeedforward(kS, kV, kA));
+    private SwerveDrivetrainConfig applyDriveFeedforward(double kS, double kV, double kA) {
+        return applyDriveFeedforward(new SimpleMotorFeedforward(kS, kV, kA));
     }
 
     /**
      * Enables or disables the configured drive feedforward.
      */
-    public SwerveDrivetrainConfig setDriveFeedforwardEnabled(boolean enabled) {
+    private SwerveDrivetrainConfig applyDriveFeedforwardEnabled(boolean enabled) {
         this.driveFeedforwardEnabled = enabled;
         return this;
     }
@@ -329,23 +767,23 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Applies the same current limit to both drive and steer motors.
      */
-    public SwerveDrivetrainConfig setCurrentLimit(double currentLimit){
-        return setCurrentLimit(currentLimit, currentLimit);
+    private SwerveDrivetrainConfig applyCurrentLimit(double currentLimit){
+        return applyCurrentLimit(currentLimit, currentLimit);
     } 
 
     /**
      * Applies the same current limit to both drive and steer motors.
      */
-    public SwerveDrivetrainConfig setCurrentLimit(double driveCurrentLimit, double steerCurrentLimit){
-        setDriveCurrentLimit(driveCurrentLimit);
-        setSteerCurrentLimit(steerCurrentLimit);
+    private SwerveDrivetrainConfig applyCurrentLimit(double driveCurrentLimit, double steerCurrentLimit){
+        applyDriveCurrentLimit(driveCurrentLimit);
+        applySteerCurrentLimit(steerCurrentLimit);
         return this;
     } 
 
     /**
      * Sets the drive motor current limit (amps).
      */
-    public SwerveDrivetrainConfig setDriveCurrentLimit(double currentLimit){
+    private SwerveDrivetrainConfig applyDriveCurrentLimit(double currentLimit){
         this.driveCurrentLimit = currentLimit;
         return this;
     } 
@@ -353,7 +791,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Sets the steer motor current limit (amps).
      */
-    public SwerveDrivetrainConfig setSteerCurrentLimit(double currentLimit){
+    private SwerveDrivetrainConfig applySteerCurrentLimit(double currentLimit){
         this.steerCurrentLimit = currentLimit;
         return this;
     } 
@@ -362,7 +800,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Provides absolute encoder offsets in radians (FL, FR, BL, BR).
      */
-    public SwerveDrivetrainConfig setEncoderOffset(double... encoderOffsets){
+    private SwerveDrivetrainConfig applyEncoderOffsets(double... encoderOffsets){
         this.encoderOffsets = encoderOffsets;
         return this;
     } 
@@ -370,7 +808,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Sets the common CAN bus used by all motors, encoders, and sensors.
      */
-    public SwerveDrivetrainConfig setCanbus(String canbus){
+    private SwerveDrivetrainConfig applyCanbus(String canbus){
         this.canbus = canbus;
         return this;
     } 
@@ -378,7 +816,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Declares the physical module locations relative to robot center (FL, FR, BL, BR).
      */
-    public SwerveDrivetrainConfig setModuleLocations(Translation2d[] locations){
+    private SwerveDrivetrainConfig applyModuleLocations(Translation2d[] locations){
         this.locations = locations;
         return this;
     }
@@ -386,31 +824,31 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     /**
      * Declares module locations assuming a rectangular footprint (track width x wheelbase).
      */
-    public SwerveDrivetrainConfig setModuleLocations(double trackWidth, double wheelbase){
-        return setModuleLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, wheelbase));
+    private SwerveDrivetrainConfig applyModuleLocations(double trackWidth, double wheelbase){
+        return applyModuleLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, wheelbase));
     }
 
     /**
      * Declares module locations assuming a square footprint (track width on both axes).
      */
-    public SwerveDrivetrainConfig setModuleLocations(double trackWidth){
-        return setModuleLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, trackWidth));
+    private SwerveDrivetrainConfig applyModuleLocations(double trackWidth){
+        return applyModuleLocations(SwerveModuleConfig.generateModuleLocations(trackWidth, trackWidth));
     }
 
     /**
      * Overrides the drivetrain simulation configuration used when running in WPILib simulation.
      */
-    public SwerveDrivetrainConfig setSimulationConfig(SwerveSimulationConfig simulationConfig) {
+    private SwerveDrivetrainConfig applySimulationConfig(SwerveSimulationConfig simulationConfig) {
         this.simulationConfig = simulationConfig;
         return this;
     }
 
-    public SwerveDrivetrainConfig addSpeedSource(String name, boolean enabledByDefault) {
+    private SwerveDrivetrainConfig addSpeedSource(String name, boolean enabledByDefault) {
         speedSources.add(new SpeedSourceRegistration(name, enabledByDefault));
         return this;
     }
 
-    public SwerveDrivetrainConfig addSpeedBlend(
+    private SwerveDrivetrainConfig addSpeedBlend(
             String target,
             String source,
             RobotSpeeds.BlendMode blendMode,
@@ -418,7 +856,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         return addSpeedBlend(target, target, source, blendMode, axes);
     }
 
-    public SwerveDrivetrainConfig addSpeedBlend(
+    private SwerveDrivetrainConfig addSpeedBlend(
             String target,
             String left,
             String right,
@@ -430,7 +868,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         return this;
     }
 
-    public SwerveDrivetrainConfig addSpeedOutputBlend(
+    private SwerveDrivetrainConfig addSpeedOutputBlend(
             String source,
             RobotSpeeds.BlendMode blendMode,
             RobotSpeeds.SpeedAxis... axes) {
@@ -487,7 +925,9 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
                 modules[i] = modules[i].setPID(rotationPID);
             }
         } 
-        imu = imu.setId(gryoId).setCanbus(canbus);
+        if (imu != null) {
+            imu = imu.hardware(h -> h.id(gryoId).canbus(canbus));
+        }
 
         Imu resolvedImu = imu == null ? null : new VirtualImu(HardwareFactories.imu(imu));
         SwerveDrivetrain dt = new SwerveDrivetrain(resolvedImu, modules);

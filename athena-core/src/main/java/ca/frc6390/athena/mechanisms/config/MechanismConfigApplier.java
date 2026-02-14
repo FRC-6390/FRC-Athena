@@ -95,7 +95,7 @@ public final class MechanismConfigApplier {
                 }
             } else if (source.equals("cancoder")) {
                 if (enc.id() != null) {
-                    EncoderConfig cfg = EncoderConfig.type(AthenaEncoder.CANCODER.resolve(), enc.id());
+                    EncoderConfig cfg = EncoderConfig.create(AthenaEncoder.CANCODER.resolve(), enc.id());
                     applyEncoderNumbers(cfg, enc);
                     section.config(cfg);
                 }
@@ -104,7 +104,7 @@ public final class MechanismConfigApplier {
                 try {
                     AthenaEncoder ae = AthenaEncoder.valueOf(source.toUpperCase(Locale.ROOT));
                     if (enc.id() != null) {
-                        EncoderConfig cfg = EncoderConfig.type(ae.resolve(), enc.id());
+                        EncoderConfig cfg = EncoderConfig.create(ae.resolve(), enc.id());
                         applyEncoderNumbers(cfg, enc);
                         section.config(cfg);
                     }
@@ -113,7 +113,7 @@ public final class MechanismConfigApplier {
                     try {
                         var et = ca.frc6390.athena.hardware.encoder.EncoderRegistry.get().encoder(source);
                         if (enc.id() != null) {
-                            EncoderConfig cfg = EncoderConfig.type(et, enc.id());
+                            EncoderConfig cfg = EncoderConfig.create(et, enc.id());
                             applyEncoderNumbers(cfg, enc);
                             section.config(cfg);
                         }
@@ -211,9 +211,6 @@ public final class MechanismConfigApplier {
             if (control.setpointAsOutput() != null) {
                 section.setpointAsOutput(control.setpointAsOutput());
             }
-            if (control.pidUseVelocity() != null) {
-                section.pidUseVelocity(control.pidUseVelocity());
-            }
             if (control.pidContinuous() != null) {
                 if (control.pidContinuous()) {
                     double min = control.pidContinuousMin() != null ? control.pidContinuousMin() : 0.0;
@@ -234,7 +231,7 @@ public final class MechanismConfigApplier {
         }
         final OutputType pidOutputTypeHintFinal = pidOutputTypeHint;
 
-        // Register PID profiles (usable by custom loops) and optionally select a default.
+        // Register PID profiles usable by periodic/custom loops.
         if (control.pidProfiles() != null) {
             for (MechanismPidConfig profile : control.pidProfiles()) {
                 if (profile == null || profile.name() == null || profile.name().isBlank()) {
@@ -247,27 +244,7 @@ public final class MechanismConfigApplier {
                 double tolerance = profile.tolerance() != null
                         ? profile.tolerance()
                         : (control.tolerance() != null ? control.tolerance() : Double.NaN);
-                target.control(c -> c.pidProfile(profile.name(), pidOutputTypeHintFinal, kp, ki, kd, iZone, tolerance));
-            }
-        }
-
-        // Main PID selection from named profiles.
-        if (control.pidProfile() != null && !control.pidProfile().isBlank()) {
-            String selected = control.pidProfile().trim();
-            target.control(c -> c.mainPid(selected));
-            if (control.pidProfiles() != null) {
-                for (MechanismPidConfig profile : control.pidProfiles()) {
-                    if (profile == null || profile.name() == null) {
-                        continue;
-                    }
-                    if (!profile.name().trim().equals(selected)) {
-                        continue;
-                    }
-                    if (profile.period() != null) {
-                        target.control(c -> c.pidPeriod(profile.period()));
-                    }
-                    break;
-                }
+                target.control(c -> c.pid(profile.name(), pidOutputTypeHintFinal, kp, ki, kd, iZone, tolerance));
             }
         }
 
@@ -289,16 +266,11 @@ public final class MechanismConfigApplier {
                 double highOutput = profile.highOutput() != null ? profile.highOutput() : 1.0;
                 double lowOutput = profile.lowOutput() != null ? profile.lowOutput() : -highOutput;
                 double tolerance = profile.tolerance() != null ? profile.tolerance() : 0.0;
-                target.control(c -> c.bangBangProfile(profile.name(), profileOutput, highOutput, lowOutput, tolerance));
+                target.control(c -> c.bangBang(profile.name(), profileOutput, highOutput, lowOutput, tolerance));
             }
         }
 
-        if (control.bangBangProfile() != null && !control.bangBangProfile().isBlank()) {
-            target.control(c -> c.mainBangBang(control.bangBangProfile().trim()));
-        }
-
-        // Feedforward profiles are used by custom loops (simple motor) and can optionally be selected
-        // as a mechanism's main feedforward for mechanisms that support built-in FF.
+        // Feedforward profiles are used by periodic/custom loops.
         if (control.ffProfiles() != null) {
             for (MechanismFeedforwardConfig ff : control.ffProfiles()) {
                 if (ff == null || ff.name() == null || ff.name().isBlank()) {
@@ -312,30 +284,9 @@ public final class MechanismConfigApplier {
                 switch (type) {
                     case "arm" -> target.control(c -> c.armFeedforwardProfile(ff.name(), ks, kg, kv, ka));
                     case "elevator" -> target.control(c -> c.elevatorFeedforwardProfile(ff.name(), ks, kg, kv, ka));
-                    case "simple_motor" -> target.control(c -> c.feedforwardProfile(ff.name(), OutputType.VOLTAGE, ks, kv, ka));
-                    default -> target.control(c -> c.feedforwardProfile(ff.name(), OutputType.VOLTAGE, ks, kv, ka));
+                    case "simple_motor" -> target.control(c -> c.ff(ff.name(), OutputType.VOLTAGE, ks, kv, ka));
+                    default -> target.control(c -> c.ff(ff.name(), OutputType.VOLTAGE, ks, kv, ka));
                 }
-            }
-        }
-
-        // Optional: select a main feedforward profile for mechanisms with built-in FF.
-        if (control.ffProfile() != null && !control.ffProfile().isBlank() && control.ffProfiles() != null) {
-            String selected = control.ffProfile().trim();
-            for (MechanismFeedforwardConfig ff : control.ffProfiles()) {
-                if (ff == null || ff.name() == null) {
-                    continue;
-                }
-                if (!ff.name().trim().equals(selected)) {
-                    continue;
-                }
-                String type = ff.type() != null ? ff.type().trim().toLowerCase(Locale.ROOT) : "simple_motor";
-                switch (type) {
-                    case "arm" -> target.control(c -> c.mainArmFeedforward(selected));
-                    case "elevator" -> target.control(c -> c.mainElevatorFeedforward(selected));
-                    case "simple_motor" -> target.control(c -> c.mainSimpleFeedforward(selected));
-                    default -> target.control(c -> c.mainSimpleFeedforward(selected));
-                }
-                break;
             }
         }
     }

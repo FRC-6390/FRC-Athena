@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core.examples;
 
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotDrivetrain;
@@ -28,15 +29,36 @@ public final class RobotCoreHookExamples {
     public static <T extends RobotDrivetrain<T>> RobotCore.RobotCoreConfig<T> withBoundingBoxCenterLineAssist(
             RobotCore.RobotCoreConfig<T> config,
             PoseBoundingBox2d zone) {
-        return withBoundingBoxCenterLineAssist(config, zone, BoundingBoxCenterLineAssistTuning.defaults());
+        Objects.requireNonNull(zone, "zone");
+        return withBoundingBoxCenterLineAssist(config, () -> zone, BoundingBoxCenterLineAssistTuning.defaults());
+    }
+
+    public static <T extends RobotDrivetrain<T>> RobotCore.RobotCoreConfig<T> withBoundingBoxCenterLineAssist(
+            RobotCore.RobotCoreConfig<T> config,
+            Supplier<PoseBoundingBox2d> zoneSupplier) {
+        return withBoundingBoxCenterLineAssist(config, zoneSupplier, BoundingBoxCenterLineAssistTuning.defaults());
     }
 
     public static <T extends RobotDrivetrain<T>> RobotCore.RobotCoreConfig<T> withBoundingBoxCenterLineAssist(
             RobotCore.RobotCoreConfig<T> config,
             PoseBoundingBox2d zone,
             BoundingBoxCenterLineAssistTuning tuning) {
-        Objects.requireNonNull(config, "config");
         Objects.requireNonNull(zone, "zone");
+        return withBoundingBoxCenterLineAssist(config, () -> zone, tuning);
+    }
+
+    /**
+     * Adds a robot-periodic driver assist using a live bounding-box supplier.
+     *
+     * <p>The supplier is sampled every loop. Returning {@code null} disables the assist and removes the
+     * published visualization box for this assist source.
+     */
+    public static <T extends RobotDrivetrain<T>> RobotCore.RobotCoreConfig<T> withBoundingBoxCenterLineAssist(
+            RobotCore.RobotCoreConfig<T> config,
+            Supplier<PoseBoundingBox2d> zoneSupplier,
+            BoundingBoxCenterLineAssistTuning tuning) {
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(zoneSupplier, "zoneSupplier");
         Objects.requireNonNull(tuning, "tuning");
 
         LaneAssistState state = new LaneAssistState();
@@ -47,20 +69,34 @@ public final class RobotCoreHookExamples {
                 RobotSpeeds speeds = ctx.drivetrain().getRobotSpeeds();
                 speeds.registerSpeedSource(tuning.speedSource(), true);
                 speeds.setSpeedSourceState(tuning.speedSource(), true);
-                if (ctx.localization() != null) {
+                PoseBoundingBox2d zone = zoneSupplier.get();
+                if (ctx.localization() != null && zone != null) {
                     ctx.localization().setBoundingBox(zoneName, zone);
+                    state.lastPublishedZone = zone;
                 }
             });
 
             // This runs from RobotCore.robotPeriodic() (phase ROBOT_PERIODIC).
             h.onPeriodic(ctx -> {
                 RobotSpeeds speeds = ctx.drivetrain().getRobotSpeeds();
+                PoseBoundingBox2d zone = zoneSupplier.get();
+
+                if (ctx.localization() != null) {
+                    if (zone == null && state.lastPublishedZone != null) {
+                        ctx.localization().removeBoundingBox(zoneName);
+                        state.lastPublishedZone = null;
+                    } else if (zone != null && !zone.equals(state.lastPublishedZone)) {
+                        ctx.localization().setBoundingBox(zoneName, zone);
+                        state.lastPublishedZone = zone;
+                    }
+                }
+
                 if (!DriverStation.isTeleopEnabled()) {
                     stopAssist(speeds, tuning, state);
                     return;
                 }
 
-                if (ctx.localization() == null) {
+                if (ctx.localization() == null || zone == null) {
                     stopAssist(speeds, tuning, state);
                     return;
                 }
@@ -156,6 +192,7 @@ public final class RobotCoreHookExamples {
     private static final class LaneAssistState {
         private boolean inZone;
         private Rotation2d targetHeading = Rotation2d.fromDegrees(90.0);
+        private PoseBoundingBox2d lastPublishedZone;
     }
 
     private static void stopAssist(

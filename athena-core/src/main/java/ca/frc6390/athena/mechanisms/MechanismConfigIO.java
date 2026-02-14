@@ -71,7 +71,7 @@ public final class MechanismConfigIO {
             if (config != null) {
                 motors.add(config);
             } else if (controller.getType() != null) {
-                MotorControllerConfig fallback = new MotorControllerConfig(controller.getType(), controller.getId());
+                MotorControllerConfig fallback = MotorControllerConfig.create(controller.getType(), controller.getId());
                 fallback.setCanbus(controller.getCanbus());
                 fallback.setCurrentLimit(controller.getCurrentLimit());
                 fallback.setInverted(controller.isInverted());
@@ -151,7 +151,7 @@ public final class MechanismConfigIO {
         if (mechanism.getMotorGroup() != null) {
             for (MotorController controller : mechanism.getMotorGroup().getControllers()) {
                 record.motors().stream()
-                        .filter(motor -> motor.id == controller.getId())
+                        .filter(motor -> motor.id() == controller.getId())
                         .findFirst()
                         .ifPresent(motor -> applyMotorConfig(controller, motor));
             }
@@ -159,27 +159,27 @@ public final class MechanismConfigIO {
     }
 
     private static void applyMotorConfig(MotorController controller, MotorControllerConfig config) {
-        if (config.currentLimit > 0.0) {
-            controller.setCurrentLimit(config.currentLimit);
+        if (config.currentLimit() > 0.0) {
+            controller.setCurrentLimit(config.currentLimit());
         }
-        controller.setInverted(config.inverted);
-        if (config.neutralMode != null) {
-            controller.setNeutralMode(config.neutralMode);
+        controller.setInverted(config.inverted());
+        if (config.neutralMode() != null) {
+            controller.setNeutralMode(config.neutralMode());
         }
-        if (config.pid != null) {
-            controller.setPid(config.pid);
+        if (config.pid() != null) {
+            controller.setPid(config.pid());
         }
-        if (config.encoderConfig != null && controller.getEncoder() != null) {
-            applyEncoderConfig(controller.getEncoder(), config.encoderConfig);
+        if (config.encoderConfig() != null && controller.getEncoder() != null) {
+            applyEncoderConfig(controller.getEncoder(), config.encoderConfig());
         }
     }
 
     private static void applyEncoderConfig(Encoder encoder, EncoderConfig config) {
-        encoder.setGearRatio(config.gearRatio);
-        encoder.setConversion(config.conversion);
-        encoder.setConversionOffset(config.conversionOffset);
-        encoder.setOffset(config.offset);
-        encoder.setInverted(config.inverted);
+        encoder.setGearRatio(config.gearRatio());
+        encoder.setConversion(config.conversion());
+        encoder.setConversionOffset(config.conversionOffset());
+        encoder.setOffset(config.offset());
+        encoder.setInverted(config.inverted());
     }
 
     private static ObjectMapper buildMapper() {

@@ -2,7 +2,6 @@ package ca.frc6390.athena.mechanisms;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -35,15 +34,16 @@ final class MechanismBangBangControlTest {
     void controlSectionRegistersAndResolvesBangBangProfiles() {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
         cfg.control(c -> c
-                .bangBangProfile("assist", OutputType.VOLTAGE, 5.0, -3.0, 0.2)
-                .mainBangBang("assist"));
+                .bangBang("assist", OutputType.VOLTAGE, 5.0, -3.0, 0.2)
+                .periodic("assist"));
 
-        MechanismConfig.BangBangProfile resolved = cfg.resolveMainBangBangProfile();
-        assertNotNull(resolved);
+        MechanismConfig.BangBangProfile resolved = cfg.controlLoopBangBangProfiles.get("assist");
         assertEquals(OutputType.VOLTAGE, resolved.outputType());
         assertEquals(5.0, resolved.highOutput(), 1e-9);
         assertEquals(-3.0, resolved.lowOutput(), 1e-9);
         assertEquals(0.2, resolved.tolerance(), 1e-9);
+        assertEquals(1, cfg.controlLoops.size());
+        assertEquals("assist", cfg.controlLoops.get(0).name());
         assertTrue(cfg.controlLoopBangBangProfiles.containsKey("assist"));
     }
 }

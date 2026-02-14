@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import ca.frc6390.athena.mechanisms.ArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism;
@@ -41,6 +42,19 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
 
     public Mechanism byName(String name) {
         return get(name);
+    }
+
+    /**
+     * Sectioned runtime interaction API for already-built mechanisms/superstructures.
+     *
+     * <p>Unlike config builders, this operates on live registered instances and is intended for
+     * "do work if present" patterns from hooks, autos, and command orchestration.</p>
+     */
+    public RobotMechanisms use(Consumer<InteractionSection> section) {
+        if (section != null) {
+            section.accept(new InteractionSection(this));
+        }
+        return this;
     }
 
     public Optional<Mechanism> findByName(String name) {
@@ -258,5 +272,94 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
     @Override
     public Collection<Mechanism> values() {
         return Collections.unmodifiableCollection(mechanisms.values());
+    }
+
+    public static final class InteractionSection {
+        private final RobotMechanisms owner;
+
+        private InteractionSection(RobotMechanisms owner) {
+            this.owner = owner;
+        }
+
+        public InteractionSection mechanism(String name, Consumer<Mechanism> action) {
+            Mechanism mechanism = owner.byName(name);
+            if (mechanism != null && action != null) {
+                action.accept(mechanism);
+            }
+            return this;
+        }
+
+        public <M extends Mechanism> InteractionSection mechanism(
+                String name,
+                Class<M> type,
+                Consumer<M> action) {
+            M mechanism = owner.byName(name, type);
+            if (mechanism != null && action != null) {
+                action.accept(mechanism);
+            }
+            return this;
+        }
+
+        public InteractionSection mechanism(MechanismConfig<?> config, Consumer<Mechanism> action) {
+            Mechanism mechanism = owner.byConfig(config);
+            if (mechanism != null && action != null) {
+                action.accept(mechanism);
+            }
+            return this;
+        }
+
+        public <M extends Mechanism> InteractionSection mechanism(
+                MechanismConfig<?> config,
+                Class<M> type,
+                Consumer<M> action) {
+            M mechanism = owner.key(config, type);
+            if (mechanism != null && action != null) {
+                action.accept(mechanism);
+            }
+            return this;
+        }
+
+        public InteractionSection requireMechanism(String name, Consumer<Mechanism> action) {
+            Mechanism mechanism = owner.requireByName(name);
+            if (action != null) {
+                action.accept(mechanism);
+            }
+            return this;
+        }
+
+        public <M extends Mechanism> InteractionSection requireMechanism(
+                String name,
+                Class<M> type,
+                Consumer<M> action) {
+            Mechanism mechanism = owner.requireByName(name);
+            if (!type.isInstance(mechanism)) {
+                throw new IllegalArgumentException("Mechanism '" + name + "' is not a "
+                        + type.getSimpleName() + " (was " + mechanism.getClass().getSimpleName() + ")");
+            }
+            if (action != null) {
+                action.accept(type.cast(mechanism));
+            }
+            return this;
+        }
+
+        public InteractionSection superstructure(
+                String name,
+                Consumer<SuperstructureMechanism<?, ?>> action) {
+            SuperstructureMechanism<?, ?> superstructure = owner.superstruct(name);
+            if (superstructure != null && action != null) {
+                action.accept(superstructure);
+            }
+            return this;
+        }
+
+        public <S extends Enum<S> & SetpointProvider<SP>, SP> InteractionSection superstructure(
+                SuperstructureConfig<S, SP> config,
+                Consumer<SuperstructureMechanism<S, SP>> action) {
+            SuperstructureMechanism<S, SP> superstructure = owner.superstruct(config);
+            if (superstructure != null && action != null) {
+                action.accept(superstructure);
+            }
+            return this;
+        }
     }
 }

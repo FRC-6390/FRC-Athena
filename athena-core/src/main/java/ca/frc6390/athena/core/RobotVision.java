@@ -48,7 +48,7 @@ public class RobotVision implements RobotSendableSystem {
    
    public record RobotVisionConfig(ArrayList<ConfigurableCamera> cameras) {
 
-      public static RobotVisionConfig defualt(){
+      public static RobotVisionConfig defaults(){
          return new RobotVisionConfig(new ArrayList<>());
       }
 
@@ -121,13 +121,14 @@ public class RobotVision implements RobotSendableSystem {
       return camerasView;
    }
 
-   public void setUseForLocalization(String key, boolean enabled) {
+   public RobotVision camera(String key, Consumer<VisionCamera.RuntimeSection> section) {
       VisionCamera camera = cameras.get(key);
-      if (camera == null) {
-         return;
+      if (camera == null || section == null) {
+         return this;
       }
-      camera.setUseForLocalization(enabled);
+      camera.config(section);
       refreshCameraRoles(camera);
+      return this;
    }
 
    public void attachLocalization(RobotLocalization<?> localization) {
@@ -316,7 +317,7 @@ public class RobotVision implements RobotSendableSystem {
    }
 
    public void setLocalizationStdDevs(Matrix<N3, N1> singleStdDevs, Matrix<N3, N1> multiStdDevs){
-      cameras.values().forEach(camera -> camera.setStdDevs(singleStdDevs, multiStdDevs));
+      cameras.values().forEach(camera -> camera.config().stdDevs(singleStdDevs, multiStdDevs));
    }
 
    private Optional<VisionCamera.TargetObservation> selectBestObservation(Iterable<VisionCamera> cameraIterable,
