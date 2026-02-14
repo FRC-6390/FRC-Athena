@@ -104,11 +104,9 @@ def providedVersion = project.hasProperty('version') ? project.property('version
 def useProvidedVersion = providedVersion && providedVersion != org.gradle.api.Project.DEFAULT_VERSION && providedVersion.trim()
 
 def pubVersion = useProvidedVersion ? providedVersion : computeAutoVersion()
-if (useProvidedVersion) {
-    logger.lifecycle("Using provided Athena version ${pubVersion}")
-} else {
-    logger.lifecycle("Auto-incremented Athena version to ${pubVersion}")
-}
+def versionResolutionMessage = useProvidedVersion
+        ? "Using provided Athena version ${pubVersion}"
+        : "Auto-incremented Athena version to ${pubVersion}"
 
 def computeFrcYear = {
     if (project.hasProperty('wpilibYear')) {
@@ -133,9 +131,9 @@ def computeFrcYear = {
 }
 
 def frcYear = project.hasProperty('frcYear') ? project.property('frcYear') : computeFrcYear()
-if (!project.hasProperty('frcYear')) {
-    logger.lifecycle("Resolved FRC year to ${frcYear} from WPILib version")
-}
+def frcYearResolutionMessage = !project.hasProperty('frcYear')
+        ? "Resolved FRC year to ${frcYear} from WPILib version"
+        : null
 
 // Group/Artifact used below and for updating JSON
 def artifactGroupId = 'ca.frc6390.athena'
@@ -165,9 +163,17 @@ def localRepoDir = rootProject.file("${rootProject.buildDir}/repos/releases")
 
 // Publish mode can be: 'local', 'online', 'all'
 def publishMode = project.hasProperty('publishMode') ? project.property('publishMode') : 'local'
-logger.lifecycle("Athena build configuration -> version: ${pubVersion}, frcYear: ${frcYear}, publishMode: ${publishMode}, wpilibFolder: ${wpilibFolder}")
+def buildConfigurationMessage = "Athena build configuration -> version: ${pubVersion}, frcYear: ${frcYear}, publishMode: ${publishMode}, wpilibFolder: ${wpilibFolder}"
 if ((publishMode == 'online' || publishMode == 'all') && (!mavenUsername || !mavenPassword)) {
     throw new GradleException("Missing publish credentials. Provide -PmavenUsername/-PmavenPassword or MAVEN_USERNAME/MAVEN_PASSWORD (or GITHUB_ACTOR/GITHUB_TOKEN).")
+}
+
+gradle.buildFinished { _ ->
+    logger.lifecycle(versionResolutionMessage)
+    if (frcYearResolutionMessage != null) {
+        logger.lifecycle(frcYearResolutionMessage)
+    }
+    logger.lifecycle(buildConfigurationMessage)
 }
 
 // -----------------------------------------------------------------------------

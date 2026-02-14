@@ -103,15 +103,15 @@ public final class MechanismConfigExport {
         List<MechanismMotorConfig> controllers = new ArrayList<>();
         if (data.motors() != null) {
             for (MotorControllerConfig m : data.motors()) {
-                if (m == null || m.type == null) {
+                if (m == null || m.type() == null) {
                     continue;
                 }
-                String typeKey = m.type.getKey();
+                String typeKey = m.type().getKey();
                 controllers.add(new MechanismMotorConfig(
                         null,
                         typeKey,
-                        m.id,
-                        m.inverted));
+                        m.id(),
+                        m.inverted()));
             }
         }
         String canbus = data.canbus();
@@ -128,19 +128,19 @@ public final class MechanismConfigExport {
         if (enc == null) {
             return null;
         }
-        String source = enc.type != null ? enc.type.getKey() : null;
+        String source = enc.type() != null ? enc.type().getKey() : null;
         return new MechanismEncoderConfig(
                 source,
-                enc.id,
+                enc.id(),
                 null,
                 data.useAbsolute(),
-                enc.inverted,
-                enc.gearRatio,
-                enc.conversion,
-                enc.conversionOffset,
-                enc.offset,
-                Double.isFinite(enc.discontinuityPoint) ? enc.discontinuityPoint : null,
-                Double.isFinite(enc.discontinuityRange) ? enc.discontinuityRange : null);
+                enc.inverted(),
+                enc.gearRatio(),
+                enc.conversion(),
+                enc.conversionOffset(),
+                enc.offset(),
+                Double.isFinite(enc.discontinuityPoint()) ? enc.discontinuityPoint() : null,
+                Double.isFinite(enc.discontinuityRange()) ? enc.discontinuityRange() : null);
     }
 
     private static MechanismConstraintsConfig exportConstraints(MechanismConfigRecord data) {
@@ -209,9 +209,9 @@ public final class MechanismConfigExport {
 
         // Export named loop profiles (data-only) so teams can inspect/round-trip them later.
         List<MechanismPidConfig> pidProfiles = null;
-        if (cfg.controlLoopPidProfiles != null && !cfg.controlLoopPidProfiles.isEmpty()) {
+        if (cfg.controlLoopPidProfiles() != null && !cfg.controlLoopPidProfiles().isEmpty()) {
             pidProfiles = new ArrayList<>();
-            for (Map.Entry<String, MechanismConfig.PidProfile> e : cfg.controlLoopPidProfiles.entrySet()) {
+            for (Map.Entry<String, MechanismConfig.PidProfile> e : cfg.controlLoopPidProfiles().entrySet()) {
                 if (e == null || e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                     continue;
                 }
@@ -226,9 +226,9 @@ public final class MechanismConfigExport {
         }
 
         List<MechanismFeedforwardConfig> ffProfiles = null;
-        if (cfg.controlLoopFeedforwardProfiles != null && !cfg.controlLoopFeedforwardProfiles.isEmpty()) {
+        if (cfg.controlLoopFeedforwardProfiles() != null && !cfg.controlLoopFeedforwardProfiles().isEmpty()) {
             ffProfiles = new ArrayList<>();
-            for (Map.Entry<String, MechanismConfig.FeedforwardProfile> e : cfg.controlLoopFeedforwardProfiles.entrySet()) {
+            for (Map.Entry<String, MechanismConfig.FeedforwardProfile> e : cfg.controlLoopFeedforwardProfiles().entrySet()) {
                 if (e == null || e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                     continue;
                 }
@@ -247,9 +247,9 @@ public final class MechanismConfigExport {
         }
 
         List<MechanismBangBangConfig> bangBangProfiles = null;
-        if (cfg.controlLoopBangBangProfiles != null && !cfg.controlLoopBangBangProfiles.isEmpty()) {
+        if (cfg.controlLoopBangBangProfiles() != null && !cfg.controlLoopBangBangProfiles().isEmpty()) {
             bangBangProfiles = new ArrayList<>();
-            for (Map.Entry<String, MechanismConfig.BangBangProfile> e : cfg.controlLoopBangBangProfiles.entrySet()) {
+            for (Map.Entry<String, MechanismConfig.BangBangProfile> e : cfg.controlLoopBangBangProfiles().entrySet()) {
                 if (e == null || e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                     continue;
                 }
@@ -284,8 +284,8 @@ public final class MechanismConfigExport {
             return null;
         }
         // Keep this conservative: export only the explicit sim parameters set on the config.
-        if (cfg.simpleMotorSimulationParameters != null) {
-            var sm = cfg.simpleMotorSimulationParameters;
+        if (cfg.simpleMotorSimulationParameters() != null) {
+            var sm = cfg.simpleMotorSimulationParameters();
             return new MechanismSimConfig(
                     new MechanismSimSimpleMotorConfig(
                             Double.isFinite(sm.momentOfInertia) ? sm.momentOfInertia : null,
@@ -294,8 +294,8 @@ public final class MechanismConfigExport {
                     null,
                     null);
         }
-        if (cfg.armSimulationParameters != null) {
-            var a = cfg.armSimulationParameters;
+        if (cfg.armSimulationParameters() != null) {
+            var a = cfg.armSimulationParameters();
             return new MechanismSimConfig(
                     null,
                     new MechanismSimArmConfig(
@@ -310,8 +310,8 @@ public final class MechanismConfigExport {
                             Double.isFinite(a.momentOfInertia) ? a.momentOfInertia : null),
                     null);
         }
-        if (cfg.elevatorSimulationParameters != null) {
-            var e = cfg.elevatorSimulationParameters;
+        if (cfg.elevatorSimulationParameters() != null) {
+            var e = cfg.elevatorSimulationParameters();
             return new MechanismSimConfig(
                     null,
                     null,

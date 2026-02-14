@@ -915,7 +915,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (config == null) {
             return;
         }
-        applyPoseConfigUpdate(config, config.setActive(active));
+        applyPoseConfigUpdate(config, config.withActive(active));
     }
 
     public boolean setPoseConfigNetworkTablesPublishing(String name, boolean publishToNetworkTables) {

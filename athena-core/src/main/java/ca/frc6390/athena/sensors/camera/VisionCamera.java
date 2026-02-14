@@ -21,6 +21,7 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotTime;
+import ca.frc6390.athena.core.sections.SectionedAccess;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -249,10 +250,7 @@ public class VisionCamera {
     }
 
     public VisionCamera config(Consumer<RuntimeSection> section) {
-        if (section != null) {
-            section.accept(new RuntimeSection());
-        }
-        return this;
+        return SectionedAccess.apply(this, section, RuntimeSection::new);
     }
 
     public RuntimeSection config() {

@@ -28,9 +28,9 @@ public final class ExampleRobotCoreConfig {
                 .poses(p -> p.autoPoseName("field"));
 
         return RobotCore.RobotCoreConfig.<SwerveDrivetrain>swerve(drivetrain)
-                .setLocalization(localization)
-                .setVision(cameras)
-                .setPerformanceMode(false)
-                .setTelemetryEnabled(true);
+                .localization(localization)
+                .cameras(cameras)
+                .performanceMode(false)
+                .telemetryEnabled(true);
     }
 }

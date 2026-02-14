@@ -105,20 +105,20 @@ public final class ExampleCompositeSuperstructure {
         MechanismConfig<StatefulMechanism<ElevatorState>> elevator =
                 MechanismConfig.statefulGeneric(ElevatorState.HomeReset);
         elevator.control(c -> c.setpointAsOutput(true));
-        elevator.setStateMachineDelay(0.04);
-        elevator.stateGraph = StateGraph.create(ElevatorState.class)
+        elevator.stateMachineDelay(0.04);
+        elevator.stateGraph(StateGraph.create(ElevatorState.class)
                 .path(ElevatorState.HomeReset, ElevatorState.Intaking)
                 .path(ElevatorState.Intaking, ElevatorState.L1, ElevatorState.L2, ElevatorState.L3, ElevatorState.L4)
-                .path(ElevatorState.HomeReset, ElevatorState.HomePID);
+                .path(ElevatorState.HomeReset, ElevatorState.HomePID));
 
         // End effector config (stub; replace with real arm/wrist mechanism configs if you have them).
         MechanismConfig<StatefulMechanism<EndEffectorState>> eff =
                 MechanismConfig.statefulGeneric(EndEffectorState.Home);
         eff.control(c -> c.setpointAsOutput(true));
-        eff.setStateMachineDelay(0.02);
-        eff.stateGraph = StateGraph.create(EndEffectorState.class)
+        eff.stateMachineDelay(0.02);
+        eff.stateGraph(StateGraph.create(EndEffectorState.class)
                 .path(EndEffectorState.Home, EndEffectorState.Intaking)
-                .path(EndEffectorState.Intaking, EndEffectorState.L1, EndEffectorState.L2, EndEffectorState.L3, EndEffectorState.L4);
+                .path(EndEffectorState.Intaking, EndEffectorState.L1, EndEffectorState.L2, EndEffectorState.L3, EndEffectorState.L4));
 
         // Superstructure config mirrors the legacy sequencing.
         SuperstructureConfig<SuperState, SuperTuple> config =

@@ -43,7 +43,7 @@ public class StudicaImu implements Imu {
     }
 
     public static StudicaImu fromConfig(ImuConfig config) {
-        if (config == null || !(config.type instanceof StudicaImuType)) {
+        if (config == null || !(config.type() instanceof StudicaImuType)) {
             throw new IllegalArgumentException("Studica IMU config required");
         }
 
@@ -136,7 +136,7 @@ public class StudicaImu implements Imu {
     @Override
     public void setInverted(boolean inverted) {
         if (config != null) {
-            config.inverted = inverted;
+            config.hardware().inverted(inverted);
         }
     }
 

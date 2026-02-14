@@ -66,17 +66,16 @@ public class CtreEncoder implements Encoder {
             return;
         }
         boolean hasDiscontinuityConfig =
-                Double.isFinite(config.discontinuityPoint) || Double.isFinite(config.discontinuityRange);
+                Double.isFinite(config.discontinuityPoint()) || Double.isFinite(config.discontinuityRange());
 
         if (!hasDiscontinuityConfig) {
-            config.discontinuityRange = 1.0;
-            config.discontinuityPoint = 0.5;
+            config.measurement().discontinuity(0.5, 1.0);
             return;
         }
 
-        double range = Double.isFinite(config.discontinuityRange)
-                ? config.discontinuityRange
-                : (Double.isFinite(config.discontinuityPoint) ? 1.0 : Double.NaN);
+        double range = Double.isFinite(config.discontinuityRange())
+                ? config.discontinuityRange()
+                : (Double.isFinite(config.discontinuityPoint()) ? 1.0 : Double.NaN);
         if (Double.isFinite(range) && range > 0.0) {
             if (Math.abs(range - 1.0) > 1e-4) {
                 DriverStation.reportWarning(
@@ -85,7 +84,7 @@ public class CtreEncoder implements Encoder {
                         false);
                 return;
             }
-            if (!Double.isFinite(config.discontinuityPoint)) {
+            if (!Double.isFinite(config.discontinuityPoint())) {
                 DriverStation.reportWarning(
                         "CANCoder discontinuity point missing; set encoder discontinuity point to apply hardware wrap.",
                         false);
@@ -93,7 +92,7 @@ public class CtreEncoder implements Encoder {
             }
             CANcoderConfiguration cfg = new CANcoderConfiguration();
             cfg.MagnetSensor.AbsoluteSensorDiscontinuityPoint =
-                    MathUtil.clamp(config.discontinuityPoint, 0.0, 1.0);
+                    MathUtil.clamp(config.discontinuityPoint(), 0.0, 1.0);
             cancoder.getConfigurator().apply(cfg, 0.0);
         }
     }
@@ -103,14 +102,14 @@ public class CtreEncoder implements Encoder {
     }
 
     public static CtreEncoder fromConfig(EncoderConfig config, TalonFX talonFx) {
-        if (config == null || !(config.type instanceof CtreEncoderType)) {
+        if (config == null || !(config.type() instanceof CtreEncoderType)) {
             throw new IllegalArgumentException("CTRE encoder config required");
         }
 
-        CtreEncoderType type = (CtreEncoderType) config.type;
+        CtreEncoderType type = (CtreEncoderType) config.type();
         switch (type) {
             case CANCODER -> {
-                CANcoder encoder = new CANcoder(config.id, resolveCanBus(config.canbus));
+                CANcoder encoder = new CANcoder(config.id(), resolveCanBus(config.canbus()));
                 return new CtreEncoder(encoder, config);
             }
             case TALON_FX -> {
@@ -203,14 +202,14 @@ public class CtreEncoder implements Encoder {
     @Override
     public void setGearRatio(double gearRatio) {
         if (config != null) {
-            config.gearRatio = gearRatio;
+            config.measurement().gearRatio(gearRatio);
         }
     }
 
     @Override
     public void setConversionOffset(double conversionOffset) {
         if (config != null) {
-            config.conversionOffset = conversionOffset;
+            config.measurement().conversionOffset(conversionOffset);
         }
     }
 
@@ -263,21 +262,21 @@ public class CtreEncoder implements Encoder {
     @Override
     public void setInverted(boolean inverted) {
         if (config != null) {
-            config.inverted = inverted;
+            config.hardware().inverted(inverted);
         }
     }
 
     @Override
     public void setConversion(double conversion) {
         if (config != null) {
-            config.conversion = conversion;
+            config.measurement().conversion(conversion);
         }
     }
 
     @Override
     public void setOffset(double offset) {
         if (config != null) {
-            config.offset = offset;
+            config.measurement().offset(offset);
         }
     }
 

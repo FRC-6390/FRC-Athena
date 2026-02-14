@@ -60,7 +60,7 @@ public class ImuAdapter implements Imu {
     public void setInverted(boolean inverted) {
         this.inverted = inverted;
         if (config != null) {
-            config.setInverted(inverted);
+            config.hardware().inverted(inverted);
         }
     }
 

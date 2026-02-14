@@ -80,11 +80,11 @@ public class RevMotorController implements MotorController {
     }
 
     public static RevMotorController fromConfig(MotorControllerConfig config) {
-        if (config == null || !(config.type instanceof RevMotorControllerType)) {
+        if (config == null || !(config.type() instanceof RevMotorControllerType)) {
             throw new IllegalArgumentException("REV motor controller config required");
         }
 
-        RevMotorControllerType type = (RevMotorControllerType) config.type;
+        RevMotorControllerType type = (RevMotorControllerType) config.type();
         return switch (type) {
             case SPARK_MAX_BRUSHED -> createSparkMax(config, MotorType.kBrushed);
             case SPARK_MAX_BRUSHLESS -> createSparkMax(config, MotorType.kBrushless);
@@ -94,44 +94,53 @@ public class RevMotorController implements MotorController {
     }
 
     private static RevMotorController createSparkMax(MotorControllerConfig config, MotorType motorType) {
-        SparkMax controller = new SparkMax(config.id, motorType);
-        setCanTimeout(controller, config.id);
+        SparkMax controller = new SparkMax(config.id(), motorType);
+        setCanTimeout(controller, config.id());
         SparkMaxConfig cfg = new SparkMaxConfig();
-        cfg.idleMode(config.neutralMode == MotorNeutralMode.Brake
+        cfg.idleMode(config.neutralMode() == MotorNeutralMode.Brake
                 ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake
                 : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast);
-        cfg.smartCurrentLimit((int) config.currentLimit);
-        if (config.pid != null) {
-            cfg.closedLoop.pid(config.pid.getP(), config.pid.getI(), config.pid.getD());
+        cfg.smartCurrentLimit((int) config.currentLimit());
+        if (config.pid() != null) {
+            cfg.closedLoop.pid(config.pid().getP(), config.pid().getI(), config.pid().getD());
         }
-        applyConfig(controller, cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "initial");
+        applyConfig(controller, cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "initial");
 
-        EncoderConfig encoderCfg = config.encoderConfig;
+        EncoderConfig encoderCfg = config.encoderConfig();
         Encoder encoder = null;
-        if (encoderCfg != null && encoderCfg.type instanceof RevEncoderType revType
+        if (encoderCfg != null && encoderCfg.type() instanceof RevEncoderType revType
                 && revType == RevEncoderType.SPARK_MAX
-                && (encoderCfg.id == 0 || encoderCfg.id == config.id)) {
+                && (encoderCfg.id() == 0 || encoderCfg.id() == config.id())) {
             encoder = EncoderAdapter.wrap(
                     new RevEncoder(controller.getEncoder(), safeAbsoluteEncoder(controller), encoderCfg),
                     encoderCfg);
-        } else if (encoderCfg != null && encoderCfg.type instanceof RevEncoderType) {
+        } else if (encoderCfg != null && encoderCfg.type() instanceof RevEncoderType) {
             encoder = EncoderAdapter.wrap(RevEncoder.fromConfig(encoderCfg), encoderCfg);
         } else {
-            EncoderConfig fallback = new EncoderConfig()
-                    .setType(RevEncoderType.SPARK_MAX)
-                    .setId(config.id)
-                    .setCanbus(config.canbus)
-                    .setGearRatio(config.encoderConfig != null ? config.encoderConfig.gearRatio : 1.0)
-                    .setConversion(config.encoderConfig != null ? config.encoderConfig.conversion : 1.0)
-                    .setConversionOffset(config.encoderConfig != null ? config.encoderConfig.conversionOffset : 0.0)
-                    .setOffset(config.encoderConfig != null ? config.encoderConfig.offset : 0.0)
-                    .setDiscontinuity(
-                            config.encoderConfig != null ? config.encoderConfig.discontinuityPoint : Double.NaN,
-                            config.encoderConfig != null ? config.encoderConfig.discontinuityRange : Double.NaN)
-                    .setInverted(config.encoderConfig != null && config.encoderConfig.inverted);
+            EncoderConfig fallback = EncoderConfig.create()
+                    .hardware(h -> h
+                            .type(RevEncoderType.SPARK_MAX)
+                            .id(config.id())
+                            .canbus(config.canbus())
+                            .inverted(config.encoderConfig() != null && config.encoderConfig().inverted()))
+                    .measurement(m -> m
+                            .gearRatio(config.encoderConfig() != null ? config.encoderConfig().gearRatio() : 1.0)
+                            .conversion(config.encoderConfig() != null ? config.encoderConfig().conversion() : 1.0)
+                            .conversionOffset(config.encoderConfig() != null
+                                    ? config.encoderConfig().conversionOffset()
+                                    : 0.0)
+                            .offset(config.encoderConfig() != null ? config.encoderConfig().offset() : 0.0)
+                            .discontinuity(
+                                    config.encoderConfig() != null
+                                            ? config.encoderConfig().discontinuityPoint()
+                                            : Double.NaN,
+                                    config.encoderConfig() != null
+                                            ? config.encoderConfig().discontinuityRange()
+                                            : Double.NaN));
             encoder = EncoderAdapter.wrap(
                     new RevEncoder(controller.getEncoder(), safeAbsoluteEncoder(controller), fallback),
                     fallback);
+            config.encoder().config(fallback);
         }
 
         return new RevMotorController(
@@ -142,7 +151,7 @@ public class RevMotorController implements MotorController {
                 limit -> {
                     SparkMaxConfig update = new SparkMaxConfig();
                     update.smartCurrentLimit((int) Math.round(limit));
-                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "currentLimit");
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "currentLimit");
                 },
                 val -> controller.getClosedLoopController().setSetpoint(val, ControlType.kPosition),
                 val -> controller.getClosedLoopController().setSetpoint(val * 60.0, ControlType.kVelocity),
@@ -151,12 +160,12 @@ public class RevMotorController implements MotorController {
                     update.idleMode(mode == MotorNeutralMode.Brake
                             ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake
                             : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast);
-                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "neutralMode");
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "neutralMode");
                 },
                 pid -> {
                     SparkMaxConfig update = new SparkMaxConfig();
                     update.closedLoop.pid(pid.getP(), pid.getI(), pid.getD());
-                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "pid");
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "pid");
                 },
                 controller::setInverted,
                 () -> !controller.hasActiveFault(),
@@ -165,44 +174,53 @@ public class RevMotorController implements MotorController {
     }
 
     private static RevMotorController createSparkFlex(MotorControllerConfig config, MotorType motorType) {
-        SparkFlex controller = new SparkFlex(config.id, motorType);
-        setCanTimeout(controller, config.id);
+        SparkFlex controller = new SparkFlex(config.id(), motorType);
+        setCanTimeout(controller, config.id());
         SparkFlexConfig cfg = new SparkFlexConfig();
-        cfg.idleMode(config.neutralMode == MotorNeutralMode.Brake
+        cfg.idleMode(config.neutralMode() == MotorNeutralMode.Brake
                 ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake
                 : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast);
-        cfg.smartCurrentLimit((int) config.currentLimit);
-        if (config.pid != null) {
-            cfg.closedLoop.pid(config.pid.getP(), config.pid.getI(), config.pid.getD());
+        cfg.smartCurrentLimit((int) config.currentLimit());
+        if (config.pid() != null) {
+            cfg.closedLoop.pid(config.pid().getP(), config.pid().getI(), config.pid().getD());
         }
-        applyConfig(controller, cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "initial");
+        applyConfig(controller, cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "initial");
 
-        EncoderConfig encoderCfg = config.encoderConfig;
+        EncoderConfig encoderCfg = config.encoderConfig();
         Encoder encoder = null;
-        if (encoderCfg != null && encoderCfg.type instanceof RevEncoderType revType
+        if (encoderCfg != null && encoderCfg.type() instanceof RevEncoderType revType
                 && revType == RevEncoderType.SPARK_FLEX
-                && (encoderCfg.id == 0 || encoderCfg.id == config.id)) {
+                && (encoderCfg.id() == 0 || encoderCfg.id() == config.id())) {
             encoder = EncoderAdapter.wrap(
                     new RevEncoder(controller.getEncoder(), safeAbsoluteEncoder(controller), encoderCfg),
                     encoderCfg);
-        } else if (encoderCfg != null && encoderCfg.type instanceof RevEncoderType) {
+        } else if (encoderCfg != null && encoderCfg.type() instanceof RevEncoderType) {
             encoder = EncoderAdapter.wrap(RevEncoder.fromConfig(encoderCfg), encoderCfg);
         } else {
-            EncoderConfig fallback = new EncoderConfig()
-                    .setType(RevEncoderType.SPARK_FLEX)
-                    .setId(config.id)
-                    .setCanbus(config.canbus)
-                    .setGearRatio(config.encoderConfig != null ? config.encoderConfig.gearRatio : 1.0)
-                    .setConversion(config.encoderConfig != null ? config.encoderConfig.conversion : 1.0)
-                    .setConversionOffset(config.encoderConfig != null ? config.encoderConfig.conversionOffset : 0.0)
-                    .setOffset(config.encoderConfig != null ? config.encoderConfig.offset : 0.0)
-                    .setDiscontinuity(
-                            config.encoderConfig != null ? config.encoderConfig.discontinuityPoint : Double.NaN,
-                            config.encoderConfig != null ? config.encoderConfig.discontinuityRange : Double.NaN)
-                    .setInverted(config.encoderConfig != null && config.encoderConfig.inverted);
+            EncoderConfig fallback = EncoderConfig.create()
+                    .hardware(h -> h
+                            .type(RevEncoderType.SPARK_FLEX)
+                            .id(config.id())
+                            .canbus(config.canbus())
+                            .inverted(config.encoderConfig() != null && config.encoderConfig().inverted()))
+                    .measurement(m -> m
+                            .gearRatio(config.encoderConfig() != null ? config.encoderConfig().gearRatio() : 1.0)
+                            .conversion(config.encoderConfig() != null ? config.encoderConfig().conversion() : 1.0)
+                            .conversionOffset(config.encoderConfig() != null
+                                    ? config.encoderConfig().conversionOffset()
+                                    : 0.0)
+                            .offset(config.encoderConfig() != null ? config.encoderConfig().offset() : 0.0)
+                            .discontinuity(
+                                    config.encoderConfig() != null
+                                            ? config.encoderConfig().discontinuityPoint()
+                                            : Double.NaN,
+                                    config.encoderConfig() != null
+                                            ? config.encoderConfig().discontinuityRange()
+                                            : Double.NaN));
             encoder = EncoderAdapter.wrap(
                     new RevEncoder(controller.getEncoder(), safeAbsoluteEncoder(controller), fallback),
                     fallback);
+            config.encoder().config(fallback);
         }
 
         return new RevMotorController(
@@ -213,7 +231,7 @@ public class RevMotorController implements MotorController {
                 limit -> {
                     SparkFlexConfig update = new SparkFlexConfig();
                     update.smartCurrentLimit((int) Math.round(limit));
-                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "currentLimit");
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "currentLimit");
                 },
                 val -> controller.getClosedLoopController().setSetpoint(val, ControlType.kPosition),
                 val -> controller.getClosedLoopController().setSetpoint(val * 60.0, ControlType.kVelocity),
@@ -222,12 +240,12 @@ public class RevMotorController implements MotorController {
                     update.idleMode(mode == MotorNeutralMode.Brake
                             ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake
                             : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast);
-                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "neutralMode");
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "neutralMode");
                 },
                 pid -> {
                     SparkFlexConfig update = new SparkFlexConfig();
                     update.closedLoop.pid(pid.getP(), pid.getI(), pid.getD());
-                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id, "pid");
+                    applyConfig(controller, update, UPDATE_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "pid");
                 },
                 controller::setInverted,
                 () -> !controller.hasActiveFault(),
@@ -237,17 +255,17 @@ public class RevMotorController implements MotorController {
 
     @Override
     public int getId() {
-        return config.id;
+        return config.id();
     }
 
     @Override
     public String getCanbus() {
-        return config.canbus;
+        return config.canbus();
     }
 
     @Override
     public MotorControllerType getType() {
-        return config.type;
+        return config.type();
     }
 
     @Override
@@ -262,7 +280,7 @@ public class RevMotorController implements MotorController {
 
     @Override
     public void setCurrentLimit(double amps) {
-        config.currentLimit = amps;
+        config.hardware().currentLimit(amps);
         setCurrentLimit.accept(amps);
     }
 
@@ -278,13 +296,13 @@ public class RevMotorController implements MotorController {
 
     @Override
     public void setNeutralMode(MotorNeutralMode mode) {
-        config.neutralMode = mode;
+        config.hardware().neutralMode(mode);
         setNeutralMode.accept(mode);
     }
 
     @Override
     public void setPid(PIDController pid) {
-        config.pid = pid;
+        config.control().pid(pid);
         setPid.accept(pid);
     }
 
@@ -305,23 +323,23 @@ public class RevMotorController implements MotorController {
 
     @Override
     public boolean isInverted() {
-        return config.inverted;
+        return config.inverted();
     }
 
     @Override
     public void setInverted(boolean inverted) {
-        config.inverted = inverted;
+        config.hardware().inverted(inverted);
         setInverted.accept(inverted);
     }
 
     @Override
     public double getCurrentLimit() {
-        return config.currentLimit;
+        return config.currentLimit();
     }
 
     @Override
     public MotorNeutralMode getNeutralMode() {
-        return config.neutralMode;
+        return config.neutralMode();
     }
 
     @Override

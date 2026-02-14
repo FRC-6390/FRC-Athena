@@ -77,7 +77,7 @@ public class EncoderAdapter implements Encoder {
     public void setInverted(boolean inverted) {
         this.inverted = inverted;
         if (config != null) {
-            config.setInverted(inverted);
+            config.hardware().inverted(inverted);
         }
     }
 
@@ -85,7 +85,7 @@ public class EncoderAdapter implements Encoder {
     public void setConversion(double conversion) {
         this.conversion = conversion;
         if (config != null) {
-            config.setConversion(conversion);
+            config.measurement().conversion(conversion);
         }
     }
 
@@ -93,7 +93,7 @@ public class EncoderAdapter implements Encoder {
     public void setOffset(double offset) {
         this.offset = offset;
         if (config != null) {
-            config.setOffset(offset);
+            config.measurement().offset(offset);
         }
     }
 
@@ -101,7 +101,7 @@ public class EncoderAdapter implements Encoder {
     public void setGearRatio(double gearRatio) {
         this.gearRatio = gearRatio;
         if (config != null) {
-            config.setGearRatio(gearRatio);
+            config.measurement().gearRatio(gearRatio);
         }
     }
 
@@ -109,7 +109,7 @@ public class EncoderAdapter implements Encoder {
     public void setConversionOffset(double conversionOffset) {
         this.conversionOffset = conversionOffset;
         if (config != null) {
-            config.setConversionOffset(conversionOffset);
+            config.measurement().conversionOffset(conversionOffset);
         }
     }
 
@@ -117,7 +117,7 @@ public class EncoderAdapter implements Encoder {
     public void setDiscontinuityPoint(double discontinuityPoint) {
         this.discontinuityPoint = discontinuityPoint;
         if (config != null) {
-            config.setDiscontinuityPoint(discontinuityPoint);
+            config.measurement().discontinuityPoint(discontinuityPoint);
         }
     }
 
@@ -125,7 +125,7 @@ public class EncoderAdapter implements Encoder {
     public void setDiscontinuityRange(double discontinuityRange) {
         this.discontinuityRange = discontinuityRange;
         if (config != null) {
-            config.setDiscontinuityRange(discontinuityRange);
+            config.measurement().discontinuityRange(discontinuityRange);
         }
     }
 

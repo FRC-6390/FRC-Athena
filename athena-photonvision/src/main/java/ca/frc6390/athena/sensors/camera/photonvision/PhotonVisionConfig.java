@@ -81,13 +81,6 @@ public record PhotonVisionConfig(
     }
 
     /**
-     * Returns a copy with the same transform (legacy helper retained for compatibility).
-     */
-    public PhotonVisionConfig withCameraRobotSpace(double x){
-        return new PhotonVisionConfig(table, cameraRobotSpace, poseStrategy,filteredTags,fieldLayout, useForLocalization, poseStrategyFallback, trustDistance, copyRoles(roles), confidence, simHorizontalFovDeg, simVerticalFovDeg, simResolutionWidth, simResolutionHeight, simMaxTargets);
-    }
-
-    /**
      * Returns a copy using the provided NetworkTables table.
      */
     public PhotonVisionConfig withTable(String table){

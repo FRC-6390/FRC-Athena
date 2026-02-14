@@ -132,59 +132,69 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
         return new IdentityView(this);
     }
 
-    final class OutputSection {
+    final class OutputSection extends MotorSectionSupport.OutputSectionBase<OutputSection> {
         private final MotorController owner;
 
         OutputSection(MotorController owner) {
             this.owner = owner;
         }
 
-        public OutputSection speed(double percent) {
+        @Override
+        protected OutputSection self() {
+            return this;
+        }
+
+        @Override
+        protected void applySpeed(double percent) {
             owner.setSpeed(percent);
-            return this;
         }
 
-        public OutputSection voltage(double volts) {
+        @Override
+        protected void applyVoltage(double volts) {
             owner.setVoltage(volts);
-            return this;
         }
 
-        public OutputSection position(double rotations) {
+        @Override
+        protected void applyPosition(double rotations) {
             owner.setPosition(rotations);
-            return this;
         }
 
-        public OutputSection velocity(double rotationsPerSecond) {
+        @Override
+        protected void applyVelocity(double rotationsPerSecond) {
             owner.setVelocity(rotationsPerSecond);
-            return this;
         }
 
-        public OutputSection stop() {
+        @Override
+        protected void applyStop() {
             owner.stopMotor();
-            return this;
         }
     }
 
-    final class HardwareSection {
+    final class HardwareSection extends MotorSectionSupport.ConfigSectionBase<HardwareSection> {
         private final MotorController owner;
 
         HardwareSection(MotorController owner) {
             this.owner = owner;
         }
 
-        public HardwareSection currentLimit(double amps) {
+        @Override
+        protected HardwareSection self() {
+            return this;
+        }
+
+        @Override
+        protected void applyCurrentLimit(double amps) {
             owner.setCurrentLimit(amps);
-            return this;
         }
 
-        public HardwareSection neutralMode(MotorNeutralMode mode) {
+        @Override
+        protected void applyNeutralMode(MotorNeutralMode mode) {
             owner.setNeutralMode(mode);
-            return this;
         }
 
-        public HardwareSection pid(PIDController pid) {
+        @Override
+        protected void applyPid(PIDController pid) {
             owner.setPid(pid);
-            return this;
         }
 
         public HardwareSection inverted(boolean inverted) {

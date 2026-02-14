@@ -75,43 +75,49 @@ public class CtreMotorController implements MotorController {
     }
 
     public static CtreMotorController fromConfig(MotorControllerConfig config) {
-        if (config == null || !(config.type instanceof CtreMotorControllerType)) {
+        if (config == null || !(config.type() instanceof CtreMotorControllerType)) {
             throw new IllegalArgumentException("CTRE motor controller config required");
         }
 
-        TalonFX talon = new TalonFX(config.id, resolveCanBus(config.canbus));
+        TalonFX talon = new TalonFX(config.id(), resolveCanBus(config.canbus()));
         TalonFXConfiguration talonConfig = new TalonFXConfiguration();
         talonConfig.CurrentLimits.SupplyCurrentLimitEnable = true;
-        talonConfig.CurrentLimits.SupplyCurrentLimit = config.currentLimit;
-        talonConfig.MotorOutput.NeutralMode = config.neutralMode == MotorNeutralMode.Brake
+        talonConfig.CurrentLimits.SupplyCurrentLimit = config.currentLimit();
+        talonConfig.MotorOutput.NeutralMode = config.neutralMode() == MotorNeutralMode.Brake
                 ? NeutralModeValue.Brake
                 : NeutralModeValue.Coast;
-        if (config.pid != null) {
-            talonConfig.Slot0.kP = config.pid.getP();
-            talonConfig.Slot0.kI = config.pid.getI();
-            talonConfig.Slot0.kD = config.pid.getD();
+        if (config.pid() != null) {
+            talonConfig.Slot0.kP = config.pid().getP();
+            talonConfig.Slot0.kI = config.pid().getI();
+            talonConfig.Slot0.kD = config.pid().getD();
         }
         talon.getConfigurator().apply(talonConfig, 0.0);
-        EncoderConfig encoderCfg = config.encoderConfig;
+        EncoderConfig encoderCfg = config.encoderConfig();
         if (encoderCfg == null) {
-            encoderCfg = new EncoderConfig()
-                    .setType(CtreEncoderType.TALON_FX)
-                    .setId(config.id)
-                    .setCanbus(config.canbus)
-                    .setGearRatio(1.0);
-        } else if (encoderCfg.type == null) {
-            encoderCfg = new EncoderConfig()
-                    .setType(CtreEncoderType.TALON_FX)
-                    .setId(encoderCfg.id != 0 ? encoderCfg.id : config.id)
-                    .setCanbus(encoderCfg.canbus != null ? encoderCfg.canbus : config.canbus)
-                    .setGearRatio(encoderCfg.gearRatio)
-                    .setConversion(encoderCfg.conversion)
-                    .setConversionOffset(encoderCfg.conversionOffset)
-                    .setOffset(encoderCfg.offset)
-                    .setDiscontinuity(encoderCfg.discontinuityPoint, encoderCfg.discontinuityRange)
-                    .setInverted(encoderCfg.inverted);
+            encoderCfg = EncoderConfig.create()
+                    .hardware(h -> h
+                            .type(CtreEncoderType.TALON_FX)
+                            .id(config.id())
+                            .canbus(config.canbus()))
+                    .measurement(m -> m.gearRatio(1.0));
+            config.encoder().config(encoderCfg);
+        } else if (encoderCfg.type() == null) {
+            EncoderConfig existing = encoderCfg;
+            encoderCfg = EncoderConfig.create()
+                    .hardware(h -> h
+                            .type(CtreEncoderType.TALON_FX)
+                            .id(existing.id() != 0 ? existing.id() : config.id())
+                            .canbus(existing.canbus() != null ? existing.canbus() : config.canbus())
+                            .inverted(existing.inverted()))
+                    .measurement(m -> m
+                            .gearRatio(existing.gearRatio())
+                            .conversion(existing.conversion())
+                            .conversionOffset(existing.conversionOffset())
+                            .offset(existing.offset())
+                            .discontinuity(existing.discontinuityPoint(), existing.discontinuityRange()));
+            config.encoder().config(encoderCfg);
         }
-        Encoder encoder = encoderCfg.type instanceof CtreEncoderType
+        Encoder encoder = encoderCfg.type() instanceof CtreEncoderType
                 ? EncoderAdapter.wrap(CtreEncoder.fromConfig(encoderCfg, talon), encoderCfg)
                 : null;
 
@@ -124,17 +130,17 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public int getId() {
-        return config.id;
+        return config.id();
     }
 
     @Override
     public String getCanbus() {
-        return config.canbus;
+        return config.canbus();
     }
 
     @Override
     public MotorControllerType getType() {
-        return config.type;
+        return config.type();
     }
 
     @Override
@@ -149,7 +155,7 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public void setCurrentLimit(double amps) {
-        config.currentLimit = amps;
+        config.hardware().currentLimit(amps);
         setCurrentLimit.accept(amps);
     }
 
@@ -165,13 +171,13 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public void setNeutralMode(MotorNeutralMode mode) {
-        config.neutralMode = mode;
+        config.hardware().neutralMode(mode);
         setNeutralMode.accept(mode);
     }
 
     @Override
     public void setPid(PIDController pid) {
-        config.pid = pid;
+        config.control().pid(pid);
         setPid.accept(pid);
     }
 
@@ -209,22 +215,22 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public boolean isInverted() {
-        return config.inverted;
+        return config.inverted();
     }
 
     @Override
     public void setInverted(boolean inverted) {
-        config.inverted = inverted;
+        config.hardware().inverted(inverted);
     }
 
     @Override
     public double getCurrentLimit() {
-        return config.currentLimit;
+        return config.currentLimit();
     }
 
     @Override
     public MotorNeutralMode getNeutralMode() {
-        return config.neutralMode;
+        return config.neutralMode();
     }
 
     @Override

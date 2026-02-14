@@ -11,6 +11,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.core.input.TypedInputRegistration;
 import ca.frc6390.athena.mechanisms.OutputType;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
@@ -352,19 +353,54 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
             this.owner = owner;
         }
 
-        public HooksSection<T> onInit(Binding<T> binding) {
-            owner.initBindings.add(Objects.requireNonNull(binding, "binding"));
+        private HooksSection<T> onPhase(Phase phase, Binding<T> binding) {
+            Objects.requireNonNull(phase, "phase");
+            Objects.requireNonNull(binding, "binding");
+            switch (phase) {
+                case ROBOT_INIT -> owner.initBindings.add(binding);
+                case ROBOT_PERIODIC -> owner.periodicBindings.add(binding);
+                case DISABLED_INIT -> owner.disabledInitBindings.add(binding);
+                case DISABLED_PERIODIC -> owner.disabledPeriodicBindings.add(binding);
+                case DISABLED_EXIT -> owner.disabledExitBindings.add(binding);
+                case TELEOP_INIT -> owner.teleopInitBindings.add(binding);
+                case TELEOP_PERIODIC -> owner.teleopPeriodicBindings.add(binding);
+                case TELEOP_EXIT -> owner.teleopExitBindings.add(binding);
+                case AUTONOMOUS_INIT -> owner.autonomousInitBindings.add(binding);
+                case AUTONOMOUS_PERIODIC -> owner.autonomousPeriodicBindings.add(binding);
+                case AUTONOMOUS_EXIT -> owner.autonomousExitBindings.add(binding);
+                case TEST_INIT -> owner.testInitBindings.add(binding);
+                case TEST_PERIODIC -> owner.testPeriodicBindings.add(binding);
+                case TEST_EXIT -> owner.testExitBindings.add(binding);
+            }
             return this;
+        }
+
+        private HooksSection<T> onPhasePeriodic(Phase phase, Binding<T> binding, double periodMs) {
+            Objects.requireNonNull(phase, "phase");
+            Objects.requireNonNull(binding, "binding");
+            switch (phase) {
+                case ROBOT_PERIODIC -> owner.periodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+                case DISABLED_PERIODIC ->
+                        owner.disabledPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+                case TELEOP_PERIODIC -> owner.teleopPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+                case AUTONOMOUS_PERIODIC ->
+                        owner.autonomousPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+                case TEST_PERIODIC -> owner.testPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
+                default -> throw new IllegalArgumentException("Phase does not support periodic-loop bindings: " + phase);
+            }
+            return this;
+        }
+
+        public HooksSection<T> onInit(Binding<T> binding) {
+            return onPhase(Phase.ROBOT_INIT, binding);
         }
 
         public HooksSection<T> onPeriodic(Binding<T> binding) {
-            owner.periodicBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.ROBOT_PERIODIC, binding);
         }
 
         public HooksSection<T> onPeriodic(Binding<T> binding, double periodMs) {
-            owner.periodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
-            return this;
+            return onPhasePeriodic(Phase.ROBOT_PERIODIC, binding, periodMs);
         }
 
         public HooksSection<T> onExit(Binding<T> binding) {
@@ -373,28 +409,23 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onDisabledInit(Binding<T> binding) {
-            owner.disabledInitBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.DISABLED_INIT, binding);
         }
 
         public HooksSection<T> onDisabledPeriodic(Binding<T> binding) {
-            owner.disabledPeriodicBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.DISABLED_PERIODIC, binding);
         }
 
         public HooksSection<T> onDisabledPeriodic(Binding<T> binding, double periodMs) {
-            owner.disabledPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
-            return this;
+            return onPhasePeriodic(Phase.DISABLED_PERIODIC, binding, periodMs);
         }
 
         public HooksSection<T> onDisabledExit(Binding<T> binding) {
-            owner.disabledExitBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.DISABLED_EXIT, binding);
         }
 
         public HooksSection<T> onTeleopInit(Binding<T> binding) {
-            owner.teleopInitBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.TELEOP_INIT, binding);
         }
 
         public HooksSection<T> onTeleInit(Binding<T> binding) {
@@ -402,8 +433,7 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onTeleopPeriodic(Binding<T> binding) {
-            owner.teleopPeriodicBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.TELEOP_PERIODIC, binding);
         }
 
         public HooksSection<T> onTelePeriodic(Binding<T> binding) {
@@ -411,8 +441,7 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onTeleopPeriodic(Binding<T> binding, double periodMs) {
-            owner.teleopPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
-            return this;
+            return onPhasePeriodic(Phase.TELEOP_PERIODIC, binding, periodMs);
         }
 
         public HooksSection<T> onTelePeriodic(Binding<T> binding, double periodMs) {
@@ -420,8 +449,7 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onTeleopExit(Binding<T> binding) {
-            owner.teleopExitBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.TELEOP_EXIT, binding);
         }
 
         public HooksSection<T> onTeleExit(Binding<T> binding) {
@@ -429,8 +457,7 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onAutonomousInit(Binding<T> binding) {
-            owner.autonomousInitBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.AUTONOMOUS_INIT, binding);
         }
 
         public HooksSection<T> onAutoInit(Binding<T> binding) {
@@ -438,8 +465,7 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onAutonomousPeriodic(Binding<T> binding) {
-            owner.autonomousPeriodicBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.AUTONOMOUS_PERIODIC, binding);
         }
 
         public HooksSection<T> onAutoPeriodic(Binding<T> binding) {
@@ -447,8 +473,7 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onAutonomousPeriodic(Binding<T> binding, double periodMs) {
-            owner.autonomousPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
-            return this;
+            return onPhasePeriodic(Phase.AUTONOMOUS_PERIODIC, binding, periodMs);
         }
 
         public HooksSection<T> onAutoPeriodic(Binding<T> binding, double periodMs) {
@@ -456,8 +481,7 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onAutonomousExit(Binding<T> binding) {
-            owner.autonomousExitBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.AUTONOMOUS_EXIT, binding);
         }
 
         public HooksSection<T> onAutoExit(Binding<T> binding) {
@@ -465,23 +489,19 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public HooksSection<T> onTestInit(Binding<T> binding) {
-            owner.testInitBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.TEST_INIT, binding);
         }
 
         public HooksSection<T> onTestPeriodic(Binding<T> binding) {
-            owner.testPeriodicBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.TEST_PERIODIC, binding);
         }
 
         public HooksSection<T> onTestPeriodic(Binding<T> binding, double periodMs) {
-            owner.testPeriodicLoopBindings.add(new PeriodicHookBinding<>(binding, periodMs));
-            return this;
+            return onPhasePeriodic(Phase.TEST_PERIODIC, binding, periodMs);
         }
 
         public HooksSection<T> onTestExit(Binding<T> binding) {
-            owner.testExitBindings.add(Objects.requireNonNull(binding, "binding"));
-            return this;
+            return onPhase(Phase.TEST_EXIT, binding);
         }
 
         public HooksSection<T> controlLoop(String name, double periodMs, ControlLoop<T> loop) {
@@ -586,37 +606,37 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
         }
 
         public InputsSection<T> boolVal(String key, BooleanSupplier supplier) {
-            owner.inputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.inputs, key, supplier);
             return this;
         }
 
         public InputsSection<T> doubleVal(String key, DoubleSupplier supplier) {
-            owner.doubleInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.doubleInputs, key, supplier);
             return this;
         }
 
         public InputsSection<T> intVal(String key, IntSupplier supplier) {
-            owner.intInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.intInputs, key, supplier);
             return this;
         }
 
         public InputsSection<T> stringVal(String key, Supplier<String> supplier) {
-            owner.stringInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.stringInputs, key, supplier);
             return this;
         }
 
         public InputsSection<T> pose2dVal(String key, Supplier<Pose2d> supplier) {
-            owner.pose2dInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.pose2dInputs, key, supplier);
             return this;
         }
 
         public InputsSection<T> pose3dVal(String key, Supplier<Pose3d> supplier) {
-            owner.pose3dInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.pose3dInputs, key, supplier);
             return this;
         }
 
         public <V> InputsSection<T> objectVal(String key, Supplier<V> supplier) {
-            owner.objectInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.objectInputs, key, supplier);
             return this;
         }
     }

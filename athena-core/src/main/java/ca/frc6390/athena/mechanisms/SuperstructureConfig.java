@@ -15,6 +15,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCoreHooks;
+import ca.frc6390.athena.core.hooks.LifecycleHooksSectionBase;
+import ca.frc6390.athena.core.input.TypedInputRegistration;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -33,32 +35,32 @@ import ca.frc6390.athena.mechanisms.Mechanism;
  */
 public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>, SP> {
 
-    public S initialState;
+    private S initialState;
     private String superstructureName;
-    public double stateMachineDelaySeconds = 0.0;
-    public List<ChildFactory<SP>> childConfigs = new ArrayList<>();
-    public Map<S, Constraint<S, SP>> constraints = new HashMap<>();
-    public List<Attachment<SP, ?>> attachments = new ArrayList<>();
-    public Map<String, BooleanSupplier> inputs = new HashMap<>();
-    public Map<String, DoubleSupplier> doubleInputs = new HashMap<>();
-    public Map<String, IntSupplier> intInputs = new HashMap<>();
-    public Map<String, Supplier<String>> stringInputs = new HashMap<>();
-    public Map<String, Supplier<Pose2d>> pose2dInputs = new HashMap<>();
-    public Map<String, Supplier<Pose3d>> pose3dInputs = new HashMap<>();
-    public Map<String, Supplier<?>> objectInputs = new HashMap<>();
-    public Map<S, List<Binding<SP>>> enterBindings = new HashMap<>();
-    public List<TransitionBinding<SP, S>> transitionBindings = new ArrayList<>();
-    public Map<S, List<Binding<SP>>> bindings = new HashMap<>();
-    public List<Binding<SP>> alwaysBindings = new ArrayList<>();
-    public List<Binding<SP>> periodicBindings = new ArrayList<>();
+    private double stateMachineDelaySeconds = 0.0;
+    private final List<ChildFactory<SP>> childConfigs = new ArrayList<>();
+    private final Map<S, Constraint<S, SP>> constraints = new HashMap<>();
+    private final List<Attachment<SP, ?>> attachments = new ArrayList<>();
+    private final Map<String, BooleanSupplier> inputs = new HashMap<>();
+    private final Map<String, DoubleSupplier> doubleInputs = new HashMap<>();
+    private final Map<String, IntSupplier> intInputs = new HashMap<>();
+    private final Map<String, Supplier<String>> stringInputs = new HashMap<>();
+    private final Map<String, Supplier<Pose2d>> pose2dInputs = new HashMap<>();
+    private final Map<String, Supplier<Pose3d>> pose3dInputs = new HashMap<>();
+    private final Map<String, Supplier<?>> objectInputs = new HashMap<>();
+    private final Map<S, List<Binding<SP>>> enterBindings = new HashMap<>();
+    private final List<TransitionBinding<SP, S>> transitionBindings = new ArrayList<>();
+    private final Map<S, List<Binding<SP>>> bindings = new HashMap<>();
+    private final List<Binding<SP>> alwaysBindings = new ArrayList<>();
+    private final List<Binding<SP>> periodicBindings = new ArrayList<>();
     /** Optional hooks that run once during robot init after all mechanisms/superstructures are registered. */
     public List<Binding<SP>> initBindings = new ArrayList<>();
     /** Optional lifecycle hooks keyed by robot phase (RobotCore parity). */
     public Map<RobotCoreHooks.Phase, List<LifecycleHookBinding<SP, S>>> lifecycleBindings = new HashMap<>();
     /** Optional hooks that run whenever a robot mode exits (before mode-specific exit hooks). */
     public List<LifecycleHookBinding<SP, S>> lifecycleExitBindings = new ArrayList<>();
-    public Map<S, List<Binding<SP>>> exitBindings = new HashMap<>();
-    public List<Binding<SP>> exitAlwaysBindings = new ArrayList<>();
+    private final Map<S, List<Binding<SP>>> exitBindings = new HashMap<>();
+    private final List<Binding<SP>> exitAlwaysBindings = new ArrayList<>();
     private SP initialSetpoint;
 
     public SuperstructureConfig(S initialState) {
@@ -222,7 +224,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     /**
      * Sets the state machine delay (seconds).
      */
-    public SuperstructureConfig<S, SP> setStateMachineDelay(double delaySeconds) {
+    public SuperstructureConfig<S, SP> stateMachineDelay(double delaySeconds) {
         this.stateMachineDelaySeconds = delaySeconds;
         return this;
     }
@@ -366,11 +368,27 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         return this;
     }
 
-    public static final class HooksSection<S extends Enum<S> & SetpointProvider<SP>, SP> {
+    public static final class HooksSection<S extends Enum<S> & SetpointProvider<SP>, SP>
+            extends LifecycleHooksSectionBase<HooksSection<S, SP>, Binding<SP>, S> {
         private final SuperstructureConfig<S, SP> owner;
 
         private HooksSection(SuperstructureConfig<S, SP> owner) {
             this.owner = owner;
+        }
+
+        @Override
+        protected HooksSection<S, SP> self() {
+            return this;
+        }
+
+        @Override
+        protected void addPhaseBinding(RobotCoreHooks.Phase phase, Binding<SP> binding, List<S> states) {
+            owner.addLifecycleBinding(phase, binding, states);
+        }
+
+        @Override
+        protected void addPhaseExitBinding(Binding<SP> binding, List<S> states) {
+            owner.addLifecycleExitBinding(binding, states);
         }
 
         @SafeVarargs
@@ -451,123 +469,6 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
             return this;
         }
 
-        @SafeVarargs
-        private final HooksSection<S, SP> onPhase(RobotCoreHooks.Phase phase, Binding<SP> binding, S... states) {
-            owner.addLifecycleBinding(phase, binding, states);
-            return this;
-        }
-
-        @SafeVarargs
-        private final HooksSection<S, SP> onPhaseExit(Binding<SP> binding, S... states) {
-            owner.addLifecycleExitBinding(binding, states);
-            return this;
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onInit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.ROBOT_INIT, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onPeriodic(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.ROBOT_PERIODIC, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onExit(Binding<SP> binding, S... states) {
-            return onPhaseExit(binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onDisabledInit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.DISABLED_INIT, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onDisabledPeriodic(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.DISABLED_PERIODIC, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onDisabledExit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.DISABLED_EXIT, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTeleopInit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.TELEOP_INIT, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTeleInit(Binding<SP> binding, S... states) {
-            return onTeleopInit(binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTeleopPeriodic(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.TELEOP_PERIODIC, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTelePeriodic(Binding<SP> binding, S... states) {
-            return onTeleopPeriodic(binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTeleopExit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.TELEOP_EXIT, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTeleExit(Binding<SP> binding, S... states) {
-            return onTeleopExit(binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onAutonomousInit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_INIT, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onAutoInit(Binding<SP> binding, S... states) {
-            return onAutonomousInit(binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onAutonomousPeriodic(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_PERIODIC, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onAutoPeriodic(Binding<SP> binding, S... states) {
-            return onAutonomousPeriodic(binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onAutonomousExit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_EXIT, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onAutoExit(Binding<SP> binding, S... states) {
-            return onAutonomousExit(binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTestInit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.TEST_INIT, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTestPeriodic(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.TEST_PERIODIC, binding, states);
-        }
-
-        @SafeVarargs
-        public final HooksSection<S, SP> onTestExit(Binding<SP> binding, S... states) {
-            return onPhase(RobotCoreHooks.Phase.TEST_EXIT, binding, states);
-        }
-
         public HooksSection<S, SP> onRobotPeriodic(Binding<SP> binding) {
             Objects.requireNonNull(binding, "binding");
             owner.periodicBindings.add(binding);
@@ -584,31 +485,29 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
          * (and superstructures) have been registered with the {@code RobotCore}.
          */
         public HooksSection<S, SP> onInit(Binding<SP> binding) {
-            return onPhase(RobotCoreHooks.Phase.ROBOT_INIT, binding);
+            owner.addLifecycleBinding(RobotCoreHooks.Phase.ROBOT_INIT, binding, List.of());
+            return this;
         }
     }
 
-    @SafeVarargs
-    final void addLifecycleBinding(RobotCoreHooks.Phase phase, Binding<SP> binding, S... states) {
+    final void addLifecycleBinding(RobotCoreHooks.Phase phase, Binding<SP> binding, List<S> states) {
         Objects.requireNonNull(phase, "phase");
         Objects.requireNonNull(binding, "binding");
         lifecycleBindings
                 .computeIfAbsent(phase, unused -> new ArrayList<>())
-                .add(new LifecycleHookBinding<>(binding, copyStates(states)));
+                .add(new LifecycleHookBinding<>(binding, sanitizeStates(states)));
     }
 
-    @SafeVarargs
-    final void addLifecycleExitBinding(Binding<SP> binding, S... states) {
+    final void addLifecycleExitBinding(Binding<SP> binding, List<S> states) {
         Objects.requireNonNull(binding, "binding");
-        lifecycleExitBindings.add(new LifecycleHookBinding<>(binding, copyStates(states)));
+        lifecycleExitBindings.add(new LifecycleHookBinding<>(binding, sanitizeStates(states)));
     }
 
-    @SafeVarargs
-    private final List<S> copyStates(S... states) {
-        if (states == null || states.length == 0) {
+    private List<S> sanitizeStates(List<S> states) {
+        if (states == null || states.isEmpty()) {
             return List.of();
         }
-        List<S> copied = new ArrayList<>(states.length);
+        List<S> copied = new ArrayList<>(states.size());
         for (S state : states) {
             if (state != null) {
                 copied.add(state);
@@ -683,7 +582,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         }
 
         public InputsSection<S, SP> boolVal(String key, BooleanSupplier supplier) {
-            owner.inputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.inputs, key, supplier);
             return this;
         }
 
@@ -692,7 +591,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
          */
         public InputsSection<S, SP> boolVal(String key, GenericLimitSwitchConfig config) {
             Objects.requireNonNull(config, "config");
-            owner.inputs.put(Objects.requireNonNull(key, "key"), config.setName(key).toSupplier());
+            TypedInputRegistration.put(owner.inputs, key, config.name(key).toSupplier());
             return this;
         }
 
@@ -702,37 +601,37 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         public InputsSection<S, SP> boolVal(GenericLimitSwitchConfig config) {
             Objects.requireNonNull(config, "config");
             String key = config.name() != null ? config.name() : ("dio-" + config.id());
-            owner.inputs.put(key, config.toSupplier());
+            TypedInputRegistration.put(owner.inputs, key, config.toSupplier());
             return this;
         }
 
         public InputsSection<S, SP> doubleVal(String key, DoubleSupplier supplier) {
-            owner.doubleInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.doubleInputs, key, supplier);
             return this;
         }
 
         public InputsSection<S, SP> intVal(String key, IntSupplier supplier) {
-            owner.intInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.intInputs, key, supplier);
             return this;
         }
 
         public InputsSection<S, SP> stringVal(String key, Supplier<String> supplier) {
-            owner.stringInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.stringInputs, key, supplier);
             return this;
         }
 
         public InputsSection<S, SP> pose2dVal(String key, Supplier<Pose2d> supplier) {
-            owner.pose2dInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.pose2dInputs, key, supplier);
             return this;
         }
 
         public InputsSection<S, SP> pose3dVal(String key, Supplier<Pose3d> supplier) {
-            owner.pose3dInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.pose3dInputs, key, supplier);
             return this;
         }
 
         public InputsSection<S, SP> objVal(String key, Supplier<?> supplier) {
-            owner.objectInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.objectInputs, key, supplier);
             return this;
         }
     }

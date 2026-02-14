@@ -1,16 +1,15 @@
 package ca.frc6390.athena.sensors.camera;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
 import java.util.ServiceLoader;
+
+import ca.frc6390.athena.core.registry.PluginRegistryBase;
 
 /**
  * Discovers vendor-specific camera software implementations via {@link ServiceLoader}. This lets
  * user code stay vendor-agnostic (use {@link AthenaCamera}) while surfacing a clear error if the
  * required athena-* camera module is not on the classpath.
  */
-public final class CameraRegistry {
+public final class CameraRegistry extends PluginRegistryBase<ConfigurableCamera.CameraSoftware> {
     /** Implemented by vendor modules to register their camera software keys. */
     public interface Provider {
         void register(CameraRegistry registry);
@@ -19,10 +18,8 @@ public final class CameraRegistry {
     private static final CameraRegistry INSTANCE = new CameraRegistry();
 
     static {
-        ServiceLoader.load(Provider.class).forEach(p -> p.register(INSTANCE));
+        loadProviders(Provider.class, CameraRegistry.class, p -> p.register(INSTANCE));
     }
-
-    private final Map<String, ConfigurableCamera.CameraSoftware> cameras = new HashMap<>();
 
     private CameraRegistry() {}
 
@@ -31,15 +28,16 @@ public final class CameraRegistry {
     }
 
     public CameraRegistry add(String key, ConfigurableCamera.CameraSoftware software) {
-        cameras.put(key, software);
+        put(key, software);
         return this;
     }
 
     public ConfigurableCamera.CameraSoftware camera(String key) {
-        return Objects.requireNonNull(cameras.get(key), missing(key));
+        return require(key);
     }
 
-    private static String missing(String key) {
+    @Override
+    protected String missingMessage(String key) {
         return "Missing vendor provider for camera '" + key
                 + "'. Add the appropriate athena-* camera module to dependencies.";
     }

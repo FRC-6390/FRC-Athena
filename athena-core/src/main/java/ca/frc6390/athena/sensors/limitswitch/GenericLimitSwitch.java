@@ -37,23 +37,23 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
             return new GenericLimitSwitchConfig(Math.abs(id) ,id<0,  Double.NaN, false, BlockDirection.None, null, 0);
         }
 
-        public GenericLimitSwitchConfig setPosition(double position){
+        public GenericLimitSwitchConfig position(double position){
             return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
         }
 
-        public GenericLimitSwitchConfig setHardstop(boolean isHardstop, BlockDirection blockDirection){
+        public GenericLimitSwitchConfig hardstop(boolean isHardstop, BlockDirection blockDirection){
             return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
         }
 
-        public GenericLimitSwitchConfig setHardstop(boolean isHardstop, int blockDirection){
-            return setHardstop(isHardstop, BlockDirection.fromMultiplier(blockDirection));
+        public GenericLimitSwitchConfig hardstop(boolean isHardstop, int blockDirection){
+            return hardstop(isHardstop, BlockDirection.fromMultiplier(blockDirection));
         }
 
-        public GenericLimitSwitchConfig setName(String name){
+        public GenericLimitSwitchConfig name(String name){
             return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
         }
 
-        public GenericLimitSwitchConfig setDelay(double delaySeconds){
+        public GenericLimitSwitchConfig delay(double delaySeconds){
             return new GenericLimitSwitchConfig(id, inverted, position, isHardstop, blockDirection, name, delaySeconds);
         }
 
@@ -86,14 +86,14 @@ public class GenericLimitSwitch extends EnhancedDigitalInput {
     }
 
     public static GenericLimitSwitch fromConfig(GenericLimitSwitchConfig config){
-        return new GenericLimitSwitch(config.id, config.inverted).applyConfig(config);
+        return new GenericLimitSwitch(config.id(), config.inverted()).applyConfig(config);
     }
 
     public GenericLimitSwitch applyConfig(GenericLimitSwitchConfig config){
-        setPosition(config.position);
-        setHardstop(config.isHardstop);
-        setBlockDirection(config.blockDirection);
-        setDelay(config.delaySeconds);
+        setPosition(config.position());
+        setHardstop(config.isHardstop());
+        setBlockDirection(config.blockDirection());
+        setDelay(config.delaySeconds());
         return this;
     }
 

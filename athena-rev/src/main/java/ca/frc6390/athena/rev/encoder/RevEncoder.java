@@ -35,18 +35,18 @@ public class RevEncoder implements Encoder {
     }
 
     public static RevEncoder fromConfig(EncoderConfig config) {
-        if (config == null || !(config.type instanceof RevEncoderType)) {
+        if (config == null || !(config.type() instanceof RevEncoderType)) {
             throw new IllegalArgumentException("REV encoder config required");
         }
 
-        RevEncoderType type = (RevEncoderType) config.type;
+        RevEncoderType type = (RevEncoderType) config.type();
         switch (type) {
             case SPARK_MAX -> {
-                SparkMax motor = new SparkMax(config.id, MotorType.kBrushless);
+                SparkMax motor = new SparkMax(config.id(), MotorType.kBrushless);
                 return new RevEncoder(motor.getEncoder(), motor.getAbsoluteEncoder(), config);
             }
             case SPARK_FLEX -> {
-                SparkFlex motor = new SparkFlex(config.id, MotorType.kBrushless);
+                SparkFlex motor = new SparkFlex(config.id(), MotorType.kBrushless);
                 return new RevEncoder(motor.getEncoder(), motor.getAbsoluteEncoder(), config);
             }
             default -> throw new IllegalArgumentException("Unsupported REV encoder type: " + type);
@@ -86,35 +86,35 @@ public class RevEncoder implements Encoder {
     @Override
     public void setInverted(boolean inverted) {
         if (config != null) {
-            config.inverted = inverted;
+            config.hardware().inverted(inverted);
         }
     }
 
     @Override
     public void setConversion(double conversion) {
         if (config != null) {
-            config.conversion = conversion;
+            config.measurement().conversion(conversion);
         }
     }
 
     @Override
     public void setGearRatio(double gearRatio) {
         if (config != null) {
-            config.gearRatio = gearRatio;
+            config.measurement().gearRatio(gearRatio);
         }
     }
 
     @Override
     public void setConversionOffset(double conversionOffset) {
         if (config != null) {
-            config.conversionOffset = conversionOffset;
+            config.measurement().conversionOffset(conversionOffset);
         }
     }
 
     @Override
     public void setOffset(double offset) {
         if (config != null) {
-            config.offset = offset;
+            config.measurement().offset(offset);
         }
     }
 

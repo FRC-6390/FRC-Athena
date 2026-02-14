@@ -2,20 +2,18 @@ package ca.frc6390.athena.hardware.imu;
 
 import java.util.function.Consumer;
 
+import ca.frc6390.athena.hardware.config.DeviceIdentityConfig;
+import ca.frc6390.athena.hardware.config.DeviceIdentitySection;
+
 /**
  * Vendor-agnostic IMU configuration.
  */
-public class ImuConfig {
-    public ImuType type;
-    public int id;
-    public String canbus = "rio";
-    public boolean inverted = false;
+public class ImuConfig extends DeviceIdentityConfig<ImuType> {
 
     /**
      */
     public ImuConfig(ImuType type, int id) {
-        this.type = type;
-        this.id = id;
+        super(type, id);
     }
 
     /**
@@ -42,67 +40,17 @@ public class ImuConfig {
         return this;
     }
 
-    /**
-     */
-    public ImuConfig setCanbus(String canbus) {
-        this.canbus = canbus;
-        return this;
+    public HardwareSection hardware() {
+        return new HardwareSection(this);
     }
 
-    /**
-     */
-    public ImuConfig setId(int id) {
-        this.id = id;
-        return this;
-    }
-
-    /**
-     */
-    public ImuConfig setInverted(boolean inverted) {
-        this.inverted = inverted;
-        return this;
-    }
-
-    public ImuType type() {
-        return type;
-    }
-
-    public int id() {
-        return id;
-    }
-
-    public String canbus() {
-        return canbus;
-    }
-
-    public boolean inverted() {
-        return inverted;
-    }
-
-    public static final class HardwareSection {
-        private final ImuConfig owner;
-
+    public static final class HardwareSection extends DeviceIdentitySection<HardwareSection, ImuType> {
         private HardwareSection(ImuConfig owner) {
-            this.owner = owner;
+            super(owner::applyType, owner::applyId, owner::applyCanbus, owner::applyInverted);
         }
 
-        public HardwareSection type(ImuType type) {
-            owner.type = type;
-            return this;
-        }
-
-        public HardwareSection id(int id) {
-            owner.setId(id);
-            return this;
-        }
-
-        public HardwareSection canbus(String canbus) {
-            owner.setCanbus(canbus);
-            return this;
-        }
-
-        public HardwareSection inverted(boolean inverted) {
-            owner.setInverted(inverted);
+        @Override
+        protected HardwareSection self() {
             return this;
         }
     }

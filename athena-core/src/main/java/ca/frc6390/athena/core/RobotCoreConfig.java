@@ -10,6 +10,7 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
+import ca.frc6390.athena.drivetrains.DrivetrainSpeedConfigSupport;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrainConfig;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
@@ -255,39 +256,9 @@ public final class RobotCoreConfig {
 
         public SwerveSection speedSource(Consumer<SpeedSourceSection> section) {
             Objects.requireNonNull(section, "section");
-            section.accept(new SpeedSourceSection(new SpeedSourceConfigurer() {
-                @Override
-                public void add(String name, boolean enabledByDefault) {
-                    config.speed().source(name, enabledByDefault);
-                }
-
-                @Override
-                public void blend(
-                        String target,
-                        String source,
-                        RobotSpeeds.BlendMode blendMode,
-                        RobotSpeeds.SpeedAxis... axes) {
-                    config.speed().blend(target, source, blendMode, axes);
-                }
-
-                @Override
-                public void blend(
-                        String target,
-                        String left,
-                        String right,
-                        RobotSpeeds.BlendMode blendMode,
-                        RobotSpeeds.SpeedAxis... axes) {
-                    config.speed().blend(target, left, right, blendMode, axes);
-                }
-
-                @Override
-                public void blendToOutput(
-                        String source,
-                        RobotSpeeds.BlendMode blendMode,
-                        RobotSpeeds.SpeedAxis... axes) {
-                    config.speed().outputBlend(source, blendMode, axes);
-                }
-            }));
+            DrivetrainSpeedConfigSupport speedSupport = new DrivetrainSpeedConfigSupport();
+            section.accept(speedSourceSection(speedSupport));
+            speedSupport.apply(config.speed());
             return this;
         }
 
@@ -362,39 +333,9 @@ public final class RobotCoreConfig {
 
         public DifferentialSection speedSource(Consumer<SpeedSourceSection> section) {
             Objects.requireNonNull(section, "section");
-            section.accept(new SpeedSourceSection(new SpeedSourceConfigurer() {
-                @Override
-                public void add(String name, boolean enabledByDefault) {
-                    config.speed().source(name, enabledByDefault);
-                }
-
-                @Override
-                public void blend(
-                        String target,
-                        String source,
-                        RobotSpeeds.BlendMode blendMode,
-                        RobotSpeeds.SpeedAxis... axes) {
-                    config.speed().blend(target, source, blendMode, axes);
-                }
-
-                @Override
-                public void blend(
-                        String target,
-                        String left,
-                        String right,
-                        RobotSpeeds.BlendMode blendMode,
-                        RobotSpeeds.SpeedAxis... axes) {
-                    config.speed().blend(target, left, right, blendMode, axes);
-                }
-
-                @Override
-                public void blendToOutput(
-                        String source,
-                        RobotSpeeds.BlendMode blendMode,
-                        RobotSpeeds.SpeedAxis... axes) {
-                    config.speed().outputBlend(source, blendMode, axes);
-                }
-            }));
+            DrivetrainSpeedConfigSupport speedSupport = new DrivetrainSpeedConfigSupport();
+            section.accept(speedSourceSection(speedSupport));
+            speedSupport.apply(config.speed());
             return this;
         }
 
@@ -472,6 +413,42 @@ public final class RobotCoreConfig {
                 String source,
                 RobotSpeeds.BlendMode blendMode,
                 RobotSpeeds.SpeedAxis... axes) {}
+    }
+
+    private static SpeedSourceSection speedSourceSection(DrivetrainSpeedConfigSupport speedSupport) {
+        return new SpeedSourceSection(new SpeedSourceConfigurer() {
+            @Override
+            public void add(String name, boolean enabledByDefault) {
+                speedSupport.source(name, enabledByDefault);
+            }
+
+            @Override
+            public void blend(
+                    String target,
+                    String source,
+                    RobotSpeeds.BlendMode blendMode,
+                    RobotSpeeds.SpeedAxis... axes) {
+                speedSupport.blend(target, source, blendMode, axes);
+            }
+
+            @Override
+            public void blend(
+                    String target,
+                    String left,
+                    String right,
+                    RobotSpeeds.BlendMode blendMode,
+                    RobotSpeeds.SpeedAxis... axes) {
+                speedSupport.blend(target, left, right, blendMode, axes);
+            }
+
+            @Override
+            public void blendToOutput(
+                    String source,
+                    RobotSpeeds.BlendMode blendMode,
+                    RobotSpeeds.SpeedAxis... axes) {
+                speedSupport.outputBlend(source, blendMode, axes);
+            }
+        });
     }
 
     public static final class SpeedSourceSection {
@@ -628,27 +605,27 @@ public final class RobotCoreConfig {
         }
 
         public TelemetrySection defaultPeriodMs(int ms) {
-            config = config.setDefaultPeriodMs(ms);
+            config = config.defaultPeriodMs(ms);
             return this;
         }
 
         public TelemetrySection diskEnabled(boolean enabled) {
-            config = config.setDiskEnabled(enabled);
+            config = config.diskEnabled(enabled);
             return this;
         }
 
         public TelemetrySection networkTablesEnabled(boolean enabled) {
-            config = config.setNetworkTablesEnabled(enabled);
+            config = config.networkTablesEnabled(enabled);
             return this;
         }
 
         public TelemetrySection prefix(String prefix) {
-            config = config.setDiskPrefix(prefix);
+            config = config.diskPrefix(prefix);
             return this;
         }
 
         public TelemetrySection networkTablePrefix(String prefix) {
-            config = config.setNetworkTablePrefix(prefix);
+            config = config.networkTablePrefix(prefix);
             return this;
         }
     }

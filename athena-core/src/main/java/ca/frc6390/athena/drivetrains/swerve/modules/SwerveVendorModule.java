@@ -44,7 +44,7 @@ public interface SwerveVendorModule {
 
         default SwerveModuleConfig config(AthenaMotor drive,  AthenaMotor steer, AthenaEncoder encoder){
             return config(null, drive, -1, steer, -1)
-                    .setEncoder(EncoderConfig.create(encoder.resolve(), 0)
+                    .encoder(EncoderConfig.create(encoder.resolve(), 0)
                             .measurement(m -> m.gearRatio(getEncoderGearRatio())));
         }       
 
@@ -71,17 +71,25 @@ public interface SwerveVendorModule {
                             EncoderConfig.create()
                                     .measurement(m -> m.gearRatio(getSteerGearRatio()))));
 
-            SwerveModuleConfig moduleConfig = new SwerveModuleConfig(location, getWheelDiameter(), getFreeSpeed(driveMotor), driveMotorController, steerMotorController, null, steerMotorController.encoderConfig, SwerveModule.SwerveModuleSimConfig.fromMotors(driveMotor, steerMotor));
+            SwerveModuleConfig moduleConfig = new SwerveModuleConfig(
+                    location,
+                    getWheelDiameter(),
+                    getFreeSpeed(driveMotor),
+                    driveMotorController,
+                    steerMotorController,
+                    null,
+                    steerMotorController.encoderConfig(),
+                    SwerveModule.SwerveModuleSimConfig.fromMotors(driveMotor, steerMotor));
             return moduleConfig;
         }
 
         default SwerveModuleConfig config(Translation2d location, AthenaMotor driveMotor, int drive, AthenaMotor steerMotor, int steer, PIDController rotationPID){
-            return config(location, driveMotor, drive, steerMotor, steer).setPID(rotationPID);
+            return config(location, driveMotor, drive, steerMotor, steer).pid(rotationPID);
         }
 
         default SwerveModuleConfig config(Translation2d location, AthenaMotor driveMotor, int drive, AthenaMotor steerMotor, int steer, PIDController rotationPID, AthenaEncoder encoderType, int encoder){
             return config(location, driveMotor, drive, steerMotor, steer, rotationPID)
-                    .setEncoder(EncoderConfig.create(encoderType.resolve(), encoder));
+                    .encoder(EncoderConfig.create(encoderType.resolve(), encoder));
         }
 
         default SwerveModuleConfig[] configs(Translation2d[] locations, AthenaMotor driveMotor, int[] drive, AthenaMotor steerMotor, int[] steer, PIDController rotationPID, AthenaEncoder encoderType, int[] encoders){

@@ -46,7 +46,7 @@ public class SwerveModule implements RobotSendableDevice {
             this(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, SwerveModuleSimConfig.fromMotors(null, null));
         }
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID) {
-            this(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, rotationMotor.encoderConfig, SwerveModuleSimConfig.fromMotors(null, null));
+            this(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, rotationMotor.encoderConfig(), SwerveModuleSimConfig.fromMotors(null, null));
         }
 
         //cloning
@@ -63,73 +63,94 @@ public class SwerveModule implements RobotSendableDevice {
             );
         }
 
-        public SwerveModuleConfig setCanbus(String canbus){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setCanbus(canbus), rotationMotor.setCanbus(canbus), rotationPID, encoder.setCanbus(canbus), sim);
-        }
-
-        public SwerveModuleConfig setP(double kP){
-            return setPID(new PIDController(kP,0,0));
-        }
-
-        public SwerveModuleConfig setPID(double kP, double kI, double kD){
-            return setPID(new PIDController(kP, kI, kD));
-        }
-
-        public SwerveModuleConfig setPID(PIDController rotationPID){
+        public SwerveModuleConfig canbus(String canbus){
+            driveMotor.hardware().canbus(canbus);
+            rotationMotor.hardware().canbus(canbus);
+            if (encoder != null) {
+                encoder.hardware().canbus(canbus);
+            }
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim);
         }
 
-        public SwerveModuleConfig setEncoder(EncoderConfig encoder){
+        public SwerveModuleConfig p(double kP){
+            return pid(new PIDController(kP,0,0));
+        }
+
+        public SwerveModuleConfig pid(double kP, double kI, double kD){
+            return pid(new PIDController(kP, kI, kD));
+        }
+
+        public SwerveModuleConfig pid(PIDController rotationPID){
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim);
         }
 
-        public SwerveModuleConfig setEncoder(EncoderType encoder){
-            EncoderConfig cfg = encoder() != null ? encoder().setType(encoder) : EncoderConfig.create(encoder, 0);
+        public SwerveModuleConfig encoder(EncoderConfig encoder){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim);
+        }
+
+        public SwerveModuleConfig encoder(EncoderType encoder){
+            EncoderConfig cfg = encoder() != null ? encoder() : EncoderConfig.create(encoder, 0);
+            cfg.hardware().type(encoder);
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, cfg, sim);
         }
 
-        public SwerveModuleConfig setOffset(double offset){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setOffset(offset), sim);
-        }
-
-        public SwerveModuleConfig setLocation(Translation2d module_location){
+        public SwerveModuleConfig offset(double offset){
+            if (encoder != null) {
+                encoder.measurement().offset(offset);
+            }
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim);
         }
 
-        public SwerveModuleConfig setDriveID(int id){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setId(id), rotationMotor, rotationPID, encoder, sim); 
+        public SwerveModuleConfig location(Translation2d module_location){
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim);
         }
 
-        public SwerveModuleConfig setSteerID(int id){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor.setId(id), rotationPID, encoder, sim); 
+        public SwerveModuleConfig driveId(int id){
+            driveMotor.hardware().id(id);
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim); 
         }
 
-        public SwerveModuleConfig setEncoderID(int id){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setId(id), sim); 
+        public SwerveModuleConfig steerId(int id){
+            rotationMotor.hardware().id(id);
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim); 
         }
 
-        public SwerveModuleConfig setDriveInverted(boolean inverted){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setInverted(inverted), rotationMotor, rotationPID, encoder, sim); 
+        public SwerveModuleConfig encoderId(int id){
+            if (encoder != null) {
+                encoder.hardware().id(id);
+            }
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim); 
         }
 
-        public SwerveModuleConfig setSteerInverted(boolean inverted){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor.setInverted(inverted), rotationPID, encoder, sim); 
+        public SwerveModuleConfig driveInverted(boolean inverted){
+            driveMotor.hardware().inverted(inverted);
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim); 
         }
 
-        public SwerveModuleConfig setEncoderInverted(boolean inverted){
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder.setInverted(inverted), sim); 
+        public SwerveModuleConfig steerInverted(boolean inverted){
+            rotationMotor.hardware().inverted(inverted);
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim); 
         }
 
-        public SwerveModuleConfig setCurrentLimit(double currentLimit) {
-            return setDriveCurrentLimit(currentLimit).setSteerCurrentLimit(currentLimit);
+        public SwerveModuleConfig encoderInverted(boolean inverted){
+            if (encoder != null) {
+                encoder.hardware().inverted(inverted);
+            }
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim); 
         }
 
-        public SwerveModuleConfig setDriveCurrentLimit(double currentLimit) {
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor.setCurrentLimit(currentLimit), rotationMotor, rotationPID, encoder, sim);
+        public SwerveModuleConfig currentLimit(double currentLimit) {
+            return driveCurrentLimit(currentLimit).steerCurrentLimit(currentLimit);
         }
 
-        public SwerveModuleConfig setSteerCurrentLimit(double currentLimit) {
-            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor.setCurrentLimit(currentLimit), rotationPID, encoder, sim);
+        public SwerveModuleConfig driveCurrentLimit(double currentLimit) {
+            driveMotor.hardware().currentLimit(currentLimit);
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim);
+        }
+
+        public SwerveModuleConfig steerCurrentLimit(double currentLimit) {
+            rotationMotor.hardware().currentLimit(currentLimit);
+            return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim);
         }
 
         public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
@@ -140,7 +161,7 @@ public class SwerveModule implements RobotSendableDevice {
             return new Translation2d[]{FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT};
         }
 
-        public SwerveModuleConfig setSim(SwerveModuleSimConfig sim) {
+        public SwerveModuleConfig simulation(SwerveModuleSimConfig sim) {
             return new SwerveModuleConfig(module_location, wheelDiameter, maxSpeedMetersPerSecond, driveMotor, rotationMotor, rotationPID, encoder, sim);
         }
     }
@@ -181,11 +202,11 @@ public class SwerveModule implements RobotSendableDevice {
         rotationPidController.enableContinuousInput(-Math.PI, Math.PI);
 
         // MOTOR INITIALIZATION
-        driveMotor = HardwareFactories.motor(config.driveMotor);
+        driveMotor = HardwareFactories.motor(config.driveMotor());
 
-        rotationMotor = HardwareFactories.motor(config.rotationMotor);
+        rotationMotor = HardwareFactories.motor(config.rotationMotor());
 
-        encoder = HardwareFactories.encoder(config.encoder);
+        encoder = HardwareFactories.encoder(config.encoder());
         driveEncoder = driveMotor.getEncoder();
         steerEncoder = rotationMotor.getEncoder();
 

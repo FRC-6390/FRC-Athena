@@ -9,6 +9,7 @@ import java.util.function.IntSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -20,27 +21,12 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
 
     public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
         super(config);
-        stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                config.stateActions,
-                config.enterStateHooks,
-                config.stateHooks,
-                config.exitStateHooks,
-                config.transitionHooks,
-                config.alwaysHooks,
-                config.exitAlwaysHooks,
-                config.inputs,
-                config.doubleInputs,
-                config.intInputs,
-                config.stringInputs,
-                config.pose2dInputs,
-                config.pose3dInputs,
-                config.objectInputs,
-                config.stateTriggerBindings);
+        stateCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
     }
 
     @Override
-    public double getSetpoint() {
-        return stateCore.getSetpoint();
+    public StatefulMechanismCore<StatefulMechanism<E>, E> stateCore() {
+        return stateCore;
     }
 
     @Override
@@ -53,50 +39,10 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         return stateCore.getStateMachine().getGoalState();
     }
 
-    /**
-     * Overrides the setpoint used by the state machine with a dynamic supplier.
-     */
-    @Override
-    public void setSetpointOverride(DoubleSupplier override) {
-        stateCore.setSetpointOverride(override);
-    }
-
-    /**
-     * Clears any active setpoint override.
-     */
-    @Override
-    public void clearSetpointOverride() {
-        stateCore.clearSetpointOverride();
-    }
-
-    /**
-     * Suppresses motor output while the supplier evaluates to true.
-     */
-    @Override
-    public void setOutputSuppressor(BooleanSupplier suppressor) {
-        stateCore.setOutputSuppressor(suppressor);
-    }
-
-    /**
-     * Clears any active output suppressor.
-     */
-    public void clearOutputSuppressor() {
-        stateCore.clearOutputSuppressor();
-    }
-
     @Override
     public void update() {
-        setSuppressMotorOutput(stateCore.update(this));
+        setSuppressMotorOutput(updateStateCore(this));
         super.update();
-    }
-
-    @Override
-    public StateMachine<Double, E> getStateMachine() {
-        return stateCore.getStateMachine();
-    }
-
-    public void setStateGraph(StateGraph<E> stateGraph) {
-        stateCore.setStateGraph(stateGraph);
     }
 
     @SuppressWarnings("unchecked")
@@ -136,6 +82,33 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         private DoubleSupplier setpointOverride;
         private BooleanSupplier outputSuppressor;
         private E previousState;
+
+        public static <T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>>
+                StatefulMechanismCore<T, E> fromConfig(
+                        E initialState,
+                        Supplier<Boolean> atSetpointSupplier,
+                        MechanismConfig<T> config) {
+            Objects.requireNonNull(config, "config");
+            return new StatefulMechanismCore<>(
+                    initialState,
+                    atSetpointSupplier,
+                    config.data().stateMachineDelay(),
+                    config.stateActions(),
+                    config.enterStateHooks(),
+                    config.stateHooks(),
+                    config.exitStateHooks(),
+                    config.transitionHooks(),
+                    config.alwaysHooks(),
+                    config.exitAlwaysHooks(),
+                    config.inputs(),
+                    config.doubleInputs(),
+                    config.intInputs(),
+                    config.stringInputs(),
+                    config.pose2dInputs(),
+                    config.pose3dInputs(),
+                    config.objectInputs(),
+                    config.stateTriggerBindings());
+        }
 
         public StatefulMechanismCore(E initialState, Supplier<Boolean> atSetpointSupplier, double delay,
                                         Map<Enum<?>, Function<T, Boolean>> stateActions,
@@ -242,6 +215,11 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
 
         public void clearOutputSuppressor() {
             this.outputSuppressor = null;
+        }
+
+        @SuppressWarnings("unchecked")
+        public boolean updateMechanism(Mechanism mechanism) {
+            return update((T) mechanism);
         }
 
         public boolean update(T instance) {
@@ -360,6 +338,77 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             private T mechanism;
             private E state;
             private double baseSetpoint;
+            private final TypedInputResolver inputsView = new TypedInputResolver(
+                    "StatefulMechanismContext",
+                    TypedInputResolver.ValueMode.STRICT,
+                    new TypedInputResolver.MutableInputs() {
+                        @Override
+                        public boolean hasBool(String key) {
+                            return mechanism != null && mechanism.hasMutableBoolValKey(key);
+                        }
+
+                        @Override
+                        public boolean bool(String key) {
+                            return mechanism.mutableBoolVal(key);
+                        }
+
+                        @Override
+                        public boolean hasDouble(String key) {
+                            return mechanism != null && mechanism.hasMutableDblValKey(key);
+                        }
+
+                        @Override
+                        public double dbl(String key) {
+                            return mechanism.mutableDblVal(key);
+                        }
+
+                        @Override
+                        public boolean hasInt(String key) {
+                            return mechanism != null && mechanism.hasMutableIntValKey(key);
+                        }
+
+                        @Override
+                        public int intVal(String key) {
+                            return mechanism.mutableIntVal(key);
+                        }
+
+                        @Override
+                        public boolean hasString(String key) {
+                            return mechanism != null && mechanism.hasMutableStrValKey(key);
+                        }
+
+                        @Override
+                        public String str(String key) {
+                            return mechanism.mutableStrVal(key);
+                        }
+
+                        @Override
+                        public boolean hasPose2d(String key) {
+                            return mechanism != null && mechanism.hasMutablePose2dValKey(key);
+                        }
+
+                        @Override
+                        public Pose2d pose2d(String key) {
+                            return mechanism.mutablePose2dVal(key);
+                        }
+
+                        @Override
+                        public boolean hasPose3d(String key) {
+                            return mechanism != null && mechanism.hasMutablePose3dValKey(key);
+                        }
+
+                        @Override
+                        public Pose3d pose3d(String key) {
+                            return mechanism.mutablePose3dVal(key);
+                        }
+                    },
+                    inputs,
+                    doubleInputs,
+                    intInputs,
+                    stringInputs,
+                    pose2dInputs,
+                    pose3dInputs,
+                    objectInputs);
 
             private void update(T mechanism, E state, double baseSetpoint) {
                 this.mechanism = mechanism;
@@ -384,171 +433,72 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
 
             @Override
             public boolean input(String key) {
-                if (mechanism != null && mechanism.hasMutableBoolValKey(key)) {
-                    return mechanism.mutableBoolVal(key);
-                }
-                BooleanSupplier supplier = inputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No bool input found for key " + key);
-                }
-                return supplier.getAsBoolean();
+                return inputsView.boolVal(key);
             }
 
             @Override
             public BooleanSupplier inputSupplier(String key) {
-                if (mechanism != null && mechanism.hasMutableBoolValKey(key)) {
-                    return () -> mechanism.mutableBoolVal(key);
-                }
-                BooleanSupplier supplier = inputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No input found for key " + key);
-                }
-                return supplier;
+                return inputsView.boolSupplier(key);
             }
 
             @Override
             public double doubleInput(String key) {
-                if (mechanism != null && mechanism.hasMutableDblValKey(key)) {
-                    return mechanism.mutableDblVal(key);
-                }
-                DoubleSupplier supplier = doubleInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No double input found for key " + key);
-                }
-                return supplier.getAsDouble();
+                return inputsView.doubleVal(key);
             }
 
             @Override
             public DoubleSupplier doubleInputSupplier(String key) {
-                if (mechanism != null && mechanism.hasMutableDblValKey(key)) {
-                    return () -> mechanism.mutableDblVal(key);
-                }
-                DoubleSupplier supplier = doubleInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No double input found for key " + key);
-                }
-                return supplier;
+                return inputsView.doubleSupplier(key);
             }
 
             @Override
             public int intVal(String key) {
-                if (mechanism != null && mechanism.hasMutableIntValKey(key)) {
-                    return mechanism.mutableIntVal(key);
-                }
-                IntSupplier supplier = intInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No int input found for key " + key);
-                }
-                return supplier.getAsInt();
+                return inputsView.intVal(key);
             }
 
             @Override
             public IntSupplier intValSupplier(String key) {
-                if (mechanism != null && mechanism.hasMutableIntValKey(key)) {
-                    return () -> mechanism.mutableIntVal(key);
-                }
-                IntSupplier supplier = intInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No int input found for key " + key);
-                }
-                return supplier;
+                return inputsView.intSupplier(key);
             }
 
             @Override
             public String stringVal(String key) {
-                if (mechanism != null && mechanism.hasMutableStrValKey(key)) {
-                    return mechanism.mutableStrVal(key);
-                }
-                Supplier<String> supplier = stringInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No string input found for key " + key);
-                }
-                return supplier.get();
+                return inputsView.stringVal(key);
             }
 
             @Override
             public Supplier<String> stringValSupplier(String key) {
-                if (mechanism != null && mechanism.hasMutableStrValKey(key)) {
-                    return () -> mechanism.mutableStrVal(key);
-                }
-                Supplier<String> supplier = stringInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No string input found for key " + key);
-                }
-                return supplier;
+                return inputsView.stringSupplier(key);
             }
 
             @Override
             public Pose2d pose2dVal(String key) {
-                if (mechanism != null && mechanism.hasMutablePose2dValKey(key)) {
-                    return mechanism.mutablePose2dVal(key);
-                }
-                Supplier<Pose2d> supplier = pose2dInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No Pose2d input found for key " + key);
-                }
-                return supplier.get();
+                return inputsView.pose2dVal(key);
             }
 
             @Override
             public Supplier<Pose2d> pose2dValSupplier(String key) {
-                if (mechanism != null && mechanism.hasMutablePose2dValKey(key)) {
-                    return () -> mechanism.mutablePose2dVal(key);
-                }
-                Supplier<Pose2d> supplier = pose2dInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No Pose2d input found for key " + key);
-                }
-                return supplier;
+                return inputsView.pose2dSupplier(key);
             }
 
             @Override
             public Pose3d pose3dVal(String key) {
-                if (mechanism != null && mechanism.hasMutablePose3dValKey(key)) {
-                    return mechanism.mutablePose3dVal(key);
-                }
-                Supplier<Pose3d> supplier = pose3dInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No Pose3d input found for key " + key);
-                }
-                return supplier.get();
+                return inputsView.pose3dVal(key);
             }
 
             @Override
             public Supplier<Pose3d> pose3dValSupplier(String key) {
-                if (mechanism != null && mechanism.hasMutablePose3dValKey(key)) {
-                    return () -> mechanism.mutablePose3dVal(key);
-                }
-                Supplier<Pose3d> supplier = pose3dInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No Pose3d input found for key " + key);
-                }
-                return supplier;
+                return inputsView.pose3dSupplier(key);
             }
 
             @Override
             public <V> V objectInput(String key, Class<V> type) {
-                Supplier<?> supplier = objectInputs.get(key);
-                if (supplier == null) {
-                    return null;
-                }
-                Object value = supplier.get();
-                if (value == null) {
-                    return null;
-                }
-                if (!type.isInstance(value)) {
-                    throw new IllegalArgumentException("Input '" + key + "' is not of type " + type.getSimpleName());
-                }
-                return type.cast(value);
+                return inputsView.objectVal(key, type);
             }
 
             @Override
             public <V> Supplier<V> objectInputSupplier(String key, Class<V> type) {
-                Supplier<?> supplier = objectInputs.get(key);
-                if (supplier == null) {
-                    throw new IllegalArgumentException("No object input found for key " + key);
-                }
-                return () -> objectInput(key, type);
+                return inputsView.objectSupplier(key, type);
             }
         }
     }

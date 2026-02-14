@@ -55,8 +55,8 @@ public final class ExampleSuperstructure {
 
         return MechanismConfig
                 .statefulGeneric(SuperStructureState.STOWED)
-                .setStateMachineDelay(0.05)
-                .setStateGraph(buildGraph(armReady, elevatorReady, wristReady));
+                .stateMachineDelay(0.05)
+                .stateGraph(buildGraph(armReady, elevatorReady, wristReady));
     }
 
     /**

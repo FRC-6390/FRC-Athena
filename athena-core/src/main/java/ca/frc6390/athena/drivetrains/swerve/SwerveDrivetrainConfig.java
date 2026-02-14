@@ -1,10 +1,10 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.function.Consumer;
 
-import ca.frc6390.athena.core.RobotSpeeds;
+import ca.frc6390.athena.drivetrains.DrivetrainSpeedSectionBase;
+import ca.frc6390.athena.drivetrains.DrivetrainSpeedConfigSupport;
+import ca.frc6390.athena.drivetrains.SectionedDrivetrainConfig;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.EncoderIDs;
@@ -26,7 +26,8 @@ import edu.wpi.first.math.geometry.Translation2d;
  * hardware layouts, controller gains, CAN IDs, and optional simulation parameters so the drivetrain
  * can be created consistently across both robot code and tests.
  */
-public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrivetrain> {
+public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDrivetrainConfig>
+        implements RobotDrivetrainConfig<SwerveDrivetrain> {
     
     /** Optional IMU configuration that provides field-centric heading. */
     private ImuConfig imu = null;
@@ -70,36 +71,20 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     private Translation2d[] locations = null;
     /** Optional physics configuration used when running drivetrain simulation. */
     private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
-    /** Additional speed sources to register beyond drive/auto/feedback. */
-    private final List<SpeedSourceRegistration> speedSources = new ArrayList<>();
-    /** Ordered blend rules that write into sources. */
-    private final List<SpeedSourceBlendRegistration> speedSourceBlends = new ArrayList<>();
-    /** Ordered blend rules that write into the final drivetrain output. */
-    private final List<SpeedOutputBlendRegistration> speedOutputBlends = new ArrayList<>();
-
-    private record SpeedSourceRegistration(String name, boolean enabledByDefault) {}
-
-    private record SpeedSourceBlendRegistration(
-            String target,
-            String left,
-            String right,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis[] axes) {}
-
-    private record SpeedOutputBlendRegistration(
-            String source,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis[] axes) {}
+    /** Shared speed source/blend registration store used by speed() sections. */
+    private final DrivetrainSpeedConfigSupport speedConfig = new DrivetrainSpeedConfigSupport();
 
     public static SwerveDrivetrainConfig create() {
         return new SwerveDrivetrainConfig();
     }
 
-    public SwerveDrivetrainConfig hardware(Consumer<HardwareSection> section) {
-        if (section != null) {
-            section.accept(new HardwareSection());
-        }
+    @Override
+    protected SwerveDrivetrainConfig self() {
         return this;
+    }
+
+    public SwerveDrivetrainConfig hardware(Consumer<HardwareSection> section) {
+        return applySection(section, HardwareSection::new);
     }
 
     public HardwareSection hardware() {
@@ -107,10 +92,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     }
 
     public SwerveDrivetrainConfig control(Consumer<ControlSection> section) {
-        if (section != null) {
-            section.accept(new ControlSection());
-        }
-        return this;
+        return applySection(section, ControlSection::new);
     }
 
     public ControlSection control() {
@@ -118,10 +100,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     }
 
     public SwerveDrivetrainConfig simulation(Consumer<SimulationSection> section) {
-        if (section != null) {
-            section.accept(new SimulationSection());
-        }
-        return this;
+        return applySection(section, SimulationSection::new);
     }
 
     public SimulationSection simulation() {
@@ -129,10 +108,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     }
 
     public SwerveDrivetrainConfig speed(Consumer<SpeedSection> section) {
-        if (section != null) {
-            section.accept(new SpeedSection());
-        }
-        return this;
+        return applySection(section, SpeedSection::new);
     }
 
     public SpeedSection speed() {
@@ -140,10 +116,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
     }
 
     public SwerveDrivetrainConfig config(Consumer<ConfigSection> section) {
-        if (section != null) {
-            section.accept(new ConfigSection());
-        }
-        return this;
+        return applySection(section, ConfigSection::new);
     }
 
     public ConfigSection config() {
@@ -489,36 +462,13 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         }
     }
 
-    public final class SpeedSection {
-        public SpeedSection source(String name, boolean enabledByDefault) {
-            addSpeedSource(name, enabledByDefault);
-            return this;
+    public final class SpeedSection extends DrivetrainSpeedSectionBase<SpeedSection> {
+        private SpeedSection() {
+            super(speedConfig);
         }
 
-        public SpeedSection blend(
-                String target,
-                String source,
-                RobotSpeeds.BlendMode blendMode,
-                RobotSpeeds.SpeedAxis... axes) {
-            addSpeedBlend(target, source, blendMode, axes);
-            return this;
-        }
-
-        public SpeedSection blend(
-                String target,
-                String left,
-                String right,
-                RobotSpeeds.BlendMode blendMode,
-                RobotSpeeds.SpeedAxis... axes) {
-            addSpeedBlend(target, left, right, blendMode, axes);
-            return this;
-        }
-
-        public SpeedSection outputBlend(
-                String source,
-                RobotSpeeds.BlendMode blendMode,
-                RobotSpeeds.SpeedAxis... axes) {
-            addSpeedOutputBlend(source, blendMode, axes);
+        @Override
+        protected SpeedSection self() {
             return this;
         }
     }
@@ -843,42 +793,6 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         return this;
     }
 
-    private SwerveDrivetrainConfig addSpeedSource(String name, boolean enabledByDefault) {
-        speedSources.add(new SpeedSourceRegistration(name, enabledByDefault));
-        return this;
-    }
-
-    private SwerveDrivetrainConfig addSpeedBlend(
-            String target,
-            String source,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis... axes) {
-        return addSpeedBlend(target, target, source, blendMode, axes);
-    }
-
-    private SwerveDrivetrainConfig addSpeedBlend(
-            String target,
-            String left,
-            String right,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis... axes) {
-        RobotSpeeds.SpeedAxis[] resolvedAxes =
-                axes == null ? new RobotSpeeds.SpeedAxis[0] : axes.clone();
-        speedSourceBlends.add(new SpeedSourceBlendRegistration(target, left, right, blendMode, resolvedAxes));
-        return this;
-    }
-
-    private SwerveDrivetrainConfig addSpeedOutputBlend(
-            String source,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis... axes) {
-        RobotSpeeds.SpeedAxis[] resolvedAxes =
-                axes == null ? new RobotSpeeds.SpeedAxis[0] : axes.clone();
-        speedOutputBlends.add(new SpeedOutputBlendRegistration(source, blendMode, resolvedAxes));
-        return this;
-    }
-
-
     /**
      * Applies all registered configuration options to the module definitions and constructs the
      * {@link SwerveDrivetrain}. Also wires up optional drift/rotation controllers and simulation
@@ -909,20 +823,20 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
         }
 
         for (int i = 0; i < modules.length; i++) {
-            modules[i] = modules[i].setEncoderID(encoderIds[i])
-                                    .setSteerID(steerIDs[i])
-                                    .setDriveID(driveIds[i])
-                                    .setEncoderInverted(encoderInverted)
-                                    .setSteerInverted(steerInverted)
-                                    .setDriveInverted(driveInverted)
-                                    .setSteerCurrentLimit(steerCurrentLimit)
-                                    .setDriveCurrentLimit(driveCurrentLimit)
-                                    .setOffset(encoderOffsets[i])
-                                    .setCanbus(canbus)
-                                    .setLocation(locations[i]);
-            
+            modules[i] = modules[i].encoderId(encoderIds[i])
+                                    .steerId(steerIDs[i])
+                                    .driveId(driveIds[i])
+                                    .encoderInverted(encoderInverted)
+                                    .steerInverted(steerInverted)
+                                    .driveInverted(driveInverted)
+                                    .steerCurrentLimit(steerCurrentLimit)
+                                    .driveCurrentLimit(driveCurrentLimit)
+                                    .offset(encoderOffsets[i])
+                                    .canbus(canbus)
+                                    .location(locations[i]);
+
             if(rotationPID != null){
-                modules[i] = modules[i].setPID(rotationPID);
+                modules[i] = modules[i].pid(rotationPID);
             }
         } 
         if (imu != null) {
@@ -948,31 +862,7 @@ public class SwerveDrivetrainConfig implements RobotDrivetrainConfig<SwerveDrive
 
         dt.setFieldRelative(fieldRelative);
         dt.driftActivationSpeed = driftActivationSpeed;
-        applySpeedConfig(dt.getRobotSpeeds());
+        speedConfig.apply(dt.getRobotSpeeds());
         return dt;
-    }
-
-    private void applySpeedConfig(RobotSpeeds speeds) {
-        if (speeds == null) {
-            return;
-        }
-        speeds.resetBlendsToDefaults();
-        for (SpeedSourceRegistration source : speedSources) {
-            speeds.registerSpeedSource(source.name(), source.enabledByDefault());
-        }
-        for (SpeedSourceBlendRegistration blend : speedSourceBlends) {
-            speeds.blend(
-                    blend.target(),
-                    blend.left(),
-                    blend.right(),
-                    blend.blendMode(),
-                    blend.axes());
-        }
-        for (SpeedOutputBlendRegistration blend : speedOutputBlends) {
-            speeds.blendToOutput(
-                    blend.source(),
-                    blend.blendMode(),
-                    blend.axes());
-        }
     }
 }

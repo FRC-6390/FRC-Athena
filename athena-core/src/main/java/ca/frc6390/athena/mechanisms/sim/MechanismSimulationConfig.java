@@ -163,7 +163,7 @@ public final class MechanismSimulationConfig {
                     DCMotor motor = resolveMotor(mechanism, params.motorOverride);
                     MechanismConfig.ElevatorSimulationParameters configParams =
                             self != null && self.sourceConfig != null
-                                    ? self.sourceConfig.elevatorSimulationParameters
+                                    ? self.sourceConfig.elevatorSimulationParameters()
                                     : null;
                     double gearing = !Double.isNaN(params.gearing)
                             ? params.gearing
@@ -233,7 +233,7 @@ public final class MechanismSimulationConfig {
                     DCMotor motor = resolveMotor(mechanism, params.motorOverride);
                     MechanismConfig.ArmSimulationParameters configParams =
                             self != null && self.sourceConfig != null
-                                    ? self.sourceConfig.armSimulationParameters
+                                    ? self.sourceConfig.armSimulationParameters()
                                     : null;
                     double gearing = !Double.isNaN(params.gearing)
                             ? params.gearing
@@ -297,7 +297,7 @@ public final class MechanismSimulationConfig {
                     DCMotor motor = resolveMotor(mechanism, params.motorOverride);
                     MechanismConfig.SimpleMotorSimulationParameters configParams =
                             self != null && self.sourceConfig != null
-                                    ? self.sourceConfig.simpleMotorSimulationParameters
+                                    ? self.sourceConfig.simpleMotorSimulationParameters()
                                     : null;
                     double gearing = !Double.isNaN(params.gearing)
                             ? params.gearing

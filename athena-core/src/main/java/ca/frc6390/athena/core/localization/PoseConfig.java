@@ -231,7 +231,7 @@ public record PoseConfig(
                 startPose3d);
     }
 
-    public PoseConfig setActive(boolean active) {
+    public PoseConfig withActive(boolean active) {
         return new PoseConfig(
                 name,
                 frame,

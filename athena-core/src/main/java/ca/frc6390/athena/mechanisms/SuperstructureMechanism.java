@@ -10,6 +10,7 @@ import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotCoreHooks;
+import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
@@ -76,6 +77,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private final Map<String, Supplier<Pose2d>> pose2dInputs;
     private final Map<String, Supplier<Pose3d>> pose3dInputs;
     private final Map<String, Supplier<?>> objectInputs;
+    private final TypedInputResolver inputResolver;
     private final Map<S, List<SuperstructureConfig.Binding<SP>>> enterBindings;
     private final List<SuperstructureConfig.TransitionBinding<SP, S>> transitionBindings;
     private final Map<S, List<SuperstructureConfig.Binding<SP>>> bindings;
@@ -115,6 +117,17 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         this.pose2dInputs = pose2dInputs;
         this.pose3dInputs = pose3dInputs;
         this.objectInputs = objectInputs;
+        this.inputResolver = new TypedInputResolver(
+                "Superstructure",
+                TypedInputResolver.ValueMode.LENIENT,
+                TypedInputResolver.NO_MUTABLES,
+                inputs,
+                doubleInputs,
+                intInputs,
+                stringInputs,
+                pose2dInputs,
+                pose3dInputs,
+                objectInputs);
         this.enterBindings = enterBindings;
         this.transitionBindings = transitionBindings;
         this.bindings = bindings;
@@ -473,17 +486,12 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
         @Override
         public boolean input(String key) {
-            java.util.function.BooleanSupplier supplier = inputs.get(key);
-            return supplier != null && supplier.getAsBoolean();
+            return SuperstructureMechanism.this.input(key);
         }
 
         @Override
         public java.util.function.BooleanSupplier inputSupplier(String key) {
-            java.util.function.BooleanSupplier supplier = inputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No input found for key " + key);
-            }
-            return supplier;
+            return SuperstructureMechanism.this.inputSupplier(key);
         }
 
         @Override
@@ -681,104 +689,59 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     }
 
     public boolean input(String key) {
-        java.util.function.BooleanSupplier supplier = inputs.get(key);
-        return supplier != null && supplier.getAsBoolean();
+        return inputResolver.boolVal(key);
     }
 
     public java.util.function.BooleanSupplier inputSupplier(String key) {
-        java.util.function.BooleanSupplier supplier = inputs.get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No input found for key " + key);
-        }
-        return supplier;
+        return inputResolver.boolSupplier(key);
     }
 
     public double doubleInput(String key) {
-        DoubleSupplier supplier = doubleInputs.get(key);
-        return supplier != null ? supplier.getAsDouble() : Double.NaN;
+        return inputResolver.doubleVal(key);
     }
 
     public DoubleSupplier doubleInputSupplier(String key) {
-        DoubleSupplier supplier = doubleInputs.get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No double input found for key " + key);
-        }
-        return supplier;
+        return inputResolver.doubleSupplier(key);
     }
 
     public int intVal(String key) {
-        IntSupplier supplier = intInputs.get(key);
-        return supplier != null ? supplier.getAsInt() : 0;
+        return inputResolver.intVal(key);
     }
 
     public IntSupplier intValSupplier(String key) {
-        IntSupplier supplier = intInputs.get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No int input found for key " + key);
-        }
-        return supplier;
+        return inputResolver.intSupplier(key);
     }
 
     public String stringVal(String key) {
-        Supplier<String> supplier = stringInputs.get(key);
-        return supplier != null ? supplier.get() : "";
+        return inputResolver.stringVal(key);
     }
 
     public Supplier<String> stringValSupplier(String key) {
-        Supplier<String> supplier = stringInputs.get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No string input found for key " + key);
-        }
-        return supplier;
+        return inputResolver.stringSupplier(key);
     }
 
     public Pose2d pose2dVal(String key) {
-        Supplier<Pose2d> supplier = pose2dInputs.get(key);
-        return supplier != null ? supplier.get() : null;
+        return inputResolver.pose2dVal(key);
     }
 
     public Supplier<Pose2d> pose2dValSupplier(String key) {
-        Supplier<Pose2d> supplier = pose2dInputs.get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No Pose2d input found for key " + key);
-        }
-        return supplier;
+        return inputResolver.pose2dSupplier(key);
     }
 
     public Pose3d pose3dVal(String key) {
-        Supplier<Pose3d> supplier = pose3dInputs.get(key);
-        return supplier != null ? supplier.get() : null;
+        return inputResolver.pose3dVal(key);
     }
 
     public Supplier<Pose3d> pose3dValSupplier(String key) {
-        Supplier<Pose3d> supplier = pose3dInputs.get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No Pose3d input found for key " + key);
-        }
-        return supplier;
+        return inputResolver.pose3dSupplier(key);
     }
 
     public <T> T objectInput(String key, Class<T> type) {
-        Supplier<?> supplier = objectInputs.get(key);
-        if (supplier == null) {
-            return null;
-        }
-        Object value = supplier.get();
-        if (value == null) {
-            return null;
-        }
-        if (!type.isInstance(value)) {
-            throw new IllegalArgumentException("Input '" + key + "' is not of type " + type.getSimpleName());
-        }
-        return type.cast(value);
+        return inputResolver.objectVal(key, type);
     }
 
     public <T> Supplier<T> objectInputSupplier(String key, Class<T> type) {
-        Supplier<?> supplier = objectInputs.get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No object input found for key " + key);
-        }
-        return () -> objectInput(key, type);
+        return inputResolver.objectSupplier(key, type);
     }
 
     private final class SuperstructureContextImpl implements SuperstructureContext<SP> {
@@ -872,8 +835,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
         @Override
         public boolean input(String key) {
-            java.util.function.BooleanSupplier supplier = inputs.get(key);
-            return supplier != null && supplier.getAsBoolean();
+            return SuperstructureMechanism.this.input(key);
         }
 
         @Override

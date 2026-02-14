@@ -2,20 +2,19 @@ package ca.frc6390.athena.hardware.encoder;
 
 import java.util.function.Consumer;
 
+import ca.frc6390.athena.hardware.config.DeviceIdentityConfig;
+import ca.frc6390.athena.hardware.config.DeviceIdentitySection;
+
 /**
  * Vendor-agnostic encoder configuration.
  */
-public class EncoderConfig {
-    public EncoderType type;
-    public int id;
-    public String canbus = "rio";
-    public double gearRatio = 1;
-    public double offset = 0;
-    public double conversion = 1;
-    public boolean inverted = false;
-    public double conversionOffset = 0;
-    public double discontinuityPoint = Double.NaN;
-    public double discontinuityRange = Double.NaN;
+public class EncoderConfig extends DeviceIdentityConfig<EncoderType> {
+    private double gearRatio = 1;
+    private double offset = 0;
+    private double conversion = 1;
+    private double conversionOffset = 0;
+    private double discontinuityPoint = Double.NaN;
+    private double discontinuityRange = Double.NaN;
 
     /**
      */
@@ -28,26 +27,14 @@ public class EncoderConfig {
 
     public static EncoderConfig create(EncoderType type) {
         EncoderConfig cfg = create();
-        cfg.type = type;
+        cfg.applyType(type);
         return cfg;
     }
 
     public static EncoderConfig create(EncoderType type, int id) {
         EncoderConfig cfg = create(type);
-        cfg.setId(id);
+        cfg.applyId(id);
         return cfg;
-    }
-
-    /**
-     */
-    public static EncoderConfig type(EncoderType type) {
-        return create(type);
-    }
-
-    /**
-     */
-    public static EncoderConfig type(EncoderType type, int id) {
-        return create(type, id);
     }
 
     /**
@@ -60,6 +47,10 @@ public class EncoderConfig {
         return this;
     }
 
+    public HardwareSection hardware() {
+        return new HardwareSection(this);
+    }
+
     /**
      * Sectioned fluent API for conversion/normalization settings.
      */
@@ -70,95 +61,8 @@ public class EncoderConfig {
         return this;
     }
 
-    /**
-     */
-    public EncoderConfig setCanbus(String canbus) {
-        this.canbus = canbus;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setOffset(double offset) {
-        this.offset = offset;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setGearRatio(double gearRatio) {
-        this.gearRatio = gearRatio;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setConversion(double conversion) {
-        this.conversion = conversion;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setInverted(boolean inverted) {
-        this.inverted = inverted;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setId(int id) {
-        this.id = Math.abs(id);
-        this.inverted = id < 0;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setConversionOffset(double conversionOffset) {
-        this.conversionOffset = conversionOffset;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setDiscontinuityPoint(double discontinuityPoint) {
-        this.discontinuityPoint = discontinuityPoint;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setDiscontinuityRange(double discontinuityRange) {
-        this.discontinuityRange = discontinuityRange;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setDiscontinuity(double discontinuityPoint, double discontinuityRange) {
-        this.discontinuityPoint = discontinuityPoint;
-        this.discontinuityRange = discontinuityRange;
-        return this;
-    }
-
-    /**
-     */
-    public EncoderConfig setType(EncoderType type) {
-        this.type = type;
-        return this;
-    }
-
-    public EncoderType type() {
-        return type;
-    }
-
-    public int id() {
-        return id;
-    }
-
-    public String canbus() {
-        return canbus;
+    public MeasurementSection measurement() {
+        return new MeasurementSection(this);
     }
 
     public double gearRatio() {
@@ -173,10 +77,6 @@ public class EncoderConfig {
         return conversion;
     }
 
-    public boolean inverted() {
-        return inverted;
-    }
-
     public double conversionOffset() {
         return conversionOffset;
     }
@@ -189,30 +89,13 @@ public class EncoderConfig {
         return discontinuityRange;
     }
 
-    public static final class HardwareSection {
-        private final EncoderConfig owner;
-
+    public static final class HardwareSection extends DeviceIdentitySection<HardwareSection, EncoderType> {
         private HardwareSection(EncoderConfig owner) {
-            this.owner = owner;
+            super(owner::applyType, owner::applyId, owner::applyCanbus, owner::applyInverted);
         }
 
-        public HardwareSection type(EncoderType type) {
-            owner.setType(type);
-            return this;
-        }
-
-        public HardwareSection id(int id) {
-            owner.setId(id);
-            return this;
-        }
-
-        public HardwareSection canbus(String canbus) {
-            owner.setCanbus(canbus);
-            return this;
-        }
-
-        public HardwareSection inverted(boolean inverted) {
-            owner.setInverted(inverted);
+        @Override
+        protected HardwareSection self() {
             return this;
         }
     }
@@ -225,38 +108,77 @@ public class EncoderConfig {
         }
 
         public MeasurementSection gearRatio(double gearRatio) {
-            owner.setGearRatio(gearRatio);
+            owner.applyGearRatio(gearRatio);
             return this;
         }
 
         public MeasurementSection offset(double offset) {
-            owner.setOffset(offset);
+            owner.applyOffset(offset);
             return this;
         }
 
         public MeasurementSection conversion(double conversion) {
-            owner.setConversion(conversion);
+            owner.applyConversion(conversion);
             return this;
         }
 
         public MeasurementSection conversionOffset(double conversionOffset) {
-            owner.setConversionOffset(conversionOffset);
+            owner.applyConversionOffset(conversionOffset);
             return this;
         }
 
         public MeasurementSection discontinuityPoint(double discontinuityPoint) {
-            owner.setDiscontinuityPoint(discontinuityPoint);
+            owner.applyDiscontinuityPoint(discontinuityPoint);
             return this;
         }
 
         public MeasurementSection discontinuityRange(double discontinuityRange) {
-            owner.setDiscontinuityRange(discontinuityRange);
+            owner.applyDiscontinuityRange(discontinuityRange);
             return this;
         }
 
         public MeasurementSection discontinuity(double discontinuityPoint, double discontinuityRange) {
-            owner.setDiscontinuity(discontinuityPoint, discontinuityRange);
+            owner.applyDiscontinuity(discontinuityPoint, discontinuityRange);
             return this;
         }
+    }
+
+    @Override
+    protected int normalizeId(int id) {
+        return Math.abs(id);
+    }
+
+    @Override
+    protected Boolean inferInvertedFromId(int id) {
+        return id < 0;
+    }
+
+    private void applyGearRatio(double gearRatio) {
+        this.gearRatio = gearRatio;
+    }
+
+    private void applyOffset(double offset) {
+        this.offset = offset;
+    }
+
+    private void applyConversion(double conversion) {
+        this.conversion = conversion;
+    }
+
+    private void applyConversionOffset(double conversionOffset) {
+        this.conversionOffset = conversionOffset;
+    }
+
+    private void applyDiscontinuityPoint(double discontinuityPoint) {
+        this.discontinuityPoint = discontinuityPoint;
+    }
+
+    private void applyDiscontinuityRange(double discontinuityRange) {
+        this.discontinuityRange = discontinuityRange;
+    }
+
+    private void applyDiscontinuity(double discontinuityPoint, double discontinuityRange) {
+        this.discontinuityPoint = discontinuityPoint;
+        this.discontinuityRange = discontinuityRange;
     }
 }

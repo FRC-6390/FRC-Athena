@@ -31,8 +31,8 @@ final class ElevatorMechanismVisualization {
 
     static MechanismConfig<? extends ElevatorMechanism> prepare(MechanismConfig<? extends ElevatorMechanism> config) {
         Objects.requireNonNull(config);
-        if (config.visualizationConfig == null) {
-            config.visualizationConfig = createVisualizationConfig();
+        if (config.visualizationConfig() == null) {
+            config.visualizationConfig(createVisualizationConfig());
         }
         return config;
     }

@@ -23,7 +23,7 @@ public final class ObstacleField {
             return falloffMeters;
         }
 
-        public CostFieldConfig setFalloffMeters(double falloffMeters) {
+        public CostFieldConfig falloffMeters(double falloffMeters) {
             if (Double.isFinite(falloffMeters) && falloffMeters > 0.0) {
                 this.falloffMeters = falloffMeters;
             }
@@ -34,7 +34,7 @@ public final class ObstacleField {
             return maxCost;
         }
 
-        public CostFieldConfig setMaxCost(double maxCost) {
+        public CostFieldConfig maxCost(double maxCost) {
             if (Double.isFinite(maxCost) && maxCost > 0.0) {
                 this.maxCost = maxCost;
             }
@@ -45,7 +45,7 @@ public final class ObstacleField {
             return minDistanceMeters;
         }
 
-        public CostFieldConfig setMinDistanceMeters(double minDistanceMeters) {
+        public CostFieldConfig minDistanceMeters(double minDistanceMeters) {
             if (Double.isFinite(minDistanceMeters) && minDistanceMeters > 0.0) {
                 this.minDistanceMeters = minDistanceMeters;
             }

@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.imu;
 import edu.wpi.first.math.geometry.Rotation2d;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.sections.SectionedAccess;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -193,10 +194,7 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
      * Sectioned config API for interacting with an already-built IMU.
      */
     default Imu config(Consumer<RuntimeSection> section) {
-        if (section != null) {
-            section.accept(new RuntimeSection(this));
-        }
-        return this;
+        return SectionedAccess.apply(this, section, () -> new RuntimeSection(this));
     }
 
     /**
@@ -210,20 +208,14 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
      * Sectioned runtime API for virtual-axis interactions.
      */
     default Imu virtualAxes(Consumer<VirtualAxesSection> section) {
-        if (section != null) {
-            section.accept(new VirtualAxesSection(this));
-        }
-        return this;
+        return SectionedAccess.apply(this, section, () -> new VirtualAxesSection(this));
     }
 
     /**
      * Sectioned runtime API for simulation interactions.
      */
     default Imu sim(Consumer<SimulationSection> section) {
-        if (section != null) {
-            section.accept(new SimulationSection(this));
-        }
-        return this;
+        return SectionedAccess.apply(this, section, () -> new SimulationSection(this));
     }
 
     // Simulation hooks (default no-op)

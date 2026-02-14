@@ -198,64 +198,69 @@ public class MotorControllerGroup implements RobotSendableDevice {
         return count > 0 ? sum / count : 0.0;
     }
 
-    public static final class OutputSection {
+    public static final class OutputSection extends MotorSectionSupport.OutputSectionBase<OutputSection> {
         private final MotorControllerGroup owner;
 
         private OutputSection(MotorControllerGroup owner) {
             this.owner = owner;
         }
 
-        public OutputSection speed(double speed) {
+        @Override
+        protected OutputSection self() {
+            return this;
+        }
+
+        @Override
+        protected void applySpeed(double speed) {
             owner.setSpeed(speed);
-            return this;
         }
 
-        public OutputSection voltage(double voltage) {
+        @Override
+        protected void applyVoltage(double voltage) {
             owner.setVoltage(voltage);
-            return this;
         }
 
-        public OutputSection position(double position) {
+        @Override
+        protected void applyPosition(double position) {
             owner.setPosition(position);
-            return this;
         }
 
-        public OutputSection velocity(double rotationsPerSecond) {
+        @Override
+        protected void applyVelocity(double rotationsPerSecond) {
             owner.setVelocity(rotationsPerSecond);
-            return this;
         }
 
-        public OutputSection stop() {
+        @Override
+        protected void applyStop() {
             owner.stopMotors();
-            return this;
         }
     }
 
-    public static final class ConfigSection {
+    public static final class ConfigSection extends MotorSectionSupport.ConfigSectionBase<ConfigSection> {
         private final MotorControllerGroup owner;
 
         private ConfigSection(MotorControllerGroup owner) {
             this.owner = owner;
         }
 
-        public ConfigSection neutralMode(MotorNeutralMode mode) {
+        @Override
+        protected ConfigSection self() {
+            return this;
+        }
+
+        @Override
+        protected void applyNeutralMode(MotorNeutralMode mode) {
             owner.setNeutralMode(mode);
-            return this;
         }
 
-        public ConfigSection currentLimit(double amps) {
+        @Override
+        protected void applyCurrentLimit(double amps) {
             owner.setCurrentLimit(amps);
-            return this;
         }
 
-        public ConfigSection pid(PIDController pid) {
+        @Override
+        protected void applyPid(PIDController pid) {
             owner.setPid(pid);
-            return this;
-        }
-
-        public ConfigSection pid(double p, double i, double d) {
-            owner.setPid(p, i, d);
-            return this;
         }
     }
 }

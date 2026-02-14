@@ -1,15 +1,15 @@
 package ca.frc6390.athena.hardware.motor;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.ServiceLoader;
+
+import ca.frc6390.athena.core.registry.PluginRegistryBase;
 
 /**
  * Discovers vendor-specific motor controller types via {@link ServiceLoader}. Missing providers
  * surface clear guidance to add the appropriate athena-* module.
  */
-public final class MotorRegistry {
+public final class MotorRegistry extends PluginRegistryBase<MotorControllerType> {
     /** Implemented by vendor modules to register motor controller types. */
     public interface Provider {
         void register(MotorRegistry registry);
@@ -18,15 +18,8 @@ public final class MotorRegistry {
     private static final MotorRegistry INSTANCE = new MotorRegistry();
 
     static {
-        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
-        loadProviders(contextLoader);
-        ClassLoader registryLoader = MotorRegistry.class.getClassLoader();
-        if (registryLoader != contextLoader) {
-            loadProviders(registryLoader);
-        }
+        loadProviders(Provider.class, MotorRegistry.class, p -> p.register(INSTANCE));
     }
-
-    private final Map<String, MotorControllerType> motors = new HashMap<>();
 
     private MotorRegistry() {}
 
@@ -35,22 +28,17 @@ public final class MotorRegistry {
     }
 
     public MotorRegistry add(MotorControllerType type) {
-        motors.put(type.getKey(), type);
+        Objects.requireNonNull(type, "type");
+        put(type.getKey(), type);
         return this;
     }
 
     public MotorControllerType motor(String key) {
-        return Objects.requireNonNull(motors.get(key), missing(key));
+        return require(key);
     }
 
-    private static void loadProviders(ClassLoader loader) {
-        ServiceLoader<Provider> providers = loader == null
-                ? ServiceLoader.load(Provider.class)
-                : ServiceLoader.load(Provider.class, loader);
-        providers.forEach(p -> p.register(INSTANCE));
-    }
-
-    private static String missing(String key) {
+    @Override
+    protected String missingMessage(String key) {
         return "Missing provider for motor '" + key
                 + "'. Add the appropriate athena-* vendor module to dependencies.";
     }

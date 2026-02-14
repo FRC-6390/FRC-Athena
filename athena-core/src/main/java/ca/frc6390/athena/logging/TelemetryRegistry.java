@@ -362,24 +362,24 @@ public final class TelemetryRegistry {
                     "Telemetry");
         }
 
-        public TelemetryConfig setDefaultPeriodMs(int defaultPeriodMs) {
+        public TelemetryConfig defaultPeriodMs(int defaultPeriodMs) {
             return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, diskPrefix, networkTablePrefix);
         }
 
-        public TelemetryConfig setDiskEnabled(boolean enabled) {
+        public TelemetryConfig diskEnabled(boolean enabled) {
             return new TelemetryConfig(defaultPeriodMs, enabled, networkTablesEnabled, diskPrefix, networkTablePrefix);
         }
 
-        public TelemetryConfig setNetworkTablesEnabled(boolean enabled) {
+        public TelemetryConfig networkTablesEnabled(boolean enabled) {
             return new TelemetryConfig(defaultPeriodMs, diskEnabled, enabled, diskPrefix, networkTablePrefix);
         }
 
-        public TelemetryConfig setDiskPrefix(String prefix) {
+        public TelemetryConfig diskPrefix(String prefix) {
             String resolved = prefix != null && !prefix.isBlank() ? prefix : DEFAULT_PREFIX;
             return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, resolved, networkTablePrefix);
         }
 
-        public TelemetryConfig setNetworkTablePrefix(String prefix) {
+        public TelemetryConfig networkTablePrefix(String prefix) {
             String resolved = prefix != null && !prefix.isBlank() ? prefix : "Telemetry";
             return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, diskPrefix, resolved);
         }

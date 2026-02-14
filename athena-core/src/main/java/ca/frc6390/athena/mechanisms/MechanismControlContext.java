@@ -2,10 +2,8 @@ package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotMechanisms;
-import java.util.function.BooleanSupplier;
+import ca.frc6390.athena.core.input.TypedInputContext;
 import java.util.function.Consumer;
-import java.util.function.DoubleSupplier;
-import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.math.controller.PIDController;
@@ -15,15 +13,13 @@ import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
-import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Pose3d;
 
 /**
  * Read-only view used by custom control loops.
  *
  * @param <T> mechanism type
  */
-public interface MechanismControlContext<T extends Mechanism> {
+public interface MechanismControlContext<T extends Mechanism> extends TypedInputContext {
 
     enum PositionUnit {
         ROTATIONS,
@@ -193,50 +189,6 @@ public interface MechanismControlContext<T extends Mechanism> {
     default void robotMechanisms(Consumer<RobotMechanisms.InteractionSection> section) {
         robotMechanisms().use(section);
     }
-
-    boolean input(String key);
-
-    BooleanSupplier inputSupplier(String key);
-
-    default boolean boolVal(String key) {
-        return input(key);
-    }
-
-    default BooleanSupplier boolValSupplier(String key) {
-        return inputSupplier(key);
-    }
-
-    double doubleInput(String key);
-
-    DoubleSupplier doubleInputSupplier(String key);
-
-    default double doubleVal(String key) {
-        return doubleInput(key);
-    }
-
-    default DoubleSupplier doubleValSupplier(String key) {
-        return doubleInputSupplier(key);
-    }
-
-    int intVal(String key);
-
-    IntSupplier intValSupplier(String key);
-
-    String stringVal(String key);
-
-    Supplier<String> stringValSupplier(String key);
-
-    Pose2d pose2dVal(String key);
-
-    Supplier<Pose2d> pose2dValSupplier(String key);
-
-    Pose3d pose3dVal(String key);
-
-    Supplier<Pose3d> pose3dValSupplier(String key);
-
-    <V> V objectInput(String key, Class<V> type);
-
-    <V> Supplier<V> objectInputSupplier(String key, Class<V> type);
 
     /**
      * Returns a named PID controller registered in the mechanism config.

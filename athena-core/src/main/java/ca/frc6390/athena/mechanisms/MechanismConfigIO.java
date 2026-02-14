@@ -72,10 +72,11 @@ public final class MechanismConfigIO {
                 motors.add(config);
             } else if (controller.getType() != null) {
                 MotorControllerConfig fallback = MotorControllerConfig.create(controller.getType(), controller.getId());
-                fallback.setCanbus(controller.getCanbus());
-                fallback.setCurrentLimit(controller.getCurrentLimit());
-                fallback.setInverted(controller.isInverted());
-                fallback.setNeutralMode(controller.getNeutralMode());
+                fallback.hardware()
+                        .canbus(controller.getCanbus())
+                        .currentLimit(controller.getCurrentLimit())
+                        .inverted(controller.isInverted())
+                        .neutralMode(controller.getNeutralMode());
                 motors.add(fallback);
             }
         }
@@ -112,7 +113,7 @@ public final class MechanismConfigIO {
         if (config == null || record == null) {
             return;
         }
-        config.setData(record);
+        config.data(record);
     }
 
     public static void apply(Mechanism mechanism, MechanismConfigRecord record) {
@@ -272,7 +273,7 @@ public final class MechanismConfigIO {
             double iGain = 0.0;
             double dGain = 0.0;
             while (p.nextToken() != JsonToken.END_OBJECT) {
-                String name = p.getCurrentName();
+                String name = p.currentName();
                 p.nextToken();
                 if ("p".equals(name)) {
                     pGain = p.getDoubleValue();
@@ -318,7 +319,7 @@ public final class MechanismConfigIO {
             double maxVelocity = 0.0;
             double maxAcceleration = 0.0;
             while (p.nextToken() != JsonToken.END_OBJECT) {
-                String name = p.getCurrentName();
+                String name = p.currentName();
                 p.nextToken();
                 if ("p".equals(name)) {
                     pGain = p.getDoubleValue();

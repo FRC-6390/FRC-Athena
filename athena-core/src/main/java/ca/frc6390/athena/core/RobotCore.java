@@ -26,7 +26,10 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
 import ca.frc6390.athena.core.auto.AutoBackends;
+import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.core.loop.TimedControlLoopRunner;
+import ca.frc6390.athena.core.loop.TimedPeriodicHookRunner;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.sim.RobotVisionSim;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
@@ -106,7 +109,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     RobotCoreHooks.empty());
         }
 
-        public RobotCoreConfig<T> setLocalization(RobotLocalizationConfig localizationConfig) {
+        public RobotCoreConfig<T> localization(RobotLocalizationConfig localizationConfig) {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
@@ -120,7 +123,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     hooks);
         }
 
-        public RobotCoreConfig<T> setVision(RobotVisionConfig visionConfig) {
+        public RobotCoreConfig<T> vision(RobotVisionConfig visionConfig) {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
@@ -134,7 +137,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     hooks);
         }
 
-        public RobotCoreConfig<T> setVision(ConfigurableCamera... cameras) {
+        public RobotCoreConfig<T> cameras(ConfigurableCamera... cameras) {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
@@ -148,7 +151,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     hooks);
         }
 
-        public RobotCoreConfig<T> setAutoInitResetEnabled(boolean enabled) {
+        public RobotCoreConfig<T> autoInitResetEnabled(boolean enabled) {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
@@ -162,7 +165,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     hooks);
         }
 
-        public RobotCoreConfig<T> setTelemetry(TelemetryRegistry.TelemetryConfig telemetryConfig) {
+        public RobotCoreConfig<T> telemetry(TelemetryRegistry.TelemetryConfig telemetryConfig) {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
@@ -198,7 +201,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     hooks);
         }
 
-        public RobotCoreConfig<T> setPerformanceMode(boolean enabled) {
+        public RobotCoreConfig<T> performanceMode(boolean enabled) {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
@@ -212,7 +215,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     hooks);
         }
 
-        public RobotCoreConfig<T> setTimingDebugEnabled(boolean enabled) {
+        public RobotCoreConfig<T> timingDebugEnabled(boolean enabled) {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
@@ -226,7 +229,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     hooks);
         }
 
-        public RobotCoreConfig<T> setTelemetryEnabled(boolean enabled) {
+        public RobotCoreConfig<T> telemetryEnabled(boolean enabled) {
             return new RobotCoreConfig<>(
                     driveTrain,
                     localizationConfig,
@@ -328,12 +331,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private double lastLoopTotalMs = Double.NaN;
     private final RobotCoreHooks<T> coreHooks;
     private final RobotCoreContextImpl coreHookContext;
-    private final List<PeriodicHookRunner<T>> periodicHookRunners;
-    private final List<PeriodicHookRunner<T>> disabledPeriodicHookRunners;
-    private final List<PeriodicHookRunner<T>> teleopPeriodicHookRunners;
-    private final List<PeriodicHookRunner<T>> autonomousPeriodicHookRunners;
-    private final List<PeriodicHookRunner<T>> testPeriodicHookRunners;
-    private final List<CoreControlLoopRunner<T>> coreControlLoopRunners;
+    private final TypedInputResolver hookInputResolver;
+    private final List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> periodicHookRunners;
+    private final List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> disabledPeriodicHookRunners;
+    private final List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> teleopPeriodicHookRunners;
+    private final List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> autonomousPeriodicHookRunners;
+    private final List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> testPeriodicHookRunners;
+    private final List<TimedControlLoopRunner<RobotCoreHooks.ControlLoop<T>>> coreControlLoopRunners;
     private final Map<String, PIDController> coreControlLoopPids;
     private final Map<String, OutputType> coreControlLoopPidOutputTypes;
     private final Map<String, SimpleMotorFeedforward> coreControlLoopFeedforwards;
@@ -383,6 +387,17 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         mechanismsNetworkTablesPublished = false;
         coreNetworkTablesPublished = false;
         coreHooks = config.hooks() != null ? config.hooks() : RobotCoreHooks.<T>empty();
+        hookInputResolver = new TypedInputResolver(
+                "RobotCore",
+                TypedInputResolver.ValueMode.LENIENT,
+                TypedInputResolver.NO_MUTABLES,
+                coreHooks.inputs(),
+                coreHooks.doubleInputs(),
+                coreHooks.intInputs(),
+                coreHooks.stringInputs(),
+                coreHooks.pose2dInputs(),
+                coreHooks.pose3dInputs(),
+                coreHooks.objectInputs());
         coreHookContext = new RobotCoreContextImpl();
         periodicHookRunners = createPeriodicHookRunners(coreHooks.periodicLoopBindings());
         disabledPeriodicHookRunners = createPeriodicHookRunners(coreHooks.disabledPeriodicLoopBindings());
@@ -866,32 +881,32 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         onSimulationPeriodic();
     }
 
-    private List<PeriodicHookRunner<T>> createPeriodicHookRunners(
+    private List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> createPeriodicHookRunners(
             List<RobotCoreHooks.PeriodicHookBinding<T>> bindings) {
         if (bindings == null || bindings.isEmpty()) {
             return new ArrayList<>();
         }
-        List<PeriodicHookRunner<T>> runners = new ArrayList<>(bindings.size());
+        List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> runners = new ArrayList<>(bindings.size());
         for (RobotCoreHooks.PeriodicHookBinding<T> binding : bindings) {
             if (binding == null || binding.hook() == null) {
                 continue;
             }
-            runners.add(new PeriodicHookRunner<>(binding.hook(), binding.periodMs()));
+            runners.add(new TimedPeriodicHookRunner<>(binding.hook(), binding.periodMs()));
         }
         return runners;
     }
 
-    private List<CoreControlLoopRunner<T>> createCoreControlLoopRunners(
+    private List<TimedControlLoopRunner<RobotCoreHooks.ControlLoop<T>>> createCoreControlLoopRunners(
             List<RobotCoreHooks.ControlLoopBinding<T>> bindings) {
         if (bindings == null || bindings.isEmpty()) {
             return new ArrayList<>();
         }
-        List<CoreControlLoopRunner<T>> runners = new ArrayList<>(bindings.size());
+        List<TimedControlLoopRunner<RobotCoreHooks.ControlLoop<T>>> runners = new ArrayList<>(bindings.size());
         for (RobotCoreHooks.ControlLoopBinding<T> binding : bindings) {
             if (binding == null || binding.loop() == null || binding.name() == null || binding.name().isBlank()) {
                 continue;
             }
-            runners.add(new CoreControlLoopRunner<>(binding.name(), binding.periodSeconds(), binding.loop()));
+            runners.add(new TimedControlLoopRunner<>(binding.name(), binding.periodSeconds(), binding.loop()));
         }
         return runners;
     }
@@ -905,7 +920,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             nowSeconds = Timer.getFPGATimestamp();
         }
         coreHookContext.setPhase(RobotCoreHooks.Phase.ROBOT_PERIODIC);
-        for (CoreControlLoopRunner<T> runner : coreControlLoopRunners) {
+        for (TimedControlLoopRunner<RobotCoreHooks.ControlLoop<T>> runner : coreControlLoopRunners) {
             if (runner == null || !runner.shouldRun(nowSeconds)) {
                 continue;
             }
@@ -943,18 +958,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private void runCorePeriodicBindings(
             RobotCoreHooks.Phase phase,
             List<RobotCoreHooks.Binding<T>> bindings,
-            List<PeriodicHookRunner<T>> runners) {
+            List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> runners) {
         coreHookContext.setPhase(phase);
         runCoreBindings(bindings);
         if (runners == null || runners.isEmpty()) {
             return;
         }
         double nowMs = hookNowMs();
-        for (PeriodicHookRunner<T> runner : runners) {
+        for (TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>> runner : runners) {
             if (runner == null || !runner.shouldRun(nowMs)) {
                 continue;
             }
-            runner.run(coreHookContext, nowMs);
+            runner.run(hook -> hook.apply(coreHookContext), nowMs);
         }
     }
 
@@ -970,11 +985,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
-    private void resetPeriodicRunners(List<PeriodicHookRunner<T>> runners) {
+    private void resetPeriodicRunners(List<TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>>> runners) {
         if (runners == null || runners.isEmpty()) {
             return;
         }
-        for (PeriodicHookRunner<T> runner : runners) {
+        for (TimedPeriodicHookRunner<RobotCoreHooks.Binding<T>> runner : runners) {
             if (runner != null) {
                 runner.reset();
             }
@@ -1020,104 +1035,59 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private boolean hookInput(String key) {
-        BooleanSupplier supplier = coreHooks.inputs().get(key);
-        return supplier != null && supplier.getAsBoolean();
+        return hookInputResolver.boolVal(key);
     }
 
     private BooleanSupplier hookInputSupplier(String key) {
-        BooleanSupplier supplier = coreHooks.inputs().get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No input found for key " + key);
-        }
-        return supplier;
+        return hookInputResolver.boolSupplier(key);
     }
 
     private double hookDoubleInput(String key) {
-        DoubleSupplier supplier = coreHooks.doubleInputs().get(key);
-        return supplier != null ? supplier.getAsDouble() : Double.NaN;
+        return hookInputResolver.doubleVal(key);
     }
 
     private DoubleSupplier hookDoubleInputSupplier(String key) {
-        DoubleSupplier supplier = coreHooks.doubleInputs().get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No double input found for key " + key);
-        }
-        return supplier;
+        return hookInputResolver.doubleSupplier(key);
     }
 
     private int hookIntVal(String key) {
-        IntSupplier supplier = coreHooks.intInputs().get(key);
-        return supplier != null ? supplier.getAsInt() : 0;
+        return hookInputResolver.intVal(key);
     }
 
     private IntSupplier hookIntValSupplier(String key) {
-        IntSupplier supplier = coreHooks.intInputs().get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No int input found for key " + key);
-        }
-        return supplier;
+        return hookInputResolver.intSupplier(key);
     }
 
     private String hookStringVal(String key) {
-        Supplier<String> supplier = coreHooks.stringInputs().get(key);
-        return supplier != null ? supplier.get() : "";
+        return hookInputResolver.stringVal(key);
     }
 
     private Supplier<String> hookStringValSupplier(String key) {
-        Supplier<String> supplier = coreHooks.stringInputs().get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No string input found for key " + key);
-        }
-        return supplier;
+        return hookInputResolver.stringSupplier(key);
     }
 
     private Pose2d hookPose2dVal(String key) {
-        Supplier<Pose2d> supplier = coreHooks.pose2dInputs().get(key);
-        return supplier != null ? supplier.get() : null;
+        return hookInputResolver.pose2dVal(key);
     }
 
     private Supplier<Pose2d> hookPose2dValSupplier(String key) {
-        Supplier<Pose2d> supplier = coreHooks.pose2dInputs().get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No Pose2d input found for key " + key);
-        }
-        return supplier;
+        return hookInputResolver.pose2dSupplier(key);
     }
 
     private Pose3d hookPose3dVal(String key) {
-        Supplier<Pose3d> supplier = coreHooks.pose3dInputs().get(key);
-        return supplier != null ? supplier.get() : null;
+        return hookInputResolver.pose3dVal(key);
     }
 
     private Supplier<Pose3d> hookPose3dValSupplier(String key) {
-        Supplier<Pose3d> supplier = coreHooks.pose3dInputs().get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No Pose3d input found for key " + key);
-        }
-        return supplier;
+        return hookInputResolver.pose3dSupplier(key);
     }
 
     private <V> V hookObjectInput(String key, Class<V> type) {
-        Supplier<?> supplier = coreHooks.objectInputs().get(key);
-        if (supplier == null) {
-            return null;
-        }
-        Object value = supplier.get();
-        if (value == null) {
-            return null;
-        }
-        if (!type.isInstance(value)) {
-            throw new IllegalArgumentException("Input '" + key + "' is not of type " + type.getSimpleName());
-        }
-        return type.cast(value);
+        return hookInputResolver.objectVal(key, type);
     }
 
     private <V> Supplier<V> hookObjectInputSupplier(String key, Class<V> type) {
-        Supplier<?> supplier = coreHooks.objectInputs().get(key);
-        if (supplier == null) {
-            throw new IllegalArgumentException("No object input found for key " + key);
-        }
-        return () -> hookObjectInput(key, type);
+        return hookInputResolver.objectSupplier(key, type);
     }
 
     private PIDController hookPid(String name) {
@@ -1270,99 +1240,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
-    private static final class CoreControlLoopRunner<T extends RobotDrivetrain<T>> {
-        private final String name;
-        private final double periodSeconds;
-        private final RobotCoreHooks.ControlLoop<T> loop;
-        private double lastRunSeconds = Double.NaN;
-        private double lastOutput;
-
-        private CoreControlLoopRunner(String name, double periodSeconds, RobotCoreHooks.ControlLoop<T> loop) {
-            this.name = name;
-            this.periodSeconds = Math.max(0.0, periodSeconds);
-            this.loop = loop;
-        }
-
-        private String name() {
-            return name;
-        }
-
-        private double periodSeconds() {
-            return periodSeconds;
-        }
-
-        private RobotCoreHooks.ControlLoop<T> loop() {
-            return loop;
-        }
-
-        private double lastRunSeconds() {
-            return lastRunSeconds;
-        }
-
-        private void setLastRunSeconds(double nowSeconds) {
-            this.lastRunSeconds = nowSeconds;
-        }
-
-        private double lastOutput() {
-            return lastOutput;
-        }
-
-        private void setLastOutput(double output) {
-            this.lastOutput = output;
-        }
-
-        private boolean shouldRun(double nowSeconds) {
-            if (!Double.isFinite(nowSeconds)) {
-                return true;
-            }
-            if (Double.isNaN(lastRunSeconds)) {
-                return true;
-            }
-            if (periodSeconds <= 0.0) {
-                return true;
-            }
-            return (nowSeconds - lastRunSeconds) >= periodSeconds;
-        }
-    }
-
-    private static final class PeriodicHookRunner<T extends RobotDrivetrain<T>> {
-        private final RobotCoreHooks.Binding<T> hook;
-        private final double periodMs;
-        private double lastRunMs = Double.NaN;
-
-        private PeriodicHookRunner(RobotCoreHooks.Binding<T> hook, double periodMs) {
-            this.hook = hook;
-            this.periodMs = Math.max(0.0, periodMs);
-        }
-
-        private boolean shouldRun(double nowMs) {
-            if (!Double.isFinite(nowMs)) {
-                return true;
-            }
-            if (Double.isNaN(lastRunMs)) {
-                return true;
-            }
-            if (periodMs <= 0.0) {
-                return true;
-            }
-            return (nowMs - lastRunMs) >= periodMs;
-        }
-
-        private void run(RobotCoreContext<T> context, double nowMs) {
-            hook.apply(context);
-            lastRunMs = nowMs;
-        }
-
-        private void reset() {
-            lastRunMs = Double.NaN;
-        }
-    }
-
     protected void onRobotInit() {}
 
     protected void onRobotPeriodic() {}
 
-    public RobotCore<T> setAutoInitResetEnabled(boolean enabled) {
+    public RobotCore<T> autoInitResetEnabled(boolean enabled) {
         autoInitResetEnabled = enabled;
         if (autoInitResetEntry != null) {
             autoInitResetEntry.setBoolean(enabled);

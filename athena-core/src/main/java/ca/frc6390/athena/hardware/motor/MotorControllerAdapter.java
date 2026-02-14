@@ -68,7 +68,7 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void setCurrentLimit(double amps) {
         if (config != null) {
-            config.setCurrentLimit(amps);
+            config.hardware().currentLimit(amps);
         }
         raw.setCurrentLimit(amps);
     }
@@ -86,7 +86,7 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void setNeutralMode(MotorNeutralMode mode) {
         if (config != null) {
-            config.setNeutralMode(mode);
+            config.hardware().neutralMode(mode);
         }
         raw.setNeutralMode(mode);
     }
@@ -94,7 +94,7 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void setPid(PIDController pid) {
         if (config != null) {
-            config.setPid(pid);
+            config.control().pid(pid);
         }
         raw.setPid(pid);
     }
@@ -138,7 +138,7 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public void setInverted(boolean inverted) {
         if (config != null) {
-            config.setInverted(inverted);
+            config.hardware().inverted(inverted);
         }
     }
 

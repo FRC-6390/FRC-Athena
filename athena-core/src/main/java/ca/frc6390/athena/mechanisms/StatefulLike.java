@@ -3,6 +3,8 @@ package ca.frc6390.athena.mechanisms;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 
+import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
+
 /**
  * Marker for mechanisms that own a state machine with a Double setpoint.
  * Implemented by all stateful mechanism variants (generic, arm, elevator, turret, etc.).
@@ -10,13 +12,21 @@ import java.util.function.DoubleSupplier;
  * @param <E> state enum type
  */
 public interface StatefulLike<E extends Enum<E> & StateMachine.SetpointProvider<Double>> {
-    StateMachine<Double, E> getStateMachine();
+    StatefulMechanismCore<? extends Mechanism, E> stateCore();
+
+    default StateMachine<Double, E> getStateMachine() {
+        return stateCore().getStateMachine();
+    }
+
+    default double getSetpoint() {
+        return stateCore().getSetpoint();
+    }
 
     /**
      * Overrides the state setpoint with a dynamic supplier.
      */
     default void setSetpointOverride(DoubleSupplier override) {
-        throw new UnsupportedOperationException("Setpoint overrides not supported by this mechanism");
+        stateCore().setSetpointOverride(override);
     }
 
     /**
@@ -30,7 +40,7 @@ public interface StatefulLike<E extends Enum<E> & StateMachine.SetpointProvider<
      * Suppresses output while the supplier evaluates to true.
      */
     default void setOutputSuppressor(BooleanSupplier suppressor) {
-        throw new UnsupportedOperationException("Output suppression not supported by this mechanism");
+        stateCore().setOutputSuppressor(suppressor);
     }
 
     /**
@@ -38,5 +48,13 @@ public interface StatefulLike<E extends Enum<E> & StateMachine.SetpointProvider<
      */
     default void clearOutputSuppressor() {
         setOutputSuppressor(null);
+    }
+
+    default void setStateGraph(StateGraph<E> stateGraph) {
+        stateCore().setStateGraph(stateGraph);
+    }
+
+    default boolean updateStateCore(Mechanism mechanism) {
+        return stateCore().updateMechanism(mechanism);
     }
 }

@@ -5,6 +5,9 @@ import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.LoopTiming;
 import ca.frc6390.athena.core.RobotCoreHooks;
+import ca.frc6390.athena.core.input.TypedInputResolver;
+import ca.frc6390.athena.core.loop.TimedControlLoopRunner;
+import ca.frc6390.athena.core.loop.TimedPeriodicHookRunner;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
@@ -151,9 +154,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean sysIdActive = false;
     private boolean sysIdPreviousOverride = false;
     private final List<Consumer<?>> periodicHooks;
-    private final List<PeriodicHookRunner<Mechanism>> timedPeriodicHooks;
-    private final List<ControlLoopRunner<Mechanism>> controlLoops;
-    private final Map<String, ControlLoopRunner<Mechanism>> controlLoopsByName;
+    private final List<TimedPeriodicHookRunner<Consumer<Mechanism>>> timedPeriodicHooks;
+    private final List<TimedControlLoopRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoops;
+    private final Map<String, TimedControlLoopRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoopsByName;
     private final Set<String> disabledControlLoops;
     private final Map<String, BooleanSupplier> controlLoopInputs;
     private final Map<String, DoubleSupplier> controlLoopDoubleInputs;
@@ -241,9 +244,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         MechanismSimulationModel model = null;
         double updatePeriod = 0.02;
-        if (config.simulationConfig != null && RobotBase.isSimulation()) {
-            model = config.simulationConfig.createSimulation(this);
-            updatePeriod = config.simulationConfig.updatePeriodSeconds();
+        if (config.simulationConfig() != null && RobotBase.isSimulation()) {
+            model = config.simulationConfig().createSimulation(this);
+            updatePeriod = config.simulationConfig().updatePeriodSeconds();
         }
         this.simulationModel = model;
         this.simulationUpdatePeriodSeconds = updatePeriod;
@@ -252,11 +255,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             lastSimulationTimestampSeconds = Timer.getFPGATimestamp();
         }
         MechanismVisualizationConfig resolvedVisualizationConfig =
-                config.visualizationConfig != null ? config.visualizationConfig : MechanismVisualizationDefaults.forMechanism(this);
+                config.visualizationConfig() != null ? config.visualizationConfig() : MechanismVisualizationDefaults.forMechanism(this);
         this.visualization = resolvedVisualizationConfig != null ? new MechanismVisualization(resolvedVisualizationConfig) : null;
         if (RobotBase.isSimulation()) {
-            if (config.sensorSimulationConfig != null) {
-                this.sensorSimulation = MechanismSensorSimulation.fromConfig(this, config.sensorSimulationConfig);
+            if (config.sensorSimulationConfig() != null) {
+                this.sensorSimulation = MechanismSensorSimulation.fromConfig(this, config.sensorSimulationConfig());
             } else {
                 this.sensorSimulation = MechanismSensorSimulation.forLimitSwitches(this);
             }
@@ -268,32 +271,32 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         MechanismConfigRecord cfg = config.data();
         setBounds(cfg.minBound(), cfg.maxBound());
         setMotionLimits(cfg.motionLimits());
-        this.periodicHooks.addAll(config.periodicHooks);
-        if (config.periodicHookBindings != null) {
-            for (MechanismConfig.PeriodicHookBinding<?> binding : config.periodicHookBindings) {
+        this.periodicHooks.addAll(config.periodicHooks());
+        if (config.periodicHookBindings() != null) {
+            for (MechanismConfig.PeriodicHookBinding<?> binding : config.periodicHookBindings()) {
                 registerPeriodicHook(binding);
             }
         }
-        this.shouldCustomEncoder = config.shouldCustomEncoder;
-        this.customEncoderPos = config.customEncoderPos;
-        this.controlLoopInputs = new HashMap<>(config.inputs);
-        this.controlLoopDoubleInputs = new HashMap<>(config.doubleInputs);
-        this.controlLoopIntInputs = new HashMap<>(config.intInputs);
-        this.controlLoopStringInputs = new HashMap<>(config.stringInputs);
-        this.controlLoopPose2dInputs = new HashMap<>(config.pose2dInputs);
-        this.controlLoopPose3dInputs = new HashMap<>(config.pose3dInputs);
-        this.controlLoopObjectInputs = new HashMap<>(config.objectInputs);
-        this.mutableBoolInputDefaults = new HashMap<>(config.mutableBoolInputDefaults);
+        this.shouldCustomEncoder = config.usesCustomEncoder();
+        this.customEncoderPos = config.customEncoderPositionSupplier();
+        this.controlLoopInputs = new HashMap<>(config.inputs());
+        this.controlLoopDoubleInputs = new HashMap<>(config.doubleInputs());
+        this.controlLoopIntInputs = new HashMap<>(config.intInputs());
+        this.controlLoopStringInputs = new HashMap<>(config.stringInputs());
+        this.controlLoopPose2dInputs = new HashMap<>(config.pose2dInputs());
+        this.controlLoopPose3dInputs = new HashMap<>(config.pose3dInputs());
+        this.controlLoopObjectInputs = new HashMap<>(config.objectInputs());
+        this.mutableBoolInputDefaults = new HashMap<>(config.mutableBoolInputDefaults());
         this.mutableBoolInputs = new HashMap<>(this.mutableBoolInputDefaults);
-        this.mutableDoubleInputDefaults = new HashMap<>(config.mutableDoubleInputDefaults);
+        this.mutableDoubleInputDefaults = new HashMap<>(config.mutableDoubleInputDefaults());
         this.mutableDoubleInputs = new HashMap<>(this.mutableDoubleInputDefaults);
-        this.mutableIntInputDefaults = new HashMap<>(config.mutableIntInputDefaults);
+        this.mutableIntInputDefaults = new HashMap<>(config.mutableIntInputDefaults());
         this.mutableIntInputs = new HashMap<>(this.mutableIntInputDefaults);
-        this.mutableStringInputDefaults = new HashMap<>(config.mutableStringInputDefaults);
+        this.mutableStringInputDefaults = new HashMap<>(config.mutableStringInputDefaults());
         this.mutableStringInputs = new HashMap<>(this.mutableStringInputDefaults);
-        this.mutablePose2dInputDefaults = new HashMap<>(config.mutablePose2dInputDefaults);
+        this.mutablePose2dInputDefaults = new HashMap<>(config.mutablePose2dInputDefaults());
         this.mutablePose2dInputs = new HashMap<>(this.mutablePose2dInputDefaults);
-        this.mutablePose3dInputDefaults = new HashMap<>(config.mutablePose3dInputDefaults);
+        this.mutablePose3dInputDefaults = new HashMap<>(config.mutablePose3dInputDefaults());
         this.mutablePose3dInputs = new HashMap<>(this.mutablePose3dInputDefaults);
         this.controlLoopPids = new HashMap<>();
         this.controlLoopProfiledPids = new HashMap<>();
@@ -304,8 +307,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.controlLoops = new ArrayList<>();
         this.controlLoopsByName = new HashMap<>();
         this.disabledControlLoops = new HashSet<>();
-        if (config.controlLoopPidProfiles != null) {
-            for (Map.Entry<String, MechanismConfig.PidProfile> entry : config.controlLoopPidProfiles.entrySet()) {
+        if (config.controlLoopPidProfiles() != null) {
+            for (Map.Entry<String, MechanismConfig.PidProfile> entry : config.controlLoopPidProfiles().entrySet()) {
                 String name = entry.getKey();
                 MechanismConfig.PidProfile profile = entry.getValue();
                 if (name == null || name.isBlank() || profile == null) {
@@ -348,8 +351,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 controlLoopPidOutputTypes.put(name, profileOutput);
             }
         }
-        if (config.controlLoopBangBangProfiles != null) {
-            for (Map.Entry<String, MechanismConfig.BangBangProfile> entry : config.controlLoopBangBangProfiles.entrySet()) {
+        if (config.controlLoopBangBangProfiles() != null) {
+            for (Map.Entry<String, MechanismConfig.BangBangProfile> entry : config.controlLoopBangBangProfiles().entrySet()) {
                 String name = entry.getKey();
                 MechanismConfig.BangBangProfile profile = entry.getValue();
                 if (name == null || name.isBlank() || profile == null) {
@@ -368,8 +371,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                                 sanitizeBangBangTolerance(profile.tolerance())));
             }
         }
-        if (config.controlLoopFeedforwardProfiles != null) {
-            for (Map.Entry<String, MechanismConfig.FeedforwardProfile> entry : config.controlLoopFeedforwardProfiles.entrySet()) {
+        if (config.controlLoopFeedforwardProfiles() != null) {
+            for (Map.Entry<String, MechanismConfig.FeedforwardProfile> entry : config.controlLoopFeedforwardProfiles().entrySet()) {
                 String name = entry.getKey();
                 MechanismConfig.FeedforwardProfile profile = entry.getValue();
                 SimpleMotorFeedforward ff = profile != null ? profile.feedforward() : null;
@@ -384,7 +387,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 controlLoopFeedforwardOutputTypes.put(name, profileOutput);
             }
         }
-        for (MechanismConfig.ControlLoopBinding<?> binding : config.controlLoops) {
+        for (MechanismConfig.ControlLoopBinding<?> binding : config.controlLoops()) {
             registerControlLoop(binding);
         }
 
@@ -463,14 +466,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private static Encoder resolveIntegratedEncoder(EncoderConfig config, MotorControllerGroup motors) {
-        if (motors == null || config.type == null) {
+        if (motors == null || config.type() == null) {
             return null;
         }
-        String key = config.type.getKey();
+        String key = config.type().getKey();
         if (!isIntegratedEncoderKey(key)) {
             return null;
         }
-        int encoderId = config.id;
+        int encoderId = config.id();
         MotorController matchingMotor = null;
         for (MotorController motor : motors.getControllers()) {
             if (motor.getId() == encoderId) {
@@ -1852,9 +1855,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!timedPeriodicHooks.isEmpty()) {
             double nowSeconds = Timer.getFPGATimestamp();
             double nowMs = nowSeconds * 1000.0;
-            for (PeriodicHookRunner<Mechanism> runner : timedPeriodicHooks) {
+            for (TimedPeriodicHookRunner<Consumer<Mechanism>> runner : timedPeriodicHooks) {
                 if (runner.shouldRun(nowMs)) {
-                    runner.run(this, nowMs);
+                    runner.run(hook -> hook.accept(this), nowMs);
                 }
             }
         }
@@ -1913,17 +1916,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
         double nowSeconds = Timer.getFPGATimestamp();
         double total = 0.0;
-        for (ControlLoopRunner<Mechanism> runner : controlLoops) {
+        for (TimedControlLoopRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
             if (!isControlLoopEnabled(runner.name())) {
                 runner.setLastOutput(0.0);
                 continue;
             }
             if (runner.shouldRun(nowSeconds)) {
                 double dtSeconds;
-                if (Double.isNaN(runner.lastRunSeconds)) {
+                if (Double.isNaN(runner.lastRunSeconds())) {
                     dtSeconds = runner.periodSeconds();
                 } else {
-                    dtSeconds = nowSeconds - runner.lastRunSeconds;
+                    dtSeconds = nowSeconds - runner.lastRunSeconds();
                 }
                 if (!Double.isFinite(dtSeconds) || dtSeconds < 0.0) {
                     dtSeconds = Double.NaN;
@@ -2055,7 +2058,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (controlLoopsByName.containsKey(name)) {
             throw new IllegalArgumentException("control loop name already registered: " + name);
         }
-        ControlLoopRunner<Mechanism> runner = new ControlLoopRunner<>(
+        TimedControlLoopRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner = new TimedControlLoopRunner<>(
                 name,
                 binding.periodSeconds(),
                 (MechanismConfig.MechanismControlLoop<Mechanism>) binding.loop());
@@ -2068,11 +2071,82 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (binding == null) {
             return;
         }
-        timedPeriodicHooks.add(new PeriodicHookRunner<>((Consumer<Mechanism>) binding.hook(), binding.periodMs()));
+        timedPeriodicHooks.add(new TimedPeriodicHookRunner<>((Consumer<Mechanism>) binding.hook(), binding.periodMs()));
     }
 
     private final class MechanismControlContextImpl implements MechanismControlContext<Mechanism> {
         private double controlLoopDtSeconds = Double.NaN;
+        private final TypedInputResolver inputs = new TypedInputResolver(
+                "MechanismControlContext",
+                TypedInputResolver.ValueMode.STRICT,
+                new TypedInputResolver.MutableInputs() {
+                    @Override
+                    public boolean hasBool(String key) {
+                        return mutableBoolInputs.containsKey(key);
+                    }
+
+                    @Override
+                    public boolean bool(String key) {
+                        return mutableBoolInputs.get(key);
+                    }
+
+                    @Override
+                    public boolean hasDouble(String key) {
+                        return mutableDoubleInputs.containsKey(key);
+                    }
+
+                    @Override
+                    public double dbl(String key) {
+                        return mutableDoubleInputs.get(key);
+                    }
+
+                    @Override
+                    public boolean hasInt(String key) {
+                        return mutableIntInputs.containsKey(key);
+                    }
+
+                    @Override
+                    public int intVal(String key) {
+                        return mutableIntInputs.get(key);
+                    }
+
+                    @Override
+                    public boolean hasString(String key) {
+                        return mutableStringInputs.containsKey(key);
+                    }
+
+                    @Override
+                    public String str(String key) {
+                        return mutableStringInputs.get(key);
+                    }
+
+                    @Override
+                    public boolean hasPose2d(String key) {
+                        return mutablePose2dInputs.containsKey(key);
+                    }
+
+                    @Override
+                    public edu.wpi.first.math.geometry.Pose2d pose2d(String key) {
+                        return mutablePose2dInputs.get(key);
+                    }
+
+                    @Override
+                    public boolean hasPose3d(String key) {
+                        return mutablePose3dInputs.containsKey(key);
+                    }
+
+                    @Override
+                    public edu.wpi.first.math.geometry.Pose3d pose3d(String key) {
+                        return mutablePose3dInputs.get(key);
+                    }
+                },
+                controlLoopInputs,
+                controlLoopDoubleInputs,
+                controlLoopIntInputs,
+                controlLoopStringInputs,
+                controlLoopPose2dInputs,
+                controlLoopPose3dInputs,
+                controlLoopObjectInputs);
 
         @Override
         public Mechanism mechanism() {
@@ -2096,171 +2170,72 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         @Override
         public boolean input(String key) {
-            if (mutableBoolInputs.containsKey(key)) {
-                return mutableBoolInputs.get(key);
-            }
-            BooleanSupplier supplier = controlLoopInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No bool input found for key " + key);
-            }
-            return supplier.getAsBoolean();
+            return inputs.boolVal(key);
         }
 
         @Override
         public BooleanSupplier inputSupplier(String key) {
-            if (mutableBoolInputs.containsKey(key)) {
-                return () -> mutableBoolInputs.get(key);
-            }
-            BooleanSupplier supplier = controlLoopInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No input found for key " + key);
-            }
-            return supplier;
+            return inputs.boolSupplier(key);
         }
 
         @Override
         public double doubleInput(String key) {
-            if (mutableDoubleInputs.containsKey(key)) {
-                return mutableDoubleInputs.get(key);
-            }
-            DoubleSupplier supplier = controlLoopDoubleInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No double input found for key " + key);
-            }
-            return supplier.getAsDouble();
+            return inputs.doubleVal(key);
         }
 
         @Override
         public DoubleSupplier doubleInputSupplier(String key) {
-            if (mutableDoubleInputs.containsKey(key)) {
-                return () -> mutableDoubleInputs.get(key);
-            }
-            DoubleSupplier supplier = controlLoopDoubleInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No double input found for key " + key);
-            }
-            return supplier;
+            return inputs.doubleSupplier(key);
         }
 
         @Override
         public int intVal(String key) {
-            if (mutableIntInputs.containsKey(key)) {
-                return mutableIntInputs.get(key);
-            }
-            java.util.function.IntSupplier supplier = controlLoopIntInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No int input found for key " + key);
-            }
-            return supplier.getAsInt();
+            return inputs.intVal(key);
         }
 
         @Override
         public java.util.function.IntSupplier intValSupplier(String key) {
-            if (mutableIntInputs.containsKey(key)) {
-                return () -> mutableIntInputs.get(key);
-            }
-            java.util.function.IntSupplier supplier = controlLoopIntInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No int input found for key " + key);
-            }
-            return supplier;
+            return inputs.intSupplier(key);
         }
 
         @Override
         public String stringVal(String key) {
-            if (mutableStringInputs.containsKey(key)) {
-                return mutableStringInputs.get(key);
-            }
-            java.util.function.Supplier<String> supplier = controlLoopStringInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No string input found for key " + key);
-            }
-            return supplier.get();
+            return inputs.stringVal(key);
         }
 
         @Override
         public java.util.function.Supplier<String> stringValSupplier(String key) {
-            if (mutableStringInputs.containsKey(key)) {
-                return () -> mutableStringInputs.get(key);
-            }
-            java.util.function.Supplier<String> supplier = controlLoopStringInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No string input found for key " + key);
-            }
-            return supplier;
+            return inputs.stringSupplier(key);
         }
 
         @Override
         public edu.wpi.first.math.geometry.Pose2d pose2dVal(String key) {
-            if (mutablePose2dInputs.containsKey(key)) {
-                return mutablePose2dInputs.get(key);
-            }
-            java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d> supplier = controlLoopPose2dInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No Pose2d input found for key " + key);
-            }
-            return supplier.get();
+            return inputs.pose2dVal(key);
         }
 
         @Override
         public java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d> pose2dValSupplier(String key) {
-            if (mutablePose2dInputs.containsKey(key)) {
-                return () -> mutablePose2dInputs.get(key);
-            }
-            java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d> supplier = controlLoopPose2dInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No Pose2d input found for key " + key);
-            }
-            return supplier;
+            return inputs.pose2dSupplier(key);
         }
 
         @Override
         public edu.wpi.first.math.geometry.Pose3d pose3dVal(String key) {
-            if (mutablePose3dInputs.containsKey(key)) {
-                return mutablePose3dInputs.get(key);
-            }
-            java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d> supplier = controlLoopPose3dInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No Pose3d input found for key " + key);
-            }
-            return supplier.get();
+            return inputs.pose3dVal(key);
         }
 
         @Override
         public java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d> pose3dValSupplier(String key) {
-            if (mutablePose3dInputs.containsKey(key)) {
-                return () -> mutablePose3dInputs.get(key);
-            }
-            java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d> supplier = controlLoopPose3dInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No Pose3d input found for key " + key);
-            }
-            return supplier;
+            return inputs.pose3dSupplier(key);
         }
 
         @Override
         public <V> V objectInput(String key, Class<V> type) {
-            Supplier<?> supplier = controlLoopObjectInputs.get(key);
-            if (supplier == null) {
-                return null;
-            }
-            Object value = supplier.get();
-            if (value == null) {
-                return null;
-            }
-            if (!type.isInstance(value)) {
-                throw new IllegalArgumentException("Input '" + key + "' is not of type " + type.getSimpleName());
-            }
-            return type.cast(value);
+            return inputs.objectVal(key, type);
         }
 
         @Override
         public <V> Supplier<V> objectInputSupplier(String key, Class<V> type) {
-            Supplier<?> supplier = controlLoopObjectInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No object input found for key " + key);
-            }
-            return () -> objectInput(key, type);
+            return inputs.objectSupplier(key, type);
         }
 
         @Override
@@ -2301,86 +2276,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         private void setControlLoopDtSeconds(double dtSeconds) {
             this.controlLoopDtSeconds = dtSeconds;
-        }
-    }
-
-    private static final class ControlLoopRunner<M extends Mechanism> {
-        private final String name;
-        private final double periodSeconds;
-        private final MechanismConfig.MechanismControlLoop<M> loop;
-        private double lastRunSeconds = Double.NaN;
-        private double lastOutput;
-
-        private ControlLoopRunner(String name, double periodSeconds, MechanismConfig.MechanismControlLoop<M> loop) {
-            this.name = name;
-            this.periodSeconds = Math.max(0.0, periodSeconds);
-            this.loop = loop;
-        }
-
-        private String name() {
-            return name;
-        }
-
-        private MechanismConfig.MechanismControlLoop<M> loop() {
-            return loop;
-        }
-
-        private double lastOutput() {
-            return lastOutput;
-        }
-
-        private void setLastOutput(double output) {
-            this.lastOutput = output;
-        }
-
-        private void setLastRunSeconds(double nowSeconds) {
-            this.lastRunSeconds = nowSeconds;
-        }
-
-        private double periodSeconds() {
-            return periodSeconds;
-        }
-
-        private boolean shouldRun(double nowSeconds) {
-            if (!Double.isFinite(nowSeconds)) {
-                return true;
-            }
-            if (Double.isNaN(lastRunSeconds)) {
-                return true;
-            }
-            if (periodSeconds <= 0.0) {
-                return true;
-            }
-            return (nowSeconds - lastRunSeconds) >= periodSeconds;
-        }
-    }
-
-    private static final class PeriodicHookRunner<M extends Mechanism> {
-        private final Consumer<M> hook;
-        private final double periodMs;
-        private double lastRunMs = Double.NaN;
-
-        private PeriodicHookRunner(Consumer<M> hook, double periodMs) {
-            this.hook = hook;
-            this.periodMs = Math.max(0.0, periodMs);
-        }
-
-        private boolean shouldRun(double nowMs) {
-            if (!Double.isFinite(nowMs)) {
-                return true;
-            }
-            if (Double.isNaN(lastRunMs)) {
-                return true;
-            }
-            if (periodMs <= 0.0) {
-                return true;
-            }
-            return (nowMs - lastRunMs) >= periodMs;
-        }
-
-        private void run(M mechanism, double nowMs) {
-            hook.accept(mechanism);
-            lastRunMs = nowMs;
         }
     }
 

@@ -3,8 +3,6 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.controllers.ElevatorFeedForwardsSendable;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import ca.frc6390.athena.core.RobotNetworkTables;
-import java.util.function.BooleanSupplier;
-import java.util.function.DoubleSupplier;
 
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 
@@ -26,8 +24,8 @@ public class ElevatorMechanism extends Mechanism {
             this.feedforwardOutputType = null;
             setFeedforwardEnabled(false);
         }
-        if (config.elevatorSimulationParameters != null) {
-            MechanismConfig.ElevatorSimulationParameters params = config.elevatorSimulationParameters;
+        if (config.elevatorSimulationParameters() != null) {
+            MechanismConfig.ElevatorSimulationParameters params = config.elevatorSimulationParameters();
             double min = params.minHeightMeters;
             double max = params.maxHeightMeters;
             double unitsPerMeter = params.unitsPerMeterOverride;
@@ -88,58 +86,18 @@ public class ElevatorMechanism extends Mechanism {
                                          OutputType feedforwardOutputType,
                                          E initialState) {
             super(config, feedforward, feedforwardOutputType);
-            stateCore = new StatefulMechanismCore<>(initialState, this::atSetpoint, config.data().stateMachineDelay(),
-                    config.stateActions,
-                    config.enterStateHooks,
-                    config.stateHooks,
-                    config.exitStateHooks,
-                    config.transitionHooks,
-                    config.alwaysHooks,
-                    config.exitAlwaysHooks,
-                    config.inputs,
-                    config.doubleInputs,
-                    config.intInputs,
-                    config.stringInputs,
-                    config.pose2dInputs,
-                    config.pose3dInputs,
-                    config.objectInputs,
-                    config.stateTriggerBindings);
+            stateCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
         }
 
         @Override
-        public double getSetpoint() {
-            return stateCore.getSetpoint();
-        }
-
-        public void setSetpointOverride(DoubleSupplier override) {
-            stateCore.setSetpointOverride(override);
-        }
-
-        public void clearSetpointOverride() {
-            stateCore.clearSetpointOverride();
-        }
-
-        public void setOutputSuppressor(BooleanSupplier suppressor) {
-            stateCore.setOutputSuppressor(suppressor);
-        }
-
-        public void clearOutputSuppressor() {
-            stateCore.clearOutputSuppressor();
+        public StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateCore() {
+            return stateCore;
         }
 
         @Override
         public void update() {
-            setSuppressMotorOutput(stateCore.update(this));
+            setSuppressMotorOutput(updateStateCore(this));
             super.update();
-        }
-
-        @Override
-        public StateMachine<Double, E> getStateMachine() {
-            return stateCore.getStateMachine();
-        }
-
-        public void setStateGraph(StateGraph<E> stateGraph) {
-            stateCore.setStateGraph(stateGraph);
         }
 
         @Override

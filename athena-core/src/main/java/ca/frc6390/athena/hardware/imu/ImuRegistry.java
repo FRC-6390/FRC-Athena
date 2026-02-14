@@ -1,14 +1,14 @@
 package ca.frc6390.athena.hardware.imu;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.ServiceLoader;
+
+import ca.frc6390.athena.core.registry.PluginRegistryBase;
 
 /**
  * Discovers vendor-specific IMU types via {@link ServiceLoader}.
  */
-public final class ImuRegistry {
+public final class ImuRegistry extends PluginRegistryBase<ImuType> {
     /** Implemented by vendor modules to register IMU types. */
     public interface Provider {
         void register(ImuRegistry registry);
@@ -17,15 +17,8 @@ public final class ImuRegistry {
     private static final ImuRegistry INSTANCE = new ImuRegistry();
 
     static {
-        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
-        loadProviders(contextLoader);
-        ClassLoader registryLoader = ImuRegistry.class.getClassLoader();
-        if (registryLoader != contextLoader) {
-            loadProviders(registryLoader);
-        }
+        loadProviders(Provider.class, ImuRegistry.class, p -> p.register(INSTANCE));
     }
-
-    private final Map<String, ImuType> imus = new HashMap<>();
 
     private ImuRegistry() {}
 
@@ -34,22 +27,17 @@ public final class ImuRegistry {
     }
 
     public ImuRegistry add(ImuType type) {
-        imus.put(type.getKey(), type);
+        Objects.requireNonNull(type, "type");
+        put(type.getKey(), type);
         return this;
     }
 
     public ImuType imu(String key) {
-        return Objects.requireNonNull(imus.get(key), missing(key));
+        return require(key);
     }
 
-    private static void loadProviders(ClassLoader loader) {
-        ServiceLoader<Provider> providers = loader == null
-                ? ServiceLoader.load(Provider.class)
-                : ServiceLoader.load(Provider.class, loader);
-        providers.forEach(p -> p.register(INSTANCE));
-    }
-
-    private static String missing(String key) {
+    @Override
+    protected String missingMessage(String key) {
         return "Missing provider for IMU '" + key
                 + "'. Add the appropriate athena-* vendor module to dependencies.";
     }

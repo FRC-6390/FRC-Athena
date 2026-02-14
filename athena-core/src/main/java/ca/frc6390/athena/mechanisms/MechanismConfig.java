@@ -17,6 +17,9 @@ import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotCoreHooks;
+import ca.frc6390.athena.core.hooks.LifecycleHooksSectionBase;
+import ca.frc6390.athena.core.input.TypedInputRegistration;
+import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.encoder.EncoderRegistry;
@@ -68,89 +71,89 @@ public class MechanismConfig<T extends Mechanism> {
      */
     private boolean autoContinuousPidForUnboundedTurret;
     /** Factory used to instantiate the final mechanism once configuration is complete. */
-    public Function<MechanismConfig<T>, T> factory = null;
+    private Function<MechanismConfig<T>, T> factory = null;
     /** Optional per-state callbacks that run when the mechanism state machine enters the state. */
-    public Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
+    private final Map<Enum<?>, Function<T, Boolean>> stateActions = new HashMap<>();
     /** Optional hooks that run once when entering a state. */
-    public Map<Enum<?>, List<MechanismBinding<T, ?>>> enterStateHooks = new HashMap<>();
+    private final Map<Enum<?>, List<MechanismBinding<T, ?>>> enterStateHooks = new HashMap<>();
     /** Optional state hooks that run every loop while a state is active. */
-    public Map<Enum<?>, List<MechanismBinding<T, ?>>> stateHooks = new HashMap<>();
+    private final Map<Enum<?>, List<MechanismBinding<T, ?>>> stateHooks = new HashMap<>();
     /** Optional hooks that run once when leaving a state. */
-    public Map<Enum<?>, List<MechanismBinding<T, ?>>> exitStateHooks = new HashMap<>();
+    private final Map<Enum<?>, List<MechanismBinding<T, ?>>> exitStateHooks = new HashMap<>();
     /** Optional hooks that run once for specific state transitions (from -> to). */
-    public List<TransitionHookBinding<T>> transitionHooks = new ArrayList<>();
+    private final List<TransitionHookBinding<T>> transitionHooks = new ArrayList<>();
     /** Optional hooks that run once whenever any state is exited. */
-    public List<MechanismBinding<T, ?>> exitAlwaysHooks = new ArrayList<>();
+    private final List<MechanismBinding<T, ?>> exitAlwaysHooks = new ArrayList<>();
     /** Optional hooks that run every loop regardless of the active state. */
-    public List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
+    private final List<MechanismBinding<T, ?>> alwaysHooks = new ArrayList<>();
     /** Optional hooks that run once during robot init after all mechanisms are registered. */
-    public List<MechanismBinding<T, ?>> initBindings = new ArrayList<>();
+    private final List<MechanismBinding<T, ?>> initBindings = new ArrayList<>();
     /** Optional lifecycle hooks keyed by robot phase (RobotCore parity). */
-    public Map<RobotCoreHooks.Phase, List<LifecycleHookBinding<T>>> lifecycleBindings = new HashMap<>();
+    private final Map<RobotCoreHooks.Phase, List<LifecycleHookBinding<T>>> lifecycleBindings = new HashMap<>();
     /** Optional hooks that run whenever a robot mode exits (before mode-specific exit hooks). */
-    public List<LifecycleHookBinding<T>> lifecycleExitBindings = new ArrayList<>();
+    private final List<LifecycleHookBinding<T>> lifecycleExitBindings = new ArrayList<>();
     /** Optional state triggers that can enqueue states when a predicate becomes true. */
-    public List<StateTriggerBinding<T>> stateTriggerBindings = new ArrayList<>();
+    private final List<StateTriggerBinding<T>> stateTriggerBindings = new ArrayList<>();
     /** Optional hooks that run every periodic loop. */
-    public List<Consumer<T>> periodicHooks = new ArrayList<>();
+    private final List<Consumer<T>> periodicHooks = new ArrayList<>();
     /** Optional hooks that run on a fixed cadence rather than every loop. */
-    public List<PeriodicHookBinding<T>> periodicHookBindings = new ArrayList<>();
+    private final List<PeriodicHookBinding<T>> periodicHookBindings = new ArrayList<>();
     /** Optional custom control loops that return output contributions. */
-    public List<ControlLoopBinding<T>> controlLoops = new ArrayList<>();
+    private final List<ControlLoopBinding<T>> controlLoops = new ArrayList<>();
     /** Optional named PID profiles for control-loop usage. */
-    public Map<String, PidProfile> controlLoopPidProfiles = new HashMap<>();
+    private final Map<String, PidProfile> controlLoopPidProfiles = new HashMap<>();
     /** Optional named bang-bang profiles for control-loop usage. */
-    public Map<String, BangBangProfile> controlLoopBangBangProfiles = new HashMap<>();
+    private final Map<String, BangBangProfile> controlLoopBangBangProfiles = new HashMap<>();
     /** Optional named simple-motor feedforward profiles for control-loop usage. */
-    public Map<String, FeedforwardProfile> controlLoopFeedforwardProfiles = new HashMap<>();
+    private final Map<String, FeedforwardProfile> controlLoopFeedforwardProfiles = new HashMap<>();
     /** Optional named arm feedforward profiles for control-loop usage. */
-    public Map<String, ArmFeedforwardProfile> armFeedforwardProfiles = new HashMap<>();
+    private final Map<String, ArmFeedforwardProfile> armFeedforwardProfiles = new HashMap<>();
     /** Optional named elevator feedforward profiles for control-loop usage. */
-    public Map<String, ElevatorFeedforwardProfile> elevatorFeedforwardProfiles = new HashMap<>();
+    private final Map<String, ElevatorFeedforwardProfile> elevatorFeedforwardProfiles = new HashMap<>();
     /** Optional boolean inputs exposed to state hooks. */
-    public Map<String, BooleanSupplier> inputs = new HashMap<>();
+    private final Map<String, BooleanSupplier> inputs = new HashMap<>();
     /** Optional mutable boolean inputs (defaults) that other systems can set at runtime. */
-    public Map<String, Boolean> mutableBoolInputDefaults = new HashMap<>();
+    private final Map<String, Boolean> mutableBoolInputDefaults = new HashMap<>();
     /** Optional double inputs exposed to state hooks. */
-    public Map<String, DoubleSupplier> doubleInputs = new HashMap<>();
+    private final Map<String, DoubleSupplier> doubleInputs = new HashMap<>();
     /** Optional mutable double inputs (defaults) that other systems can set at runtime. */
-    public Map<String, Double> mutableDoubleInputDefaults = new HashMap<>();
+    private final Map<String, Double> mutableDoubleInputDefaults = new HashMap<>();
     /** Optional int inputs exposed to hooks/loops. */
-    public Map<String, IntSupplier> intInputs = new HashMap<>();
+    private final Map<String, IntSupplier> intInputs = new HashMap<>();
     /** Optional mutable int inputs (defaults) that other systems can set at runtime. */
-    public Map<String, Integer> mutableIntInputDefaults = new HashMap<>();
+    private final Map<String, Integer> mutableIntInputDefaults = new HashMap<>();
     /** Optional string inputs exposed to hooks/loops. */
-    public Map<String, Supplier<String>> stringInputs = new HashMap<>();
+    private final Map<String, Supplier<String>> stringInputs = new HashMap<>();
     /** Optional mutable string inputs (defaults) that other systems can set at runtime. */
-    public Map<String, String> mutableStringInputDefaults = new HashMap<>();
+    private final Map<String, String> mutableStringInputDefaults = new HashMap<>();
     /** Optional Pose2d inputs exposed to hooks/loops. */
-    public Map<String, Supplier<Pose2d>> pose2dInputs = new HashMap<>();
+    private final Map<String, Supplier<Pose2d>> pose2dInputs = new HashMap<>();
     /** Optional mutable Pose2d inputs (defaults) that other systems can set at runtime. */
-    public Map<String, Pose2d> mutablePose2dInputDefaults = new HashMap<>();
+    private final Map<String, Pose2d> mutablePose2dInputDefaults = new HashMap<>();
     /** Optional Pose3d inputs exposed to hooks/loops. */
-    public Map<String, Supplier<Pose3d>> pose3dInputs = new HashMap<>();
+    private final Map<String, Supplier<Pose3d>> pose3dInputs = new HashMap<>();
     /** Optional mutable Pose3d inputs (defaults) that other systems can set at runtime. */
-    public Map<String, Pose3d> mutablePose3dInputDefaults = new HashMap<>();
+    private final Map<String, Pose3d> mutablePose3dInputDefaults = new HashMap<>();
     /** Optional object inputs exposed to state hooks. */
-    public Map<String, Supplier<?>> objectInputs = new HashMap<>();
+    private final Map<String, Supplier<?>> objectInputs = new HashMap<>();
     /** Optional transition graph that defines required intermediate states and guards. */
-    public StateGraph<?> stateGraph = null;
+    private StateGraph<?> stateGraph = null;
     /** Simulation model description used when running in simulation environments. */
-    public MechanismSimulationConfig simulationConfig = null;
+    private MechanismSimulationConfig simulationConfig = null;
     /** Cached elevator-specific simulation hints provided through {@link #setSimulationElevator}. */
-    public ElevatorSimulationParameters elevatorSimulationParameters = null;
+    private ElevatorSimulationParameters elevatorSimulationParameters = null;
     /** Cached arm-specific simulation hints provided through {@link #setSimulationArm}. */
-    public ArmSimulationParameters armSimulationParameters = null;
+    private ArmSimulationParameters armSimulationParameters = null;
     /** Cached simple-motor simulation hints provided through {@link #setSimulationSimpleMotor}. */
-    public SimpleMotorSimulationParameters simpleMotorSimulationParameters = null;
+    private SimpleMotorSimulationParameters simpleMotorSimulationParameters = null;
     /** Optional visualization metadata consumed by the mechanism visualizer. */
-    public ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig visualizationConfig = null;
+    private MechanismVisualizationConfig visualizationConfig = null;
     /** Optional field-heading visualization config for turret mechanisms. */
-    public Supplier<TurretMechanism.FieldHeadingVisualization> turretHeadingVisualization = null;
+    private Supplier<TurretMechanism.FieldHeadingVisualization> turretHeadingVisualization = null;
     /** Optional sensor simulation configuration used to generate virtual readings. */
-    public MechanismSensorSimulationConfig sensorSimulationConfig = null;
-    public boolean shouldCustomEncoder = false;
-    public DoubleSupplier customEncoderPos;
+    private MechanismSensorSimulationConfig sensorSimulationConfig = null;
+    private boolean shouldCustomEncoder = false;
+    private DoubleSupplier customEncoderPos;
     /**
      * Loads a JSON/TOML deploy-file mechanism config into this builder and applies it using
      * {@link MechanismConfigApplier}. This is intended for teams to keep hardware/constants in deploy
@@ -302,32 +305,36 @@ public class MechanismConfig<T extends Mechanism> {
         public EncoderSection<T> fromMotor(int motorId) {
             int abs = Math.abs(motorId);
             MotorControllerConfig motor = owner.data.motors().stream()
-                    .filter(cfg -> cfg != null && cfg.id == abs)
+                    .filter(cfg -> cfg != null && cfg.id() == abs)
                     .findFirst()
                     .orElseThrow(() -> new IllegalStateException("No motor controller configured with ID " + abs));
 
-            ca.frc6390.athena.hardware.encoder.EncoderConfig encoderCfg = motor.encoderConfig;
+            ca.frc6390.athena.hardware.encoder.EncoderConfig encoderCfg = motor.encoderConfig();
             if (encoderCfg == null) {
-                encoderCfg = new ca.frc6390.athena.hardware.encoder.EncoderConfig()
-                        .setType(resolveIntegratedEncoderType(motor.type))
-                        .setId(motor.id)
-                        .setCanbus(motor.canbus);
-                motor.encoderConfig = encoderCfg;
-            } else if (encoderCfg.type == null) {
-                ca.frc6390.athena.hardware.encoder.EncoderConfig resolved = new ca.frc6390.athena.hardware.encoder.EncoderConfig()
-                        .setType(resolveIntegratedEncoderType(motor.type))
-                        .setId(encoderCfg.id != 0 ? encoderCfg.id : motor.id)
-                        .setCanbus(encoderCfg.canbus != null ? encoderCfg.canbus : motor.canbus)
-                        .setGearRatio(encoderCfg.gearRatio)
-                        .setConversion(encoderCfg.conversion)
-                        .setConversionOffset(encoderCfg.conversionOffset)
-                        .setOffset(encoderCfg.offset)
-                        .setDiscontinuity(encoderCfg.discontinuityPoint, encoderCfg.discontinuityRange)
-                        .setInverted(encoderCfg.inverted);
+                encoderCfg = ca.frc6390.athena.hardware.encoder.EncoderConfig.create()
+                        .hardware(h -> h
+                                .type(resolveIntegratedEncoderType(motor.type()))
+                                .id(motor.id())
+                                .canbus(motor.canbus()));
+                motor.encoder().config(encoderCfg);
+            } else if (encoderCfg.type() == null) {
+                ca.frc6390.athena.hardware.encoder.EncoderConfig existing = encoderCfg;
+                ca.frc6390.athena.hardware.encoder.EncoderConfig resolved = ca.frc6390.athena.hardware.encoder.EncoderConfig.create()
+                        .hardware(h -> h
+                                .type(resolveIntegratedEncoderType(motor.type()))
+                                .id(existing.id() != 0 ? existing.id() : motor.id())
+                                .canbus(existing.canbus() != null ? existing.canbus() : motor.canbus())
+                                .inverted(existing.inverted()))
+                        .measurement(m -> m
+                                .gearRatio(existing.gearRatio())
+                                .conversion(existing.conversion())
+                                .conversionOffset(existing.conversionOffset())
+                                .offset(existing.offset())
+                                .discontinuity(existing.discontinuityPoint(), existing.discontinuityRange()));
                 encoderCfg = resolved;
-                motor.encoderConfig = encoderCfg;
+                motor.encoder().config(encoderCfg);
             }
-            encoderCfg.setInverted(motorId < 0);
+            encoderCfg.hardware().inverted(motorId < 0);
             final ca.frc6390.athena.hardware.encoder.EncoderConfig finalEncoderCfg = encoderCfg;
             owner.updateData(builder -> builder.encoder(finalEncoderCfg));
             return this;
@@ -502,7 +509,7 @@ public class MechanismConfig<T extends Mechanism> {
             if (owner.mutableBoolInputDefaults.containsKey(k)) {
                 throw new IllegalArgumentException("mutable bool input already registered: " + k);
             }
-            owner.inputs.put(k, supplier);
+            TypedInputRegistration.put(owner.inputs, k, supplier);
             return this;
         }
 
@@ -531,7 +538,7 @@ public class MechanismConfig<T extends Mechanism> {
             if (owner.mutableDoubleInputDefaults.containsKey(k)) {
                 throw new IllegalArgumentException("mutable double input already registered: " + k);
             }
-            owner.doubleInputs.put(k, supplier);
+            TypedInputRegistration.put(owner.doubleInputs, k, supplier);
             return this;
         }
 
@@ -556,7 +563,7 @@ public class MechanismConfig<T extends Mechanism> {
             if (owner.mutableIntInputDefaults.containsKey(k)) {
                 throw new IllegalArgumentException("mutable int input already registered: " + k);
             }
-            owner.intInputs.put(k, supplier);
+            TypedInputRegistration.put(owner.intInputs, k, supplier);
             return this;
         }
 
@@ -581,7 +588,7 @@ public class MechanismConfig<T extends Mechanism> {
             if (owner.mutableStringInputDefaults.containsKey(k)) {
                 throw new IllegalArgumentException("mutable string input already registered: " + k);
             }
-            owner.stringInputs.put(k, supplier);
+            TypedInputRegistration.put(owner.stringInputs, k, supplier);
             return this;
         }
 
@@ -607,7 +614,7 @@ public class MechanismConfig<T extends Mechanism> {
             if (owner.mutablePose2dInputDefaults.containsKey(k)) {
                 throw new IllegalArgumentException("mutable Pose2d input already registered: " + k);
             }
-            owner.pose2dInputs.put(k, supplier);
+            TypedInputRegistration.put(owner.pose2dInputs, k, supplier);
             return this;
         }
 
@@ -633,7 +640,7 @@ public class MechanismConfig<T extends Mechanism> {
             if (owner.mutablePose3dInputDefaults.containsKey(k)) {
                 throw new IllegalArgumentException("mutable Pose3d input already registered: " + k);
             }
-            owner.pose3dInputs.put(k, supplier);
+            TypedInputRegistration.put(owner.pose3dInputs, k, supplier);
             return this;
         }
 
@@ -651,7 +658,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         public InputsSection<T> objVal(String key, Supplier<?> supplier) {
-            owner.objectInputs.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(supplier, "supplier"));
+            TypedInputRegistration.put(owner.objectInputs, key, supplier);
             return this;
         }
     }
@@ -1168,11 +1175,27 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
-    public static final class HooksSection<T extends Mechanism> {
+    public static final class HooksSection<T extends Mechanism>
+            extends LifecycleHooksSectionBase<HooksSection<T>, MechanismBinding<T, ?>, Enum<?>> {
         private final MechanismConfig<T> owner;
 
         private HooksSection(MechanismConfig<T> owner) {
             this.owner = owner;
+        }
+
+        @Override
+        protected HooksSection<T> self() {
+            return this;
+        }
+
+        @Override
+        protected void addPhaseBinding(RobotCoreHooks.Phase phase, MechanismBinding<T, ?> binding, List<Enum<?>> states) {
+            owner.addLifecycleBinding(phase, binding, states);
+        }
+
+        @Override
+        protected void addPhaseExitBinding(MechanismBinding<T, ?> binding, List<Enum<?>> states) {
+            owner.addLifecycleExitBinding(binding, states);
         }
 
         @SafeVarargs
@@ -1263,102 +1286,9 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        private HooksSection<T> onPhase(RobotCoreHooks.Phase phase, MechanismBinding<T, ?> binding, Enum<?>... states) {
-            owner.addLifecycleBinding(phase, binding, states);
-            return this;
-        }
-
-        private HooksSection<T> onPhaseExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            owner.addLifecycleExitBinding(binding, states);
-            return this;
-        }
-
-        public HooksSection<T> onInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.ROBOT_INIT, binding, states);
-        }
-
         public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onInit(MechanismBinding<T, E> binding) {
-            return onPhase(RobotCoreHooks.Phase.ROBOT_INIT, (MechanismBinding<T, ?>) binding);
-        }
-
-        public HooksSection<T> onPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.ROBOT_PERIODIC, binding, states);
-        }
-
-        public HooksSection<T> onExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhaseExit(binding, states);
-        }
-
-        public HooksSection<T> onDisabledInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.DISABLED_INIT, binding, states);
-        }
-
-        public HooksSection<T> onDisabledPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.DISABLED_PERIODIC, binding, states);
-        }
-
-        public HooksSection<T> onDisabledExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.DISABLED_EXIT, binding, states);
-        }
-
-        public HooksSection<T> onTeleopInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.TELEOP_INIT, binding, states);
-        }
-
-        public HooksSection<T> onTeleInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onTeleopInit(binding, states);
-        }
-
-        public HooksSection<T> onTeleopPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.TELEOP_PERIODIC, binding, states);
-        }
-
-        public HooksSection<T> onTelePeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onTeleopPeriodic(binding, states);
-        }
-
-        public HooksSection<T> onTeleopExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.TELEOP_EXIT, binding, states);
-        }
-
-        public HooksSection<T> onTeleExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onTeleopExit(binding, states);
-        }
-
-        public HooksSection<T> onAutonomousInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_INIT, binding, states);
-        }
-
-        public HooksSection<T> onAutoInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onAutonomousInit(binding, states);
-        }
-
-        public HooksSection<T> onAutonomousPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_PERIODIC, binding, states);
-        }
-
-        public HooksSection<T> onAutoPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onAutonomousPeriodic(binding, states);
-        }
-
-        public HooksSection<T> onAutonomousExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.AUTONOMOUS_EXIT, binding, states);
-        }
-
-        public HooksSection<T> onAutoExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onAutonomousExit(binding, states);
-        }
-
-        public HooksSection<T> onTestInit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.TEST_INIT, binding, states);
-        }
-
-        public HooksSection<T> onTestPeriodic(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.TEST_PERIODIC, binding, states);
-        }
-
-        public HooksSection<T> onTestExit(MechanismBinding<T, ?> binding, Enum<?>... states) {
-            return onPhase(RobotCoreHooks.Phase.TEST_EXIT, binding, states);
+            owner.addLifecycleBinding(RobotCoreHooks.Phase.ROBOT_INIT, (MechanismBinding<T, ?>) binding, List.of());
+            return this;
         }
 
         public HooksSection<T> onRobotPeriodic(Consumer<T> hook, double periodMs) {
@@ -1429,24 +1359,24 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
-    private void addLifecycleBinding(RobotCoreHooks.Phase phase, MechanismBinding<T, ?> binding, Enum<?>... states) {
+    private void addLifecycleBinding(RobotCoreHooks.Phase phase, MechanismBinding<T, ?> binding, List<Enum<?>> states) {
         Objects.requireNonNull(phase, "phase");
         Objects.requireNonNull(binding, "binding");
         lifecycleBindings
                 .computeIfAbsent(phase, unused -> new ArrayList<>())
-                .add(new LifecycleHookBinding<>(binding, copyStates(states)));
+                .add(new LifecycleHookBinding<>(binding, sanitizeStates(states)));
     }
 
-    private void addLifecycleExitBinding(MechanismBinding<T, ?> binding, Enum<?>... states) {
+    private void addLifecycleExitBinding(MechanismBinding<T, ?> binding, List<Enum<?>> states) {
         Objects.requireNonNull(binding, "binding");
-        lifecycleExitBindings.add(new LifecycleHookBinding<>(binding, copyStates(states)));
+        lifecycleExitBindings.add(new LifecycleHookBinding<>(binding, sanitizeStates(states)));
     }
 
-    private static List<Enum<?>> copyStates(Enum<?>... states) {
-        if (states == null || states.length == 0) {
+    private static List<Enum<?>> sanitizeStates(List<Enum<?>> states) {
+        if (states == null || states.isEmpty()) {
             return List.of();
         }
-        List<Enum<?>> copied = new ArrayList<>(states.length);
+        List<Enum<?>> copied = new ArrayList<>(states.size());
         for (Enum<?> state : states) {
             if (state != null) {
                 copied.add(state);
@@ -1539,6 +1469,7 @@ public class MechanismConfig<T extends Mechanism> {
         private final T mechanism;
         private final E state;
         private final double baseSetpoint;
+        private final TypedInputResolver inputsView;
 
         @SuppressWarnings("unchecked")
         private LifecycleMechanismContext(T mechanism, Enum<?> activeState) {
@@ -1554,6 +1485,77 @@ public class MechanismConfig<T extends Mechanism> {
             }
             this.state = resolvedState;
             this.baseSetpoint = resolvedState != null ? resolvedState.getSetpoint() : mechanism.getSetpoint();
+            this.inputsView = new TypedInputResolver(
+                    "LifecycleMechanismContext",
+                    TypedInputResolver.ValueMode.STRICT,
+                    new TypedInputResolver.MutableInputs() {
+                        @Override
+                        public boolean hasBool(String key) {
+                            return LifecycleMechanismContext.this.mechanism.hasMutableBoolValKey(key);
+                        }
+
+                        @Override
+                        public boolean bool(String key) {
+                            return LifecycleMechanismContext.this.mechanism.mutableBoolVal(key);
+                        }
+
+                        @Override
+                        public boolean hasDouble(String key) {
+                            return LifecycleMechanismContext.this.mechanism.hasMutableDblValKey(key);
+                        }
+
+                        @Override
+                        public double dbl(String key) {
+                            return LifecycleMechanismContext.this.mechanism.mutableDblVal(key);
+                        }
+
+                        @Override
+                        public boolean hasInt(String key) {
+                            return LifecycleMechanismContext.this.mechanism.hasMutableIntValKey(key);
+                        }
+
+                        @Override
+                        public int intVal(String key) {
+                            return LifecycleMechanismContext.this.mechanism.mutableIntVal(key);
+                        }
+
+                        @Override
+                        public boolean hasString(String key) {
+                            return LifecycleMechanismContext.this.mechanism.hasMutableStrValKey(key);
+                        }
+
+                        @Override
+                        public String str(String key) {
+                            return LifecycleMechanismContext.this.mechanism.mutableStrVal(key);
+                        }
+
+                        @Override
+                        public boolean hasPose2d(String key) {
+                            return LifecycleMechanismContext.this.mechanism.hasMutablePose2dValKey(key);
+                        }
+
+                        @Override
+                        public Pose2d pose2d(String key) {
+                            return LifecycleMechanismContext.this.mechanism.mutablePose2dVal(key);
+                        }
+
+                        @Override
+                        public boolean hasPose3d(String key) {
+                            return LifecycleMechanismContext.this.mechanism.hasMutablePose3dValKey(key);
+                        }
+
+                        @Override
+                        public Pose3d pose3d(String key) {
+                            return LifecycleMechanismContext.this.mechanism.mutablePose3dVal(key);
+                        }
+                    },
+                    inputs,
+                    doubleInputs,
+                    intInputs,
+                    stringInputs,
+                    pose2dInputs,
+                    pose3dInputs,
+                    objectInputs);
         }
 
         @Override
@@ -1573,171 +1575,72 @@ public class MechanismConfig<T extends Mechanism> {
 
         @Override
         public boolean input(String key) {
-            if (mechanism.hasMutableBoolValKey(key)) {
-                return mechanism.mutableBoolVal(key);
-            }
-            BooleanSupplier supplier = inputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No bool input found for key " + key);
-            }
-            return supplier.getAsBoolean();
+            return inputsView.boolVal(key);
         }
 
         @Override
         public BooleanSupplier inputSupplier(String key) {
-            if (mechanism.hasMutableBoolValKey(key)) {
-                return () -> mechanism.mutableBoolVal(key);
-            }
-            BooleanSupplier supplier = inputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No input found for key " + key);
-            }
-            return supplier;
+            return inputsView.boolSupplier(key);
         }
 
         @Override
         public double doubleInput(String key) {
-            if (mechanism.hasMutableDblValKey(key)) {
-                return mechanism.mutableDblVal(key);
-            }
-            DoubleSupplier supplier = doubleInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No double input found for key " + key);
-            }
-            return supplier.getAsDouble();
+            return inputsView.doubleVal(key);
         }
 
         @Override
         public DoubleSupplier doubleInputSupplier(String key) {
-            if (mechanism.hasMutableDblValKey(key)) {
-                return () -> mechanism.mutableDblVal(key);
-            }
-            DoubleSupplier supplier = doubleInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No double input found for key " + key);
-            }
-            return supplier;
+            return inputsView.doubleSupplier(key);
         }
 
         @Override
         public int intVal(String key) {
-            if (mechanism.hasMutableIntValKey(key)) {
-                return mechanism.mutableIntVal(key);
-            }
-            IntSupplier supplier = intInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No int input found for key " + key);
-            }
-            return supplier.getAsInt();
+            return inputsView.intVal(key);
         }
 
         @Override
         public IntSupplier intValSupplier(String key) {
-            if (mechanism.hasMutableIntValKey(key)) {
-                return () -> mechanism.mutableIntVal(key);
-            }
-            IntSupplier supplier = intInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No int input found for key " + key);
-            }
-            return supplier;
+            return inputsView.intSupplier(key);
         }
 
         @Override
         public String stringVal(String key) {
-            if (mechanism.hasMutableStrValKey(key)) {
-                return mechanism.mutableStrVal(key);
-            }
-            Supplier<String> supplier = stringInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No string input found for key " + key);
-            }
-            return supplier.get();
+            return inputsView.stringVal(key);
         }
 
         @Override
         public Supplier<String> stringValSupplier(String key) {
-            if (mechanism.hasMutableStrValKey(key)) {
-                return () -> mechanism.mutableStrVal(key);
-            }
-            Supplier<String> supplier = stringInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No string input found for key " + key);
-            }
-            return supplier;
+            return inputsView.stringSupplier(key);
         }
 
         @Override
         public Pose2d pose2dVal(String key) {
-            if (mechanism.hasMutablePose2dValKey(key)) {
-                return mechanism.mutablePose2dVal(key);
-            }
-            Supplier<Pose2d> supplier = pose2dInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No Pose2d input found for key " + key);
-            }
-            return supplier.get();
+            return inputsView.pose2dVal(key);
         }
 
         @Override
         public Supplier<Pose2d> pose2dValSupplier(String key) {
-            if (mechanism.hasMutablePose2dValKey(key)) {
-                return () -> mechanism.mutablePose2dVal(key);
-            }
-            Supplier<Pose2d> supplier = pose2dInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No Pose2d input found for key " + key);
-            }
-            return supplier;
+            return inputsView.pose2dSupplier(key);
         }
 
         @Override
         public Pose3d pose3dVal(String key) {
-            if (mechanism.hasMutablePose3dValKey(key)) {
-                return mechanism.mutablePose3dVal(key);
-            }
-            Supplier<Pose3d> supplier = pose3dInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No Pose3d input found for key " + key);
-            }
-            return supplier.get();
+            return inputsView.pose3dVal(key);
         }
 
         @Override
         public Supplier<Pose3d> pose3dValSupplier(String key) {
-            if (mechanism.hasMutablePose3dValKey(key)) {
-                return () -> mechanism.mutablePose3dVal(key);
-            }
-            Supplier<Pose3d> supplier = pose3dInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No Pose3d input found for key " + key);
-            }
-            return supplier;
+            return inputsView.pose3dSupplier(key);
         }
 
         @Override
         public <V> V objectInput(String key, Class<V> type) {
-            Supplier<?> supplier = objectInputs.get(key);
-            if (supplier == null) {
-                return null;
-            }
-            Object value = supplier.get();
-            if (value == null) {
-                return null;
-            }
-            if (!type.isInstance(value)) {
-                throw new IllegalArgumentException("Input '" + key + "' is not of type " + type.getSimpleName());
-            }
-            return type.cast(value);
+            return inputsView.objectVal(key, type);
         }
 
         @Override
         public <V> Supplier<V> objectInputSupplier(String key, Class<V> type) {
-            Supplier<?> supplier = objectInputs.get(key);
-            if (supplier == null) {
-                throw new IllegalArgumentException("No object input found for key " + key);
-            }
-            return () -> objectInput(key, type);
+            return inputsView.objectSupplier(key, type);
         }
     }
 
@@ -1746,7 +1649,7 @@ public class MechanismConfig<T extends Mechanism> {
         return data;
     }
 
-    public MechanismConfig<T> setData(MechanismConfigRecord data) {
+    public MechanismConfig<T> data(MechanismConfigRecord data) {
         this.data = data != null ? data : MechanismConfigRecord.defaults();
         return this;
     }
@@ -1763,6 +1666,154 @@ public class MechanismConfig<T extends Mechanism> {
 
     public String name() {
         return mechanismName;
+    }
+
+    public Map<Enum<?>, Function<T, Boolean>> stateActions() {
+        return Map.copyOf(stateActions);
+    }
+
+    public Map<Enum<?>, List<MechanismBinding<T, ?>>> enterStateHooks() {
+        return immutableMapOfLists(enterStateHooks);
+    }
+
+    public Map<Enum<?>, List<MechanismBinding<T, ?>>> stateHooks() {
+        return immutableMapOfLists(stateHooks);
+    }
+
+    public Map<Enum<?>, List<MechanismBinding<T, ?>>> exitStateHooks() {
+        return immutableMapOfLists(exitStateHooks);
+    }
+
+    public List<TransitionHookBinding<T>> transitionHooks() {
+        return List.copyOf(transitionHooks);
+    }
+
+    public List<MechanismBinding<T, ?>> alwaysHooks() {
+        return List.copyOf(alwaysHooks);
+    }
+
+    public List<MechanismBinding<T, ?>> exitAlwaysHooks() {
+        return List.copyOf(exitAlwaysHooks);
+    }
+
+    public List<StateTriggerBinding<T>> stateTriggerBindings() {
+        return List.copyOf(stateTriggerBindings);
+    }
+
+    public Map<String, BooleanSupplier> inputs() {
+        return Map.copyOf(inputs);
+    }
+
+    public Map<String, DoubleSupplier> doubleInputs() {
+        return Map.copyOf(doubleInputs);
+    }
+
+    public Map<String, IntSupplier> intInputs() {
+        return Map.copyOf(intInputs);
+    }
+
+    public Map<String, Supplier<String>> stringInputs() {
+        return Map.copyOf(stringInputs);
+    }
+
+    public Map<String, Supplier<Pose2d>> pose2dInputs() {
+        return Map.copyOf(pose2dInputs);
+    }
+
+    public Map<String, Supplier<Pose3d>> pose3dInputs() {
+        return Map.copyOf(pose3dInputs);
+    }
+
+    public Map<String, Supplier<?>> objectInputs() {
+        return Map.copyOf(objectInputs);
+    }
+
+    public MechanismSimulationConfig simulationConfig() {
+        return simulationConfig;
+    }
+
+    public ElevatorSimulationParameters elevatorSimulationParameters() {
+        return elevatorSimulationParameters;
+    }
+
+    public ArmSimulationParameters armSimulationParameters() {
+        return armSimulationParameters;
+    }
+
+    public SimpleMotorSimulationParameters simpleMotorSimulationParameters() {
+        return simpleMotorSimulationParameters;
+    }
+
+    public Supplier<TurretMechanism.FieldHeadingVisualization> turretHeadingVisualization() {
+        return turretHeadingVisualization;
+    }
+
+    public MechanismSensorSimulationConfig sensorSimulationConfig() {
+        return sensorSimulationConfig;
+    }
+
+    public List<Consumer<T>> periodicHooks() {
+        return List.copyOf(periodicHooks);
+    }
+
+    public List<PeriodicHookBinding<T>> periodicHookBindings() {
+        return List.copyOf(periodicHookBindings);
+    }
+
+    public boolean usesCustomEncoder() {
+        return shouldCustomEncoder;
+    }
+
+    public DoubleSupplier customEncoderPositionSupplier() {
+        return customEncoderPos;
+    }
+
+    public Map<String, Boolean> mutableBoolInputDefaults() {
+        return Map.copyOf(mutableBoolInputDefaults);
+    }
+
+    public Map<String, Double> mutableDoubleInputDefaults() {
+        return Map.copyOf(mutableDoubleInputDefaults);
+    }
+
+    public Map<String, Integer> mutableIntInputDefaults() {
+        return Map.copyOf(mutableIntInputDefaults);
+    }
+
+    public Map<String, String> mutableStringInputDefaults() {
+        return Map.copyOf(mutableStringInputDefaults);
+    }
+
+    public Map<String, Pose2d> mutablePose2dInputDefaults() {
+        return Map.copyOf(mutablePose2dInputDefaults);
+    }
+
+    public Map<String, Pose3d> mutablePose3dInputDefaults() {
+        return Map.copyOf(mutablePose3dInputDefaults);
+    }
+
+    public Map<String, PidProfile> controlLoopPidProfiles() {
+        return Map.copyOf(controlLoopPidProfiles);
+    }
+
+    public Map<String, BangBangProfile> controlLoopBangBangProfiles() {
+        return Map.copyOf(controlLoopBangBangProfiles);
+    }
+
+    public Map<String, FeedforwardProfile> controlLoopFeedforwardProfiles() {
+        return Map.copyOf(controlLoopFeedforwardProfiles);
+    }
+
+    public List<ControlLoopBinding<T>> controlLoops() {
+        return List.copyOf(controlLoops);
+    }
+
+    private static <K, V> Map<K, List<V>> immutableMapOfLists(Map<K, List<V>> source) {
+        Map<K, List<V>> copy = new HashMap<>();
+        for (Map.Entry<K, List<V>> entry : source.entrySet()) {
+            copy.put(entry.getKey(), List.copyOf(entry.getValue()));
+        }
+        return Map.copyOf(copy);
     }
 
     private void updateData(Consumer<MechanismConfigRecord.Builder> mutator) {
@@ -2105,7 +2156,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @param delay minimum delay (seconds) between transitions
      * @return this config for chaining
      */
-    public MechanismConfig<T> setStateMachineDelay(double delay){
+    public MechanismConfig<T> stateMachineDelay(double delay){
         updateData(builder -> builder.stateMachineDelay(delay));
         return this;
     }
@@ -2141,7 +2192,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @return this config for chaining
      */
     @SuppressWarnings("unchecked")
-    public <E extends Enum<E>> MechanismConfig<T> setStateGraph(StateGraph<E> stateGraph){
+    public <E extends Enum<E>> MechanismConfig<T> stateGraph(StateGraph<E> stateGraph){
         this.stateGraph = Objects.requireNonNull(stateGraph, "stateGraph");
         return this;
     }
@@ -2256,7 +2307,11 @@ public class MechanismConfig<T extends Mechanism> {
      * @param visualizationConfig visualization metadata describing nodes and hierarchy
      * @return this config for chaining
      */
-    public MechanismConfig<T> setVisualizationConfig(MechanismVisualizationConfig visualizationConfig) {
+    public MechanismVisualizationConfig visualizationConfig() {
+        return visualizationConfig;
+    }
+
+    public MechanismConfig<T> visualizationConfig(MechanismVisualizationConfig visualizationConfig) {
         this.visualizationConfig = Objects.requireNonNull(visualizationConfig);
         return this;
     }
@@ -2264,7 +2319,7 @@ public class MechanismConfig<T extends Mechanism> {
     /**
      * Supplies a field-heading visualization for turret mechanisms (Field2d line for AdvantageScope).
      */
-    public MechanismConfig<T> setTurretHeadingVisualization(Supplier<TurretMechanism.FieldHeadingVisualization> supplier) {
+    public MechanismConfig<T> turretHeadingVisualization(Supplier<TurretMechanism.FieldHeadingVisualization> supplier) {
         this.turretHeadingVisualization = Objects.requireNonNull(supplier, "supplier");
         return this;
     }
@@ -2293,7 +2348,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param carriageMassKg mass in kg
          * @return this parameter builder for chaining
          */
-        public ElevatorSimulationParameters setCarriageMassKg(double carriageMassKg) {
+        public ElevatorSimulationParameters carriageMassKg(double carriageMassKg) {
             this.carriageMassKg = carriageMassKg;
             return this;
         }
@@ -2304,7 +2359,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param drumRadiusMeters radius in meters
          * @return this parameter builder for chaining
          */
-        public ElevatorSimulationParameters setDrumRadiusMeters(double drumRadiusMeters) {
+        public ElevatorSimulationParameters drumRadiusMeters(double drumRadiusMeters) {
             this.drumRadiusMeters = drumRadiusMeters;
             return this;
         }
@@ -2316,7 +2371,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param maxHeightMeters upper bound of travel
          * @return this parameter builder for chaining
          */
-        public ElevatorSimulationParameters setRangeMeters(double minHeightMeters, double maxHeightMeters) {
+        public ElevatorSimulationParameters rangeMeters(double minHeightMeters, double maxHeightMeters) {
             this.minHeightMeters = minHeightMeters;
             this.maxHeightMeters = maxHeightMeters;
             return this;
@@ -2328,7 +2383,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param startingHeightMeters starting position in meters
          * @return this parameter builder for chaining
          */
-        public ElevatorSimulationParameters setStartingHeightMeters(double startingHeightMeters) {
+        public ElevatorSimulationParameters startingHeightMeters(double startingHeightMeters) {
             this.startingHeightMeters = startingHeightMeters;
             return this;
         }
@@ -2339,7 +2394,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param simulateGravity true to include gravity
          * @return this parameter builder for chaining
          */
-        public ElevatorSimulationParameters setSimulateGravity(boolean simulateGravity) {
+        public ElevatorSimulationParameters simulateGravity(boolean simulateGravity) {
             this.simulateGravity = simulateGravity;
             return this;
         }
@@ -2350,7 +2405,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param nominalVoltage voltage in volts
          * @return this parameter builder for chaining
          */
-        public ElevatorSimulationParameters setNominalVoltage(double nominalVoltage) {
+        public ElevatorSimulationParameters nominalVoltage(double nominalVoltage) {
             this.nominalVoltage = nominalVoltage;
             return this;
         }
@@ -2362,7 +2417,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param unitsPerMeter encoder units per meter of travel
          * @return this parameter builder for chaining
          */
-        public ElevatorSimulationParameters setUnitsPerMeter(double unitsPerMeter) {
+        public ElevatorSimulationParameters unitsPerMeter(double unitsPerMeter) {
             this.unitsPerMeterOverride = unitsPerMeter;
             return this;
         }
@@ -2394,7 +2449,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param motorReduction motor rotations per arm rotation
          * @return this parameter builder for chaining
          */
-        public ArmSimulationParameters setMotorReduction(double motorReduction) {
+        public ArmSimulationParameters motorReduction(double motorReduction) {
             this.motorReduction = motorReduction;
             return this;
         }
@@ -2405,7 +2460,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param momentOfInertia inertia in kg·m^2
          * @return this parameter builder for chaining
          */
-        public ArmSimulationParameters setMomentOfInertia(double momentOfInertia) {
+        public ArmSimulationParameters momentOfInertia(double momentOfInertia) {
             this.momentOfInertia = momentOfInertia;
             return this;
         }
@@ -2416,7 +2471,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param armLengthMeters arm length in meters
          * @return this parameter builder for chaining
          */
-        public ArmSimulationParameters setArmLengthMeters(double armLengthMeters) {
+        public ArmSimulationParameters armLengthMeters(double armLengthMeters) {
             this.armLengthMeters = armLengthMeters;
             return this;
         }
@@ -2428,7 +2483,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param maxAngleRadians upper bound of rotation
          * @return this parameter builder for chaining
          */
-        public ArmSimulationParameters setAngleRangeRadians(double minAngleRadians, double maxAngleRadians) {
+        public ArmSimulationParameters angleRangeRadians(double minAngleRadians, double maxAngleRadians) {
             this.minAngleRadians = minAngleRadians;
             this.maxAngleRadians = maxAngleRadians;
             return this;
@@ -2440,7 +2495,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param startingAngleRadians starting angle in radians
          * @return this parameter builder for chaining
          */
-        public ArmSimulationParameters setStartingAngleRadians(double startingAngleRadians) {
+        public ArmSimulationParameters startingAngleRadians(double startingAngleRadians) {
             this.startingAngleRadians = startingAngleRadians;
             return this;
         }
@@ -2451,7 +2506,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param simulateGravity true to include gravity
          * @return this parameter builder for chaining
          */
-        public ArmSimulationParameters setSimulateGravity(boolean simulateGravity) {
+        public ArmSimulationParameters simulateGravity(boolean simulateGravity) {
             this.simulateGravity = simulateGravity;
             return this;
         }
@@ -2462,7 +2517,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param nominalVoltage voltage in volts
          * @return this parameter builder for chaining
          */
-        public ArmSimulationParameters setNominalVoltage(double nominalVoltage) {
+        public ArmSimulationParameters nominalVoltage(double nominalVoltage) {
             this.nominalVoltage = nominalVoltage;
             return this;
         }
@@ -2474,7 +2529,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param unitsPerRadian encoder units per radian of arm rotation
          * @return this parameter builder for chaining
          */
-        public ArmSimulationParameters setUnitsPerRadian(double unitsPerRadian) {
+        public ArmSimulationParameters unitsPerRadian(double unitsPerRadian) {
             this.unitsPerRadianOverride = unitsPerRadian;
             return this;
         }
@@ -2494,7 +2549,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param momentOfInertia inertia in kg·m^2
          * @return this parameter builder for chaining
          */
-        public SimpleMotorSimulationParameters setMomentOfInertia(double momentOfInertia) {
+        public SimpleMotorSimulationParameters momentOfInertia(double momentOfInertia) {
             this.momentOfInertia = momentOfInertia;
             return this;
         }
@@ -2505,7 +2560,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param nominalVoltage voltage in volts
          * @return this parameter builder for chaining
          */
-        public SimpleMotorSimulationParameters setNominalVoltage(double nominalVoltage) {
+        public SimpleMotorSimulationParameters nominalVoltage(double nominalVoltage) {
             this.nominalVoltage = nominalVoltage;
             return this;
         }
@@ -2517,7 +2572,7 @@ public class MechanismConfig<T extends Mechanism> {
          * @param unitsPerRadian encoder units per radian of rotation
          * @return this parameter builder for chaining
          */
-        public SimpleMotorSimulationParameters setUnitsPerRadian(double unitsPerRadian) {
+        public SimpleMotorSimulationParameters unitsPerRadian(double unitsPerRadian) {
             this.unitsPerRadianOverride = unitsPerRadian;
             return this;
         }
@@ -2537,18 +2592,20 @@ public class MechanismConfig<T extends Mechanism> {
             data = cfg;
         }
         for (MotorControllerConfig motor : cfg.motors()) {
-            motor.setNeutralMode(cfg.motorNeutralMode())
-                    .setCurrentLimit(cfg.motorCurrentLimit())
-                    .setCanbus(cfg.canbus());
+            motor.hardware()
+                    .neutralMode(cfg.motorNeutralMode())
+                    .currentLimit(cfg.motorCurrentLimit())
+                    .canbus(cfg.canbus());
         }
 
         if (cfg.encoder() != null) {
-             cfg.encoder().setCanbus(cfg.canbus())
-                    .setConversion(cfg.encoderConversion())
-                    .setConversionOffset(cfg.encoderConversionOffset())
-                    .setGearRatio(cfg.encoderGearRatio())
-                    .setOffset(cfg.encoderOffset())
-                    .setDiscontinuity(cfg.encoderDiscontinuityPoint(), cfg.encoderDiscontinuityRange());
+             cfg.encoder().hardware().canbus(cfg.canbus());
+             cfg.encoder().measurement()
+                    .conversion(cfg.encoderConversion())
+                    .conversionOffset(cfg.encoderConversionOffset())
+                    .gearRatio(cfg.encoderGearRatio())
+                    .offset(cfg.encoderOffset())
+                    .discontinuity(cfg.encoderDiscontinuityPoint(), cfg.encoderDiscontinuityRange());
         }
 
         // PID controller construction/config is handled by the mechanism runtime using named profiles.
@@ -2636,11 +2693,11 @@ public class MechanismConfig<T extends Mechanism> {
             return;
         }
         data.motors().forEach(config -> {
-            if (config.type == null) {
+            if (config.type() == null) {
                 throw new IllegalStateException("Motor controller config is missing a type");
             }
             // Throws with a clear message if the vendor module is absent.
-            MotorRegistry.get().motor(config.type.getKey());
+            MotorRegistry.get().motor(config.type().getKey());
         });
     }
 
@@ -2669,10 +2726,10 @@ public class MechanismConfig<T extends Mechanism> {
             throw new IllegalStateException("Simulation requires at least one motor controller to be configured");
         }
         data.motors().forEach(config -> {
-            if (config.type == null) {
+            if (config.type() == null) {
                 throw new IllegalStateException("Motor controller config is missing a type");
             }
-            MechanismSimulationConfig.requireSupportedMotorSim(config.type);
+            MechanismSimulationConfig.requireSupportedMotorSim(config.type());
         });
     }
 

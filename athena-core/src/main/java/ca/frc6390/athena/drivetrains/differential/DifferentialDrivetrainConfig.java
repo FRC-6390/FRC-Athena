@@ -1,12 +1,11 @@
 package ca.frc6390.athena.drivetrains.differential;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
+import ca.frc6390.athena.drivetrains.DrivetrainSpeedConfigSupport;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DriveIDs;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.EncoderIDs;
@@ -66,26 +65,8 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     private SimpleMotorFeedforward driveFeedforward = null;
     /** Whether the configured drive feedforward is enabled. */
     private boolean driveFeedforwardEnabled = true;
-    /** Additional speed sources to register beyond drive/auto/feedback. */
-    private final List<SpeedSourceRegistration> speedSources = new ArrayList<>();
-    /** Ordered blend rules that write into sources. */
-    private final List<SpeedSourceBlendRegistration> speedSourceBlends = new ArrayList<>();
-    /** Ordered blend rules that write into the final drivetrain output. */
-    private final List<SpeedOutputBlendRegistration> speedOutputBlends = new ArrayList<>();
-
-    private record SpeedSourceRegistration(String name, boolean enabledByDefault) {}
-
-    private record SpeedSourceBlendRegistration(
-            String target,
-            String left,
-            String right,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis[] axes) {}
-
-    private record SpeedOutputBlendRegistration(
-            String source,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis[] axes) {}
+    /** Shared speed source/blend registration store used by speed() sections. */
+    private final DrivetrainSpeedConfigSupport speedConfig = new DrivetrainSpeedConfigSupport();
 
     public static DifferentialDrivetrainConfig create() {
         return new DifferentialDrivetrainConfig();
@@ -437,7 +418,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
 
     public final class SpeedSection {
         public SpeedSection source(String name, boolean enabledByDefault) {
-            addSpeedSource(name, enabledByDefault);
+            speedConfig.source(name, enabledByDefault);
             return this;
         }
 
@@ -446,7 +427,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
                 String source,
                 RobotSpeeds.BlendMode blendMode,
                 RobotSpeeds.SpeedAxis... axes) {
-            addSpeedBlend(target, source, blendMode, axes);
+            speedConfig.blend(target, source, blendMode, axes);
             return this;
         }
 
@@ -456,7 +437,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
                 String right,
                 RobotSpeeds.BlendMode blendMode,
                 RobotSpeeds.SpeedAxis... axes) {
-            addSpeedBlend(target, left, right, blendMode, axes);
+            speedConfig.blend(target, left, right, blendMode, axes);
             return this;
         }
 
@@ -464,7 +445,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
                 String source,
                 RobotSpeeds.BlendMode blendMode,
                 RobotSpeeds.SpeedAxis... axes) {
-            addSpeedOutputBlend(source, blendMode, axes);
+            speedConfig.outputBlend(source, blendMode, axes);
             return this;
         }
     }
@@ -714,41 +695,6 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
         return this;
     }
 
-    private DifferentialDrivetrainConfig addSpeedSource(String name, boolean enabledByDefault) {
-        speedSources.add(new SpeedSourceRegistration(name, enabledByDefault));
-        return this;
-    }
-
-    private DifferentialDrivetrainConfig addSpeedBlend(
-            String target,
-            String source,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis... axes) {
-        return addSpeedBlend(target, target, source, blendMode, axes);
-    }
-
-    private DifferentialDrivetrainConfig addSpeedBlend(
-            String target,
-            String left,
-            String right,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis... axes) {
-        RobotSpeeds.SpeedAxis[] resolvedAxes =
-                axes == null ? new RobotSpeeds.SpeedAxis[0] : axes.clone();
-        speedSourceBlends.add(new SpeedSourceBlendRegistration(target, left, right, blendMode, resolvedAxes));
-        return this;
-    }
-
-    private DifferentialDrivetrainConfig addSpeedOutputBlend(
-            String source,
-            RobotSpeeds.BlendMode blendMode,
-            RobotSpeeds.SpeedAxis... axes) {
-        RobotSpeeds.SpeedAxis[] resolvedAxes =
-                axes == null ? new RobotSpeeds.SpeedAxis[0] : axes.clone();
-        speedOutputBlends.add(new SpeedOutputBlendRegistration(source, blendMode, resolvedAxes));
-        return this;
-    }
-
     /**
      * Applies all registered configuration data to the instantiated drivetrain, wiring up motors,
      * encoders, and IMU before returning the fully constructed {@link DifferentialDrivetrain}.
@@ -757,41 +703,47 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
     public DifferentialDrivetrain build() {
        
         for (int i = 0; i < leftMotors.length; i++) {
-            leftMotors[i] = leftMotors[i].setId(driveIds[i])
-                                    .setInverted(driveInverted)
-                                    .setCurrentLimit(currentLimit)
-                                    .setCanbus(canbus)
-                                    .setInverted(driveIds[i] > 0);
+            leftMotors[i].hardware()
+                    .id(driveIds[i])
+                    .inverted(driveInverted)
+                    .currentLimit(currentLimit)
+                    .canbus(canbus)
+                    .inverted(driveIds[i] > 0);
         } 
 
         for (int i = 0; i < rightMotors.length; i++) {
-            rightMotors[i] = rightMotors[i].setId(driveIds[i+leftMotors.length])
-                                    .setInverted(driveInverted)
-                                    .setCurrentLimit(currentLimit)
-                                    .setCanbus(canbus)
-                                    .setInverted(driveIds[i+leftMotors.length] > 0);
+            rightMotors[i].hardware()
+                    .id(driveIds[i + leftMotors.length])
+                    .inverted(driveInverted)
+                    .currentLimit(currentLimit)
+                    .canbus(canbus)
+                    .inverted(driveIds[i + leftMotors.length] > 0);
         } 
 
         if(leftEncoders != null) {
             for (int i = 0; i < leftEncoders.length; i++) {
-                leftEncoders[i] = leftEncoders[i].setId(encoderIds[i])
-                                        .setInverted(encoderInverted)
-                                        .setCanbus(canbus)
-                                        .setGearRatio(gearRatio)
-                                        .setConversion(Math.PI * wheelDiameterMeters)
-                                        .setInverted(encoderIds[i+leftMotors.length] > 0);
+                leftEncoders[i].hardware()
+                        .id(encoderIds[i])
+                        .inverted(encoderInverted)
+                        .canbus(canbus)
+                        .inverted(encoderIds[i + leftMotors.length] > 0);
+                leftEncoders[i].measurement()
+                        .gearRatio(gearRatio)
+                        .conversion(Math.PI * wheelDiameterMeters);
             } 
         }
 
         if(rightEncoders != null) {
             int leftlen = leftEncoders != null ? leftEncoders.length : 0;
             for (int i = 0; i < rightEncoders.length; i++) {
-                rightEncoders[i] = rightEncoders[i].setId(encoderIds[i+leftlen])
-                                        .setInverted(encoderInverted)
-                                        .setCanbus(canbus)
-                                        .setGearRatio(gearRatio)
-                                        .setConversion(Math.PI *wheelDiameterMeters)
-                                        .setInverted(encoderIds[i+leftlen] > 0);
+                rightEncoders[i].hardware()
+                        .id(encoderIds[i + leftlen])
+                        .inverted(encoderInverted)
+                        .canbus(canbus)
+                        .inverted(encoderIds[i + leftlen] > 0);
+                rightEncoders[i].measurement()
+                        .gearRatio(gearRatio)
+                        .conversion(Math.PI * wheelDiameterMeters);
             } 
         }
 
@@ -839,31 +791,7 @@ public class DifferentialDrivetrainConfig implements RobotDrivetrainConfig<Diffe
             dt.configureSimulation(resolvedSimulation);
         }
 
-        applySpeedConfig(dt.getRobotSpeeds());
+        speedConfig.apply(dt.getRobotSpeeds());
         return dt;
-    }
-
-    private void applySpeedConfig(RobotSpeeds speeds) {
-        if (speeds == null) {
-            return;
-        }
-        speeds.resetBlendsToDefaults();
-        for (SpeedSourceRegistration source : speedSources) {
-            speeds.registerSpeedSource(source.name(), source.enabledByDefault());
-        }
-        for (SpeedSourceBlendRegistration blend : speedSourceBlends) {
-            speeds.blend(
-                    blend.target(),
-                    blend.left(),
-                    blend.right(),
-                    blend.blendMode(),
-                    blend.axes());
-        }
-        for (SpeedOutputBlendRegistration blend : speedOutputBlends) {
-            speeds.blendToOutput(
-                    blend.source(),
-                    blend.blendMode(),
-                    blend.axes());
-        }
     }
 }

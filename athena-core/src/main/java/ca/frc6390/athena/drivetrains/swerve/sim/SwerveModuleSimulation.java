@@ -55,13 +55,13 @@ public class SwerveModuleSimulation {
         this.steerEncoder = module.getSteerEncoder();
         this.nominalVoltage = drivetrainConfig.getNominalVoltage();
 
-        this.driveOutputPerMotorRotation = config.driveMotor() != null && config.driveMotor().encoderConfig != null
-                ? config.driveMotor().encoderConfig.gearRatio
+        this.driveOutputPerMotorRotation = config.driveMotor() != null && config.driveMotor().encoderConfig() != null
+                ? config.driveMotor().encoderConfig().gearRatio()
                 : 1.0;
-        this.rotationMotorOutputPerMotorRotation = config.rotationMotor() != null && config.rotationMotor().encoderConfig != null
-                ? config.rotationMotor().encoderConfig.gearRatio
+        this.rotationMotorOutputPerMotorRotation = config.rotationMotor() != null && config.rotationMotor().encoderConfig() != null
+                ? config.rotationMotor().encoderConfig().gearRatio()
                 : 1.0;
-        this.encoderOutputPerRotation = config.encoder() != null ? config.encoder().gearRatio : 1.0;
+        this.encoderOutputPerRotation = config.encoder() != null ? config.encoder().gearRatio() : 1.0;
 
         DCMotor driveMotor = resolveMotor(simConfig.driveMotorType(), config.driveMotor());
         DCMotor steerMotor = resolveMotor(simConfig.steerMotorType(), config.rotationMotor());

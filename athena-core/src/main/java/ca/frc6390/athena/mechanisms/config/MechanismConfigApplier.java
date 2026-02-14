@@ -134,26 +134,26 @@ public final class MechanismConfigApplier {
             return;
         }
         if (enc.gearRatio() != null) {
-            cfg.setGearRatio(enc.gearRatio());
+            cfg.measurement().gearRatio(enc.gearRatio());
         }
         if (enc.conversion() != null) {
-            cfg.setConversion(enc.conversion());
+            cfg.measurement().conversion(enc.conversion());
         }
         if (enc.conversionOffset() != null) {
-            cfg.setConversionOffset(enc.conversionOffset());
+            cfg.measurement().conversionOffset(enc.conversionOffset());
         }
         if (enc.offset() != null) {
-            cfg.setOffset(enc.offset());
+            cfg.measurement().offset(enc.offset());
         }
         if (enc.discontinuityPoint() != null && enc.discontinuityRange() != null) {
-            cfg.setDiscontinuity(enc.discontinuityPoint(), enc.discontinuityRange());
+            cfg.measurement().discontinuity(enc.discontinuityPoint(), enc.discontinuityRange());
         } else if (enc.discontinuityPoint() != null) {
-            cfg.setDiscontinuityPoint(enc.discontinuityPoint());
+            cfg.measurement().discontinuityPoint(enc.discontinuityPoint());
         } else if (enc.discontinuityRange() != null) {
-            cfg.setDiscontinuityRange(enc.discontinuityRange());
+            cfg.measurement().discontinuityRange(enc.discontinuityRange());
         }
         if (enc.inverted() != null) {
-            cfg.setInverted(enc.inverted());
+            cfg.hardware().inverted(enc.inverted());
         }
     }
 
@@ -296,13 +296,13 @@ public final class MechanismConfigApplier {
             MechanismSimSimpleMotorConfig sm = sim.simpleMotor();
             MechanismConfig.SimpleMotorSimulationParameters params = new MechanismConfig.SimpleMotorSimulationParameters();
             if (sm.momentOfInertia() != null) {
-                params.setMomentOfInertia(sm.momentOfInertia());
+                params.momentOfInertia(sm.momentOfInertia());
             }
             if (sm.nominalVoltage() != null) {
-                params.setNominalVoltage(sm.nominalVoltage());
+                params.nominalVoltage(sm.nominalVoltage());
             }
             if (sm.unitsPerRadian() != null) {
-                params.setUnitsPerRadian(sm.unitsPerRadian());
+                params.unitsPerRadian(sm.unitsPerRadian());
             }
             target.sim(s -> s.simpleMotor(params));
         }
@@ -310,28 +310,28 @@ public final class MechanismConfigApplier {
             MechanismSimArmConfig arm = sim.arm();
             MechanismConfig.ArmSimulationParameters params = new MechanismConfig.ArmSimulationParameters();
             if (arm.armLengthM() != null) {
-                params.setArmLengthMeters(arm.armLengthM());
+                params.armLengthMeters(arm.armLengthM());
             }
             if (arm.motorReduction() != null) {
-                params.setMotorReduction(arm.motorReduction());
+                params.motorReduction(arm.motorReduction());
             }
             if (arm.minDeg() != null && arm.maxDeg() != null) {
-                params.setAngleRangeRadians(Units.degreesToRadians(arm.minDeg()), Units.degreesToRadians(arm.maxDeg()));
+                params.angleRangeRadians(Units.degreesToRadians(arm.minDeg()), Units.degreesToRadians(arm.maxDeg()));
             }
             if (arm.startingDeg() != null) {
-                params.setStartingAngleRadians(Units.degreesToRadians(arm.startingDeg()));
+                params.startingAngleRadians(Units.degreesToRadians(arm.startingDeg()));
             }
             if (arm.unitsPerRadian() != null) {
-                params.setUnitsPerRadian(arm.unitsPerRadian());
+                params.unitsPerRadian(arm.unitsPerRadian());
             }
             if (arm.simulateGravity() != null) {
-                params.setSimulateGravity(arm.simulateGravity());
+                params.simulateGravity(arm.simulateGravity());
             }
             if (arm.nominalVoltage() != null) {
-                params.setNominalVoltage(arm.nominalVoltage());
+                params.nominalVoltage(arm.nominalVoltage());
             }
             if (arm.momentOfInertia() != null) {
-                params.setMomentOfInertia(arm.momentOfInertia());
+                params.momentOfInertia(arm.momentOfInertia());
             }
             target.sim(s -> s.arm(params));
         }
@@ -339,25 +339,25 @@ public final class MechanismConfigApplier {
             MechanismSimElevatorConfig elev = sim.elevator();
             MechanismConfig.ElevatorSimulationParameters params = new MechanismConfig.ElevatorSimulationParameters();
             if (elev.drumRadiusM() != null) {
-                params.setDrumRadiusMeters(elev.drumRadiusM());
+                params.drumRadiusMeters(elev.drumRadiusM());
             }
             if (elev.carriageMassKg() != null) {
-                params.setCarriageMassKg(elev.carriageMassKg());
+                params.carriageMassKg(elev.carriageMassKg());
             }
             if (elev.minHeightM() != null && elev.maxHeightM() != null) {
-                params.setRangeMeters(elev.minHeightM(), elev.maxHeightM());
+                params.rangeMeters(elev.minHeightM(), elev.maxHeightM());
             }
             if (elev.startingHeightM() != null) {
-                params.setStartingHeightMeters(elev.startingHeightM());
+                params.startingHeightMeters(elev.startingHeightM());
             }
             if (elev.simulateGravity() != null) {
-                params.setSimulateGravity(elev.simulateGravity());
+                params.simulateGravity(elev.simulateGravity());
             }
             if (elev.nominalVoltage() != null) {
-                params.setNominalVoltage(elev.nominalVoltage());
+                params.nominalVoltage(elev.nominalVoltage());
             }
             if (elev.unitsPerMeter() != null) {
-                params.setUnitsPerMeter(elev.unitsPerMeter());
+                params.unitsPerMeter(elev.unitsPerMeter());
             }
             target.sim(s -> s.elevator(params));
         }

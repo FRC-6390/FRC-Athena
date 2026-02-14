@@ -103,11 +103,11 @@ public class CtreImu implements Imu {
     }
 
     public static CtreImu fromConfig(ImuConfig config) {
-        if (config == null || !(config.type instanceof CtreImuType)) {
+        if (config == null || !(config.type() instanceof CtreImuType)) {
             throw new IllegalArgumentException("CTRE IMU config required");
         }
 
-        Pigeon2 pigeon = new Pigeon2(config.id, resolveCanBus(config.canbus));
+        Pigeon2 pigeon = new Pigeon2(config.id(), resolveCanBus(config.canbus()));
         return new CtreImu(pigeon, config);
     }
 
@@ -223,7 +223,7 @@ public class CtreImu implements Imu {
     @Override
     public void setInverted(boolean inverted) {
         if (config != null) {
-            config.inverted = inverted;
+            config.hardware().inverted(inverted);
         }
     }
 

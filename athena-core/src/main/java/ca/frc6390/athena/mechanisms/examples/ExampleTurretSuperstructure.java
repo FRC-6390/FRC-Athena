@@ -152,15 +152,16 @@ public final class ExampleTurretSuperstructure {
                                 .canbus(canbus)
                                 .currentLimit(20))
                         .encoder(enc -> enc.config(EncoderConfig
-                                .type(AthenaEncoder.CANCODER.resolve(), 1)
-                                .setGearRatio(100.0)
-                                .setConversion(2.0 * Math.PI)))
+                                .create(AthenaEncoder.CANCODER.resolve(), 1)
+                                .measurement(m -> m
+                                        .gearRatio(100.0)
+                                        .conversion(2.0 * Math.PI))))
                         .control(control -> control
                                 .pid("main", OutputType.PERCENT, 2.0, 0.0, 0.1)
                                 .periodic("main"))
                         .constraints(constraints -> constraints.bounds(Math.toRadians(-170.0), Math.toRadians(170.0)))
                         .sim(sim -> sim.simpleMotor(new MechanismConfig.SimpleMotorSimulationParameters()
-                                .setMomentOfInertia(0.02)))
+                                .momentOfInertia(0.02)))
                         .hooks(h -> h.stateAction(
                                 (TurretMechanism.StatefulTurretMechanism<TurretState> mech) -> mech.setSetpoint(targetHeadingRad[0]),
                                 TurretState.TARGET));
@@ -175,16 +176,17 @@ public final class ExampleTurretSuperstructure {
                                 .canbus(canbus)
                                 .currentLimit(15))
                         .encoder(enc -> enc.config(EncoderConfig
-                                .type(AthenaEncoder.SPARK_MAX.resolve(), 2)
-                                .setGearRatio(50.0)
-                                .setConversion(2.0 * Math.PI)))
+                                .create(AthenaEncoder.SPARK_MAX.resolve(), 2)
+                                .measurement(m -> m
+                                        .gearRatio(50.0)
+                                        .conversion(2.0 * Math.PI))))
                         .control(control -> control
                                 .pid("main", OutputType.PERCENT, 3.0, 0.0, 0.2)
                                 .periodic("main"))
                         .constraints(constraints -> constraints.bounds(Math.toRadians(0.0), Math.toRadians(60.0)))
                         .sim(sim -> sim.arm(new MechanismConfig.ArmSimulationParameters()
-                                .setArmLengthMeters(0.4)
-                                .setStartingAngleRadians(0.0)));
+                                .armLengthMeters(0.4)
+                                .startingAngleRadians(0.0)));
 
         ArmMechanism.StatefulArmMechanism<HoodState> hood = hoodConfig.build();
 
@@ -196,9 +198,10 @@ public final class ExampleTurretSuperstructure {
                                 .canbus(canbus)
                                 .currentLimit(30))
                         .encoder(enc -> enc.config(EncoderConfig
-                                .type(AthenaEncoder.CANCODER.resolve(), 3)
-                                .setGearRatio(1.0)
-                                .setConversion(2.0 * Math.PI)))
+                                .create(AthenaEncoder.CANCODER.resolve(), 3)
+                                .measurement(m -> m
+                                        .gearRatio(1.0)
+                                        .conversion(2.0 * Math.PI))))
                         .control(control -> control
                                 .ff("mainFF", 0.15, 0.12, 0.0)
                                 .pid("mainPid", OutputType.PERCENT, 0.1, 0.0, 0.0)
@@ -207,7 +210,7 @@ public final class ExampleTurretSuperstructure {
                                 .setpointAsOutput(false))
                         .constraints(constraints -> constraints.bounds(0.0, rpm(6000.0)))
                         .sim(sim -> sim.simpleMotor(new MechanismConfig.SimpleMotorSimulationParameters()
-                                .setMomentOfInertia(0.01)));
+                                .momentOfInertia(0.01)));
 
         FlywheelMechanism.StatefulFlywheelMechanism<ShooterState> shooter = shooterConfig.build();
 

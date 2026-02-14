@@ -60,7 +60,7 @@ public class VirtualImu implements Imu {
         this.delegate = delegate;
         addVirtualAxis("driver", this::getYaw);
         ImuConfig config = delegate.getConfig();
-        this.inverted = config != null && config.inverted;
+        this.inverted = config != null && config.inverted();
     }
 
     private static class SpeedSample {
