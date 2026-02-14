@@ -334,7 +334,7 @@ public class RobotAuto {
         }
 
         default Command sequence(String... autoIds) {
-            Command[] commands = commandsForIds(autos(), autoIds);
+            Command[] commands = commandsForIds(this, autoIds);
             Command sequenceCommand = commands.length == 0 ? Commands.none() : Commands.sequence(commands);
             return traceBuild(
                     "sequence(autoIds)",
@@ -349,7 +349,7 @@ public class RobotAuto {
         }
 
         default Command parallel(String... autoIds) {
-            Command[] commands = commandsForIds(autos(), autoIds);
+            Command[] commands = commandsForIds(this, autoIds);
             Command parallelCommand = commands.length == 0 ? Commands.none() : Commands.parallel(commands);
             return traceBuild(
                     "parallel(autoIds)",
@@ -364,7 +364,7 @@ public class RobotAuto {
         }
 
         default Command race(String... autoIds) {
-            Command[] commands = commandsForIds(autos(), autoIds);
+            Command[] commands = commandsForIds(this, autoIds);
             Command raceCommand = commands.length == 0 ? Commands.none() : Commands.race(commands);
             return traceBuild(
                     "race(autoIds)",
@@ -384,7 +384,7 @@ public class RobotAuto {
 
         default Command deadline(String deadlineAutoId, String... otherAutoIds) {
             Objects.requireNonNull(deadlineAutoId, "deadlineAutoId");
-            Command[] otherCommands = commandsForIds(autos(), otherAutoIds);
+            Command[] otherCommands = commandsForIds(this, otherAutoIds);
             Command deadlineCommand = otherCommands.length == 0
                     ? auto(deadlineAutoId)
                     : Commands.deadline(auto(deadlineAutoId), otherCommands);
@@ -749,7 +749,8 @@ public class RobotAuto {
             };
         }
 
-        private static Command[] commandsForIds(RobotAuto autos, String... ids) {
+        private static Command[] commandsForIds(AutoBuildCtx ctx, String... ids) {
+            Objects.requireNonNull(ctx, "ctx");
             if (ids == null || ids.length == 0) {
                 return new Command[0];
             }
@@ -758,7 +759,7 @@ public class RobotAuto {
                 if (id == null || id.isBlank()) {
                     continue;
                 }
-                commands.add(autos.deferredAuto(id, OptionalInt.empty()));
+                commands.add(ctx.auto(id));
             }
             return commands.toArray(Command[]::new);
         }
@@ -810,17 +811,82 @@ public class RobotAuto {
         }
     }
 
-    private record AutoRegisterCtxImpl(RobotCore<?> robot, RobotAuto autos) implements AutoRegisterCtx {
+    private record AutoRegisterCtxImpl(
+            RobotCore<?> robot,
+            RobotAuto autos,
+            String programId,
+            Map<String, AutoRoutine> scopedAutos) implements AutoRegisterCtx {
         private AutoRegisterCtxImpl {
             Objects.requireNonNull(robot, "robot");
             Objects.requireNonNull(autos, "autos");
+            Objects.requireNonNull(programId, "programId");
+            Objects.requireNonNull(scopedAutos, "scopedAutos");
+        }
+
+        @Override
+        public boolean hasAuto(String id) {
+            return id != null && (scopedAutos.containsKey(id) || autos.hasAuto(id));
+        }
+
+        @Override
+        public AutoRegisterCtx path(String reference, TrajectorySource source) {
+            return path(reference, source, reference);
+        }
+
+        @Override
+        public AutoRegisterCtx path(String reference, TrajectorySource source, String id) {
+            autos.registerScopedPath(scopedAutos, programId, reference, source, id);
+            return this;
         }
     }
 
-    private record AutoBuildCtxImpl(RobotCore<?> robot, RobotAuto autos) implements AutoBuildCtx {
+    private record AutoBuildCtxImpl(
+            RobotCore<?> robot,
+            RobotAuto autos,
+            Map<String, AutoRoutine> scopedAutos) implements AutoBuildCtx {
         private AutoBuildCtxImpl {
             Objects.requireNonNull(robot, "robot");
             Objects.requireNonNull(autos, "autos");
+            Objects.requireNonNull(scopedAutos, "scopedAutos");
+        }
+
+        @Override
+        public boolean hasAuto(String id) {
+            return id != null && (scopedAutos.containsKey(id) || autos.hasAuto(id));
+        }
+
+        @Override
+        public Command auto(String id) {
+            Objects.requireNonNull(id, "id");
+            return autos.deferredAuto(scopedAutos, id, OptionalInt.empty());
+        }
+
+        @Override
+        public Command auto(String id, int splitIndex) {
+            Objects.requireNonNull(id, "id");
+            return autos.deferredAuto(scopedAutos, id, OptionalInt.of(splitIndex));
+        }
+
+        @Override
+        public AutoPlan.Context planContext() {
+            return new AutoPlan.Context() {
+                @Override
+                public Command resolve(AutoPlan.StepRef ref) {
+                    return ref.splitIndex().isPresent()
+                            ? auto(ref.key().id(), ref.splitIndex().getAsInt())
+                            : auto(ref.key().id());
+                }
+
+                @Override
+                public Optional<Pose2d> startingPose(AutoPlan.StepRef ref) {
+                    return autos.startingPoseFor(scopedAutos, ref.key().id(), ref.splitIndex());
+                }
+
+                @Override
+                public Command resetPose(Pose2d pose) {
+                    return autos.resetPose(pose);
+                }
+            };
         }
     }
 
@@ -1043,10 +1109,12 @@ public class RobotAuto {
         }
         boolean hadProgramAutoBeforeRegister = hasAuto(programId);
 
-        AutoRegisterCtx regCtx = new AutoRegisterCtxImpl(robot, this);
+        Map<String, AutoRoutine> scopedAutos = new LinkedHashMap<>();
+
+        AutoRegisterCtx regCtx = new AutoRegisterCtxImpl(robot, this, programId, scopedAutos);
         program.register(regCtx);
 
-        AutoBuildCtx buildCtx = new AutoBuildCtxImpl(robot, this);
+        AutoBuildCtx buildCtx = new AutoBuildCtxImpl(robot, this, Map.copyOf(scopedAutos));
         AutoRoutine routine = Objects.requireNonNull(
                 program.build(buildCtx),
                 "AutoProgram.build(ctx) returned null for " + program.getClass().getName());
@@ -1463,6 +1531,11 @@ public class RobotAuto {
     }
 
     private Command deferredAuto(String id, OptionalInt splitIndex) {
+        return deferredAuto(Collections.emptyMap(), id, splitIndex);
+    }
+
+    private Command deferredAuto(Map<String, AutoRoutine> scopedAutos, String id, OptionalInt splitIndex) {
+        Objects.requireNonNull(scopedAutos, "scopedAutos");
         Objects.requireNonNull(id, "id");
         if (splitIndex.isPresent()) {
             int split = splitIndex.getAsInt();
@@ -1470,7 +1543,10 @@ public class RobotAuto {
                 throw new IllegalArgumentException("splitIndex must be >= 0");
             }
             String explicitSplitId = id + "." + split;
-            AutoRoutine explicitSplit = autoRoutines.get(explicitSplitId);
+            AutoRoutine explicitSplit = scopedAutos.get(explicitSplitId);
+            if (explicitSplit == null) {
+                explicitSplit = autoRoutines.get(explicitSplitId);
+            }
             if (explicitSplit != null) {
                 return traceAutoLifecycle(
                         "auto(" + explicitSplitId + ")",
@@ -1479,24 +1555,31 @@ public class RobotAuto {
                                 + " reference=\"" + explicitSplit.reference() + "\"",
                         deferredCommand(explicitSplit));
             }
-            AutoRoutine base = autoRoutines.get(id);
-            if (base == null) {
+            AutoRoutine resolvedBase = scopedAutos.get(id);
+            if (resolvedBase == null) {
+                resolvedBase = autoRoutines.get(id);
+            }
+            if (resolvedBase == null) {
                 throw new IllegalStateException("Auto not registered: " + id + " (or split " + explicitSplitId + ")");
             }
-            if (base.source() == AutoSource.CUSTOM) {
+            if (resolvedBase.source() == AutoSource.CUSTOM) {
                 throw new IllegalStateException("Auto split requested for CUSTOM auto: " + id + "." + split);
             }
-            String splitReference = base.reference() + "." + split;
-            Command splitCommand = Commands.defer(() -> buildPathCommand(base.source(), splitReference), Set.of());
+            String splitReference = resolvedBase.reference() + "." + split;
+            AutoSource splitSource = resolvedBase.source();
+            Command splitCommand = Commands.defer(() -> buildPathCommand(splitSource, splitReference), Set.of());
             return traceAutoLifecycle(
                     "auto(" + id + "." + split + ")",
                     "derivedFrom=" + id
-                            + " source=" + base.source()
+                            + " source=" + splitSource
                             + " reference=\"" + splitReference + "\"",
                     splitCommand);
         }
 
-        AutoRoutine routine = autoRoutines.get(id);
+        AutoRoutine routine = scopedAutos.get(id);
+        if (routine == null) {
+            routine = autoRoutines.get(id);
+        }
         if (routine == null) {
             throw new IllegalStateException("Auto not registered: " + id);
         }
@@ -1507,10 +1590,21 @@ public class RobotAuto {
     }
 
     private Optional<Pose2d> startingPoseFor(String id, OptionalInt splitIndex) {
-        AutoRoutine base = autoRoutines.get(id);
+        return startingPoseFor(Collections.emptyMap(), id, splitIndex);
+    }
+
+    private Optional<Pose2d> startingPoseFor(Map<String, AutoRoutine> scopedAutos, String id, OptionalInt splitIndex) {
+        Objects.requireNonNull(scopedAutos, "scopedAutos");
+        AutoRoutine base = scopedAutos.get(id);
+        if (base == null) {
+            base = autoRoutines.get(id);
+        }
         if (splitIndex.isPresent()) {
             String splitId = id + "." + splitIndex.getAsInt();
-            AutoRoutine split = autoRoutines.get(splitId);
+            AutoRoutine split = scopedAutos.get(splitId);
+            if (split == null) {
+                split = autoRoutines.get(splitId);
+            }
             if (split != null && split.hasStartingPose()) {
                 return Optional.ofNullable(split.startingPose());
             }
@@ -1574,6 +1668,46 @@ public class RobotAuto {
     private static AutoBackend backendForSource(AutoSource source) {
         return AutoBackends.forSource(source)
                 .orElseThrow(() -> new IllegalStateException("No auto backend available for source: " + source));
+    }
+
+    private void registerScopedPath(
+            Map<String, AutoRoutine> scopedAutos,
+            String programId,
+            String reference,
+            TrajectorySource source,
+            String id) {
+        Objects.requireNonNull(scopedAutos, "scopedAutos");
+        String resolvedReference = requireNonBlank(reference, "reference");
+        String resolvedId = requireNonBlank(id, "id");
+        try {
+            validatePathReference(source, resolvedReference);
+            putScopedPath(scopedAutos, programId, path(AutoKey.of(resolvedId), source, resolvedReference));
+        } catch (IllegalArgumentException referenceError) {
+            // Common user mistake: path(aliasId, source, reference) instead of path(reference, source, aliasId).
+            // If the third argument validates as a reference, auto-correct to keep startup fail-fast but ergonomic.
+            try {
+                validatePathReference(source, resolvedId);
+            } catch (IllegalArgumentException idError) {
+                throw referenceError;
+            }
+            DriverStation.reportWarning(
+                    "Auto path registration arguments were likely swapped. "
+                            + "Expected path(reference, source, id), but received reference=\""
+                            + resolvedReference + "\" and id=\"" + resolvedId + "\". "
+                            + "Using reference=\"" + resolvedId + "\" and id=\"" + resolvedReference + "\"."
+                            + " Program=\"" + programId + "\".",
+                    false);
+            putScopedPath(scopedAutos, programId, path(AutoKey.of(resolvedReference), source, resolvedId));
+        }
+    }
+
+    private static void putScopedPath(Map<String, AutoRoutine> scopedAutos, String programId, AutoRoutine routine) {
+        String id = requireNonBlank(routine.key().id(), "auto id");
+        if (scopedAutos.containsKey(id)) {
+            throw new IllegalArgumentException(
+                    "Auto path already registered in program \"" + programId + "\": " + id);
+        }
+        scopedAutos.put(id, routine);
     }
 
     private Command resetPose(Pose2d pose) {
