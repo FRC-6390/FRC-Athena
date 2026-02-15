@@ -3771,7 +3771,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.simEncoderOverride = false;
     }
 
-    private SysIdRoutine getSysIdRoutine() {
+    public SysIdRoutine getSysIdRoutine() {
         if (sysIdRoutine == null) {
             sysIdRoutine = new SysIdRoutine(
                     new SysIdRoutine.Config(
@@ -3782,6 +3782,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
         return sysIdRoutine;
     }
+
+
 
     private void invalidateSysIdRoutine() {
         sysIdRoutine = null;
