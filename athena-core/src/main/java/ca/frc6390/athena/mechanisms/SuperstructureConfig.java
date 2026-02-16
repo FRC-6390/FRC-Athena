@@ -37,6 +37,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
 
     private S initialState;
     private String superstructureName;
+    private boolean disabled;
     private double stateMachineDelaySeconds = 0.0;
     private final List<ChildFactory<SP>> childConfigs = new ArrayList<>();
     private final Map<S, Constraint<S, SP>> constraints = new HashMap<>();
@@ -93,11 +94,30 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         return superstructureName;
     }
 
+    /**
+     * Enables/disables this superstructure config.
+     * When disabled, {@link #build()} returns {@code null} and no child hardware is constructed.
+     */
+    public SuperstructureConfig<S, SP> disabled(boolean disabled) {
+        this.disabled = disabled;
+        return this;
+    }
+
+    public boolean disabled() {
+        return disabled;
+    }
+
     public SuperstructureMechanism<S, SP> build() {
+        if (disabled) {
+            return null;
+        }
         ensureInitialState();
         List<SuperstructureMechanism.Child<SP, ?>> builtChildren = new ArrayList<>();
         for (ChildFactory<SP> child : childConfigs) {
-            builtChildren.add(child.build());
+            SuperstructureMechanism.Child<SP, ?> built = child.build();
+            if (built != null) {
+                builtChildren.add(built);
+            }
         }
         SuperstructureMechanism<S, SP> mech = new SuperstructureMechanism<>(
                 initialState,
@@ -130,12 +150,18 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
      * Builds a superstructure with additional/overridden inputs supplied at build time.
      */
     public SuperstructureMechanism<S, SP> build(Map<String, BooleanSupplier> inputOverrides) {
+        if (disabled) {
+            return null;
+        }
         ensureInitialState();
         Map<String, BooleanSupplier> merged = new HashMap<>(inputs);
         merged.putAll(inputOverrides);
         List<SuperstructureMechanism.Child<SP, ?>> builtChildren = new ArrayList<>();
         for (ChildFactory<SP> child : childConfigs) {
-            builtChildren.add(child.build());
+            SuperstructureMechanism.Child<SP, ?> built = child.build();
+            if (built != null) {
+                builtChildren.add(built);
+            }
         }
         SuperstructureMechanism<S, SP> mech = new SuperstructureMechanism<>(
                 initialState,
@@ -170,6 +196,9 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     public SuperstructureMechanism<S, SP> build(Map<String, BooleanSupplier> booleanOverrides,
                                                Map<String, DoubleSupplier> doubleOverrides,
                                                Map<String, Supplier<?>> objectOverrides) {
+        if (disabled) {
+            return null;
+        }
         ensureInitialState();
         Map<String, BooleanSupplier> mergedBooleans = new HashMap<>(inputs);
         if (booleanOverrides != null) {
@@ -185,7 +214,10 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         }
         List<SuperstructureMechanism.Child<SP, ?>> builtChildren = new ArrayList<>();
         for (ChildFactory<SP> child : childConfigs) {
-            builtChildren.add(child.build());
+            SuperstructureMechanism.Child<SP, ?> built = child.build();
+            if (built != null) {
+                builtChildren.add(built);
+            }
         }
         SuperstructureMechanism<S, SP> mech = new SuperstructureMechanism<>(
                 initialState,
@@ -254,6 +286,9 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
             owner.ensureInitialState();
             owner.childConfigs.add(() -> {
                 Mechanism mechanism = config.build();
+                if (mechanism == null) {
+                    return null;
+                }
                 E sample = mapper.apply(owner.initialSetpoint);
                 Class<E> stateType = sample != null ? sample.getDeclaringClass() : null;
                 return new SuperstructureMechanism.Child<>(mechanism, mapper, stateType);
@@ -297,6 +332,9 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
             Class<CS> stateType = sample != null ? sample.getDeclaringClass() : null;
             owner.childConfigs.add(() -> {
                 SuperstructureMechanism<CS, CSP> superstructure = config.build();
+                if (superstructure == null) {
+                    return null;
+                }
                 return new SuperstructureMechanism.Child<>(superstructure, mapper, stateType);
             });
             return this;

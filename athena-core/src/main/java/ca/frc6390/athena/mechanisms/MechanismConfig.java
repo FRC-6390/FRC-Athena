@@ -62,6 +62,7 @@ public class MechanismConfig<T extends Mechanism> {
 
     private MechanismConfigRecord data = MechanismConfigRecord.defaults();
     private String mechanismName;
+    private boolean disabled;
     /**
      * When true, turret factory helpers will auto-enable continuous PID input for unbounded turrets
      * using the configured encoder conversion as the wrap span (e.g. 360 degrees, 2*pi radians).
@@ -1671,6 +1672,19 @@ public class MechanismConfig<T extends Mechanism> {
         return mechanismName;
     }
 
+    /**
+     * Enables/disables this mechanism config.
+     * When disabled, {@link #build()} returns {@code null} and no hardware is constructed.
+     */
+    public MechanismConfig<T> disabled(boolean disabled) {
+        this.disabled = disabled;
+        return this;
+    }
+
+    public boolean disabled() {
+        return disabled;
+    }
+
     public Map<Enum<?>, Function<T, Boolean>> stateActions() {
         return Map.copyOf(stateActions);
     }
@@ -2589,6 +2603,9 @@ public class MechanismConfig<T extends Mechanism> {
      * @return constructed mechanism instance
      */
     public T build(){
+        if (disabled) {
+            return null;
+        }
         MechanismConfigRecord cfg = data;
         if (autoContinuousPidForUnboundedTurret) {
             cfg = applyAutoContinuousPidForUnboundedTurret(cfg);
