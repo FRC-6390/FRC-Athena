@@ -41,6 +41,8 @@ public class CtreMotorController implements MotorController {
     private final Consumer<MotorNeutralMode> setNeutralMode;
     private final Consumer<PIDController> setPid;
     private final StatusSignal<?> deviceTemperatureSignal;
+    private final StatusSignal<Boolean> faultStatorCurrentLimitSignal;
+    private final StatusSignal<Boolean> faultSupplyCurrentLimitSignal;
     private double cachedTemperatureCelsius = 0.0;
     private boolean cachedConnected = true;
     private int updateCycles = 0;
@@ -70,8 +72,12 @@ public class CtreMotorController implements MotorController {
             slot0.kD = pid.getD();
             controller.getConfigurator().apply(slot0, 0.0);
         };
+        this.faultStatorCurrentLimitSignal = controller.getFault_StatorCurrLimit(false).clone();
+        this.faultSupplyCurrentLimitSignal = controller.getFault_SupplyCurrLimit(false).clone();
 
         deviceTemperatureSignal.setUpdateFrequency(10.0, 0.0);
+        faultStatorCurrentLimitSignal.setUpdateFrequency(10.0, 0.0);
+        faultSupplyCurrentLimitSignal.setUpdateFrequency(10.0, 0.0);
         controller.optimizeBusUtilization(4.0, 0.0);
     }
 
@@ -211,6 +217,14 @@ public class CtreMotorController implements MotorController {
     }
 
     @Override
+    public boolean isStalled() {
+        faultStatorCurrentLimitSignal.refresh(false);
+        faultSupplyCurrentLimitSignal.refresh(false);
+        return Boolean.TRUE.equals(faultStatorCurrentLimitSignal.getValue())
+                || Boolean.TRUE.equals(faultSupplyCurrentLimitSignal.getValue());
+    }
+
+    @Override
     public Encoder getEncoder() {
         return encoder;
     }
@@ -258,6 +272,8 @@ public class CtreMotorController implements MotorController {
         updateCycles++;
         if (updateCycles == 1 || updateCycles % TEMPERATURE_REFRESH_INTERVAL_CYCLES == 0) {
             deviceTemperatureSignal.refresh(false);
+            faultStatorCurrentLimitSignal.refresh(false);
+            faultSupplyCurrentLimitSignal.refresh(false);
             cachedTemperatureCelsius = deviceTemperatureSignal.getValueAsDouble();
         }
         if (updateCycles >= 1_000_000) {

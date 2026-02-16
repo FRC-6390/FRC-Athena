@@ -50,6 +50,7 @@ public class RevMotorController implements MotorController {
     private final BooleanSupplier getConnected;
     private final java.util.function.DoubleSupplier getTemperature;
     private final BooleanSupplier getInverted;
+    private final BooleanSupplier getStalled;
 
     public RevMotorController(MotorControllerConfig config,
                               Encoder encoder,
@@ -63,7 +64,8 @@ public class RevMotorController implements MotorController {
                               Consumer<Boolean> setInverted,
                               BooleanSupplier getConnected,
                               java.util.function.DoubleSupplier getTemperature,
-                              BooleanSupplier getInverted) {
+                              BooleanSupplier getInverted,
+                              BooleanSupplier getStalled) {
         this.config = config;
         this.encoder = encoder;
         this.setSpeed = setSpeed;
@@ -77,6 +79,7 @@ public class RevMotorController implements MotorController {
         this.getConnected = getConnected;
         this.getTemperature = getTemperature;
         this.getInverted = getInverted;
+        this.getStalled = getStalled;
     }
 
     public static RevMotorController fromConfig(MotorControllerConfig config) {
@@ -170,7 +173,11 @@ public class RevMotorController implements MotorController {
                 controller::setInverted,
                 () -> !controller.hasActiveFault(),
                 controller::getMotorTemperature,
-                controller::getInverted);
+                controller::getInverted,
+                () -> {
+                    SparkBase.Warnings warnings = controller.getWarnings();
+                    return warnings != null && warnings.stall;
+                });
     }
 
     private static RevMotorController createSparkFlex(MotorControllerConfig config, MotorType motorType) {
@@ -250,7 +257,11 @@ public class RevMotorController implements MotorController {
                 controller::setInverted,
                 () -> !controller.hasActiveFault(),
                 controller::getMotorTemperature,
-                controller::getInverted);
+                controller::getInverted,
+                () -> {
+                    SparkBase.Warnings warnings = controller.getWarnings();
+                    return warnings != null && warnings.stall;
+                });
     }
 
     @Override
@@ -330,6 +341,11 @@ public class RevMotorController implements MotorController {
     public void setInverted(boolean inverted) {
         config.hardware().inverted(inverted);
         setInverted.accept(inverted);
+    }
+
+    @Override
+    public boolean isStalled() {
+        return getStalled.getAsBoolean();
     }
 
     @Override

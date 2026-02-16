@@ -51,6 +51,13 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
 
     double getTemperatureCelsius();
 
+    /**
+     * Returns true when the motor controller is indicating a stall condition.
+     */
+    default boolean isStalled() {
+        return false;
+    }
+
     default boolean isConnected(boolean poll) {
         if (poll) {
             update();
@@ -219,6 +226,10 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
             return owner.getTemperatureCelsius(poll);
         }
 
+        public boolean stalled() {
+            return owner.isStalled();
+        }
+
         public boolean inverted() {
             return owner.isInverted();
         }
@@ -277,6 +288,7 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
         node.putString("type", type != null ? type.getKey() : "unknown");
         node.putBoolean("connected", isConnected());
         node.putDouble("tempC", getTemperatureCelsius());
+        node.putBoolean("stalled", isStalled());
         node.putString("neutralMode", getNeutralMode().name());
 
         if (nt.enabled(RobotNetworkTables.Flag.HW_MOTOR_TUNING_WIDGETS)) {
