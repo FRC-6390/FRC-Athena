@@ -186,9 +186,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, PIDController> controlLoopPids;
     private final Map<String, ProfiledPIDController> controlLoopProfiledPids;
     private final Map<String, OutputType> controlLoopPidOutputTypes;
+    private final Map<String, Double> controlLoopPidTolerances;
     private final Map<String, MechanismConfig.BangBangProfile> controlLoopBangBangs;
     private final Map<String, SimpleMotorFeedforward> controlLoopFeedforwards;
     private final Map<String, OutputType> controlLoopFeedforwardOutputTypes;
+    private final Map<String, Double> controlLoopFeedforwardTolerances;
     private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
     private  boolean shouldCustomEncoder = false;
     private  DoubleSupplier customEncoderPos;
@@ -328,9 +330,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.controlLoopPids = new HashMap<>();
         this.controlLoopProfiledPids = new HashMap<>();
         this.controlLoopPidOutputTypes = new HashMap<>();
+        this.controlLoopPidTolerances = new HashMap<>();
         this.controlLoopBangBangs = new HashMap<>();
         this.controlLoopFeedforwards = new HashMap<>();
         this.controlLoopFeedforwardOutputTypes = new HashMap<>();
+        this.controlLoopFeedforwardTolerances = new HashMap<>();
         this.controlLoops = new ArrayList<>();
         this.controlLoopsByName = new HashMap<>();
         this.disabledControlLoops = new HashSet<>();
@@ -376,6 +380,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     controlLoopPids.put(name, pid);
                 }
                 controlLoopPidOutputTypes.put(name, profileOutput);
+                controlLoopPidTolerances.put(name, sanitizeControlLoopTolerance(profile.tolerance()));
             }
         }
         if (config.controlLoopBangBangProfiles() != null) {
@@ -412,6 +417,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 }
                 controlLoopFeedforwards.put(name, new SimpleMotorFeedforward(ff.getKs(), ff.getKv(), ff.getKa()));
                 controlLoopFeedforwardOutputTypes.put(name, profileOutput);
+                controlLoopFeedforwardTolerances.put(name, sanitizeControlLoopTolerance(profile.tolerance()));
             }
         }
         for (MechanismConfig.ControlLoopBinding<?> binding : config.controlLoops()) {
@@ -619,9 +625,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.controlLoopPids = new HashMap<>();
         this.controlLoopProfiledPids = new HashMap<>();
         this.controlLoopPidOutputTypes = new HashMap<>();
+        this.controlLoopPidTolerances = new HashMap<>();
         this.controlLoopBangBangs = new HashMap<>();
         this.controlLoopFeedforwards = new HashMap<>();
         this.controlLoopFeedforwardOutputTypes = new HashMap<>();
+        this.controlLoopFeedforwardTolerances = new HashMap<>();
     }
 
     // Package-private helpers for state-hook contexts (StatefulMechanismCore).
@@ -2071,6 +2079,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return controlLoopPidOutputTypes.getOrDefault(name, OutputType.PERCENT);
     }
 
+    double getControlLoopPidTolerance(String name) {
+        if (name == null) {
+            return Double.NaN;
+        }
+        return controlLoopPidTolerances.getOrDefault(name, Double.NaN);
+    }
+
     MechanismConfig.BangBangProfile getControlLoopBangBangProfile(String name) {
         if (name == null) {
             return null;
@@ -2085,6 +2100,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return controlLoopFeedforwardOutputTypes.getOrDefault(name, OutputType.VOLTAGE);
     }
 
+    double getControlLoopFeedforwardTolerance(String name) {
+        if (name == null) {
+            return Double.NaN;
+        }
+        return controlLoopFeedforwardTolerances.getOrDefault(name, Double.NaN);
+    }
+
     static double sanitizeBangBangLevel(double output) {
         return Double.isFinite(output) ? output : 0.0;
     }
@@ -2094,6 +2116,23 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return 0.0;
         }
         return tolerance;
+    }
+
+    static double sanitizeControlLoopTolerance(double tolerance) {
+        if (!Double.isFinite(tolerance) || tolerance < 0.0) {
+            return Double.NaN;
+        }
+        return tolerance;
+    }
+
+    static boolean isWithinTolerance(double measurement, double setpoint, double tolerance) {
+        if (!Double.isFinite(tolerance) || tolerance < 0.0) {
+            return false;
+        }
+        if (!Double.isFinite(measurement) || !Double.isFinite(setpoint)) {
+            return false;
+        }
+        return Math.abs(setpoint - measurement) <= tolerance;
     }
 
     static boolean isBangBangWithinTolerance(

@@ -245,6 +245,13 @@ public interface MechanismControlContext<T extends Mechanism>
     }
 
     /**
+     * Computes feedforward output using measurement/setpoint context.
+     */
+    default double feedforwardOut(String name, double measurement, double setpoint, double velocity) {
+        return feedforwardOut(name, velocity);
+    }
+
+    /**
      * Computes feedforward output using current and next velocity (better for acceleration terms).
      */
     default double feedforwardOut(String name, double currentVelocity, double nextVelocity) {
@@ -255,6 +262,18 @@ public interface MechanismControlContext<T extends Mechanism>
         double volts = ff.calculateWithVelocities(currentVelocity, nextVelocity);
         OutputType from = mechanism().getControlLoopFeedforwardOutputType(name);
         return toOutput(from, volts);
+    }
+
+    /**
+     * Computes feedforward output with velocity transition using measurement/setpoint context.
+     */
+    default double feedforwardOut(
+            String name,
+            double measurement,
+            double setpoint,
+            double currentVelocity,
+            double nextVelocity) {
+        return feedforwardOut(name, currentVelocity, nextVelocity);
     }
 
     default boolean usesVoltage() {

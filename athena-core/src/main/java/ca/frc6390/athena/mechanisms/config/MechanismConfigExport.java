@@ -233,13 +233,15 @@ public final class MechanismConfigExport {
                     continue;
                 }
                 var ff = e.getValue().feedforward();
+                Double toleranceProfile = Double.isFinite(e.getValue().tolerance()) ? e.getValue().tolerance() : null;
                 ffProfiles.add(new MechanismFeedforwardConfig(
                         e.getKey(),
                         "simple_motor",
                         ff.getKs(),
                         null,
                         ff.getKv(),
-                        ff.getKa()));
+                        ff.getKa(),
+                        toleranceProfile));
             }
             if (ffProfiles.isEmpty()) {
                 ffProfiles = null;

@@ -14,7 +14,7 @@ public record MechanismFeedforwardConfig(
         Double kS,
         Double kG,
         Double kV,
-        Double kA
+        Double kA,
+        Double tolerance
 ) {
 }
-

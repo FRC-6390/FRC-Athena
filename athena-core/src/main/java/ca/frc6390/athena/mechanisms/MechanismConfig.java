@@ -769,7 +769,7 @@ public class MechanismConfig<T extends Mechanism> {
                     output += ctx.bangBangOut(normalizedName, measurement, setpoint);
                 }
                 if (hasFf) {
-                    output += ctx.feedforwardOut(normalizedName, setpoint);
+                    output += ctx.feedforwardOut(normalizedName, measurement, setpoint, setpoint);
                 }
                 return output;
             });
@@ -858,11 +858,19 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         public ControlSection<T> ff(String name, double kS, double kV, double kA) {
-            return registerFeedforward(name, OutputType.VOLTAGE, kS, kV, kA);
+            return registerFeedforward(name, OutputType.VOLTAGE, kS, kV, kA, Double.NaN);
+        }
+
+        public ControlSection<T> ff(String name, double kS, double kV, double kA, double tolerance) {
+            return registerFeedforward(name, OutputType.VOLTAGE, kS, kV, kA, tolerance);
         }
 
         public ControlSection<T> ff(String name, OutputType outputType, double kS, double kV, double kA) {
-            return registerFeedforward(name, outputType, kS, kV, kA);
+            return registerFeedforward(name, outputType, kS, kV, kA, Double.NaN);
+        }
+
+        public ControlSection<T> ff(String name, OutputType outputType, double kS, double kV, double kA, double tolerance) {
+            return registerFeedforward(name, outputType, kS, kV, kA, tolerance);
         }
 
         public ControlSection<T> ff(String name, Consumer<FeedforwardBuilder> builder) {
@@ -871,7 +879,7 @@ public class MechanismConfig<T extends Mechanism> {
             if (builder != null) {
                 builder.accept(spec);
             }
-            return registerFeedforward(name, spec.outputType, spec.kS, spec.kV, spec.kA);
+            return registerFeedforward(name, spec.outputType, spec.kS, spec.kV, spec.kA, spec.tolerance);
         }
 
         private ControlSection<T> registerPid(
@@ -949,7 +957,8 @@ public class MechanismConfig<T extends Mechanism> {
                 OutputType outputType,
                 double kS,
                 double kV,
-                double kA) {
+                double kA,
+                double tolerance) {
             Objects.requireNonNull(name, "name");
             String normalized = normalizeName(name);
             if (normalized == null) {
@@ -960,9 +969,15 @@ public class MechanismConfig<T extends Mechanism> {
             if (resolvedOutput != OutputType.VOLTAGE) {
                 throw new IllegalArgumentException("feedforward output type must be VOLTAGE");
             }
+            if (Double.isFinite(tolerance) && tolerance < 0.0) {
+                throw new IllegalArgumentException("feedforward tolerance must be >= 0 when provided");
+            }
             owner.controlLoopFeedforwardProfiles.put(
                     normalized,
-                    new FeedforwardProfile(resolvedOutput, new SimpleMotorFeedforward(kS, kV, kA)));
+                    new FeedforwardProfile(
+                            resolvedOutput,
+                            new SimpleMotorFeedforward(kS, kV, kA),
+                            tolerance));
             return this;
         }
 
@@ -1080,6 +1095,7 @@ public class MechanismConfig<T extends Mechanism> {
             private double kS = 0.0;
             private double kV = 0.0;
             private double kA = 0.0;
+            private double tolerance = Double.NaN;
 
             public FeedforwardBuilder output(OutputType outputType) {
                 this.outputType = outputType != null ? outputType : OutputType.VOLTAGE;
@@ -1098,6 +1114,11 @@ public class MechanismConfig<T extends Mechanism> {
 
             public FeedforwardBuilder ka(double kA) {
                 this.kA = kA;
+                return this;
+            }
+
+            public FeedforwardBuilder tolerance(double tolerance) {
+                this.tolerance = tolerance;
                 return this;
             }
         }
@@ -2264,7 +2285,7 @@ public class MechanismConfig<T extends Mechanism> {
             double tolerance) {
     }
 
-    public record FeedforwardProfile(OutputType outputType, SimpleMotorFeedforward feedforward) {
+    public record FeedforwardProfile(OutputType outputType, SimpleMotorFeedforward feedforward, double tolerance) {
         public FeedforwardProfile {
             Objects.requireNonNull(feedforward, "feedforward");
         }

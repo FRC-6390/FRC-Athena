@@ -281,11 +281,14 @@ public final class MechanismConfigApplier {
                 double kg = ff.kG() != null ? ff.kG() : 0.0;
                 double kv = ff.kV() != null ? ff.kV() : 0.0;
                 double ka = ff.kA() != null ? ff.kA() : 0.0;
+                double tolerance = ff.tolerance() != null
+                        ? ff.tolerance()
+                        : (control.tolerance() != null ? control.tolerance() : Double.NaN);
                 switch (type) {
                     case "arm" -> target.control(c -> c.armFeedforwardProfile(ff.name(), ks, kg, kv, ka));
                     case "elevator" -> target.control(c -> c.elevatorFeedforwardProfile(ff.name(), ks, kg, kv, ka));
-                    case "simple_motor" -> target.control(c -> c.ff(ff.name(), OutputType.VOLTAGE, ks, kv, ka));
-                    default -> target.control(c -> c.ff(ff.name(), OutputType.VOLTAGE, ks, kv, ka));
+                    case "simple_motor" -> target.control(c -> c.ff(ff.name(), OutputType.VOLTAGE, ks, kv, ka, tolerance));
+                    default -> target.control(c -> c.ff(ff.name(), OutputType.VOLTAGE, ks, kv, ka, tolerance));
                 }
             }
         }
