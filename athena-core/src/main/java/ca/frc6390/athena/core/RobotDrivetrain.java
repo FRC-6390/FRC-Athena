@@ -27,7 +27,7 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
         void defaultCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput);
 
         default void defaultCommand(EnhancedXboxController driverController) {
-            defaultCommand(driverController.leftX, driverController.leftY, driverController.rightX);
+            defaultCommand(driverController.leftY, driverController.leftX, driverController.rightX);
         }
 
         void reset();
