@@ -382,50 +382,51 @@ public class RobotVision implements RobotSendableSystem {
             }
          }
 
-         VisionCamera.TargetObservation transformed = new VisionCamera.TargetObservation(
-                 base.tagId(),
-                 base.yawDegrees(),
-                 base.distanceMeters(),
-                 translation,
-                 space,
-                 base.localizationData(),
-                 base.confidence());
-
-         best = pickBetterObservation(best, transformed);
+         if (isObservationBetter(best, base.confidence(), base.distanceMeters(), translation)) {
+            best = new VisionCamera.TargetObservation(
+                    base.tagId(),
+                    base.yawDegrees(),
+                    base.distanceMeters(),
+                    translation,
+                    space,
+                    base.localizationData(),
+                    base.confidence());
+         }
       }
       return Optional.ofNullable(best);
    }
 
-   private VisionCamera.TargetObservation pickBetterObservation(VisionCamera.TargetObservation current,
-         VisionCamera.TargetObservation candidate) {
-      if (candidate == null) {
-         return current;
-      }
+   private static boolean isObservationBetter(
+         VisionCamera.TargetObservation current,
+         double candidateConfidence,
+         double candidateDistance,
+         Translation2d candidateTranslation) {
       if (current == null) {
-         return candidate;
+         return true;
       }
 
       double currentConfidence = current.hasConfidence() ? current.confidence() : 0.0;
-      double candidateConfidence = candidate.hasConfidence() ? candidate.confidence() : 0.0;
-      if (candidateConfidence > currentConfidence + 1e-9) {
-         return candidate;
+      double resolvedCandidateConfidence = Double.isFinite(candidateConfidence) ? candidateConfidence : 0.0;
+      if (resolvedCandidateConfidence > currentConfidence + 1e-9) {
+         return true;
       }
-      if (currentConfidence > candidateConfidence + 1e-9) {
-         return current;
+      if (currentConfidence > resolvedCandidateConfidence + 1e-9) {
+         return false;
       }
 
       double currentDistance = current.hasDistance() ? Math.abs(current.distanceMeters()) : Double.POSITIVE_INFINITY;
-      double candidateDistance = candidate.hasDistance() ? Math.abs(candidate.distanceMeters()) : Double.POSITIVE_INFINITY;
-      if (candidateDistance < currentDistance) {
-         return candidate;
+      double resolvedCandidateDistance =
+            Double.isFinite(candidateDistance) ? Math.abs(candidateDistance) : Double.POSITIVE_INFINITY;
+      if (resolvedCandidateDistance < currentDistance) {
+         return true;
       }
 
       double currentMagnitude = current.hasTranslation() ? current.translation().getNorm() : Double.POSITIVE_INFINITY;
-      double candidateMagnitude = candidate.hasTranslation() ? candidate.translation().getNorm() : Double.POSITIVE_INFINITY;
+      double candidateMagnitude = candidateTranslation != null ? candidateTranslation.getNorm() : Double.POSITIVE_INFINITY;
       if (candidateMagnitude < currentMagnitude) {
-         return candidate;
+         return true;
       }
-      return current;
+      return false;
    }
 
    private void registerCamera(String key, VisionCamera camera, Object vendorInstance) {

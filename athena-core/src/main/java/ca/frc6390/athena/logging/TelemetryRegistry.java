@@ -4,7 +4,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import ca.frc6390.athena.core.RobotTime;
@@ -13,10 +15,12 @@ import edu.wpi.first.wpilibj.DriverStation;
 public final class TelemetryRegistry {
     private static final String DEFAULT_PREFIX = "Athena";
     private static final int DEFAULT_PERIOD_MS = 100;
+    private static final int HIGH_BANDWIDTH_MIN_PERIOD_MS = 200;
     private volatile boolean enabled = true;
     private final TelemetrySink diskSink;
     private final TelemetrySink networkTablesSink;
     private final List<Entry> entries;
+    private final Map<String, Entry> entriesByKey;
     private final int defaultPeriodMs;
 
     private static final class Entry {
@@ -46,7 +50,7 @@ public final class TelemetryRegistry {
             this.periodMs = periodMs;
             this.epsilon = epsilon;
             this.lastPublishMs = 0L;
-            this.lastValue = snapshotValue(type, initialValue);
+            this.lastValue = snapshotValue(type, initialValue, null);
         }
     }
 
@@ -61,6 +65,7 @@ public final class TelemetryRegistry {
         this.diskSink = diskSink;
         this.networkTablesSink = networkTablesSink;
         this.entries = new ArrayList<>();
+        this.entriesByKey = new HashMap<>();
         this.defaultPeriodMs = defaultPeriodMs > 0 ? defaultPeriodMs : DEFAULT_PERIOD_MS;
     }
 
@@ -146,7 +151,7 @@ public final class TelemetryRegistry {
             if (entry.networkTablesOutput != null) {
                 entry.networkTablesOutput.write(value);
             }
-            entry.lastValue = snapshotValue(entry.type, value);
+            entry.lastValue = snapshotValue(entry.type, value, entry.lastValue);
             entry.lastPublishMs = nowMs;
         }
     }
@@ -157,6 +162,10 @@ public final class TelemetryRegistry {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public int entryCount() {
+        return entries.size();
     }
 
     private void registerField(Object target, Field field, Telemetry telemetry) {
@@ -201,8 +210,30 @@ public final class TelemetryRegistry {
                 ? networkTablesSink.create(key, valueType, initialValue)
                 : null;
         int periodMs = telemetry.periodMs() > 0 ? telemetry.periodMs() : defaultPeriodMs;
-        entries.add(new Entry(key, valueType, diskOutput, networkTablesOutput, supplier,
-                periodMs, telemetry.epsilon(), initialValue));
+        if (isHighBandwidthType(valueType) && periodMs < HIGH_BANDWIDTH_MIN_PERIOD_MS) {
+            periodMs = HIGH_BANDWIDTH_MIN_PERIOD_MS;
+        }
+        Entry updated = new Entry(
+                key,
+                valueType,
+                diskOutput,
+                networkTablesOutput,
+                supplier,
+                periodMs,
+                telemetry.epsilon(),
+                initialValue);
+        Entry previous = entriesByKey.put(key, updated);
+        if (previous == null) {
+            entries.add(updated);
+            return;
+        }
+        int index = entries.indexOf(previous);
+        if (index >= 0) {
+            entries.set(index, updated);
+        } else {
+            // Fallback for unexpected external mutation; keep map/list consistent.
+            entries.add(updated);
+        }
     }
 
     private boolean shouldLogToDisk(Telemetry telemetry) {
@@ -228,6 +259,13 @@ public final class TelemetryRegistry {
             return targetType.getSimpleName() + "/" + name;
         }
         return key;
+    }
+
+    private static boolean isHighBandwidthType(TelemetryValueType valueType) {
+        return valueType == TelemetryValueType.DOUBLE_ARRAY
+                || valueType == TelemetryValueType.BOOLEAN_ARRAY
+                || valueType == TelemetryValueType.INTEGER_ARRAY
+                || valueType == TelemetryValueType.STRING_ARRAY;
     }
 
     private static TelemetryValueType resolveType(Class<?> type) {
@@ -304,19 +342,68 @@ public final class TelemetryRegistry {
         };
     }
 
-    private static Object snapshotValue(TelemetryValueType type, Object value) {
+    private static Object snapshotValue(TelemetryValueType type, Object value, Object previous) {
         if (value == null) {
             return null;
         }
         return switch (type) {
-            case DOUBLE_ARRAY -> ((double[]) value).clone();
-            case BOOLEAN_ARRAY -> ((boolean[]) value).clone();
-            case INTEGER_ARRAY -> value instanceof long[]
-                    ? ((long[]) value).clone()
-                    : ((int[]) value).clone();
-            case STRING_ARRAY -> ((String[]) value).clone();
+            case DOUBLE_ARRAY -> copyDoubleArray((double[]) value, previous);
+            case BOOLEAN_ARRAY -> copyBooleanArray((boolean[]) value, previous);
+            case INTEGER_ARRAY -> copyIntegerArray(value, previous);
+            case STRING_ARRAY -> copyStringArray((String[]) value, previous);
             default -> value;
         };
+    }
+
+    private static double[] copyDoubleArray(double[] source, Object previous) {
+        if (source == null) {
+            return null;
+        }
+        double[] out = previous instanceof double[] existing && existing.length == source.length
+                ? existing
+                : new double[source.length];
+        System.arraycopy(source, 0, out, 0, source.length);
+        return out;
+    }
+
+    private static boolean[] copyBooleanArray(boolean[] source, Object previous) {
+        if (source == null) {
+            return null;
+        }
+        boolean[] out = previous instanceof boolean[] existing && existing.length == source.length
+                ? existing
+                : new boolean[source.length];
+        System.arraycopy(source, 0, out, 0, source.length);
+        return out;
+    }
+
+    private static Object copyIntegerArray(Object source, Object previous) {
+        if (source instanceof long[] sourceLong) {
+            long[] out = previous instanceof long[] existing && existing.length == sourceLong.length
+                    ? existing
+                    : new long[sourceLong.length];
+            System.arraycopy(sourceLong, 0, out, 0, sourceLong.length);
+            return out;
+        }
+        if (source instanceof int[] sourceInt) {
+            int[] out = previous instanceof int[] existing && existing.length == sourceInt.length
+                    ? existing
+                    : new int[sourceInt.length];
+            System.arraycopy(sourceInt, 0, out, 0, sourceInt.length);
+            return out;
+        }
+        return null;
+    }
+
+    private static String[] copyStringArray(String[] source, Object previous) {
+        if (source == null) {
+            return null;
+        }
+        String[] out = previous instanceof String[] existing && existing.length == source.length
+                ? existing
+                : new String[source.length];
+        System.arraycopy(source, 0, out, 0, source.length);
+        return out;
     }
 
     private static boolean integerArrayEquals(Object value, Object lastValue) {
@@ -327,10 +414,30 @@ public final class TelemetryRegistry {
             return Arrays.equals((int[]) value, (int[]) lastValue);
         }
         if (value instanceof long[] && lastValue instanceof int[]) {
-            return Arrays.equals((long[]) value, toLongArray((int[]) lastValue));
+            long[] left = (long[]) value;
+            int[] right = (int[]) lastValue;
+            if (left.length != right.length) {
+                return false;
+            }
+            for (int i = 0; i < left.length; i++) {
+                if (left[i] != right[i]) {
+                    return false;
+                }
+            }
+            return true;
         }
         if (value instanceof int[] && lastValue instanceof long[]) {
-            return Arrays.equals(toLongArray((int[]) value), (long[]) lastValue);
+            int[] left = (int[]) value;
+            long[] right = (long[]) lastValue;
+            if (left.length != right.length) {
+                return false;
+            }
+            for (int i = 0; i < left.length; i++) {
+                if (left[i] != right[i]) {
+                    return false;
+                }
+            }
+            return true;
         }
         return false;
     }

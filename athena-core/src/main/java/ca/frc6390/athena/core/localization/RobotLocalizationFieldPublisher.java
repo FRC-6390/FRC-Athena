@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core.localization;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,12 +19,19 @@ import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 
 final class RobotLocalizationFieldPublisher {
+    private static final Pose2d ZERO_POSE = new Pose2d();
+    private static final List<Pose2d> EMPTY_POSES = List.of();
+    private static final Rotation2d ZERO_ROTATION = Rotation2d.kZero;
+
     private final Field2d field;
     private final Supplier<RobotVision> visionSupplier;
     private FieldObject2d plannedPathObject;
     private FieldObject2d actualPathObject;
     private final Map<String, FieldObject2d> boundingBoxObjects = new HashMap<>();
-    private final List<Pose2d> actualPathPoses = new ArrayList<>();
+    private final Map<String, List<Pose2d>> boundingBoxPathCache = new HashMap<>();
+    private final Map<String, PoseBoundingBox2d> boundingBoxPathSources = new HashMap<>();
+    private final ArrayDeque<Pose2d> actualPathPoses = new ArrayDeque<>();
+    private final List<Pose2d> actualPathPoseSnapshot = new ArrayList<>();
     private double actualPathSpacingMeters = 0.1;
     private double actualPathMinIntervalSeconds = 0.1;
     private int actualPathMaxPoints = 600;
@@ -31,8 +39,9 @@ final class RobotLocalizationFieldPublisher {
     private Double fieldLengthMetersOverride = null;
     private Double fieldWidthMetersOverride = null;
     private double lastActualPathTimestamp = Double.NEGATIVE_INFINITY;
-    private Pose2d lastActualPathPose = new Pose2d();
+    private Pose2d lastActualPathPose = ZERO_POSE;
     private String lastPlannedAutoId;
+    private boolean plannedPathEmpty = true;
     private boolean fieldPublished;
 
     RobotLocalizationFieldPublisher(Supplier<RobotVision> visionSupplier) {
@@ -63,7 +72,7 @@ final class RobotLocalizationFieldPublisher {
     }
 
     void clearRobotPose() {
-        field.getObject("Robot").setPoses(List.of());
+        field.getObject("Robot").setPoses(EMPTY_POSES);
     }
 
     void setBoundingBoxes(Map<String, PoseBoundingBox2d> boxes) {
@@ -76,7 +85,9 @@ final class RobotLocalizationFieldPublisher {
             if (boxes.containsKey(entry.getKey())) {
                 return false;
             }
-            entry.getValue().setPoses(List.of());
+            entry.getValue().setPoses(EMPTY_POSES);
+            boundingBoxPathCache.remove(entry.getKey());
+            boundingBoxPathSources.remove(entry.getKey());
             return true;
         });
 
@@ -89,15 +100,17 @@ final class RobotLocalizationFieldPublisher {
             FieldObject2d object = boundingBoxObjects.computeIfAbsent(
                     key,
                     id -> field.getObject("BoundingBoxes/" + id));
-            object.setPoses(toBoundingBoxPath(box));
+            object.setPoses(getOrBuildBoundingBoxPath(key, box));
         }
     }
 
     void clearBoundingBoxes() {
         for (FieldObject2d object : boundingBoxObjects.values()) {
-            object.setPoses(List.of());
+            object.setPoses(EMPTY_POSES);
         }
         boundingBoxObjects.clear();
+        boundingBoxPathCache.clear();
+        boundingBoxPathSources.clear();
     }
 
     void updateAutoVisualization(RobotAuto autos) {
@@ -122,29 +135,38 @@ final class RobotLocalizationFieldPublisher {
             plannedPathObject = field.getObject("AutoPlan");
         }
         if (poses == null || poses.isEmpty()) {
-            plannedPathObject.setPoses(List.of());
+            plannedPathObject.setPoses(EMPTY_POSES);
+            plannedPathEmpty = true;
             return;
         }
         List<Pose2d> resolved = applyAllianceFlip(poses);
         resolved = downsamplePoses(resolved, plannedPathSpacingMeters);
+        if (resolved.isEmpty()) {
+            plannedPathObject.setPoses(EMPTY_POSES);
+            plannedPathEmpty = true;
+            return;
+        }
         plannedPathObject.setPoses(resolved);
+        plannedPathEmpty = false;
     }
 
     void clearPlannedPath() {
         if (plannedPathObject == null) {
             plannedPathObject = field.getObject("AutoPlan");
         }
-        plannedPathObject.setPoses(List.of());
+        plannedPathObject.setPoses(EMPTY_POSES);
+        plannedPathEmpty = true;
     }
 
     void resetActualPath() {
         actualPathPoses.clear();
-        lastActualPathPose = new Pose2d();
+        actualPathPoseSnapshot.clear();
+        lastActualPathPose = ZERO_POSE;
         lastActualPathTimestamp = Double.NEGATIVE_INFINITY;
         if (actualPathObject == null) {
             actualPathObject = field.getObject("ActualPath");
         }
-        actualPathObject.setPoses(List.of());
+        actualPathObject.setPoses(EMPTY_POSES);
     }
 
     void setPlannedPathSpacingMeters(double spacingMeters) {
@@ -201,19 +223,25 @@ final class RobotLocalizationFieldPublisher {
         if (actualPathObject == null) {
             actualPathObject = field.getObject("ActualPath");
         }
-        actualPathPoses.add(pose);
-        if (actualPathPoses.size() > actualPathMaxPoints) {
-            actualPathPoses.remove(0);
+        actualPathPoses.addLast(pose);
+        boolean pruned = false;
+        while (actualPathPoses.size() > actualPathMaxPoints) {
+            actualPathPoses.removeFirst();
+            pruned = true;
         }
         lastActualPathPose = pose;
         lastActualPathTimestamp = timestampSeconds;
-        actualPathObject.setPoses(actualPathPoses);
+        if (pruned) {
+            actualPathPoseSnapshot.clear();
+            actualPathPoseSnapshot.addAll(actualPathPoses);
+        } else {
+            actualPathPoseSnapshot.add(pose);
+        }
+        actualPathObject.setPoses(actualPathPoseSnapshot);
     }
 
     private boolean isPlannedPathEmpty() {
-        return plannedPathObject == null
-                || plannedPathObject.getPoses() == null
-                || plannedPathObject.getPoses().isEmpty();
+        return plannedPathEmpty;
     }
 
     private List<Pose2d> applyAllianceFlip(List<Pose2d> poses) {
@@ -294,12 +322,23 @@ final class RobotLocalizationFieldPublisher {
         return result;
     }
 
+    private List<Pose2d> getOrBuildBoundingBoxPath(String name, PoseBoundingBox2d box) {
+        PoseBoundingBox2d previous = boundingBoxPathSources.get(name);
+        List<Pose2d> cached = boundingBoxPathCache.get(name);
+        if (cached != null && box.equals(previous)) {
+            return cached;
+        }
+        List<Pose2d> rebuilt = toBoundingBoxPath(box);
+        boundingBoxPathCache.put(name, rebuilt);
+        boundingBoxPathSources.put(name, box);
+        return rebuilt;
+    }
+
     private static List<Pose2d> toBoundingBoxPath(PoseBoundingBox2d box) {
-        Rotation2d heading = new Rotation2d();
-        Pose2d bottomLeft = new Pose2d(box.minX(), box.minY(), heading);
-        Pose2d bottomRight = new Pose2d(box.maxX(), box.minY(), heading);
-        Pose2d topRight = new Pose2d(box.maxX(), box.maxY(), heading);
-        Pose2d topLeft = new Pose2d(box.minX(), box.maxY(), heading);
+        Pose2d bottomLeft = new Pose2d(box.minX(), box.minY(), ZERO_ROTATION);
+        Pose2d bottomRight = new Pose2d(box.maxX(), box.minY(), ZERO_ROTATION);
+        Pose2d topRight = new Pose2d(box.maxX(), box.maxY(), ZERO_ROTATION);
+        Pose2d topLeft = new Pose2d(box.minX(), box.maxY(), ZERO_ROTATION);
         return List.of(bottomLeft, bottomRight, topRight, topLeft, bottomLeft);
     }
 }

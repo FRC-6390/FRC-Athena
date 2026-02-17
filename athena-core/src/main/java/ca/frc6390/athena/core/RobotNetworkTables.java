@@ -12,6 +12,7 @@ import edu.wpi.first.networktables.StringPublisher;
 import edu.wpi.first.networktables.StringTopic;
 import edu.wpi.first.wpilibj.Timer;
 import java.util.EnumMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -88,8 +89,14 @@ public final class RobotNetworkTables {
     private final ConcurrentHashMap<String, Boolean> lastBooleanValues = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastDoubleBits = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> lastStringValues = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> topicLastSeenCycle = new ConcurrentHashMap<>();
+    private static final long TOPIC_STALE_CYCLES = 750L;
+    private static final int TOPIC_PRUNE_SCAN_BUDGET_PER_CYCLE = 64;
+    private final AtomicLong publishCycle = new AtomicLong(0L);
+    private volatile Iterator<Map.Entry<String, Long>> topicPruneIterator;
     private static final double CONFIG_REFRESH_PERIOD_SECONDS = 0.1;
     private double lastConfigRefreshSeconds = Double.NaN;
+    private final Node rootNode = new Node("/" + ROOT);
 
     public RobotNetworkTables() {
         this(NetworkTableInstance.getDefault());
@@ -185,6 +192,14 @@ public final class RobotNetworkTables {
         refresh0();
     }
 
+    /**
+     * Advances the publish cycle and periodically prunes stale topic caches/publishers.
+     */
+    public void beginPublishCycle() {
+        long cycle = publishCycle.incrementAndGet();
+        pruneStaleTopics(cycle);
+    }
+
     private void refresh0() {
         if (!publishedConfig) {
             return;
@@ -235,52 +250,47 @@ public final class RobotNetworkTables {
                 if (t == null) {
                     continue;
                 }
-                boolean details = t.detailsEntry.getBoolean(t.details.get());
+                boolean details = readToggleEntry(t.detailsEntry, t.details.get());
                 if (details != t.details.get()) {
                     t.details.set(details);
                     changed = true;
                 }
-                boolean adv = t.advancedEntry.getBoolean(t.advanced.get());
-                if (adv != t.advanced.get()) {
-                    t.advanced.set(adv);
-                    changed = true;
-                }
-                boolean motors = t.motorsEntry.getBoolean(t.motors.get());
+                boolean motors = readToggleEntry(t.motorsEntry, t.motors.get());
                 if (motors != t.motors.get()) {
                     t.motors.set(motors);
                     changed = true;
                 }
-                boolean enc = t.encoderEntry.getBoolean(t.encoder.get());
+                boolean enc = readToggleEntry(t.encoderEntry, t.encoder.get());
                 if (enc != t.encoder.get()) {
                     t.encoder.set(enc);
                     changed = true;
                 }
-                boolean constraints = t.constraintsEntry.getBoolean(t.constraints.get());
+                boolean constraints = readToggleEntry(t.constraintsEntry, t.constraints.get());
                 if (constraints != t.constraints.get()) {
                     t.constraints.set(constraints);
                     changed = true;
                 }
-                boolean sensors = t.sensorsEntry.getBoolean(t.sensors.get());
+                boolean sensors = readToggleEntry(t.sensorsEntry, t.sensors.get());
                 if (sensors != t.sensors.get()) {
                     t.sensors.set(sensors);
                     changed = true;
                 }
-                boolean control = t.controlEntry.getBoolean(t.control.get());
+                boolean control = readToggleEntry(t.controlEntry, t.control.get());
                 if (control != t.control.get()) {
                     t.control.set(control);
                     changed = true;
                 }
-                boolean inputs = t.inputsEntry.getBoolean(t.inputs.get());
+                boolean inputs = readToggleEntry(t.inputsEntry, t.inputs.get());
                 if (inputs != t.inputs.get()) {
                     t.inputs.set(inputs);
                     changed = true;
                 }
-                boolean sim = t.simulationEntry.getBoolean(t.simulation.get());
+                boolean sim = readToggleEntry(t.simulationEntry, t.simulation.get());
                 if (sim != t.simulation.get()) {
                     t.simulation.set(sim);
                     changed = true;
                 }
-                boolean sysid = t.sysIdEntry.getBoolean(t.sysId.get());
+                boolean sysid = readToggleEntry(t.sysIdEntry, t.sysId.get());
                 if (sysid != t.sysId.get()) {
                     t.sysId.set(sysid);
                     changed = true;
@@ -334,10 +344,31 @@ public final class RobotNetworkTables {
         }
     }
 
+    /**
+     * Superstructure-scoped publishing toggles under:
+     * {@code Athena/Mechanisms/.../<SuperstructureName>/NetworkTableConfig/...}.
+     *
+     * <p>Superstructures currently consume only {@code Details}, {@code Control}, and {@code Inputs},
+     * so only those keys are created for cleaner dashboards.</p>
+     */
+    public MechanismToggles superstructureConfig(Node superstructureNode) {
+        Objects.requireNonNull(superstructureNode, "superstructureNode");
+        ensureTables();
+        String id = superstructureNode.path();
+        synchronized (mechLock) {
+            MechanismToggles t = mechanismToggles.get(id);
+            if (t != null) {
+                return t;
+            }
+            MechanismToggles created = createSuperstructureToggles(superstructureNode);
+            mechanismToggles.put(id, created);
+            return created;
+        }
+    }
+
     public final class MechanismToggles {
         private final String name;
         private final AtomicBoolean details;
-        private final AtomicBoolean advanced;
         private final AtomicBoolean motors;
         private final AtomicBoolean encoder;
         private final AtomicBoolean constraints;
@@ -347,7 +378,6 @@ public final class RobotNetworkTables {
         private final AtomicBoolean simulation;
         private final AtomicBoolean sysId;
         private final NetworkTableEntry detailsEntry;
-        private final NetworkTableEntry advancedEntry;
         private final NetworkTableEntry motorsEntry;
         private final NetworkTableEntry encoderEntry;
         private final NetworkTableEntry constraintsEntry;
@@ -359,7 +389,6 @@ public final class RobotNetworkTables {
 
         private MechanismToggles(String name,
                                 boolean detailsDefault,
-                                boolean advancedDefault,
                                 boolean motorsDefault,
                                 boolean encoderDefault,
                                 boolean constraintsDefault,
@@ -369,7 +398,6 @@ public final class RobotNetworkTables {
                                 boolean simulationDefault,
                                 boolean sysIdDefault,
                                 NetworkTableEntry detailsEntry,
-                                NetworkTableEntry advancedEntry,
                                 NetworkTableEntry motorsEntry,
                                 NetworkTableEntry encoderEntry,
                                 NetworkTableEntry constraintsEntry,
@@ -380,7 +408,6 @@ public final class RobotNetworkTables {
                                 NetworkTableEntry sysIdEntry) {
             this.name = name;
             this.details = new AtomicBoolean(detailsDefault);
-            this.advanced = new AtomicBoolean(advancedDefault);
             this.motors = new AtomicBoolean(motorsDefault);
             this.encoder = new AtomicBoolean(encoderDefault);
             this.constraints = new AtomicBoolean(constraintsDefault);
@@ -390,7 +417,6 @@ public final class RobotNetworkTables {
             this.simulation = new AtomicBoolean(simulationDefault);
             this.sysId = new AtomicBoolean(sysIdDefault);
             this.detailsEntry = detailsEntry;
-            this.advancedEntry = advancedEntry;
             this.motorsEntry = motorsEntry;
             this.encoderEntry = encoderEntry;
             this.constraintsEntry = constraintsEntry;
@@ -403,10 +429,6 @@ public final class RobotNetworkTables {
 
         public boolean detailsEnabled() {
             return details.get();
-        }
-
-        public boolean advancedEnabled() {
-            return advanced.get();
         }
 
         public boolean motorsEnabled() {
@@ -442,70 +464,81 @@ public final class RobotNetworkTables {
         }
 
         public MechanismToggles details(boolean enabled) {
-            detailsEntry.setBoolean(enabled);
+            if (detailsEntry != null) {
+                detailsEntry.setBoolean(enabled);
+            }
             details.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
-        public MechanismToggles advanced(boolean enabled) {
-            advancedEntry.setBoolean(enabled);
-            advanced.set(enabled);
-            revision.incrementAndGet();
-            return this;
-        }
-
         public MechanismToggles motors(boolean enabled) {
-            motorsEntry.setBoolean(enabled);
+            if (motorsEntry != null) {
+                motorsEntry.setBoolean(enabled);
+            }
             motors.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
         public MechanismToggles encoder(boolean enabled) {
-            encoderEntry.setBoolean(enabled);
+            if (encoderEntry != null) {
+                encoderEntry.setBoolean(enabled);
+            }
             encoder.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
         public MechanismToggles constraints(boolean enabled) {
-            constraintsEntry.setBoolean(enabled);
+            if (constraintsEntry != null) {
+                constraintsEntry.setBoolean(enabled);
+            }
             constraints.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
         public MechanismToggles sensors(boolean enabled) {
-            sensorsEntry.setBoolean(enabled);
+            if (sensorsEntry != null) {
+                sensorsEntry.setBoolean(enabled);
+            }
             sensors.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
         public MechanismToggles control(boolean enabled) {
-            controlEntry.setBoolean(enabled);
+            if (controlEntry != null) {
+                controlEntry.setBoolean(enabled);
+            }
             control.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
         public MechanismToggles inputs(boolean enabled) {
-            inputsEntry.setBoolean(enabled);
+            if (inputsEntry != null) {
+                inputsEntry.setBoolean(enabled);
+            }
             inputs.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
         public MechanismToggles simulation(boolean enabled) {
-            simulationEntry.setBoolean(enabled);
+            if (simulationEntry != null) {
+                simulationEntry.setBoolean(enabled);
+            }
             simulation.set(enabled);
             revision.incrementAndGet();
             return this;
         }
 
         public MechanismToggles sysId(boolean enabled) {
-            sysIdEntry.setBoolean(enabled);
+            if (sysIdEntry != null) {
+                sysIdEntry.setBoolean(enabled);
+            }
             sysId.set(enabled);
             revision.incrementAndGet();
             return this;
@@ -519,7 +552,6 @@ public final class RobotNetworkTables {
         // Defaults are intentionally conservative: "details" is off until explicitly requested,
         // but the internal sections default on so when details is enabled you get the useful stuff.
         boolean detailsDefault = false;
-        boolean advancedDefault = false;
         boolean motorsDefault = true;
         boolean encoderDefault = true;
         boolean constraintsDefault = true;
@@ -531,7 +563,6 @@ public final class RobotNetworkTables {
 
         Node cfg = mechanismNode.child("NetworkTableConfig");
         NetworkTableEntry detailsEntry = cfg.entry("Details");
-        NetworkTableEntry advancedEntry = cfg.entry("Advanced");
         NetworkTableEntry motorsEntry = cfg.entry("Motors");
         NetworkTableEntry encoderEntry = cfg.entry("Encoder");
         NetworkTableEntry constraintsEntry = cfg.entry("Constraints");
@@ -542,7 +573,6 @@ public final class RobotNetworkTables {
         NetworkTableEntry sysIdEntry = cfg.entry("SysId");
 
         initIfAbsent(detailsEntry, detailsDefault);
-        initIfAbsent(advancedEntry, advancedDefault);
         initIfAbsent(motorsEntry, motorsDefault);
         initIfAbsent(encoderEntry, encoderDefault);
         initIfAbsent(constraintsEntry, constraintsDefault);
@@ -554,7 +584,6 @@ public final class RobotNetworkTables {
 
         return new MechanismToggles(mechanismNode.path(),
                 detailsEntry.getBoolean(detailsDefault),
-                advancedEntry.getBoolean(advancedDefault),
                 motorsEntry.getBoolean(motorsDefault),
                 encoderEntry.getBoolean(encoderDefault),
                 constraintsEntry.getBoolean(constraintsDefault),
@@ -564,7 +593,6 @@ public final class RobotNetworkTables {
                 simulationEntry.getBoolean(simulationDefault),
                 sysIdEntry.getBoolean(sysIdDefault),
                 detailsEntry,
-                advancedEntry,
                 motorsEntry,
                 encoderEntry,
                 constraintsEntry,
@@ -573,6 +601,43 @@ public final class RobotNetworkTables {
                 inputsEntry,
                 simulationEntry,
                 sysIdEntry);
+    }
+
+    private MechanismToggles createSuperstructureToggles(Node superstructureNode) {
+        ensureTables();
+
+        boolean detailsDefault = false;
+        boolean controlDefault = true;
+        boolean inputsDefault = false;
+
+        Node cfg = superstructureNode.child("NetworkTableConfig");
+        NetworkTableEntry detailsEntry = cfg.entry("Details");
+        NetworkTableEntry controlEntry = cfg.entry("Control");
+        NetworkTableEntry inputsEntry = cfg.entry("Inputs");
+
+        initIfAbsent(detailsEntry, detailsDefault);
+        initIfAbsent(controlEntry, controlDefault);
+        initIfAbsent(inputsEntry, inputsDefault);
+
+        return new MechanismToggles(superstructureNode.path(),
+                detailsEntry.getBoolean(detailsDefault),
+                false,
+                false,
+                false,
+                false,
+                controlEntry.getBoolean(controlDefault),
+                inputsEntry.getBoolean(inputsDefault),
+                false,
+                false,
+                detailsEntry,
+                null,
+                null,
+                null,
+                null,
+                controlEntry,
+                inputsEntry,
+                null,
+                null);
     }
 
     private void ensureTables() {
@@ -600,15 +665,47 @@ public final class RobotNetworkTables {
         }
     }
 
+    private static boolean readToggleEntry(NetworkTableEntry entry, boolean fallback) {
+        if (entry == null) {
+            return fallback;
+        }
+        return entry.getBoolean(fallback);
+    }
+
     /**
      * Root node for Athena publishing (default: {@code /Athena}).
      */
     public Node root() {
-        return new Node("/" + ROOT);
+        return rootNode;
+    }
+
+    public int topicCacheSize() {
+        return topicLastSeenCycle.size();
+    }
+
+    public int booleanPublisherCount() {
+        return booleanPublishers.size();
+    }
+
+    public int doublePublisherCount() {
+        return doublePublishers.size();
+    }
+
+    public int stringPublisherCount() {
+        return stringPublishers.size();
+    }
+
+    public int mechanismToggleCount() {
+        synchronized (mechLock) {
+            return mechanismToggles.size();
+        }
     }
 
     public final class Node {
         private final String path; // absolute, no trailing slash
+        private final ConcurrentHashMap<String, Node> childNodes = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, String> relativeResolvedKeys = new ConcurrentHashMap<>();
+        private volatile NetworkTable cachedTable;
 
         private Node(String path) {
             this.path = path;
@@ -626,24 +723,25 @@ public final class RobotNetworkTables {
             if (childPath == null || childPath.isBlank()) {
                 return this;
             }
-            String normalized = childPath.trim().replace('\\', '/').replaceAll("/+", "/");
-            while (normalized.startsWith("/")) {
-                normalized = normalized.substring(1);
-            }
-            while (normalized.endsWith("/")) {
-                normalized = normalized.substring(0, normalized.length() - 1);
-            }
+            String normalized = normalizeChildPath(childPath);
             if (normalized.isEmpty()) {
                 return this;
             }
-            return new Node(path + "/" + normalized);
+            Node cached = childNodes.get(normalized);
+            if (cached != null) {
+                return cached;
+            }
+            Node created = new Node(path + "/" + normalized);
+            Node raced = childNodes.putIfAbsent(normalized, created);
+            return raced != null ? raced : created;
         }
 
         public void putBoolean(String key, boolean value) {
+            String full = resolveKey(key);
+            markTopicSeen(full);
             if (!cachedPublishingEnabled) {
                 return;
             }
-            String full = resolveKey(key);
             Boolean previous = lastBooleanValues.put(full, value);
             if (previous != null && previous.booleanValue() == value) {
                 return;
@@ -656,10 +754,11 @@ public final class RobotNetworkTables {
         }
 
         public void putDouble(String key, double value) {
+            String full = resolveKey(key);
+            markTopicSeen(full);
             if (!cachedPublishingEnabled) {
                 return;
             }
-            String full = resolveKey(key);
             long bits = Double.doubleToLongBits(value);
             Long previousBits = lastDoubleBits.put(full, bits);
             if (previousBits != null && previousBits.longValue() == bits) {
@@ -673,10 +772,11 @@ public final class RobotNetworkTables {
         }
 
         public void putString(String key, String value) {
+            String full = resolveKey(key);
+            markTopicSeen(full);
             if (!cachedPublishingEnabled) {
                 return;
             }
-            String full = resolveKey(key);
             String safeValue = value != null ? value : "";
             String previous = lastStringValues.put(full, safeValue);
             if (safeValue.equals(previous)) {
@@ -690,28 +790,160 @@ public final class RobotNetworkTables {
         }
 
         public NetworkTable table() {
+            NetworkTable table = cachedTable;
+            if (table != null) {
+                return table;
+            }
             // Strip leading slash for NetworkTableInstance.getTable
             String rel = path.startsWith("/") ? path.substring(1) : path;
-            return nt.getTable(rel);
+            table = nt.getTable(rel);
+            cachedTable = table;
+            return table;
         }
 
         public NetworkTableEntry entry(String key) {
-            String k = key != null ? key.trim() : "";
-            if (k.isEmpty()) {
-                throw new IllegalArgumentException("key must not be blank");
-            }
-            return table().getEntry(k);
+            return table().getEntry(normalizeEntryKey(key));
         }
 
         private String resolveKey(String key) {
-            String k = key != null ? key.trim() : "";
-            if (k.isEmpty()) {
+            String normalized = normalizeEntryKey(key);
+            if (normalized.startsWith("/")) {
+                return normalized;
+            }
+            String cached = relativeResolvedKeys.get(normalized);
+            if (cached != null) {
+                return cached;
+            }
+            String resolved = path + "/" + normalized;
+            String raced = relativeResolvedKeys.putIfAbsent(normalized, resolved);
+            return raced != null ? raced : resolved;
+        }
+
+        private static String normalizeChildPath(String childPath) {
+            String raw = childPath != null ? childPath.trim() : "";
+            if (raw.isEmpty()) {
+                return "";
+            }
+            int start = 0;
+            int end = raw.length();
+            while (start < end) {
+                char c = raw.charAt(start);
+                if (c == '/' || c == '\\') {
+                    start++;
+                    continue;
+                }
+                break;
+            }
+            while (end > start) {
+                char c = raw.charAt(end - 1);
+                if (c == '/' || c == '\\') {
+                    end--;
+                    continue;
+                }
+                break;
+            }
+            if (start >= end) {
+                return "";
+            }
+            StringBuilder normalizedBuilder = new StringBuilder(end - start);
+            boolean lastSlash = false;
+            for (int i = start; i < end; i++) {
+                char c = raw.charAt(i);
+                if (c == '/' || c == '\\') {
+                    if (lastSlash) {
+                        continue;
+                    }
+                    normalizedBuilder.append('/');
+                    lastSlash = true;
+                } else {
+                    normalizedBuilder.append(c);
+                    lastSlash = false;
+                }
+            }
+            return normalizedBuilder.toString();
+        }
+
+        private static String normalizeEntryKey(String key) {
+            if (key == null) {
                 throw new IllegalArgumentException("key must not be blank");
             }
-            if (k.startsWith("/")) {
-                return k;
+            int start = 0;
+            int end = key.length();
+            while (start < end && Character.isWhitespace(key.charAt(start))) {
+                start++;
             }
-            return path + "/" + k;
+            while (end > start && Character.isWhitespace(key.charAt(end - 1))) {
+                end--;
+            }
+            if (start >= end) {
+                throw new IllegalArgumentException("key must not be blank");
+            }
+            if (start == 0 && end == key.length()) {
+                return key;
+            }
+            return key.substring(start, end);
+        }
+    }
+
+    private void markTopicSeen(String key) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
+        topicLastSeenCycle.put(key, publishCycle.get());
+    }
+
+    private void pruneStaleTopics(long currentCycle) {
+        long cutoff = currentCycle - TOPIC_STALE_CYCLES;
+        if (cutoff <= 0) {
+            return;
+        }
+        Iterator<Map.Entry<String, Long>> iterator = topicPruneIterator;
+        if (iterator == null || !iterator.hasNext()) {
+            iterator = topicLastSeenCycle.entrySet().iterator();
+            topicPruneIterator = iterator;
+        }
+
+        int processed = 0;
+        while (iterator != null && iterator.hasNext() && processed < TOPIC_PRUNE_SCAN_BUDGET_PER_CYCLE) {
+            Map.Entry<String, Long> entry = iterator.next();
+            processed++;
+            if (entry == null) {
+                continue;
+            }
+            String key = entry.getKey();
+            if (key == null) {
+                continue;
+            }
+            Long seen = entry.getValue();
+            if (seen != null && seen.longValue() >= cutoff) {
+                continue;
+            }
+            if (seen != null && !topicLastSeenCycle.remove(key, seen)) {
+                continue;
+            }
+            if (seen == null) {
+                topicLastSeenCycle.remove(key);
+            }
+            lastBooleanValues.remove(key);
+            lastDoubleBits.remove(key);
+            lastStringValues.remove(key);
+
+            BooleanPublisher booleanPublisher = booleanPublishers.remove(key);
+            if (booleanPublisher != null) {
+                booleanPublisher.close();
+            }
+            DoublePublisher doublePublisher = doublePublishers.remove(key);
+            if (doublePublisher != null) {
+                doublePublisher.close();
+            }
+            StringPublisher stringPublisher = stringPublishers.remove(key);
+            if (stringPublisher != null) {
+                stringPublisher.close();
+            }
+        }
+
+        if (iterator == null || !iterator.hasNext()) {
+            topicPruneIterator = null;
         }
     }
 }

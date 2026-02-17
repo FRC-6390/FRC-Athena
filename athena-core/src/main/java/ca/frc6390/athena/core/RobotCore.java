@@ -64,6 +64,7 @@ import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DataLogManager;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -72,6 +73,13 @@ import edu.wpi.first.wpilibj2.command.Commands;
 
 public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static volatile RobotCore<?> activeInstance;
+
+    public enum RuntimeMode {
+        AUTO,
+        TELEOP,
+        DISABLED,
+        TEST
+    }
 
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
@@ -289,12 +297,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final RobotLocalization<?> localization;
     private final RobotVision vision;
     private final RobotNetworkTables robotNetworkTables = new RobotNetworkTables();
+    private final RobotNetworkTables.Node mechanismsRootNode;
     private RobotVisionSim visionSim;
     private Notifier visionSimNotifier;
     private final RobotAuto autos;
     private final RobotCopilot copilot;
     private AthenaRuntimeServer configServer;
     private String configServerBaseUrl;
+    private String cachedConfigExportBaseUrl = "";
+    private ConfigExportUrls cachedConfigExportUrls = ConfigExportUrls.empty();
     private final ConfigServerSection configServerSection;
     private final DiagnosticsSection diagnosticsSection;
     private final Map<String, DiagnosticsChannel> diagnosticsChannels;
@@ -317,6 +328,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final Set<String> publishedSuperstructuresComp;
     private final List<String> mechanismPublishKeysBuffer;
     private final List<String> superstructurePublishKeysBuffer;
+    private boolean mechanismPublishKeysDirty = true;
+    private boolean superstructurePublishKeysDirty = true;
     private int mechanismPublishCursor = 0;
     private int superstructurePublishCursor = 0;
     private int remainingMechanismRefreshCount = 0;
@@ -330,6 +343,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final java.lang.management.OperatingSystemMXBean osMxBean;
     private final com.sun.management.OperatingSystemMXBean sunOsMxBean;
     private final List<GarbageCollectorMXBean> gcMxBeans;
+    private double lastSlowPerformanceMetricsPublishSeconds = Double.NaN;
+    private double lastVerySlowPerformanceMetricsPublishSeconds = Double.NaN;
     private double lastLoopSchedulerMs = Double.NaN;
     private double lastLoopTelemetryMs = Double.NaN;
     private double lastLoopLocalizationMs = Double.NaN;
@@ -337,6 +352,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private double lastLoopTotalMs = Double.NaN;
     private final RobotCoreHooks<T> coreHooks;
     private final RobotCoreContextImpl coreHookContext;
+    private final Consumer<RobotCoreHooks.Binding<T>> timedBindingRunnerInvoker;
     private final TypedInputResolver hookInputResolver;
     private final List<TimedRunner<RobotCoreHooks.Binding<T>>> periodicHookRunners;
     private final List<TimedRunner<RobotCoreHooks.Binding<T>>> disabledPeriodicHookRunners;
@@ -348,9 +364,33 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final Map<String, OutputType> coreControlLoopPidOutputTypes;
     private final Map<String, SimpleMotorFeedforward> coreControlLoopFeedforwards;
     private final Map<String, OutputType> coreControlLoopFeedforwardOutputTypes;
+    private volatile RuntimeMode runtimeMode = RuntimeMode.DISABLED;
+    private volatile boolean competitionStreamSheddingApplied = false;
     private static final double MECHANISM_AUTO_PUBLISH_PERIOD_SECONDS = 0.05;
     private static final int MECHANISM_AUTO_PUBLISH_BATCH_SIZE = 2;
+    private static final double PERFORMANCE_SLOW_METRICS_PERIOD_SECONDS = 1.0;
+    private static final double PERFORMANCE_VERY_SLOW_METRICS_PERIOD_SECONDS = 5.0;
+    private static final double COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS = 0.2;
     private static final double STARTUP_LOG_THRESHOLD_SECONDS = 0.05;
+
+    private record ConfigExportUrls(
+            String baseUrl,
+            String indexUrlJson,
+            String indexUrlToml,
+            String allZipUrl,
+            String mechanismsBaseUrl,
+            String customConfigUrl,
+            String customConfigBaseUrl,
+            String diagnosticsUrl,
+            String diagnosticsBaseUrl,
+            String diagnosticsHistoryUrl,
+            String autoLogUrl,
+            String mechanismLogUrl,
+            String mechanismLogBaseUrl) {
+        static ConfigExportUrls empty() {
+            return new ConfigExportUrls("", "", "", "", "", "", "", "", "", "", "", "", "");
+        }
+    }
 
     public RobotCore(RobotCoreConfig<T> config) {
         double constructorStart = Timer.getFPGATimestamp();
@@ -362,6 +402,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         vision = timedStartupStep("constructor.vision.create", () -> RobotVision.fromConfig(config.visionConfig));
         autos = new RobotAuto().attachRobotCore(this);
         copilot = new RobotCopilot(drivetrain, localization, RobotCopilot.inferDriveStyle(drivetrain));
+        mechanismsRootNode = robotNetworkTables.root().child("Mechanisms");
         mechanisms = new HashMap<>();
         registeredSuperstructures = new ArrayList<>();
         superstructuresByName = new HashMap<>();
@@ -410,6 +451,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 coreHooks.pose3dInputs(),
                 coreHooks.objectInputs());
         coreHookContext = new RobotCoreContextImpl();
+        timedBindingRunnerInvoker = hook -> hook.apply(coreHookContext);
         periodicHookRunners = createPeriodicHookRunners(coreHooks.periodicLoopBindings());
         disabledPeriodicHookRunners = createPeriodicHookRunners(coreHooks.disabledPeriodicLoopBindings());
         teleopPeriodicHookRunners = createPeriodicHookRunners(coreHooks.teleopPeriodicLoopBindings());
@@ -625,12 +667,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void robotPeriodic() {
         LoopTiming.beginCycle();
+        updateRuntimeModeCache();
+        maybeApplyCompetitionStreamShedding();
         robotNetworkTables.refresh();
+        robotNetworkTables.beginPublishCycle();
 
         // Auto publish when enabled at runtime from Athena/NetworkTableConfig.
         if (robotNetworkTables.isPublishingEnabled()) {
+            double now = nowSeconds();
             if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
-                double now = Timer.getFPGATimestamp();
                 double period = robotNetworkTables.getDefaultPeriodSeconds();
                 boolean due = !Double.isFinite(lastCoreNetworkTablesPublishSeconds)
                         || !Double.isFinite(now)
@@ -643,40 +688,51 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 }
             }
             if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
-                autoPublishMechanismsIncremental();
+                autoPublishMechanismsIncremental(now);
             }
         }
 
-        double t0 = Timer.getFPGATimestamp();
+        double cycleStartSeconds = nowSeconds();
+
+        long t0Ns = System.nanoTime();
         CommandScheduler.getInstance().run();
-        double t1 = Timer.getFPGATimestamp();
+        long t1Ns = System.nanoTime();
         telemetry.tick();
-        double t2 = Timer.getFPGATimestamp();
-        if (localization != null && !DriverStation.isDisabled()) {
+        long t2Ns = System.nanoTime();
+        if (localization != null && runtimeMode != RuntimeMode.DISABLED) {
             localization.updateAutoVisualization(autos);
         }
-        double t3 = Timer.getFPGATimestamp();
-        runCoreControlLoops();
+        long t3Ns = System.nanoTime();
+        runCoreControlLoops(cycleStartSeconds);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.ROBOT_PERIODIC);
         runCorePeriodicBindings(
                 RobotCoreHooks.Phase.ROBOT_PERIODIC,
                 coreHooks.periodicBindings(),
                 periodicHookRunners);
         onRobotPeriodic();
-        double t4 = Timer.getFPGATimestamp();
-        lastLoopSchedulerMs = (t1 - t0) * 1000.0;
-        lastLoopTelemetryMs = (t2 - t1) * 1000.0;
-        lastLoopLocalizationMs = (t3 - t2) * 1000.0;
-        lastLoopUserMs = (t4 - t3) * 1000.0;
-        lastLoopTotalMs = (t4 - t0) * 1000.0;
+        long t4Ns = System.nanoTime();
+
+        double schedulerSeconds = (t1Ns - t0Ns) * 1e-9;
+        double telemetrySeconds = (t2Ns - t1Ns) * 1e-9;
+        double localizationSeconds = (t3Ns - t2Ns) * 1e-9;
+        double userSeconds = (t4Ns - t3Ns) * 1e-9;
+        double totalSeconds = (t4Ns - t0Ns) * 1e-9;
+
+        double t0 = cycleStartSeconds;
+        double t1 = t0 + schedulerSeconds;
+        double t2 = t1 + telemetrySeconds;
+        double t3 = t2 + localizationSeconds;
+        double t4 = t3 + userSeconds;
+
+        lastLoopSchedulerMs = schedulerSeconds * 1000.0;
+        lastLoopTelemetryMs = telemetrySeconds * 1000.0;
+        lastLoopLocalizationMs = localizationSeconds * 1000.0;
+        lastLoopUserMs = userSeconds * 1000.0;
+        lastLoopTotalMs = totalSeconds * 1000.0;
         LoopTiming.endCycle(t0, t1, t2, t3, t4);
     }
 
-    private void autoPublishMechanismsIncremental() {
-        double now = RobotTime.nowSeconds();
-        if (!Double.isFinite(now)) {
-            now = Timer.getFPGATimestamp();
-        }
+    private void autoPublishMechanismsIncremental(double now) {
         if (Double.isFinite(lastMechanismAutoPublishSeconds)
                 && (now - lastMechanismAutoPublishSeconds) < MECHANISM_AUTO_PUBLISH_PERIOD_SECONDS) {
             return;
@@ -684,8 +740,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         lastMechanismAutoPublishSeconds = now;
 
         mechanismsNetworkTablesPublished = true;
-        RobotNetworkTables.Node mechanismsNode = robotNetworkTables.root().child("Mechanisms");
-        RobotNetworkTables.Node supersNode = robotNetworkTables.root().child("Superstructures");
+        RobotNetworkTables.Node mechanismsNode = mechanismsRootNode;
 
         long revision = robotNetworkTables.revision();
         if (revision != lastMechanismsConfigRevision) {
@@ -696,19 +751,22 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         publishMechanismBatch(mechanismsNode);
-        publishSuperstructureBatch(supersNode);
+        publishSuperstructureBatch(mechanismsNode);
     }
 
     private void publishMechanismBatch(RobotNetworkTables.Node mechanismsNode) {
-        mechanismPublishKeysBuffer.clear();
-        mechanismPublishKeysBuffer.addAll(mechanisms.keySet());
+        if (mechanismPublishKeysDirty || mechanismPublishKeysBuffer.size() != mechanisms.size()) {
+            mechanismPublishKeysBuffer.clear();
+            mechanismPublishKeysBuffer.addAll(mechanisms.keySet());
+            mechanismPublishKeysDirty = false;
+            publishedMechanismsComp.retainAll(mechanismPublishKeysBuffer);
+        }
         if (mechanismPublishKeysBuffer.isEmpty()) {
             publishedMechanismsComp.clear();
             mechanismPublishCursor = 0;
             remainingMechanismRefreshCount = 0;
             return;
         }
-        publishedMechanismsComp.retainAll(mechanismPublishKeysBuffer);
 
         int batchSize = Math.min(MECHANISM_AUTO_PUBLISH_BATCH_SIZE, mechanismPublishKeysBuffer.size());
         for (int i = 0; i < batchSize; i++) {
@@ -736,16 +794,19 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
-    private void publishSuperstructureBatch(RobotNetworkTables.Node supersNode) {
-        superstructurePublishKeysBuffer.clear();
-        superstructurePublishKeysBuffer.addAll(superstructuresByName.keySet());
+    private void publishSuperstructureBatch(RobotNetworkTables.Node mechanismsNode) {
+        if (superstructurePublishKeysDirty || superstructurePublishKeysBuffer.size() != superstructuresByName.size()) {
+            superstructurePublishKeysBuffer.clear();
+            superstructurePublishKeysBuffer.addAll(superstructuresByName.keySet());
+            superstructurePublishKeysDirty = false;
+            publishedSuperstructuresComp.retainAll(superstructurePublishKeysBuffer);
+        }
         if (superstructurePublishKeysBuffer.isEmpty()) {
             publishedSuperstructuresComp.clear();
             superstructurePublishCursor = 0;
             remainingSuperstructureRefreshCount = 0;
             return;
         }
-        publishedSuperstructuresComp.retainAll(superstructurePublishKeysBuffer);
 
         int batchSize = Math.min(MECHANISM_AUTO_PUBLISH_BATCH_SIZE, superstructurePublishKeysBuffer.size());
         for (int i = 0; i < batchSize; i++) {
@@ -762,7 +823,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (!needsRefresh && !needsInitialPublish) {
                 continue;
             }
-            superstructure.networkTables(supersNode.child(key));
+            superstructure.networkTables(mechanismsNode.child(key));
             publishedSuperstructuresComp.add(key);
             if (needsRefresh) {
                 remainingSuperstructureRefreshCount--;
@@ -936,13 +997,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return runners;
     }
 
-    private void runCoreControlLoops() {
+    private void runCoreControlLoops(double nowSeconds) {
         if (coreControlLoopRunners == null || coreControlLoopRunners.isEmpty()) {
             return;
-        }
-        double nowSeconds = RobotTime.nowSeconds();
-        if (!Double.isFinite(nowSeconds)) {
-            nowSeconds = Timer.getFPGATimestamp();
         }
         coreHookContext.setPhase(RobotCoreHooks.Phase.ROBOT_PERIODIC);
         for (TimedRunner<RobotCoreHooks.ControlLoop<T>> runner : coreControlLoopRunners) {
@@ -994,7 +1051,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (runner == null || !runner.shouldRunSeconds(nowSeconds)) {
                 continue;
             }
-            runner.run(hook -> hook.apply(coreHookContext), nowSeconds);
+            runner.run(timedBindingRunnerInvoker, nowSeconds);
         }
     }
 
@@ -1002,11 +1059,23 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (bindings == null || bindings.isEmpty()) {
             return;
         }
-        for (RobotCoreHooks.Binding<T> binding : bindings) {
+        for (int i = 0; i < bindings.size(); i++) {
+            RobotCoreHooks.Binding<T> binding = bindings.get(i);
             if (binding == null) {
                 continue;
             }
-            binding.apply(coreHookContext);
+            try {
+                binding.apply(coreHookContext);
+            } catch (Throwable throwable) {
+                DriverStation.reportError(
+                        String.format(
+                                java.util.Locale.US,
+                                "[Athena] Hook binding failure in phase %s at index %d: %s",
+                                coreHookContext.phase(),
+                                i,
+                                throwable.toString()),
+                        throwable.getStackTrace());
+            }
         }
     }
 
@@ -1022,11 +1091,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private static double hookNowSeconds() {
-        double nowSeconds = RobotTime.nowSeconds();
-        if (!Double.isFinite(nowSeconds)) {
-            nowSeconds = Timer.getFPGATimestamp();
+        return nowSeconds();
+    }
+
+    private static double nowSeconds() {
+        double now = RobotTime.nowSeconds();
+        if (!Double.isFinite(now)) {
+            now = Timer.getFPGATimestamp();
         }
-        return nowSeconds;
+        return now;
     }
 
     private static void logStartupDuration(String step, double elapsedSeconds) {
@@ -1384,7 +1457,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             registerMechanismInternal(mech);
             // Ensure per-mechanism NetworkTableConfig entries exist under the mechanism itself.
             RobotNetworkTables.Node mechNode =
-                    mech.networkTables().resolveNode(robotNetworkTables.root().child("Mechanisms"));
+                    mech.networkTables().resolveNode(mechanismsRootNode);
             robotNetworkTables.mechanismConfig(mechNode);
             mech.setRobotCore(this);
             scheduleCustomPidCycle(mech);
@@ -1404,10 +1477,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 continue;
             }
             registerSuperstructureInternal(s);
-            // Ensure per-superstructure NetworkTableConfig entries exist under Athena/Superstructures.
+            // Ensure per-superstructure NetworkTableConfig entries exist under Athena/Mechanisms/<SuperstructureName>.
             RobotNetworkTables.Node superNode =
-                    robotNetworkTables.root().child("Superstructures").child(s.getName() != null ? s.getName() : "Superstructure");
-            robotNetworkTables.mechanismConfig(superNode);
+                    mechanismsRootNode.child(s.getName() != null ? s.getName() : "Superstructure");
+            robotNetworkTables.superstructureConfig(superNode);
             s.setRobotCore(this);
             s.diagnostics().info("lifecycle", "superstructure registered");
             registerSuperstructureDiagnosticsProviderIfReady(s);
@@ -1444,8 +1517,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
                 registerSuperstructureInternal(superstructure);
                 RobotNetworkTables.Node superNode =
-                        robotNetworkTables.root().child("Superstructures").child(superstructure.getName() != null ? superstructure.getName() : "Superstructure");
-                robotNetworkTables.mechanismConfig(superNode);
+                        mechanismsRootNode.child(superstructure.getName() != null ? superstructure.getName() : "Superstructure");
+                robotNetworkTables.superstructureConfig(superNode);
                 superstructure.setRobotCore(this);
                 superstructure.diagnostics().info("lifecycle", "superstructure registered");
                 registerSuperstructureDiagnosticsProviderIfReady(superstructure);
@@ -1512,6 +1585,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 mech.setName(base);
             }
             mechanisms.put(base, mech);
+            mechanismPublishKeysDirty = true;
             return base;
         }
 
@@ -1530,6 +1604,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
         mech.setName(candidate);
         mechanisms.put(candidate, mech);
+        mechanismPublishKeysDirty = true;
         return candidate;
     }
 
@@ -1548,6 +1623,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             superstructuresByName.put(base, superstructure);
             registeredSuperstructures.add(superstructure);
+            superstructurePublishKeysDirty = true;
             return base;
         }
 
@@ -1566,7 +1642,50 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         superstructure.setName(candidate);
         superstructuresByName.put(candidate, superstructure);
         registeredSuperstructures.add(superstructure);
+        superstructurePublishKeysDirty = true;
         return candidate;
+    }
+
+    public RuntimeMode runtimeMode() {
+        return runtimeMode;
+    }
+
+    private void updateRuntimeModeCache() {
+        if (DriverStation.isAutonomousEnabled()) {
+            runtimeMode = RuntimeMode.AUTO;
+        } else if (DriverStation.isTeleopEnabled()) {
+            runtimeMode = RuntimeMode.TELEOP;
+        } else if (DriverStation.isTestEnabled()) {
+            runtimeMode = RuntimeMode.TEST;
+        } else {
+            runtimeMode = RuntimeMode.DISABLED;
+        }
+    }
+
+    private void maybeApplyCompetitionStreamShedding() {
+        if (competitionStreamSheddingApplied || !DriverStation.isFMSAttached()) {
+            return;
+        }
+        competitionStreamSheddingApplied = true;
+
+        robotNetworkTables.disable(RobotNetworkTables.Flag.LOCALIZATION_POSE_TOPICS);
+        robotNetworkTables.disable(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET);
+        robotNetworkTables.disable(RobotNetworkTables.Flag.VISION_CAMERA_WIDGETS);
+        robotNetworkTables.disable(RobotNetworkTables.Flag.DRIVETRAIN_SPEED_WIDGETS);
+        robotNetworkTables.disable(RobotNetworkTables.Flag.HW_MOTOR_TUNING_WIDGETS);
+        robotNetworkTables.disable(RobotNetworkTables.Flag.HW_ENCODER_TUNING_WIDGETS);
+        robotNetworkTables.disable(RobotNetworkTables.Flag.HW_IMU_TUNING_WIDGETS);
+        robotNetworkTables.disable(RobotNetworkTables.Flag.SWERVE_MODULE_DEBUG);
+
+        double configuredPeriod = robotNetworkTables.getDefaultPeriodSeconds();
+        if (!Double.isFinite(configuredPeriod) || configuredPeriod < COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS) {
+            robotNetworkTables.setDefaultPeriodSeconds(COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS);
+        }
+
+        DataLogManager.logNetworkTables(false);
+        diagnosticsSection.core().warn(
+                "networktables",
+                "fms attached: disabled high-bandwidth debug streams and NT datalogging");
     }
 
     public RobotLocalization<?> localization() {
@@ -1631,61 +1750,65 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (root == null) {
             return;
         }
+        ConfigExportUrls urls = resolveConfigExportUrls();
         RobotNetworkTables.Node cfg = root.child("Config");
+        cfg.putString("baseUrl", urls.baseUrl());
+        root.putString("configBaseUrl", urls.baseUrl());
+        cfg.putString("indexUrlJson", urls.indexUrlJson());
+        cfg.putString("indexUrlToml", urls.indexUrlToml());
+        cfg.putString("allZipUrl", urls.allZipUrl());
+        cfg.putString("mechanismsBaseUrl", urls.mechanismsBaseUrl());
+        cfg.putString("customConfigUrl", urls.customConfigUrl());
+        cfg.putString("customConfigBaseUrl", urls.customConfigBaseUrl());
+        cfg.putString("diagnosticsUrl", urls.diagnosticsUrl());
+        cfg.putString("diagnosticsBaseUrl", urls.diagnosticsBaseUrl());
+        cfg.putString("diagnosticsHistoryUrl", urls.diagnosticsHistoryUrl());
+        cfg.putString("autoLogUrl", urls.autoLogUrl());
+        cfg.putString("mechanismLogUrl", urls.mechanismLogUrl());
+        cfg.putString("mechanismLogBaseUrl", urls.mechanismLogBaseUrl());
+        root.putString("configIndexUrlJson", urls.indexUrlJson());
+        root.putString("configIndexUrlToml", urls.indexUrlToml());
+        root.putString("configAllZipUrl", urls.allZipUrl());
+        root.putString("configMechanismsBaseUrl", urls.mechanismsBaseUrl());
+        root.putString("configCustomUrl", urls.customConfigUrl());
+        root.putString("configCustomBaseUrl", urls.customConfigBaseUrl());
+        root.putString("configDiagnosticsUrl", urls.diagnosticsUrl());
+        root.putString("configDiagnosticsBaseUrl", urls.diagnosticsBaseUrl());
+        root.putString("configDiagnosticsHistoryUrl", urls.diagnosticsHistoryUrl());
+        root.putString("configAutoLogUrl", urls.autoLogUrl());
+        root.putString("configMechanismLogUrl", urls.mechanismLogUrl());
+        root.putString("configMechanismLogBaseUrl", urls.mechanismLogBaseUrl());
+    }
+
+    private ConfigExportUrls resolveConfigExportUrls() {
         String base = configServerBaseUrl;
-        cfg.putString("baseUrl", base != null ? base : "");
-        root.putString("configBaseUrl", base != null ? base : "");
-        if (base == null || base.isBlank()) {
-            cfg.putString("indexUrlJson", "");
-            cfg.putString("indexUrlToml", "");
-            cfg.putString("allZipUrl", "");
-            cfg.putString("mechanismsBaseUrl", "");
-            cfg.putString("customConfigUrl", "");
-            cfg.putString("customConfigBaseUrl", "");
-            cfg.putString("diagnosticsUrl", "");
-            cfg.putString("diagnosticsBaseUrl", "");
-            cfg.putString("diagnosticsHistoryUrl", "");
-            cfg.putString("autoLogUrl", "");
-            cfg.putString("mechanismLogUrl", "");
-            cfg.putString("mechanismLogBaseUrl", "");
-            root.putString("configIndexUrlJson", "");
-            root.putString("configIndexUrlToml", "");
-            root.putString("configAllZipUrl", "");
-            root.putString("configMechanismsBaseUrl", "");
-            root.putString("configCustomUrl", "");
-            root.putString("configCustomBaseUrl", "");
-            root.putString("configDiagnosticsUrl", "");
-            root.putString("configDiagnosticsBaseUrl", "");
-            root.putString("configDiagnosticsHistoryUrl", "");
-            root.putString("configAutoLogUrl", "");
-            root.putString("configMechanismLogUrl", "");
-            root.putString("configMechanismLogBaseUrl", "");
-            return;
+        String normalizedBase = (base == null || base.isBlank()) ? "" : base;
+        if (cachedConfigExportUrls != null && normalizedBase.equals(cachedConfigExportBaseUrl)) {
+            return cachedConfigExportUrls;
         }
-        cfg.putString("indexUrlJson", base + "/Athena/config/index.json");
-        cfg.putString("indexUrlToml", base + "/Athena/config/index.toml");
-        cfg.putString("allZipUrl", base + "/Athena/config/all.zip");
-        cfg.putString("mechanismsBaseUrl", base + "/Athena/config/mechanisms/");
-        cfg.putString("customConfigUrl", base + "/Athena/config/custom");
-        cfg.putString("customConfigBaseUrl", base + "/Athena/config/custom/");
-        cfg.putString("diagnosticsUrl", base + "/Athena/diagnostics");
-        cfg.putString("diagnosticsBaseUrl", base + "/Athena/diagnostics/");
-        cfg.putString("diagnosticsHistoryUrl", base + "/Athena/diagnostics/history.json");
-        cfg.putString("autoLogUrl", base + "/Athena/auto/log");
-        cfg.putString("mechanismLogUrl", base + "/Athena/mechanisms/log");
-        cfg.putString("mechanismLogBaseUrl", base + "/Athena/mechanisms/log/");
-        root.putString("configIndexUrlJson", base + "/Athena/config/index.json");
-        root.putString("configIndexUrlToml", base + "/Athena/config/index.toml");
-        root.putString("configAllZipUrl", base + "/Athena/config/all.zip");
-        root.putString("configMechanismsBaseUrl", base + "/Athena/config/mechanisms/");
-        root.putString("configCustomUrl", base + "/Athena/config/custom");
-        root.putString("configCustomBaseUrl", base + "/Athena/config/custom/");
-        root.putString("configDiagnosticsUrl", base + "/Athena/diagnostics");
-        root.putString("configDiagnosticsBaseUrl", base + "/Athena/diagnostics/");
-        root.putString("configDiagnosticsHistoryUrl", base + "/Athena/diagnostics/history.json");
-        root.putString("configAutoLogUrl", base + "/Athena/auto/log");
-        root.putString("configMechanismLogUrl", base + "/Athena/mechanisms/log");
-        root.putString("configMechanismLogBaseUrl", base + "/Athena/mechanisms/log/");
+        ConfigExportUrls resolved;
+        if (normalizedBase.isEmpty()) {
+            resolved = ConfigExportUrls.empty();
+        } else {
+            String prefix = normalizedBase + "/Athena";
+            resolved = new ConfigExportUrls(
+                    normalizedBase,
+                    prefix + "/config/index.json",
+                    prefix + "/config/index.toml",
+                    prefix + "/config/all.zip",
+                    prefix + "/config/mechanisms/",
+                    prefix + "/config/custom",
+                    prefix + "/config/custom/",
+                    prefix + "/diagnostics",
+                    prefix + "/diagnostics/",
+                    prefix + "/diagnostics/history.json",
+                    prefix + "/auto/log",
+                    prefix + "/mechanisms/log",
+                    prefix + "/mechanisms/log/");
+        }
+        cachedConfigExportBaseUrl = normalizedBase;
+        cachedConfigExportUrls = resolved;
+        return resolved;
     }
 
     private AthenaRuntimeServer ensureConfigServerReadyForCustomContent() {
@@ -1761,16 +1884,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (superstructure == null) {
             return Map.of("error", "superstructure unavailable");
         }
-        Map<String, Object> summary = new HashMap<>();
-        String name = superstructure.getName();
-        summary.put("name", name != null ? name : "");
-        Enum<?> state = superstructure.stateMachine().goal();
-        summary.put("state", state != null ? state.name() : "");
-        summary.put("atGoal", superstructure.stateMachine().atGoal());
-        summary.put("childMechanismCount", superstructure.children().all().size());
-        summary.put("systemKey", "superstructures/" + (name != null ? name : ""));
-        summary.put("logCount", superstructure.diagnostics().count());
-        return summary;
+        return superstructure.diagnostics().summary();
     }
 
     private Map<String, Object> buildSuperstructureDiagnosticsSnapshot(
@@ -2025,6 +2139,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (root == null) {
             return;
         }
+        double nowSeconds = Timer.getFPGATimestamp();
 
         RobotNetworkTables.Node performance = root.child("Performance");
         RobotNetworkTables.Node status = performance.child("Status");
@@ -2032,100 +2147,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         status.putBoolean("isSimulation", RobotBase.isSimulation());
         status.putBoolean("isDSAttached", DriverStation.isDSAttached());
         status.putBoolean("isFMSAttached", DriverStation.isFMSAttached());
-        status.putBoolean("isSysActive", RobotController.isSysActive());
-        status.putBoolean("isBrownedOut", RobotController.isBrownedOut());
-        status.putBoolean("isSystemTimeValid", RobotController.isSystemTimeValid());
-        status.putDouble("fpgaTimeMicros", RobotController.getFPGATime());
-        status.putDouble("uptimeSec", runtimeMxBean.getUptime() / 1000.0);
-        status.putDouble("teamNumber", RobotController.getTeamNumber());
-
-        RobotNetworkTables.Node power = performance.child("Power");
-        power.putDouble("batteryVoltage", RobotController.getBatteryVoltage());
-        power.putDouble("inputVoltage", RobotController.getInputVoltage());
-        power.putDouble("inputCurrentAmps", RobotController.getInputCurrent());
-        power.putDouble("cpuTempCelsius", RobotController.getCPUTemp());
-        power.putDouble("brownoutVoltage", RobotController.getBrownoutVoltage());
-        power.putBoolean("rslState", RobotController.getRSLState());
-
-        RobotNetworkTables.Node rails = performance.child("Rails");
-        RobotNetworkTables.Node rail3v3 = rails.child("3V3");
-        rail3v3.putDouble("voltage", RobotController.getVoltage3V3());
-        rail3v3.putDouble("currentAmps", RobotController.getCurrent3V3());
-        rail3v3.putBoolean("enabled", RobotController.getEnabled3V3());
-        rail3v3.putDouble("faultCount", RobotController.getFaultCount3V3());
-        RobotNetworkTables.Node rail5v = rails.child("5V");
-        rail5v.putDouble("voltage", RobotController.getVoltage5V());
-        rail5v.putDouble("currentAmps", RobotController.getCurrent5V());
-        rail5v.putBoolean("enabled", RobotController.getEnabled5V());
-        rail5v.putDouble("faultCount", RobotController.getFaultCount5V());
-        RobotNetworkTables.Node rail6v = rails.child("6V");
-        rail6v.putDouble("voltage", RobotController.getVoltage6V());
-        rail6v.putDouble("currentAmps", RobotController.getCurrent6V());
-        rail6v.putBoolean("enabled", RobotController.getEnabled6V());
-        rail6v.putDouble("faultCount", RobotController.getFaultCount6V());
-
-        RobotNetworkTables.Node cpu = performance.child("CPU");
-        cpu.putDouble("availableProcessors", osMxBean.getAvailableProcessors());
-        cpu.putDouble("systemLoadAverage", finiteOr(osMxBean.getSystemLoadAverage(), -1.0));
-        if (sunOsMxBean != null) {
-            cpu.putDouble("processLoadPercent", finiteOr(sunOsMxBean.getProcessCpuLoad() * 100.0, -1.0));
-            cpu.putDouble("systemLoadPercent", finiteOr(sunOsMxBean.getCpuLoad() * 100.0, -1.0));
-            cpu.putDouble("processCpuTimeSec", sunOsMxBean.getProcessCpuTime() / 1_000_000_000.0);
-        } else {
-            cpu.putDouble("processLoadPercent", -1.0);
-            cpu.putDouble("systemLoadPercent", -1.0);
-            cpu.putDouble("processCpuTimeSec", -1.0);
-        }
-
-        MemoryUsage heap = memoryMxBean.getHeapMemoryUsage();
-        MemoryUsage nonHeap = memoryMxBean.getNonHeapMemoryUsage();
-        long heapUsed = Math.max(0L, heap.getUsed());
-        long heapCommitted = Math.max(0L, heap.getCommitted());
-        long heapMax = Math.max(0L, heap.getMax());
-        long nonHeapUsed = Math.max(0L, nonHeap.getUsed());
-        long nonHeapCommitted = Math.max(0L, nonHeap.getCommitted());
-
-        RobotNetworkTables.Node memory = performance.child("Memory");
-        memory.putDouble("heapUsedBytes", heapUsed);
-        memory.putDouble("heapCommittedBytes", heapCommitted);
-        memory.putDouble("heapMaxBytes", heapMax);
-        memory.putDouble("heapUsedPercent", ratioPercent(heapUsed, heapMax));
-        memory.putDouble("nonHeapUsedBytes", nonHeapUsed);
-        memory.putDouble("nonHeapCommittedBytes", nonHeapCommitted);
-        memory.putDouble("processCommittedVirtualBytes", sunOsMxBean != null ? sunOsMxBean.getCommittedVirtualMemorySize() : -1.0);
-        if (sunOsMxBean != null) {
-            long totalMemory = Math.max(0L, sunOsMxBean.getTotalMemorySize());
-            long freeMemory = Math.max(0L, sunOsMxBean.getFreeMemorySize());
-            long usedMemory = Math.max(0L, totalMemory - freeMemory);
-            memory.putDouble("systemTotalBytes", totalMemory);
-            memory.putDouble("systemFreeBytes", freeMemory);
-            memory.putDouble("systemUsedBytes", usedMemory);
-            memory.putDouble("systemUsedPercent", ratioPercent(usedMemory, totalMemory));
-        } else {
-            memory.putDouble("systemTotalBytes", -1.0);
-            memory.putDouble("systemFreeBytes", -1.0);
-            memory.putDouble("systemUsedBytes", -1.0);
-            memory.putDouble("systemUsedPercent", -1.0);
-        }
-
-        long gcCollections = 0;
-        long gcCollectionTimeMs = 0;
-        for (GarbageCollectorMXBean gcBean : gcMxBeans) {
-            if (gcBean == null) {
-                continue;
-            }
-            long count = gcBean.getCollectionCount();
-            long timeMs = gcBean.getCollectionTime();
-            if (count >= 0) {
-                gcCollections += count;
-            }
-            if (timeMs >= 0) {
-                gcCollectionTimeMs += timeMs;
-            }
-        }
-        RobotNetworkTables.Node jvm = performance.child("JVM");
-        jvm.putDouble("gcCollectionCount", gcCollections);
-        jvm.putDouble("gcCollectionTimeMs", gcCollectionTimeMs);
 
         RobotNetworkTables.Node loop = performance.child("Loop");
         loop.putDouble("periodSec", getPeriod());
@@ -2136,6 +2157,141 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         loop.putDouble("userMs", finiteOr(lastLoopUserMs, -1.0));
         loop.putDouble("totalMs", finiteOr(lastLoopTotalMs, -1.0));
         loop.putDouble("utilizationPercent", ratioPercent(lastLoopTotalMs, getPeriod() * 1000.0));
+
+        boolean publishSlowMetrics = shouldPublishSlowPerformanceMetrics(nowSeconds);
+        boolean publishVerySlowMetrics = shouldPublishVerySlowPerformanceMetrics(nowSeconds);
+        if (!publishSlowMetrics && !publishVerySlowMetrics) {
+            return;
+        }
+        if (publishSlowMetrics) {
+            lastSlowPerformanceMetricsPublishSeconds = nowSeconds;
+
+            status.putBoolean("isSysActive", RobotController.isSysActive());
+            status.putBoolean("isBrownedOut", RobotController.isBrownedOut());
+            status.putBoolean("isSystemTimeValid", RobotController.isSystemTimeValid());
+            status.putDouble("fpgaTimeMicros", RobotController.getFPGATime());
+            status.putDouble("uptimeSec", runtimeMxBean.getUptime() / 1000.0);
+            status.putDouble("teamNumber", RobotController.getTeamNumber());
+
+            RobotNetworkTables.Node power = performance.child("Power");
+            power.putDouble("batteryVoltage", RobotController.getBatteryVoltage());
+            power.putDouble("inputVoltage", RobotController.getInputVoltage());
+            power.putDouble("inputCurrentAmps", RobotController.getInputCurrent());
+            power.putDouble("cpuTempCelsius", RobotController.getCPUTemp());
+            power.putDouble("brownoutVoltage", RobotController.getBrownoutVoltage());
+            power.putBoolean("rslState", RobotController.getRSLState());
+
+            RobotNetworkTables.Node rails = performance.child("Rails");
+            RobotNetworkTables.Node rail3v3 = rails.child("3V3");
+            rail3v3.putDouble("voltage", RobotController.getVoltage3V3());
+            rail3v3.putDouble("currentAmps", RobotController.getCurrent3V3());
+            rail3v3.putBoolean("enabled", RobotController.getEnabled3V3());
+            rail3v3.putDouble("faultCount", RobotController.getFaultCount3V3());
+            RobotNetworkTables.Node rail5v = rails.child("5V");
+            rail5v.putDouble("voltage", RobotController.getVoltage5V());
+            rail5v.putDouble("currentAmps", RobotController.getCurrent5V());
+            rail5v.putBoolean("enabled", RobotController.getEnabled5V());
+            rail5v.putDouble("faultCount", RobotController.getFaultCount5V());
+            RobotNetworkTables.Node rail6v = rails.child("6V");
+            rail6v.putDouble("voltage", RobotController.getVoltage6V());
+            rail6v.putDouble("currentAmps", RobotController.getCurrent6V());
+            rail6v.putBoolean("enabled", RobotController.getEnabled6V());
+            rail6v.putDouble("faultCount", RobotController.getFaultCount6V());
+
+            RobotNetworkTables.Node cpu = performance.child("CPU");
+            cpu.putDouble("availableProcessors", osMxBean.getAvailableProcessors());
+            cpu.putDouble("systemLoadAverage", finiteOr(osMxBean.getSystemLoadAverage(), -1.0));
+            if (sunOsMxBean != null) {
+                cpu.putDouble("processLoadPercent", finiteOr(sunOsMxBean.getProcessCpuLoad() * 100.0, -1.0));
+                cpu.putDouble("systemLoadPercent", finiteOr(sunOsMxBean.getCpuLoad() * 100.0, -1.0));
+                cpu.putDouble("processCpuTimeSec", sunOsMxBean.getProcessCpuTime() / 1_000_000_000.0);
+            } else {
+                cpu.putDouble("processLoadPercent", -1.0);
+                cpu.putDouble("systemLoadPercent", -1.0);
+                cpu.putDouble("processCpuTimeSec", -1.0);
+            }
+        }
+
+        if (publishVerySlowMetrics) {
+            lastVerySlowPerformanceMetricsPublishSeconds = nowSeconds;
+
+            MemoryUsage heap = memoryMxBean.getHeapMemoryUsage();
+            MemoryUsage nonHeap = memoryMxBean.getNonHeapMemoryUsage();
+            long heapUsed = Math.max(0L, heap.getUsed());
+            long heapCommitted = Math.max(0L, heap.getCommitted());
+            long heapMax = Math.max(0L, heap.getMax());
+            long nonHeapUsed = Math.max(0L, nonHeap.getUsed());
+            long nonHeapCommitted = Math.max(0L, nonHeap.getCommitted());
+
+            RobotNetworkTables.Node memory = performance.child("Memory");
+            memory.putDouble("heapUsedBytes", heapUsed);
+            memory.putDouble("heapCommittedBytes", heapCommitted);
+            memory.putDouble("heapMaxBytes", heapMax);
+            memory.putDouble("heapUsedPercent", ratioPercent(heapUsed, heapMax));
+            memory.putDouble("nonHeapUsedBytes", nonHeapUsed);
+            memory.putDouble("nonHeapCommittedBytes", nonHeapCommitted);
+            memory.putDouble("processCommittedVirtualBytes", sunOsMxBean != null ? sunOsMxBean.getCommittedVirtualMemorySize() : -1.0);
+            memory.putDouble("ntTopicCacheSize", robotNetworkTables.topicCacheSize());
+            memory.putDouble("ntBooleanPublisherCount", robotNetworkTables.booleanPublisherCount());
+            memory.putDouble("ntDoublePublisherCount", robotNetworkTables.doublePublisherCount());
+            memory.putDouble("ntStringPublisherCount", robotNetworkTables.stringPublisherCount());
+            memory.putDouble("ntMechanismToggleCount", robotNetworkTables.mechanismToggleCount());
+            memory.putDouble("telemetryEntryCount", telemetry.entryCount());
+            memory.putDouble("diagnosticsChannelCount", diagnosticsChannels.size());
+            if (sunOsMxBean != null) {
+                long totalMemory = Math.max(0L, sunOsMxBean.getTotalMemorySize());
+                long freeMemory = Math.max(0L, sunOsMxBean.getFreeMemorySize());
+                long usedMemory = Math.max(0L, totalMemory - freeMemory);
+                memory.putDouble("systemTotalBytes", totalMemory);
+                memory.putDouble("systemFreeBytes", freeMemory);
+                memory.putDouble("systemUsedBytes", usedMemory);
+                memory.putDouble("systemUsedPercent", ratioPercent(usedMemory, totalMemory));
+            } else {
+                memory.putDouble("systemTotalBytes", -1.0);
+                memory.putDouble("systemFreeBytes", -1.0);
+                memory.putDouble("systemUsedBytes", -1.0);
+                memory.putDouble("systemUsedPercent", -1.0);
+            }
+
+            long gcCollections = 0;
+            long gcCollectionTimeMs = 0;
+            for (GarbageCollectorMXBean gcBean : gcMxBeans) {
+                if (gcBean == null) {
+                    continue;
+                }
+                long count = gcBean.getCollectionCount();
+                long timeMs = gcBean.getCollectionTime();
+                if (count >= 0) {
+                    gcCollections += count;
+                }
+                if (timeMs >= 0) {
+                    gcCollectionTimeMs += timeMs;
+                }
+            }
+            RobotNetworkTables.Node jvm = performance.child("JVM");
+            jvm.putDouble("gcCollectionCount", gcCollections);
+            jvm.putDouble("gcCollectionTimeMs", gcCollectionTimeMs);
+        }
+    }
+
+    private boolean shouldPublishSlowPerformanceMetrics(double nowSeconds) {
+        if (!Double.isFinite(lastSlowPerformanceMetricsPublishSeconds)) {
+            return true;
+        }
+        if (!Double.isFinite(nowSeconds)) {
+            return true;
+        }
+        return nowSeconds - lastSlowPerformanceMetricsPublishSeconds >= PERFORMANCE_SLOW_METRICS_PERIOD_SECONDS;
+    }
+
+    private boolean shouldPublishVerySlowPerformanceMetrics(double nowSeconds) {
+        if (!Double.isFinite(lastVerySlowPerformanceMetricsPublishSeconds)) {
+            return true;
+        }
+        if (!Double.isFinite(nowSeconds)) {
+            return true;
+        }
+        return nowSeconds - lastVerySlowPerformanceMetricsPublishSeconds >= PERFORMANCE_VERY_SLOW_METRICS_PERIOD_SECONDS;
     }
 
     private static double ratioPercent(double numerator, double denominator) {
@@ -2158,7 +2314,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         mechanismsNetworkTablesPublished = true;
 
-        RobotNetworkTables.Node mechanismsNode = robotNetworkTables.root().child("Mechanisms");
+        RobotNetworkTables.Node mechanismsNode = mechanismsRootNode;
         for (Mechanism mech : mechanisms.values()) {
             if (mech == null) {
                 continue;
@@ -2166,12 +2322,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             mech.networkTables(mech.networkTables().resolveNode(mechanismsNode));
         }
 
-        RobotNetworkTables.Node supersNode = robotNetworkTables.root().child("Superstructures");
         for (Map.Entry<String, SuperstructureMechanism<?, ?>> e : superstructuresByName.entrySet()) {
             if (e == null || e.getKey() == null || e.getValue() == null) {
                 continue;
             }
-            e.getValue().networkTables(supersNode.child(e.getKey()));
+            e.getValue().networkTables(mechanismsNode.child(e.getKey()));
         }
         return this;
     }

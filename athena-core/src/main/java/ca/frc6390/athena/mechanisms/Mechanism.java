@@ -5,6 +5,7 @@ import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.LoopTiming;
 import ca.frc6390.athena.core.RobotCoreHooks;
+import ca.frc6390.athena.core.RobotTime;
 import ca.frc6390.athena.core.diagnostics.BoundedEventLog;
 import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.core.input.TypedInputResolver;
@@ -24,6 +25,8 @@ import ca.frc6390.athena.mechanisms.sim.MechanismSimulationConfig;
 import ca.frc6390.athena.mechanisms.sim.MechanismSimulationModel;
 import ca.frc6390.athena.mechanisms.sim.MechanismVisualization;
 import ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig;
+import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.ProfiledPIDController;
@@ -36,9 +39,12 @@ import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.units.measure.Voltage;
 import java.util.function.DoubleSupplier;
+import java.util.Objects;
 import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
+import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
@@ -123,6 +129,21 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean ntSysIdBuilt;
     private boolean ntControllersBuilt;
     private boolean ntHintBuilt;
+    private String ntHintPathCache;
+    private String ntHintTextCache = "";
+    private String ntControlCommandsPath;
+    private NetworkTableEntry ntControlSetpointEntry;
+    private NetworkTableEntry ntControlApplySetpointEntry;
+    private NetworkTableEntry ntControlOutputEntry;
+    private NetworkTableEntry ntControlApplyOutputEntry;
+    private NetworkTableEntry ntControlSetNeutralBrakeEntry;
+    private NetworkTableEntry ntControlSetNeutralCoastEntry;
+    private String ntSysIdCommandsPath;
+    private NetworkTableEntry ntSysIdQuasistaticForwardEntry;
+    private NetworkTableEntry ntSysIdQuasistaticReverseEntry;
+    private NetworkTableEntry ntSysIdDynamicForwardEntry;
+    private NetworkTableEntry ntSysIdDynamicReverseEntry;
+    private NetworkTableEntry ntSysIdCancelEntry;
     private boolean cachedEmergencyStopped;
     private boolean cachedOverride;
     private boolean cachedAtSetpoint;
@@ -150,6 +171,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private int cachedHardwareUpdateSlot;
     private String cachedFaultReason = "";
     private String cachedLastFaultReason = "";
+    private final Map<String, String> sanitizedTopicKeyCache = new HashMap<>();
+    private static final int SANITIZED_TOPIC_KEY_CACHE_MAX = 256;
     private RobotCore<?> robotCore;
     private SysIdRoutine sysIdRoutine;
     private double sysIdRampRateVoltsPerSecond = 1.0;
@@ -158,6 +181,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double sysIdLastVoltage = 0.0;
     private boolean sysIdActive = false;
     private boolean sysIdPreviousOverride = false;
+    private Command activeSysIdCommand;
     private final List<Consumer<?>> periodicHooks;
     private final List<TimedRunner<Consumer<Mechanism>>> timedPeriodicHooks;
     private final List<TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoops;
@@ -192,6 +216,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, OutputType> controlLoopFeedforwardOutputTypes;
     private final Map<String, Double> controlLoopFeedforwardTolerances;
     private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
+    private final java.util.function.Consumer<Consumer<Mechanism>> timedHookRunnerInvoker = hook -> hook.accept(this);
     private  boolean shouldCustomEncoder = false;
     private  DoubleSupplier customEncoderPos;
     private boolean networkTablesEnabled;
@@ -203,6 +228,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final BoundedEventLog<DiagnosticsChannel.Event> diagnosticsLog =
             new BoundedEventLog<>(DIAGNOSTIC_LOG_CAPACITY);
     private final DiagnosticsView diagnosticsView = new DiagnosticsView();
+    private final InputSection inputSection;
+    private final MotorsSection motorsSection;
+    private final EncoderSection encoderSection;
+    private final ControlSection controlSection;
+    private final LoopsSection loopsSection;
+    private final SysIdSection sysIdSection;
+    private final SimulationSection simulationSection;
+    private final NetworkTablesSection networkTablesSection;
+    private final VisualizationSection visualizationSection;
     private static final double EMERGENCY_STOP_LOG_PERIOD_SECONDS = 1.0;
     private static final int DIAGNOSTIC_LOG_CAPACITY = 256;
 
@@ -255,6 +289,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.hardwareUpdateSlot = NEXT_HARDWARE_UPDATE_SLOT.getAndIncrement();
         recomputeHardwareRefreshPhase();
         this.encoderOwnedByMotorGroup = isEncoderOwnedByMotorGroup(this.encoder, this.motors);
+        this.inputSection = new InputSection(this);
+        this.motorsSection = new MotorsSection(this);
+        this.encoderSection = new EncoderSection(this);
+        this.controlSection = new ControlSection(this);
+        this.loopsSection = new LoopsSection(this);
+        this.sysIdSection = new SysIdSection(this);
+        this.simulationSection = new SimulationSection(this);
+        this.networkTablesSection = new NetworkTablesSection(this);
+        this.visualizationSection = new VisualizationSection(this);
 
         if (pidController != null && config.data().pidContinous()) {
             pidController.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
@@ -565,6 +608,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.hardwareUpdateSlot = NEXT_HARDWARE_UPDATE_SLOT.getAndIncrement();
         recomputeHardwareRefreshPhase();
         this.encoderOwnedByMotorGroup = isEncoderOwnedByMotorGroup(this.encoder, this.motors);
+        this.inputSection = new InputSection(this);
+        this.motorsSection = new MotorsSection(this);
+        this.encoderSection = new EncoderSection(this);
+        this.controlSection = new ControlSection(this);
+        this.loopsSection = new LoopsSection(this);
+        this.sysIdSection = new SysIdSection(this);
+        this.simulationSection = new SimulationSection(this);
+        this.networkTablesSection = new NetworkTablesSection(this);
+        this.visualizationSection = new VisualizationSection(this);
 
         if(profiledPIDController != null){
             profiledPIDController.reset(getPosition(), getVelocity());
@@ -657,125 +709,125 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public Mechanism input(Consumer<InputSection> section) {
         if (section != null) {
-            section.accept(new InputSection(this));
+            section.accept(inputSection);
         }
         return this;
     }
 
     public InputSection input() {
-        return new InputSection(this);
+        return inputSection;
     }
 
     public Mechanism motors(Consumer<MotorsSection> section) {
         if (section != null) {
-            section.accept(new MotorsSection(this));
+            section.accept(motorsSection);
         }
         return this;
     }
 
     public MotorsSection motors() {
-        return new MotorsSection(this);
+        return motorsSection;
     }
 
     public Mechanism encoder(Consumer<EncoderSection> section) {
         if (section != null) {
-            section.accept(new EncoderSection(this));
+            section.accept(encoderSection);
         }
         return this;
     }
 
     public EncoderSection encoder() {
-        return new EncoderSection(this);
+        return encoderSection;
     }
 
     public Mechanism control(Consumer<ControlSection> section) {
         if (section != null) {
-            section.accept(new ControlSection(this));
+            section.accept(controlSection);
         }
         return this;
     }
 
     public ControlSection control() {
-        return new ControlSection(this);
+        return controlSection;
     }
 
     public Mechanism loops(Consumer<LoopsSection> section) {
         if (section != null) {
-            section.accept(new LoopsSection(this));
+            section.accept(loopsSection);
         }
         return this;
     }
 
     public LoopsSection loops() {
-        return new LoopsSection(this);
+        return loopsSection;
     }
 
     public Mechanism sysId(Consumer<SysIdSection> section) {
         if (section != null) {
-            section.accept(new SysIdSection(this));
+            section.accept(sysIdSection);
         }
         return this;
     }
 
     public SysIdSection sysId() {
-        return new SysIdSection(this);
+        return sysIdSection;
     }
 
     public Mechanism sim(Consumer<SimulationSection> section) {
         if (section != null) {
-            section.accept(new SimulationSection(this));
+            section.accept(simulationSection);
         }
         return this;
     }
 
     public SimulationSection sim() {
-        return new SimulationSection(this);
+        return simulationSection;
     }
 
     public Mechanism networkTables(Consumer<NetworkTablesSection> section) {
         if (section != null) {
-            section.accept(new NetworkTablesSection(this));
+            section.accept(networkTablesSection);
         }
         return this;
     }
 
     public NetworkTablesSection networkTables() {
-        return new NetworkTablesSection(this);
+        return networkTablesSection;
     }
 
     public Mechanism visualization(Consumer<VisualizationSection> section) {
         if (section != null) {
-            section.accept(new VisualizationSection(this));
+            section.accept(visualizationSection);
         }
         return this;
     }
 
     public VisualizationSection visualization() {
-        return new VisualizationSection(this);
+        return visualizationSection;
     }
 
     public Mechanism setpoint(double value) {
-        control().setpoint(value);
+        setSetpoint(value);
         return this;
     }
 
     public Mechanism output(double value) {
-        control().output(value);
+        setOutput(value);
         return this;
     }
 
     public Mechanism speed(double value) {
-        control().speed(value);
+        setSpeed(value);
         return this;
     }
 
     public Mechanism voltage(double value) {
-        control().voltage(value);
+        setVoltage(value);
         return this;
     }
 
     public Mechanism manualOverride(boolean enabled) {
-        control().manualOverride(enabled);
+        setOverride(enabled);
         return this;
     }
 
@@ -2303,13 +2355,17 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         feedforwardOutput = calculateFeedForward();
     }
 
-    public void update(){
+    public void update() {
+        update(currentLoopNowSeconds());
+    }
+
+    private void update(double nowSeconds) {
 
         double output = 0;
 
         boolean encoderDisconnected = encoder != null && !encoder.isConnected();
         boolean motorsDisconnected = !motors.allMotorsConnected();
-        updateConnectivityEmergencyStop(encoderDisconnected, motorsDisconnected);
+        updateConnectivityEmergencyStop(encoderDisconnected, motorsDisconnected, nowSeconds);
 
         if(!customPIDCycle) updatePID();
 
@@ -2320,7 +2376,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             output = getSetpoint() + getNudge();
         }
 
-        output += calculateControlLoopOutput();
+        output += calculateControlLoopOutput(nowSeconds);
 
         this.output = output;
 
@@ -2373,9 +2429,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return suppressed;
     }
 
-    private void logEmergencyStopReason(boolean encoderDisconnected, boolean motorsDisconnected) {
+    private void logEmergencyStopReason(boolean encoderDisconnected, boolean motorsDisconnected, double nowSeconds) {
         String reasonText = connectivityReasonText(encoderDisconnected, motorsDisconnected);
-        double now = Timer.getFPGATimestamp();
+        double now = Double.isFinite(nowSeconds) ? nowSeconds : currentLoopNowSeconds();
         boolean reasonChanged = !reasonText.equals(lastEmergencyStopReason);
         boolean shouldLog = Double.isNaN(lastEmergencyStopLogSeconds)
                 || (now - lastEmergencyStopLogSeconds) >= EMERGENCY_STOP_LOG_PERIOD_SECONDS
@@ -2390,14 +2446,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
-    private void updateConnectivityEmergencyStop(boolean encoderDisconnected, boolean motorsDisconnected) {
+    private void updateConnectivityEmergencyStop(boolean encoderDisconnected, boolean motorsDisconnected, double nowSeconds) {
         boolean disconnected = encoderDisconnected || motorsDisconnected;
         if (disconnected) {
             connectivityFaultReason = connectivityReasonText(encoderDisconnected, motorsDisconnected);
             lastFaultReason = connectivityFaultReason;
             connectivityFaultEmergencyStopped = true;
             refreshEmergencyStopState();
-            logEmergencyStopReason(encoderDisconnected, motorsDisconnected);
+            logEmergencyStopReason(encoderDisconnected, motorsDisconnected, nowSeconds);
             return;
         }
         if (!connectivityFaultEmergencyStopped) {
@@ -2406,12 +2462,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         connectivityFaultEmergencyStopped = false;
         connectivityFaultReason = "";
         refreshEmergencyStopState();
-        logEmergencyStopRecovery();
+        logEmergencyStopRecovery(nowSeconds);
     }
 
-    private void logEmergencyStopRecovery() {
+    private void logEmergencyStopRecovery(double nowSeconds) {
         String reasonText = "connectivity restored";
-        double now = Timer.getFPGATimestamp();
+        double now = Double.isFinite(nowSeconds) ? nowSeconds : currentLoopNowSeconds();
         boolean shouldLog = Double.isNaN(lastEmergencyStopLogSeconds)
                 || (now - lastEmergencyStopLogSeconds) >= EMERGENCY_STOP_LOG_PERIOD_SECONDS
                 || !reasonText.equals(lastEmergencyStopReason);
@@ -2899,25 +2955,24 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     @SuppressWarnings("unchecked")
-    private void applyPeriodicHooks() {
+    private void applyPeriodicHooks(double nowSeconds) {
         for (Consumer<?> hook : periodicHooks) {
             ((Consumer<Mechanism>) hook).accept(this);
         }
-        if (!timedPeriodicHooks.isEmpty()) {
-            double nowSeconds = Timer.getFPGATimestamp();
-            for (TimedRunner<Consumer<Mechanism>> runner : timedPeriodicHooks) {
-                if (runner.shouldRunSeconds(nowSeconds)) {
-                    runner.run(hook -> hook.accept(this), nowSeconds);
-                }
+        if (timedPeriodicHooks.isEmpty()) {
+            return;
+        }
+        for (TimedRunner<Consumer<Mechanism>> runner : timedPeriodicHooks) {
+            if (runner.shouldRunSeconds(nowSeconds)) {
+                runner.run(timedHookRunnerInvoker, nowSeconds);
             }
         }
     }
 
-    private void updateNetworkTablesCache() {
+    private void updateNetworkTablesCache(double nowSeconds) {
         if (!networkTablesEnabled) {
             return;
         }
-        double nowSeconds = Timer.getFPGATimestamp();
         double periodSeconds = getNetworkTablesPeriodSeconds();
         if (Double.isFinite(periodSeconds) && periodSeconds > 0.0
                 && Double.isFinite(nowSeconds)
@@ -2962,14 +3017,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         cachedLastFaultReason = lastFaultReason;
     }
 
-    private double calculateControlLoopOutput() {
+    private double calculateControlLoopOutput(double nowSeconds) {
         if (controlLoops.isEmpty()) {
             return 0.0;
         }
-        double nowSeconds = Timer.getFPGATimestamp();
         double total = 0.0;
         for (TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
-            if (!isControlLoopEnabled(runner.name())) {
+            if (!isControlLoopRunnerEnabled(runner)) {
                 runner.setLastOutput(0.0);
                 continue;
             }
@@ -2990,6 +3044,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             total += runner.lastOutput();
         }
         return total;
+    }
+
+    private boolean isControlLoopRunnerEnabled(TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner) {
+        if (runner == null) {
+            return false;
+        }
+        String name = runner.name();
+        return name != null && !disabledControlLoops.contains(name);
     }
 
     private boolean shouldRefreshHardwareSignals(double nowSeconds) {
@@ -3013,11 +3075,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return (nowSeconds - lastHardwareUpdateSeconds) >= hardwareUpdatePeriodSeconds;
     }
 
-    private void refreshHardwareSignals(boolean force) {
+    private void refreshHardwareSignals(boolean force, double nowSeconds) {
         if (simulationModel != null) {
             return;
         }
-        double nowSeconds = Timer.getFPGATimestamp();
         if (!force && !shouldRefreshHardwareSignals(nowSeconds)) {
             return;
         }
@@ -3028,12 +3089,20 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         lastHardwareUpdateSeconds = nowSeconds;
     }
 
+    private double currentLoopNowSeconds() {
+        double nowSeconds = RobotTime.nowSeconds();
+        if (Double.isFinite(nowSeconds)) {
+            return nowSeconds;
+        }
+        return Timer.getFPGATimestamp();
+    }
+
     @Override
     public void periodic() {
         if (LoopTiming.shouldSampleMechanisms()) {
-            double startSeconds = Timer.getFPGATimestamp();
+            long startNanos = System.nanoTime();
             periodicImpl();
-            double durationMs = (Timer.getFPGATimestamp() - startSeconds) * 1000.0;
+            double durationMs = (System.nanoTime() - startNanos) * 1e-6;
             LoopTiming.recordMechanism(getName(), durationMs);
             return;
         }
@@ -3041,35 +3110,28 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void periodicImpl() {
-        if(DriverStation.isAutonomousEnabled()){
-            robotMode = RobotMode.AUTO;
-        } else if(DriverStation.isTeleopEnabled()){
-            robotMode = RobotMode.TELE;
-        } else if(DriverStation.isDisabled()){
-            robotMode = RobotMode.DISABLE;
-        } else if(DriverStation.isTestEnabled()){
-            robotMode = RobotMode.TEST;
-        }
+        robotMode = resolveRobotMode();
+        double nowSeconds = currentLoopNowSeconds();
 
-        if(!prevRobotMode.equals(robotMode)){
+        if (prevRobotMode != robotMode) {
             resetPID();
         }
 
         if (simulationModel != null) {
-            advanceSimulation(Timer.getFPGATimestamp());
+            advanceSimulation(nowSeconds);
         } else {
-            refreshHardwareSignals(false);
+            refreshHardwareSignals(false, nowSeconds);
         }
 
         sensorSimulation.update(this);
 
-        applyPeriodicHooks();
+        applyPeriodicHooks(nowSeconds);
 
-        update();
+        update(nowSeconds);
 
-        updateNetworkTablesCache();
+        updateNetworkTablesCache(nowSeconds);
         refreshNetworkTablesOnConfigChange();
-        attemptNetworkTablesPublishIfNeeded();
+        attemptNetworkTablesPublishIfNeeded(nowSeconds);
 
         if (visualization != null) {
             visualization.setExternalRootPose(visualizationRootOverride);
@@ -3077,6 +3139,34 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         prevRobotMode = robotMode;
+    }
+
+    private RobotMode resolveRobotMode() {
+        RobotCore<?> core = robotCore;
+        if (core != null) {
+            RobotCore.RuntimeMode mode = core.runtimeMode();
+            if (mode == RobotCore.RuntimeMode.AUTO) {
+                return RobotMode.AUTO;
+            }
+            if (mode == RobotCore.RuntimeMode.TELEOP) {
+                return RobotMode.TELE;
+            }
+            if (mode == RobotCore.RuntimeMode.TEST) {
+                return RobotMode.TEST;
+            }
+            return RobotMode.DISABLE;
+        }
+
+        if (DriverStation.isAutonomousEnabled()) {
+            return RobotMode.AUTO;
+        }
+        if (DriverStation.isTeleopEnabled()) {
+            return RobotMode.TELE;
+        }
+        if (DriverStation.isTestEnabled()) {
+            return RobotMode.TEST;
+        }
+        return RobotMode.DISABLE;
     }
 
     private void refreshNetworkTablesOnConfigChange() {
@@ -3374,7 +3464,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
-    private void attemptNetworkTablesPublishIfNeeded() {
+    private void attemptNetworkTablesPublishIfNeeded(double now) {
         RobotNetworkTables nt = lastRobotNetworkTables;
         if (!networkTablesEnabled || !shouldPublishMechanismNetworkTables(nt)) {
             return;
@@ -3384,7 +3474,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
 
-        double now = Timer.getFPGATimestamp();
         double period = getNetworkTablesPeriodSeconds();
         if (Double.isFinite(period) && period > 0.0
                 && Double.isFinite(now)
@@ -3527,8 +3616,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         meta.putString("name", name != null ? name : "");
         meta.putString("type", getNetworkTablesTypeName());
         meta.putString("owner", getNetworkTablesOwnerPath() != null ? getNetworkTablesOwnerPath() : "");
-        meta.putString("hint",
-                "Enable " + node.path() + "/NetworkTableConfig/Details and section flags to publish more topics.");
+        String nodePath = node.path();
+        if (!Objects.equals(nodePath, ntHintPathCache)) {
+            ntHintPathCache = nodePath;
+            String resolvedPath = nodePath != null && !nodePath.isBlank() ? nodePath : "/Athena/Mechanisms";
+            ntHintTextCache =
+                    "Enable section flags under " + resolvedPath + "/NetworkTableConfig to publish more topics.";
+        }
+        meta.putString("hint", ntHintTextCache);
         String jsonUrl = resolveConfigDownloadUrl("json");
         String tomlUrl = resolveConfigDownloadUrl("toml");
         String diagnosticsUrl = resolveDiagnosticsLogUrl();
@@ -3537,10 +3632,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         meta.putString("diagnosticsUrl", diagnosticsUrl != null ? diagnosticsUrl : "");
 
         RobotNetworkTables.MechanismToggles toggles = nt.mechanismConfig(node);
-        boolean details = toggles.detailsEnabled();
-        if (!details) {
-            return;
-        }
 
         if (toggles.motorsEnabled()) {
             motors.networkTables(node.child("Motors"));
@@ -3608,6 +3699,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             boolean nextRefreshValid = Double.isFinite(cachedHardwareNextRefreshInSeconds);
             status.putBoolean("hwNextRefreshValid", nextRefreshValid);
             status.putDouble("hwNextRefreshInMs", nextRefreshValid ? cachedHardwareNextRefreshInSeconds * 1000.0 : -1.0);
+            status.putString("neutralMode", resolveNeutralMode().name());
 
             RobotNetworkTables.Node setpoint = control.child("Setpoint");
             setpoint.putDouble("value", cachedSetpoint);
@@ -3617,6 +3709,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             output.putDouble("value", cachedOutput);
             output.putDouble("pid", cachedPidOutput);
             output.putDouble("feedforward", cachedFeedforwardOutput);
+            processNetworkTablesControlCommands(control.child("Commands"));
         }
 
         if (toggles.inputsEnabled()) {
@@ -3626,52 +3719,52 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
-                bools.putBoolean(sanitizeTopicKey(e.getKey()), e.getValue());
+                bools.putBoolean(sanitizeTopicKeyCached(e.getKey()), e.getValue());
             }
             for (Map.Entry<String, BooleanSupplier> e : controlLoopInputs.entrySet()) {
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
-                bools.putBoolean(sanitizeTopicKey(e.getKey()), e.getValue().getAsBoolean());
+                bools.putBoolean(sanitizeTopicKeyCached(e.getKey()), e.getValue().getAsBoolean());
             }
             RobotNetworkTables.Node dbls = inputs.child("Double");
             for (Map.Entry<String, Double> e : mutableDoubleInputs.entrySet()) {
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
-                dbls.putDouble(sanitizeTopicKey(e.getKey()), e.getValue());
+                dbls.putDouble(sanitizeTopicKeyCached(e.getKey()), e.getValue());
             }
             for (Map.Entry<String, DoubleSupplier> e : controlLoopDoubleInputs.entrySet()) {
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
-                dbls.putDouble(sanitizeTopicKey(e.getKey()), e.getValue().getAsDouble());
+                dbls.putDouble(sanitizeTopicKeyCached(e.getKey()), e.getValue().getAsDouble());
             }
             RobotNetworkTables.Node ints = inputs.child("Int");
             for (Map.Entry<String, Integer> e : mutableIntInputs.entrySet()) {
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
-                ints.putDouble(sanitizeTopicKey(e.getKey()), e.getValue());
+                ints.putDouble(sanitizeTopicKeyCached(e.getKey()), e.getValue());
             }
             for (Map.Entry<String, java.util.function.IntSupplier> e : controlLoopIntInputs.entrySet()) {
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
-                ints.putDouble(sanitizeTopicKey(e.getKey()), e.getValue().getAsInt());
+                ints.putDouble(sanitizeTopicKeyCached(e.getKey()), e.getValue().getAsInt());
             }
             RobotNetworkTables.Node strs = inputs.child("String");
             for (Map.Entry<String, String> e : mutableStringInputs.entrySet()) {
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
-                strs.putString(sanitizeTopicKey(e.getKey()), e.getValue());
+                strs.putString(sanitizeTopicKeyCached(e.getKey()), e.getValue());
             }
             for (Map.Entry<String, java.util.function.Supplier<String>> e : controlLoopStringInputs.entrySet()) {
                 if (e == null || e.getKey() == null || e.getValue() == null) {
                     continue;
                 }
-                strs.putString(sanitizeTopicKey(e.getKey()), e.getValue().get());
+                strs.putString(sanitizeTopicKeyCached(e.getKey()), e.getValue().get());
             }
             RobotNetworkTables.Node poses2d = inputs.child("Pose2d");
             for (Map.Entry<String, edu.wpi.first.math.geometry.Pose2d> e : mutablePose2dInputs.entrySet()) {
@@ -3679,7 +3772,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     continue;
                 }
                 edu.wpi.first.math.geometry.Pose2d pose = e.getValue();
-                RobotNetworkTables.Node p = poses2d.child(sanitizeTopicKey(e.getKey()));
+                RobotNetworkTables.Node p = poses2d.child(sanitizeTopicKeyCached(e.getKey()));
                 p.putDouble("x", pose.getX());
                 p.putDouble("y", pose.getY());
                 p.putDouble("deg", pose.getRotation().getDegrees());
@@ -3692,7 +3785,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (pose == null) {
                     continue;
                 }
-                RobotNetworkTables.Node p = poses2d.child(sanitizeTopicKey(e.getKey()));
+                RobotNetworkTables.Node p = poses2d.child(sanitizeTopicKeyCached(e.getKey()));
                 p.putDouble("x", pose.getX());
                 p.putDouble("y", pose.getY());
                 p.putDouble("deg", pose.getRotation().getDegrees());
@@ -3703,7 +3796,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     continue;
                 }
                 edu.wpi.first.math.geometry.Pose3d pose = e.getValue();
-                RobotNetworkTables.Node p = poses3d.child(sanitizeTopicKey(e.getKey()));
+                RobotNetworkTables.Node p = poses3d.child(sanitizeTopicKeyCached(e.getKey()));
                 p.putDouble("x", pose.getX());
                 p.putDouble("y", pose.getY());
                 p.putDouble("z", pose.getZ());
@@ -3719,7 +3812,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (pose == null) {
                     continue;
                 }
-                RobotNetworkTables.Node p = poses3d.child(sanitizeTopicKey(e.getKey()));
+                RobotNetworkTables.Node p = poses3d.child(sanitizeTopicKeyCached(e.getKey()));
                 p.putDouble("x", pose.getX());
                 p.putDouble("y", pose.getY());
                 p.putDouble("z", pose.getZ());
@@ -3741,7 +3834,187 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             sysid.putDouble("stepVoltageV", cachedSysIdStepVoltage);
             sysid.putDouble("timeoutSec", cachedSysIdTimeoutSeconds);
             sysid.putBoolean("active", cachedSysIdActive);
+            processNetworkTablesSysIdCommands(sysid.child("Commands"));
         }
+    }
+
+    private void processNetworkTablesControlCommands(RobotNetworkTables.Node commandsNode) {
+        if (commandsNode == null) {
+            return;
+        }
+        ensureControlCommandEntries(commandsNode);
+        if (ntControlApplySetpointEntry.getBoolean(false)) {
+            double requested = ntControlSetpointEntry.getDouble(setpoint);
+            setSetpoint(requested);
+            ntControlApplySetpointEntry.setBoolean(false);
+        }
+
+        if (ntControlApplyOutputEntry.getBoolean(false)) {
+            double requested = ntControlOutputEntry.getDouble(output);
+            setOutput(requested);
+            ntControlApplyOutputEntry.setBoolean(false);
+        }
+
+        if (ntControlSetNeutralBrakeEntry.getBoolean(false)) {
+            motors.setNeutralMode(MotorNeutralMode.Brake);
+            ntControlSetNeutralBrakeEntry.setBoolean(false);
+        }
+
+        if (ntControlSetNeutralCoastEntry.getBoolean(false)) {
+            motors.setNeutralMode(MotorNeutralMode.Coast);
+            ntControlSetNeutralCoastEntry.setBoolean(false);
+        }
+    }
+
+    private void processNetworkTablesSysIdCommands(RobotNetworkTables.Node commandsNode) {
+        if (commandsNode == null) {
+            return;
+        }
+        ensureSysIdCommandEntries(commandsNode);
+        if (ntSysIdQuasistaticForwardEntry.getBoolean(false)) {
+            scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)));
+            ntSysIdQuasistaticForwardEntry.setBoolean(false);
+        }
+        if (ntSysIdQuasistaticReverseEntry.getBoolean(false)) {
+            scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)));
+            ntSysIdQuasistaticReverseEntry.setBoolean(false);
+        }
+        if (ntSysIdDynamicForwardEntry.getBoolean(false)) {
+            scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)));
+            ntSysIdDynamicForwardEntry.setBoolean(false);
+        }
+        if (ntSysIdDynamicReverseEntry.getBoolean(false)) {
+            scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)));
+            ntSysIdDynamicReverseEntry.setBoolean(false);
+        }
+        if (ntSysIdCancelEntry.getBoolean(false)) {
+            cancelActiveSysIdCommand();
+            ntSysIdCancelEntry.setBoolean(false);
+        }
+        if (activeSysIdCommand != null && !CommandScheduler.getInstance().isScheduled(activeSysIdCommand)) {
+            activeSysIdCommand = null;
+        }
+    }
+
+    private void ensureControlCommandEntries(RobotNetworkTables.Node commandsNode) {
+        String path = commandsNode.path();
+        boolean samePath = (path == null && ntControlCommandsPath == null)
+                || (path != null && path.equals(ntControlCommandsPath));
+        if (samePath
+                && ntControlSetpointEntry != null
+                && ntControlApplySetpointEntry != null
+                && ntControlOutputEntry != null
+                && ntControlApplyOutputEntry != null
+                && ntControlSetNeutralBrakeEntry != null
+                && ntControlSetNeutralCoastEntry != null) {
+            return;
+        }
+        ntControlCommandsPath = path;
+        ntControlSetpointEntry = commandsNode.entry("Setpoint");
+        ntControlApplySetpointEntry = commandsNode.entry("ApplySetpoint");
+        ntControlOutputEntry = commandsNode.entry("Output");
+        ntControlApplyOutputEntry = commandsNode.entry("ApplyOutput");
+        ntControlSetNeutralBrakeEntry = commandsNode.entry("SetNeutralBrake");
+        ntControlSetNeutralCoastEntry = commandsNode.entry("SetNeutralCoast");
+
+        initIfAbsent(ntControlSetpointEntry, setpoint);
+        initIfAbsent(ntControlApplySetpointEntry, false);
+        initIfAbsent(ntControlOutputEntry, output);
+        initIfAbsent(ntControlApplyOutputEntry, false);
+        initIfAbsent(ntControlSetNeutralBrakeEntry, false);
+        initIfAbsent(ntControlSetNeutralCoastEntry, false);
+    }
+
+    private void ensureSysIdCommandEntries(RobotNetworkTables.Node commandsNode) {
+        String path = commandsNode.path();
+        boolean samePath = (path == null && ntSysIdCommandsPath == null)
+                || (path != null && path.equals(ntSysIdCommandsPath));
+        if (samePath
+                && ntSysIdQuasistaticForwardEntry != null
+                && ntSysIdQuasistaticReverseEntry != null
+                && ntSysIdDynamicForwardEntry != null
+                && ntSysIdDynamicReverseEntry != null
+                && ntSysIdCancelEntry != null) {
+            return;
+        }
+        ntSysIdCommandsPath = path;
+        ntSysIdQuasistaticForwardEntry = commandsNode.entry("RunQuasistaticForward");
+        ntSysIdQuasistaticReverseEntry = commandsNode.entry("RunQuasistaticReverse");
+        ntSysIdDynamicForwardEntry = commandsNode.entry("RunDynamicForward");
+        ntSysIdDynamicReverseEntry = commandsNode.entry("RunDynamicReverse");
+        ntSysIdCancelEntry = commandsNode.entry("Cancel");
+
+        initIfAbsent(ntSysIdQuasistaticForwardEntry, false);
+        initIfAbsent(ntSysIdQuasistaticReverseEntry, false);
+        initIfAbsent(ntSysIdDynamicForwardEntry, false);
+        initIfAbsent(ntSysIdDynamicReverseEntry, false);
+        initIfAbsent(ntSysIdCancelEntry, false);
+    }
+
+    private void scheduleSysIdCommand(Command command) {
+        if (command == null) {
+            return;
+        }
+        cancelActiveSysIdCommand();
+        activeSysIdCommand = command;
+        CommandScheduler.getInstance().schedule(command);
+    }
+
+    private void cancelActiveSysIdCommand() {
+        if (activeSysIdCommand == null) {
+            return;
+        }
+        if (CommandScheduler.getInstance().isScheduled(activeSysIdCommand)) {
+            activeSysIdCommand.cancel();
+        }
+        activeSysIdCommand = null;
+    }
+
+    private MotorNeutralMode resolveNeutralMode() {
+        MotorController[] controllers = motors.getControllers();
+        if (controllers == null) {
+            return MotorNeutralMode.Coast;
+        }
+        for (MotorController controller : controllers) {
+            if (controller != null) {
+                return controller.getNeutralMode();
+            }
+        }
+        return MotorNeutralMode.Coast;
+    }
+
+    private static void initIfAbsent(NetworkTableEntry entry, boolean value) {
+        if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+            entry.setBoolean(value);
+        }
+    }
+
+    private static void initIfAbsent(NetworkTableEntry entry, double value) {
+        if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+            entry.setDouble(value);
+        }
+    }
+
+    private static void initIfAbsent(NetworkTableEntry entry, String value) {
+        if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+            entry.setString(value != null ? value : "");
+        }
+    }
+
+    private String sanitizeTopicKeyCached(String key) {
+        if (key == null) {
+            return "";
+        }
+        String cached = sanitizedTopicKeyCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        String sanitized = sanitizeTopicKey(key);
+        if (sanitizedTopicKeyCache.size() >= SANITIZED_TOPIC_KEY_CACHE_MAX) {
+            sanitizedTopicKeyCache.clear();
+        }
+        sanitizedTopicKeyCache.put(key, sanitized);
+        return sanitized;
     }
 
     private static String sanitizeTopicKey(String key) {
@@ -3752,7 +4025,34 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (trimmed.isEmpty()) {
             return "";
         }
-        return trimmed.replaceAll("[^A-Za-z0-9_\\-]", "_");
+        boolean changed = false;
+        int len = trimmed.length();
+        for (int i = 0; i < len; i++) {
+            char c = trimmed.charAt(i);
+            boolean valid = (c >= 'A' && c <= 'Z')
+                    || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9')
+                    || c == '_'
+                    || c == '-';
+            if (!valid) {
+                changed = true;
+                break;
+            }
+        }
+        if (!changed) {
+            return trimmed;
+        }
+        StringBuilder out = new StringBuilder(len);
+        for (int i = 0; i < len; i++) {
+            char c = trimmed.charAt(i);
+            boolean valid = (c >= 'A' && c <= 'Z')
+                    || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9')
+                    || c == '_'
+                    || c == '-';
+            out.append(valid ? c : '_');
+        }
+        return out.toString();
     }
 
     private String resolveConfigDownloadUrl(String ext) {

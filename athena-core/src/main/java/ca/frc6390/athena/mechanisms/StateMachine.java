@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.function.BooleanSupplier;
-import java.util.stream.Collectors;
 
 import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
@@ -180,9 +179,17 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         if (stateQueue.isEmpty()) {
             return "None";
         }
-        return stateQueue.stream()
-                .map(entry -> entry.state.name())
-                .collect(Collectors.joining(", "));
+        StringBuilder queueString = new StringBuilder();
+        for (StateQueueEntry<E> entry : stateQueue) {
+            if (entry == null || entry.state == null) {
+                continue;
+            }
+            if (queueString.length() > 0) {
+                queueString.append(", ");
+            }
+            queueString.append(entry.state.name());
+        }
+        return queueString.length() > 0 ? queueString.toString() : "None";
     }
 
     public void resetQueue(){

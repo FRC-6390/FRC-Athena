@@ -1,11 +1,9 @@
 package ca.frc6390.athena.hardware.encoder;
 
-import java.util.Arrays;
-import java.util.Objects;
-
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
+import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -15,34 +13,59 @@ import edu.wpi.first.wpilibj.DriverStation;
  */
 public class EncoderGroup implements RobotSendableDevice {
     private final Encoder[] encoders;
+    private final String[] encoderTopicKeys;
+    private String publishNodePath;
+    private RobotNetworkTables.Node summaryNode;
+    private RobotNetworkTables.Node[] encoderNodes;
 
     public EncoderGroup(Encoder... encoders) {
         this.encoders = encoders;
+        this.encoderTopicKeys = buildTopicKeys(encoders);
     }
 
     public static EncoderGroup fromConfigs(EncoderConfig... configs) {
-        return new EncoderGroup(Arrays.stream(configs).map(HardwareFactories::encoder).toArray(Encoder[]::new));
+        if (configs == null || configs.length == 0) {
+            return new EncoderGroup();
+        }
+        Encoder[] resolved = new Encoder[configs.length];
+        for (int i = 0; i < configs.length; i++) {
+            resolved[i] = HardwareFactories.encoder(configs[i]);
+        }
+        return new EncoderGroup(resolved);
     }
 
     public static EncoderGroup fromMotorGroup(MotorControllerGroup motors) {
-        Encoder[] encoders = Arrays.stream(motors.getControllers())
-                .map(m -> {
-                    Encoder encoder = m.getEncoder();
-                    if (encoder == null) {
-                        DriverStation.reportWarning(
-                                "Motor controller '" + m.getName() + "' has no encoder; skipping in EncoderGroup.",
-                                false);
-                        return null;
-                    }
-                    encoder.setInverted(m.isInverted());
-                    return encoder;
-                })
-                .filter(Objects::nonNull)
-                .toArray(Encoder[]::new);
-        if (encoders.length == 0) {
-            DriverStation.reportWarning("No encoders available for MotorControllerGroup; EncoderGroup will be empty.", false);
+        if (motors == null || motors.getControllers() == null || motors.getControllers().length == 0) {
+            DriverStation.reportWarning("No motor controllers available; EncoderGroup will be empty.", false);
+            return new EncoderGroup();
         }
-        return new EncoderGroup(encoders);
+        MotorController[] controllers = motors.getControllers();
+        Encoder[] buffer = new Encoder[controllers.length];
+        int count = 0;
+        for (MotorController controller : controllers) {
+            if (controller == null) {
+                continue;
+            }
+            Encoder encoder = controller.getEncoder();
+            if (encoder == null) {
+                DriverStation.reportWarning(
+                        "Motor controller '" + controller.getName() + "' has no encoder; skipping in EncoderGroup.",
+                        false);
+                continue;
+            }
+            encoder.setInverted(controller.isInverted());
+            buffer[count++] = encoder;
+        }
+        if (count == 0) {
+            DriverStation.reportWarning("No encoders available for MotorControllerGroup; EncoderGroup will be empty.", false);
+            return new EncoderGroup();
+        }
+        if (count == buffer.length) {
+            return new EncoderGroup(buffer);
+        }
+        Encoder[] resolved = new Encoder[count];
+        System.arraycopy(buffer, 0, resolved, 0, count);
+        return new EncoderGroup(resolved);
     }
 
     public Encoder[] getEncoders() {
@@ -147,75 +170,81 @@ public class EncoderGroup implements RobotSendableDevice {
     }
 
     private void publish(RobotNetworkTables.Node node) {
-        RobotNetworkTables.Node summary = node.child("Summary");
-        summary.putDouble("avgPosition", getAveragePosition());
-        summary.putDouble("avgVelocity", getAverageVelocity());
-        summary.putDouble("avgRotations", getAverageRotations());
-        summary.putDouble("avgRate", getAverageRate());
-        summary.putBoolean("allConnected", allEncodersConnected());
-
-        if (node.robot().enabled(RobotNetworkTables.Flag.ENCODER_GROUP_PER_ENCODER)) {
-            RobotNetworkTables.Node encNode = node.child("Encoders");
-            Arrays.stream(encoders)
-                    .filter(Objects::nonNull)
-                    .forEach(encoder -> {
-                        String key = encoder.getName();
-                        key = key != null ? key.replace('\\', '_').replace('/', '_') : "encoder";
-                        encoder.networkTables(encNode.child(key));
-                    });
-        }
-    }
-
-    private double getAveragePosition() {
-        double sum = 0.0;
+        RobotNetworkTables nt = node.robot();
+        ensurePublishNodes(node);
+        double positionSum = 0.0;
+        double velocitySum = 0.0;
+        double rotationsSum = 0.0;
+        double rateSum = 0.0;
         int count = 0;
+        boolean allConnected = true;
         for (Encoder encoder : encoders) {
             if (encoder == null) {
                 continue;
             }
-            sum += encoder.getPosition();
+            positionSum += encoder.getPosition();
+            velocitySum += encoder.getVelocity();
+            rotationsSum += encoder.getRotations();
+            rateSum += encoder.getRate();
+            allConnected &= encoder.isConnected();
             count++;
         }
-        return count > 0 ? sum / count : 0.0;
+        double invCount = count > 0 ? 1.0 / count : 0.0;
+
+        summaryNode.putDouble("avgPosition", positionSum * invCount);
+        summaryNode.putDouble("avgVelocity", velocitySum * invCount);
+        summaryNode.putDouble("avgRotations", rotationsSum * invCount);
+        summaryNode.putDouble("avgRate", rateSum * invCount);
+        summaryNode.putBoolean("allConnected", allConnected);
+
+        if (nt.enabled(RobotNetworkTables.Flag.ENCODER_GROUP_PER_ENCODER)) {
+            for (int i = 0; i < encoders.length; i++) {
+                Encoder encoder = encoders[i];
+                if (encoder == null) {
+                    continue;
+                }
+                if (encoderNodes != null && i < encoderNodes.length && encoderNodes[i] != null) {
+                    encoder.networkTables(encoderNodes[i]);
+                }
+            }
+        }
     }
 
-    private double getAverageVelocity() {
-        double sum = 0.0;
-        int count = 0;
-        for (Encoder encoder : encoders) {
-            if (encoder == null) {
-                continue;
-            }
-            sum += encoder.getVelocity();
-            count++;
+    private void ensurePublishNodes(RobotNetworkTables.Node node) {
+        String path = node.path();
+        if (path != null && path.equals(publishNodePath) && summaryNode != null) {
+            return;
         }
-        return count > 0 ? sum / count : 0.0;
+        publishNodePath = path;
+        summaryNode = node.child("Summary");
+        RobotNetworkTables.Node encodersRoot = node.child("Encoders");
+        encoderNodes = new RobotNetworkTables.Node[encoders.length];
+        for (int i = 0; i < encoders.length; i++) {
+            String key = encoderTopicKeys != null && i < encoderTopicKeys.length
+                    ? encoderTopicKeys[i]
+                    : "encoder";
+            encoderNodes[i] = encodersRoot.child(key);
+        }
     }
 
-    private double getAverageRotations() {
-        double sum = 0.0;
-        int count = 0;
-        for (Encoder encoder : encoders) {
-            if (encoder == null) {
-                continue;
-            }
-            sum += encoder.getRotations();
-            count++;
+    private static String[] buildTopicKeys(Encoder[] encoders) {
+        if (encoders == null || encoders.length == 0) {
+            return new String[0];
         }
-        return count > 0 ? sum / count : 0.0;
+        String[] keys = new String[encoders.length];
+        for (int i = 0; i < encoders.length; i++) {
+            Encoder encoder = encoders[i];
+            String fallback = "encoder";
+            keys[i] = sanitizeTopicKey(encoder != null ? encoder.getName() : null, fallback);
+        }
+        return keys;
     }
 
-    private double getAverageRate() {
-        double sum = 0.0;
-        int count = 0;
-        for (Encoder encoder : encoders) {
-            if (encoder == null) {
-                continue;
-            }
-            sum += encoder.getRate();
-            count++;
+    private static String sanitizeTopicKey(String raw, String fallback) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
         }
-        return count > 0 ? sum / count : 0.0;
+        return raw.replace('\\', '_').replace('/', '_');
     }
 
 }

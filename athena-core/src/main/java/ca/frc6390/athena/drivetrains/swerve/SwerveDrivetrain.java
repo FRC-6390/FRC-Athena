@@ -1,6 +1,5 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
-import java.util.Arrays;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
@@ -60,6 +59,9 @@ public class SwerveDrivetrain extends SubsystemBase
     implements RobotDrivetrain<SwerveDrivetrain>, RobotDrivetrainLocalizationFactory {
 
   private static final double DRIFT_TURN_DEADBAND_RAD_PER_SEC = 0.05;
+  private static final double MODULE_HEADING_EPSILON = 1e-6;
+  private static final double MODULE_ANGLE_UPDATE_EPSILON_RAD = 1e-4;
+  private static final Pose2d ZERO_POSE = new Pose2d();
 
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
@@ -82,8 +84,15 @@ public class SwerveDrivetrain extends SubsystemBase
   private SwerveDrivetrainSimulation simulation;
   private Field2d simulationField;
   private double lastSimulationTimestamp = -1;
-  private ChassisSpeeds lastCommandedSpeeds = new ChassisSpeeds();
-  private ChassisSpeeds lastLimitedSpeeds = new ChassisSpeeds();
+  private final ChassisSpeeds lastCommandedSpeeds = new ChassisSpeeds();
+  private final ChassisSpeeds calculatedSpeeds = new ChassisSpeeds();
+  private final ChassisSpeeds lastLimitedSpeeds = new ChassisSpeeds();
+  private final ChassisSpeeds velocityLimitedSpeeds = new ChassisSpeeds();
+  private final ChassisSpeeds accelerationLimitedSpeeds = new ChassisSpeeds();
+  private final SwerveModuleState[] desiredModuleStates;
+  private final Translation2d[] moduleLocations;
+  private final SwerveModulePosition[] positionsBuffer;
+  private final double maxDriveVelocityMetersPerSecond;
   private double lastMotionLimitTimestampSeconds = Double.NaN;
   private SimpleMotorFeedForwardsSendable driveFeedforward;
   private boolean driveFeedforwardEnabled = false;
@@ -95,6 +104,12 @@ public class SwerveDrivetrain extends SubsystemBase
   private double sysIdLastVoltage = 0.0;
   private boolean sysIdActive = false;
   private final Rotation2d sysIdSteerAngle = new Rotation2d();
+  private String ntRootPath;
+  private RobotNetworkTables.Node ntModulesNode;
+  private RobotNetworkTables.Node ntDriftNode;
+  private RobotNetworkTables.Node ntSysIdNode;
+  private RobotNetworkTables.Node ntSimNode;
+  private RobotNetworkTables.Node[] ntModuleNodes;
   
   public SwerveDrivetrain(Imu imu, SwerveModuleConfig... modules) {
 
@@ -105,12 +120,16 @@ public class SwerveDrivetrain extends SubsystemBase
     driftpid.enableContinuousInput(-Math.PI, Math.PI);
 
     swerveModules = new SwerveModule[modules.length];
-    Translation2d[] moduleLocations = new Translation2d[swerveModules.length];
+    desiredModuleStates = new SwerveModuleState[modules.length];
+    moduleLocations = new Translation2d[modules.length];
+    positionsBuffer = new SwerveModulePosition[modules.length];
     double maxVelocity = 0;
     double minVelocity = Double.POSITIVE_INFINITY;
     double maxModuleRadius = 0;
     for (int i = 0; i < modules.length; i++) {
       swerveModules[i] = new SwerveModule(modules[i]);
+      desiredModuleStates[i] = new SwerveModuleState(0.0, new Rotation2d());
+      positionsBuffer[i] = swerveModules[i].getPostion();
       double moduleMax = modules[i].maxSpeedMetersPerSecond();
       maxVelocity = Math.max(maxVelocity, moduleMax);
       minVelocity = Math.min(minVelocity, moduleMax);
@@ -126,9 +145,11 @@ public class SwerveDrivetrain extends SubsystemBase
       maxVelocity = minVelocity;
     }
 
+    maxDriveVelocityMetersPerSecond = maxVelocity;
     kinematics = new SwerveDriveKinematics(moduleLocations);
-    double maxAngularVelocity = maxModuleRadius > 1e-6 ? maxVelocity / maxModuleRadius : maxVelocity;
-    robotSpeeds = new RobotSpeeds(maxVelocity, maxAngularVelocity);
+    double maxAngularVelocity =
+        maxModuleRadius > 1e-6 ? maxDriveVelocityMetersPerSecond / maxModuleRadius : maxDriveVelocityMetersPerSecond;
+    robotSpeeds = new RobotSpeeds(maxDriveVelocityMetersPerSecond, maxAngularVelocity);
     motionLimits = new MotionLimits()
         .setBaseDriveLimits(MotionLimits.DriveLimits.fromRobotSpeeds(robotSpeeds));
     imu.addVirtualAxis("drift", imu::getYaw);
@@ -246,16 +267,43 @@ public class SwerveDrivetrain extends SubsystemBase
   } 
 
   private SwerveModulePosition[] positions(){
-    SwerveModulePosition[] positions = new SwerveModulePosition[swerveModules.length];
     for (int i = 0; i < swerveModules.length; i++) {
-      positions[i] = swerveModules[i].getPostion();
+      swerveModules[i].getPostion();
     }
-    return positions;
+    return positionsBuffer;
   }
 
   private void setModuleStates(SwerveModuleState[] states) {
     for (int i = 0; i < states.length; i++) {
       swerveModules[i].setDesiredState(states[i]);
+    }
+  }
+
+  private void calculateModuleStates(ChassisSpeeds speed, SwerveModuleState[] states) {
+    double vx = speed.vxMetersPerSecond;
+    double vy = speed.vyMetersPerSecond;
+    double omega = speed.omegaRadiansPerSecond;
+    boolean stationary = vx == 0.0 && vy == 0.0 && omega == 0.0;
+
+    for (int i = 0; i < states.length; i++) {
+      SwerveModuleState state = states[i];
+      if (stationary) {
+        state.speedMetersPerSecond = 0.0;
+        continue;
+      }
+
+      Translation2d module = moduleLocations[i];
+      double moduleVx = vx - omega * module.getY();
+      double moduleVy = vy + omega * module.getX();
+      double moduleSpeed = Math.hypot(moduleVx, moduleVy);
+
+      state.speedMetersPerSecond = moduleSpeed;
+      if (moduleSpeed > MODULE_HEADING_EPSILON) {
+        double desiredAngleRadians = Math.atan2(moduleVy, moduleVx);
+        if (angleNeedsUpdate(state.angle, desiredAngleRadians)) {
+          state.angle = Rotation2d.fromRadians(desiredAngleRadians);
+        }
+      }
     }
   }
 
@@ -266,13 +314,14 @@ public class SwerveDrivetrain extends SubsystemBase
     double measuredOmega = Math.abs(imu.getVelocityZ().getRadians());
 
     // Hold heading only while translating straight; never fight intentional turns.
+    double driftHeadingRadians = imu.getVirtualAxis("drift").getRadians();
     if (commandedOmega > DRIFT_TURN_DEADBAND_RAD_PER_SEC
         || measuredOmega > DRIFT_TURN_DEADBAND_RAD_PER_SEC
         || linearSpeed < Math.max(0.0, driftActivationSpeed)) {
-      desiredHeading = imu.getVirtualAxis("drift").getRadians();
+      desiredHeading = driftHeadingRadians;
       return 0;
     } else {
-      return driftpid.calculate(imu.getVirtualAxis("drift").getRadians(), desiredHeading);
+      return driftpid.calculate(driftHeadingRadians, desiredHeading);
     }
   }
 
@@ -297,21 +346,27 @@ public class SwerveDrivetrain extends SubsystemBase
     if (feedforward == null) {
       driveFeedforward = null;
       driveFeedforwardEnabled(false);
-      Arrays.stream(swerveModules).forEach(module -> module.setDriveFeedforward(null));
+      for (SwerveModule module : swerveModules) {
+        module.setDriveFeedforward(null);
+      }
       return this;
     }
     driveFeedforward = new SimpleMotorFeedForwardsSendable(
         feedforward.getKs(),
         feedforward.getKv(),
         feedforward.getKa());
-    Arrays.stream(swerveModules).forEach(module -> module.setDriveFeedforward(driveFeedforward));
+    for (SwerveModule module : swerveModules) {
+      module.setDriveFeedforward(driveFeedforward);
+    }
     driveFeedforwardEnabled(true);
     return this;
   }
 
   public void driveFeedforwardEnabled(boolean enabled) {
     driveFeedforwardEnabled = driveFeedforward != null && enabled;
-    Arrays.stream(swerveModules).forEach(module -> module.setDriveFeedforwardEnabled(driveFeedforwardEnabled));
+    for (SwerveModule module : swerveModules) {
+      module.setDriveFeedforwardEnabled(driveFeedforwardEnabled);
+    }
   }
 
   public boolean driveFeedforwardEnabled() {
@@ -367,7 +422,9 @@ public class SwerveDrivetrain extends SubsystemBase
   }
 
   private void applyNeutralMode(MotorNeutralMode mode) {
-    Arrays.stream(swerveModules).forEach(m -> m.setNeutralMode(mode));
+    for (SwerveModule module : swerveModules) {
+      module.setNeutralMode(mode);
+    }
   }
 
   private RobotSpeeds speedsModel() {
@@ -380,8 +437,8 @@ public class SwerveDrivetrain extends SubsystemBase
 
   private void resetControlState() {
     robotSpeeds.stop();
-    lastCommandedSpeeds = new ChassisSpeeds();
-    lastLimitedSpeeds = new ChassisSpeeds();
+    setChassisSpeeds(lastCommandedSpeeds, 0.0, 0.0, 0.0);
+    setChassisSpeeds(lastLimitedSpeeds, 0.0, 0.0, 0.0);
     lastMotionLimitTimestampSeconds = Double.NaN;
     desiredHeading = imu.getVirtualAxis("drift").getRadians();
     for (SwerveModule module : swerveModules) {
@@ -400,26 +457,28 @@ public class SwerveDrivetrain extends SubsystemBase
       return;
     }
 
-    ChassisSpeeds speed = robotSpeeds.calculate();
+    robotSpeeds.calculate(calculatedSpeeds);
+    ChassisSpeeds speed = calculatedSpeeds;
+    double nowSeconds = nowSeconds();
 
     if (enableDriftCorrection) {
       speed.omegaRadiansPerSecond += driftCorrection(speed);
     }
-    speed = applyMotionLimits(speed);
+    speed = applyMotionLimits(speed, nowSeconds);
 
-    SwerveModuleState[] states = kinematics.toSwerveModuleStates(speed);
+    calculateModuleStates(speed, desiredModuleStates);
 
-    publishSwerveStatesIfDue(states);
+    publishSwerveStatesIfDue(desiredModuleStates, nowSeconds);
 
-    SwerveDriveKinematics.desaturateWheelSpeeds(states, robotSpeeds.getMaxVelocity());
+    SwerveDriveKinematics.desaturateWheelSpeeds(desiredModuleStates, maxDriveVelocityMetersPerSecond);
 
-    setModuleStates(states);   
+    setModuleStates(desiredModuleStates);   
 
-    lastCommandedSpeeds = new ChassisSpeeds(
+    setChassisSpeeds(
+        lastCommandedSpeeds,
         speed.vxMetersPerSecond,
         speed.vyMetersPerSecond,
-        speed.omegaRadiansPerSecond
-    );
+        speed.omegaRadiansPerSecond);
   }
 
   public SwerveDrivetrain configureSimulation(SwerveSimulationConfig config) {
@@ -433,7 +492,7 @@ public class SwerveDrivetrain extends SubsystemBase
     if (simulationField == null) {
       simulationField = new Field2d();
     }
-    simulationField.setRobotPose(new Pose2d());
+    simulationField.setRobotPose(ZERO_POSE);
     lastSimulationTimestamp = -1;
     return this;
   }
@@ -443,7 +502,7 @@ public class SwerveDrivetrain extends SubsystemBase
   }
 
   private Pose2d simulationPose() {
-    return simulation != null ? simulation.getPose() : new Pose2d();
+    return simulation != null ? simulation.getPose() : ZERO_POSE;
   }
 
   private void simulationPose(Pose2d pose) {
@@ -454,6 +513,22 @@ public class SwerveDrivetrain extends SubsystemBase
 
   private Command driveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
     return new SwerveDriveCommand(this, xInput, yInput, thetaInput, fieldRelative);
+  }
+
+  private void ensureNetworkTableNodes(RobotNetworkTables.Node node) {
+    String path = node.path();
+    if (path != null && path.equals(ntRootPath) && ntModulesNode != null && ntModuleNodes != null) {
+      return;
+    }
+    ntRootPath = path;
+    ntModulesNode = node.child("SwerveModules");
+    ntDriftNode = node.child("DriftCorrection");
+    ntSysIdNode = node.child("SysId");
+    ntSimNode = node.child("Sim");
+    ntModuleNodes = new RobotNetworkTables.Node[swerveModules.length];
+    for (int i = 0; i < swerveModules.length; i++) {
+      ntModuleNodes[i] = ntModulesNode.child("Module" + i);
+    }
   }
 
   @Override
@@ -467,29 +542,28 @@ public class SwerveDrivetrain extends SubsystemBase
 
     RobotDrivetrain.super.networkTables(node);
 
-    RobotNetworkTables.Node modules = node.child("SwerveModules");
+    ensureNetworkTableNodes(node);
+
     for (int i = 0; i < swerveModules.length; i++) {
-      if (swerveModules[i] != null) {
-        swerveModules[i].networkTables(modules.child("Module" + i));
+      SwerveModule module = swerveModules[i];
+      if (module != null && ntModuleNodes != null && i < ntModuleNodes.length) {
+        module.networkTables(ntModuleNodes[i]);
       }
     }
 
-    RobotNetworkTables.Node drift = node.child("DriftCorrection");
-    drift.putBoolean("enabled", driftCorrectionEnabled());
-    drift.putDouble("desiredHeadingDeg", desiredHeading);
+    ntDriftNode.putBoolean("enabled", driftCorrectionEnabled());
+    ntDriftNode.putDouble("desiredHeadingDeg", desiredHeading);
 
-    RobotNetworkTables.Node sysid = node.child("SysId");
-    sysid.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
-    sysid.putDouble("stepVoltageV", sysIdStepVoltage());
-    sysid.putDouble("timeoutSec", sysIdTimeoutSeconds());
-    sysid.putBoolean("active", sysIdActive());
+    ntSysIdNode.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
+    ntSysIdNode.putDouble("stepVoltageV", sysIdStepVoltage());
+    ntSysIdNode.putDouble("timeoutSec", sysIdTimeoutSeconds());
+    ntSysIdNode.putBoolean("active", sysIdActive());
 
     if (simulation != null) {
       Pose2d pose = simulationPose();
-      RobotNetworkTables.Node simNode = node.child("Sim");
-      simNode.putDouble("xM", pose.getX());
-      simNode.putDouble("yM", pose.getY());
-      simNode.putDouble("rotDeg", pose.getRotation().getDegrees());
+      ntSimNode.putDouble("xM", pose.getX());
+      ntSimNode.putDouble("yM", pose.getY());
+      ntSimNode.putDouble("rotDeg", pose.getRotation().getDegrees());
     }
 
     return node;
@@ -503,7 +577,7 @@ public class SwerveDrivetrain extends SubsystemBase
   @Override
   public void simulationPeriodic() {
       if (simulation != null) {
-        double now = Timer.getFPGATimestamp();
+        double now = nowSeconds();
         if (lastSimulationTimestamp < 0) {
           lastSimulationTimestamp = now;
         }
@@ -620,7 +694,7 @@ public class SwerveDrivetrain extends SubsystemBase
 
   private void stopSysId() {
     sysIdActive = false;
-    lastCommandedSpeeds = new ChassisSpeeds();
+    setChassisSpeeds(lastCommandedSpeeds, 0.0, 0.0, 0.0);
     for (SwerveModule module : swerveModules) {
       module.stop();
     }
@@ -655,8 +729,21 @@ public class SwerveDrivetrain extends SubsystemBase
   private void setNominalVoltage(double nominalVoltage) {
     if (Double.isFinite(nominalVoltage) && nominalVoltage > 1e-3) {
       this.nominalVoltage = nominalVoltage;
-      Arrays.stream(swerveModules).forEach(module -> module.setNominalVoltage(nominalVoltage));
+      for (SwerveModule module : swerveModules) {
+        module.setNominalVoltage(nominalVoltage);
+      }
     }
+  }
+
+  private static boolean angleNeedsUpdate(Rotation2d current, double desiredRadians) {
+    if (current == null) {
+      return true;
+    }
+    return absoluteAngularDifference(current.getRadians(), desiredRadians) > MODULE_ANGLE_UPDATE_EPSILON_RAD;
+  }
+
+  private static double absoluteAngularDifference(double aRadians, double bRadians) {
+    return Math.abs(Math.IEEEremainder(aRadians - bRadians, 2.0 * Math.PI));
   }
 
   private MotionLimits.DriveLimits resolveDriveLimits() {
@@ -664,23 +751,19 @@ public class SwerveDrivetrain extends SubsystemBase
     return limits != null ? limits : MotionLimits.DriveLimits.none();
   }
 
-  private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds) {
+  private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds, double nowSeconds) {
     MotionLimits.DriveLimits limits = resolveDriveLimits();
     ChassisSpeeds limited = limitVelocity(speeds, limits);
-    double nowSeconds = RobotTime.nowSeconds();
-    if (!Double.isFinite(nowSeconds)) {
-      nowSeconds = Timer.getFPGATimestamp();
-    }
     limited = limitAcceleration(limited, limits, nowSeconds);
-    lastLimitedSpeeds = limited;
+    setChassisSpeeds(
+        lastLimitedSpeeds,
+        limited.vxMetersPerSecond,
+        limited.vyMetersPerSecond,
+        limited.omegaRadiansPerSecond);
     return limited;
   }
 
-  private void publishSwerveStatesIfDue(SwerveModuleState[] states) {
-    double nowSeconds = RobotTime.nowSeconds();
-    if (!Double.isFinite(nowSeconds)) {
-      nowSeconds = Timer.getFPGATimestamp();
-    }
+  private void publishSwerveStatesIfDue(SwerveModuleState[] states, double nowSeconds) {
     if (Double.isFinite(lastSwerveStatePublishSeconds)
             && (nowSeconds - lastSwerveStatePublishSeconds) < SWERVE_STATE_PUBLISH_PERIOD_SECONDS) {
       return;
@@ -704,7 +787,8 @@ public class SwerveDrivetrain extends SubsystemBase
     if (limits.maxAngularVelocity() > 0.0) {
       omega = MathUtil.clamp(omega, -limits.maxAngularVelocity(), limits.maxAngularVelocity());
     }
-    return new ChassisSpeeds(vx, vy, omega);
+    setChassisSpeeds(velocityLimitedSpeeds, vx, vy, omega);
+    return velocityLimitedSpeeds;
   }
 
   private ChassisSpeeds limitAcceleration(ChassisSpeeds speeds, MotionLimits.DriveLimits limits, double nowSeconds) {
@@ -726,7 +810,22 @@ public class SwerveDrivetrain extends SubsystemBase
     double vx = limitDelta(speeds.vxMetersPerSecond, lastLimitedSpeeds.vxMetersPerSecond, maxLinearDelta);
     double vy = limitDelta(speeds.vyMetersPerSecond, lastLimitedSpeeds.vyMetersPerSecond, maxLinearDelta);
     double omega = limitDelta(speeds.omegaRadiansPerSecond, lastLimitedSpeeds.omegaRadiansPerSecond, maxAngularDelta);
-    return new ChassisSpeeds(vx, vy, omega);
+    setChassisSpeeds(accelerationLimitedSpeeds, vx, vy, omega);
+    return accelerationLimitedSpeeds;
+  }
+
+  private static void setChassisSpeeds(ChassisSpeeds target, double vx, double vy, double omega) {
+    target.vxMetersPerSecond = vx;
+    target.vyMetersPerSecond = vy;
+    target.omegaRadiansPerSecond = omega;
+  }
+
+  private static double nowSeconds() {
+    double now = RobotTime.nowSeconds();
+    if (!Double.isFinite(now)) {
+      now = Timer.getFPGATimestamp();
+    }
+    return now;
   }
 
   private double limitDelta(double value, double lastValue, double maxDelta) {

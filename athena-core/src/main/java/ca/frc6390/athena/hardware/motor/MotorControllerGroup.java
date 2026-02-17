@@ -1,10 +1,8 @@
 package ca.frc6390.athena.hardware.motor;
 
-import java.util.Arrays;
 import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
-import ca.frc6390.athena.core.sections.SectionedAccess;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.core.RobotNetworkTables;
@@ -16,10 +14,20 @@ import edu.wpi.first.math.controller.PIDController;
  */
 public class MotorControllerGroup implements RobotSendableDevice {
     private final MotorController[] controllers;
+    private final String[] controllerTopicKeys;
+    private final OutputSection outputSection;
+    private final ConfigSection configSection;
     private EncoderGroup encoders;
+    private String publishNodePath;
+    private RobotNetworkTables.Node summaryNode;
+    private RobotNetworkTables.Node encodersNode;
+    private RobotNetworkTables.Node[] motorNodes;
 
     public MotorControllerGroup(MotorController... controllers) {
         this.controllers = controllers;
+        this.controllerTopicKeys = buildTopicKeys(controllers);
+        this.outputSection = new OutputSection(this);
+        this.configSection = new ConfigSection(this);
         this.encoders = EncoderGroup.fromMotorGroup(this);
     }
 
@@ -28,36 +36,48 @@ public class MotorControllerGroup implements RobotSendableDevice {
     }
 
     public static MotorControllerGroup fromConfigs(MotorControllerConfig... configs) {
-        return new MotorControllerGroup(
-                Arrays.stream(configs).map(HardwareFactories::motor).toArray(MotorController[]::new));
+        if (configs == null || configs.length == 0) {
+            return new MotorControllerGroup();
+        }
+        MotorController[] motors = new MotorController[configs.length];
+        for (int i = 0; i < configs.length; i++) {
+            motors[i] = HardwareFactories.motor(configs[i]);
+        }
+        return new MotorControllerGroup(motors);
     }
 
     /**
      * Sectioned output API for already-built motor groups.
      */
     public MotorControllerGroup output(Consumer<OutputSection> section) {
-        return SectionedAccess.apply(this, section, () -> new OutputSection(this));
+        if (section != null) {
+            section.accept(outputSection);
+        }
+        return this;
     }
 
     /**
      * Non-lambda section accessor for output interactions.
      */
     public OutputSection output() {
-        return new OutputSection(this);
+        return outputSection;
     }
 
     /**
      * Sectioned config API for already-built motor groups.
      */
     public MotorControllerGroup config(Consumer<ConfigSection> section) {
-        return SectionedAccess.apply(this, section, () -> new ConfigSection(this));
+        if (section != null) {
+            section.accept(configSection);
+        }
+        return this;
     }
 
     /**
      * Non-lambda section accessor for hardware config interactions.
      */
     public ConfigSection config() {
-        return new ConfigSection(this);
+        return configSection;
     }
 
     public MotorController[] getControllers() {
@@ -171,25 +191,63 @@ public class MotorControllerGroup implements RobotSendableDevice {
     }
 
     private void publish(RobotNetworkTables.Node node) {
-        RobotNetworkTables.Node summary = node.child("Summary");
-        summary.putBoolean("allConnected", allMotorsConnected());
-        summary.putDouble("avgTempC", calculateAverageTemperatureCelsius());
+        RobotNetworkTables nt = node.robot();
+        ensurePublishNodes(node);
+        summaryNode.putBoolean("allConnected", allMotorsConnected());
+        summaryNode.putDouble("avgTempC", calculateAverageTemperatureCelsius());
 
-        if (encoders != null && node.robot().enabled(RobotNetworkTables.Flag.HW_ENCODER_TUNING_WIDGETS)) {
-            encoders.networkTables(node.child("Encoders"));
+        if (encoders != null && nt.enabled(RobotNetworkTables.Flag.HW_ENCODER_TUNING_WIDGETS)) {
+            encoders.networkTables(encodersNode);
         }
 
-        if (node.robot().enabled(RobotNetworkTables.Flag.MOTOR_GROUP_PER_MOTOR)) {
-            RobotNetworkTables.Node motorsNode = node.child("Motors");
-            for (MotorController motor : controllers) {
+        if (nt.enabled(RobotNetworkTables.Flag.MOTOR_GROUP_PER_MOTOR)) {
+            for (int i = 0; i < controllers.length; i++) {
+                MotorController motor = controllers[i];
                 if (motor == null) {
                     continue;
                 }
-                String key = motor.getName();
-                key = key != null ? key.replace('\\', '_').replace('/', '_') : "motor";
-                motor.networkTables(motorsNode.child(key));
+                if (motorNodes != null && i < motorNodes.length && motorNodes[i] != null) {
+                    motor.networkTables(motorNodes[i]);
+                }
             }
         }
+    }
+
+    private void ensurePublishNodes(RobotNetworkTables.Node node) {
+        String path = node.path();
+        if (path != null && path.equals(publishNodePath) && summaryNode != null) {
+            return;
+        }
+        publishNodePath = path;
+        summaryNode = node.child("Summary");
+        encodersNode = node.child("Encoders");
+        RobotNetworkTables.Node motorsRoot = node.child("Motors");
+        motorNodes = new RobotNetworkTables.Node[controllers.length];
+        for (int i = 0; i < controllers.length; i++) {
+            String key = controllerTopicKeys != null && i < controllerTopicKeys.length
+                    ? controllerTopicKeys[i]
+                    : "motor";
+            motorNodes[i] = motorsRoot.child(key);
+        }
+    }
+
+    private static String[] buildTopicKeys(MotorController[] controllers) {
+        if (controllers == null || controllers.length == 0) {
+            return new String[0];
+        }
+        String[] keys = new String[controllers.length];
+        for (int i = 0; i < controllers.length; i++) {
+            MotorController controller = controllers[i];
+            keys[i] = sanitizeTopicKey(controller != null ? controller.getName() : null, "motor");
+        }
+        return keys;
+    }
+
+    private static String sanitizeTopicKey(String raw, String fallback) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        return raw.replace('\\', '_').replace('/', '_');
     }
 
     private double calculateAverageTemperatureCelsius() {

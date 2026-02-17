@@ -284,7 +284,7 @@ public class EncoderAdapter implements Encoder {
         cachedAbsoluteRotations = applyDiscontinuity((rawAbsolutePosition - offset) * gearRatio);
         cachedAbsolutePosition = cachedAbsoluteRotations * conversion + conversionOffset;
         cachedRawAbsoluteValue = rawAbsolutePosition;
-        cachedRotationDegrees = Rotation2d.fromRotations(cachedRotations).getDegrees();
-        cachedAbsoluteRotationDegrees = Rotation2d.fromRotations(cachedAbsoluteRotations).getDegrees();
+        cachedRotationDegrees = cachedRotations * 360.0;
+        cachedAbsoluteRotationDegrees = cachedAbsoluteRotations * 360.0;
     }
 }

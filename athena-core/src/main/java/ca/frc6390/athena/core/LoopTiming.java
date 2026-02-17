@@ -38,12 +38,17 @@ public final class LoopTiming {
         if (!samplingMechanisms || name == null) {
             return;
         }
-        mechanismDurationsMs.merge(name, durationMs, Double::sum);
+        Double previous = mechanismDurationsMs.get(name);
+        mechanismDurationsMs.put(name, previous != null ? previous + durationMs : durationMs);
     }
 
     static void endCycle(double t0, double t1, double t2, double t3, double t4) {
         double total = t4 - t0;
-        long nowMs = (long) (Timer.getFPGATimestamp() * 1000.0);
+        boolean overBudget = total > LOOP_BUDGET_SECONDS;
+        if (!debugAlways && !overBudget) {
+            return;
+        }
+        long nowMs = (long) (t4 * 1000.0);
         if (nowMs - lastReportMs < REPORT_PERIOD_MS) {
             return;
         }
@@ -56,13 +61,17 @@ public final class LoopTiming {
         double totalMs = total * 1000.0;
 
         StringBuilder message = new StringBuilder(128);
-        message.append("Loop overrun: total=")
-                .append(formatMs(totalMs))
-                .append(" (scheduler=").append(formatMs(schedMs))
-                .append(", telemetry=").append(formatMs(telemetryMs))
-                .append(", localization=").append(formatMs(localMs))
-                .append(", user=").append(formatMs(userMs))
-                .append(")");
+        message.append("Loop overrun: total=");
+        appendMs(message, totalMs);
+        message.append(" (scheduler=");
+        appendMs(message, schedMs);
+        message.append(", telemetry=");
+        appendMs(message, telemetryMs);
+        message.append(", localization=");
+        appendMs(message, localMs);
+        message.append(", user=");
+        appendMs(message, userMs);
+        message.append(')');
 
         if (samplingMechanisms && !mechanismDurationsMs.isEmpty()) {
             message.append(" | Top mechanisms: ");
@@ -73,14 +82,23 @@ public final class LoopTiming {
         }
 
         String text = message.toString();
-        if (total > LOOP_BUDGET_SECONDS) {
+        if (overBudget) {
             DriverStation.reportWarning(text, false);
         }
-        System.out.println("[Athena][LoopTiming] " + text);
+        if (debugAlways || overBudget) {
+            System.out.println("[Athena][LoopTiming] " + text);
+        }
     }
 
-    private static String formatMs(double ms) {
-        return String.format(java.util.Locale.ROOT, "%.1fms", ms);
+    private static void appendMs(StringBuilder message, double ms) {
+        if (!Double.isFinite(ms)) {
+            message.append("NaNms");
+            return;
+        }
+        long tenths = Math.round(ms * 10.0);
+        long whole = tenths / 10;
+        long fractional = Math.abs(tenths % 10);
+        message.append(whole).append('.').append(fractional).append("ms");
     }
 
     private static void appendTopMechanisms(StringBuilder message) {
@@ -111,15 +129,18 @@ public final class LoopTiming {
         }
         boolean wrote = false;
         if (top1 != null) {
-            message.append(top1).append('=').append(formatMs(top1Ms));
+            message.append(top1).append('=');
+            appendMs(message, top1Ms);
             wrote = true;
         }
         if (top2 != null) {
-            message.append(wrote ? ", " : "").append(top2).append('=').append(formatMs(top2Ms));
+            message.append(wrote ? ", " : "").append(top2).append('=');
+            appendMs(message, top2Ms);
             wrote = true;
         }
         if (top3 != null) {
-            message.append(wrote ? ", " : "").append(top3).append('=').append(formatMs(top3Ms));
+            message.append(wrote ? ", " : "").append(top3).append('=');
+            appendMs(message, top3Ms);
         }
     }
 }

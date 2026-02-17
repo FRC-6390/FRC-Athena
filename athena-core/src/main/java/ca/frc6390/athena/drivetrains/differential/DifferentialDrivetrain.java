@@ -14,6 +14,7 @@ import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.localization.RobotDrivetrainLocalizationFactory;
 import ca.frc6390.athena.core.RobotSpeeds;
+import ca.frc6390.athena.core.RobotTime;
 import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
@@ -33,7 +34,6 @@ import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.DifferentialDriveKinematics;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelPositions;
-import edu.wpi.first.math.kinematics.DifferentialDriveWheelSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.math.numbers.N4;
@@ -51,6 +51,8 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class DifferentialDrivetrain extends SubsystemBase
         implements RobotDrivetrain<DifferentialDrivetrain>, RobotDrivetrainLocalizationFactory {
+
+    private static final Pose2d ZERO_POSE = new Pose2d();
 
     private final RobotSpeeds robotSpeeds;
     private final MotionLimits motionLimits;
@@ -71,12 +73,16 @@ public class DifferentialDrivetrain extends SubsystemBase
     private double lastSimulationTimestamp = -1;
     private double lastLeftCommand = 0;
     private double lastRightCommand = 0;
-    private ChassisSpeeds lastLimitedSpeeds = new ChassisSpeeds();
+    private final ChassisSpeeds lastLimitedSpeeds = new ChassisSpeeds();
+    private final ChassisSpeeds calculatedSpeeds = new ChassisSpeeds();
+    private final ChassisSpeeds velocityLimitedSpeeds = new ChassisSpeeds();
+    private final ChassisSpeeds accelerationLimitedSpeeds = new ChassisSpeeds();
+    private final DifferentialDriveWheelPositions wheelPositions = new DifferentialDriveWheelPositions(0.0, 0.0);
     private double lastMotionLimitTimestampSeconds = Double.NaN;
     private SimpleMotorFeedForwardsSendable driveFeedforward;
     private boolean driveFeedforwardEnabled = false;
     private double nominalVoltage = 12.0;
-    private double lastFeedforwardTimestampSeconds = Double.NaN;
+    private boolean hasFeedforwardSetpoint = false;
     private double lastLeftSetpointMetersPerSecond = 0.0;
     private double lastRightSetpointMetersPerSecond = 0.0;
     private SysIdRoutine sysIdRoutine;
@@ -85,6 +91,10 @@ public class DifferentialDrivetrain extends SubsystemBase
     private double sysIdTimeoutSeconds = 10.0;
     private double sysIdLastVoltage = 0.0;
     private boolean sysIdActive = false;
+    private String ntRootPath;
+    private RobotNetworkTables.Node ntDriveFeedforwardNode;
+    private RobotNetworkTables.Node ntSysIdNode;
+    private RobotNetworkTables.Node ntSimNode;
 
     public DifferentialDrivetrain(Imu imu, double maxVelocity, double trackwidth, MotorControllerGroup leftMotors, MotorControllerGroup rightMotors){
        this(imu, maxVelocity, trackwidth, leftMotors, rightMotors, leftMotors.getEncoderGroup(), rightMotors.getEncoderGroup());
@@ -221,7 +231,7 @@ public class DifferentialDrivetrain extends SubsystemBase
 
     private void resetControlState() {
         robotSpeeds.stop();
-        lastLimitedSpeeds = new ChassisSpeeds();
+        setChassisSpeeds(lastLimitedSpeeds, 0.0, 0.0, 0.0);
         lastMotionLimitTimestampSeconds = Double.NaN;
         lastLeftCommand = 0.0;
         lastRightCommand = 0.0;
@@ -319,25 +329,27 @@ public class DifferentialDrivetrain extends SubsystemBase
             return;
         }
 
-        ChassisSpeeds speeds = robotSpeeds.calculate();
-        speeds = applyMotionLimits(speeds);
+        robotSpeeds.calculate(calculatedSpeeds);
+        ChassisSpeeds speeds = applyMotionLimits(calculatedSpeeds, nowSeconds());
         if (driveFeedforwardEnabled && driveFeedforward != null) {
-            DifferentialDriveWheelSpeeds wheelSpeeds = kinematics.toWheelSpeeds(speeds);
-            double now = Timer.getFPGATimestamp();
-            double leftCurrent = Double.isFinite(lastFeedforwardTimestampSeconds)
+            double halfTrackWidth = 0.5 * kinematics.trackWidthMeters;
+            double leftTarget = speeds.vxMetersPerSecond - (halfTrackWidth * speeds.omegaRadiansPerSecond);
+            double rightTarget = speeds.vxMetersPerSecond + (halfTrackWidth * speeds.omegaRadiansPerSecond);
+            double leftCurrent = hasFeedforwardSetpoint
                     ? lastLeftSetpointMetersPerSecond
-                    : wheelSpeeds.leftMetersPerSecond;
-            double rightCurrent = Double.isFinite(lastFeedforwardTimestampSeconds)
+                    : leftTarget;
+            double rightCurrent = hasFeedforwardSetpoint
                     ? lastRightSetpointMetersPerSecond
-                    : wheelSpeeds.rightMetersPerSecond;
-            lastFeedforwardTimestampSeconds = now;
-            lastLeftSetpointMetersPerSecond = wheelSpeeds.leftMetersPerSecond;
-            lastRightSetpointMetersPerSecond = wheelSpeeds.rightMetersPerSecond;
+                    : rightTarget;
+            hasFeedforwardSetpoint = true;
+            lastLeftSetpointMetersPerSecond = leftTarget;
+            lastRightSetpointMetersPerSecond = rightTarget;
 
-            double leftVolts = driveFeedforward.calculateWithVelocities(leftCurrent, wheelSpeeds.leftMetersPerSecond);
-            double rightVolts = driveFeedforward.calculateWithVelocities(rightCurrent, wheelSpeeds.rightMetersPerSecond);
-            setLeftVoltage(leftVolts);
-            setRightVoltage(rightVolts);
+            double leftVolts = driveFeedforward.calculateWithVelocities(leftCurrent, leftTarget);
+            double rightVolts = driveFeedforward.calculateWithVelocities(rightCurrent, rightTarget);
+            double voltageLimit = getVoltageLimit();
+            setLeftVoltage(leftVolts, voltageLimit);
+            setRightVoltage(rightVolts, voltageLimit);
             drive.feed();
         } else {
             drive.arcadeDrive(speeds.vxMetersPerSecond, speeds.omegaRadiansPerSecond);
@@ -360,7 +372,7 @@ public class DifferentialDrivetrain extends SubsystemBase
     @Override
     public void simulationPeriodic() {
         if (simulation != null) {
-            double now = Timer.getFPGATimestamp();
+            double now = nowSeconds();
             if (lastSimulationTimestamp < 0) {
                 lastSimulationTimestamp = now;
             }
@@ -374,9 +386,9 @@ public class DifferentialDrivetrain extends SubsystemBase
     }
 
     private DifferentialDriveWheelPositions positions(){
-     double leftPosition = leftEncoders != null ? leftEncoders.getPosition() : 0;
-     double rightPosition = rightEncoders != null ? rightEncoders.getPosition() : 0;
-     return new DifferentialDriveWheelPositions(leftPosition, rightPosition);
+     wheelPositions.leftMeters = leftEncoders != null ? leftEncoders.getPosition() : 0.0;
+     wheelPositions.rightMeters = rightEncoders != null ? rightEncoders.getPosition() : 0.0;
+     return wheelPositions;
     }
 
      @Override
@@ -420,6 +432,17 @@ public class DifferentialDrivetrain extends SubsystemBase
         return new RobotLocalization<>(factory, effectiveConfig, robotSpeeds, imu, this::positions);
     }
 
+    private void ensureNetworkTableNodes(RobotNetworkTables.Node node) {
+        String path = node.path();
+        if (path != null && path.equals(ntRootPath) && ntSysIdNode != null) {
+            return;
+        }
+        ntRootPath = path;
+        ntDriveFeedforwardNode = node.child("DriveFeedforward");
+        ntSysIdNode = node.child("SysId");
+        ntSimNode = node.child("Sim");
+    }
+
     @Override
     public RobotNetworkTables.Node networkTables(RobotNetworkTables.Node node) {
         if (node == null) {
@@ -431,24 +454,22 @@ public class DifferentialDrivetrain extends SubsystemBase
         }
 
         RobotDrivetrain.super.networkTables(node);
+        ensureNetworkTableNodes(node);
 
         if (driveFeedforward != null && nt.enabled(RobotNetworkTables.Flag.DRIVETRAIN_SPEED_WIDGETS)) {
-            RobotNetworkTables.Node ff = node.child("DriveFeedforward");
-            ff.putBoolean("enabled", driveFeedforwardEnabled());
+            ntDriveFeedforwardNode.putBoolean("enabled", driveFeedforwardEnabled());
         }
 
-        RobotNetworkTables.Node sysid = node.child("SysId");
-        sysid.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
-        sysid.putDouble("stepVoltageV", sysIdStepVoltage());
-        sysid.putDouble("timeoutSec", sysIdTimeoutSeconds());
-        sysid.putBoolean("active", sysIdActive());
+        ntSysIdNode.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
+        ntSysIdNode.putDouble("stepVoltageV", sysIdStepVoltage());
+        ntSysIdNode.putDouble("timeoutSec", sysIdTimeoutSeconds());
+        ntSysIdNode.putBoolean("active", sysIdActive());
 
         if (simulation != null) {
             Pose2d pose = simulationPose();
-            RobotNetworkTables.Node simNode = node.child("Sim");
-            simNode.putDouble("xM", pose.getX());
-            simNode.putDouble("yM", pose.getY());
-            simNode.putDouble("rotDeg", pose.getRotation().getDegrees());
+            ntSimNode.putDouble("xM", pose.getX());
+            ntSimNode.putDouble("yM", pose.getY());
+            ntSimNode.putDouble("rotDeg", pose.getRotation().getDegrees());
         }
 
         return node;
@@ -475,7 +496,7 @@ public class DifferentialDrivetrain extends SubsystemBase
     }
 
     private Pose2d simulationPose() {
-        return simulation != null ? simulation.getPose() : new Pose2d();
+        return simulation != null ? simulation.getPose() : ZERO_POSE;
     }
 
     private void simulationPose(Pose2d pose) {
@@ -502,16 +523,24 @@ public class DifferentialDrivetrain extends SubsystemBase
     }
 
     private void setLeftVoltage(double volts) {
-        double voltageLimit = getVoltageLimit();
-        double clamped = MathUtil.clamp(volts, -voltageLimit, voltageLimit);
-        lastLeftCommand = MathUtil.clamp(clamped / voltageLimit, -1.0, 1.0);
+        setLeftVoltage(volts, getVoltageLimit());
+    }
+
+    private void setLeftVoltage(double volts, double voltageLimit) {
+        double safeVoltageLimit = Math.max(1e-3, voltageLimit);
+        double clamped = MathUtil.clamp(volts, -safeVoltageLimit, safeVoltageLimit);
+        lastLeftCommand = MathUtil.clamp(clamped / safeVoltageLimit, -1.0, 1.0);
         leftMotors.setVoltage(clamped);
     }
 
     private void setRightVoltage(double volts) {
-        double voltageLimit = getVoltageLimit();
-        double clamped = MathUtil.clamp(volts, -voltageLimit, voltageLimit);
-        lastRightCommand = MathUtil.clamp(clamped / voltageLimit, -1.0, 1.0);
+        setRightVoltage(volts, getVoltageLimit());
+    }
+
+    private void setRightVoltage(double volts, double voltageLimit) {
+        double safeVoltageLimit = Math.max(1e-3, voltageLimit);
+        double clamped = MathUtil.clamp(volts, -safeVoltageLimit, safeVoltageLimit);
+        lastRightCommand = MathUtil.clamp(clamped / safeVoltageLimit, -1.0, 1.0);
         rightMotors.setVoltage(clamped);
     }
 
@@ -527,7 +556,7 @@ public class DifferentialDrivetrain extends SubsystemBase
     }
 
     private void resetFeedforwardState() {
-        lastFeedforwardTimestampSeconds = Double.NaN;
+        hasFeedforwardSetpoint = false;
         lastLeftSetpointMetersPerSecond = 0.0;
         lastRightSetpointMetersPerSecond = 0.0;
     }
@@ -553,8 +582,8 @@ public class DifferentialDrivetrain extends SubsystemBase
         double voltageLimit = getVoltageLimit();
         double applied = MathUtil.clamp(requested, -voltageLimit, voltageLimit);
         sysIdLastVoltage = applied;
-        setLeftVoltage(applied);
-        setRightVoltage(applied);
+        setLeftVoltage(applied, voltageLimit);
+        setRightVoltage(applied, voltageLimit);
         drive.feed();
     }
 
@@ -608,11 +637,15 @@ public class DifferentialDrivetrain extends SubsystemBase
         return limits != null ? limits : MotionLimits.DriveLimits.none();
     }
 
-    private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds) {
+    private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds, double nowSeconds) {
         MotionLimits.DriveLimits limits = resolveDriveLimits();
         ChassisSpeeds limited = limitVelocity(speeds, limits);
-        limited = limitAcceleration(limited, limits, Timer.getFPGATimestamp());
-        lastLimitedSpeeds = limited;
+        limited = limitAcceleration(limited, limits, nowSeconds);
+        setChassisSpeeds(
+                lastLimitedSpeeds,
+                limited.vxMetersPerSecond,
+                limited.vyMetersPerSecond,
+                limited.omegaRadiansPerSecond);
         return limited;
     }
 
@@ -631,7 +664,8 @@ public class DifferentialDrivetrain extends SubsystemBase
         if (limits.maxAngularVelocity() > 0.0) {
             omega = MathUtil.clamp(omega, -limits.maxAngularVelocity(), limits.maxAngularVelocity());
         }
-        return new ChassisSpeeds(vx, vy, omega);
+        setChassisSpeeds(velocityLimitedSpeeds, vx, vy, omega);
+        return velocityLimitedSpeeds;
     }
 
     private ChassisSpeeds limitAcceleration(ChassisSpeeds speeds, MotionLimits.DriveLimits limits, double nowSeconds) {
@@ -653,7 +687,22 @@ public class DifferentialDrivetrain extends SubsystemBase
         double vx = limitDelta(speeds.vxMetersPerSecond, lastLimitedSpeeds.vxMetersPerSecond, maxLinearDelta);
         double vy = limitDelta(speeds.vyMetersPerSecond, lastLimitedSpeeds.vyMetersPerSecond, maxLinearDelta);
         double omega = limitDelta(speeds.omegaRadiansPerSecond, lastLimitedSpeeds.omegaRadiansPerSecond, maxAngularDelta);
-        return new ChassisSpeeds(vx, vy, omega);
+        setChassisSpeeds(accelerationLimitedSpeeds, vx, vy, omega);
+        return accelerationLimitedSpeeds;
+    }
+
+    private static void setChassisSpeeds(ChassisSpeeds target, double vx, double vy, double omega) {
+        target.vxMetersPerSecond = vx;
+        target.vyMetersPerSecond = vy;
+        target.omegaRadiansPerSecond = omega;
+    }
+
+    private static double nowSeconds() {
+        double now = RobotTime.nowSeconds();
+        if (!Double.isFinite(now)) {
+            now = Timer.getFPGATimestamp();
+        }
+        return now;
     }
 
     private double limitDelta(double value, double lastValue, double maxDelta) {

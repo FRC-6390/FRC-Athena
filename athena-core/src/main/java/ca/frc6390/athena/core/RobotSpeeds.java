@@ -43,13 +43,42 @@ public class RobotSpeeds {
         private final String right;
         private final BlendMode mode;
         private final EnumSet<SpeedAxis> axes;
+        private final SpeedSource targetSource;
+        private final SpeedSource leftSource;
+        private final SpeedSource rightSource;
+        private final double[] targetValues;
+        private final double[] leftValues;
+        private final double[] rightValues;
+        private final boolean appliesToX;
+        private final boolean appliesToY;
+        private final boolean appliesToTheta;
 
-        private SourceBlendRule(String target, String left, String right, BlendMode mode, EnumSet<SpeedAxis> axes) {
+        private SourceBlendRule(
+                String target,
+                String left,
+                String right,
+                BlendMode mode,
+                EnumSet<SpeedAxis> axes,
+                SpeedSource targetSource,
+                SpeedSource leftSource,
+                SpeedSource rightSource,
+                double[] targetValues,
+                double[] leftValues,
+                double[] rightValues) {
             this.target = target;
             this.left = left;
             this.right = right;
             this.mode = mode != null ? mode : BlendMode.ADD;
             this.axes = axes != null && !axes.isEmpty() ? axes.clone() : EnumSet.of(SpeedAxis.ALL);
+            this.targetSource = targetSource;
+            this.leftSource = leftSource;
+            this.rightSource = rightSource;
+            this.targetValues = targetValues;
+            this.leftValues = leftValues;
+            this.rightValues = rightValues;
+            this.appliesToX = this.axes.contains(SpeedAxis.ALL) || this.axes.contains(SpeedAxis.X);
+            this.appliesToY = this.axes.contains(SpeedAxis.ALL) || this.axes.contains(SpeedAxis.Y);
+            this.appliesToTheta = this.axes.contains(SpeedAxis.ALL) || this.axes.contains(SpeedAxis.Theta);
         }
 
         public String target() {
@@ -72,6 +101,42 @@ public class RobotSpeeds {
             return EnumSet.copyOf(axes);
         }
 
+        private SpeedSource targetSource() {
+            return targetSource;
+        }
+
+        private SpeedSource leftSource() {
+            return leftSource;
+        }
+
+        private SpeedSource rightSource() {
+            return rightSource;
+        }
+
+        private double[] targetValues() {
+            return targetValues;
+        }
+
+        private double[] leftValues() {
+            return leftValues;
+        }
+
+        private double[] rightValues() {
+            return rightValues;
+        }
+
+        private boolean appliesToX() {
+            return appliesToX;
+        }
+
+        private boolean appliesToY() {
+            return appliesToY;
+        }
+
+        private boolean appliesToTheta() {
+            return appliesToTheta;
+        }
+
         private boolean appliesToAxis(SpeedAxis axis) {
             return axes.contains(SpeedAxis.ALL) || axes.contains(axis);
         }
@@ -81,11 +146,26 @@ public class RobotSpeeds {
         private final String source;
         private final BlendMode mode;
         private final EnumSet<SpeedAxis> axes;
+        private final SpeedSource sourceRef;
+        private final double[] sourceValues;
+        private final boolean appliesToX;
+        private final boolean appliesToY;
+        private final boolean appliesToTheta;
 
-        private OutputBlendRule(String source, BlendMode mode, EnumSet<SpeedAxis> axes) {
+        private OutputBlendRule(
+                String source,
+                BlendMode mode,
+                EnumSet<SpeedAxis> axes,
+                SpeedSource sourceRef,
+                double[] sourceValues) {
             this.source = source;
             this.mode = mode != null ? mode : BlendMode.ADD;
             this.axes = axes != null && !axes.isEmpty() ? axes.clone() : EnumSet.of(SpeedAxis.ALL);
+            this.sourceRef = sourceRef;
+            this.sourceValues = sourceValues;
+            this.appliesToX = this.axes.contains(SpeedAxis.ALL) || this.axes.contains(SpeedAxis.X);
+            this.appliesToY = this.axes.contains(SpeedAxis.ALL) || this.axes.contains(SpeedAxis.Y);
+            this.appliesToTheta = this.axes.contains(SpeedAxis.ALL) || this.axes.contains(SpeedAxis.Theta);
         }
 
         public String source() {
@@ -98,6 +178,26 @@ public class RobotSpeeds {
 
         public Set<SpeedAxis> axes() {
             return EnumSet.copyOf(axes);
+        }
+
+        private SpeedSource sourceRef() {
+            return sourceRef;
+        }
+
+        private double[] sourceValues() {
+            return sourceValues;
+        }
+
+        private boolean appliesToX() {
+            return appliesToX;
+        }
+
+        private boolean appliesToY() {
+            return appliesToY;
+        }
+
+        private boolean appliesToTheta() {
+            return appliesToTheta;
         }
 
         private boolean appliesToAxis(SpeedAxis axis) {
@@ -166,6 +266,21 @@ public class RobotSpeeds {
             return omegaRadiansPerSecond;
         }
 
+        private void writeOutputs(double[] values) {
+            if (values == null) {
+                return;
+            }
+            if (!enabled) {
+                values[AXIS_X] = 0.0;
+                values[AXIS_Y] = 0.0;
+                values[AXIS_THETA] = 0.0;
+                return;
+            }
+            values[AXIS_X] = enableX ? vxMetersPerSecond : 0.0;
+            values[AXIS_Y] = enableY ? vyMetersPerSecond : 0.0;
+            values[AXIS_THETA] = enableTheta ? omegaRadiansPerSecond : 0.0;
+        }
+
         public ChassisSpeeds getOutputSpeeds() {
             return new ChassisSpeeds(outputVx(), outputVy(), outputOmega());
         }
@@ -228,6 +343,18 @@ public class RobotSpeeds {
             return enabled && isAxisActive(axis);
         }
 
+        public boolean contributesX() {
+            return enabled && enableX;
+        }
+
+        public boolean contributesY() {
+            return enabled && enableY;
+        }
+
+        public boolean contributesTheta() {
+            return enabled && enableTheta;
+        }
+
         public double output(SpeedAxis axis) {
             switch (axis) {
                 case X:
@@ -244,10 +371,32 @@ public class RobotSpeeds {
 
     private static final double EPSILON = 1E-9;
     private static final SpeedAxis[] AXES = new SpeedAxis[] { SpeedAxis.X, SpeedAxis.Y, SpeedAxis.Theta };
+    private static final int AXIS_X = 0;
+    private static final int AXIS_Y = 1;
+    private static final int AXIS_THETA = 2;
+
+    private static final class SourceValueSlot {
+        private final SpeedSource source;
+        private final double[] values;
+
+        private SourceValueSlot(SpeedSource source, double[] values) {
+            this.source = source;
+            this.values = values;
+        }
+    }
 
     private final LinkedHashMap<String, SpeedSource> sources;
     private final List<SourceBlendRule> sourceBlendRules;
     private final List<OutputBlendRule> outputBlendRules;
+    private final HashMap<String, double[]> sourceValuesScratch;
+    private final List<SourceValueSlot> sourceValueSlots;
+    private final double[] outputScratch;
+    private List<SourceBlendRule> sourceBlendRulesView;
+    private List<OutputBlendRule> outputBlendRulesView;
+    private Set<String> speedSourcesView;
+    private boolean sourceBlendRulesDirty;
+    private boolean outputBlendRulesDirty;
+    private boolean speedSourcesDirty;
 
     private final double maxVelocity;
     private final double maxAngularVelocity;
@@ -258,6 +407,15 @@ public class RobotSpeeds {
         this.sources = new LinkedHashMap<>();
         this.sourceBlendRules = new ArrayList<>();
         this.outputBlendRules = new ArrayList<>();
+        this.sourceValuesScratch = new HashMap<>();
+        this.sourceValueSlots = new ArrayList<>();
+        this.outputScratch = new double[3];
+        this.sourceBlendRulesView = List.of();
+        this.outputBlendRulesView = List.of();
+        this.speedSourcesView = Set.of();
+        this.sourceBlendRulesDirty = true;
+        this.outputBlendRulesDirty = true;
+        this.speedSourcesDirty = true;
 
         add(DRIVE_SOURCE, true);
         add(AUTO_SOURCE, true);
@@ -274,6 +432,10 @@ public class RobotSpeeds {
         if (source == null) {
             source = new SpeedSource(name);
             sources.put(key, source);
+            double[] values = new double[3];
+            sourceValuesScratch.put(key, values);
+            sourceValueSlots.add(new SourceValueSlot(source, values));
+            speedSourcesDirty = true;
         }
         source.setEnabled(enabledByDefault);
         if (!enabledByDefault) {
@@ -314,16 +476,25 @@ public class RobotSpeeds {
         String keyLeft = normalizeKey(left);
         String keyRight = normalizeKey(right);
 
-        speedSource(keyTarget);
-        speedSource(keyLeft);
-        speedSource(keyRight);
+        SpeedSource targetSource = speedSource(keyTarget);
+        SpeedSource leftSource = speedSource(keyLeft);
+        SpeedSource rightSource = speedSource(keyRight);
+        double[] targetValues = sourceValuesForKey(keyTarget);
+        double[] leftValues = sourceValuesForKey(keyLeft);
+        double[] rightValues = sourceValuesForKey(keyRight);
 
         SourceBlendRule rule = new SourceBlendRule(
                 keyTarget,
                 keyLeft,
                 keyRight,
                 mode,
-                normalizeAxes(axes));
+                normalizeAxes(axes),
+                targetSource,
+                leftSource,
+                rightSource,
+                targetValues,
+                leftValues,
+                rightValues);
 
         sourceBlendRules.add(rule);
         try {
@@ -332,6 +503,7 @@ public class RobotSpeeds {
             sourceBlendRules.remove(sourceBlendRules.size() - 1);
             throw ex;
         }
+        sourceBlendRulesDirty = true;
     }
 
     public void blendToOutput(String source, BlendMode mode, SpeedAxis axis) {
@@ -340,16 +512,25 @@ public class RobotSpeeds {
 
     public void blendToOutput(String source, BlendMode mode, SpeedAxis... axes) {
         String key = normalizeKey(source);
-        speedSource(key);
-        outputBlendRules.add(new OutputBlendRule(key, mode, normalizeAxes(axes)));
+        SpeedSource sourceRef = speedSource(key);
+        outputBlendRules.add(new OutputBlendRule(key, mode, normalizeAxes(axes), sourceRef, sourceValuesForKey(key)));
+        outputBlendRulesDirty = true;
     }
 
     public void clearSourceBlends() {
+        if (sourceBlendRules.isEmpty()) {
+            return;
+        }
         sourceBlendRules.clear();
+        sourceBlendRulesDirty = true;
     }
 
     public void clearOutputBlends() {
+        if (outputBlendRules.isEmpty()) {
+            return;
+        }
         outputBlendRules.clear();
+        outputBlendRulesDirty = true;
     }
 
     public void clearBlends() {
@@ -363,11 +544,19 @@ public class RobotSpeeds {
     }
 
     public List<SourceBlendRule> getSourceBlends() {
-        return List.copyOf(sourceBlendRules);
+        if (sourceBlendRulesDirty) {
+            sourceBlendRulesView = List.copyOf(sourceBlendRules);
+            sourceBlendRulesDirty = false;
+        }
+        return sourceBlendRulesView;
     }
 
     public List<OutputBlendRule> getOutputBlends() {
-        return List.copyOf(outputBlendRules);
+        if (outputBlendRulesDirty) {
+            outputBlendRulesView = List.copyOf(outputBlendRules);
+            outputBlendRulesDirty = false;
+        }
+        return outputBlendRulesView;
     }
 
     public void setSpeeds(String source, ChassisSpeeds speeds) {
@@ -387,11 +576,19 @@ public class RobotSpeeds {
     }
 
     public Set<String> getSpeedSources() {
-        return Set.copyOf(sources.keySet());
+        if (speedSourcesDirty) {
+            speedSourcesView = Set.copyOf(sources.keySet());
+            speedSourcesDirty = false;
+        }
+        return speedSourcesView;
     }
 
     public void stop() {
-        sources.forEach((key, value) -> value.stop());
+        for (SpeedSource source : sources.values()) {
+            if (source != null) {
+                source.stop();
+            }
+        }
     }
 
     public void stopSpeeds(String source) {
@@ -415,7 +612,11 @@ public class RobotSpeeds {
     }
 
     public void setAllAxisState(String source, SpeedAxis axis, boolean enabled) {
-        sources.forEach((key, value) -> value.setAxisState(axis, enabled));
+        for (SpeedSource speedSource : sources.values()) {
+            if (speedSource != null) {
+                speedSource.setAxisState(axis, enabled);
+            }
+        }
     }
 
     public boolean isAxisActive(String source, SpeedAxis axis) {
@@ -423,71 +624,82 @@ public class RobotSpeeds {
     }
 
     public ChassisSpeeds calculate() {
-        Map<String, double[]> sourceValues = initializeSourceValues();
-        applySourceBlends(sourceValues);
-
-        double[] output = new double[] { 0.0, 0.0, 0.0 };
-        applyOutputBlends(sourceValues, output);
-
-        return new ChassisSpeeds(
-                clamp(output[axisIndex(SpeedAxis.X)], maxVelocity),
-                clamp(output[axisIndex(SpeedAxis.Y)], maxVelocity),
-                clamp(output[axisIndex(SpeedAxis.Theta)], maxAngularVelocity));
+        ChassisSpeeds output = new ChassisSpeeds();
+        calculate(output);
+        return output;
     }
 
-    private Map<String, double[]> initializeSourceValues() {
-        Map<String, double[]> values = new HashMap<>();
-        for (Map.Entry<String, SpeedSource> entry : sources.entrySet()) {
-            SpeedSource source = entry.getValue();
-            values.put(entry.getKey(), new double[] {
-                    source.output(SpeedAxis.X),
-                    source.output(SpeedAxis.Y),
-                    source.output(SpeedAxis.Theta)
-            });
+    public void calculate(ChassisSpeeds target) {
+        if (target == null) {
+            return;
         }
-        return values;
+        initializeSourceValues();
+        applySourceBlends();
+
+        outputScratch[AXIS_X] = 0.0;
+        outputScratch[AXIS_Y] = 0.0;
+        outputScratch[AXIS_THETA] = 0.0;
+        applyOutputBlends();
+
+        target.vxMetersPerSecond = clamp(outputScratch[AXIS_X], maxVelocity);
+        target.vyMetersPerSecond = clamp(outputScratch[AXIS_Y], maxVelocity);
+        target.omegaRadiansPerSecond = clamp(outputScratch[AXIS_THETA], maxAngularVelocity);
     }
 
-    private void applySourceBlends(Map<String, double[]> sourceValues) {
+    private void initializeSourceValues() {
+        for (SourceValueSlot slot : sourceValueSlots) {
+            slot.source.writeOutputs(slot.values);
+        }
+    }
+
+    private void applySourceBlends() {
         for (SourceBlendRule rule : sourceBlendRules) {
-            SpeedSource target = speedSource(rule.target());
-            SpeedSource left = speedSource(rule.left());
-            SpeedSource right = speedSource(rule.right());
+            SpeedSource target = rule.targetSource();
+            SpeedSource left = rule.leftSource();
+            SpeedSource right = rule.rightSource();
+            double[] targetValues = rule.targetValues();
+            double[] leftValues = rule.leftValues();
+            double[] rightValues = rule.rightValues();
+            if (targetValues == null || leftValues == null || rightValues == null) {
+                continue;
+            }
 
-            double[] targetValues = sourceValues.get(rule.target());
-            double[] leftValues = sourceValues.get(rule.left());
-            double[] rightValues = sourceValues.get(rule.right());
-
-            for (SpeedAxis axis : AXES) {
-                if (!rule.appliesToAxis(axis)) {
-                    continue;
-                }
-                if (!target.contributesOnAxis(axis)) {
-                    continue;
-                }
-                if (!left.contributesOnAxis(axis) || !right.contributesOnAxis(axis)) {
-                    continue;
-                }
-
-                int idx = axisIndex(axis);
-                targetValues[idx] = applyBlend(leftValues[idx], rightValues[idx], rule.mode());
+            if (rule.appliesToX()
+                    && target.enabled && target.enableX
+                    && left.enabled && left.enableX
+                    && right.enabled && right.enableX) {
+                targetValues[AXIS_X] = applyBlend(leftValues[AXIS_X], rightValues[AXIS_X], rule.mode());
+            }
+            if (rule.appliesToY()
+                    && target.enabled && target.enableY
+                    && left.enabled && left.enableY
+                    && right.enabled && right.enableY) {
+                targetValues[AXIS_Y] = applyBlend(leftValues[AXIS_Y], rightValues[AXIS_Y], rule.mode());
+            }
+            if (rule.appliesToTheta()
+                    && target.enabled && target.enableTheta
+                    && left.enabled && left.enableTheta
+                    && right.enabled && right.enableTheta) {
+                targetValues[AXIS_THETA] = applyBlend(leftValues[AXIS_THETA], rightValues[AXIS_THETA], rule.mode());
             }
         }
     }
 
-    private void applyOutputBlends(Map<String, double[]> sourceValues, double[] output) {
+    private void applyOutputBlends() {
         for (OutputBlendRule rule : outputBlendRules) {
-            SpeedSource source = speedSource(rule.source());
-            double[] values = sourceValues.get(rule.source());
-            for (SpeedAxis axis : AXES) {
-                if (!rule.appliesToAxis(axis)) {
-                    continue;
-                }
-                if (!source.contributesOnAxis(axis)) {
-                    continue;
-                }
-                int idx = axisIndex(axis);
-                output[idx] = applyBlend(output[idx], values[idx], rule.mode());
+            SpeedSource source = rule.sourceRef();
+            double[] values = rule.sourceValues();
+            if (values == null) {
+                continue;
+            }
+            if (rule.appliesToX() && source.enabled && source.enableX) {
+                outputScratch[AXIS_X] = applyBlend(outputScratch[AXIS_X], values[AXIS_X], rule.mode());
+            }
+            if (rule.appliesToY() && source.enabled && source.enableY) {
+                outputScratch[AXIS_Y] = applyBlend(outputScratch[AXIS_Y], values[AXIS_Y], rule.mode());
+            }
+            if (rule.appliesToTheta() && source.enabled && source.enableTheta) {
+                outputScratch[AXIS_THETA] = applyBlend(outputScratch[AXIS_THETA], values[AXIS_THETA], rule.mode());
             }
         }
     }
@@ -587,11 +799,11 @@ public class RobotSpeeds {
     private int axisIndex(SpeedAxis axis) {
         switch (axis) {
             case X:
-                return 0;
+                return AXIS_X;
             case Y:
-                return 1;
+                return AXIS_Y;
             case Theta:
-                return 2;
+                return AXIS_THETA;
             default:
                 throw new IllegalArgumentException("invalid axis for value lookup: " + axis);
         }
@@ -648,13 +860,32 @@ public class RobotSpeeds {
         if (!sources.containsKey(key)) {
             return;
         }
-        outputBlendRules.add(new OutputBlendRule(key, BlendMode.ADD, EnumSet.of(SpeedAxis.ALL)));
+        outputBlendRules.add(new OutputBlendRule(
+                key,
+                BlendMode.ADD,
+                EnumSet.of(SpeedAxis.ALL),
+                speedSource(key),
+                sourceValuesForKey(key)));
+    }
+
+    private double[] sourceValuesForKey(String key) {
+        double[] values = sourceValuesScratch.get(key);
+        if (values == null) {
+            values = new double[3];
+            sourceValuesScratch.put(key, values);
+        }
+        return values;
     }
 
     private String normalizeKey(String source) {
         if (source == null) {
             throw new IllegalArgumentException("speed source cannot be null");
         }
-        return source.toLowerCase(Locale.ROOT);
+        for (int i = 0; i < source.length(); i++) {
+            if (Character.isUpperCase(source.charAt(i))) {
+                return source.toLowerCase(Locale.ROOT);
+            }
+        }
+        return source;
     }
 }

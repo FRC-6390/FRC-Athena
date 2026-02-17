@@ -21,7 +21,6 @@ import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
-import edu.wpi.first.wpilibj.Timer;
 public class SwerveModule implements RobotSendableDevice {
     
     private final SwerveModuleConfig config;
@@ -38,8 +37,10 @@ public class SwerveModule implements RobotSendableDevice {
     private boolean driveFeedforwardEnabled = false;
     private double nominalVoltage = 12.0;
     private double lastSetpointSpeedMetersPerSecond = 0.0;
-    private double lastSetpointTimestampSeconds = Double.NaN;
+    private boolean hasPreviousSetpoint = false;
     private ca.frc6390.athena.drivetrains.swerve.sim.SwerveModuleSimulation simulation;
+    private final SwerveModuleState stateView = new SwerveModuleState(0.0, Rotation2d.kZero);
+    private final SwerveModulePosition positionView = new SwerveModulePosition(0.0, Rotation2d.kZero);
     // SWERVE MOTOR RECORD
     public record SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder, SwerveModuleSimConfig sim) {
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder) {
@@ -265,11 +266,15 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     public SwerveModuleState getState() {
-        return new SwerveModuleState(getDriveMotorVelocity(), getEncoderPosition());
+        stateView.speedMetersPerSecond = getDriveMotorVelocity();
+        stateView.angle = getEncoderPosition();
+        return stateView;
     }
 
     public SwerveModulePosition getPostion() {
-        return new SwerveModulePosition(getDriveMotorPosition(), getEncoderPosition());
+        positionView.distanceMeters = getDriveMotorPosition();
+        positionView.angle = getEncoderPosition();
+        return positionView;
     }
 
     public void setDriveMotor(double speed) {
@@ -362,7 +367,7 @@ public class SwerveModule implements RobotSendableDevice {
         lastDriveCommand = 0;
         lastSteerCommand = 0;
         lastSetpointSpeedMetersPerSecond = 0.0;
-        lastSetpointTimestampSeconds = Double.NaN;
+        hasPreviousSetpoint = false;
     }
 
     public void setToAngle(double angle) {
@@ -410,11 +415,10 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     private double calculateFeedforwardVolts(double targetSpeedMetersPerSecond) {
-        double now = Timer.getFPGATimestamp();
-        double currentSpeed = Double.isFinite(lastSetpointTimestampSeconds)
+        double currentSpeed = hasPreviousSetpoint
                 ? lastSetpointSpeedMetersPerSecond
                 : targetSpeedMetersPerSecond;
-        lastSetpointTimestampSeconds = now;
+        hasPreviousSetpoint = true;
         lastSetpointSpeedMetersPerSecond = targetSpeedMetersPerSecond;
         return driveFeedforward.calculateWithVelocities(currentSpeed, targetSpeedMetersPerSecond);
     }

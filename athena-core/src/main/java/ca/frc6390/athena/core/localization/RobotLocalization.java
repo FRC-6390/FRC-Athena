@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core.localization;
 
 import java.lang.reflect.Field;
+import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -9,12 +10,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 import ca.frc6390.athena.core.RobotAuto;
+import ca.frc6390.athena.core.RobotTime;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotVision;
@@ -69,6 +70,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private Pose2d fieldPose;
     private Pose3d fieldPose3d;
     private static final double STD_EPSILON = 1e-5;
+    private static final Rotation2d ZERO_ROTATION = new Rotation2d();
+    private static final Pose2d ZERO_POSE_2D = new Pose2d();
+    private static final Pose3d ZERO_POSE_3D = new Pose3d();
+    private static final int POSE_STRUCT_PRUNE_PER_CYCLE = 8;
+    private static final int BOUNDING_BOX_STATIC_PUBLISH_PERIOD = 10;
 
     private RobotLocalizationConfig localizationConfig;
     private boolean visionEnabled = false;
@@ -94,8 +100,15 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private final Map<String, PoseConfig> poseConfigs = new HashMap<>();
     private final Map<String, PoseEstimatorState> poseStates = new HashMap<>();
     private final Map<String, StructPublisher<Pose2d>> poseStructPublishers = new HashMap<>();
+    private final ArrayDeque<String> poseStructPruneQueue = new ArrayDeque<>();
     private final LinkedHashMap<String, PoseBoundingBox2d> namedBoundingBoxes = new LinkedHashMap<>();
     private final Map<String, StructArrayPublisher<Pose2d>> boundingBoxPublishers = new HashMap<>();
+    private final Map<String, Pose2d[]> boundingBoxTrajectoryCache = new HashMap<>();
+    private final Map<String, PoseBoundingBox2d> boundingBoxTrajectorySources = new HashMap<>();
+    private final Map<String, PoseBoundingBox2d> boundingBoxMetadataPublished = new HashMap<>();
+    private final Map<String, Boolean> boundingBoxContainsPublished = new HashMap<>();
+    private final Map<String, Pose2d[]> boundingBoxTrajectoryPublished = new HashMap<>();
+    private int boundingBoxPublishCycle = 0;
     private String primaryPoseName;
     private boolean slipActive = false;
     private double slipActiveUntilSeconds = Double.NEGATIVE_INFINITY;
@@ -153,8 +166,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.estimatorFactory = Objects.requireNonNull(estimatorFactory, "estimatorFactory");
         this.baseStateStdDevs2d = config.getStd2d();
         this.baseStateStdDevs3d = config.getStd3d();
-        this.fieldPose = new Pose2d();
-        this.fieldPose3d = new Pose3d(fieldPose);
+        this.fieldPose = ZERO_POSE_2D;
+        this.fieldPose3d = ZERO_POSE_3D;
         this.autoDrive = (speeds, feed) -> robotSpeeds.setSpeeds("auto", speeds);
 
         this.fieldPublisher = new RobotLocalizationFieldPublisher(() -> vision);
@@ -334,11 +347,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private void persistRobotState(boolean force) {
-        Pose2d currentFieldPose = fieldPose != null ? fieldPose : new Pose2d();
-        Pose3d currentFieldPose3d =
-                poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D && fieldPose3d != null
-                        ? fieldPose3d
-                        : new Pose3d(currentFieldPose);
+        Pose2d currentFieldPose = fieldPose != null ? fieldPose : ZERO_POSE_2D;
+        Pose3d currentFieldPose3d = fieldPose3d != null ? fieldPose3d : new Pose3d(currentFieldPose);
         Rotation2d currentDriverYaw = imu != null ? imu.getVirtualAxis("driver") : new Rotation2d();
 
         persistence.persist(currentFieldPose, currentFieldPose3d, currentDriverYaw, force, restoringPersistentState);
@@ -463,7 +473,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             HolonomicDriveBinding binding = new HolonomicDriveBinding(
                     this::getFieldPose,
                     pose -> resetPose(localizationConfig.autoPoseName(), pose),
-                    () -> robotSpeeds.getSpeeds("drive"),
+                    this::getRobotRelativeSpeeds,
                     output,
                     translationConstants,
                     rotationConstants,
@@ -671,9 +681,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         fieldPublisher.setActualPathMaxPoints(maxPoints);
     }
 
-    private void updateHealthMetrics() {
+    private void updateHealthMetrics(double now) {
         ensureHealthNetworkEntries();
-        double now = Timer.getFPGATimestamp();
         if (Double.isFinite(lastHealthTimestamp)) {
             double dt = now - lastHealthTimestamp;
             if (dt > 0.0) {
@@ -699,9 +708,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
     }
 
-    private void updateSlipState() {
+    private void updateSlipState(double now) {
         RobotLocalizationConfig.BackendConfig backend = backendConfig();
-        double now = Timer.getFPGATimestamp();
         boolean previousSlipActive = slipActive;
         if (Double.isFinite(lastUpdateTimestamp)) {
             double dt = now - lastUpdateTimestamp;
@@ -712,10 +720,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                         fieldPose.getRotation()
                                 .minus(lastFieldPoseForSlip.getRotation())
                                 .getRadians() / dt;
+                if (!Double.isFinite(estimatedYawRate)) {
+                    estimatedYawRate = 0.0;
+                }
                 double yawRateRad = Double.isFinite(imuYawRateRad) ? imuYawRateRad : estimatedYawRate;
-                double disagreement = Math.abs(yawRateRad - estimatedYawRate);
+                double comparableYawRate = unwrapRateNear(yawRateRad, estimatedYawRate);
+                double disagreement = Math.abs(comparableYawRate - estimatedYawRate);
                 boolean yawSlip =
-                        Math.abs(yawRateRad) > backend.slipYawRateThreshold()
+                        Math.abs(comparableYawRate) > backend.slipYawRateThreshold()
                                 && disagreement > backend.slipYawRateDisagreement();
 
                 Translation2d deltaTranslation =
@@ -746,6 +758,24 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         lastUpdateTimestamp = now;
         lastFieldPoseForSlip = fieldPose;
         updateProcessStdDevScale(slipActive);
+    }
+
+    private static double unwrapRateNear(double wrappedRate, double referenceRate) {
+        if (!Double.isFinite(wrappedRate) || !Double.isFinite(referenceRate)) {
+            return wrappedRate;
+        }
+        double best = wrappedRate;
+        double bestError = Math.abs(wrappedRate - referenceRate);
+        double twoPi = 2.0 * Math.PI;
+        for (int k = -2; k <= 2; k++) {
+            double candidate = wrappedRate + k * twoPi;
+            double error = Math.abs(candidate - referenceRate);
+            if (error < bestError) {
+                best = candidate;
+                bestError = error;
+            }
+        }
+        return best;
     }
 
     private void updateProcessStdDevScale(boolean slipActive) {
@@ -859,7 +889,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         state.active = config.active();
         ensurePrimaryPose(config);
         if (!isPrimaryPose(config)) {
-            Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
+            Pose2d pose = state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
             publishPoseStruct(config, pose);
         }
     }
@@ -937,6 +967,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     public void removePoseConfig(String name) {
         poseConfigs.remove(name);
         poseStates.remove(name);
+        poseStructPruneQueue.remove(name);
+        StructPublisher<Pose2d> publisher = poseStructPublishers.remove(name);
+        if (publisher != null) {
+            publisher.close();
+        }
         if (Objects.equals(primaryPoseName, name)) {
             primaryPoseName = null;
             for (PoseConfig config : poseConfigs.values()) {
@@ -972,6 +1007,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             state.active = updated.active();
         }
         if (existing.publishToNetworkTables() && !updated.publishToNetworkTables()) {
+            poseStructPruneQueue.remove(updated.name());
             StructPublisher<Pose2d> publisher = poseStructPublishers.remove(updated.name());
             if (publisher != null) {
                 publisher.close();
@@ -988,21 +1024,21 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     public Pose2d getPose2d(String name) {
         PoseConfig config = poseConfigs.get(name);
         if (config == null) {
-            return new Pose2d();
+            return ZERO_POSE_2D;
         }
         PoseEstimatorState state = ensurePoseState(config);
-        updatePoseFromConfig(config, state);
-        return state.pose2d != null ? state.pose2d : new Pose2d();
+        updatePoseFromConfig(config, state, currentTimestampSeconds());
+        return state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
     }
 
     public Pose3d getPose3d(String name) {
         PoseConfig config = poseConfigs.get(name);
         if (config == null) {
-            return new Pose3d();
+            return ZERO_POSE_3D;
         }
         PoseEstimatorState state = ensurePoseState(config);
-        updatePoseFromConfig(config, state);
-        return state.pose3d != null ? state.pose3d : new Pose3d();
+        updatePoseFromConfig(config, state, currentTimestampSeconds());
+        return state.pose3d != null ? state.pose3d : ZERO_POSE_3D;
     }
  
     private PoseEstimatorState ensurePoseState(PoseConfig config) {
@@ -1055,7 +1091,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     private Pose2d resolveInitialPose2d(PoseConfig config) {
         if (config == null) {
-            return new Pose2d();
+            return ZERO_POSE_2D;
         }
         if (config.startPose2d() != null) {
             return config.startPose2d();
@@ -1067,12 +1103,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (primary != null && primary.pose2d != null) {
             return primary.pose2d;
         }
-        return new Pose2d();
+        return ZERO_POSE_2D;
     }
 
     private Pose3d resolveInitialPose3d(PoseConfig config) {
         if (config == null) {
-            return new Pose3d();
+            return ZERO_POSE_3D;
         }
         if (config.startPose3d() != null) {
             return config.startPose3d();
@@ -1084,7 +1120,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (primary != null && primary.pose3d != null) {
             return primary.pose3d;
         }
-        return new Pose3d();
+        return ZERO_POSE_3D;
     }
 
     private PoseEstimatorState getPrimaryPoseState() {
@@ -1114,21 +1150,24 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (state == null) {
             return;
         }
-        fieldPose = state.pose2d != null ? state.pose2d : new Pose2d();
+        fieldPose = state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
         fieldPose3d = state.pose3d != null ? state.pose3d : new Pose3d(fieldPose);
     }
 
     private void resetVelocityTracking(Pose2d pose) {
-        lastVelocityPose = pose != null ? pose : new Pose2d();
-        lastVelocityTimestamp = Timer.getFPGATimestamp();
-        fieldRelativeSpeeds = new ChassisSpeeds();
-        robotRelativeSpeeds = new ChassisSpeeds();
+        lastVelocityPose = pose != null ? pose : ZERO_POSE_2D;
+        lastVelocityTimestamp = currentTimestampSeconds();
+        fieldRelativeSpeeds.vxMetersPerSecond = 0.0;
+        fieldRelativeSpeeds.vyMetersPerSecond = 0.0;
+        fieldRelativeSpeeds.omegaRadiansPerSecond = 0.0;
+        robotRelativeSpeeds.vxMetersPerSecond = 0.0;
+        robotRelativeSpeeds.vyMetersPerSecond = 0.0;
+        robotRelativeSpeeds.omegaRadiansPerSecond = 0.0;
         normalizedMovementSpeed = 0.0;
     }
 
-    private void updateVelocityTracking(Pose2d pose) {
-        Pose2d currentPose = pose != null ? pose : new Pose2d();
-        double nowSeconds = Timer.getFPGATimestamp();
+    private void updateVelocityTracking(Pose2d pose, double nowSeconds) {
+        Pose2d currentPose = pose != null ? pose : ZERO_POSE_2D;
         if (!Double.isFinite(lastVelocityTimestamp)) {
             resetVelocityTracking(currentPose);
             return;
@@ -1157,8 +1196,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             omega = 0.0;
         }
 
-        fieldRelativeSpeeds = new ChassisSpeeds(fieldVx, fieldVy, omega);
-        robotRelativeSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(fieldVx, fieldVy, omega, currentPose.getRotation());
+        fieldRelativeSpeeds.vxMetersPerSecond = fieldVx;
+        fieldRelativeSpeeds.vyMetersPerSecond = fieldVy;
+        fieldRelativeSpeeds.omegaRadiansPerSecond = omega;
+        double cos = currentPose.getRotation().getCos();
+        double sin = currentPose.getRotation().getSin();
+        robotRelativeSpeeds.vxMetersPerSecond = fieldVx * cos + fieldVy * sin;
+        robotRelativeSpeeds.vyMetersPerSecond = -fieldVx * sin + fieldVy * cos;
+        robotRelativeSpeeds.omegaRadiansPerSecond = omega;
         normalizedMovementSpeed = normalizeMovementSpeed(Math.hypot(
                 robotRelativeSpeeds.vxMetersPerSecond,
                 robotRelativeSpeeds.vyMetersPerSecond));
@@ -1201,7 +1246,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     public RobotLocalization<T> zone(String name, PoseBoundingBox2d box) {
         String resolvedName = sanitizeBoundingBoxName(name);
         Objects.requireNonNull(box, "box");
-        namedBoundingBoxes.put(resolvedName, box);
+        PoseBoundingBox2d previous = namedBoundingBoxes.put(resolvedName, box);
+        if (!box.equals(previous)) {
+            boundingBoxTrajectoryCache.remove(resolvedName);
+            boundingBoxTrajectorySources.remove(resolvedName);
+            boundingBoxMetadataPublished.remove(resolvedName);
+            boundingBoxContainsPublished.remove(resolvedName);
+            boundingBoxTrajectoryPublished.remove(resolvedName);
+        }
         fieldPublisher.setBoundingBoxes(namedBoundingBoxes);
         return this;
     }
@@ -1226,6 +1278,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (publisher != null) {
             publisher.close();
         }
+        boundingBoxTrajectoryCache.remove(resolvedName);
+        boundingBoxTrajectorySources.remove(resolvedName);
+        boundingBoxMetadataPublished.remove(resolvedName);
+        boundingBoxContainsPublished.remove(resolvedName);
+        boundingBoxTrajectoryPublished.remove(resolvedName);
         fieldPublisher.setBoundingBoxes(namedBoundingBoxes);
         return true;
     }
@@ -1241,6 +1298,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             }
         }
         boundingBoxPublishers.clear();
+        boundingBoxTrajectoryCache.clear();
+        boundingBoxTrajectorySources.clear();
+        boundingBoxMetadataPublished.clear();
+        boundingBoxContainsPublished.clear();
+        boundingBoxTrajectoryPublished.clear();
         fieldPublisher.clearBoundingBoxes();
     }
 
@@ -1624,33 +1686,70 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         slipActiveNtEntry = healthTable.getEntry("SlipActive");
     }
 
+    private static double currentTimestampSeconds() {
+        double nowSeconds = RobotTime.nowSeconds();
+        if (Double.isFinite(nowSeconds)) {
+            return nowSeconds;
+        }
+        return Timer.getFPGATimestamp();
+    }
+
     @Override
     public void periodic() {
         if (suppressUpdates) {
             return;
         }
-        updateActivePoseConfigs();
+        double nowSeconds = currentTimestampSeconds();
+        updateActivePoseConfigs(nowSeconds);
         publishPoseObjects();
     }
 
-    private void updateActivePoseConfigs() {
+    private void updateActivePoseConfigs(double nowSeconds) {
         for (PoseConfig config : poseConfigs.values()) {
             PoseEstimatorState state = ensurePoseState(config);
             if (state.active) {
-                updatePoseFromConfig(config, state);
+                updatePoseFromConfig(config, state, nowSeconds);
             }
         }
     }
 
     private void publishPoseObjects() {
+        prunePoseStructPublishers();
         fieldPublisher.clearRobotPose();
         for (PoseConfig config : poseConfigs.values()) {
             PoseEstimatorState state = poseStates.get(config.name());
             if (state == null) {
                 continue;
             }
-            Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
+            Pose2d pose = state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
             publishPoseStruct(config, pose);
+        }
+    }
+
+    private void prunePoseStructPublishers() {
+        if (poseStructPublishers.isEmpty()) {
+            poseStructPruneQueue.clear();
+            return;
+        }
+        if (poseStructPruneQueue.isEmpty()) {
+            poseStructPruneQueue.addAll(poseStructPublishers.keySet());
+        }
+        int budget = Math.min(POSE_STRUCT_PRUNE_PER_CYCLE, poseStructPruneQueue.size());
+        for (int i = 0; i < budget; i++) {
+            String name = poseStructPruneQueue.pollFirst();
+            if (name == null) {
+                continue;
+            }
+            StructPublisher<Pose2d> publisher = poseStructPublishers.get(name);
+            if (publisher == null) {
+                continue;
+            }
+            PoseConfig config = poseConfigs.get(name);
+            boolean keep = config != null && config.publishToNetworkTables();
+            if (!keep) {
+                publisher.close();
+                poseStructPublishers.remove(name);
+            }
         }
     }
 
@@ -1673,6 +1772,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                     .getStructTopic(topic, Pose2d.struct)
                     .publish();
             poseStructPublishers.put(name, publisher);
+            poseStructPruneQueue.addLast(name);
         }
         publisher.set(pose);
     }
@@ -1683,16 +1783,23 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             return;
         }
 
+        boolean publishStaticThisCycle =
+                (boundingBoxPublishCycle++ % BOUNDING_BOX_STATIC_PUBLISH_PERIOD) == 0;
         RobotNetworkTables.Node boxesNode = localizationNode.child("BoundingBoxes");
-        Set<String> activeNames = Set.copyOf(namedBoundingBoxes.keySet());
         boundingBoxPublishers.entrySet().removeIf(entry -> {
-            if (activeNames.contains(entry.getKey())) {
+            String name = entry.getKey();
+            if (name != null && namedBoundingBoxes.containsKey(name)) {
                 return false;
             }
             StructArrayPublisher<Pose2d> publisher = entry.getValue();
             if (publisher != null) {
                 publisher.close();
             }
+            boundingBoxTrajectoryCache.remove(name);
+            boundingBoxTrajectorySources.remove(name);
+            boundingBoxMetadataPublished.remove(name);
+            boundingBoxContainsPublished.remove(name);
+            boundingBoxTrajectoryPublished.remove(name);
             return true;
         });
 
@@ -1703,26 +1810,51 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 continue;
             }
             RobotNetworkTables.Node boxNode = boxesNode.child(name);
-            boxNode.putDouble("minX", box.minX());
-            boxNode.putDouble("minY", box.minY());
-            boxNode.putDouble("maxX", box.maxX());
-            boxNode.putDouble("maxY", box.maxY());
-            boxNode.putBoolean("containsPrimaryPose", box.contains(currentPose));
+            PoseBoundingBox2d publishedBox = boundingBoxMetadataPublished.get(name);
+            if (publishStaticThisCycle || !box.equals(publishedBox)) {
+                boxNode.putDouble("minX", box.minX());
+                boxNode.putDouble("minY", box.minY());
+                boxNode.putDouble("maxX", box.maxX());
+                boxNode.putDouble("maxY", box.maxY());
+                boundingBoxMetadataPublished.put(name, box);
+            }
+            boolean containsPrimaryPose = box.contains(currentPose);
+            Boolean previousContains = boundingBoxContainsPublished.get(name);
+            if (publishStaticThisCycle || previousContains == null || previousContains.booleanValue() != containsPrimaryPose) {
+                boxNode.putBoolean("containsPrimaryPose", containsPrimaryPose);
+                boundingBoxContainsPublished.put(name, containsPrimaryPose);
+            }
 
             StructArrayPublisher<Pose2d> publisher = boundingBoxPublishers.computeIfAbsent(name, key ->
                     NetworkTableInstance.getDefault()
                             .getStructArrayTopic("Athena/Localization/BoundingBoxes/" + key + "/Trajectory", Pose2d.struct)
                             .publish());
-            publisher.set(toBoundingBoxTrajectory(box));
+            Pose2d[] trajectory = getOrBuildBoundingBoxTrajectory(name, box);
+            Pose2d[] publishedTrajectory = boundingBoxTrajectoryPublished.get(name);
+            if (publishStaticThisCycle || publishedTrajectory != trajectory) {
+                publisher.set(trajectory);
+                boundingBoxTrajectoryPublished.put(name, trajectory);
+            }
         }
     }
 
+    private Pose2d[] getOrBuildBoundingBoxTrajectory(String name, PoseBoundingBox2d box) {
+        PoseBoundingBox2d previousBox = boundingBoxTrajectorySources.get(name);
+        Pose2d[] cached = boundingBoxTrajectoryCache.get(name);
+        if (cached != null && box.equals(previousBox)) {
+            return cached;
+        }
+        Pose2d[] rebuilt = toBoundingBoxTrajectory(box);
+        boundingBoxTrajectoryCache.put(name, rebuilt);
+        boundingBoxTrajectorySources.put(name, box);
+        return rebuilt;
+    }
+
     private static Pose2d[] toBoundingBoxTrajectory(PoseBoundingBox2d box) {
-        Rotation2d heading = new Rotation2d();
-        Pose2d bottomLeft = new Pose2d(box.minX(), box.minY(), heading);
-        Pose2d bottomRight = new Pose2d(box.maxX(), box.minY(), heading);
-        Pose2d topRight = new Pose2d(box.maxX(), box.maxY(), heading);
-        Pose2d topLeft = new Pose2d(box.minX(), box.maxY(), heading);
+        Pose2d bottomLeft = new Pose2d(box.minX(), box.minY(), ZERO_ROTATION);
+        Pose2d bottomRight = new Pose2d(box.maxX(), box.minY(), ZERO_ROTATION);
+        Pose2d topRight = new Pose2d(box.maxX(), box.maxY(), ZERO_ROTATION);
+        Pose2d topLeft = new Pose2d(box.minX(), box.maxY(), ZERO_ROTATION);
         return new Pose2d[] { bottomLeft, bottomRight, topRight, topLeft, bottomLeft };
     }
 
@@ -1740,7 +1872,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return resolved;
     }
 
-    private void updatePoseFromConfig(PoseConfig config, PoseEstimatorState state) {
+    private void updatePoseFromConfig(PoseConfig config, PoseEstimatorState state, double now) {
         if (config == null || state == null) {
             return;
         }
@@ -1750,7 +1882,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (suppressUpdates) {
             return;
         }
-        double now = Timer.getFPGATimestamp();
         RobotLocalizationConfig.BackendConfig backend = resolveBackendForPose(config);
         boolean hasFreshVision = hasFreshVision(now, config.constraints(), state);
         if (!config.constraints().canUpdate(now, state.lastUpdateSeconds, hasFreshVision, slipActive)) {
@@ -1768,9 +1899,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         boolean updatedEstimator = false;
         if (config.continuousInputs().contains(PoseInput.ODOMETRY)
                 || config.continuousInputs().contains(PoseInput.IMU_YAW)) {
-            updatedEstimator = updateEstimator(state, backend);
+            updatedEstimator = updateEstimator(state, backend, now);
         } else if (appliedVision) {
-            updatedEstimator = refreshPoseFromEstimator(state);
+            updatedEstimator = refreshPoseFromEstimator(state, now);
         }
 
         if (updatedEstimator || appliedVision) {
@@ -1809,20 +1940,20 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             return false;
         }
         state.lastVisionFusionUpdateSeconds = nowSeconds;
-        Pose2d referencePose = state.pose2d != null ? state.pose2d : new Pose2d();
+        Pose2d referencePose = state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
         vision.measurements().robotOrientation(referencePose);
         boolean accepted = false;
         if (backend.useMultiVision()) {
             Optional<VisionCamera.VisionMeasurement> measurement =
                     fuseVisionMeasurements(state, referencePose, vision.measurements().measurements(), backend);
-            if (measurement.isPresent() && applyVisionMeasurement(config, state, measurement.get(), backend)) {
+            if (measurement.isPresent() && applyVisionMeasurement(config, state, measurement.get(), backend, nowSeconds)) {
                 state.hasAcceptedVisionMeasurement = true;
                 state.lastVisionMeasurementTimestamp = measurement.get().timestampSeconds();
                 accepted = true;
             }
         } else {
             Optional<VisionCamera.VisionMeasurement> measurement = vision.measurements().bestMeasurement();
-            if (measurement.isPresent() && applyVisionMeasurement(config, state, measurement.get(), backend)) {
+            if (measurement.isPresent() && applyVisionMeasurement(config, state, measurement.get(), backend, nowSeconds)) {
                 state.hasAcceptedVisionMeasurement = true;
                 state.lastVisionMeasurementTimestamp = measurement.get().timestampSeconds();
                 accepted = true;
@@ -1831,8 +1962,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return accepted;
     }
 
-    private boolean updateEstimator(PoseEstimatorState state, RobotLocalizationConfig.BackendConfig backend) {
-        double now = Timer.getFPGATimestamp();
+    private boolean updateEstimator(
+            PoseEstimatorState state,
+            RobotLocalizationConfig.BackendConfig backend,
+            double now) {
         if (Math.abs(now - state.lastEstimatorUpdateSeconds) < 1e-6) {
             return false;
         }
@@ -1853,11 +1986,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             state.pose3d = new Pose3d(state.pose2d);
         }
         state.lastEstimatorUpdateSeconds = now;
-        onPoseUpdated(state);
+        onPoseUpdated(state, now);
         return true;
     }
 
-    private boolean refreshPoseFromEstimator(PoseEstimatorState state) {
+    private boolean refreshPoseFromEstimator(PoseEstimatorState state, double nowSeconds) {
         if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
             PoseEstimator3d<T> estimator = state.estimator3d;
             if (estimator == null) {
@@ -1873,19 +2006,19 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             state.pose2d = estimator.getEstimatedPosition();
             state.pose3d = new Pose3d(state.pose2d);
         }
-        onPoseUpdated(state);
+        onPoseUpdated(state, nowSeconds);
         return true;
     }
 
-    private void onPoseUpdated(PoseEstimatorState state) {
+    private void onPoseUpdated(PoseEstimatorState state, double nowSeconds) {
         if (state == null) {
             return;
         }
         boolean isPrimary = state == getPrimaryPoseState();
-        Pose2d pose = state.pose2d != null ? state.pose2d : new Pose2d();
+        Pose2d pose = state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
         if (isPrimary) {
             setPrimaryPose(state);
-            updateVelocityTracking(pose);
+            updateVelocityTracking(pose, nowSeconds);
             RobotNetworkTables nt = robotNetworkTables;
             boolean fieldEnabled = nt != null && nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET);
             if (fieldEnabled) {
@@ -1901,12 +2034,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             }
         }
         if (isPrimary) {
-            updateHealthMetrics();
+            updateHealthMetrics(nowSeconds);
             RobotNetworkTables nt = robotNetworkTables;
             if (nt != null && nt.enabled(RobotNetworkTables.Flag.VISION_CAMERA_WIDGETS)) {
                 cameraManager.updateCameraVisualizations(vision, fieldPose);
             }
-            updateSlipState();
+            updateSlipState(nowSeconds);
             persistRobotState(false);
         }
     }
@@ -1915,7 +2048,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             PoseConfig config,
             PoseEstimatorState state,
             VisionCamera.VisionMeasurement measurement,
-            RobotLocalizationConfig.BackendConfig backend) {
+            RobotLocalizationConfig.BackendConfig backend,
+            double nowSeconds) {
         if (measurement == null) {
             return false;
         }
@@ -1927,8 +2061,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             return false;
         }
         Pose2d measurementPose = measurement.pose2d();
-        Pose2d referencePose = state.pose2d != null ? state.pose2d : new Pose2d();
-        if (!passesPoseJumpGuard(state, referencePose, measurementPose, false, backend)) {
+        Pose2d referencePose = state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
+        if (!passesPoseJumpGuard(state, referencePose, measurementPose, false, backend, nowSeconds)) {
             recordVisionSample(config, false);
             return false;
         }
@@ -1980,8 +2114,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             Pose2d referencePose,
             Pose2d measurementPose,
             boolean hasAgreement,
-            RobotLocalizationConfig.BackendConfig backend) {
-        double now = Timer.getFPGATimestamp();
+            RobotLocalizationConfig.BackendConfig backend,
+            double now) {
         if (!hasAgreement && now < state.poseJumpGuardUntilSeconds) {
             return false;
         }
@@ -2112,7 +2246,13 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 sumY / sumWeight,
                 new Rotation2d(Math.atan2(sumSin / sumWeight, sumCos / sumWeight)));
         Pose2d basePose = referencePose != null ? referencePose : new Pose2d();
-        if (!passesPoseJumpGuard(state, basePose, fusedPose, hasAgreement, backend)) {
+        if (!passesPoseJumpGuard(
+                state,
+                basePose,
+                fusedPose,
+                hasAgreement,
+                backend,
+                currentTimestampSeconds())) {
             return Optional.empty();
         }
         double fusedTimestamp = sumTimestamp / sumWeight;

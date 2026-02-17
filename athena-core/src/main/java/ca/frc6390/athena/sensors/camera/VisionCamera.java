@@ -152,6 +152,8 @@ public class VisionCamera {
     private double cachedYawDegrees = Double.NaN;
     private Optional<Translation2d> cachedCameraTranslation = Optional.empty();
     private List<TargetMeasurement> measurementCache = List.of();
+    private List<TargetMeasurement> measurementCacheSnapshot = List.of();
+    private List<TargetMeasurement> measurementCacheSnapshotSource = List.of();
     private double lastUpdateTimestampSeconds = Double.NaN;
     private Pose2d cachedPose = ZERO_POSE;
     private Pose3d cachedPose3d = ZERO_POSE3D;
@@ -370,6 +372,9 @@ public class VisionCamera {
         List<TargetMeasurement> measurements =
                 targetMeasurementsSupplier != null ? targetMeasurementsSupplier.get() : List.of();
         measurementCache = measurements != null && !measurements.isEmpty() ? measurements : List.of();
+        if (measurementCacheSnapshotSource != measurementCache) {
+            measurementCacheSnapshotSource = null;
+        }
         if (networkEstimatedPosePublisher != null) {
             networkEstimatedPosePublisher.set(cachedPose);
         }
@@ -824,7 +829,12 @@ public class VisionCamera {
      */
     public List<TargetMeasurement> getTargetMeasurements() {
         update();
-        return List.copyOf(measurementCache);
+        if (measurementCacheSnapshotSource != measurementCache) {
+            measurementCacheSnapshot =
+                    measurementCache.isEmpty() ? List.of() : List.copyOf(measurementCache);
+            measurementCacheSnapshotSource = measurementCache;
+        }
+        return measurementCacheSnapshot;
     }
 
     /**
@@ -877,8 +887,20 @@ public class VisionCamera {
      * with any localization metadata.
      */
     public Optional<TargetObservation> getLatestObservation(CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
-        List<TargetObservation> observations = getObservations(space, robotPose, tagPose);
-        return observations.isEmpty() ? Optional.empty() : Optional.of(observations.get(0));
+        update();
+        TargetMeasurement measurement = resolvePrimaryMeasurement();
+        if (measurement == null) {
+            return Optional.empty();
+        }
+        TargetObservation observation = buildObservation(
+                measurement,
+                space,
+                robotPose,
+                tagPose,
+                cachedPose,
+                createLocalizationData(),
+                cachedConfidence);
+        return observation != null ? Optional.of(observation) : Optional.empty();
     }
 
     /**
@@ -901,55 +923,23 @@ public class VisionCamera {
             measurements = List.of(fallback);
         }
 
-        Matrix<N3, N1> stdDevs =
-                recalculateStdDevs(
-                        cachedVisibleTargets,
-                        cachedAverageDistanceMeters,
-                        trustDistance);
         Pose2d vendorPose = cachedPose;
-        Pose2d safePose = cachedPose;
-        Pose3d safePose3d = cachedPose3d;
-        LocalizationData data =
-                new LocalizationData(safePose, safePose3d, cachedLatencySeconds, stdDevs);
+        LocalizationData data = createLocalizationData();
         double defaultConfidence = cachedConfidence;
 
         List<TargetObservation> observations = new ArrayList<>(measurements.size());
         for (TargetMeasurement measurement : measurements) {
-            Optional<Translation2d> cameraTranslationOpt = cameraTranslationFromMeasurement(measurement);
-            Optional<Translation2d> translatedOpt =
-                    cameraTranslationOpt.flatMap(
-                            ct ->
-                                    convertCameraTranslationToSpace(
-                                            ct, space, robotPose, vendorPose, tagPose, measurement.tagId()));
-            Translation2d translated = translatedOpt.orElse(null);
-
-            double yaw =
-                    measurement.yawDegrees() != null ? measurement.yawDegrees() : Double.NaN;
-            if (Double.isNaN(yaw) && cameraTranslationOpt.isPresent()) {
-                Translation2d ct = cameraTranslationOpt.get();
-                yaw = Math.toDegrees(-Math.atan2(ct.getY(), ct.getX()));
+            TargetObservation observation = buildObservation(
+                    measurement,
+                    space,
+                    robotPose,
+                    tagPose,
+                    vendorPose,
+                    data,
+                    defaultConfidence);
+            if (observation != null) {
+                observations.add(observation);
             }
-
-            double distance =
-                    measurement.distanceMeters() != null ? measurement.distanceMeters() : Double.NaN;
-            if (Double.isNaN(distance) && cameraTranslationOpt.isPresent()) {
-                distance = cameraTranslationOpt.get().getNorm();
-            }
-
-            double confidence =
-                    measurement.confidence() != null && !Double.isNaN(measurement.confidence())
-                            ? measurement.confidence()
-                            : defaultConfidence;
-
-            observations.add(
-                    new TargetObservation(
-                            measurement.tagId(),
-                            yaw,
-                            distance,
-                            translated,
-                            space,
-                            data,
-                            confidence));
         }
 
         return observations;
@@ -1048,11 +1038,70 @@ public class VisionCamera {
      * @param tagPose tag pose in field space when {@code CoordinateSpace.TAG} is requested
      */
     public Optional<Translation2d> getTargetTranslation(CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
-        List<TargetObservation> observations = getObservations(space, robotPose, tagPose);
-        if (observations.isEmpty()) {
+        update();
+        TargetMeasurement measurement = resolvePrimaryMeasurement();
+        if (measurement == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable(observations.get(0).translation());
+        Optional<Translation2d> cameraTranslation = cameraTranslationFromMeasurement(measurement);
+        if (cameraTranslation.isEmpty()) {
+            return Optional.empty();
+        }
+        return cameraTranslation.flatMap(ct ->
+                convertCameraTranslationToSpace(ct, space, robotPose, cachedPose, tagPose, measurement.tagId()));
+    }
+
+    private TargetMeasurement resolvePrimaryMeasurement() {
+        List<TargetMeasurement> measurements = measurementCache;
+        if (measurements != null && !measurements.isEmpty()) {
+            return measurements.get(0);
+        }
+        return buildFallbackMeasurement();
+    }
+
+    private TargetObservation buildObservation(
+            TargetMeasurement measurement,
+            CoordinateSpace space,
+            Pose2d robotPose,
+            Pose2d tagPose,
+            Pose2d vendorPose,
+            LocalizationData data,
+            double defaultConfidence) {
+        if (measurement == null) {
+            return null;
+        }
+        Optional<Translation2d> cameraTranslationOpt = cameraTranslationFromMeasurement(measurement);
+        Optional<Translation2d> translatedOpt =
+                cameraTranslationOpt.flatMap(
+                        ct ->
+                                convertCameraTranslationToSpace(
+                                        ct, space, robotPose, vendorPose, tagPose, measurement.tagId()));
+        Translation2d translated = translatedOpt.orElse(null);
+
+        double yaw = measurement.yawDegrees() != null ? measurement.yawDegrees() : Double.NaN;
+        if (Double.isNaN(yaw) && cameraTranslationOpt.isPresent()) {
+            Translation2d ct = cameraTranslationOpt.get();
+            yaw = Math.toDegrees(-Math.atan2(ct.getY(), ct.getX()));
+        }
+
+        double distance = measurement.distanceMeters() != null ? measurement.distanceMeters() : Double.NaN;
+        if (Double.isNaN(distance) && cameraTranslationOpt.isPresent()) {
+            distance = cameraTranslationOpt.get().getNorm();
+        }
+
+        double confidence =
+                measurement.confidence() != null && !Double.isNaN(measurement.confidence())
+                        ? measurement.confidence()
+                        : defaultConfidence;
+
+        return new TargetObservation(
+                measurement.tagId(),
+                yaw,
+                distance,
+                translated,
+                space,
+                data,
+                confidence);
     }
 
     /**

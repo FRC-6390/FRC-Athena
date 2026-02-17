@@ -46,8 +46,8 @@ public class SwerveDrivetrainSimulation {
         double omega = measured.omegaRadiansPerSecond;
 
         // Apply traction-limited acceleration to avoid unrealistic jumps in sim.
-        double tractionScaleAccel = 0.5; // conservative to better match practice carpet behavior
-        double tractionScaleDecel = 1.0; // allow stronger braking than acceleration
+        double tractionScaleAccel = 0.8; // keep sim responsive while still traction-limited
+        double tractionScaleDecel = 1.1; // allow slightly stronger braking than acceleration
         double maxAccel = Math.max(0.0, tractionScaleAccel * config.getWheelCoefficientOfFriction() * 9.81); // m/s^2
         double maxDecel = Math.max(0.0, tractionScaleDecel * config.getWheelCoefficientOfFriction() * 9.81); // m/s^2
         double dvx = vx - lastChassisSpeeds.vxMetersPerSecond;

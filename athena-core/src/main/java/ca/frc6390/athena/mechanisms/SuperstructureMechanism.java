@@ -21,6 +21,8 @@ import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -97,9 +99,24 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private SP queuedSetpoint;
     private SP lastAppliedSetpoint;
     private S prevState;
+    private String ntLastRequestedState = "";
+    private String ntLastQueuedState = "";
+    private boolean ntLastClearQueue = false;
+    private String ntCommandsPath;
+    private NetworkTableEntry ntRequestStateEntry;
+    private NetworkTableEntry ntQueueStateEntry;
+    private NetworkTableEntry ntClearQueueEntry;
     private final BoundedEventLog<DiagnosticsChannel.Event> diagnosticsLog =
             new BoundedEventLog<>(DIAGNOSTIC_LOG_CAPACITY);
     private final DiagnosticsView diagnosticsView = new DiagnosticsView();
+    private final StateMachineSection<S, SP> stateMachineSection;
+    private final InputSection inputSection;
+    private final ChildrenSection<SP> childrenSection;
+    private final NetworkTablesSection networkTablesSection;
+    private final SuperstructureMechanismsView<SP> mechanismsView;
+    private final List<Mechanism> flattenedMechanisms;
+    private final List<SuperstructureMechanism<?, ?>> flattenedSuperstructures;
+    private final int flattenedMechanismCount;
     private static final int DIAGNOSTIC_LOG_CAPACITY = 256;
 
     SuperstructureMechanism(S initialState,
@@ -152,6 +169,18 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         this.stateMachine = new StateMachine<>(initialState, this::childrenAtGoalsInternal);
         this.stateMachine.setAtStateDelay(stateMachineDelaySeconds);
         this.context = new SuperstructureContextImpl();
+        this.stateMachineSection = new StateMachineSection<>(this);
+        this.inputSection = new InputSection(this);
+        this.childrenSection = new ChildrenSection<>(this);
+        this.networkTablesSection = new NetworkTablesSection(this);
+        this.mechanismsView = new MechanismsView();
+        List<Mechanism> allMechanisms = new ArrayList<>();
+        flattenMechanisms(allMechanisms, this);
+        this.flattenedMechanisms = List.copyOf(allMechanisms);
+        this.flattenedMechanismCount = this.flattenedMechanisms.size();
+        List<SuperstructureMechanism<?, ?>> allSuperstructures = new ArrayList<>();
+        flattenSuperstructures(allSuperstructures, this);
+        this.flattenedSuperstructures = List.copyOf(allSuperstructures);
         lastAppliedSetpoint = initialState.getSetpoint();
         applySetpoints(lastAppliedSetpoint);
         this.prevState = initialState;
@@ -159,46 +188,57 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
     public SuperstructureMechanism<S, SP> stateMachine(Consumer<StateMachineSection<S, SP>> section) {
         if (section != null) {
-            section.accept(stateMachine());
+            section.accept(stateMachineSection);
         }
         return this;
     }
 
     public StateMachineSection<S, SP> stateMachine() {
-        return new StateMachineSection<>(this);
+        return stateMachineSection;
     }
 
     public SuperstructureMechanism<S, SP> input(Consumer<InputSection> section) {
         if (section != null) {
-            section.accept(input());
+            section.accept(inputSection);
         }
         return this;
     }
 
     public InputSection input() {
-        return new InputSection(this);
+        return inputSection;
     }
 
     public SuperstructureMechanism<S, SP> children(Consumer<ChildrenSection<SP>> section) {
         if (section != null) {
-            section.accept(children());
+            section.accept(childrenSection);
         }
         return this;
     }
 
     public ChildrenSection<SP> children() {
-        return new ChildrenSection<>(this);
+        return childrenSection;
+    }
+
+    public SuperstructureMechanism<S, SP> mechanisms(Consumer<SuperstructureMechanismsView<SP>> section) {
+        if (section != null) {
+            section.accept(mechanismsView);
+        }
+        return this;
+    }
+
+    public SuperstructureMechanismsView<SP> mechanisms() {
+        return mechanismsView;
     }
 
     public SuperstructureMechanism<S, SP> networkTables(Consumer<NetworkTablesSection> section) {
         if (section != null) {
-            section.accept(networkTables());
+            section.accept(networkTablesSection);
         }
         return this;
     }
 
     public NetworkTablesSection networkTables() {
-        return new NetworkTablesSection(this);
+        return networkTablesSection;
     }
 
     public DiagnosticsView diagnostics() {
@@ -445,13 +485,9 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         meta.putString("type", "Superstructure");
         meta.putString("owner", "");
         meta.putString("hint",
-                "Enable " + node.path() + "/NetworkTableConfig/Details and section flags to publish more topics.");
+                "Enable section flags under " + node.path() + "/NetworkTableConfig to publish more topics.");
 
-        RobotNetworkTables.MechanismToggles toggles = nt.mechanismConfig(node);
-        boolean details = toggles.detailsEnabled();
-        if (!details) {
-            return node;
-        }
+        RobotNetworkTables.MechanismToggles toggles = nt.superstructureConfig(node);
 
         if (toggles.controlEnabled()) {
             stateMachine.networkTables(node.child("Control").child("StateMachine"));
@@ -523,7 +559,113 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             }
             // Object inputs are not automatically published (type-dependent).
         }
+        if (toggles.controlEnabled()) {
+            processNetworkTableCommands(node);
+        }
+        publishNestedSuperstructures(node);
         return node;
+    }
+
+    private void publishNestedSuperstructures(RobotNetworkTables.Node node) {
+        for (Child<SP, ?> child : children) {
+            if (child == null || child.superstructure == null) {
+                continue;
+            }
+            SuperstructureMechanism<?, ?> nested = child.superstructure;
+            String nestedName = nested.getName();
+            if (nestedName == null || nestedName.isBlank()) {
+                nestedName = nested.getClass().getSimpleName();
+            }
+            nested.networkTables(node.child(nestedName));
+        }
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private void processNetworkTableCommands(RobotNetworkTables.Node node) {
+        if (node == null) {
+            return;
+        }
+        RobotNetworkTables.Node commands = node.child("Control").child("Commands");
+        ensureNetworkTableCommandEntries(commands);
+        String requestState = ntRequestStateEntry.getString("").trim();
+        if (!requestState.isEmpty() && !requestState.equals(ntLastRequestedState)) {
+            S parsed = parseStateName(requestState);
+            if (parsed != null) {
+                requestStateInternal(parsed);
+            }
+            ntLastRequestedState = requestState;
+            ntRequestStateEntry.setString("");
+            ntLastRequestedState = "";
+        }
+
+        String queueState = ntQueueStateEntry.getString("").trim();
+        if (!queueState.isEmpty() && !queueState.equals(ntLastQueuedState)) {
+            S parsed = parseStateName(queueState);
+            if (parsed != null) {
+                queueStateInternal(parsed);
+            }
+            ntLastQueuedState = queueState;
+            ntQueueStateEntry.setString("");
+            ntLastQueuedState = "";
+        }
+
+        boolean clearQueue = ntClearQueueEntry.getBoolean(false);
+        if (clearQueue && !ntLastClearQueue) {
+            clearStateMachineInternal();
+            ntClearQueueEntry.setBoolean(false);
+            ntLastClearQueue = false;
+            return;
+        }
+        ntLastClearQueue = clearQueue;
+    }
+
+    private void ensureNetworkTableCommandEntries(RobotNetworkTables.Node commands) {
+        String path = commands.path();
+        boolean samePath = (path == null && ntCommandsPath == null)
+                || (path != null && path.equals(ntCommandsPath));
+        if (samePath
+                && ntRequestStateEntry != null
+                && ntQueueStateEntry != null
+                && ntClearQueueEntry != null) {
+            return;
+        }
+        ntCommandsPath = path;
+        ntRequestStateEntry = commands.entry("RequestState");
+        ntQueueStateEntry = commands.entry("QueueState");
+        ntClearQueueEntry = commands.entry("ClearQueue");
+        initIfAbsent(ntRequestStateEntry, "");
+        initIfAbsent(ntQueueStateEntry, "");
+        initIfAbsent(ntClearQueueEntry, false);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private S parseStateName(String stateName) {
+        if (stateName == null || stateName.isBlank()) {
+            return null;
+        }
+        S current = stateMachine.getGoalState();
+        if (current == null) {
+            return null;
+        }
+        Class enumType = current.getDeclaringClass();
+        try {
+            return (S) Enum.valueOf(enumType, stateName.trim());
+        } catch (IllegalArgumentException ex) {
+            appendDiagnosticLog("WARN", "networkTables", "unknown state command '" + stateName + "'");
+            return null;
+        }
+    }
+
+    private static void initIfAbsent(NetworkTableEntry entry, boolean value) {
+        if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+            entry.setBoolean(value);
+        }
+    }
+
+    private static void initIfAbsent(NetworkTableEntry entry, String value) {
+        if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+            entry.setString(value != null ? value : "");
+        }
     }
 
     /**
@@ -543,10 +685,10 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     /**
      * Typed accessors for common mechanism subclasses.
      */
-        private final class MechanismsView implements SuperstructureMechanismsView<SP> {
-            @SuppressWarnings("unchecked")
-            @Override
-            public <E extends Enum<E> & SetpointProvider<Double>> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
+    private final class MechanismsView implements SuperstructureMechanismsView<SP> {
+        @SuppressWarnings("unchecked")
+        @Override
+        public <E extends Enum<E> & SetpointProvider<Double>> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof StatefulArmMechanism<?>) {
                 return (StatefulArmMechanism<E>) mech;
@@ -669,9 +811,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
          */
         @Override
         public List<Mechanism> all() {
-            List<Mechanism> list = new ArrayList<>();
-            flattenMechanisms(list, SuperstructureMechanism.this);
-            return list;
+            return flattenedMechanisms;
         }
 
         /**
@@ -691,18 +831,12 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             this.owner = owner;
         }
 
-        public SuperstructureMechanismsView<SP> mechanisms() {
-            return owner.new MechanismsView();
-        }
-
         public List<Mechanism> all() {
-            return mechanisms().all();
+            return owner.flattenedMechanisms;
         }
 
         public List<SuperstructureMechanism<?, ?>> superstructures() {
-            List<SuperstructureMechanism<?, ?>> out = new ArrayList<>();
-            flattenSuperstructures(out, owner);
-            return out;
+            return owner.flattenedSuperstructures;
         }
 
         public <T> T key(String name, Class<T> type) {
@@ -914,10 +1048,10 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("name", getName());
         summary.put("systemKey", diagnosticsSystemKey());
-        Enum<?> state = stateMachine().goal();
+        Enum<?> state = stateMachine.getGoalState();
         summary.put("state", state != null ? state.name() : "");
-        summary.put("atGoal", stateMachine().atGoal());
-        summary.put("childMechanismCount", children().all().size());
+        summary.put("atGoal", stateMachine.atGoalState());
+        summary.put("childMechanismCount", flattenedMechanismCount);
         summary.put("logCount", diagnosticLogCount());
         return summary;
     }
@@ -1362,7 +1496,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
 
         @Override
         public SuperstructureMechanismsView<SP> mechanisms() {
-            return SuperstructureMechanism.this.children().mechanisms();
+            return SuperstructureMechanism.this.mechanisms();
         }
 
         @Override

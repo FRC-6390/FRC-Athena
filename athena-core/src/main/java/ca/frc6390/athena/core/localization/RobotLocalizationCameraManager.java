@@ -20,6 +20,7 @@ import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.networktables.StructPublisher;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 
@@ -33,6 +34,9 @@ final class RobotVisionCameraManager {
 
     private static final Pose2d ZERO_POSE = new Pose2d();
     private static final java.util.List<Pose2d> EMPTY_POSES = java.util.List.of();
+    private static final double CAMERA_CONFIG_SYNC_PERIOD_SECONDS = 0.25;
+    private static final double STD_THETA_EPSILON_RAD = Math.toRadians(0.01);
+    private static final double TAG_LINE_POSE_EPSILON_METERS = 1e-6;
 
     private final double stdEpsilon;
     private final Field2d field;
@@ -155,7 +159,7 @@ final class RobotVisionCameraManager {
                 .publish();
         estimatedPosePublisher.set(ZERO_POSE);
 
-        return new CameraDisplayState(
+        CameraDisplayState state = new CameraDisplayState(
                 key,
                 showCameraPoseEntry,
                 showTagLinesEntry,
@@ -173,9 +177,37 @@ final class RobotVisionCameraManager {
                 tagLineObject,
                 cameraPosePublisher,
                 estimatedPosePublisher);
+        state.useForLocalizationMirrored = true;
+        state.lastUseForLocalizationValue = defaultUseForLocalization;
+        state.trustDistanceMirrored = true;
+        state.lastTrustDistanceValue = trustDistance;
+        state.singleStdXMirrored = true;
+        state.lastSingleStdXValue = singleStdX;
+        state.singleStdYMirrored = true;
+        state.lastSingleStdYValue = singleStdY;
+        state.singleStdThetaMirrored = true;
+        state.lastSingleStdThetaDegValue = singleStdThetaDeg;
+        state.multiStdXMirrored = true;
+        state.lastMultiStdXValue = multiStdX;
+        state.multiStdYMirrored = true;
+        state.lastMultiStdYValue = multiStdY;
+        state.multiStdThetaMirrored = true;
+        state.lastMultiStdThetaDegValue = multiStdThetaDeg;
+        return state;
     }
 
     private void applyCameraConfigUpdates(CameraDisplayState state, VisionCamera camera, RobotVision vision) {
+        if (state == null || camera == null) {
+            return;
+        }
+        double nowSeconds = Timer.getFPGATimestamp();
+        if (Double.isFinite(nowSeconds)
+                && Double.isFinite(state.lastConfigSyncSeconds)
+                && nowSeconds - state.lastConfigSyncSeconds < CAMERA_CONFIG_SYNC_PERIOD_SECONDS) {
+            return;
+        }
+        state.lastConfigSyncSeconds = nowSeconds;
+
         boolean currentUse = camera.isUseForLocalization();
         boolean desiredUse = state.useForLocalizationEntry != null
                 ? state.useForLocalizationEntry.getBoolean(currentUse)
@@ -187,9 +219,7 @@ final class RobotVisionCameraManager {
                 camera.config().useForLocalization(desiredUse);
             }
         }
-        if (state.useForLocalizationEntry != null) {
-            state.useForLocalizationEntry.setBoolean(desiredUse);
-        }
+        mirrorUseForLocalization(state, camera.isUseForLocalization());
 
         double currentTrust = camera.getTrustDistance();
         double desiredTrust = state.trustDistanceEntry != null
@@ -198,9 +228,7 @@ final class RobotVisionCameraManager {
         if (Math.abs(desiredTrust - currentTrust) > stdEpsilon) {
             camera.config().trustDistance(desiredTrust);
         }
-        if (state.trustDistanceEntry != null) {
-            state.trustDistanceEntry.setDouble(camera.getTrustDistance());
-        }
+        mirrorTrustDistance(state, camera.getTrustDistance());
 
         Matrix<N3, N1> singleStd = camera.getSingleStdDev();
         double desiredSingleX = sanitizeStdDev(state.singleStdXEntry.getDouble(singleStd.get(0, 0)));
@@ -210,10 +238,12 @@ final class RobotVisionCameraManager {
         double desiredSingleThetaRad = Math.toRadians(desiredSingleThetaDeg);
         if (Math.abs(desiredSingleX - singleStd.get(0, 0)) > stdEpsilon
                 || Math.abs(desiredSingleY - singleStd.get(1, 0)) > stdEpsilon
-                || Math.abs(desiredSingleThetaRad - singleStd.get(2, 0)) > Math.toRadians(0.01)) {
+                || Math.abs(desiredSingleThetaRad - singleStd.get(2, 0)) > STD_THETA_EPSILON_RAD) {
             Matrix<N3, N1> updatedSingle = VecBuilder.fill(desiredSingleX, desiredSingleY, desiredSingleThetaRad);
             camera.config().singleStdDevs(updatedSingle);
         }
+        Matrix<N3, N1> appliedSingle = camera.getSingleStdDev();
+        mirrorSingleStdDevs(state, appliedSingle);
 
         Matrix<N3, N1> multiStd = camera.getMultiStdDev();
         double desiredMultiX = sanitizeStdDev(state.multiStdXEntry.getDouble(multiStd.get(0, 0)));
@@ -223,9 +253,87 @@ final class RobotVisionCameraManager {
         double desiredMultiThetaRad = Math.toRadians(desiredMultiThetaDeg);
         if (Math.abs(desiredMultiX - multiStd.get(0, 0)) > stdEpsilon
                 || Math.abs(desiredMultiY - multiStd.get(1, 0)) > stdEpsilon
-                || Math.abs(desiredMultiThetaRad - multiStd.get(2, 0)) > Math.toRadians(0.01)) {
+                || Math.abs(desiredMultiThetaRad - multiStd.get(2, 0)) > STD_THETA_EPSILON_RAD) {
             Matrix<N3, N1> updatedMulti = VecBuilder.fill(desiredMultiX, desiredMultiY, desiredMultiThetaRad);
             camera.config().multiStdDevs(updatedMulti);
+        }
+        Matrix<N3, N1> appliedMulti = camera.getMultiStdDev();
+        mirrorMultiStdDevs(state, appliedMulti);
+    }
+
+    private void mirrorUseForLocalization(CameraDisplayState state, boolean value) {
+        if (state.useForLocalizationEntry == null) {
+            return;
+        }
+        if (!state.useForLocalizationMirrored || state.lastUseForLocalizationValue != value) {
+            state.useForLocalizationEntry.setBoolean(value);
+            state.lastUseForLocalizationValue = value;
+            state.useForLocalizationMirrored = true;
+        }
+    }
+
+    private void mirrorTrustDistance(CameraDisplayState state, double value) {
+        if (state.trustDistanceEntry == null) {
+            return;
+        }
+        if (!state.trustDistanceMirrored || Math.abs(state.lastTrustDistanceValue - value) > stdEpsilon) {
+            state.trustDistanceEntry.setDouble(value);
+            state.lastTrustDistanceValue = value;
+            state.trustDistanceMirrored = true;
+        }
+    }
+
+    private void mirrorSingleStdDevs(CameraDisplayState state, Matrix<N3, N1> singleStd) {
+        if (singleStd == null) {
+            return;
+        }
+        double singleX = sanitizeStdDev(singleStd.get(0, 0));
+        if (state.singleStdXEntry != null
+                && (!state.singleStdXMirrored || Math.abs(state.lastSingleStdXValue - singleX) > stdEpsilon)) {
+            state.singleStdXEntry.setDouble(singleX);
+            state.lastSingleStdXValue = singleX;
+            state.singleStdXMirrored = true;
+        }
+        double singleY = sanitizeStdDev(singleStd.get(1, 0));
+        if (state.singleStdYEntry != null
+                && (!state.singleStdYMirrored || Math.abs(state.lastSingleStdYValue - singleY) > stdEpsilon)) {
+            state.singleStdYEntry.setDouble(singleY);
+            state.lastSingleStdYValue = singleY;
+            state.singleStdYMirrored = true;
+        }
+        double singleThetaDeg = Math.toDegrees(singleStd.get(2, 0));
+        if (state.singleStdThetaDegEntry != null
+                && (!state.singleStdThetaMirrored || Math.abs(state.lastSingleStdThetaDegValue - singleThetaDeg) > 0.01)) {
+            state.singleStdThetaDegEntry.setDouble(singleThetaDeg);
+            state.lastSingleStdThetaDegValue = singleThetaDeg;
+            state.singleStdThetaMirrored = true;
+        }
+    }
+
+    private void mirrorMultiStdDevs(CameraDisplayState state, Matrix<N3, N1> multiStd) {
+        if (multiStd == null) {
+            return;
+        }
+        double multiX = sanitizeStdDev(multiStd.get(0, 0));
+        if (state.multiStdXEntry != null
+                && (!state.multiStdXMirrored || Math.abs(state.lastMultiStdXValue - multiX) > stdEpsilon)) {
+            state.multiStdXEntry.setDouble(multiX);
+            state.lastMultiStdXValue = multiX;
+            state.multiStdXMirrored = true;
+        }
+        double multiY = sanitizeStdDev(multiStd.get(1, 0));
+        if (state.multiStdYEntry != null
+                && (!state.multiStdYMirrored || Math.abs(state.lastMultiStdYValue - multiY) > stdEpsilon)) {
+            state.multiStdYEntry.setDouble(multiY);
+            state.lastMultiStdYValue = multiY;
+            state.multiStdYMirrored = true;
+        }
+        double multiThetaDeg = Math.toDegrees(multiStd.get(2, 0));
+        if (state.multiStdThetaDegEntry != null
+                && (!state.multiStdThetaMirrored || Math.abs(state.lastMultiStdThetaDegValue - multiThetaDeg) > 0.01)) {
+            state.multiStdThetaDegEntry.setDouble(multiThetaDeg);
+            state.lastMultiStdThetaDegValue = multiThetaDeg;
+            state.multiStdThetaMirrored = true;
         }
     }
 
@@ -286,8 +394,27 @@ final class RobotVisionCameraManager {
             return;
         }
         Translation2d targetFieldTranslation = observation.translation();
-        Pose2d tagPose = new Pose2d(targetFieldTranslation, new Rotation2d());
+        Pose2d tagPose = resolveTagLinePose(state, targetFieldTranslation);
         state.visionTagLineObject.setPoses(cameraPose, tagPose);
+    }
+
+    private Pose2d resolveTagLinePose(CameraDisplayState state, Translation2d translation) {
+        if (state == null || translation == null) {
+            return ZERO_POSE;
+        }
+        double x = translation.getX();
+        double y = translation.getY();
+        Pose2d cached = state.cachedTagLinePose;
+        if (cached != null
+                && Math.abs(x - state.cachedTagLineX) <= TAG_LINE_POSE_EPSILON_METERS
+                && Math.abs(y - state.cachedTagLineY) <= TAG_LINE_POSE_EPSILON_METERS) {
+            return cached;
+        }
+        Pose2d updated = new Pose2d(x, y, Rotation2d.kZero);
+        state.cachedTagLinePose = updated;
+        state.cachedTagLineX = x;
+        state.cachedTagLineY = y;
+        return updated;
     }
 
     private static NetworkTableEntry initIfAbsent(NetworkTableEntry entry, boolean defaultValue) {
@@ -322,6 +449,26 @@ final class RobotVisionCameraManager {
         final FieldObject2d visionTagLineObject;
         final StructPublisher<Pose2d> cameraPosePublisher;
         final StructPublisher<Pose2d> estimatedPosePublisher;
+        double lastConfigSyncSeconds = Double.NEGATIVE_INFINITY;
+        boolean useForLocalizationMirrored;
+        boolean lastUseForLocalizationValue;
+        boolean trustDistanceMirrored;
+        double lastTrustDistanceValue = Double.NaN;
+        boolean singleStdXMirrored;
+        double lastSingleStdXValue = Double.NaN;
+        boolean singleStdYMirrored;
+        double lastSingleStdYValue = Double.NaN;
+        boolean singleStdThetaMirrored;
+        double lastSingleStdThetaDegValue = Double.NaN;
+        boolean multiStdXMirrored;
+        double lastMultiStdXValue = Double.NaN;
+        boolean multiStdYMirrored;
+        double lastMultiStdYValue = Double.NaN;
+        boolean multiStdThetaMirrored;
+        double lastMultiStdThetaDegValue = Double.NaN;
+        Pose2d cachedTagLinePose;
+        double cachedTagLineX = Double.NaN;
+        double cachedTagLineY = Double.NaN;
 
         CameraDisplayState(
                 String key,
