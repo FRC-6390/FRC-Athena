@@ -155,10 +155,11 @@ public class SwerveModule implements RobotSendableDevice {
         }
 
         public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
-            Translation2d FRONT_LEFT = new Translation2d(trackwidth/2, wheelbase/2);
-            Translation2d FRONT_RIGHT = new Translation2d(trackwidth/2, -wheelbase/2);
-            Translation2d BACK_LEFT = new Translation2d(-trackwidth/2, wheelbase/2);
-            Translation2d BACK_RIGHT = new Translation2d(-trackwidth/2, -wheelbase/2);
+            // WPILib chassis convention: +X forward (wheelbase), +Y left (trackwidth).
+            Translation2d FRONT_LEFT = new Translation2d(wheelbase/2, trackwidth/2);
+            Translation2d FRONT_RIGHT = new Translation2d(wheelbase/2, -trackwidth/2);
+            Translation2d BACK_LEFT = new Translation2d(-wheelbase/2, trackwidth/2);
+            Translation2d BACK_RIGHT = new Translation2d(-wheelbase/2, -trackwidth/2);
             return new Translation2d[]{FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT};
         }
 
