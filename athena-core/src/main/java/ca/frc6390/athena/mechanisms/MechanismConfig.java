@@ -1309,6 +1309,17 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
+        /**
+         * Registers a hook that runs once when any motor enters a stalled condition.
+         *
+         * <p>Semantics: fires on the rising edge (not stalled -> stalled) to avoid repeated callbacks
+         * while the mechanism remains stalled.</p>
+         */
+        public HooksSection<T> onStall(Consumer<T> hook) {
+            owner.periodicHooks.add(stallEdgeHook(hook));
+            return this;
+        }
+
         public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onInit(MechanismBinding<T, E> binding) {
             owner.addLifecycleBinding(RobotCoreHooks.Phase.ROBOT_INIT, (MechanismBinding<T, ?>) binding, List.of());
             return this;
@@ -1317,6 +1328,16 @@ public class MechanismConfig<T extends Mechanism> {
         public HooksSection<T> onRobotPeriodic(Consumer<T> hook, double periodMs) {
             Objects.requireNonNull(hook, "hook");
             owner.periodicHookBindings.add(new PeriodicHookBinding<>(hook, periodMs));
+            return this;
+        }
+
+        /**
+         * Registers a stall hook sampled on a fixed cadence.
+         *
+         * <p>Semantics: fires on the rising edge (not stalled -> stalled).</p>
+         */
+        public HooksSection<T> onStall(Consumer<T> hook, double periodMs) {
+            owner.periodicHookBindings.add(new PeriodicHookBinding<>(stallEdgeHook(hook), periodMs));
             return this;
         }
 
@@ -1367,6 +1388,18 @@ public class MechanismConfig<T extends Mechanism> {
                 action.accept(mech);
                 return true;
             }, states);
+        }
+
+        private Consumer<T> stallEdgeHook(Consumer<T> hook) {
+            Objects.requireNonNull(hook, "hook");
+            final boolean[] wasStalled = {false};
+            return mechanism -> {
+                boolean stalled = mechanism.motors().device().isStalling();
+                if (stalled && !wasStalled[0]) {
+                    hook.accept(mechanism);
+                }
+                wasStalled[0] = stalled;
+            };
         }
     }
 

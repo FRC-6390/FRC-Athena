@@ -1130,6 +1130,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return owner.motors.allMotorsConnected();
         }
 
+        public boolean isStalling() {
+            return owner.motors.isStalling();
+        }
+
         public double averageTemperatureCelsius() {
             return owner.motors.getAverageTemperatureCelsius();
         }
@@ -1154,6 +1158,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         public boolean allConnected() {
             return owner.motors.allMotorsConnected();
+        }
+
+        public boolean isStalling() {
+            return owner.motors.isStalling();
         }
 
         public double averageTemperatureCelsius() {

@@ -131,6 +131,18 @@ public class MotorControllerGroup implements RobotSendableDevice {
         return true;
     }
 
+    /**
+     * Returns true when any motor controller in the group reports a stalled condition.
+     */
+    public boolean isStalling() {
+        for (MotorController controller : controllers) {
+            if (controller != null && controller.isStalled()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public void update() {
         for (MotorController controller : controllers) {
             controller.update();
