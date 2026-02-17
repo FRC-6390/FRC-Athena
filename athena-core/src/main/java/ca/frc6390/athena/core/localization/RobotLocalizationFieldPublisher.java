@@ -28,6 +28,7 @@ final class RobotLocalizationFieldPublisher {
     private FieldObject2d plannedPathObject;
     private FieldObject2d actualPathObject;
     private final Map<String, FieldObject2d> boundingBoxObjects = new HashMap<>();
+    private final Map<String, FieldObject2d> namedPoseObjects = new HashMap<>();
     private final Map<String, List<Pose2d>> boundingBoxPathCache = new HashMap<>();
     private final Map<String, PoseBoundingBox2d> boundingBoxPathSources = new HashMap<>();
     private final ArrayDeque<Pose2d> actualPathPoses = new ArrayDeque<>();
@@ -73,6 +74,40 @@ final class RobotLocalizationFieldPublisher {
 
     void clearRobotPose() {
         field.getObject("Robot").setPoses(EMPTY_POSES);
+    }
+
+    void setNamedPoses(Map<String, Pose2d> poses) {
+        if (poses == null || poses.isEmpty()) {
+            clearNamedPoses();
+            return;
+        }
+
+        namedPoseObjects.entrySet().removeIf(entry -> {
+            if (poses.containsKey(entry.getKey())) {
+                return false;
+            }
+            entry.getValue().setPoses(EMPTY_POSES);
+            return true;
+        });
+
+        for (Map.Entry<String, Pose2d> entry : poses.entrySet()) {
+            String key = entry.getKey();
+            Pose2d pose = entry.getValue();
+            if (key == null || key.isBlank() || pose == null) {
+                continue;
+            }
+            FieldObject2d object = namedPoseObjects.computeIfAbsent(
+                    key,
+                    id -> field.getObject("Poses/" + id));
+            object.setPose(pose);
+        }
+    }
+
+    void clearNamedPoses() {
+        for (FieldObject2d object : namedPoseObjects.values()) {
+            object.setPoses(EMPTY_POSES);
+        }
+        namedPoseObjects.clear();
     }
 
     void setBoundingBoxes(Map<String, PoseBoundingBox2d> boxes) {

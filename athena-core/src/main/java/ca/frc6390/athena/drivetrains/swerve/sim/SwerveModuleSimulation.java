@@ -110,16 +110,6 @@ public class SwerveModuleSimulation {
         double drivePercent = MathUtil.clamp(module.getDriveCommandPercent(), -1.0, 1.0);
         double steerPercent = MathUtil.clamp(module.getSteerCommandPercent(), -1.0, 1.0);
 
-        // Keep sim dynamics aligned with hardware behavior by honoring configured motor inversion.
-        MotorControllerConfig driveCfg = config.driveMotor();
-        if (driveCfg != null && driveCfg.inverted()) {
-            drivePercent = -drivePercent;
-        }
-        MotorControllerConfig steerCfg = config.rotationMotor();
-        if (steerCfg != null && steerCfg.inverted()) {
-            steerPercent = -steerPercent;
-        }
-
         driveSim.setInputVoltage(drivePercent * nominalVoltage);
         steerSim.setInputVoltage(steerPercent * nominalVoltage);
 

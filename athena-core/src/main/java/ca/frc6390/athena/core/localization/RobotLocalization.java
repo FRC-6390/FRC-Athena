@@ -108,6 +108,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private final Map<String, PoseBoundingBox2d> boundingBoxMetadataPublished = new HashMap<>();
     private final Map<String, Boolean> boundingBoxContainsPublished = new HashMap<>();
     private final Map<String, Pose2d[]> boundingBoxTrajectoryPublished = new HashMap<>();
+    private final Map<String, Pose2d> fieldPoseObjectsBuffer = new LinkedHashMap<>();
     private int boundingBoxPublishCycle = 0;
     private String primaryPoseName;
     private boolean slipActive = false;
@@ -1660,8 +1661,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             }
             fieldPublisher.setRobotPose(pose);
             fieldPublisher.setBoundingBoxes(namedBoundingBoxes);
+            fieldPublisher.setNamedPoses(collectFieldPoses());
         } else {
             fieldPublisher.clearBoundingBoxes();
+            fieldPublisher.clearNamedPoses();
         }
 
         if (nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_HEALTH_WIDGETS)) {
@@ -1673,6 +1676,21 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
 
         return node;
+    }
+
+    private Map<String, Pose2d> collectFieldPoses() {
+        fieldPoseObjectsBuffer.clear();
+        for (Map.Entry<String, PoseConfig> entry : poseConfigs.entrySet()) {
+            if (entry == null || entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            PoseEstimatorState state = poseStates.get(entry.getKey());
+            if (state == null || state.pose2d == null) {
+                continue;
+            }
+            fieldPoseObjectsBuffer.put(entry.getKey(), state.pose2d);
+        }
+        return fieldPoseObjectsBuffer;
     }
 
     private void ensureHealthNetworkEntries() {
