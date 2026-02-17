@@ -285,6 +285,8 @@ public class SwerveDrivetrain extends SubsystemBase
     double omega = speed.omegaRadiansPerSecond;
     boolean stationary = vx == 0.0 && vy == 0.0 && omega == 0.0;
 
+    SwerveModuleState[] calculatedStates = stationary ? null : kinematics.toSwerveModuleStates(speed);
+
     for (int i = 0; i < states.length; i++) {
       SwerveModuleState state = states[i];
       if (stationary) {
@@ -292,16 +294,12 @@ public class SwerveDrivetrain extends SubsystemBase
         continue;
       }
 
-      Translation2d module = moduleLocations[i];
-      double moduleVx = vx - omega * module.getY();
-      double moduleVy = vy + omega * module.getX();
-      double moduleSpeed = Math.hypot(moduleVx, moduleVy);
-
-      state.speedMetersPerSecond = moduleSpeed;
-      if (moduleSpeed > MODULE_HEADING_EPSILON) {
-        double desiredAngleRadians = Math.atan2(moduleVy, moduleVx);
+      SwerveModuleState calculated = calculatedStates[i];
+      state.speedMetersPerSecond = calculated.speedMetersPerSecond;
+      if (state.speedMetersPerSecond > MODULE_HEADING_EPSILON) {
+        double desiredAngleRadians = calculated.angle.getRadians();
         if (angleNeedsUpdate(state.angle, desiredAngleRadians)) {
-          state.angle = Rotation2d.fromRadians(desiredAngleRadians);
+          state.angle = calculated.angle;
         }
       }
     }

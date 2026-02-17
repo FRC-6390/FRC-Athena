@@ -194,6 +194,13 @@ public class VirtualImu implements Imu {
         return Rotation2d.fromRadians(-value.getRadians());
     }
 
+    private Rotation2d removeSimInversion(Rotation2d value) {
+        if (value == null || !inverted) {
+            return value;
+        }
+        return Rotation2d.fromRadians(-value.getRadians());
+    }
+
     @Override
     public void update() {
         if (!useSimulatedReadings) {
@@ -211,12 +218,13 @@ public class VirtualImu implements Imu {
     @Override
     public void setSimulatedReadings(Rotation2d yaw, Rotation2d pitch, Rotation2d roll,
                                      Rotation2d velX, Rotation2d velY, Rotation2d velZ) {
-        simYaw = yaw;
-        simPitch = pitch;
-        simRoll = roll;
-        simVelX = velX;
-        simVelY = velY;
-        simVelZ = velZ;
+        // Store simulated values in raw-sensor frame so getters can apply inversion exactly once.
+        simYaw = removeSimInversion(yaw);
+        simPitch = removeSimInversion(pitch);
+        simRoll = removeSimInversion(roll);
+        simVelX = removeSimInversion(velX);
+        simVelY = removeSimInversion(velY);
+        simVelZ = removeSimInversion(velZ);
         useSimulatedReadings = true;
     }
 

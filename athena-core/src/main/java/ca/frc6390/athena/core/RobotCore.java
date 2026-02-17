@@ -2394,8 +2394,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     public ChassisSpeeds createRobotRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
-        return ChassisSpeeds.fromRobotRelativeSpeeds(
-                new ChassisSpeeds(xSpeed, ySpeed, rot), localization().pose().getRotation());
+        return new ChassisSpeeds(xSpeed, ySpeed, rot);
     }
 
     public ChassisSpeeds createFieldRelativeSpeeds(double xSpeed, double ySpeed, double rot) {
