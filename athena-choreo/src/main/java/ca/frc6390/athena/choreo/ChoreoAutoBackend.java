@@ -190,7 +190,15 @@ public class ChoreoAutoBackend implements AutoBackend {
             Pose2d targetPose = targetPoseOpt.get();
             AtomicBoolean timedOut = new AtomicBoolean(false);
             Command settle = Commands.run(
-                            () -> follow.accept(targetPose, new ChassisSpeeds()),
+                            () -> {
+                                Pose2d current = currentPoseSupplier.get();
+                                // Hold current translation and only settle heading so we do not
+                                // "pull back" to the final pose translation after trajectory end.
+                                Pose2d headingOnlyTarget = new Pose2d(
+                                        current.getTranslation(),
+                                        targetPose.getRotation());
+                                follow.accept(headingOnlyTarget, new ChassisSpeeds());
+                            },
                             requirement)
                     .until(() -> {
                         Pose2d current = currentPoseSupplier.get();

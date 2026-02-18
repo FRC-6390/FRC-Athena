@@ -91,7 +91,6 @@ public class SwerveDrivetrain extends SubsystemBase
   private final ChassisSpeeds accelerationLimitedSpeeds = new ChassisSpeeds();
   private final SwerveModuleState[] desiredModuleStates;
   private final Translation2d[] moduleLocations;
-  private final SwerveModulePosition[] positionsBuffer;
   private final double maxDriveVelocityMetersPerSecond;
   private double lastMotionLimitTimestampSeconds = Double.NaN;
   private SimpleMotorFeedForwardsSendable driveFeedforward;
@@ -122,14 +121,12 @@ public class SwerveDrivetrain extends SubsystemBase
     swerveModules = new SwerveModule[modules.length];
     desiredModuleStates = new SwerveModuleState[modules.length];
     moduleLocations = new Translation2d[modules.length];
-    positionsBuffer = new SwerveModulePosition[modules.length];
     double maxVelocity = 0;
     double minVelocity = Double.POSITIVE_INFINITY;
     double maxModuleRadius = 0;
     for (int i = 0; i < modules.length; i++) {
       swerveModules[i] = new SwerveModule(modules[i]);
       desiredModuleStates[i] = new SwerveModuleState(0.0, new Rotation2d());
-      positionsBuffer[i] = swerveModules[i].getPostion();
       double moduleMax = modules[i].maxSpeedMetersPerSecond();
       maxVelocity = Math.max(maxVelocity, moduleMax);
       minVelocity = Math.min(minVelocity, moduleMax);
@@ -267,10 +264,14 @@ public class SwerveDrivetrain extends SubsystemBase
   } 
 
   private SwerveModulePosition[] positions(){
+    SwerveModulePosition[] positions = new SwerveModulePosition[swerveModules.length];
     for (int i = 0; i < swerveModules.length; i++) {
-      swerveModules[i].getPostion();
+      SwerveModulePosition modulePosition = swerveModules[i].getPostion();
+      positions[i] = new SwerveModulePosition(
+          modulePosition.distanceMeters,
+          modulePosition.angle);
     }
-    return positionsBuffer;
+    return positions;
   }
 
   private void setModuleStates(SwerveModuleState[] states) {

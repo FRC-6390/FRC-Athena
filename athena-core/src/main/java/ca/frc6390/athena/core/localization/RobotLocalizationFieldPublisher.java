@@ -13,6 +13,9 @@ import ca.frc6390.athena.core.RobotVision;
 import ca.frc6390.athena.sensors.camera.VisionCamera;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StringPublisher;
+import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
@@ -20,11 +23,16 @@ import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 
 final class RobotLocalizationFieldPublisher {
     private static final Pose2d ZERO_POSE = new Pose2d();
+    private static final Pose2d[] EMPTY_POSE_ARRAY = new Pose2d[0];
     private static final List<Pose2d> EMPTY_POSES = List.of();
     private static final Rotation2d ZERO_ROTATION = Rotation2d.kZero;
+    private static final String AUTO_NT_ROOT = "Athena/Auto";
 
     private final Field2d field;
     private final Supplier<RobotVision> visionSupplier;
+    private final StructArrayPublisher<Pose2d> plannedPathPublisher;
+    private final StructArrayPublisher<Pose2d> localizationPathPublisher;
+    private final StringPublisher selectedAutoIdPublisher;
     private FieldObject2d plannedPathObject;
     private FieldObject2d actualPathObject;
     private final Map<String, FieldObject2d> boundingBoxObjects = new HashMap<>();
@@ -48,6 +56,15 @@ final class RobotLocalizationFieldPublisher {
     RobotLocalizationFieldPublisher(Supplier<RobotVision> visionSupplier) {
         this.field = new Field2d();
         this.visionSupplier = visionSupplier;
+        this.plannedPathPublisher = NetworkTableInstance.getDefault()
+                .getStructArrayTopic(AUTO_NT_ROOT + "/PlannedPath", Pose2d.struct)
+                .publish();
+        this.localizationPathPublisher = NetworkTableInstance.getDefault()
+                .getStructArrayTopic(AUTO_NT_ROOT + "/LocalizationPath", Pose2d.struct)
+                .publish();
+        this.selectedAutoIdPublisher = NetworkTableInstance.getDefault()
+                .getStringTopic(AUTO_NT_ROOT + "/SelectedRoutine")
+                .publish();
         this.plannedPathObject = field.getObject("AutoPlan");
         this.actualPathObject = field.getObject("ActualPath");
     }
@@ -150,12 +167,14 @@ final class RobotLocalizationFieldPublisher {
 
     void updateAutoVisualization(RobotAuto autos) {
         if (autos == null) {
+            selectedAutoIdPublisher.set("");
             clearPlannedPath();
             return;
         }
         String selectedId = autos.selection().selected()
                 .map(routine -> routine.key().id())
                 .orElse(null);
+        selectedAutoIdPublisher.set(selectedId != null ? selectedId : "");
         if (Objects.equals(selectedId, lastPlannedAutoId) && !isPlannedPathEmpty()) {
             return;
         }
@@ -171,6 +190,7 @@ final class RobotLocalizationFieldPublisher {
         }
         if (poses == null || poses.isEmpty()) {
             plannedPathObject.setPoses(EMPTY_POSES);
+            plannedPathPublisher.set(EMPTY_POSE_ARRAY);
             plannedPathEmpty = true;
             return;
         }
@@ -178,10 +198,12 @@ final class RobotLocalizationFieldPublisher {
         resolved = downsamplePoses(resolved, plannedPathSpacingMeters);
         if (resolved.isEmpty()) {
             plannedPathObject.setPoses(EMPTY_POSES);
+            plannedPathPublisher.set(EMPTY_POSE_ARRAY);
             plannedPathEmpty = true;
             return;
         }
         plannedPathObject.setPoses(resolved);
+        plannedPathPublisher.set(resolved.toArray(EMPTY_POSE_ARRAY));
         plannedPathEmpty = false;
     }
 
@@ -190,6 +212,7 @@ final class RobotLocalizationFieldPublisher {
             plannedPathObject = field.getObject("AutoPlan");
         }
         plannedPathObject.setPoses(EMPTY_POSES);
+        plannedPathPublisher.set(EMPTY_POSE_ARRAY);
         plannedPathEmpty = true;
     }
 
@@ -202,6 +225,7 @@ final class RobotLocalizationFieldPublisher {
             actualPathObject = field.getObject("ActualPath");
         }
         actualPathObject.setPoses(EMPTY_POSES);
+        localizationPathPublisher.set(EMPTY_POSE_ARRAY);
     }
 
     void setPlannedPathSpacingMeters(double spacingMeters) {
@@ -273,6 +297,7 @@ final class RobotLocalizationFieldPublisher {
             actualPathPoseSnapshot.add(pose);
         }
         actualPathObject.setPoses(actualPathPoseSnapshot);
+        localizationPathPublisher.set(actualPathPoseSnapshot.toArray(EMPTY_POSE_ARRAY));
     }
 
     private boolean isPlannedPathEmpty() {

@@ -66,6 +66,7 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DataLogManager;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SendableBuilderImpl;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
@@ -318,6 +319,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final TelemetryRegistry telemetry;
     private boolean autoInitResetEnabled;
     private NetworkTableEntry autoInitResetEntry;
+    private SendableBuilderImpl autoCommandChooserAthenaBuilder;
+    private SendableBuilderImpl autoRoutineChooserAthenaBuilder;
     private final List<RegisterableMechanism> configuredMechanisms;
     private boolean configuredMechanismsRegistered;
     private final boolean timingDebugEnabled;
@@ -372,6 +375,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final double PERFORMANCE_VERY_SLOW_METRICS_PERIOD_SECONDS = 5.0;
     private static final double COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS = 0.2;
     private static final double STARTUP_LOG_THRESHOLD_SECONDS = 0.05;
+    private static final String AUTO_COMMAND_CHOOSER_DASHBOARD_KEY = "Auto Chooser";
+    private static final String AUTO_ROUTINE_CHOOSER_DASHBOARD_KEY = "Auto Routine Chooser";
+    private static final String AUTO_COMMAND_CHOOSER_ATHENA_KEY = "Athena/Auto/CommandChooser";
+    private static final String AUTO_ROUTINE_CHOOSER_ATHENA_KEY = "Athena/Auto/RoutineChooser";
 
     private record ConfigExportUrls(
             String baseUrl,
@@ -699,7 +706,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         long t1Ns = System.nanoTime();
         telemetry.tick();
         long t2Ns = System.nanoTime();
-        if (localization != null && runtimeMode != RuntimeMode.DISABLED) {
+        if (localization != null) {
             localization.updateAutoVisualization(autos);
         }
         long t3Ns = System.nanoTime();
@@ -1740,10 +1747,52 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (vision != null) {
             vision.networkTables(root.child("Vision"));
         }
+        publishAutoNetworkTables(root.child("Auto"));
         publishPerformanceMetrics(root);
 
         coreNetworkTablesPublished = true;
         return this;
+    }
+
+    private void publishAutoNetworkTables(RobotNetworkTables.Node autoNode) {
+        if (autoNode == null) {
+            return;
+        }
+        StringBuilder routineIds = new StringBuilder();
+        StringBuilder routineNames = new StringBuilder();
+        int routineCount = 0;
+        for (RobotAuto.AutoRoutine routine : autos.routines().all()) {
+            if (routine == null || routine.key() == null) {
+                continue;
+            }
+            if (routineCount > 0) {
+                routineIds.append(',');
+                routineNames.append(',');
+            }
+            String id = routine.key().id() != null ? routine.key().id() : "";
+            String displayName = routine.key().displayName() != null ? routine.key().displayName() : "";
+            routineIds.append(id);
+            routineNames.append(displayName);
+            routineCount++;
+        }
+
+        autoNode.putDouble("routineCount", routineCount);
+        autoNode.putString("routineIdsCsv", routineIds.toString());
+        autoNode.putString("routineNamesCsv", routineNames.toString());
+        autoNode.putBoolean("commandChooserRegistered", autos.selection().commandChooser().isPresent());
+        autoNode.putBoolean("routineChooserRegistered", autos.selection().chooser().isPresent());
+        if (autoCommandChooserAthenaBuilder != null) {
+            autoCommandChooserAthenaBuilder.update();
+        }
+        if (autoRoutineChooserAthenaBuilder != null) {
+            autoRoutineChooserAthenaBuilder.update();
+        }
+        autoNode.putString(
+                "selectedRoutineId",
+                autos.selection().selected().map(routine -> routine.key().id()).orElse(""));
+        autoNode.putString(
+                "selectedRoutineName",
+                autos.selection().selected().map(routine -> routine.key().displayName()).orElse(""));
     }
 
     private void publishConfigExportUrls(RobotNetworkTables.Node root) {
@@ -2355,14 +2404,47 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public SendableChooser<Command> registerAutoChooser(RobotAuto.AutoKey defaultAuto) {
         SendableChooser<Command> chooser = autos.selection().commandChooser(defaultAuto);
-        SmartDashboard.putData("Auto Chooser", chooser);
+        SmartDashboard.putData(AUTO_COMMAND_CHOOSER_DASHBOARD_KEY, chooser);
+        SmartDashboard.putData(AUTO_COMMAND_CHOOSER_ATHENA_KEY, chooser);
+        autoCommandChooserAthenaBuilder = publishChooserToAthenaNode(
+                chooser,
+                "CommandChooser",
+                AUTO_COMMAND_CHOOSER_ATHENA_KEY,
+                autoCommandChooserAthenaBuilder);
         return chooser;
     }
 
     public SendableChooser<RobotAuto.AutoRoutine> registerAutoRoutineChooser(RobotAuto.AutoKey defaultAuto) {
         SendableChooser<RobotAuto.AutoRoutine> chooser = autos.selection().chooser(defaultAuto);
-        SmartDashboard.putData("Auto Routine Chooser", chooser);
+        SmartDashboard.putData(AUTO_ROUTINE_CHOOSER_DASHBOARD_KEY, chooser);
+        SmartDashboard.putData(AUTO_ROUTINE_CHOOSER_ATHENA_KEY, chooser);
+        autoRoutineChooserAthenaBuilder = publishChooserToAthenaNode(
+                chooser,
+                "RoutineChooser",
+                AUTO_ROUTINE_CHOOSER_ATHENA_KEY,
+                autoRoutineChooserAthenaBuilder);
         return chooser;
+    }
+
+    private SendableBuilderImpl publishChooserToAthenaNode(
+            SendableChooser<?> chooser,
+            String nodeName,
+            String chooserName,
+            SendableBuilderImpl previousBuilder) {
+        if (chooser == null) {
+            return previousBuilder;
+        }
+        if (previousBuilder != null) {
+            previousBuilder.stopListeners();
+            previousBuilder.close();
+        }
+        SendableBuilderImpl builder = new SendableBuilderImpl();
+        builder.setTable(robotNetworkTables.root().child("Auto").child(nodeName).table());
+        chooser.initSendable(builder);
+        builder.startListeners();
+        builder.update();
+        builder.getTable().getEntry(".name").setString(chooserName);
+        return builder;
     }
 
     public SendableChooser<RobotAuto.AutoRoutine> registerAutoRoutineChooser(String defaultAuto) {
