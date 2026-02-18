@@ -12,6 +12,7 @@ import java.util.Set;
 
 import ca.frc6390.athena.sensors.camera.VisionCamera;
 import ca.frc6390.athena.sensors.camera.VisionCamera.PipelineControl;
+import ca.frc6390.athena.sensors.camera.VisionCamera.PriorityIdControl;
 import ca.frc6390.athena.sensors.camera.VisionCamera.StreamControl;
 import ca.frc6390.athena.sensors.camera.VisionCameraConfig;
 import ca.frc6390.athena.sensors.camera.VisionCameraConfig.CameraRole;
@@ -515,6 +516,7 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         camera.registerCapability(VisionCameraCapability.LED, new LimelightLedCapability());
         camera.registerCapability(VisionCameraCapability.PIPELINE, new LimelightPipelineCapability());
         camera.registerCapability(VisionCameraCapability.STREAM, new LimelightStreamCapability());
+        camera.registerCapability(VisionCameraCapability.PRIORITY_ID, new LimelightPriorityIdCapability());
         return camera;
     }
 
@@ -664,6 +666,18 @@ public class LimeLight implements LimelightCamera, LocalizationSource, Targeting
         @Override
         public VisionCamera.StreamMode getStreamMode() {
             return toGenericStreamMode(LimeLight.this.getStreamMode());
+        }
+    }
+
+    private class LimelightPriorityIdCapability implements PriorityIdControl {
+        @Override
+        public void setPriorityId(int tagId) {
+            LimeLight.this.setPriorityID(tagId);
+        }
+
+        @Override
+        public int getPriorityId() {
+            return LimeLight.this.getPriorityID();
         }
     }
 

@@ -12,6 +12,7 @@ public enum VisionCameraCapability {
     LED(VisionCamera.LedControl.class),
     PIPELINE(VisionCamera.PipelineControl.class),
     STREAM(VisionCamera.StreamControl.class),
+    PRIORITY_ID(VisionCamera.PriorityIdControl.class),
     LOCALIZATION_SOURCE(LocalizationSource.class),
     TARGETING_SOURCE(TargetingSource.class),
     FIDUCIAL_SOURCE(FiducialSource.class),

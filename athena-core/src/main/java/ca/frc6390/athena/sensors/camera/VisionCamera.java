@@ -1472,6 +1472,23 @@ public class VisionCamera {
     }
 
     /**
+     * Capability that exposes vendor priority-tag selection controls.
+     */
+    public interface PriorityIdControl {
+        /**
+         * Selects the fiducial ID the camera should prioritize.
+         *
+         * @param tagId desired fiducial id, or vendor-specific default value to disable priority
+         */
+        void setPriorityId(int tagId);
+
+        /**
+         * Returns the currently configured prioritized fiducial ID.
+         */
+        int getPriorityId();
+    }
+
+    /**
      * LED behavior modes supported by the vendor API.
      */
     public enum LedMode {
