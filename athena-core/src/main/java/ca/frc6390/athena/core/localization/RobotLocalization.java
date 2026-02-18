@@ -2038,13 +2038,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             setPrimaryPose(state);
             updateVelocityTracking(pose, nowSeconds);
             RobotNetworkTables nt = robotNetworkTables;
-            boolean canPublish = nt != null && nt.isPublishingEnabled();
             boolean fieldEnabled = nt != null && nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET);
-            if (canPublish) {
-                fieldPublisher.updateActualPath(pose);
-            }
             if (fieldEnabled) {
                 fieldPublisher.setRobotPose(pose);
+                fieldPublisher.updateActualPath(pose);
             }
             PoseConfig config = primaryPoseName != null ? poseConfigs.get(primaryPoseName) : null;
             publishPoseStruct(config, pose);
