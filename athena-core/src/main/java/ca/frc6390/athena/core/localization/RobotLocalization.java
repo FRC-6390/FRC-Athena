@@ -103,6 +103,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final double SLIP_WEIGHT_CONTACT = 0.35;
     private static final double REVERSAL_OPPOSING_VELOCITY_MAX_MPS = 0.20;
     private static final double REVERSAL_OPPOSING_VELOCITY_MIN_MPS = 0.02;
+    private static final double CONTACT_LOCK_IMU_SPEED_MPS = 0.16;
+    private static final double CONTACT_LOCK_ENTER_COMPONENT = 0.55;
+    private static final double CONTACT_LOCK_MAX_ODOM_WEIGHT = 0.08;
+    private static final double REVERSAL_INERTIA_IMU_OPPOSE_MPS = 0.05;
+    private static final double REVERSAL_NEW_DIRECTION_ALLOWANCE_MPS = 0.06;
     private static final int POSE_STRUCT_PRUNE_PER_CYCLE = 8;
     private static final int BOUNDING_BOX_STATIC_PUBLISH_PERIOD = 10;
 
@@ -2404,6 +2409,13 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (imuFieldVelocity.getNorm() > maxTrustedImuSpeed) {
             imuFieldVelocity = new Translation2d();
         }
+        Translation2d commandedFieldVelocity = computeCommandedFieldVelocity(resolvedHeading);
+        double commandedNorm = commandedFieldVelocity.getNorm();
+        Translation2d commandDirection = null;
+        if (commandedNorm > 0.2) {
+            commandDirection = commandedFieldVelocity.times(1.0 / commandedNorm);
+        }
+
         double odomWeight = 1.0 - slipScore;
         if (!imuLinearSignalObserved) {
             odomWeight = 1.0;
@@ -2421,18 +2433,42 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             default:
                 break;
         }
+
+        if (commandDirection != null) {
+            double imuParallel = imuFieldVelocity.getX() * commandDirection.getX()
+                    + imuFieldVelocity.getY() * commandDirection.getY();
+            boolean reversalWindowActive = nowSeconds <= reversalEventUntilSeconds;
+            if (reversalWindowActive && imuParallel < -REVERSAL_INERTIA_IMU_OPPOSE_MPS) {
+                double opposeNorm = clamp01(
+                        (-imuParallel - REVERSAL_INERTIA_IMU_OPPOSE_MPS) / Math.max(commandedNorm, 0.2));
+                double reversalBlend = Math.max(
+                        opposeNorm,
+                        clamp01((slipReversalComponent - 0.15) / 0.85));
+                odomWeight = Math.min(odomWeight, MathUtil.interpolate(0.45, 0.08, reversalBlend));
+            }
+        }
+
+        if (slipContactComponent >= CONTACT_LOCK_ENTER_COMPONENT
+                && imuFieldVelocity.getNorm() < CONTACT_LOCK_IMU_SPEED_MPS) {
+            double contactLockBlend = clamp01(
+                    (slipContactComponent - CONTACT_LOCK_ENTER_COMPONENT)
+                            / (1.0 - CONTACT_LOCK_ENTER_COMPONENT));
+            odomWeight = Math.min(
+                    odomWeight,
+                    MathUtil.interpolate(0.25, CONTACT_LOCK_MAX_ODOM_WEIGHT, contactLockBlend));
+        }
+
         odomWeight = clamp01(odomWeight);
         Translation2d fusedVelocity =
                 rawOdomVelocity.times(odomWeight).plus(imuFieldVelocity.times(1.0 - odomWeight));
 
-        Translation2d commandedFieldVelocity = computeCommandedFieldVelocity(resolvedHeading);
-        double commandedNorm = commandedFieldVelocity.getNorm();
         if (commandedNorm > 0.2) {
             Translation2d direction = commandedFieldVelocity.times(1.0 / commandedNorm);
             double fusedParallel = fusedVelocity.getX() * direction.getX() + fusedVelocity.getY() * direction.getY();
             Translation2d fusedPerpendicular = fusedVelocity.minus(direction.times(fusedParallel));
             double odomParallel = rawOdomVelocity.getX() * direction.getX() + rawOdomVelocity.getY() * direction.getY();
             double imuParallel = imuFieldVelocity.getX() * direction.getX() + imuFieldVelocity.getY() * direction.getY();
+            boolean reversalWindowActive = nowSeconds <= reversalEventUntilSeconds;
 
             if (slipContactComponent > 0.35) {
                 double contactBlend = clamp01((slipContactComponent - 0.35) / 0.65);
@@ -2440,6 +2476,15 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 double targetParallel = MathUtil.interpolate(imuParallel, imuOrZeroParallel, contactBlend);
                 targetParallel = MathUtil.interpolate(targetParallel, 0.0, contactBlend * 0.85);
                 fusedParallel = MathUtil.interpolate(fusedParallel, targetParallel, contactBlend);
+            }
+
+            if (slipContactComponent >= CONTACT_LOCK_ENTER_COMPONENT
+                    && Math.abs(imuParallel) < CONTACT_LOCK_IMU_SPEED_MPS) {
+                double lockBlend = clamp01(
+                        (slipContactComponent - CONTACT_LOCK_ENTER_COMPONENT)
+                                / (1.0 - CONTACT_LOCK_ENTER_COMPONENT));
+                fusedParallel = MathUtil.interpolate(fusedParallel, 0.0, lockBlend);
+                fusedPerpendicular = fusedPerpendicular.times(1.0 - (0.80 * lockBlend));
             }
 
             if (slipReversalComponent > 0.20) {
@@ -2453,6 +2498,18 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 }
                 if (odomParallel < -0.15 && Math.abs(imuParallel) < 0.20) {
                     fusedParallel = Math.max(fusedParallel, 0.0);
+                }
+            }
+
+            if (reversalWindowActive && imuParallel < -REVERSAL_INERTIA_IMU_OPPOSE_MPS) {
+                double opposeBlend = clamp01(
+                        (-imuParallel - REVERSAL_INERTIA_IMU_OPPOSE_MPS) / Math.max(commandedNorm, 0.2));
+                double positiveAllowance = MathUtil.interpolate(
+                        REVERSAL_NEW_DIRECTION_ALLOWANCE_MPS,
+                        0.0,
+                        opposeBlend);
+                if (fusedParallel > positiveAllowance) {
+                    fusedParallel = positiveAllowance;
                 }
             }
 
