@@ -350,16 +350,21 @@ public class SwerveModule implements RobotSendableDevice {
             return;
         }
 
+        SwerveModuleState optimizedState =
+                new SwerveModuleState(state.speedMetersPerSecond, state.angle);
         Rotation2d currentAngle = getEncoderPosition();
-        state.optimize(currentAngle);
-        state.speedMetersPerSecond *= state.angle.minus(currentAngle).getCos();
+        optimizedState.optimize(currentAngle);
+        optimizedState.speedMetersPerSecond *= optimizedState.angle.minus(currentAngle).getCos();
         if (driveFeedforwardEnabled && driveFeedforward != null) {
-            double driveVolts = calculateFeedforwardVolts(state.speedMetersPerSecond);
+            double driveVolts = calculateFeedforwardVolts(optimizedState.speedMetersPerSecond);
             setDriveMotorVoltage(driveVolts);
         } else {
-            setDriveMotor(state.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
+            setDriveMotor(optimizedState.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
         }
-        setRotationMotor(rotationPidController.calculate(MathUtil.angleModulus(currentAngle.getRadians()), state.angle.getRadians()));
+        setRotationMotor(
+                rotationPidController.calculate(
+                        MathUtil.angleModulus(currentAngle.getRadians()),
+                        optimizedState.angle.getRadians()));
     }
 
     public void stop() {

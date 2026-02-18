@@ -73,6 +73,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 
 public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static volatile RobotCore<?> activeInstance;
+    private static final String AUTO_PROGRAM_CHOOSER_KEY = "Auto Program Chooser";
 
     public enum RuntimeMode {
         AUTO,
@@ -2360,13 +2361,21 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     public SendableChooser<RobotAuto.AutoRoutine> registerAutoRoutineChooser(RobotAuto.AutoKey defaultAuto) {
-        SendableChooser<RobotAuto.AutoRoutine> chooser = autos.selection().chooser(defaultAuto);
-        SmartDashboard.putData("Auto Routine Chooser", chooser);
+        return registerAutoProgramChooser(defaultAuto);
+    }
+
+    public SendableChooser<RobotAuto.AutoRoutine> registerAutoProgramChooser(RobotAuto.AutoKey defaultProgram) {
+        SendableChooser<RobotAuto.AutoRoutine> chooser = autos.selection().programChooser(defaultProgram);
+        SmartDashboard.putData(AUTO_PROGRAM_CHOOSER_KEY, chooser);
         return chooser;
     }
 
     public SendableChooser<RobotAuto.AutoRoutine> registerAutoRoutineChooser(String defaultAuto) {
-        return registerAutoRoutineChooser(RobotAuto.AutoKey.of(defaultAuto));
+        return registerAutoProgramChooser(defaultAuto);
+    }
+
+    public SendableChooser<RobotAuto.AutoRoutine> registerAutoProgramChooser(String defaultProgram) {
+        return registerAutoProgramChooser(RobotAuto.AutoKey.of(defaultProgram));
     }
 
     public SendableChooser<Command> registerAutoChooser(String defaultsAuto) {
@@ -2380,7 +2389,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         autos.routines().all().stream()
                 .findFirst()
                 .map(RobotAuto.AutoRoutine::key)
-                .ifPresent(this::registerAutoChooser);
+                .ifPresent(this::registerAutoProgramChooser);
     }
 
     public void registerPIDCycles() {

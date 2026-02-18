@@ -2094,8 +2094,24 @@ public class RobotAuto {
     }
 
     public final class SelectionSection {
+        public SendableChooser<AutoRoutine> programChooser(AutoKey defaultProgram) {
+            return createChooser(defaultProgram);
+        }
+
+        public Optional<SendableChooser<AutoRoutine>> programChooser() {
+            return Optional.ofNullable(chooser);
+        }
+
+        public Optional<AutoRoutine> selectedProgram() {
+            return getSelectedAuto();
+        }
+
+        public Optional<List<Pose2d>> selectedProgramPoses() {
+            return getSelectedAutoPoses();
+        }
+
         public SendableChooser<AutoRoutine> chooser(AutoKey defaultAuto) {
-            return createChooser(defaultAuto);
+            return programChooser(defaultAuto);
         }
 
         public SendableChooser<Command> commandChooser(AutoKey defaultAuto) {
@@ -2103,7 +2119,7 @@ public class RobotAuto {
         }
 
         public Optional<SendableChooser<AutoRoutine>> chooser() {
-            return Optional.ofNullable(chooser);
+            return programChooser();
         }
 
         public Optional<SendableChooser<Command>> commandChooser() {
@@ -2111,11 +2127,11 @@ public class RobotAuto {
         }
 
         public Optional<AutoRoutine> selected() {
-            return getSelectedAuto();
+            return selectedProgram();
         }
 
         public Optional<List<Pose2d>> selectedPoses() {
-            return getSelectedAutoPoses();
+            return selectedProgramPoses();
         }
     }
 

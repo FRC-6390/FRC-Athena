@@ -297,12 +297,7 @@ public class SwerveDrivetrain extends SubsystemBase
 
       SwerveModuleState calculated = calculatedStates[i];
       state.speedMetersPerSecond = calculated.speedMetersPerSecond;
-      if (state.speedMetersPerSecond > MODULE_HEADING_EPSILON) {
-        double desiredAngleRadians = calculated.angle.getRadians();
-        if (angleNeedsUpdate(state.angle, desiredAngleRadians)) {
-          state.angle = calculated.angle;
-        }
-      }
+      state.angle = calculated.angle;
     }
   }
 
