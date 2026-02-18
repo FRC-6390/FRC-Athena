@@ -15,6 +15,7 @@ import edu.wpi.first.wpilibj.Timer;
  * Studica (NavX) IMU wrapper for the new vendordep system.
  */
 public class StudicaImu implements Imu {
+    private static final double GRAVITY_METERS_PER_SECOND_SQUARED = 9.80665;
     private static final double DEFAULT_MAX_SPEED_WINDOW_SECONDS = 5.0;
     private static final double MIN_MAX_SPEED_WINDOW_SECONDS = 0.02;
 
@@ -83,17 +84,17 @@ public class StudicaImu implements Imu {
 
     @Override
     public double getAccelerationX() {
-        return navx.getWorldLinearAccelX();
+        return navx.getWorldLinearAccelX() * GRAVITY_METERS_PER_SECOND_SQUARED;
     }
 
     @Override
     public double getAccelerationY() {
-        return navx.getWorldLinearAccelY();
+        return navx.getWorldLinearAccelY() * GRAVITY_METERS_PER_SECOND_SQUARED;
     }
 
     @Override
     public double getAccelerationZ() {
-        return navx.getWorldLinearAccelZ();
+        return navx.getWorldLinearAccelZ() * GRAVITY_METERS_PER_SECOND_SQUARED;
     }
 
     @Override

@@ -136,7 +136,7 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
         return Math.toDegrees(getAngularAccelerationZRadiansPerSecondSquared());
     }
 
-    // Optional linear acceleration accessors (default to zero)
+    // Optional linear acceleration accessors in meters per second squared (m/s^2).
     default double getAccelerationX() { return 0.0; }
     default double getAccelerationY() { return 0.0; }
     default double getAccelerationZ() { return 0.0; }

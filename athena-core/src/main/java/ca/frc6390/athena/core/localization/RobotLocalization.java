@@ -30,6 +30,7 @@ import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.sensors.camera.VisionCamera;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
@@ -73,6 +74,22 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final Rotation2d ZERO_ROTATION = new Rotation2d();
     private static final Pose2d ZERO_POSE_2D = new Pose2d();
     private static final Pose3d ZERO_POSE_3D = new Pose3d();
+    private static final double CHOREO_HEADING_DEADBAND_RAD = Units.degreesToRadians(1.5);
+    private static final double CHOREO_OMEGA_DEADBAND_RAD_PER_SEC = 0.05;
+    private static final double SLIP_DT_MAX_SECONDS = 0.25;
+    private static final double SLIP_YAW_TRANSLATION_GATE_MPS = 0.25;
+    private static final double SLIP_ACCEL_TRANSLATION_GATE_MPS = 0.15;
+    private static final double IMU_LINEAR_OBSERVED_SPEED_MPS = 0.15;
+    private static final double IMU_LINEAR_OBSERVED_ACCEL_MPS2 = 0.75;
+    private static final double IMU_ACCEL_NOISE_FLOOR_MPS2 = 0.10;
+    private static final double REVERSAL_COMMAND_THRESHOLD_MPS = 0.8;
+    private static final double REVERSAL_WINDOW_SECONDS = 0.35;
+    private static final double REVERSAL_ODOM_ACCEL_THRESHOLD_MPS2 = 2.5;
+    private static final double REVERSAL_IMU_ACCEL_MIN_MPS2 = 0.75;
+    private static final double WHEELSPIN_COMMAND_SPEED_MPS = 0.8;
+    private static final double WHEELSPIN_ODOM_SPEED_MPS = 1.0;
+    private static final double WHEELSPIN_IMU_SPEED_RATIO = 0.30;
+    private static final double WHEELSPIN_IMU_SPEED_FLOOR_MPS = 0.25;
     private static final int POSE_STRUCT_PRUNE_PER_CYCLE = 8;
     private static final int BOUNDING_BOX_STATIC_PUBLISH_PERIOD = 10;
 
@@ -116,6 +133,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private double lastUpdateTimestamp = Double.NaN;
     private Pose2d lastFieldPoseForSlip = new Pose2d();
     private Translation2d lastFieldVelocityForSlip = new Translation2d();
+    private double lastCommandedVxForSlip = 0.0;
+    private double lastCommandedVyForSlip = 0.0;
+    private double reversalEventUntilSeconds = Double.NEGATIVE_INFINITY;
+    private boolean imuLinearSignalObserved = false;
+    private String lastSlipCause = "none";
     private Pose2d lastHealthPose = new Pose2d();
     private double lastHealthTimestamp = Double.NaN;
     private double lastPoseJumpMeters = 0.0;
@@ -132,6 +154,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private NetworkTableEntry driftRateNtEntry;
     private NetworkTableEntry visionAcceptanceNtEntry;
     private NetworkTableEntry slipActiveNtEntry;
+    private NetworkTableEntry slipCauseNtEntry;
     private ChassisSpeeds fieldRelativeSpeeds = new ChassisSpeeds();
     private ChassisSpeeds robotRelativeSpeeds = new ChassisSpeeds();
     private double normalizedMovementSpeed = 0.0;
@@ -493,6 +516,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     public RobotLocalization<T> configureChoreo(Subsystem drivetrain){
         HolonomicPidConstants rotationConstants = localizationConfig.rotation();
         HolonomicPidConstants translationConstants = localizationConfig.translation();
+        String autoHeadingAxis = localizationConfig.autoPoseName();
+        if (autoHeadingAxis == null || autoHeadingAxis.isBlank()) {
+            autoHeadingAxis = "field";
+        }
+        final String headingAxis = autoHeadingAxis;
 
         PIDController rotationController = new PIDController(rotationConstants.kP(), rotationConstants.kI(), rotationConstants.kD());
         rotationController.setIZone(rotationConstants.iZone());
@@ -516,11 +544,20 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 pose -> resetPose(localizationConfig.autoPoseName(), pose),
                 (desiredPose, desiredSpeeds) -> {
                     Pose2d botpose = getFieldPose();
+                    Rotation2d measuredHeading = getYaw(headingAxis, backendConfig());
+                    double desiredHeadingRadians = desiredPose.getRotation().getRadians();
+                    double measuredHeadingRadians = measuredHeading.getRadians();
+                    double headingErrorRadians = MathUtil.inputModulus(
+                            desiredHeadingRadians - measuredHeadingRadians,
+                            -Math.PI,
+                            Math.PI);
                     double xFeedback = xController.calculate(botpose.getX(), desiredPose.getX());
                     double yFeedback = yController.calculate(botpose.getY(), desiredPose.getY());
-                    double thetaFeedback = rotationController.calculate(
-                            botpose.getRotation().getRadians(),
-                            desiredPose.getRotation().getRadians());
+                    double thetaFeedback = 0.0;
+                    if (Math.abs(desiredSpeeds.omegaRadiansPerSecond) > CHOREO_OMEGA_DEADBAND_RAD_PER_SEC
+                            || Math.abs(headingErrorRadians) > CHOREO_HEADING_DEADBAND_RAD) {
+                        thetaFeedback = rotationController.calculate(measuredHeadingRadians, desiredHeadingRadians);
+                    }
                     ChassisSpeeds fieldSpeeds = new ChassisSpeeds(
                             desiredSpeeds.vxMetersPerSecond + xFeedback,
                             desiredSpeeds.vyMetersPerSecond + yFeedback,
@@ -528,7 +565,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
                     ChassisSpeeds robotRelative = ChassisSpeeds.fromFieldRelativeSpeeds(
                             fieldSpeeds,
-                            botpose.getRotation());
+                            measuredHeading);
 
                     robotSpeeds.setSpeeds("auto", robotRelative);
                 },
@@ -707,6 +744,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (slipActiveNtEntry != null) {
             slipActiveNtEntry.setBoolean(slipActive);
         }
+        if (slipCauseNtEntry != null) {
+            slipCauseNtEntry.setString(lastSlipCause);
+        }
     }
 
     private void updateSlipState(double now) {
@@ -714,7 +754,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         boolean previousSlipActive = slipActive;
         if (Double.isFinite(lastUpdateTimestamp)) {
             double dt = now - lastUpdateTimestamp;
-            if (dt > 0.0) {
+            if (dt > 1e-6 && dt <= SLIP_DT_MAX_SECONDS) {
                 Rotation2d imuYawRate = imu.getVelocityZ();
                 double imuYawRateRad = imuYawRate != null ? imuYawRate.getRadians() : Double.NaN;
                 double estimatedYawRate =
@@ -726,27 +766,85 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 }
                 double yawRateRad = Double.isFinite(imuYawRateRad) ? imuYawRateRad : estimatedYawRate;
                 double comparableYawRate = unwrapRateNear(yawRateRad, estimatedYawRate);
-                double disagreement = Math.abs(comparableYawRate - estimatedYawRate);
-                boolean yawSlip =
-                        Math.abs(comparableYawRate) > backend.slipYawRateThreshold()
-                                && disagreement > backend.slipYawRateDisagreement();
+                double yawDisagreement = Math.abs(comparableYawRate - estimatedYawRate);
 
                 Translation2d deltaTranslation =
                         fieldPose.getTranslation().minus(lastFieldPoseForSlip.getTranslation());
                 Translation2d odomVelocity = deltaTranslation.times(1.0 / dt);
                 Translation2d odomAccel = odomVelocity.minus(lastFieldVelocityForSlip).times(1.0 / dt);
+                double odomSpeed = odomVelocity.getNorm();
                 double odomAccelMag = odomAccel.getNorm();
-                double imuAccelMag =
-                        Math.hypot(imu.getAccelerationX(), imu.getAccelerationY());
+
+                ChassisSpeeds commandedRobot = combinedCommandedRobotSpeeds();
+                double commandedSpeed = Math.hypot(
+                        commandedRobot.vxMetersPerSecond,
+                        commandedRobot.vyMetersPerSecond);
+                if (hasAxisSignFlip(
+                        lastCommandedVxForSlip,
+                        commandedRobot.vxMetersPerSecond,
+                        REVERSAL_COMMAND_THRESHOLD_MPS)
+                        || hasAxisSignFlip(
+                                lastCommandedVyForSlip,
+                                commandedRobot.vyMetersPerSecond,
+                                REVERSAL_COMMAND_THRESHOLD_MPS)) {
+                    reversalEventUntilSeconds = now + REVERSAL_WINDOW_SECONDS;
+                }
+                boolean reversalActive = now <= reversalEventUntilSeconds;
+
+                double imuAx = finiteOrZero(imu.getAccelerationX());
+                double imuAy = finiteOrZero(imu.getAccelerationY());
+                double imuAccelMag = Math.hypot(imuAx, imuAy);
+                double imuSpeedX = finiteOrZero(imu.getXSpeedMetersPerSecond());
+                double imuSpeedY = finiteOrZero(imu.getYSpeedMetersPerSecond());
+                double imuLinearSpeed = Math.hypot(imuSpeedX, imuSpeedY);
+                if (imuLinearSpeed >= IMU_LINEAR_OBSERVED_SPEED_MPS
+                        || imuAccelMag >= IMU_LINEAR_OBSERVED_ACCEL_MPS2) {
+                    imuLinearSignalObserved = true;
+                }
+
+                boolean translatingForYaw =
+                        Math.max(odomSpeed, commandedSpeed) > SLIP_YAW_TRANSLATION_GATE_MPS;
+                boolean yawSlip =
+                        translatingForYaw
+                                && Math.abs(comparableYawRate) > backend.slipYawRateThreshold()
+                                && yawDisagreement > backend.slipYawRateDisagreement();
+
+                boolean translatingForAccel =
+                        Math.max(odomSpeed, commandedSpeed) > SLIP_ACCEL_TRANSLATION_GATE_MPS;
+                double accelThreshold = Math.max(backend.slipAccelThreshold(), IMU_ACCEL_NOISE_FLOOR_MPS2);
                 boolean accelSlip =
-                        Double.isFinite(imuAccelMag)
-                                && imuAccelMag > backend.slipAccelThreshold()
+                        translatingForAccel
+                                && imuAccelMag > accelThreshold
                                 && Math.abs(imuAccelMag - odomAccelMag) > backend.slipAccelDisagreement();
 
-                if (yawSlip || accelSlip) {
-                    slipActiveUntilSeconds = now + backend.slipHoldSeconds();
+                boolean reversalSlip =
+                        reversalActive
+                                && odomAccelMag > REVERSAL_ODOM_ACCEL_THRESHOLD_MPS2
+                                && imuAccelMag < REVERSAL_IMU_ACCEL_MIN_MPS2;
+
+                boolean wheelSpinSlip = false;
+                if (imuLinearSignalObserved) {
+                    double allowedImuSpeed =
+                            Math.max(WHEELSPIN_IMU_SPEED_FLOOR_MPS, odomSpeed * WHEELSPIN_IMU_SPEED_RATIO);
+                    wheelSpinSlip =
+                            commandedSpeed > WHEELSPIN_COMMAND_SPEED_MPS
+                                    && odomSpeed > WHEELSPIN_ODOM_SPEED_MPS
+                                    && imuLinearSpeed < allowedImuSpeed;
                 }
+
+                boolean slipTriggered = yawSlip || accelSlip || reversalSlip || wheelSpinSlip;
+                if (slipTriggered) {
+                    slipActiveUntilSeconds = now + backend.slipHoldSeconds();
+                    lastSlipCause = describeSlipCause(yawSlip, accelSlip, reversalSlip, wheelSpinSlip);
+                }
+
                 lastFieldVelocityForSlip = odomVelocity;
+                lastCommandedVxForSlip = commandedRobot.vxMetersPerSecond;
+                lastCommandedVyForSlip = commandedRobot.vyMetersPerSecond;
+            } else {
+                lastCommandedVxForSlip = 0.0;
+                lastCommandedVyForSlip = 0.0;
+                reversalEventUntilSeconds = Double.NEGATIVE_INFINITY;
             }
         }
         slipActive = now <= slipActiveUntilSeconds;
@@ -754,11 +852,77 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             appendDiagnosticLog(
                     slipActive ? "WARN" : "INFO",
                     "slip",
-                    slipActive ? "slip detection active" : "slip detection cleared");
+                    slipActive
+                            ? "slip detection active: " + lastSlipCause
+                            : "slip detection cleared");
+            if (!slipActive) {
+                lastSlipCause = "none";
+            }
         }
         lastUpdateTimestamp = now;
         lastFieldPoseForSlip = fieldPose;
         updateProcessStdDevScale(slipActive);
+    }
+
+    private ChassisSpeeds combinedCommandedRobotSpeeds() {
+        if (robotSpeeds == null) {
+            return new ChassisSpeeds();
+        }
+        ChassisSpeeds speeds = robotSpeeds.calculate();
+        if (speeds == null) {
+            return new ChassisSpeeds();
+        }
+        speeds.vxMetersPerSecond = finiteOrZero(speeds.vxMetersPerSecond);
+        speeds.vyMetersPerSecond = finiteOrZero(speeds.vyMetersPerSecond);
+        speeds.omegaRadiansPerSecond = finiteOrZero(speeds.omegaRadiansPerSecond);
+        return speeds;
+    }
+
+    private static boolean hasAxisSignFlip(double previous, double current, double minimumMagnitude) {
+        if (!Double.isFinite(previous) || !Double.isFinite(current)) {
+            return false;
+        }
+        if (Math.abs(previous) < minimumMagnitude || Math.abs(current) < minimumMagnitude) {
+            return false;
+        }
+        return Math.signum(previous) != Math.signum(current);
+    }
+
+    private static double finiteOrZero(double value) {
+        return Double.isFinite(value) ? value : 0.0;
+    }
+
+    private static String describeSlipCause(
+            boolean yawSlip,
+            boolean accelSlip,
+            boolean reversalSlip,
+            boolean wheelSpinSlip) {
+        StringBuilder cause = new StringBuilder();
+        if (yawSlip) {
+            cause.append("yawMismatch");
+        }
+        if (accelSlip) {
+            if (cause.length() > 0) {
+                cause.append("+");
+            }
+            cause.append("accelMismatch");
+        }
+        if (reversalSlip) {
+            if (cause.length() > 0) {
+                cause.append("+");
+            }
+            cause.append("reversal");
+        }
+        if (wheelSpinSlip) {
+            if (cause.length() > 0) {
+                cause.append("+");
+            }
+            cause.append("wheelSpin");
+        }
+        if (cause.length() == 0) {
+            return "none";
+        }
+        return cause.toString();
     }
 
     private static double unwrapRateNear(double wrappedRate, double referenceRate) {
@@ -1584,6 +1748,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         summary.put("visionEnabled", isVisionEnabled());
         summary.put("suppressUpdates", suppressUpdates);
         summary.put("slipActive", slipActive);
+        summary.put("slipCause", lastSlipCause);
         summary.put("visionAcceptRate", visionAcceptRateWindow);
         summary.put("driftRateMetersPerSec", driftRateMetersPerSec);
         summary.put("poseJumpMeters", lastPoseJumpMeters);
@@ -1673,6 +1838,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             health.putDouble("driftRateMetersPerSec", driftRateMetersPerSec);
             health.putDouble("visionAcceptRate", visionAcceptRateWindow);
             health.putBoolean("slipActive", slipActive);
+            health.putString("slipCause", lastSlipCause);
         }
 
         return node;
@@ -1702,6 +1868,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         driftRateNtEntry = healthTable.getEntry("DriftRateMetersPerSec");
         visionAcceptanceNtEntry = healthTable.getEntry("VisionAcceptRate");
         slipActiveNtEntry = healthTable.getEntry("SlipActive");
+        slipCauseNtEntry = healthTable.getEntry("SlipCause");
     }
 
     private static double currentTimestampSeconds() {

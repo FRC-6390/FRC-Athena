@@ -145,17 +145,17 @@ public class CtreImu implements Imu {
 
     @Override
     public double getAccelerationX() {
-        return cachedAccelerationX;
+        return cachedAccelerationX * GRAVITY_METERS_PER_SECOND_SQUARED;
     }
 
     @Override
     public double getAccelerationY() {
-        return cachedAccelerationY;
+        return cachedAccelerationY * GRAVITY_METERS_PER_SECOND_SQUARED;
     }
 
     @Override
     public double getAccelerationZ() {
-        return cachedAccelerationZ;
+        return cachedAccelerationZ * GRAVITY_METERS_PER_SECOND_SQUARED;
     }
 
     @Override

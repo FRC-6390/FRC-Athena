@@ -31,8 +31,9 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 
 public class ChoreoAutoBackend implements AutoBackend {
-    private static final double HEADING_SETTLE_TOLERANCE_DEG = 2.0;
-    private static final double HEADING_SETTLE_TIMEOUT_SECONDS = 0.6;
+    private static final double POSE_SETTLE_TRANSLATION_TOLERANCE_METERS = 0.10;
+    private static final double POSE_SETTLE_HEADING_TOLERANCE_DEG = 2.0;
+    private static final double POSE_SETTLE_TIMEOUT_SECONDS = 0.75;
 
     private volatile ChoreoAutoFactory factory;
     private volatile AutoFactory autoFactory;
@@ -98,13 +99,13 @@ public class ChoreoAutoBackend implements AutoBackend {
                 .onTrue(Commands.sequence(reset, trajectory.cmd())
                         .finallyDo(interrupted -> trajectoryFinished.set(true)));
         Command runRoutine = routine.cmd(trajectoryFinished::get);
-        Command headingSettle = buildHeadingSettleCommand(reference, trajectory);
+        Command poseSettle = buildPoseSettleCommand(reference, trajectory);
         Command stop = Commands.runOnce(() -> {
             if (stopFollower != null) {
                 stopFollower.run();
             }
         });
-        return Optional.of(Commands.sequence(runRoutine, headingSettle, stop));
+        return Optional.of(Commands.sequence(runRoutine, poseSettle, stop));
     }
 
     @Override
@@ -175,7 +176,7 @@ public class ChoreoAutoBackend implements AutoBackend {
         }
     }
 
-    private Command buildHeadingSettleCommand(String reference, AutoTrajectory trajectory) {
+    private Command buildPoseSettleCommand(String reference, AutoTrajectory trajectory) {
         Supplier<Pose2d> currentPoseSupplier = poseSupplier;
         BiConsumer<Pose2d, ChassisSpeeds> follow = follower;
         Subsystem requirement = followerSubsystem;
@@ -191,38 +192,39 @@ public class ChoreoAutoBackend implements AutoBackend {
             AtomicBoolean timedOut = new AtomicBoolean(false);
             Command settle = Commands.run(
                             () -> {
-                                Pose2d current = currentPoseSupplier.get();
-                                // Hold current translation and only settle heading so we do not
-                                // "pull back" to the final pose translation after trajectory end.
-                                Pose2d headingOnlyTarget = new Pose2d(
-                                        current.getTranslation(),
-                                        targetPose.getRotation());
-                                follow.accept(headingOnlyTarget, new ChassisSpeeds());
+                                follow.accept(targetPose, new ChassisSpeeds());
                             },
                             requirement)
                     .until(() -> {
                         Pose2d current = currentPoseSupplier.get();
+                        double translationErrorMeters =
+                                current.getTranslation().getDistance(targetPose.getTranslation());
                         double headingErrorDeg = Math.abs(MathUtil.inputModulus(
                                 targetPose.getRotation().getDegrees() - current.getRotation().getDegrees(),
                                 -180.0,
                                 180.0));
-                        return headingErrorDeg <= HEADING_SETTLE_TOLERANCE_DEG;
+                        return translationErrorMeters <= POSE_SETTLE_TRANSLATION_TOLERANCE_METERS
+                                && headingErrorDeg <= POSE_SETTLE_HEADING_TOLERANCE_DEG;
                     })
-                    .withTimeout(HEADING_SETTLE_TIMEOUT_SECONDS)
+                    .withTimeout(POSE_SETTLE_TIMEOUT_SECONDS)
                     .beforeStarting(() -> DriverStation.reportWarning(
-                            "[Choreo] Heading settle start \"" + reference + "\"", false))
+                            "[Choreo] Pose settle start \"" + reference + "\"", false))
                     .finallyDo(interrupted -> {
                         if (interrupted) {
                             timedOut.set(true);
                         }
                         Pose2d current = currentPoseSupplier.get();
+                        double translationErrorMeters =
+                                current.getTranslation().getDistance(targetPose.getTranslation());
                         double headingErrorDeg = Math.abs(MathUtil.inputModulus(
                                 targetPose.getRotation().getDegrees() - current.getRotation().getDegrees(),
                                 -180.0,
                                 180.0));
                         DriverStation.reportWarning(
-                                "[Choreo] Heading settle end \"" + reference
-                                        + "\" errorDeg=" + String.format(java.util.Locale.US, "%.2f", headingErrorDeg)
+                                "[Choreo] Pose settle end \"" + reference
+                                        + "\" translationErrorM="
+                                        + String.format(java.util.Locale.US, "%.3f", translationErrorMeters)
+                                        + " errorDeg=" + String.format(java.util.Locale.US, "%.2f", headingErrorDeg)
                                         + " timeout=" + timedOut.get(),
                                 false);
                     });
