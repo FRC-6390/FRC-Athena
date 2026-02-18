@@ -1878,73 +1878,90 @@ public class RobotAuto {
     }
 
     public final class RegistrySection {
-        public RobotAuto program(AutoProgram program) {
-            return registerProgram(program);
+        public RegistrySection program(AutoProgram program) {
+            registerProgram(program);
+            return this;
         }
 
-        public RobotAuto programs(AutoProgram... programs) {
-            return registerPrograms(programs);
+        public RegistrySection programs(AutoProgram... programs) {
+            registerPrograms(programs);
+            return this;
         }
 
         @SafeVarargs
-        public final RobotAuto programTypes(Class<? extends AutoProgram>... types) {
-            return registerPrograms(types);
+        public final RegistrySection programTypes(Class<? extends AutoProgram>... types) {
+            registerPrograms(types);
+            return this;
         }
 
-        public RobotAuto command(NamedCommandKey key, Command command) {
-            return registerNamedCommand(key, command);
+        public RegistrySection command(NamedCommandKey key, Command command) {
+            registerNamedCommand(key, command);
+            return this;
         }
 
-        public RobotAuto command(String id, Command command) {
-            return registerNamedCommand(id, command);
+        public RegistrySection command(String id, Command command) {
+            registerNamedCommand(id, command);
+            return this;
         }
 
-        public RobotAuto command(NamedCommandKey key, Supplier<Command> supplier) {
-            return registerNamedCommand(key, supplier);
+        public RegistrySection command(NamedCommandKey key, Supplier<Command> supplier) {
+            registerNamedCommand(key, supplier);
+            return this;
         }
 
-        public RobotAuto command(String id, Supplier<Command> supplier) {
-            return registerNamedCommand(id, supplier);
+        public RegistrySection command(String id, Supplier<Command> supplier) {
+            registerNamedCommand(id, supplier);
+            return this;
         }
 
-        public RobotAuto command(NamedCommandKey key, Runnable action) {
-            return registerNamedCommand(key, action);
+        public RegistrySection command(NamedCommandKey key, Runnable action) {
+            registerNamedCommand(key, action);
+            return this;
         }
 
-        public RobotAuto command(String id, Runnable action) {
-            return registerNamedCommand(id, action);
+        public RegistrySection command(String id, Runnable action) {
+            registerNamedCommand(id, action);
+            return this;
         }
 
-        public <T> RobotAuto input(AutoInput<T> key, Supplier<T> supplier) {
-            return registerInput(key, supplier);
+        public <T> RegistrySection input(AutoInput<T> key, Supplier<T> supplier) {
+            registerInput(key, supplier);
+            return this;
         }
 
-        public RobotAuto routine(AutoRoutine routine) {
-            return registerAuto(routine);
+        public RegistrySection routine(AutoRoutine routine) {
+            registerAuto(routine);
+            return this;
         }
 
-        public RobotAuto routines(AutoRoutine... routines) {
-            return registerAutos(routines);
+        public RegistrySection routines(AutoRoutine... routines) {
+            registerAutos(routines);
+            return this;
         }
 
-        public RobotAuto routine(AutoKey key, Supplier<Command> factory) {
-            return registerAuto(key, factory);
+        public RegistrySection routine(AutoKey key, Supplier<Command> factory) {
+            registerAuto(key, factory);
+            return this;
         }
 
-        public RobotAuto routine(String id, Supplier<Command> factory) {
-            return registerAuto(id, factory);
+        public RegistrySection routine(String id, Supplier<Command> factory) {
+            registerAuto(id, factory);
+            return this;
         }
 
-        public RobotAuto path(String reference, TrajectorySource source) {
-            return registerPath(reference, source);
+        public RegistrySection path(String reference, TrajectorySource source) {
+            registerPath(reference, source);
+            return this;
         }
 
-        public RobotAuto path(String reference, TrajectorySource source, String id) {
-            return registerPath(reference, source, id);
+        public RegistrySection path(String reference, TrajectorySource source, String id) {
+            registerPath(reference, source, id);
+            return this;
         }
 
-        public RobotAuto path(AutoKey key, TrajectorySource source, String reference) {
-            return registerPath(key, source, reference);
+        public RegistrySection path(AutoKey key, TrajectorySource source, String reference) {
+            registerPath(key, source, reference);
+            return this;
         }
 
         public boolean hasCommand(String id) {
@@ -1962,27 +1979,33 @@ public class RobotAuto {
 
     public final class CommandsSection {
         public RobotAuto put(NamedCommandKey key, Command command) {
-            return registry().command(key, command);
+            registry().command(key, command);
+            return RobotAuto.this;
         }
 
         public RobotAuto put(String id, Command command) {
-            return registry().command(id, command);
+            registry().command(id, command);
+            return RobotAuto.this;
         }
 
         public RobotAuto put(NamedCommandKey key, Supplier<Command> supplier) {
-            return registry().command(key, supplier);
+            registry().command(key, supplier);
+            return RobotAuto.this;
         }
 
         public RobotAuto put(String id, Supplier<Command> supplier) {
-            return registry().command(id, supplier);
+            registry().command(id, supplier);
+            return RobotAuto.this;
         }
 
         public RobotAuto put(NamedCommandKey key, Runnable action) {
-            return registry().command(key, action);
+            registry().command(key, action);
+            return RobotAuto.this;
         }
 
         public RobotAuto put(String id, Runnable action) {
-            return registry().command(id, action);
+            registry().command(id, action);
+            return RobotAuto.this;
         }
 
         public boolean has(String id) {
@@ -1992,7 +2015,8 @@ public class RobotAuto {
 
     public final class InputsSection {
         public <T> RobotAuto put(AutoInput<T> key, Supplier<T> supplier) {
-            return registry().input(key, supplier);
+            registry().input(key, supplier);
+            return RobotAuto.this;
         }
 
         public boolean has(String id) {
@@ -2010,31 +2034,38 @@ public class RobotAuto {
 
     public final class RoutinesSection {
         public RobotAuto put(AutoRoutine routine) {
-            return registry().routine(routine);
+            registry().routine(routine);
+            return RobotAuto.this;
         }
 
         public RobotAuto put(AutoRoutine... routines) {
-            return registry().routines(routines);
+            registry().routines(routines);
+            return RobotAuto.this;
         }
 
         public RobotAuto put(AutoKey key, Supplier<Command> factory) {
-            return registry().routine(key, factory);
+            registry().routine(key, factory);
+            return RobotAuto.this;
         }
 
         public RobotAuto put(String id, Supplier<Command> factory) {
-            return registry().routine(id, factory);
+            registry().routine(id, factory);
+            return RobotAuto.this;
         }
 
         public RobotAuto path(String reference, TrajectorySource source) {
-            return registry().path(reference, source);
+            registry().path(reference, source);
+            return RobotAuto.this;
         }
 
         public RobotAuto path(String reference, TrajectorySource source, String id) {
-            return registry().path(reference, source, id);
+            registry().path(reference, source, id);
+            return RobotAuto.this;
         }
 
         public RobotAuto path(AutoKey key, TrajectorySource source, String reference) {
-            return registry().path(key, source, reference);
+            registry().path(key, source, reference);
+            return RobotAuto.this;
         }
 
         public boolean has(String id) {
