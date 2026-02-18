@@ -2358,6 +2358,16 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private Translation2d computeSlipAwareFieldTranslation(Pose2d rawPose, Rotation2d heading, double nowSeconds) {
         Pose2d resolvedRawPose = rawPose != null ? rawPose : ZERO_POSE_2D;
         Rotation2d resolvedHeading = heading != null ? heading : resolvedRawPose.getRotation();
+        boolean tractionAssistActive =
+                slipMode == SlipMode.TRANSIENT
+                        || slipMode == SlipMode.SLIP
+                        || slipMode == SlipMode.RECOVER;
+        if (!tractionAssistActive || slipScore < SLIP_TRANSIENT_EXIT_SCORE) {
+            lastRawEstimatorPoseForSlipFusion = resolvedRawPose;
+            lastCorrectedPoseForSlipFusion = resolvedRawPose;
+            lastSlipFusionTimestamp = nowSeconds;
+            return resolvedRawPose.getTranslation();
+        }
         if (!Double.isFinite(lastSlipFusionTimestamp)) {
             lastRawEstimatorPoseForSlipFusion = resolvedRawPose;
             lastCorrectedPoseForSlipFusion = resolvedRawPose;
@@ -2377,19 +2387,29 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                         .minus(lastRawEstimatorPoseForSlipFusion.getTranslation())
                         .times(1.0 / dt);
         Translation2d imuFieldVelocity = computeImuFieldVelocity(resolvedHeading);
+        double maxTrustedImuSpeed = 6.0;
+        if (robotSpeeds != null) {
+            double configuredMax = robotSpeeds.getMaxVelocity();
+            if (Double.isFinite(configuredMax) && configuredMax > 0.0) {
+                maxTrustedImuSpeed = Math.max(0.75, configuredMax * 1.35);
+            }
+        }
+        if (imuFieldVelocity.getNorm() > maxTrustedImuSpeed) {
+            imuFieldVelocity = new Translation2d();
+        }
         double odomWeight = 1.0 - slipScore;
         if (!imuLinearSignalObserved) {
             odomWeight = 1.0;
         }
         switch (slipMode) {
             case SLIP:
-                odomWeight = Math.min(odomWeight, 0.35);
+                odomWeight = Math.max(odomWeight, 0.50);
                 break;
             case TRANSIENT:
-                odomWeight = Math.min(odomWeight, 0.75);
+                odomWeight = Math.max(odomWeight, 0.85);
                 break;
             case RECOVER:
-                odomWeight = Math.min(odomWeight, 0.90);
+                odomWeight = Math.max(odomWeight, 0.92);
                 break;
             default:
                 break;
