@@ -90,8 +90,26 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final double WHEELSPIN_ODOM_SPEED_MPS = 1.0;
     private static final double WHEELSPIN_IMU_SPEED_RATIO = 0.30;
     private static final double WHEELSPIN_IMU_SPEED_FLOOR_MPS = 0.25;
+    private static final double SLIP_SCORE_FILTER_RISE_TIME_SECONDS = 0.06;
+    private static final double SLIP_SCORE_FILTER_FALL_TIME_SECONDS = 0.20;
+    private static final double SLIP_TRANSIENT_ENTER_SCORE = 0.35;
+    private static final double SLIP_TRANSIENT_EXIT_SCORE = 0.18;
+    private static final double SLIP_ACTIVE_ENTER_SCORE = 0.62;
+    private static final double SLIP_ACTIVE_EXIT_SCORE = 0.28;
+    private static final double SLIP_RECOVER_TIME_SECONDS = 0.30;
+    private static final double SLIP_WEIGHT_YAW = 0.22;
+    private static final double SLIP_WEIGHT_ACCEL = 0.20;
+    private static final double SLIP_WEIGHT_REVERSAL = 0.23;
+    private static final double SLIP_WEIGHT_CONTACT = 0.35;
     private static final int POSE_STRUCT_PRUNE_PER_CYCLE = 8;
     private static final int BOUNDING_BOX_STATIC_PUBLISH_PERIOD = 10;
+
+    private enum SlipMode {
+        NOMINAL,
+        TRANSIENT,
+        SLIP,
+        RECOVER
+    }
 
     private RobotLocalizationConfig localizationConfig;
     private boolean visionEnabled = false;
@@ -102,7 +120,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private boolean suppressUpdates = false;
     private NetworkTable backendTable;
     private NetworkTableEntry backendOverrideEnabledEntry;
-    private NetworkTableEntry backendSlipStrategyEntry;
     private NetworkTableEntry backendImuStrategyEntry;
     private NetworkTableEntry backendVisionStrategyEntry;
 
@@ -129,7 +146,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private int boundingBoxPublishCycle = 0;
     private String primaryPoseName;
     private boolean slipActive = false;
-    private double slipActiveUntilSeconds = Double.NEGATIVE_INFINITY;
     private double lastUpdateTimestamp = Double.NaN;
     private Pose2d lastFieldPoseForSlip = new Pose2d();
     private Translation2d lastFieldVelocityForSlip = new Translation2d();
@@ -137,6 +153,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private double lastCommandedVyForSlip = 0.0;
     private double reversalEventUntilSeconds = Double.NEGATIVE_INFINITY;
     private boolean imuLinearSignalObserved = false;
+    private double slipScore = 0.0;
+    private double slipScoreRaw = 0.0;
+    private double slipContactComponent = 0.0;
+    private double slipRecoverUntilSeconds = Double.NEGATIVE_INFINITY;
+    private SlipMode slipMode = SlipMode.NOMINAL;
+    private Pose2d lastRawEstimatorPoseForSlipFusion = new Pose2d();
+    private Pose2d lastCorrectedPoseForSlipFusion = new Pose2d();
+    private double lastSlipFusionTimestamp = Double.NaN;
     private String lastSlipCause = "none";
     private Pose2d lastHealthPose = new Pose2d();
     private double lastHealthTimestamp = Double.NaN;
@@ -155,6 +179,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private NetworkTableEntry visionAcceptanceNtEntry;
     private NetworkTableEntry slipActiveNtEntry;
     private NetworkTableEntry slipCauseNtEntry;
+    private NetworkTableEntry slipScoreNtEntry;
+    private NetworkTableEntry slipModeNtEntry;
     private ChassisSpeeds fieldRelativeSpeeds = new ChassisSpeeds();
     private ChassisSpeeds robotRelativeSpeeds = new ChassisSpeeds();
     private double normalizedMovementSpeed = 0.0;
@@ -450,13 +476,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private void initBackendOverrides() {
         backendTable = NetworkTableInstance.getDefault().getTable("Athena/Localization/Backend");
         backendOverrideEnabledEntry = backendTable.getEntry("EnableOverride");
-        backendSlipStrategyEntry = backendTable.getEntry("SlipStrategy");
         backendImuStrategyEntry = backendTable.getEntry("ImuStrategy");
         backendVisionStrategyEntry = backendTable.getEntry("VisionStrategy");
 
         backendOverrideEnabledEntry.setBoolean(false);
         RobotLocalizationConfig.BackendConfig base = backendConfig();
-        backendSlipStrategyEntry.setString(base.slipStrategy().name());
         backendImuStrategyEntry.setString(base.imuStrategy().name());
         backendVisionStrategyEntry.setString(base.visionStrategy().name());
     }
@@ -464,15 +488,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     // Backend override values are edited directly via NetworkTables under Athena/Localization/Backend.
 
     private RobotLocalizationConfig.BackendConfig applyBackendOverride(RobotLocalizationConfig.BackendConfig base) {
-        RobotLocalizationConfig.BackendConfig.SlipStrategy slipStrategy =
-                parseEnum(backendSlipStrategyEntry.getString(base.slipStrategy().name()), base.slipStrategy());
         RobotLocalizationConfig.BackendConfig.ImuStrategy imuStrategy =
                 parseEnum(backendImuStrategyEntry.getString(base.imuStrategy().name()), base.imuStrategy());
         RobotLocalizationConfig.BackendConfig.VisionStrategy visionStrategy =
                 parseEnum(backendVisionStrategyEntry.getString(base.visionStrategy().name()), base.visionStrategy());
 
         return base
-                .withSlipStrategy(slipStrategy)
                 .withImuStrategy(imuStrategy)
                 .withVisionStrategy(visionStrategy);
     }
@@ -747,10 +768,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (slipCauseNtEntry != null) {
             slipCauseNtEntry.setString(lastSlipCause);
         }
+        if (slipScoreNtEntry != null) {
+            slipScoreNtEntry.setDouble(slipScore);
+        }
+        if (slipModeNtEntry != null) {
+            slipModeNtEntry.setString(slipMode.name());
+        }
     }
 
     private void updateSlipState(double now) {
         RobotLocalizationConfig.BackendConfig backend = backendConfig();
+        SlipMode previousMode = slipMode;
         boolean previousSlipActive = slipActive;
         if (Double.isFinite(lastUpdateTimestamp)) {
             double dt = now - lastUpdateTimestamp;
@@ -804,38 +832,63 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
                 boolean translatingForYaw =
                         Math.max(odomSpeed, commandedSpeed) > SLIP_YAW_TRANSLATION_GATE_MPS;
-                boolean yawSlip =
-                        translatingForYaw
-                                && Math.abs(comparableYawRate) > backend.slipYawRateThreshold()
-                                && yawDisagreement > backend.slipYawRateDisagreement();
+                double yawMagnitudeExcess = translatingForYaw
+                        ? clamp01((Math.abs(comparableYawRate) - backend.slipYawRateThreshold())
+                                / Math.max(backend.slipYawRateThreshold(), 1e-6))
+                        : 0.0;
+                double yawResidualNorm = translatingForYaw
+                        ? clamp01(yawDisagreement / Math.max(backend.slipYawRateDisagreement(), 1e-6))
+                        : 0.0;
+                double yawComponent = yawMagnitudeExcess * yawResidualNorm;
 
                 boolean translatingForAccel =
                         Math.max(odomSpeed, commandedSpeed) > SLIP_ACCEL_TRANSLATION_GATE_MPS;
                 double accelThreshold = Math.max(backend.slipAccelThreshold(), IMU_ACCEL_NOISE_FLOOR_MPS2);
-                boolean accelSlip =
-                        translatingForAccel
-                                && imuAccelMag > accelThreshold
-                                && Math.abs(imuAccelMag - odomAccelMag) > backend.slipAccelDisagreement();
+                double accelMagnitudeExcess = translatingForAccel
+                        ? clamp01((imuAccelMag - accelThreshold) / Math.max(accelThreshold, 1e-6))
+                        : 0.0;
+                double accelResidualNorm = translatingForAccel
+                        ? clamp01(Math.abs(imuAccelMag - odomAccelMag)
+                                / Math.max(backend.slipAccelDisagreement(), 1e-6))
+                        : 0.0;
+                double accelComponent = accelMagnitudeExcess * accelResidualNorm;
 
-                boolean reversalSlip =
-                        reversalActive
-                                && odomAccelMag > REVERSAL_ODOM_ACCEL_THRESHOLD_MPS2
-                                && imuAccelMag < REVERSAL_IMU_ACCEL_MIN_MPS2;
-
-                boolean wheelSpinSlip = false;
-                if (imuLinearSignalObserved) {
-                    double allowedImuSpeed =
-                            Math.max(WHEELSPIN_IMU_SPEED_FLOOR_MPS, odomSpeed * WHEELSPIN_IMU_SPEED_RATIO);
-                    wheelSpinSlip =
-                            commandedSpeed > WHEELSPIN_COMMAND_SPEED_MPS
-                                    && odomSpeed > WHEELSPIN_ODOM_SPEED_MPS
-                                    && imuLinearSpeed < allowedImuSpeed;
+                double reversalComponent = 0.0;
+                if (reversalActive) {
+                    double odomExcess = clamp01((odomAccelMag - REVERSAL_ODOM_ACCEL_THRESHOLD_MPS2)
+                            / Math.max(REVERSAL_ODOM_ACCEL_THRESHOLD_MPS2, 1e-6));
+                    double imuDeficit = clamp01((REVERSAL_IMU_ACCEL_MIN_MPS2 - imuAccelMag)
+                            / Math.max(REVERSAL_IMU_ACCEL_MIN_MPS2, 1e-6));
+                    reversalComponent = odomExcess * imuDeficit;
                 }
 
-                boolean slipTriggered = yawSlip || accelSlip || reversalSlip || wheelSpinSlip;
-                if (slipTriggered) {
-                    slipActiveUntilSeconds = now + backend.slipHoldSeconds();
-                    lastSlipCause = describeSlipCause(yawSlip, accelSlip, reversalSlip, wheelSpinSlip);
+                double contactComponent = 0.0;
+                if (imuLinearSignalObserved
+                        && commandedSpeed > WHEELSPIN_COMMAND_SPEED_MPS
+                        && odomSpeed > WHEELSPIN_ODOM_SPEED_MPS) {
+                    double allowedImuSpeed =
+                            Math.max(WHEELSPIN_IMU_SPEED_FLOOR_MPS, odomSpeed * WHEELSPIN_IMU_SPEED_RATIO);
+                    contactComponent = clamp01((allowedImuSpeed - imuLinearSpeed) / Math.max(allowedImuSpeed, 0.05));
+                }
+                slipContactComponent = contactComponent;
+
+                slipScoreRaw = clamp01(
+                        SLIP_WEIGHT_YAW * yawComponent
+                                + SLIP_WEIGHT_ACCEL * accelComponent
+                                + SLIP_WEIGHT_REVERSAL * reversalComponent
+                                + SLIP_WEIGHT_CONTACT * contactComponent);
+                double filterTime = slipScoreRaw > slipScore
+                        ? SLIP_SCORE_FILTER_RISE_TIME_SECONDS
+                        : SLIP_SCORE_FILTER_FALL_TIME_SECONDS;
+                double alpha = dt / (filterTime + dt);
+                slipScore += alpha * (slipScoreRaw - slipScore);
+                slipScore = clamp01(slipScore);
+
+                updateSlipMode(now, slipScore, contactComponent, backend);
+                if (slipMode == SlipMode.NOMINAL && slipScore < 0.08) {
+                    lastSlipCause = "none";
+                } else {
+                    lastSlipCause = dominantSlipCause(yawComponent, accelComponent, reversalComponent, contactComponent);
                 }
 
                 lastFieldVelocityForSlip = odomVelocity;
@@ -845,23 +898,26 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 lastCommandedVxForSlip = 0.0;
                 lastCommandedVyForSlip = 0.0;
                 reversalEventUntilSeconds = Double.NEGATIVE_INFINITY;
+                slipScoreRaw = slipScore;
             }
         }
-        slipActive = now <= slipActiveUntilSeconds;
-        if (slipActive != previousSlipActive) {
+        slipActive = slipMode == SlipMode.TRANSIENT || slipMode == SlipMode.SLIP;
+        if (slipMode != previousMode) {
             appendDiagnosticLog(
                     slipActive ? "WARN" : "INFO",
                     "slip",
-                    slipActive
-                            ? "slip detection active: " + lastSlipCause
-                            : "slip detection cleared");
-            if (!slipActive) {
-                lastSlipCause = "none";
-            }
+                    "slip mode " + previousMode.name() + " -> " + slipMode.name()
+                            + " cause=" + lastSlipCause
+                            + " score=" + String.format("%.3f", slipScore));
+        } else if (slipActive != previousSlipActive) {
+            appendDiagnosticLog(
+                    slipActive ? "WARN" : "INFO",
+                    "slip",
+                    slipActive ? "slip detection active" : "slip detection cleared");
         }
         lastUpdateTimestamp = now;
         lastFieldPoseForSlip = fieldPose;
-        updateProcessStdDevScale(slipActive);
+        updateProcessStdDevScale(slipScore);
     }
 
     private ChassisSpeeds combinedCommandedRobotSpeeds() {
@@ -892,37 +948,72 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return Double.isFinite(value) ? value : 0.0;
     }
 
-    private static String describeSlipCause(
-            boolean yawSlip,
-            boolean accelSlip,
-            boolean reversalSlip,
-            boolean wheelSpinSlip) {
-        StringBuilder cause = new StringBuilder();
-        if (yawSlip) {
-            cause.append("yawMismatch");
+    private static double clamp01(double value) {
+        return MathUtil.clamp(value, 0.0, 1.0);
+    }
+
+    private void updateSlipMode(
+            double now,
+            double score,
+            double contactComponent,
+            RobotLocalizationConfig.BackendConfig backend) {
+        double recoverHoldSeconds = Math.max(SLIP_RECOVER_TIME_SECONDS, backend.slipHoldSeconds());
+        switch (slipMode) {
+            case NOMINAL:
+                if (score >= SLIP_ACTIVE_ENTER_SCORE || contactComponent >= 0.90) {
+                    slipMode = SlipMode.SLIP;
+                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE) {
+                    slipMode = SlipMode.TRANSIENT;
+                }
+                break;
+            case TRANSIENT:
+                if (score >= SLIP_ACTIVE_ENTER_SCORE || contactComponent >= 0.90) {
+                    slipMode = SlipMode.SLIP;
+                } else if (score <= SLIP_TRANSIENT_EXIT_SCORE) {
+                    slipMode = SlipMode.NOMINAL;
+                }
+                break;
+            case SLIP:
+                if (score <= SLIP_ACTIVE_EXIT_SCORE) {
+                    slipMode = SlipMode.RECOVER;
+                    slipRecoverUntilSeconds = now + recoverHoldSeconds;
+                }
+                break;
+            case RECOVER:
+                if (score >= SLIP_ACTIVE_ENTER_SCORE) {
+                    slipMode = SlipMode.SLIP;
+                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE) {
+                    slipMode = SlipMode.TRANSIENT;
+                } else if (now >= slipRecoverUntilSeconds) {
+                    slipMode = SlipMode.NOMINAL;
+                }
+                break;
+            default:
+                slipMode = SlipMode.NOMINAL;
+                break;
         }
-        if (accelSlip) {
-            if (cause.length() > 0) {
-                cause.append("+");
-            }
-            cause.append("accelMismatch");
+    }
+
+    private static String dominantSlipCause(
+            double yawComponent,
+            double accelComponent,
+            double reversalComponent,
+            double contactComponent) {
+        double best = yawComponent;
+        String cause = "yawMismatch";
+        if (accelComponent > best) {
+            best = accelComponent;
+            cause = "accelMismatch";
         }
-        if (reversalSlip) {
-            if (cause.length() > 0) {
-                cause.append("+");
-            }
-            cause.append("reversal");
+        if (reversalComponent > best) {
+            best = reversalComponent;
+            cause = "reversal";
         }
-        if (wheelSpinSlip) {
-            if (cause.length() > 0) {
-                cause.append("+");
-            }
-            cause.append("wheelSpin");
+        if (contactComponent > best) {
+            best = contactComponent;
+            cause = "contact";
         }
-        if (cause.length() == 0) {
-            return "none";
-        }
-        return cause.toString();
+        return best < 0.05 ? "none" : cause;
     }
 
     private static double unwrapRateNear(double wrappedRate, double referenceRate) {
@@ -943,12 +1034,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return best;
     }
 
-    private void updateProcessStdDevScale(boolean slipActive) {
+    private void updateProcessStdDevScale(double slipScoreValue) {
         if (processStdDevUpdateFailed) {
             return;
         }
         RobotLocalizationConfig.BackendConfig backend = backendConfig();
-        double targetScale = slipActive ? backend.slipProcessStdDevScale() : 1.0;
+        double slipTargetScale = backend.slipProcessStdDevScale();
+        if (!Double.isFinite(slipTargetScale) || slipTargetScale <= 0.0) {
+            slipTargetScale = 1.0;
+        }
+        double normalizedScore = clamp01(slipScoreValue);
+        double targetScale = 1.0 + normalizedScore * (slipTargetScale - 1.0);
         if (!Double.isFinite(targetScale) || targetScale <= 0.0) {
             targetScale = 1.0;
         }
@@ -1329,6 +1425,29 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         robotRelativeSpeeds.vyMetersPerSecond = 0.0;
         robotRelativeSpeeds.omegaRadiansPerSecond = 0.0;
         normalizedMovementSpeed = 0.0;
+        resetSlipFusionTracking(lastVelocityPose, lastVelocityTimestamp);
+    }
+
+    private void resetSlipFusionTracking(Pose2d pose, double timestampSeconds) {
+        Pose2d resolvedPose = pose != null ? pose : ZERO_POSE_2D;
+        double resolvedTimestamp = Double.isFinite(timestampSeconds) ? timestampSeconds : currentTimestampSeconds();
+        lastRawEstimatorPoseForSlipFusion = resolvedPose;
+        lastCorrectedPoseForSlipFusion = resolvedPose;
+        lastSlipFusionTimestamp = resolvedTimestamp;
+        slipScore = 0.0;
+        slipScoreRaw = 0.0;
+        slipContactComponent = 0.0;
+        slipMode = SlipMode.NOMINAL;
+        slipActive = false;
+        slipRecoverUntilSeconds = Double.NEGATIVE_INFINITY;
+        lastUpdateTimestamp = resolvedTimestamp;
+        lastFieldPoseForSlip = resolvedPose;
+        lastFieldVelocityForSlip = new Translation2d();
+        lastCommandedVxForSlip = 0.0;
+        lastCommandedVyForSlip = 0.0;
+        reversalEventUntilSeconds = Double.NEGATIVE_INFINITY;
+        lastSlipCause = "none";
+        updateProcessStdDevScale(0.0);
     }
 
     private void updateVelocityTracking(Pose2d pose, double nowSeconds) {
@@ -1748,7 +1867,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         summary.put("visionEnabled", isVisionEnabled());
         summary.put("suppressUpdates", suppressUpdates);
         summary.put("slipActive", slipActive);
+        summary.put("slipMode", slipMode.name());
         summary.put("slipCause", lastSlipCause);
+        summary.put("slipScore", slipScore);
         summary.put("visionAcceptRate", visionAcceptRateWindow);
         summary.put("driftRateMetersPerSec", driftRateMetersPerSec);
         summary.put("poseJumpMeters", lastPoseJumpMeters);
@@ -1838,7 +1959,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             health.putDouble("driftRateMetersPerSec", driftRateMetersPerSec);
             health.putDouble("visionAcceptRate", visionAcceptRateWindow);
             health.putBoolean("slipActive", slipActive);
+            health.putString("slipMode", slipMode.name());
             health.putString("slipCause", lastSlipCause);
+            health.putDouble("slipScore", slipScore);
         }
 
         return node;
@@ -1868,7 +1991,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         driftRateNtEntry = healthTable.getEntry("DriftRateMetersPerSec");
         visionAcceptanceNtEntry = healthTable.getEntry("VisionAcceptRate");
         slipActiveNtEntry = healthTable.getEntry("SlipActive");
+        slipModeNtEntry = healthTable.getEntry("SlipMode");
         slipCauseNtEntry = healthTable.getEntry("SlipCause");
+        slipScoreNtEntry = healthTable.getEntry("SlipScore");
     }
 
     private static double currentTimestampSeconds() {
@@ -2069,12 +2194,15 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         RobotLocalizationConfig.BackendConfig backend = resolveBackendForPose(config);
         boolean hasFreshVision = hasFreshVision(now, config.constraints(), state);
+        boolean supportsVisionInput =
+                config.continuousInputs().contains(PoseInput.VISION)
+                        || config.onDemandInputs().contains(PoseInput.VISION);
         if (!config.constraints().canUpdate(now, state.lastUpdateSeconds, hasFreshVision, slipActive)) {
             return;
         }
 
         boolean appliedVision = false;
-        if (config.onDemandInputs().contains(PoseInput.VISION)) {
+        if (supportsVisionInput) {
             appliedVision = applyVisionForConfig(config, state, backend, now);
         }
         if (config.constraints().requireVision() && !appliedVision) {
@@ -2154,6 +2282,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (Math.abs(now - state.lastEstimatorUpdateSeconds) < 1e-6) {
             return false;
         }
+        boolean isPrimary = state == getPrimaryPoseState();
         if (poseSpace == RobotLocalizationConfig.PoseSpace.THREE_D) {
             Rotation3d rotation = getRotation3d("field", backend);
             PoseEstimator3d<T> estimator = state.estimator3d;
@@ -2162,17 +2291,153 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             }
             state.pose3d = estimator.update(rotation, wheelPositions.get());
             state.pose2d = state.pose3d.toPose2d();
+            if (isPrimary) {
+                applySlipAwareEstimatorCorrection3d(state, estimator, rotation, now);
+            }
         } else {
             PoseEstimator<T> estimator = state.estimator2d;
             if (estimator == null) {
                 return false;
             }
-            state.pose2d = estimator.update(getYaw("field", backend), wheelPositions.get());
+            Rotation2d yaw = getYaw("field", backend);
+            state.pose2d = estimator.update(yaw, wheelPositions.get());
             state.pose3d = new Pose3d(state.pose2d);
+            if (isPrimary) {
+                applySlipAwareEstimatorCorrection2d(state, estimator, yaw, now);
+            }
         }
         state.lastEstimatorUpdateSeconds = now;
         onPoseUpdated(state, now);
         return true;
+    }
+
+    private void applySlipAwareEstimatorCorrection2d(
+            PoseEstimatorState state,
+            PoseEstimator<T> estimator,
+            Rotation2d yaw,
+            double nowSeconds) {
+        Pose2d rawPose = state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
+        Translation2d correctedTranslation = computeSlipAwareFieldTranslation(rawPose, yaw, nowSeconds);
+        if (correctedTranslation == null) {
+            return;
+        }
+        if (correctedTranslation.getDistance(rawPose.getTranslation()) < 1e-5) {
+            return;
+        }
+        Pose2d correctedPose = new Pose2d(correctedTranslation, yaw);
+        estimator.resetPosition(yaw, wheelPositions.get(), correctedPose);
+        state.pose2d = correctedPose;
+        state.pose3d = new Pose3d(correctedPose);
+    }
+
+    private void applySlipAwareEstimatorCorrection3d(
+            PoseEstimatorState state,
+            PoseEstimator3d<T> estimator,
+            Rotation3d rotation,
+            double nowSeconds) {
+        Pose3d rawPose3d = state.pose3d != null ? state.pose3d : new Pose3d();
+        Pose2d rawPose2d = rawPose3d.toPose2d();
+        Translation2d correctedTranslation =
+                computeSlipAwareFieldTranslation(rawPose2d, rawPose2d.getRotation(), nowSeconds);
+        if (correctedTranslation == null) {
+            return;
+        }
+        if (correctedTranslation.getDistance(rawPose2d.getTranslation()) < 1e-5) {
+            return;
+        }
+        Pose3d correctedPose = new Pose3d(
+                correctedTranslation.getX(),
+                correctedTranslation.getY(),
+                rawPose3d.getZ(),
+                rotation);
+        estimator.resetPosition(rotation, wheelPositions.get(), correctedPose);
+        state.pose3d = correctedPose;
+        state.pose2d = correctedPose.toPose2d();
+    }
+
+    private Translation2d computeSlipAwareFieldTranslation(Pose2d rawPose, Rotation2d heading, double nowSeconds) {
+        Pose2d resolvedRawPose = rawPose != null ? rawPose : ZERO_POSE_2D;
+        Rotation2d resolvedHeading = heading != null ? heading : resolvedRawPose.getRotation();
+        if (!Double.isFinite(lastSlipFusionTimestamp)) {
+            lastRawEstimatorPoseForSlipFusion = resolvedRawPose;
+            lastCorrectedPoseForSlipFusion = resolvedRawPose;
+            lastSlipFusionTimestamp = nowSeconds;
+            return resolvedRawPose.getTranslation();
+        }
+        double dt = nowSeconds - lastSlipFusionTimestamp;
+        if (!Double.isFinite(dt) || dt <= 1e-6 || dt > SLIP_DT_MAX_SECONDS) {
+            lastRawEstimatorPoseForSlipFusion = resolvedRawPose;
+            lastCorrectedPoseForSlipFusion = resolvedRawPose;
+            lastSlipFusionTimestamp = nowSeconds;
+            return resolvedRawPose.getTranslation();
+        }
+
+        Translation2d rawOdomVelocity =
+                resolvedRawPose.getTranslation()
+                        .minus(lastRawEstimatorPoseForSlipFusion.getTranslation())
+                        .times(1.0 / dt);
+        Translation2d imuFieldVelocity = computeImuFieldVelocity(resolvedHeading);
+        double odomWeight = 1.0 - slipScore;
+        if (!imuLinearSignalObserved) {
+            odomWeight = 1.0;
+        }
+        switch (slipMode) {
+            case SLIP:
+                odomWeight = Math.min(odomWeight, 0.35);
+                break;
+            case TRANSIENT:
+                odomWeight = Math.min(odomWeight, 0.75);
+                break;
+            case RECOVER:
+                odomWeight = Math.min(odomWeight, 0.90);
+                break;
+            default:
+                break;
+        }
+        odomWeight = clamp01(odomWeight);
+        Translation2d fusedVelocity =
+                rawOdomVelocity.times(odomWeight).plus(imuFieldVelocity.times(1.0 - odomWeight));
+
+        if (slipContactComponent > 0.40) {
+            Translation2d commandedFieldVelocity = computeCommandedFieldVelocity(resolvedHeading);
+            double commandedNorm = commandedFieldVelocity.getNorm();
+            if (commandedNorm > 0.2) {
+                Translation2d direction = commandedFieldVelocity.times(1.0 / commandedNorm);
+                double fusedParallel = fusedVelocity.getX() * direction.getX() + fusedVelocity.getY() * direction.getY();
+                Translation2d fusedPerpendicular = fusedVelocity.minus(direction.times(fusedParallel));
+                double imuParallel = imuFieldVelocity.getX() * direction.getX() + imuFieldVelocity.getY() * direction.getY();
+                double clampBlend = clamp01((slipContactComponent - 0.40) / 0.60);
+                double correctedParallel = MathUtil.interpolate(fusedParallel, imuParallel, clampBlend);
+                fusedVelocity = fusedPerpendicular.plus(direction.times(correctedParallel));
+            }
+        }
+
+        Translation2d correctedTranslation =
+                lastCorrectedPoseForSlipFusion.getTranslation().plus(fusedVelocity.times(dt));
+        Pose2d correctedPose = new Pose2d(correctedTranslation, resolvedHeading);
+        lastRawEstimatorPoseForSlipFusion = resolvedRawPose;
+        lastCorrectedPoseForSlipFusion = correctedPose;
+        lastSlipFusionTimestamp = nowSeconds;
+        return correctedTranslation;
+    }
+
+    private Translation2d computeImuFieldVelocity(Rotation2d heading) {
+        double imuRobotVx = finiteOrZero(imu.getXSpeedMetersPerSecond());
+        double imuRobotVy = finiteOrZero(imu.getYSpeedMetersPerSecond());
+        double cos = heading.getCos();
+        double sin = heading.getSin();
+        return new Translation2d(
+                imuRobotVx * cos - imuRobotVy * sin,
+                imuRobotVx * sin + imuRobotVy * cos);
+    }
+
+    private Translation2d computeCommandedFieldVelocity(Rotation2d heading) {
+        ChassisSpeeds commandedRobot = combinedCommandedRobotSpeeds();
+        double cos = heading.getCos();
+        double sin = heading.getSin();
+        return new Translation2d(
+                commandedRobot.vxMetersPerSecond * cos - commandedRobot.vyMetersPerSecond * sin,
+                commandedRobot.vxMetersPerSecond * sin + commandedRobot.vyMetersPerSecond * cos);
     }
 
     private boolean refreshPoseFromEstimator(PoseEstimatorState state, double nowSeconds) {

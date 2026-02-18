@@ -16,7 +16,6 @@ import ca.frc6390.athena.core.localization.PoseEstimatorFactory;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.localization.RobotDrivetrainLocalizationFactory;
-import ca.frc6390.athena.odometry.SlipCompensatingSwerveDrivePoseEstimator;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveDrivetrainSimulation;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
@@ -594,19 +593,6 @@ public class SwerveDrivetrain extends SubsystemBase
               Pose2d startPose,
               Matrix<N3, N1> stateStdDevs,
               Matrix<N3, N1> visionStdDevs) {
-        if (backend != null
-                && backend.slipStrategy() == RobotLocalizationConfig.BackendConfig.SlipStrategy.SWERVE_VARIANCE) {
-          SlipCompensatingSwerveDrivePoseEstimator estimator =
-                  new SlipCompensatingSwerveDrivePoseEstimator(
-                          kinematics,
-                          imu.getYaw(),
-                          positions(),
-                          startPose,
-                          stateStdDevs,
-                          visionStdDevs);
-          estimator.setSlipThreshold(backend.slipThreshold());
-          return estimator;
-        }
         return new SwerveDrivePoseEstimator(
                 kinematics,
                 imu.getYaw(),

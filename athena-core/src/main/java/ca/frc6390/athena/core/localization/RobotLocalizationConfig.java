@@ -269,16 +269,6 @@ public class RobotLocalizationConfig {
             return this;
         }
 
-        public ConfigSection slipStrategy(BackendConfig.SlipStrategy strategy) {
-            applySlipStrategy(strategy);
-            return this;
-        }
-
-        public ConfigSection slipThreshold(double value) {
-            applySlipThreshold(value);
-            return this;
-        }
-
         public ConfigSection slipYawRateThreshold(double value) {
             applySlipYawRateThreshold(value);
             return this;
@@ -445,16 +435,6 @@ public class RobotLocalizationConfig {
     public final class BackendSection {
         public BackendSection config(BackendConfig backendConfig) {
             applyBackend(backendConfig);
-            return this;
-        }
-
-        public BackendSection slipStrategy(BackendConfig.SlipStrategy strategy) {
-            applySlipStrategy(strategy);
-            return this;
-        }
-
-        public BackendSection slipThreshold(double value) {
-            applySlipThreshold(value);
             return this;
         }
 
@@ -848,14 +828,6 @@ public class RobotLocalizationConfig {
         return this;
     }
 
-    private RobotLocalizationConfig applySlipStrategy(BackendConfig.SlipStrategy slipStrategy) {
-        return applyBackend(backend().withSlipStrategy(slipStrategy));
-    }
-
-    private RobotLocalizationConfig applySlipThreshold(double slipThreshold) {
-        return applyBackend(backend().withSlipThreshold(slipThreshold));
-    }
-
     private RobotLocalizationConfig applySlipYawRateThreshold(double slipYawRateThreshold) {
         return applyBackend(backend().withSlipYawRateThreshold(slipYawRateThreshold));
     }
@@ -976,10 +948,8 @@ public class RobotLocalizationConfig {
     }
 
     public record BackendConfig(
-            SlipStrategy slipStrategy,
             ImuStrategy imuStrategy,
             VisionStrategy visionStrategy,
-            double slipThreshold,
             double slipYawRateThreshold,
             double slipYawRateDisagreement,
             double slipAccelThreshold,
@@ -996,11 +966,6 @@ public class RobotLocalizationConfig {
             double poseJumpHoldSeconds,
             double poseJumpAgreementMeters) {
 
-        public enum SlipStrategy {
-            OFF,
-            SWERVE_VARIANCE
-        }
-
         public enum ImuStrategy {
             VIRTUAL_AXES,
             RAW_YAW
@@ -1015,10 +980,8 @@ public class RobotLocalizationConfig {
 
         public static BackendConfig defaults() {
             return new BackendConfig(
-                    SlipStrategy.OFF,
                     ImuStrategy.VIRTUAL_AXES,
                     VisionStrategy.DEFAULT,
-                    0.2,
                     2.0,
                     1.0,
                     1.5,
@@ -1036,35 +999,10 @@ public class RobotLocalizationConfig {
                     1.0);
         }
 
-        public BackendConfig withSlipStrategy(SlipStrategy slipStrategy) {
-            return new BackendConfig(
-                    slipStrategy,
-                    imuStrategy,
-                    visionStrategy,
-                    slipThreshold,
-                    slipYawRateThreshold,
-                    slipYawRateDisagreement,
-                    slipAccelThreshold,
-                    slipAccelDisagreement,
-                    slipHoldSeconds,
-                    slipVisionStdDevScale,
-                    slipProcessStdDevScale,
-                    visionFusionMaxSeparationSeconds,
-                    visionFusionMinWeight,
-                    visionFusionDistanceWeight,
-                    visionFusionLatencyWeight,
-                    visionFusionConfidenceExponent,
-                    poseJumpMeters,
-                    poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
-        }
-
         public BackendConfig withImuStrategy(ImuStrategy imuStrategy) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1084,33 +1022,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withVisionStrategy(VisionStrategy visionStrategy) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
-                    slipYawRateThreshold,
-                    slipYawRateDisagreement,
-                    slipAccelThreshold,
-                    slipAccelDisagreement,
-                    slipHoldSeconds,
-                    slipVisionStdDevScale,
-                    slipProcessStdDevScale,
-                    visionFusionMaxSeparationSeconds,
-                    visionFusionMinWeight,
-                    visionFusionDistanceWeight,
-                    visionFusionLatencyWeight,
-                    visionFusionConfidenceExponent,
-                    poseJumpMeters,
-                    poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
-        }
-
-        public BackendConfig withSlipThreshold(double slipThreshold) {
-            return new BackendConfig(
-                    slipStrategy,
-                    imuStrategy,
-                    visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1130,10 +1043,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withSlipYawRateThreshold(double slipYawRateThreshold) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1153,10 +1064,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withSlipYawRateDisagreement(double slipYawRateDisagreement) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1176,10 +1085,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withSlipAccelThreshold(double slipAccelThreshold) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1199,10 +1106,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withSlipAccelDisagreement(double slipAccelDisagreement) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1222,10 +1127,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withSlipHoldSeconds(double slipHoldSeconds) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1245,10 +1148,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withSlipVisionStdDevScale(double slipVisionStdDevScale) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1268,10 +1169,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withSlipProcessStdDevScale(double slipProcessStdDevScale) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1291,10 +1190,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withVisionFusionMaxSeparationSeconds(double visionFusionMaxSeparationSeconds) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1314,10 +1211,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withVisionFusionMinWeight(double visionFusionMinWeight) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1337,10 +1232,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withVisionFusionDistanceWeight(double visionFusionDistanceWeight) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1360,10 +1253,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withVisionFusionLatencyWeight(double visionFusionLatencyWeight) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1383,10 +1274,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withVisionFusionConfidenceExponent(double visionFusionConfidenceExponent) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1406,10 +1295,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withPoseJumpMeters(double poseJumpMeters) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1429,10 +1316,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withPoseJumpHoldSeconds(double poseJumpHoldSeconds) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1452,10 +1337,8 @@ public class RobotLocalizationConfig {
 
         public BackendConfig withPoseJumpAgreementMeters(double poseJumpAgreementMeters) {
             return new BackendConfig(
-                    slipStrategy,
                     imuStrategy,
                     visionStrategy,
-                    slipThreshold,
                     slipYawRateThreshold,
                     slipYawRateDisagreement,
                     slipAccelThreshold,
@@ -1486,12 +1369,8 @@ public class RobotLocalizationConfig {
         }
 
         public BackendConfig {
-            slipStrategy = slipStrategy != null ? slipStrategy : SlipStrategy.OFF;
             imuStrategy = imuStrategy != null ? imuStrategy : ImuStrategy.VIRTUAL_AXES;
             visionStrategy = visionStrategy != null ? visionStrategy : VisionStrategy.DEFAULT;
-            if (!Double.isFinite(slipThreshold) || slipThreshold <= 0.0) {
-                slipThreshold = 0.2;
-            }
             if (!Double.isFinite(slipYawRateThreshold) || slipYawRateThreshold <= 0.0) {
                 slipYawRateThreshold = 2.0;
             }
