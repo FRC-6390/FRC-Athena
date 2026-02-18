@@ -101,6 +101,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final double SLIP_WEIGHT_ACCEL = 0.20;
     private static final double SLIP_WEIGHT_REVERSAL = 0.23;
     private static final double SLIP_WEIGHT_CONTACT = 0.35;
+    private static final double REVERSAL_OPPOSING_VELOCITY_MAX_MPS = 0.20;
+    private static final double REVERSAL_OPPOSING_VELOCITY_MIN_MPS = 0.02;
     private static final int POSE_STRUCT_PRUNE_PER_CYCLE = 8;
     private static final int BOUNDING_BOX_STATIC_PUBLISH_PERIOD = 10;
 
@@ -156,6 +158,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private double slipScore = 0.0;
     private double slipScoreRaw = 0.0;
     private double slipContactComponent = 0.0;
+    private double slipReversalComponent = 0.0;
     private double slipRecoverUntilSeconds = Double.NEGATIVE_INFINITY;
     private SlipMode slipMode = SlipMode.NOMINAL;
     private Pose2d lastRawEstimatorPoseForSlipFusion = new Pose2d();
@@ -861,6 +864,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                             / Math.max(REVERSAL_IMU_ACCEL_MIN_MPS2, 1e-6));
                     reversalComponent = odomExcess * imuDeficit;
                 }
+                slipReversalComponent = reversalComponent;
 
                 double contactComponent = 0.0;
                 if (imuLinearSignalObserved
@@ -898,6 +902,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 lastCommandedVxForSlip = 0.0;
                 lastCommandedVyForSlip = 0.0;
                 reversalEventUntilSeconds = Double.NEGATIVE_INFINITY;
+                slipContactComponent = 0.0;
+                slipReversalComponent = 0.0;
                 slipScoreRaw = slipScore;
             }
         }
@@ -1437,6 +1443,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         slipScore = 0.0;
         slipScoreRaw = 0.0;
         slipContactComponent = 0.0;
+        slipReversalComponent = 0.0;
         slipMode = SlipMode.NOMINAL;
         slipActive = false;
         slipRecoverUntilSeconds = Double.NEGATIVE_INFINITY;
@@ -2418,18 +2425,52 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         Translation2d fusedVelocity =
                 rawOdomVelocity.times(odomWeight).plus(imuFieldVelocity.times(1.0 - odomWeight));
 
-        if (slipContactComponent > 0.40) {
-            Translation2d commandedFieldVelocity = computeCommandedFieldVelocity(resolvedHeading);
-            double commandedNorm = commandedFieldVelocity.getNorm();
-            if (commandedNorm > 0.2) {
-                Translation2d direction = commandedFieldVelocity.times(1.0 / commandedNorm);
-                double fusedParallel = fusedVelocity.getX() * direction.getX() + fusedVelocity.getY() * direction.getY();
-                Translation2d fusedPerpendicular = fusedVelocity.minus(direction.times(fusedParallel));
-                double imuParallel = imuFieldVelocity.getX() * direction.getX() + imuFieldVelocity.getY() * direction.getY();
-                double clampBlend = clamp01((slipContactComponent - 0.40) / 0.60);
-                double correctedParallel = MathUtil.interpolate(fusedParallel, imuParallel, clampBlend);
-                fusedVelocity = fusedPerpendicular.plus(direction.times(correctedParallel));
+        Translation2d commandedFieldVelocity = computeCommandedFieldVelocity(resolvedHeading);
+        double commandedNorm = commandedFieldVelocity.getNorm();
+        if (commandedNorm > 0.2) {
+            Translation2d direction = commandedFieldVelocity.times(1.0 / commandedNorm);
+            double fusedParallel = fusedVelocity.getX() * direction.getX() + fusedVelocity.getY() * direction.getY();
+            Translation2d fusedPerpendicular = fusedVelocity.minus(direction.times(fusedParallel));
+            double odomParallel = rawOdomVelocity.getX() * direction.getX() + rawOdomVelocity.getY() * direction.getY();
+            double imuParallel = imuFieldVelocity.getX() * direction.getX() + imuFieldVelocity.getY() * direction.getY();
+
+            if (slipContactComponent > 0.35) {
+                double contactBlend = clamp01((slipContactComponent - 0.35) / 0.65);
+                double imuOrZeroParallel = Math.abs(imuParallel) < 0.25 ? 0.0 : imuParallel;
+                double targetParallel = MathUtil.interpolate(imuParallel, imuOrZeroParallel, contactBlend);
+                targetParallel = MathUtil.interpolate(targetParallel, 0.0, contactBlend * 0.85);
+                fusedParallel = MathUtil.interpolate(fusedParallel, targetParallel, contactBlend);
             }
+
+            if (slipReversalComponent > 0.20) {
+                double reversalBlend = clamp01((slipReversalComponent - 0.20) / 0.80);
+                double opposingClamp = MathUtil.interpolate(
+                        REVERSAL_OPPOSING_VELOCITY_MAX_MPS,
+                        REVERSAL_OPPOSING_VELOCITY_MIN_MPS,
+                        reversalBlend);
+                if (fusedParallel < -opposingClamp) {
+                    fusedParallel = -opposingClamp;
+                }
+                if (odomParallel < -0.15 && Math.abs(imuParallel) < 0.20) {
+                    fusedParallel = Math.max(fusedParallel, 0.0);
+                }
+            }
+
+            if (slipScore > 0.55 && fusedParallel < 0.0) {
+                double opposingClamp = MathUtil.interpolate(
+                        0.15,
+                        0.03,
+                        clamp01((slipScore - 0.55) / 0.45));
+                fusedParallel = Math.max(fusedParallel, -opposingClamp);
+            }
+
+            fusedVelocity = fusedPerpendicular.plus(direction.times(fusedParallel));
+        } else if (slipContactComponent > 0.55 || slipReversalComponent > 0.45) {
+            double damp = MathUtil.interpolate(
+                    1.0,
+                    0.25,
+                    Math.max(slipContactComponent, slipReversalComponent));
+            fusedVelocity = fusedVelocity.times(damp);
         }
 
         Translation2d correctedTranslation =
