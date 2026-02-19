@@ -376,7 +376,7 @@ public class RobotAuto {
         }
 
         /**
-         * Enables or disables odometry reset before each {@code auto(...)} command built by this ctx.
+         * Enables or disables odometry reset for the next {@code auto(...)} command built by this ctx.
          */
         default AutoBuildCtx odometryReset(boolean enabled) {
             return this;
@@ -394,7 +394,7 @@ public class RobotAuto {
         }
 
         default OdometryResetTarget odometryResetTarget() {
-            return OdometryResetTarget.NONE;
+            return OdometryResetTarget.PATH_START;
         }
 
         /**
