@@ -94,10 +94,13 @@ public class ChoreoAutoBackend implements AutoBackend {
                                 + "\" because alliance is unknown.",
                         false)),
                 () -> DriverStation.getAlliance().isPresent());
+        boolean shouldResetOdometry = splitIndex.isEmpty() || splitIndex.getAsInt() == 0;
         AtomicBoolean trajectoryFinished = new AtomicBoolean(false);
+        Command startCommand = shouldResetOdometry
+                ? Commands.sequence(reset, trajectory.cmd())
+                : trajectory.cmd();
         routine.active()
-                .onTrue(Commands.sequence(reset, trajectory.cmd())
-                        .finallyDo(interrupted -> trajectoryFinished.set(true)));
+                .onTrue(startCommand.finallyDo(interrupted -> trajectoryFinished.set(true)));
         Command runRoutine = routine.cmd(trajectoryFinished::get);
         Command poseSettle = buildPoseSettleCommand(reference, trajectory);
         Command stop = Commands.runOnce(() -> {

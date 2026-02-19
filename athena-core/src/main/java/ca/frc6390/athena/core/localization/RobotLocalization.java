@@ -1562,6 +1562,24 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     /**
+     * Updates an existing named localization bounding box from opposite corners.
+     *
+     * <p>Returns {@code false} if the zone is not currently registered.</p>
+     */
+    public boolean updateZoneCorners(String name, Translation2d cornerA, Translation2d cornerB) {
+        if (cornerA == null || cornerB == null) {
+            return false;
+        }
+        String resolvedName = sanitizeBoundingBoxName(name);
+        PoseBoundingBox2d existing = namedBoundingBoxes.get(resolvedName);
+        if (existing == null) {
+            return false;
+        }
+        zone(resolvedName, existing.updateCorners(cornerA, cornerB));
+        return true;
+    }
+
+    /**
      * Removes a named localization bounding box from visualization and telemetry.
      */
     public boolean removeZone(String name) {
@@ -1811,6 +1829,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
         public boolean in(PoseBoundingBox2d box) {
             return owner.inZone(box);
+        }
+
+        public boolean updateCorners(String name, Translation2d cornerA, Translation2d cornerB) {
+            return owner.updateZoneCorners(name, cornerA, cornerB);
         }
     }
 
@@ -2133,12 +2155,13 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             }
             RobotNetworkTables.Node boxNode = boxesNode.child(name);
             PoseBoundingBox2d publishedBox = boundingBoxMetadataPublished.get(name);
-            if (publishStaticThisCycle || !box.equals(publishedBox)) {
+            boolean boxChanged = !box.equals(publishedBox);
+            if (publishStaticThisCycle || boxChanged) {
                 boxNode.putDouble("minX", box.minX());
                 boxNode.putDouble("minY", box.minY());
                 boxNode.putDouble("maxX", box.maxX());
                 boxNode.putDouble("maxY", box.maxY());
-                boundingBoxMetadataPublished.put(name, box);
+                boundingBoxMetadataPublished.put(name, snapshotBoundingBox(box));
             }
             boolean containsPrimaryPose = box.contains(currentPose);
             Boolean previousContains = boundingBoxContainsPublished.get(name);
@@ -2153,7 +2176,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                             .publish());
             Pose2d[] trajectory = getOrBuildBoundingBoxTrajectory(name, box);
             Pose2d[] publishedTrajectory = boundingBoxTrajectoryPublished.get(name);
-            if (publishStaticThisCycle || publishedTrajectory != trajectory) {
+            if (publishStaticThisCycle || boxChanged || publishedTrajectory == null) {
                 publisher.set(trajectory);
                 boundingBoxTrajectoryPublished.put(name, trajectory);
             }
@@ -2168,7 +2191,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         Pose2d[] rebuilt = toBoundingBoxTrajectory(box);
         boundingBoxTrajectoryCache.put(name, rebuilt);
-        boundingBoxTrajectorySources.put(name, box);
+        boundingBoxTrajectorySources.put(name, snapshotBoundingBox(box));
         return rebuilt;
     }
 
@@ -2178,6 +2201,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         Pose2d topRight = new Pose2d(box.maxX(), box.maxY(), ZERO_ROTATION);
         Pose2d topLeft = new Pose2d(box.minX(), box.maxY(), ZERO_ROTATION);
         return new Pose2d[] { bottomLeft, bottomRight, topRight, topLeft, bottomLeft };
+    }
+
+    private static PoseBoundingBox2d snapshotBoundingBox(PoseBoundingBox2d box) {
+        return new PoseBoundingBox2d(box.minX(), box.minY(), box.maxX(), box.maxY());
     }
 
     private static String sanitizeBoundingBoxName(String name) {

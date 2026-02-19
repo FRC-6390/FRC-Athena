@@ -44,6 +44,27 @@ public record PoseBoundingBox2d(double minX, double minY, double maxX, double ma
         return fromCorners(cornerA.getTranslation(), cornerB.getTranslation());
     }
 
+    /**
+     * Returns a new bounding box with corners replaced by the provided translations.
+     */
+    public PoseBoundingBox2d updateCorners(Translation2d cornerA, Translation2d cornerB) {
+        return fromCorners(cornerA, cornerB);
+    }
+
+    /**
+     * Returns a new bounding box with corners replaced by the provided poses.
+     */
+    public PoseBoundingBox2d updateCorners(Pose2d cornerA, Pose2d cornerB) {
+        return fromCorners(cornerA, cornerB);
+    }
+
+    /**
+     * Returns a new bounding box with corners replaced by the provided coordinates.
+     */
+    public PoseBoundingBox2d updateCorners(double minX, double minY, double maxX, double maxY) {
+        return new PoseBoundingBox2d(minX, minY, maxX, maxY);
+    }
+
     public boolean contains(Translation2d point) {
         if (point == null) {
             return false;

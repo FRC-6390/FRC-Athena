@@ -365,7 +365,7 @@ final class RobotLocalizationFieldPublisher {
         }
         List<Pose2d> rebuilt = toBoundingBoxPath(box);
         boundingBoxPathCache.put(name, rebuilt);
-        boundingBoxPathSources.put(name, box);
+        boundingBoxPathSources.put(name, snapshotBoundingBox(box));
         return rebuilt;
     }
 
@@ -375,5 +375,9 @@ final class RobotLocalizationFieldPublisher {
         Pose2d topRight = new Pose2d(box.maxX(), box.maxY(), ZERO_ROTATION);
         Pose2d topLeft = new Pose2d(box.minX(), box.maxY(), ZERO_ROTATION);
         return List.of(bottomLeft, bottomRight, topRight, topLeft, bottomLeft);
+    }
+
+    private static PoseBoundingBox2d snapshotBoundingBox(PoseBoundingBox2d box) {
+        return new PoseBoundingBox2d(box.minX(), box.minY(), box.maxX(), box.maxY());
     }
 }

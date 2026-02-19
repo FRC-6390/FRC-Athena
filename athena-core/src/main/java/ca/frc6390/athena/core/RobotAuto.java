@@ -368,6 +368,62 @@ public class RobotAuto {
      * Build-only context used in {@link AutoProgram#build(AutoBuildCtx)}.
      */
     public interface AutoBuildCtx extends AutoRuntimeCtx {
+        enum OdometryResetTarget {
+            NONE,
+            PATH_START,
+            PATH_END,
+            POSE
+        }
+
+        /**
+         * Enables or disables odometry reset before each {@code auto(...)} command built by this ctx.
+         */
+        default AutoBuildCtx odometryReset(boolean enabled) {
+            return this;
+        }
+
+        default boolean odometryResetEnabled() {
+            return true;
+        }
+
+        /**
+         * Selects which pose source should be used when odometry reset is enabled.
+         */
+        default AutoBuildCtx odometryResetTarget(OdometryResetTarget target) {
+            return this;
+        }
+
+        default OdometryResetTarget odometryResetTarget() {
+            return OdometryResetTarget.NONE;
+        }
+
+        /**
+         * Sets an explicit reset pose and selects {@link OdometryResetTarget#POSE}.
+         */
+        default AutoBuildCtx odometryResetPose(Pose2d pose) {
+            return this;
+        }
+
+        default Optional<Pose2d> odometryResetPose() {
+            return Optional.empty();
+        }
+
+        default AutoBuildCtx odometryResetToPathStart() {
+            return odometryResetTarget(OdometryResetTarget.PATH_START);
+        }
+
+        default AutoBuildCtx odometryResetToPathEnd() {
+            return odometryResetTarget(OdometryResetTarget.PATH_END);
+        }
+
+        default AutoBuildCtx odometryResetToPose(Pose2d pose) {
+            return odometryResetPose(pose);
+        }
+
+        default AutoBuildCtx disableOdometryReset() {
+            return odometryReset(false);
+        }
+
         default Command auto(String id) {
             Objects.requireNonNull(id, "id");
             return autos().deferredAuto(id, OptionalInt.empty());
@@ -899,14 +955,31 @@ public class RobotAuto {
         }
     }
 
-    private record AutoBuildCtxImpl(
-            RobotCore<?> robot,
-            RobotAuto autos,
-            Map<String, AutoRoutine> scopedAutos) implements AutoBuildCtx {
-        private AutoBuildCtxImpl {
-            Objects.requireNonNull(robot, "robot");
-            Objects.requireNonNull(autos, "autos");
-            Objects.requireNonNull(scopedAutos, "scopedAutos");
+    private static final class AutoBuildCtxImpl implements AutoBuildCtx {
+        private final RobotCore<?> robot;
+        private final RobotAuto autos;
+        private final Map<String, AutoRoutine> scopedAutos;
+        private boolean odometryResetEnabled = true;
+        private OdometryResetTarget odometryResetTarget = OdometryResetTarget.PATH_START;
+        private Pose2d odometryResetPose = null;
+
+        private AutoBuildCtxImpl(
+                RobotCore<?> robot,
+                RobotAuto autos,
+                Map<String, AutoRoutine> scopedAutos) {
+            this.robot = Objects.requireNonNull(robot, "robot");
+            this.autos = Objects.requireNonNull(autos, "autos");
+            this.scopedAutos = Objects.requireNonNull(scopedAutos, "scopedAutos");
+        }
+
+        @Override
+        public RobotCore<?> robot() {
+            return robot;
+        }
+
+        @Override
+        public RobotAuto autos() {
+            return autos;
         }
 
         @Override
@@ -915,15 +988,74 @@ public class RobotAuto {
         }
 
         @Override
+        public AutoBuildCtx odometryReset(boolean enabled) {
+            this.odometryResetEnabled = enabled;
+            return this;
+        }
+
+        @Override
+        public boolean odometryResetEnabled() {
+            return odometryResetEnabled;
+        }
+
+        @Override
+        public AutoBuildCtx odometryResetTarget(OdometryResetTarget target) {
+            this.odometryResetTarget = Objects.requireNonNull(target, "target");
+            return this;
+        }
+
+        @Override
+        public OdometryResetTarget odometryResetTarget() {
+            return odometryResetTarget;
+        }
+
+        @Override
+        public AutoBuildCtx odometryResetPose(Pose2d pose) {
+            this.odometryResetPose = Objects.requireNonNull(pose, "pose");
+            this.odometryResetTarget = OdometryResetTarget.POSE;
+            return this;
+        }
+
+        @Override
+        public Optional<Pose2d> odometryResetPose() {
+            return Optional.ofNullable(odometryResetPose);
+        }
+
+        @Override
         public Command auto(String id) {
             Objects.requireNonNull(id, "id");
-            return autos.deferredAuto(scopedAutos, id, OptionalInt.empty());
+            Command command = autos.deferredAuto(scopedAutos, id, OptionalInt.empty());
+            if (!odometryResetEnabled) {
+                return command;
+            }
+            Command wrapped = autos.applyBuildCtxOdometryReset(
+                    scopedAutos,
+                    id,
+                    OptionalInt.empty(),
+                    command,
+                    odometryResetTarget,
+                    odometryResetPose);
+            odometryResetEnabled = false;
+            return wrapped;
         }
 
         @Override
         public Command auto(String id, int splitIndex) {
             Objects.requireNonNull(id, "id");
-            return autos.deferredAuto(scopedAutos, id, OptionalInt.of(splitIndex));
+            OptionalInt split = OptionalInt.of(splitIndex);
+            Command command = autos.deferredAuto(scopedAutos, id, split);
+            if (!odometryResetEnabled) {
+                return command;
+            }
+            Command wrapped = autos.applyBuildCtxOdometryReset(
+                    scopedAutos,
+                    id,
+                    split,
+                    command,
+                    odometryResetTarget,
+                    odometryResetPose);
+            odometryResetEnabled = false;
+            return wrapped;
         }
 
         @Override
@@ -1647,6 +1779,98 @@ public class RobotAuto {
             return Optional.empty();
         }
         return Optional.ofNullable(base.startingPose());
+    }
+
+    private AutoRoutine resolveRoutineFor(Map<String, AutoRoutine> scopedAutos, String id, OptionalInt splitIndex) {
+        Objects.requireNonNull(scopedAutos, "scopedAutos");
+        Objects.requireNonNull(id, "id");
+        AutoRoutine base = scopedAutos.get(id);
+        if (base == null) {
+            base = autoRoutines.get(id);
+        }
+        if (splitIndex.isEmpty()) {
+            return base;
+        }
+        int split = splitIndex.getAsInt();
+        String splitId = id + "." + split;
+        AutoRoutine explicitSplit = scopedAutos.get(splitId);
+        if (explicitSplit == null) {
+            explicitSplit = autoRoutines.get(splitId);
+        }
+        if (explicitSplit != null) {
+            return explicitSplit;
+        }
+        if (base == null || base.source() == AutoSource.CUSTOM) {
+            return null;
+        }
+        String splitReference = base.reference() + "." + split;
+        AutoSource splitSource = base.source();
+        Supplier<Command> splitFactory = () -> buildPathCommand(splitSource, splitReference);
+        return new AutoRoutine(
+                AutoKey.of(splitId),
+                splitSource,
+                splitReference,
+                splitFactory,
+                new Pose2d(),
+                false,
+                null);
+    }
+
+    private Optional<Pose2d> endingPoseFor(Map<String, AutoRoutine> scopedAutos, String id, OptionalInt splitIndex) {
+        AutoRoutine routine = resolveRoutineFor(scopedAutos, id, splitIndex);
+        if (routine == null) {
+            return Optional.empty();
+        }
+        Optional<List<Pose2d>> poses = getAutoPoses(routine);
+        if (poses.isEmpty() || poses.get().isEmpty()) {
+            return Optional.empty();
+        }
+        List<Pose2d> path = poses.get();
+        return Optional.ofNullable(path.get(path.size() - 1));
+    }
+
+    private Command applyBuildCtxOdometryReset(
+            Map<String, AutoRoutine> scopedAutos,
+            String id,
+            OptionalInt splitIndex,
+            Command command,
+            AutoBuildCtx.OdometryResetTarget target,
+            Pose2d explicitPose) {
+        Objects.requireNonNull(scopedAutos, "scopedAutos");
+        Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(command, "command");
+        AutoBuildCtx.OdometryResetTarget resolvedTarget =
+                target != null ? target : AutoBuildCtx.OdometryResetTarget.NONE;
+        if (resolvedTarget == AutoBuildCtx.OdometryResetTarget.NONE) {
+            return command;
+        }
+
+        Optional<Pose2d> resetPose;
+        switch (resolvedTarget) {
+            case PATH_START -> resetPose = startingPoseFor(scopedAutos, id, splitIndex);
+            case PATH_END -> resetPose = endingPoseFor(scopedAutos, id, splitIndex);
+            case POSE -> resetPose = Optional.ofNullable(explicitPose);
+            case NONE -> resetPose = Optional.empty();
+            default -> resetPose = Optional.empty();
+        }
+
+        if (resetPose.isEmpty()) {
+            String splitLabel = splitIndex.isPresent() ? "." + splitIndex.getAsInt() : "";
+            throw new IllegalStateException(
+                    "Unable to resolve odometry reset pose for auto \"" + id + splitLabel
+                            + "\" with target " + resolvedTarget + ".");
+        }
+
+        Pose2d pose = resetPose.get();
+        String splitLabel = splitIndex.isPresent() ? "." + splitIndex.getAsInt() : "";
+        String detail = "target=" + resolvedTarget
+                + " x=" + String.format(Locale.US, "%.3f", pose.getX())
+                + " y=" + String.format(Locale.US, "%.3f", pose.getY())
+                + " deg=" + String.format(Locale.US, "%.2f", pose.getRotation().getDegrees());
+        return traceAutoLifecycle(
+                "ctx.odometryReset(" + id + splitLabel + ")",
+                detail,
+                Commands.sequence(resetPose(pose), command));
     }
 
     private static Command buildPathCommand(AutoSource source, String reference) {
