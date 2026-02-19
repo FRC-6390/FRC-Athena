@@ -4,6 +4,8 @@ import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.context.RobotScopedContext;
 import ca.frc6390.athena.core.input.TypedInputContext;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
+import ca.frc6390.athena.networktables.AthenaNT;
+import ca.frc6390.athena.networktables.NtScope;
 
 /**
  * Read-only view used by mechanism state hooks.
@@ -23,6 +25,21 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
     default RobotCore<?> robotCore() {
         RobotCore<?> core = mechanism().getRobotCore();
         return core != null ? core : RobotCore.activeInstance();
+    }
+
+    @Override
+    default NtScope nt() {
+        T mechanism = mechanism();
+        String name = mechanism != null ? mechanism.getName() : null;
+        if (name == null || name.isBlank()) {
+            name = mechanism != null ? mechanism.getClass().getSimpleName() : "Mechanism";
+        }
+        NtScope scope = AthenaNT.scope("Mechanisms");
+        String ownerPath = mechanism != null ? mechanism.networkTables().ownerPath() : null;
+        if (ownerPath != null && !ownerPath.isBlank()) {
+            scope = scope.scope(ownerPath);
+        }
+        return scope.scope(name).scope("NetworkTables");
     }
 
     /**

@@ -77,7 +77,10 @@ public class SwerveDrivetrain extends SubsystemBase
   private final SysIdRuntimeSection sysIdSection = new SysIdRuntimeSection();
   private final ImuRuntimeSection imuSection = new ImuRuntimeSection();
   private final SimulationRuntimeSection simulationSection = new SimulationRuntimeSection();
-  private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance.getDefault().getStructArrayTopic("/Drivetrain/SwerveStates", SwerveModuleState.struct).publish();
+  private final StructArrayPublisher<SwerveModuleState> publisher = NetworkTableInstance
+      .getDefault()
+      .getStructArrayTopic("/Athena/Drivetrain/SwerveStates", SwerveModuleState.struct)
+      .publish();
   private static final double SWERVE_STATE_PUBLISH_PERIOD_SECONDS = 0.1;
   private double lastSwerveStatePublishSeconds = Double.NaN;
   private SwerveDrivetrainSimulation simulation;

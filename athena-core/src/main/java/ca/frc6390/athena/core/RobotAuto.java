@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,8 @@ public class RobotAuto {
     private final Map<String, Supplier<Command>> namedCommandSuppliers;
     private final Map<String, AutoRoutine> autoRoutines;
     private final Map<String, AutoInputBinding<?>> autoInputs;
+    private final Map<String, List<AutoRoutine>> programPathRoutines;
+    private final Map<Command, AutoRoutine> commandChooserRoutineByCommand;
     private SendableChooser<AutoRoutine> chooser;
     private SendableChooser<Command> commandChooser;
     private ProfiledPIDController xController;
@@ -68,6 +71,8 @@ public class RobotAuto {
         namedCommandSuppliers = new LinkedHashMap<>();
         autoRoutines = new LinkedHashMap<>();
         autoInputs = new LinkedHashMap<>();
+        programPathRoutines = new LinkedHashMap<>();
+        commandChooserRoutineByCommand = new IdentityHashMap<>();
         chooser = null;
         commandChooser = null;
         xController = null;
@@ -1315,6 +1320,7 @@ public class RobotAuto {
                             + ": program.id()=\"" + programId
                             + "\", routine.key().id()=\"" + routine.key().id() + "\"");
         }
+        recordProgramPathRoutines(programId, scopedAutos, routine);
         if (hasAuto(programId)) {
             if (hadProgramAutoBeforeRegister) {
                 throw new IllegalArgumentException(
@@ -1544,6 +1550,7 @@ public class RobotAuto {
         }
         chooser = newChooser;
         commandChooser = null;
+        commandChooserRoutineByCommand.clear();
         return chooser;
     }
 
@@ -1555,12 +1562,17 @@ public class RobotAuto {
         createChooser(defaultAuto);
         AutoRoutine defaultRoutine = autoRoutines.get(defaultAuto.id());
         SendableChooser<Command> newChooser = new SendableChooser<>();
-        newChooser.setDefaultOption(defaultRoutine.key().displayName(), deferredCommand(defaultRoutine));
+        commandChooserRoutineByCommand.clear();
+        Command defaultCommand = deferredCommand(defaultRoutine);
+        commandChooserRoutineByCommand.put(defaultCommand, defaultRoutine);
+        newChooser.setDefaultOption(defaultRoutine.key().displayName(), defaultCommand);
         for (AutoRoutine routine : autoRoutines.values()) {
             if (routine.key().id().equals(defaultAuto.id())) {
                 continue;
             }
-            newChooser.addOption(routine.key().displayName(), deferredCommand(routine));
+            Command command = deferredCommand(routine);
+            commandChooserRoutineByCommand.put(command, routine);
+            newChooser.addOption(routine.key().displayName(), command);
         }
         commandChooser = newChooser;
         return newChooser;
@@ -1571,11 +1583,66 @@ public class RobotAuto {
     }
 
     private Optional<AutoRoutine> getSelectedAuto() {
-        return Optional.ofNullable(chooser).map(SendableChooser::getSelected);
+        if (commandChooser != null) {
+            Command selectedCommand = commandChooser.getSelected();
+            if (selectedCommand != null) {
+                AutoRoutine mapped = commandChooserRoutineByCommand.get(selectedCommand);
+                if (mapped != null) {
+                    return Optional.of(mapped);
+                }
+            }
+        }
+        AutoRoutine selectedRoutine = chooser != null ? chooser.getSelected() : null;
+        if (selectedRoutine != null) {
+            return Optional.of(selectedRoutine);
+        }
+        return Optional.empty();
     }
 
     private Optional<List<Pose2d>> getSelectedAutoPoses() {
-        return getSelectedAuto().flatMap(this::getAutoPoses);
+        return getSelectedAuto().flatMap(this::getProgramPathPoses);
+    }
+
+    private Optional<List<Pose2d>> getProgramPathPoses(AutoRoutine selectedRoutine) {
+        if (selectedRoutine == null) {
+            return Optional.empty();
+        }
+        List<AutoRoutine> routines = programPathRoutines.get(selectedRoutine.key().id());
+        if (routines == null || routines.isEmpty()) {
+            return getAutoPoses(selectedRoutine);
+        }
+        List<Pose2d> merged = new ArrayList<>();
+        for (AutoRoutine routine : routines) {
+            getAutoPoses(routine)
+                    .filter(poses -> poses != null && !poses.isEmpty())
+                    .ifPresent(merged::addAll);
+        }
+        if (merged.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(List.copyOf(merged));
+    }
+
+    private void recordProgramPathRoutines(
+            String programId,
+            Map<String, AutoRoutine> scopedAutos,
+            AutoRoutine programRoutine) {
+        Objects.requireNonNull(programId, "programId");
+        Objects.requireNonNull(scopedAutos, "scopedAutos");
+        List<AutoRoutine> routines = new ArrayList<>();
+        for (AutoRoutine routine : scopedAutos.values()) {
+            if (routine != null && routine.source() != AutoSource.CUSTOM) {
+                routines.add(routine);
+            }
+        }
+        if (programRoutine != null && programRoutine.source() != AutoSource.CUSTOM) {
+            boolean alreadyIncluded = routines.stream()
+                    .anyMatch(r -> r.key().id().equals(programRoutine.key().id()));
+            if (!alreadyIncluded) {
+                routines.add(programRoutine);
+            }
+        }
+        programPathRoutines.put(programId, List.copyOf(routines));
     }
 
     private Optional<List<Pose2d>> getAutoPoses(AutoRoutine routine) {
@@ -1765,20 +1832,37 @@ public class RobotAuto {
         if (base == null) {
             base = autoRoutines.get(id);
         }
+
+        Optional<Pose2d> basePose = resolvedStartingPose(base);
         if (splitIndex.isPresent()) {
-            String splitId = id + "." + splitIndex.getAsInt();
-            AutoRoutine split = scopedAutos.get(splitId);
-            if (split == null) {
-                split = autoRoutines.get(splitId);
+            AutoRoutine split = resolveRoutineFor(scopedAutos, id, splitIndex);
+            Optional<Pose2d> splitPose = resolvedStartingPose(split);
+            if (splitPose.isPresent()) {
+                return splitPose;
             }
-            if (split != null && split.hasStartingPose()) {
-                return Optional.ofNullable(split.startingPose());
+            if (basePose.isPresent()) {
+                return basePose;
             }
-        }
-        if (base == null || !base.hasStartingPose()) {
             return Optional.empty();
         }
-        return Optional.ofNullable(base.startingPose());
+        if (basePose.isEmpty()) {
+            return Optional.empty();
+        }
+        return basePose;
+    }
+
+    private Optional<Pose2d> resolvedStartingPose(AutoRoutine routine) {
+        if (routine == null) {
+            return Optional.empty();
+        }
+        if (routine.hasStartingPose()) {
+            return Optional.ofNullable(routine.startingPose());
+        }
+        Optional<List<Pose2d>> poses = getAutoPoses(routine);
+        if (poses.isEmpty() || poses.get().isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(poses.get().get(0));
     }
 
     private AutoRoutine resolveRoutineFor(Map<String, AutoRoutine> scopedAutos, String id, OptionalInt splitIndex) {

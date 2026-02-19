@@ -6,6 +6,8 @@ import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.context.RobotScopedContext;
 import ca.frc6390.athena.core.input.TypedInputContext;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
+import ca.frc6390.athena.networktables.AthenaNT;
+import ca.frc6390.athena.networktables.NtScope;
 
 /**
  * Read-only view of the composite that constraints can use to inspect child mechanisms.
@@ -20,6 +22,20 @@ public interface SuperstructureContext<SP> extends TypedInputContext, RobotScope
      * Returns the robot core associated with the superstructure's child mechanisms.
      */
     RobotCore<?> robotCore();
+
+    /**
+     * Name used for default NetworkTables scoping.
+     */
+    default String superstructureName() {
+        return "Superstructure";
+    }
+
+    @Override
+    default NtScope nt() {
+        return AthenaNT.scope("Superstructures")
+                .scope(superstructureName())
+                .scope("NetworkTables");
+    }
 
     <E extends Enum<E> & SetpointProvider<Double>> StatefulLike<E> mechanism(Function<SP, E> mapper);
 

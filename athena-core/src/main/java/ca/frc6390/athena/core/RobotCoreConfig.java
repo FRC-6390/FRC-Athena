@@ -72,6 +72,7 @@ public final class RobotCoreConfig {
         private RobotLocalizationConfig localizationConfig = RobotLocalizationConfig.defaults();
         private RobotVisionConfig visionConfig = RobotVisionConfig.defaults();
         private TelemetryRegistry.TelemetryConfig telemetryConfig = TelemetryRegistry.TelemetryConfig.defaults();
+        private RobotCore.AutoConfig autoConfig = RobotCore.AutoConfig.defaults();
 
         private boolean autoInitResetEnabled = true;
         private boolean performanceMode = false;
@@ -118,6 +119,14 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public Builder<T> auto(Consumer<AutoSection> section) {
+            Objects.requireNonNull(section, "section");
+            AutoSection a = new AutoSection(autoConfig);
+            section.accept(a);
+            autoConfig = a.config;
+            return this;
+        }
+
         public Builder<T> mechanisms(Consumer<MechanismsSection> section) {
             Objects.requireNonNull(section, "section");
             MechanismsSection m = new MechanismsSection(mechanisms);
@@ -157,6 +166,7 @@ public final class RobotCoreConfig {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
     }
@@ -526,11 +536,6 @@ public final class RobotCoreConfig {
             return this;
         }
 
-        public LocalizationSection autoPlannerPid(double tP, double tI, double tD, double rP, double rI, double rD) {
-            config.planner().autoPlannerPid(tP, tI, tD, rP, rI, rD);
-            return this;
-        }
-
         public LocalizationSection visionEnabled(boolean enabled) {
             config.estimation().visionEnabled(enabled);
             return this;
@@ -566,8 +571,43 @@ public final class RobotCoreConfig {
             return this;
         }
 
-        public LocalizationSection autoPoseName(String name) {
-            config.poses().autoPoseName(name);
+    }
+
+    public static final class AutoSection {
+        private RobotCore.AutoConfig config;
+
+        private AutoSection(RobotCore.AutoConfig config) {
+            this.config = config != null ? config : RobotCore.AutoConfig.defaults();
+        }
+
+        public AutoSection config(RobotCore.AutoConfig config) {
+            this.config = config != null ? config : RobotCore.AutoConfig.defaults();
+            return this;
+        }
+
+        public AutoSection pid(
+                double tP,
+                double tI,
+                double tD,
+                double rP,
+                double rI,
+                double rD) {
+            config = config.pid(tP, tI, tD, rP, rI, rD);
+            return this;
+        }
+
+        public AutoSection pid(Consumer<RobotLocalizationConfig.AutoPlannerPidSection> section) {
+            config = config.pid(section);
+            return this;
+        }
+
+        public AutoSection pose(String poseName) {
+            config = config.pose(poseName);
+            return this;
+        }
+
+        public AutoSection registry(Consumer<RobotAuto.RegistrySection> section) {
+            config = config.registry(section);
             return this;
         }
     }
@@ -635,6 +675,16 @@ public final class RobotCoreConfig {
 
         public TelemetrySection networkTablePrefix(String prefix) {
             config = config.networkTablePrefix(prefix);
+            return this;
+        }
+
+        public TelemetrySection dataLogDirectory(String directory) {
+            config = config.dataLogDirectory(directory);
+            return this;
+        }
+
+        public TelemetrySection dataLogRetentionCount(int count) {
+            config = config.dataLogRetentionCount(count);
             return this;
         }
     }

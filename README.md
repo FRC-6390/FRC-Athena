@@ -100,6 +100,36 @@ public RobotAuto.AutoRoutine build(RobotAuto.AutoBuildCtx ctx) {
 
 `ctx.auto("Path", 1)` resolves split paths (`Path.1`) directly. It uses an explicit registered split id first, then derives from base trajectory reference if needed.
 
+### Auto Planner PID DSL + Autotuner
+Localization planner PID can now be configured with a structured DSL:
+
+```java
+.localization(l -> l
+    .autoPlannerPid(p -> {
+        p.translation().kp(7.0).ki(0.0).kd(0.0).iZone(0.0);
+        p.rotation().kp(2.0).ki(0.0).kd(0.0).iZone(0.0);
+
+        // Enable built-in autotuner publish (defaults to relay-theta tuner)
+        p.autotuner();
+
+        // Optional advanced tuning config:
+        // p.autotunerConfig(a -> a
+        //     .enabled(true)
+        //     .dashboardPath("Athena/Localization/AutoPlannerPidAutotuner")
+        //     .program(ctx -> ctx.relayTheta()));
+    }))
+```
+
+When enabled, Athena publishes a `Run` command at:
+`Athena/Localization/AutoPlannerPidAutotuner/Run`
+
+Default relay-theta tuner output keys:
+- `.../Suggested/Rotation/kP`
+- `.../Suggested/Rotation/kI`
+- `.../Suggested/Rotation/kD`
+- `.../Ku`
+- `.../TuSec`
+
 ## Localization Camera Auto Align
 Use the `AlignAndDriveToTagCommand` to close the loop on robot-relative translations produced by any configured localization camera. Supply tuned PID controllers, the desired standoff pose (as a `Pose2d`), a tolerance pose, and clamp limits to make the command suit your drivetrain. The command always targets one or more specific camera tables, so pass the NetworkTables names you want it to consume.
 

@@ -38,6 +38,11 @@ public interface StatefulLike<E extends Enum<E> & StateMachine.SetpointProvider<
             return this;
         }
 
+        public StateMachineSection<E> request(double setpoint) {
+            core.requestSetpoint(setpoint);
+            return this;
+        }
+
         public StateMachineSection<E> request(E target) {
             core.requestState(target);
             return this;

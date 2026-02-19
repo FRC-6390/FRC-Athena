@@ -164,6 +164,10 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         return goalState;
     }
 
+    public SendableChooser<E> chooser() {
+        return chooser;
+    }
+
     public boolean isGoalState(E state) {
         return goalState.equals(state);
     }

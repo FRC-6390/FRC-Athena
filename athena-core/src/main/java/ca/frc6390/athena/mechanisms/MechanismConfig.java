@@ -790,19 +790,59 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         public ControlSection<T> pid(String name, double kP, double kI, double kD) {
-            return registerPid(name, OutputType.PERCENT, kP, kI, kD, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+            return registerPid(
+                    name,
+                    OutputType.PERCENT,
+                    kP,
+                    kI,
+                    kD,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    PidAutotunerConfig.defaults());
         }
 
         public ControlSection<T> pid(String name, OutputType outputType, double kP, double kI, double kD) {
-            return registerPid(name, outputType, kP, kI, kD, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+            return registerPid(
+                    name,
+                    outputType,
+                    kP,
+                    kI,
+                    kD,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    PidAutotunerConfig.defaults());
         }
 
         public ControlSection<T> pid(String name, double kP, double kI, double kD, double iZone, double tolerance) {
-            return registerPid(name, OutputType.PERCENT, kP, kI, kD, iZone, tolerance, Double.NaN, Double.NaN);
+            return registerPid(
+                    name,
+                    OutputType.PERCENT,
+                    kP,
+                    kI,
+                    kD,
+                    iZone,
+                    tolerance,
+                    Double.NaN,
+                    Double.NaN,
+                    PidAutotunerConfig.defaults());
         }
 
         public ControlSection<T> pid(String name, OutputType outputType, double kP, double kI, double kD, double iZone, double tolerance) {
-            return registerPid(name, outputType, kP, kI, kD, iZone, tolerance, Double.NaN, Double.NaN);
+            return registerPid(
+                    name,
+                    outputType,
+                    kP,
+                    kI,
+                    kD,
+                    iZone,
+                    tolerance,
+                    Double.NaN,
+                    Double.NaN,
+                    PidAutotunerConfig.defaults());
         }
 
         public ControlSection<T> pid(String name, Consumer<PidBuilder> builder) {
@@ -820,7 +860,8 @@ public class MechanismConfig<T extends Mechanism> {
                     spec.iZone,
                     spec.tolerance,
                     spec.maxVelocity,
-                    spec.maxAcceleration);
+                    spec.maxAcceleration,
+                    spec.autotuner);
         }
 
         public ControlSection<T> bangBang(String name, double output) {
@@ -891,7 +932,8 @@ public class MechanismConfig<T extends Mechanism> {
                 double iZone,
                 double tolerance,
                 double maxVelocity,
-                double maxAcceleration) {
+                double maxAcceleration,
+                PidAutotunerConfig pidAutotuner) {
             Objects.requireNonNull(name, "name");
             String normalized = normalizeName(name);
             if (normalized == null) {
@@ -922,7 +964,8 @@ public class MechanismConfig<T extends Mechanism> {
                             iZone,
                             tolerance,
                             maxVelocity,
-                            maxAcceleration));
+                            maxAcceleration,
+                            pidAutotuner));
             return this;
         }
 
@@ -1049,6 +1092,7 @@ public class MechanismConfig<T extends Mechanism> {
             private double tolerance = Double.NaN;
             private double maxVelocity = Double.NaN;
             private double maxAcceleration = Double.NaN;
+            private PidAutotunerConfig autotuner = PidAutotunerConfig.defaults();
 
             public PidBuilder output(OutputType outputType) {
                 this.outputType = outputType != null ? outputType : OutputType.PERCENT;
@@ -1087,6 +1131,69 @@ public class MechanismConfig<T extends Mechanism> {
                 this.maxVelocity = maxVelocity;
                 this.maxAcceleration = maxAcceleration;
                 return this;
+            }
+
+            public PidBuilder autotuner() {
+                autotuner = autotuner.withEnabled(true);
+                return this;
+            }
+
+            public PidBuilder autotuner(MechanismPidAutotunerProgram program) {
+                autotuner = autotuner.withEnabled(true).withProgram(program);
+                return this;
+            }
+
+            public PidBuilder autotunerConfig(Consumer<PidAutotunerSection> section) {
+                PidAutotunerSection builder = PidAutotunerSection.from(autotuner);
+                if (section != null) {
+                    section.accept(builder);
+                }
+                autotuner = builder.build();
+                return this;
+            }
+        }
+
+        public static final class PidAutotunerSection {
+            private boolean enabled;
+            private String dashboardPath;
+            private MechanismPidAutotunerProgram program;
+
+            private PidAutotunerSection(
+                    boolean enabled,
+                    String dashboardPath,
+                    MechanismPidAutotunerProgram program) {
+                this.enabled = enabled;
+                this.dashboardPath = dashboardPath;
+                this.program = program;
+            }
+
+            static PidAutotunerSection from(PidAutotunerConfig config) {
+                PidAutotunerConfig resolved = config != null
+                        ? config
+                        : PidAutotunerConfig.defaults();
+                return new PidAutotunerSection(
+                        resolved.enabled(),
+                        resolved.dashboardPath(),
+                        resolved.program());
+            }
+
+            public PidAutotunerSection enabled(boolean enabled) {
+                this.enabled = enabled;
+                return this;
+            }
+
+            public PidAutotunerSection dashboardPath(String dashboardPath) {
+                this.dashboardPath = dashboardPath;
+                return this;
+            }
+
+            public PidAutotunerSection program(MechanismPidAutotunerProgram program) {
+                this.program = program;
+                return this;
+            }
+
+            PidAutotunerConfig build() {
+                return new PidAutotunerConfig(enabled, dashboardPath, program);
             }
         }
 
@@ -2301,6 +2408,27 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
+    public record PidAutotunerConfig(
+            boolean enabled,
+            String dashboardPath,
+            MechanismPidAutotunerProgram program) {
+        public static PidAutotunerConfig defaults() {
+            return new PidAutotunerConfig(false, null, null);
+        }
+
+        public PidAutotunerConfig withEnabled(boolean enabled) {
+            return new PidAutotunerConfig(enabled, dashboardPath, program);
+        }
+
+        public PidAutotunerConfig withDashboardPath(String dashboardPath) {
+            return new PidAutotunerConfig(enabled, dashboardPath, program);
+        }
+
+        public PidAutotunerConfig withProgram(MechanismPidAutotunerProgram program) {
+            return new PidAutotunerConfig(enabled, dashboardPath, program);
+        }
+    }
+
     public record PidProfile(
             OutputType outputType,
             double kP,
@@ -2309,7 +2437,12 @@ public class MechanismConfig<T extends Mechanism> {
             double iZone,
             double tolerance,
             double maxVelocity,
-            double maxAcceleration) { }
+            double maxAcceleration,
+            PidAutotunerConfig autotuner) {
+        public PidProfile {
+            autotuner = autotuner != null ? autotuner : PidAutotunerConfig.defaults();
+        }
+    }
 
     public record BangBangProfile(
             OutputType outputType,

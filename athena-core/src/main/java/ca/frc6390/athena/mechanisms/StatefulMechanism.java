@@ -194,6 +194,15 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             queuedSetpoints.add(setpoint);
         }
 
+        public void requestSetpoint(double setpoint) {
+            if (!Double.isFinite(setpoint)) {
+                return;
+            }
+            stateMachine.resetQueue();
+            queuedSetpoints.clear();
+            queuedSetpoint = setpoint;
+        }
+
         public void requestState(E target) {
             Objects.requireNonNull(target, "target");
             queuedSetpoints.clear();

@@ -53,7 +53,9 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
+import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.math.numbers.N1;
@@ -74,6 +76,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final Rotation2d ZERO_ROTATION = new Rotation2d();
     private static final Pose2d ZERO_POSE_2D = new Pose2d();
     private static final Pose3d ZERO_POSE_3D = new Pose3d();
+    private static final String AUTO_PLANNER_PID_AUTOTUNER_OUTPUT_SOURCE = "auto_tuner";
     private static final double CHOREO_HEADING_DEADBAND_RAD = Units.degreesToRadians(1.5);
     private static final double CHOREO_OMEGA_DEADBAND_RAD_PER_SEC = 0.05;
     private static final double SLIP_DT_MAX_SECONDS = 0.25;
@@ -90,6 +93,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final double WHEELSPIN_ODOM_SPEED_MPS = 1.0;
     private static final double WHEELSPIN_IMU_SPEED_RATIO = 0.30;
     private static final double WHEELSPIN_IMU_SPEED_FLOOR_MPS = 0.25;
+    private static final double WHEELSPIN_DEFICIT_RATIO_START = 0.80;
+    private static final double WHEELSPIN_DEFICIT_RATIO_FULL = 0.40;
     private static final double SLIP_SCORE_FILTER_RISE_TIME_SECONDS = 0.06;
     private static final double SLIP_SCORE_FILTER_FALL_TIME_SECONDS = 0.20;
     private static final double SLIP_TRANSIENT_ENTER_SCORE = 0.35;
@@ -104,6 +109,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final double REVERSAL_OPPOSING_VELOCITY_MAX_MPS = 0.20;
     private static final double REVERSAL_OPPOSING_VELOCITY_MIN_MPS = 0.02;
     private static final double CONTACT_LOCK_IMU_SPEED_MPS = 0.16;
+    private static final double CONTACT_ASSIST_COMPONENT = 0.45;
     private static final double CONTACT_LOCK_ENTER_COMPONENT = 0.55;
     private static final double CONTACT_LOCK_MAX_ODOM_WEIGHT = 0.08;
     private static final double REVERSAL_INERTIA_IMU_OPPOSE_MPS = 0.05;
@@ -208,6 +214,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private final RobotLocalizationFieldPublisher fieldPublisher;
     private DiagnosticsChannel diagnosticsChannel;
     private final DiagnosticsView diagnosticsView = new DiagnosticsView();
+    private Subsystem autoPlannerPidAutotunerRequirement;
 
     public RobotLocalization(
             PoseEstimatorFactory<T> estimatorFactory,
@@ -262,6 +269,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         loadPersistentState();
         initBackendOverrides();
+        publishAutoPlannerPidAutotuner();
     }
 
     public RobotLocalization<T> enableVisionForLocalization(boolean visionEnabled){
@@ -302,6 +310,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public DiagnosticsView diagnostics() {
         return diagnosticsView;
+    }
+
+    public RobotLocalization<T> setAutoPlannerPidAutotunerRequirement(Subsystem requirement) {
+        this.autoPlannerPidAutotunerRequirement = requirement;
+        publishAutoPlannerPidAutotuner();
+        return this;
     }
 
     /**
@@ -515,6 +529,84 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         } catch (IllegalArgumentException ex) {
             return fallback;
         }
+    }
+
+    private void publishAutoPlannerPidAutotuner() {
+        RobotLocalizationConfig.AutoPlannerPidAutotunerConfig tunerConfig = localizationConfig.autoPlannerPidAutotuner();
+        if (!tunerConfig.enabled()) {
+            return;
+        }
+
+        Subsystem requirement = autoPlannerPidAutotunerRequirement != null
+                ? autoPlannerPidAutotunerRequirement
+                : this;
+        String dashboardPath = tunerConfig.dashboardPath();
+        AutoPlannerPidAutotuners.initializeDashboard(dashboardPath);
+
+        AutoPlannerPidAutotunerProgram configuredProgram = tunerConfig.program();
+        AutoPlannerPidAutotunerProgram program = configuredProgram != null
+                ? configuredProgram
+                : AutoPlannerPidAutotunerContext::relayTheta;
+
+        AutoPlannerPidAutotunerContext ctx = new AutoPlannerPidAutotunerContext() {
+            @Override
+            public RobotLocalization<?> localization() {
+                return RobotLocalization.this;
+            }
+
+            @Override
+            public Subsystem requirement() {
+                return requirement;
+            }
+
+            @Override
+            public String dashboardPath() {
+                return dashboardPath;
+            }
+
+            @Override
+            public String outputSource() {
+                return AUTO_PLANNER_PID_AUTOTUNER_OUTPUT_SOURCE;
+            }
+
+            @Override
+            public HolonomicPidConstants translationPid() {
+                return localizationConfig.translation();
+            }
+
+            @Override
+            public HolonomicPidConstants rotationPid() {
+                return localizationConfig.rotation();
+            }
+
+            @Override
+            public void output(ChassisSpeeds speeds) {
+                robotSpeeds.setSpeeds(AUTO_PLANNER_PID_AUTOTUNER_OUTPUT_SOURCE, speeds);
+            }
+
+            @Override
+            public void stopOutput() {
+                robotSpeeds.stopSpeeds(AUTO_PLANNER_PID_AUTOTUNER_OUTPUT_SOURCE);
+            }
+        };
+
+        Command built = program.build(ctx);
+        if (built == null) {
+            DriverStation.reportWarning(
+                    "AutoPlanner PID autotuner program returned null command; skipping publish.",
+                    false);
+            return;
+        }
+
+        Command guarded = Commands.defer(
+                () -> Commands.either(
+                        built,
+                        Commands.runOnce(() -> DriverStation.reportWarning(
+                                "AutoPlanner PID autotuner can only run in Test mode.",
+                                false)),
+                        DriverStation::isTest),
+                java.util.Set.of(requirement));
+        SmartDashboard.putData(dashboardPath + "/Run", guarded);
     }
 
     public RobotLocalization<T> configurePathPlanner(HolonomicPidConstants translationConstants, HolonomicPidConstants rotationConstants){
@@ -878,6 +970,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                     double allowedImuSpeed =
                             Math.max(WHEELSPIN_IMU_SPEED_FLOOR_MPS, odomSpeed * WHEELSPIN_IMU_SPEED_RATIO);
                     contactComponent = clamp01((allowedImuSpeed - imuLinearSpeed) / Math.max(allowedImuSpeed, 0.05));
+
+                    double expectedLinearSpeed = Math.max(commandedSpeed, odomSpeed);
+                    if (expectedLinearSpeed > 1e-6) {
+                        double imuSpeedRatio = imuLinearSpeed / expectedLinearSpeed;
+                        double deficitComponent = clamp01(
+                                (WHEELSPIN_DEFICIT_RATIO_START - imuSpeedRatio)
+                                        / Math.max(
+                                                WHEELSPIN_DEFICIT_RATIO_START - WHEELSPIN_DEFICIT_RATIO_FULL,
+                                                1e-6));
+                        contactComponent = Math.max(contactComponent, deficitComponent);
+                    }
                 }
                 slipContactComponent = contactComponent;
 
@@ -973,14 +1076,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             case NOMINAL:
                 if (score >= SLIP_ACTIVE_ENTER_SCORE || contactComponent >= 0.90) {
                     slipMode = SlipMode.SLIP;
-                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE) {
+                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE || contactComponent >= CONTACT_ASSIST_COMPONENT) {
                     slipMode = SlipMode.TRANSIENT;
                 }
                 break;
             case TRANSIENT:
                 if (score >= SLIP_ACTIVE_ENTER_SCORE || contactComponent >= 0.90) {
                     slipMode = SlipMode.SLIP;
-                } else if (score <= SLIP_TRANSIENT_EXIT_SCORE) {
+                } else if (score <= SLIP_TRANSIENT_EXIT_SCORE && contactComponent < CONTACT_ASSIST_COMPONENT) {
                     slipMode = SlipMode.NOMINAL;
                 }
                 break;
@@ -993,7 +1096,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             case RECOVER:
                 if (score >= SLIP_ACTIVE_ENTER_SCORE) {
                     slipMode = SlipMode.SLIP;
-                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE) {
+                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE || contactComponent >= CONTACT_ASSIST_COMPONENT) {
                     slipMode = SlipMode.TRANSIENT;
                 } else if (now >= slipRecoverUntilSeconds) {
                     slipMode = SlipMode.NOMINAL;
@@ -2397,11 +2500,16 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private Translation2d computeSlipAwareFieldTranslation(Pose2d rawPose, Rotation2d heading, double nowSeconds) {
         Pose2d resolvedRawPose = rawPose != null ? rawPose : ZERO_POSE_2D;
         Rotation2d resolvedHeading = heading != null ? heading : resolvedRawPose.getRotation();
+        boolean contactAssistActive = slipContactComponent >= CONTACT_ASSIST_COMPONENT;
+        boolean reversalAssistActive = slipReversalComponent > 0.30;
         boolean tractionAssistActive =
                 slipMode == SlipMode.TRANSIENT
                         || slipMode == SlipMode.SLIP
-                        || slipMode == SlipMode.RECOVER;
-        if (!tractionAssistActive || slipScore < SLIP_TRANSIENT_EXIT_SCORE) {
+                        || slipMode == SlipMode.RECOVER
+                        || contactAssistActive
+                        || reversalAssistActive;
+        if (!tractionAssistActive
+                || (slipScore < SLIP_TRANSIENT_EXIT_SCORE && !contactAssistActive && !reversalAssistActive)) {
             lastRawEstimatorPoseForSlipFusion = resolvedRawPose;
             lastCorrectedPoseForSlipFusion = resolvedRawPose;
             lastSlipFusionTimestamp = nowSeconds;
@@ -2614,11 +2722,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (isPrimary) {
             setPrimaryPose(state);
             updateVelocityTracking(pose, nowSeconds);
+            fieldPublisher.updateActualPath(pose);
             RobotNetworkTables nt = robotNetworkTables;
             boolean fieldEnabled = nt != null && nt.enabled(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET);
             if (fieldEnabled) {
                 fieldPublisher.setRobotPose(pose);
-                fieldPublisher.updateActualPath(pose);
             }
             PoseConfig config = primaryPoseName != null ? poseConfigs.get(primaryPoseName) : null;
             publishPoseStruct(config, pose);

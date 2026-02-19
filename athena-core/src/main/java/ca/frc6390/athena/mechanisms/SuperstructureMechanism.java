@@ -25,6 +25,11 @@ import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.util.sendable.Sendable;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SendableBuilderImpl;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -99,13 +104,14 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private SP queuedSetpoint;
     private SP lastAppliedSetpoint;
     private S prevState;
-    private String ntLastRequestedState = "";
-    private String ntLastQueuedState = "";
-    private boolean ntLastClearQueue = false;
     private String ntCommandsPath;
-    private NetworkTableEntry ntRequestStateEntry;
-    private NetworkTableEntry ntQueueStateEntry;
-    private NetworkTableEntry ntClearQueueEntry;
+    private NetworkTableEntry ntCustomSetpointEntry;
+    private NtSendablePublisher ntStateChooserPublisher;
+    private NtSendablePublisher ntModeChooserPublisher;
+    private NtCommandButton ntRequestButton;
+    private NtCommandButton ntQueueButton;
+    private NtCommandButton ntClearQueueButton;
+    private final SendableChooser<ControlCommandMode> ntCommandModeChooser = createControlCommandModeChooser();
     private final BoundedEventLog<DiagnosticsChannel.Event> diagnosticsLog =
             new BoundedEventLog<>(DIAGNOSTIC_LOG_CAPACITY);
     private final DiagnosticsView diagnosticsView = new DiagnosticsView();
@@ -276,6 +282,15 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             return;
         }
         queuedSetpoints.add(setpoint);
+    }
+
+    private void requestSetpointInternal(SP setpoint) {
+        if (setpoint == null) {
+            return;
+        }
+        stateMachine.resetQueue();
+        queuedSetpoints.clear();
+        queuedSetpoint = setpoint;
     }
 
     private void requestStateInternal(S target) {
@@ -580,80 +595,203 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         }
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private void processNetworkTableCommands(RobotNetworkTables.Node node) {
         if (node == null) {
             return;
         }
         RobotNetworkTables.Node commands = node.child("Control").child("Commands");
         ensureNetworkTableCommandEntries(commands);
-        String requestState = ntRequestStateEntry.getString("").trim();
-        if (!requestState.isEmpty() && !requestState.equals(ntLastRequestedState)) {
-            S parsed = parseStateName(requestState);
-            if (parsed != null) {
-                requestStateInternal(parsed);
-            }
-            ntLastRequestedState = requestState;
-            ntRequestStateEntry.setString("");
-            ntLastRequestedState = "";
-        }
-
-        String queueState = ntQueueStateEntry.getString("").trim();
-        if (!queueState.isEmpty() && !queueState.equals(ntLastQueuedState)) {
-            S parsed = parseStateName(queueState);
-            if (parsed != null) {
-                queueStateInternal(parsed);
-            }
-            ntLastQueuedState = queueState;
-            ntQueueStateEntry.setString("");
-            ntLastQueuedState = "";
-        }
-
-        boolean clearQueue = ntClearQueueEntry.getBoolean(false);
-        if (clearQueue && !ntLastClearQueue) {
-            clearStateMachineInternal();
-            ntClearQueueEntry.setBoolean(false);
-            ntLastClearQueue = false;
-            return;
-        }
-        ntLastClearQueue = clearQueue;
+        updateCommandButton(ntRequestButton);
+        updateCommandButton(ntQueueButton);
+        updateCommandButton(ntClearQueueButton);
+        updateSendablePublisher(ntStateChooserPublisher);
+        updateSendablePublisher(ntModeChooserPublisher);
     }
 
     private void ensureNetworkTableCommandEntries(RobotNetworkTables.Node commands) {
         String path = commands.path();
         boolean samePath = (path == null && ntCommandsPath == null)
                 || (path != null && path.equals(ntCommandsPath));
-        if (samePath
-                && ntRequestStateEntry != null
-                && ntQueueStateEntry != null
-                && ntClearQueueEntry != null) {
+        if (samePath && hasNetworkTableCommandEntries()) {
             return;
         }
+        closeCommandButton(ntRequestButton);
+        closeCommandButton(ntQueueButton);
+        closeCommandButton(ntClearQueueButton);
+        closeSendablePublisher(ntStateChooserPublisher);
+        closeSendablePublisher(ntModeChooserPublisher);
+        ntRequestButton = null;
+        ntQueueButton = null;
+        ntClearQueueButton = null;
+        ntStateChooserPublisher = null;
+        ntModeChooserPublisher = null;
         ntCommandsPath = path;
-        ntRequestStateEntry = commands.entry("RequestState");
-        ntQueueStateEntry = commands.entry("QueueState");
-        ntClearQueueEntry = commands.entry("ClearQueue");
-        initIfAbsent(ntRequestStateEntry, "");
-        initIfAbsent(ntQueueStateEntry, "");
-        initIfAbsent(ntClearQueueEntry, false);
+        ntCustomSetpointEntry = commands.entry("CustomSetpoint");
+        ntStateChooserPublisher = publishSendable(
+                ntStateChooserPublisher,
+                commands.child("StateChooser"),
+                stateMachine.chooser());
+        ntModeChooserPublisher = publishSendable(
+                ntModeChooserPublisher,
+                commands.child("ModeChooser"),
+                ntCommandModeChooser);
+        ntRequestButton = createCommandButton(
+                commands.child("Request"),
+                "Request",
+                Commands.runOnce(this::requestFromChooserOrCustom).ignoringDisable(true));
+        ntQueueButton = createCommandButton(
+                commands.child("Queue"),
+                "Queue",
+                Commands.runOnce(this::queueFromChooserOrCustom).ignoringDisable(true));
+        ntClearQueueButton = createCommandButton(
+                commands.child("ClearAll"),
+                "ClearAll",
+                Commands.runOnce(this::clearStateMachineInternal).ignoringDisable(true));
+        initIfAbsent(ntCustomSetpointEntry, formatSetpoint(currentSetpoint()));
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private S parseStateName(String stateName) {
-        if (stateName == null || stateName.isBlank()) {
+    private boolean hasNetworkTableCommandEntries() {
+        return ntCustomSetpointEntry != null
+                && ntStateChooserPublisher != null
+                && ntModeChooserPublisher != null
+                && ntRequestButton != null
+                && ntQueueButton != null
+                && ntClearQueueButton != null;
+    }
+
+    private void requestFromChooserOrCustom() {
+        if (selectedControlCommandMode() == ControlCommandMode.CUSTOM_SETPOINT) {
+            requestCustomSetpoint();
+            return;
+        }
+        S selected = selectedState();
+        if (selected != null) {
+            requestStateInternal(selected);
+        }
+    }
+
+    private void queueFromChooserOrCustom() {
+        if (selectedControlCommandMode() == ControlCommandMode.CUSTOM_SETPOINT) {
+            queueCustomSetpoint();
+            return;
+        }
+        S selected = selectedState();
+        if (selected != null) {
+            queueStateInternal(selected);
+        }
+    }
+
+    private ControlCommandMode selectedControlCommandMode() {
+        ControlCommandMode selected = ntCommandModeChooser.getSelected();
+        return selected != null ? selected : ControlCommandMode.STATE;
+    }
+
+    private boolean requestCustomSetpoint() {
+        SP parsed = parseCustomSetpoint(readCustomSetpointInput());
+        if (parsed != null) {
+            requestSetpointInternal(parsed);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean queueCustomSetpoint() {
+        SP parsed = parseCustomSetpoint(readCustomSetpointInput());
+        if (parsed != null) {
+            queueSetpointInternal(parsed);
+            return true;
+        }
+        return false;
+    }
+
+    private String readCustomSetpointInput() {
+        if (ntCustomSetpointEntry == null) {
+            return "";
+        }
+        return ntCustomSetpointEntry.getString("");
+    }
+
+    private S selectedState() {
+        S selected = stateMachine.chooser().getSelected();
+        if (selected != null) {
+            return selected;
+        }
+        return stateMachine.getGoalState();
+    }
+
+    @SuppressWarnings("unchecked")
+    private SP parseCustomSetpoint(String rawValue) {
+        String trimmed = rawValue != null ? rawValue.trim() : "";
+        if (trimmed.isEmpty()) {
             return null;
         }
-        S current = stateMachine.getGoalState();
-        if (current == null) {
+        SP template = currentSetpoint();
+        if (template == null) {
+            appendDiagnosticLog("WARN", "networkTables", "cannot parse custom setpoint without a setpoint template");
             return null;
         }
-        Class enumType = current.getDeclaringClass();
         try {
-            return (S) Enum.valueOf(enumType, stateName.trim());
-        } catch (IllegalArgumentException ex) {
-            appendDiagnosticLog("WARN", "networkTables", "unknown state command '" + stateName + "'");
+            if (template instanceof Double) {
+                double value = parseFiniteDouble(trimmed);
+                return (SP) Double.valueOf(value);
+            }
+            if (template instanceof Float) {
+                double value = parseFiniteDouble(trimmed);
+                return (SP) Float.valueOf((float) value);
+            }
+            if (template instanceof Integer) {
+                return (SP) Integer.valueOf(Integer.parseInt(trimmed));
+            }
+            if (template instanceof Long) {
+                return (SP) Long.valueOf(Long.parseLong(trimmed));
+            }
+            if (template instanceof Short) {
+                return (SP) Short.valueOf(Short.parseShort(trimmed));
+            }
+            if (template instanceof Byte) {
+                return (SP) Byte.valueOf(Byte.parseByte(trimmed));
+            }
+            if (template instanceof Boolean) {
+                if ("true".equalsIgnoreCase(trimmed) || "1".equals(trimmed)) {
+                    return (SP) Boolean.TRUE;
+                }
+                if ("false".equalsIgnoreCase(trimmed) || "0".equals(trimmed)) {
+                    return (SP) Boolean.FALSE;
+                }
+                appendDiagnosticLog("WARN", "networkTables", "invalid boolean custom setpoint '" + rawValue + "'");
+                return null;
+            }
+            if (template instanceof String) {
+                return (SP) trimmed;
+            }
+        } catch (NumberFormatException ex) {
+            appendDiagnosticLog("WARN", "networkTables", "invalid custom setpoint '" + rawValue + "'");
             return null;
         }
+        appendDiagnosticLog(
+                "WARN",
+                "networkTables",
+                "unsupported custom setpoint type '" + template.getClass().getSimpleName() + "'");
+        return null;
+    }
+
+    private static double parseFiniteDouble(String value) {
+        double parsed = Double.parseDouble(value);
+        if (!Double.isFinite(parsed)) {
+            throw new NumberFormatException("Non-finite value");
+        }
+        return parsed;
+    }
+
+    private static SendableChooser<ControlCommandMode> createControlCommandModeChooser() {
+        SendableChooser<ControlCommandMode> chooser = new SendableChooser<>();
+        chooser.setDefaultOption("State", ControlCommandMode.STATE);
+        chooser.addOption("CustomSetpoint", ControlCommandMode.CUSTOM_SETPOINT);
+        return chooser;
+    }
+
+    private static String formatSetpoint(Object value) {
+        return value != null ? String.valueOf(value) : "";
     }
 
     private static void initIfAbsent(NetworkTableEntry entry, boolean value) {
@@ -665,6 +803,96 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
     private static void initIfAbsent(NetworkTableEntry entry, String value) {
         if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
             entry.setString(value != null ? value : "");
+        }
+    }
+
+    private static NtCommandButton createCommandButton(RobotNetworkTables.Node node, String name, Command command) {
+        if (node == null || command == null) {
+            return null;
+        }
+        Command named = command.withName(name != null ? name : command.getName());
+        return new NtCommandButton(node, named);
+    }
+
+    private enum ControlCommandMode {
+        STATE,
+        CUSTOM_SETPOINT
+    }
+
+    private static NtSendablePublisher publishSendable(
+            NtSendablePublisher existing,
+            RobotNetworkTables.Node node,
+            Sendable sendable) {
+        if (existing != null) {
+            existing.close();
+        }
+        if (node == null || sendable == null) {
+            return null;
+        }
+        return new NtSendablePublisher(node, sendable);
+    }
+
+    private static void updateSendablePublisher(NtSendablePublisher publisher) {
+        if (publisher != null) {
+            publisher.update();
+        }
+    }
+
+    private static void closeSendablePublisher(NtSendablePublisher publisher) {
+        if (publisher != null) {
+            publisher.close();
+        }
+    }
+
+    private static void closeCommandButton(NtCommandButton button) {
+        if (button != null) {
+            button.close();
+        }
+    }
+
+    private static void updateCommandButton(NtCommandButton button) {
+        if (button != null) {
+            button.update();
+        }
+    }
+
+    private static final class NtCommandButton {
+        private final SendableBuilderImpl builder;
+
+        private NtCommandButton(RobotNetworkTables.Node node, Command command) {
+            builder = new SendableBuilderImpl();
+            builder.setTable(node.table());
+            command.initSendable(builder);
+            builder.startListeners();
+            builder.update();
+        }
+
+        private void update() {
+            builder.update();
+        }
+
+        private void close() {
+            builder.close();
+        }
+    }
+
+    private static final class NtSendablePublisher {
+        private final SendableBuilderImpl builder;
+
+        private NtSendablePublisher(RobotNetworkTables.Node node, Sendable sendable) {
+            builder = new SendableBuilderImpl();
+            builder.setTable(node.table());
+            sendable.initSendable(builder);
+            builder.startListeners();
+            builder.update();
+        }
+
+        private void update() {
+            builder.update();
+        }
+
+        private void close() {
+            builder.close();
         }
     }
 
@@ -1205,6 +1433,11 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
             return this;
         }
 
+        public StateMachineSection<S, SP> request(SP setpoint) {
+            owner.requestSetpointInternal(setpoint);
+            return this;
+        }
+
         public StateMachineSection<S, SP> clear() {
             owner.clearStateMachineInternal();
             return this;
@@ -1439,6 +1672,15 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                 }
             }
             return null;
+        }
+
+        @Override
+        public String superstructureName() {
+            String name = SuperstructureMechanism.this.getName();
+            if (name == null || name.isBlank()) {
+                return "Superstructure";
+            }
+            return name;
         }
 
         @Override

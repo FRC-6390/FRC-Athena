@@ -3,6 +3,8 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.context.RobotScopedContext;
 import ca.frc6390.athena.core.input.TypedInputContext;
+import ca.frc6390.athena.networktables.AthenaNT;
+import ca.frc6390.athena.networktables.NtScope;
 import java.util.function.Supplier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.math.controller.PIDController;
@@ -170,6 +172,21 @@ public interface MechanismControlContext<T extends Mechanism>
     default RobotCore<?> robotCore() {
         RobotCore<?> core = mechanism().getRobotCore();
         return core != null ? core : RobotCore.activeInstance();
+    }
+
+    @Override
+    default NtScope nt() {
+        T mechanism = mechanism();
+        String name = mechanism != null ? mechanism.getName() : null;
+        if (name == null || name.isBlank()) {
+            name = mechanism != null ? mechanism.getClass().getSimpleName() : "Mechanism";
+        }
+        NtScope scope = AthenaNT.scope("Mechanisms");
+        String ownerPath = mechanism != null ? mechanism.networkTables().ownerPath() : null;
+        if (ownerPath != null && !ownerPath.isBlank()) {
+            scope = scope.scope(ownerPath);
+        }
+        return scope.scope(name).scope("NetworkTables");
     }
 
     /**

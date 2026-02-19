@@ -4,12 +4,21 @@ import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotMechanisms;
+import ca.frc6390.athena.networktables.AthenaNT;
+import ca.frc6390.athena.networktables.NtScope;
 
 /**
  * Shared context contract for APIs that can access a {@link RobotCore} instance.
  */
 public interface RobotScopedContext {
     RobotCore<?> robotCore();
+
+    /**
+     * Default robot-core-scoped Athena NetworkTables view.
+     */
+    default NtScope nt() {
+        return AthenaNT.scope("RobotCore/NetworkTables");
+    }
 
     /**
      * Returns the global robot-wide mechanisms view (lookup by name/config/type).

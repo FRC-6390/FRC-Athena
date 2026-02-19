@@ -48,6 +48,9 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SendableBuilderImpl;
+import edu.wpi.first.util.sendable.Sendable;
 import edu.wpi.first.math.geometry.Pose3d;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -133,17 +136,26 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private String ntHintTextCache = "";
     private String ntControlCommandsPath;
     private NetworkTableEntry ntControlSetpointEntry;
-    private NetworkTableEntry ntControlApplySetpointEntry;
     private NetworkTableEntry ntControlOutputEntry;
-    private NetworkTableEntry ntControlApplyOutputEntry;
-    private NetworkTableEntry ntControlSetNeutralBrakeEntry;
-    private NetworkTableEntry ntControlSetNeutralCoastEntry;
+    private NetworkTableEntry ntControlCustomSetpointEntry;
+    private NtSendablePublisher ntControlStateChooserPublisher;
+    private NtSendablePublisher ntControlModeChooserPublisher;
+    private NtCommandButton ntControlApplySetpointButton;
+    private NtCommandButton ntControlApplyOutputButton;
+    private NtCommandButton ntControlSetNeutralBrakeButton;
+    private NtCommandButton ntControlSetNeutralCoastButton;
+    private NtCommandButton ntControlStateRequestButton;
+    private NtCommandButton ntControlStateQueueButton;
+    private NtCommandButton ntControlStateClearButton;
+    private final SendableChooser<ControlCommandMode> ntControlCommandModeChooser = createControlCommandModeChooser();
     private String ntSysIdCommandsPath;
-    private NetworkTableEntry ntSysIdQuasistaticForwardEntry;
-    private NetworkTableEntry ntSysIdQuasistaticReverseEntry;
-    private NetworkTableEntry ntSysIdDynamicForwardEntry;
-    private NetworkTableEntry ntSysIdDynamicReverseEntry;
-    private NetworkTableEntry ntSysIdCancelEntry;
+    private NtCommandButton ntSysIdQuasistaticForwardButton;
+    private NtCommandButton ntSysIdQuasistaticReverseButton;
+    private NtCommandButton ntSysIdDynamicForwardButton;
+    private NtCommandButton ntSysIdDynamicReverseButton;
+    private NtCommandButton ntSysIdCancelButton;
+    private String ntPidAutotunerCommandsPath;
+    private final Map<String, NtCommandButton> ntPidAutotunerRunButtons = new HashMap<>();
     private boolean cachedEmergencyStopped;
     private boolean cachedOverride;
     private boolean cachedAtSetpoint;
@@ -209,6 +221,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, edu.wpi.first.math.geometry.Pose3d> mutablePose3dInputs;
     private final Map<String, PIDController> controlLoopPids;
     private final Map<String, ProfiledPIDController> controlLoopProfiledPids;
+    private final Map<String, MechanismConfig.PidProfile> controlLoopPidProfilesConfig = new HashMap<>();
+    private final Map<String, MechanismConfig.PidAutotunerConfig> controlLoopPidAutotunerConfigs = new HashMap<>();
     private final Map<String, OutputType> controlLoopPidOutputTypes;
     private final Map<String, Double> controlLoopPidTolerances;
     private final Map<String, MechanismConfig.BangBangProfile> controlLoopBangBangs;
@@ -388,6 +402,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (name == null || name.isBlank() || profile == null) {
                     continue;
                 }
+                controlLoopPidProfilesConfig.put(name, profile);
                 OutputType profileOutput = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
                 if (profileOutput != OutputType.PERCENT && profileOutput != OutputType.VOLTAGE) {
                     throw new IllegalStateException("PID profile '" + name + "' output type must be PERCENT or VOLTAGE");
@@ -424,6 +439,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 }
                 controlLoopPidOutputTypes.put(name, profileOutput);
                 controlLoopPidTolerances.put(name, sanitizeControlLoopTolerance(profile.tolerance()));
+                MechanismConfig.PidAutotunerConfig autotuner = profile.autotuner();
+                if (autotuner != null && autotuner.enabled()) {
+                    controlLoopPidAutotunerConfigs.put(name, autotuner);
+                }
             }
         }
         if (config.controlLoopBangBangProfiles() != null) {
@@ -3710,6 +3729,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             output.putDouble("pid", cachedPidOutput);
             output.putDouble("feedforward", cachedFeedforwardOutput);
             processNetworkTablesControlCommands(control.child("Commands"));
+            processNetworkTablesPidAutotunerCommands(control.child("Pid"));
+        } else {
+            closePidAutotunerCommandButtons();
         }
 
         if (toggles.inputsEnabled()) {
@@ -3843,27 +3865,195 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
         ensureControlCommandEntries(commandsNode);
-        if (ntControlApplySetpointEntry.getBoolean(false)) {
-            double requested = ntControlSetpointEntry.getDouble(setpoint);
-            setSetpoint(requested);
-            ntControlApplySetpointEntry.setBoolean(false);
+        updateCommandButton(ntControlApplySetpointButton);
+        updateCommandButton(ntControlApplyOutputButton);
+        updateCommandButton(ntControlSetNeutralBrakeButton);
+        updateCommandButton(ntControlSetNeutralCoastButton);
+        updateCommandButton(ntControlStateRequestButton);
+        updateCommandButton(ntControlStateQueueButton);
+        updateCommandButton(ntControlStateClearButton);
+        updateSendablePublisher(ntControlStateChooserPublisher);
+        updateSendablePublisher(ntControlModeChooserPublisher);
+    }
+
+    private void processNetworkTablesPidAutotunerCommands(RobotNetworkTables.Node pidNode) {
+        if (pidNode == null) {
+            closePidAutotunerCommandButtons();
+            return;
+        }
+        ensurePidAutotunerEntries(pidNode);
+        for (NtCommandButton button : ntPidAutotunerRunButtons.values()) {
+            updateCommandButton(button);
+        }
+    }
+
+    private void ensurePidAutotunerEntries(RobotNetworkTables.Node pidNode) {
+        if (controlLoopPidAutotunerConfigs.isEmpty()) {
+            closePidAutotunerCommandButtons();
+            return;
         }
 
-        if (ntControlApplyOutputEntry.getBoolean(false)) {
-            double requested = ntControlOutputEntry.getDouble(output);
-            setOutput(requested);
-            ntControlApplyOutputEntry.setBoolean(false);
+        String path = pidNode.path();
+        boolean samePath = (path == null && ntPidAutotunerCommandsPath == null)
+                || (path != null && path.equals(ntPidAutotunerCommandsPath));
+        if (!samePath) {
+            closePidAutotunerCommandButtons();
+        }
+        ntPidAutotunerCommandsPath = path;
+
+        Set<String> active = new HashSet<>();
+        for (Map.Entry<String, MechanismConfig.PidAutotunerConfig> entry : controlLoopPidAutotunerConfigs.entrySet()) {
+            if (entry == null || entry.getKey() == null || entry.getKey().isBlank()) {
+                continue;
+            }
+            String pidName = entry.getKey();
+            MechanismConfig.PidAutotunerConfig tunerConfig = entry.getValue();
+            if (tunerConfig == null || !tunerConfig.enabled()) {
+                continue;
+            }
+            MechanismConfig.PidProfile profile = controlLoopPidProfilesConfig.get(pidName);
+            if (profile == null) {
+                continue;
+            }
+
+            active.add(pidName);
+            String pidKey = sanitizeTopicKeyCached(pidName);
+            String dashboardPath = resolvePidAutotunerDashboardPath(pidName, tunerConfig);
+            OutputType mechanismOutputType = getOutputType();
+
+            RobotNetworkTables.Node tunerNode = pidNode.child(pidKey).child("Autotuner");
+            tunerNode.putBoolean("enabled", true);
+            tunerNode.putString("dashboardPath", dashboardPath);
+            MechanismPidAutotuners.initializeDashboard(dashboardPath, mechanismOutputType);
+
+            NtCommandButton existing = ntPidAutotunerRunButtons.get(pidName);
+            if (existing != null) {
+                continue;
+            }
+
+            Command run = buildPidAutotunerCommand(pidName, profile, tunerConfig, dashboardPath);
+            if (run != null) {
+                NtCommandButton button = createCommandButton(tunerNode.child("Run"), "Run", run);
+                if (button != null) {
+                    ntPidAutotunerRunButtons.put(pidName, button);
+                }
+            }
         }
 
-        if (ntControlSetNeutralBrakeEntry.getBoolean(false)) {
-            motors.setNeutralMode(MotorNeutralMode.Brake);
-            ntControlSetNeutralBrakeEntry.setBoolean(false);
+        java.util.Iterator<Map.Entry<String, NtCommandButton>> iterator = ntPidAutotunerRunButtons.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, NtCommandButton> entry = iterator.next();
+            if (!active.contains(entry.getKey())) {
+                closeCommandButton(entry.getValue());
+                iterator.remove();
+            }
+        }
+    }
+
+    private Command buildPidAutotunerCommand(
+            String pidName,
+            MechanismConfig.PidProfile profile,
+            MechanismConfig.PidAutotunerConfig tunerConfig,
+            String dashboardPath) {
+        if (pidName == null || pidName.isBlank() || profile == null) {
+            return null;
         }
 
-        if (ntControlSetNeutralCoastEntry.getBoolean(false)) {
-            motors.setNeutralMode(MotorNeutralMode.Coast);
-            ntControlSetNeutralCoastEntry.setBoolean(false);
+        MechanismPidAutotunerProgram configured = tunerConfig != null ? tunerConfig.program() : null;
+        MechanismPidAutotunerProgram program = configured != null
+                ? configured
+                : MechanismPidAutotunerContext::relayPosition;
+
+        MechanismPidAutotunerContext ctx = new MechanismPidAutotunerContext() {
+            @Override
+            public Mechanism mechanism() {
+                return Mechanism.this;
+            }
+
+            @Override
+            public String pidName() {
+                return pidName;
+            }
+
+            @Override
+            public MechanismConfig.PidProfile pidProfile() {
+                return profile;
+            }
+
+            @Override
+            public String dashboardPath() {
+                return dashboardPath;
+            }
+
+            @Override
+            public OutputType outputType() {
+                return getOutputType();
+            }
+
+            @Override
+            public double measurement() {
+                return getPidMeasurement();
+            }
+
+            @Override
+            public double setpoint() {
+                return getSetpoint() + getNudge();
+            }
+
+            @Override
+            public void output(double output) {
+                control().output(output);
+            }
+
+            @Override
+            public void stopOutput() {
+                control().output(0.0);
+                control().manualOverride(false);
+            }
+        };
+
+        return Commands.defer(
+                () -> {
+                    Command built = program.build(ctx);
+                    if (built == null) {
+                        return Commands.runOnce(() -> DriverStation.reportWarning(
+                                        "Mechanism PID autotuner program returned null for '" + pidName + "'.",
+                                        false))
+                                .ignoringDisable(true);
+                    }
+                    return Commands.either(
+                            built,
+                            Commands.runOnce(() -> DriverStation.reportWarning(
+                                    "Mechanism PID autotuner can only run in Test mode.",
+                                    false)),
+                            DriverStation::isTest);
+                },
+                Set.of(this));
+    }
+
+    private String resolvePidAutotunerDashboardPath(
+            String pidName,
+            MechanismConfig.PidAutotunerConfig config) {
+        String configured = config != null ? config.dashboardPath() : null;
+        if (configured != null) {
+            String trimmed = configured.trim();
+            if (!trimmed.isEmpty()) {
+                return trimmed;
+            }
         }
+        String mechanismName = getName();
+        if (mechanismName == null || mechanismName.isBlank()) {
+            mechanismName = getClass().getSimpleName();
+        }
+        String mechanismKey = sanitizeTopicKeyCached(mechanismName);
+        if (mechanismKey == null || mechanismKey.isBlank()) {
+            mechanismKey = "Mechanism";
+        }
+        String pidKey = sanitizeTopicKeyCached(pidName);
+        if (pidKey == null || pidKey.isBlank()) {
+            pidKey = "pid";
+        }
+        return "Athena/Mechanisms/" + mechanismKey + "/Control/Pid/" + pidKey + "/Autotuner";
     }
 
     private void processNetworkTablesSysIdCommands(RobotNetworkTables.Node commandsNode) {
@@ -3871,58 +4061,275 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
         ensureSysIdCommandEntries(commandsNode);
-        if (ntSysIdQuasistaticForwardEntry.getBoolean(false)) {
-            scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)));
-            ntSysIdQuasistaticForwardEntry.setBoolean(false);
-        }
-        if (ntSysIdQuasistaticReverseEntry.getBoolean(false)) {
-            scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)));
-            ntSysIdQuasistaticReverseEntry.setBoolean(false);
-        }
-        if (ntSysIdDynamicForwardEntry.getBoolean(false)) {
-            scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)));
-            ntSysIdDynamicForwardEntry.setBoolean(false);
-        }
-        if (ntSysIdDynamicReverseEntry.getBoolean(false)) {
-            scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)));
-            ntSysIdDynamicReverseEntry.setBoolean(false);
-        }
-        if (ntSysIdCancelEntry.getBoolean(false)) {
-            cancelActiveSysIdCommand();
-            ntSysIdCancelEntry.setBoolean(false);
-        }
+        updateCommandButton(ntSysIdQuasistaticForwardButton);
+        updateCommandButton(ntSysIdQuasistaticReverseButton);
+        updateCommandButton(ntSysIdDynamicForwardButton);
+        updateCommandButton(ntSysIdDynamicReverseButton);
+        updateCommandButton(ntSysIdCancelButton);
         if (activeSysIdCommand != null && !CommandScheduler.getInstance().isScheduled(activeSysIdCommand)) {
             activeSysIdCommand = null;
         }
     }
 
     private void ensureControlCommandEntries(RobotNetworkTables.Node commandsNode) {
+        boolean stateful = isStatefulMechanism();
         String path = commandsNode.path();
         boolean samePath = (path == null && ntControlCommandsPath == null)
                 || (path != null && path.equals(ntControlCommandsPath));
         if (samePath
-                && ntControlSetpointEntry != null
-                && ntControlApplySetpointEntry != null
                 && ntControlOutputEntry != null
-                && ntControlApplyOutputEntry != null
-                && ntControlSetNeutralBrakeEntry != null
-                && ntControlSetNeutralCoastEntry != null) {
+                && ntControlApplyOutputButton != null
+                && ntControlSetNeutralBrakeButton != null
+                && ntControlSetNeutralCoastButton != null) {
+            if (stateful && hasStatefulControlCommandEntries()) {
+                return;
+            }
+            if (!stateful
+                    && ntControlSetpointEntry != null
+                    && ntControlApplySetpointButton != null) {
+                return;
+            }
+        }
+        closeControlCommandButtons();
+        ntControlCommandsPath = path;
+        ntControlOutputEntry = commandsNode.entry("Output");
+        ntControlApplyOutputButton = createCommandButton(
+                commandsNode.child("ApplyOutput"),
+                "ApplyOutput",
+                Commands.runOnce(() -> {
+                    NetworkTableEntry requested = ntControlOutputEntry;
+                    setOutput(requested != null ? requested.getDouble(output) : output);
+                }).ignoringDisable(true));
+        ntControlSetNeutralBrakeButton = createCommandButton(
+                commandsNode.child("SetNeutralBrake"),
+                "SetNeutralBrake",
+                Commands.runOnce(() -> motors.setNeutralMode(MotorNeutralMode.Brake)).ignoringDisable(true));
+        ntControlSetNeutralCoastButton = createCommandButton(
+                commandsNode.child("SetNeutralCoast"),
+                "SetNeutralCoast",
+                Commands.runOnce(() -> motors.setNeutralMode(MotorNeutralMode.Coast)).ignoringDisable(true));
+
+        initIfAbsent(ntControlOutputEntry, output);
+        if (stateful) {
+            ntControlSetpointEntry = null;
+            ntControlApplySetpointButton = null;
+            ntControlCustomSetpointEntry = commandsNode.entry("CustomSetpoint");
+            ntControlStateChooserPublisher = publishSendable(
+                    ntControlStateChooserPublisher,
+                    commandsNode.child("StateChooser"),
+                    statefulChooser());
+            ntControlModeChooserPublisher = publishSendable(
+                    ntControlModeChooserPublisher,
+                    commandsNode.child("ModeChooser"),
+                    ntControlCommandModeChooser);
+            ntControlStateRequestButton = createCommandButton(
+                    commandsNode.child("Request"),
+                    "Request",
+                    Commands.runOnce(this::requestStatefulFromChooserOrCustom).ignoringDisable(true));
+            ntControlStateQueueButton = createCommandButton(
+                    commandsNode.child("Queue"),
+                    "Queue",
+                    Commands.runOnce(this::queueStatefulFromChooserOrCustom).ignoringDisable(true));
+            ntControlStateClearButton = createCommandButton(
+                    commandsNode.child("ClearAll"),
+                    "ClearAll",
+                    Commands.runOnce(this::clearStatefulAll).ignoringDisable(true));
+            initIfAbsent(ntControlCustomSetpointEntry, Double.toString(currentStatefulSetpoint()));
+        } else {
+            ntControlCustomSetpointEntry = null;
+            ntControlStateChooserPublisher = null;
+            ntControlModeChooserPublisher = null;
+            ntControlStateRequestButton = null;
+            ntControlStateQueueButton = null;
+            ntControlStateClearButton = null;
+            ntControlSetpointEntry = commandsNode.entry("Setpoint");
+            ntControlApplySetpointButton = createCommandButton(
+                    commandsNode.child("ApplySetpoint"),
+                    "ApplySetpoint",
+                    Commands.runOnce(() -> {
+                        NetworkTableEntry requested = ntControlSetpointEntry;
+                        setSetpoint(requested != null ? requested.getDouble(setpoint) : setpoint);
+                    }).ignoringDisable(true));
+            initIfAbsent(ntControlSetpointEntry, setpoint);
+        }
+    }
+
+    private boolean hasStatefulControlCommandEntries() {
+        return ntControlCustomSetpointEntry != null
+                && ntControlStateChooserPublisher != null
+                && ntControlModeChooserPublisher != null
+                && ntControlStateRequestButton != null
+                && ntControlStateQueueButton != null
+                && ntControlStateClearButton != null;
+    }
+
+    private boolean isStatefulMechanism() {
+        return this instanceof StatefulLike<?>;
+    }
+
+    private Enum<?> currentStatefulGoal() {
+        StatefulLike.StateMachineSection<?> section = statefulSection();
+        return section != null ? section.goal() : null;
+    }
+
+    private double currentStatefulSetpoint() {
+        StatefulLike.StateMachineSection<?> section = statefulSection();
+        return section != null ? section.setpoint() : getSetpoint();
+    }
+
+    private StatefulLike.StateMachineSection<?> statefulSection() {
+        if (!(this instanceof StatefulLike<?> stateful)) {
+            return null;
+        }
+        return stateful.stateMachine();
+    }
+
+    private Sendable statefulChooser() {
+        StatefulLike.StateMachineSection<?> section = statefulSection();
+        if (section == null) {
+            return null;
+        }
+        return section.machine().chooser();
+    }
+
+    private ControlCommandMode selectedControlCommandMode() {
+        ControlCommandMode selected = ntControlCommandModeChooser.getSelected();
+        return selected != null ? selected : ControlCommandMode.STATE;
+    }
+
+    private void requestStatefulFromChooserOrCustom() {
+        if (selectedControlCommandMode() == ControlCommandMode.CUSTOM_SETPOINT) {
+            requestStatefulCustomSetpoint();
             return;
         }
-        ntControlCommandsPath = path;
-        ntControlSetpointEntry = commandsNode.entry("Setpoint");
-        ntControlApplySetpointEntry = commandsNode.entry("ApplySetpoint");
-        ntControlOutputEntry = commandsNode.entry("Output");
-        ntControlApplyOutputEntry = commandsNode.entry("ApplyOutput");
-        ntControlSetNeutralBrakeEntry = commandsNode.entry("SetNeutralBrake");
-        ntControlSetNeutralCoastEntry = commandsNode.entry("SetNeutralCoast");
+        Enum<?> selected = selectedStatefulState();
+        if (selected != null) {
+            requestStatefulState(selected);
+        }
+    }
 
-        initIfAbsent(ntControlSetpointEntry, setpoint);
-        initIfAbsent(ntControlApplySetpointEntry, false);
-        initIfAbsent(ntControlOutputEntry, output);
-        initIfAbsent(ntControlApplyOutputEntry, false);
-        initIfAbsent(ntControlSetNeutralBrakeEntry, false);
-        initIfAbsent(ntControlSetNeutralCoastEntry, false);
+    private void queueStatefulFromChooserOrCustom() {
+        if (selectedControlCommandMode() == ControlCommandMode.CUSTOM_SETPOINT) {
+            queueStatefulCustomSetpoint();
+            return;
+        }
+        Enum<?> selected = selectedStatefulState();
+        if (selected != null) {
+            queueStatefulState(selected);
+        }
+    }
+
+    private boolean requestStatefulCustomSetpoint() {
+        String raw = readStatefulCustomSetpointInput();
+        if (raw == null) {
+            return false;
+        }
+        try {
+            requestStatefulSetpoint(parseFiniteDouble(raw));
+            return true;
+        } catch (NumberFormatException ex) {
+            appendDiagnosticLog("WARN", "networkTables", "invalid custom setpoint '" + raw + "'");
+            return false;
+        }
+    }
+
+    private boolean queueStatefulCustomSetpoint() {
+        String raw = readStatefulCustomSetpointInput();
+        if (raw == null) {
+            return false;
+        }
+        try {
+            queueStatefulSetpoint(parseFiniteDouble(raw));
+            return true;
+        } catch (NumberFormatException ex) {
+            appendDiagnosticLog("WARN", "networkTables", "invalid custom setpoint '" + raw + "'");
+            return false;
+        }
+    }
+
+    private String readStatefulCustomSetpointInput() {
+        NetworkTableEntry entry = ntControlCustomSetpointEntry;
+        if (entry == null) {
+            return null;
+        }
+        String raw = entry.getString("");
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private Enum<?> selectedStatefulState() {
+        StatefulLike.StateMachineSection<?> section = statefulSection();
+        if (section == null) {
+            return null;
+        }
+        Enum<?> selected = section.machine().chooser().getSelected();
+        if (selected != null) {
+            return selected;
+        }
+        return section.goal();
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void requestStatefulState(Enum<?> state) {
+        if (state == null || !(this instanceof StatefulLike<?> stateful)) {
+            return;
+        }
+        StatefulLike raw = (StatefulLike) stateful;
+        raw.stateMachine().request(state);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void queueStatefulState(Enum<?> state) {
+        if (state == null || !(this instanceof StatefulLike<?> stateful)) {
+            return;
+        }
+        StatefulLike raw = (StatefulLike) stateful;
+        raw.stateMachine().queue(state);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void requestStatefulSetpoint(double setpoint) {
+        if (!Double.isFinite(setpoint) || !(this instanceof StatefulLike<?> stateful)) {
+            return;
+        }
+        StatefulLike raw = (StatefulLike) stateful;
+        raw.stateMachine().request(setpoint);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void queueStatefulSetpoint(double setpoint) {
+        if (!Double.isFinite(setpoint) || !(this instanceof StatefulLike<?> stateful)) {
+            return;
+        }
+        StatefulLike raw = (StatefulLike) stateful;
+        raw.stateMachine().queue(setpoint);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void clearStatefulAll() {
+        if (!(this instanceof StatefulLike<?> stateful)) {
+            return;
+        }
+        StatefulLike raw = (StatefulLike) stateful;
+        raw.stateMachine().clear();
+    }
+
+    private static double parseFiniteDouble(String value) {
+        double parsed = Double.parseDouble(value);
+        if (!Double.isFinite(parsed)) {
+            throw new NumberFormatException("Non-finite value");
+        }
+        return parsed;
+    }
+
+    private static SendableChooser<ControlCommandMode> createControlCommandModeChooser() {
+        SendableChooser<ControlCommandMode> chooser = new SendableChooser<>();
+        chooser.setDefaultOption("State", ControlCommandMode.STATE);
+        chooser.addOption("CustomSetpoint", ControlCommandMode.CUSTOM_SETPOINT);
+        return chooser;
     }
 
     private void ensureSysIdCommandEntries(RobotNetworkTables.Node commandsNode) {
@@ -3930,25 +4337,132 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         boolean samePath = (path == null && ntSysIdCommandsPath == null)
                 || (path != null && path.equals(ntSysIdCommandsPath));
         if (samePath
-                && ntSysIdQuasistaticForwardEntry != null
-                && ntSysIdQuasistaticReverseEntry != null
-                && ntSysIdDynamicForwardEntry != null
-                && ntSysIdDynamicReverseEntry != null
-                && ntSysIdCancelEntry != null) {
+                && ntSysIdQuasistaticForwardButton != null
+                && ntSysIdQuasistaticReverseButton != null
+                && ntSysIdDynamicForwardButton != null
+                && ntSysIdDynamicReverseButton != null
+                && ntSysIdCancelButton != null) {
             return;
         }
+        closeSysIdCommandButtons();
         ntSysIdCommandsPath = path;
-        ntSysIdQuasistaticForwardEntry = commandsNode.entry("RunQuasistaticForward");
-        ntSysIdQuasistaticReverseEntry = commandsNode.entry("RunQuasistaticReverse");
-        ntSysIdDynamicForwardEntry = commandsNode.entry("RunDynamicForward");
-        ntSysIdDynamicReverseEntry = commandsNode.entry("RunDynamicReverse");
-        ntSysIdCancelEntry = commandsNode.entry("Cancel");
+        ntSysIdQuasistaticForwardButton = createCommandButton(
+                commandsNode.child("RunQuasistaticForward"),
+                "RunQuasistaticForward",
+                Commands.runOnce(() -> scheduleSysIdCommand(
+                        sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))));
+        ntSysIdQuasistaticReverseButton = createCommandButton(
+                commandsNode.child("RunQuasistaticReverse"),
+                "RunQuasistaticReverse",
+                Commands.runOnce(() -> scheduleSysIdCommand(
+                        sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))));
+        ntSysIdDynamicForwardButton = createCommandButton(
+                commandsNode.child("RunDynamicForward"),
+                "RunDynamicForward",
+                Commands.runOnce(() -> scheduleSysIdCommand(
+                        sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))));
+        ntSysIdDynamicReverseButton = createCommandButton(
+                commandsNode.child("RunDynamicReverse"),
+                "RunDynamicReverse",
+                Commands.runOnce(() -> scheduleSysIdCommand(
+                        sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))));
+        ntSysIdCancelButton = createCommandButton(
+                commandsNode.child("Cancel"),
+                "Cancel",
+                Commands.runOnce(this::cancelActiveSysIdCommand).ignoringDisable(true));
+    }
 
-        initIfAbsent(ntSysIdQuasistaticForwardEntry, false);
-        initIfAbsent(ntSysIdQuasistaticReverseEntry, false);
-        initIfAbsent(ntSysIdDynamicForwardEntry, false);
-        initIfAbsent(ntSysIdDynamicReverseEntry, false);
-        initIfAbsent(ntSysIdCancelEntry, false);
+    private void closeControlCommandButtons() {
+        closeCommandButton(ntControlApplySetpointButton);
+        closeCommandButton(ntControlApplyOutputButton);
+        closeCommandButton(ntControlSetNeutralBrakeButton);
+        closeCommandButton(ntControlSetNeutralCoastButton);
+        closeCommandButton(ntControlStateRequestButton);
+        closeCommandButton(ntControlStateQueueButton);
+        closeCommandButton(ntControlStateClearButton);
+        closeSendablePublisher(ntControlStateChooserPublisher);
+        closeSendablePublisher(ntControlModeChooserPublisher);
+        ntControlApplySetpointButton = null;
+        ntControlApplyOutputButton = null;
+        ntControlSetNeutralBrakeButton = null;
+        ntControlSetNeutralCoastButton = null;
+        ntControlStateRequestButton = null;
+        ntControlStateQueueButton = null;
+        ntControlStateClearButton = null;
+        ntControlStateChooserPublisher = null;
+        ntControlModeChooserPublisher = null;
+        ntControlCustomSetpointEntry = null;
+    }
+
+    private void closeSysIdCommandButtons() {
+        closeCommandButton(ntSysIdQuasistaticForwardButton);
+        closeCommandButton(ntSysIdQuasistaticReverseButton);
+        closeCommandButton(ntSysIdDynamicForwardButton);
+        closeCommandButton(ntSysIdDynamicReverseButton);
+        closeCommandButton(ntSysIdCancelButton);
+        ntSysIdQuasistaticForwardButton = null;
+        ntSysIdQuasistaticReverseButton = null;
+        ntSysIdDynamicForwardButton = null;
+        ntSysIdDynamicReverseButton = null;
+        ntSysIdCancelButton = null;
+    }
+
+    private void closePidAutotunerCommandButtons() {
+        for (NtCommandButton button : ntPidAutotunerRunButtons.values()) {
+            closeCommandButton(button);
+        }
+        ntPidAutotunerRunButtons.clear();
+        ntPidAutotunerCommandsPath = null;
+    }
+
+    private static void closeCommandButton(NtCommandButton button) {
+        if (button != null) {
+            button.close();
+        }
+    }
+
+    private static void updateCommandButton(NtCommandButton button) {
+        if (button != null) {
+            button.update();
+        }
+    }
+
+    private static NtCommandButton createCommandButton(RobotNetworkTables.Node node, String name, Command command) {
+        if (node == null || command == null) {
+            return null;
+        }
+        Command named = command.withName(name != null ? name : command.getName());
+        return new NtCommandButton(node, named);
+    }
+
+    private enum ControlCommandMode {
+        STATE,
+        CUSTOM_SETPOINT
+    }
+
+    private static NtSendablePublisher publishSendable(
+            NtSendablePublisher existing,
+            RobotNetworkTables.Node node,
+            Sendable sendable) {
+        if (existing != null) {
+            existing.close();
+        }
+        if (node == null || sendable == null) {
+            return null;
+        }
+        return new NtSendablePublisher(node, sendable);
+    }
+
+    private static void updateSendablePublisher(NtSendablePublisher publisher) {
+        if (publisher != null) {
+            publisher.update();
+        }
+    }
+
+    private static void closeSendablePublisher(NtSendablePublisher publisher) {
+        if (publisher != null) {
+            publisher.close();
+        }
     }
 
     private void scheduleSysIdCommand(Command command) {
@@ -3998,6 +4512,46 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private static void initIfAbsent(NetworkTableEntry entry, String value) {
         if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
             entry.setString(value != null ? value : "");
+        }
+    }
+
+    private static final class NtCommandButton {
+        private final SendableBuilderImpl builder;
+
+        private NtCommandButton(RobotNetworkTables.Node node, Command command) {
+            builder = new SendableBuilderImpl();
+            builder.setTable(node.table());
+            command.initSendable(builder);
+            builder.startListeners();
+            builder.update();
+        }
+
+        private void update() {
+            builder.update();
+        }
+
+        private void close() {
+            builder.close();
+        }
+    }
+
+    private static final class NtSendablePublisher {
+        private final SendableBuilderImpl builder;
+
+        private NtSendablePublisher(RobotNetworkTables.Node node, Sendable sendable) {
+            builder = new SendableBuilderImpl();
+            builder.setTable(node.table());
+            sendable.initSendable(builder);
+            builder.startListeners();
+            builder.update();
+        }
+
+        private void update() {
+            builder.update();
+        }
+
+        private void close() {
+            builder.close();
         }
     }
 

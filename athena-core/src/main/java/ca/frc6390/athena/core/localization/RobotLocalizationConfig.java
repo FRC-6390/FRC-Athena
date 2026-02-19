@@ -20,6 +20,7 @@ public class RobotLocalizationConfig {
     private StdDevs visionMultiStdDevs;
     private HolonomicPidConstants translation;
     private HolonomicPidConstants rotation;
+    private AutoPlannerPidAutotunerConfig autoPlannerPidAutotuner;
     private boolean useVision;
     private PoseSpace poseSpace;
     private BackendConfig backend;
@@ -176,6 +177,18 @@ public class RobotLocalizationConfig {
                 HolonomicPidConstants translationConstants,
                 HolonomicPidConstants rotationConstants) {
             applyAutoPlannerPID(translationConstants, rotationConstants);
+            return this;
+        }
+
+        public ConfigSection autoPlannerPid(Consumer<AutoPlannerPidSection> section) {
+            AutoPlannerPidSection spec = AutoPlannerPidSection.create(
+                    translation,
+                    rotation,
+                    autoPlannerPidAutotuner());
+            if (section != null) {
+                section.accept(spec);
+            }
+            applyAutoPlannerPID(spec.translationConstants(), spec.rotationConstants(), spec.autotunerConfig());
             return this;
         }
 
@@ -430,6 +443,218 @@ public class RobotLocalizationConfig {
             applyAutoPlannerPID(translationConstants, rotationConstants);
             return this;
         }
+
+        public PlannerSection autoPlannerPid(Consumer<AutoPlannerPidSection> section) {
+            AutoPlannerPidSection spec = AutoPlannerPidSection.create(
+                    translation,
+                    rotation,
+                    autoPlannerPidAutotuner());
+            if (section != null) {
+                section.accept(spec);
+            }
+            applyAutoPlannerPID(spec.translationConstants(), spec.rotationConstants(), spec.autotunerConfig());
+            return this;
+        }
+    }
+
+    public static final class AutoPlannerPidSection {
+        private final PidAxisSection translation;
+        private final PidAxisSection rotation;
+        private AutoPlannerPidAutotunerConfig autotuner;
+
+        private AutoPlannerPidSection(
+                HolonomicPidConstants translation,
+                HolonomicPidConstants rotation,
+                AutoPlannerPidAutotunerConfig autotuner) {
+            this.translation = new PidAxisSection(translation);
+            this.rotation = new PidAxisSection(rotation);
+            this.autotuner = autotuner != null
+                    ? autotuner
+                    : AutoPlannerPidAutotunerConfig.defaults();
+        }
+
+        static AutoPlannerPidSection create(
+                HolonomicPidConstants translation,
+                HolonomicPidConstants rotation,
+                AutoPlannerPidAutotunerConfig autotuner) {
+            return new AutoPlannerPidSection(
+                    translation != null ? translation : new HolonomicPidConstants(0.0, 0.0, 0.0, 0.0),
+                    rotation != null ? rotation : new HolonomicPidConstants(0.0, 0.0, 0.0, 0.0),
+                    autotuner);
+        }
+
+        public PidAxisSection translation() {
+            return translation;
+        }
+
+        public PidAxisSection rotation() {
+            return rotation;
+        }
+
+        public AutoPlannerPidSection translation(Consumer<PidAxisSection> section) {
+            if (section != null) {
+                section.accept(translation);
+            }
+            return this;
+        }
+
+        public AutoPlannerPidSection rotation(Consumer<PidAxisSection> section) {
+            if (section != null) {
+                section.accept(rotation);
+            }
+            return this;
+        }
+
+        public AutoPlannerPidSection autotuner() {
+            autotuner = autotuner.withEnabled(true);
+            return this;
+        }
+
+        public AutoPlannerPidSection autotuner(AutoPlannerPidAutotunerProgram program) {
+            autotuner = autotuner.withEnabled(true).withProgram(program);
+            return this;
+        }
+
+        public AutoPlannerPidSection autotunerConfig(Consumer<AutoPlannerPidAutotunerSection> section) {
+            AutoPlannerPidAutotunerSection builder = AutoPlannerPidAutotunerSection.from(autotuner);
+            if (section != null) {
+                section.accept(builder);
+            }
+            autotuner = builder.build();
+            return this;
+        }
+
+        HolonomicPidConstants translationConstants() {
+            return translation.toConstants();
+        }
+
+        HolonomicPidConstants rotationConstants() {
+            return rotation.toConstants();
+        }
+
+        AutoPlannerPidAutotunerConfig autotunerConfig() {
+            return autotuner;
+        }
+    }
+
+    public static final class PidAxisSection {
+        private double kP;
+        private double kI;
+        private double kD;
+        private double iZone;
+
+        private PidAxisSection(HolonomicPidConstants initial) {
+            HolonomicPidConstants resolved = initial != null
+                    ? initial
+                    : new HolonomicPidConstants(0.0, 0.0, 0.0, 0.0);
+            this.kP = resolved.kP();
+            this.kI = resolved.kI();
+            this.kD = resolved.kD();
+            this.iZone = resolved.iZone();
+        }
+
+        public PidAxisSection kp(double kP) {
+            this.kP = kP;
+            return this;
+        }
+
+        public PidAxisSection ki(double kI) {
+            this.kI = kI;
+            return this;
+        }
+
+        public PidAxisSection kd(double kD) {
+            this.kD = kD;
+            return this;
+        }
+
+        public PidAxisSection iZone(double iZone) {
+            this.iZone = iZone;
+            return this;
+        }
+
+        HolonomicPidConstants toConstants() {
+            return new HolonomicPidConstants(kP, kI, kD, iZone);
+        }
+    }
+
+    public static final class AutoPlannerPidAutotunerSection {
+        private boolean enabled;
+        private String dashboardPath;
+        private AutoPlannerPidAutotunerProgram program;
+
+        private AutoPlannerPidAutotunerSection(
+                boolean enabled,
+                String dashboardPath,
+                AutoPlannerPidAutotunerProgram program) {
+            this.enabled = enabled;
+            this.dashboardPath = dashboardPath;
+            this.program = program;
+        }
+
+        static AutoPlannerPidAutotunerSection from(AutoPlannerPidAutotunerConfig config) {
+            AutoPlannerPidAutotunerConfig resolved = config != null
+                    ? config
+                    : AutoPlannerPidAutotunerConfig.defaults();
+            return new AutoPlannerPidAutotunerSection(
+                    resolved.enabled(),
+                    resolved.dashboardPath(),
+                    resolved.program());
+        }
+
+        public AutoPlannerPidAutotunerSection enabled(boolean enabled) {
+            this.enabled = enabled;
+            return this;
+        }
+
+        public AutoPlannerPidAutotunerSection dashboardPath(String dashboardPath) {
+            this.dashboardPath = dashboardPath;
+            return this;
+        }
+
+        public AutoPlannerPidAutotunerSection program(AutoPlannerPidAutotunerProgram program) {
+            this.program = program;
+            return this;
+        }
+
+        AutoPlannerPidAutotunerConfig build() {
+            return new AutoPlannerPidAutotunerConfig(enabled, dashboardPath, program);
+        }
+    }
+
+    public record AutoPlannerPidAutotunerConfig(
+            boolean enabled,
+            String dashboardPath,
+            AutoPlannerPidAutotunerProgram program) {
+        private static final String DEFAULT_DASHBOARD_PATH = "Athena/Localization/AutoPlannerPidAutotuner";
+
+        public AutoPlannerPidAutotunerConfig {
+            dashboardPath = normalizeDashboardPath(dashboardPath);
+        }
+
+        private static String normalizeDashboardPath(String dashboardPath) {
+            if (dashboardPath == null) {
+                return DEFAULT_DASHBOARD_PATH;
+            }
+            String trimmed = dashboardPath.trim();
+            return trimmed.isEmpty() ? DEFAULT_DASHBOARD_PATH : trimmed;
+        }
+
+        public static AutoPlannerPidAutotunerConfig defaults() {
+            return new AutoPlannerPidAutotunerConfig(false, DEFAULT_DASHBOARD_PATH, null);
+        }
+
+        public AutoPlannerPidAutotunerConfig withEnabled(boolean enabled) {
+            return new AutoPlannerPidAutotunerConfig(enabled, dashboardPath, program);
+        }
+
+        public AutoPlannerPidAutotunerConfig withDashboardPath(String dashboardPath) {
+            return new AutoPlannerPidAutotunerConfig(enabled, dashboardPath, program);
+        }
+
+        public AutoPlannerPidAutotunerConfig withProgram(AutoPlannerPidAutotunerProgram program) {
+            return new AutoPlannerPidAutotunerConfig(enabled, dashboardPath, program);
+        }
     }
 
     public final class BackendSection {
@@ -612,6 +837,12 @@ public class RobotLocalizationConfig {
         return rotation;
     }
 
+    public AutoPlannerPidAutotunerConfig autoPlannerPidAutotuner() {
+        return autoPlannerPidAutotuner != null
+                ? autoPlannerPidAutotuner
+                : AutoPlannerPidAutotunerConfig.defaults();
+    }
+
     public boolean useVision() {
         return useVision;
     }
@@ -643,6 +874,18 @@ public class RobotLocalizationConfig {
     private RobotLocalizationConfig applyAutoPlannerPID(HolonomicPidConstants translation, HolonomicPidConstants rotation){
         this.translation = translation;
         this.rotation = rotation;
+        return this;
+    }
+
+    private RobotLocalizationConfig applyAutoPlannerPID(
+            HolonomicPidConstants translation,
+            HolonomicPidConstants rotation,
+            AutoPlannerPidAutotunerConfig autotuner) {
+        this.translation = translation;
+        this.rotation = rotation;
+        this.autoPlannerPidAutotuner = autotuner != null
+                ? autotuner
+                : AutoPlannerPidAutotunerConfig.defaults();
         return this;
     }
 
@@ -908,6 +1151,9 @@ public class RobotLocalizationConfig {
         stateStdDevs = stateStdDevs != null ? stateStdDevs : StdDevs.defaults();
         visionStdDevs = visionStdDevs != null ? visionStdDevs : StdDevs.defaults();
         visionMultiStdDevs = visionMultiStdDevs != null ? visionMultiStdDevs : StdDevs.defaults();
+        autoPlannerPidAutotuner = autoPlannerPidAutotuner != null
+                ? autoPlannerPidAutotuner
+                : AutoPlannerPidAutotunerConfig.defaults();
         autoPoseName = (autoPoseName == null || autoPoseName.isBlank()) ? "field" : autoPoseName;
     }
 

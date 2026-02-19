@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.io.File;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
@@ -28,6 +29,7 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
 import ca.frc6390.athena.core.auto.AutoBackends;
+import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.localization.RobotLocalization;
@@ -45,6 +47,7 @@ import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanismFactory;
 import ca.frc6390.athena.mechanisms.OutputType;
+import ca.frc6390.athena.networktables.AthenaNT;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
 import ca.frc6390.athena.logging.TelemetryRegistry;
@@ -57,7 +60,11 @@ import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.networktables.NetworkTableType;
+import edu.wpi.first.networktables.StructArrayPublisher;
+import edu.wpi.first.util.sendable.Sendable;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Notifier;
@@ -65,15 +72,17 @@ import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DataLogManager;
+import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.smartdashboard.SendableBuilderImpl;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 
 public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static volatile RobotCore<?> activeInstance;
-    private static final String AUTO_PROGRAM_CHOOSER_KEY = "Auto Program Chooser";
+    private static final String AUTO_PROGRAM_CHOOSER_KEY = "ProgramChooser";
+    private static final Pose2d[] EMPTY_POSE2D_ARRAY = new Pose2d[0];
 
     public enum RuntimeMode {
         AUTO,
@@ -82,14 +91,103 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         TEST
     }
 
+    public record AutoConfig(
+            HolonomicPidConstants translationPid,
+            HolonomicPidConstants rotationPid,
+            String poseName,
+            RobotLocalizationConfig.AutoPlannerPidAutotunerConfig pidAutotunerConfig,
+            List<Consumer<RobotAuto.RegistrySection>> registryBindings) {
+
+        public AutoConfig {
+            poseName = normalizePoseName(poseName);
+            registryBindings = registryBindings != null ? List.copyOf(registryBindings) : List.of();
+        }
+
+        public static AutoConfig defaults() {
+            return new AutoConfig(null, null, null, null, List.of());
+        }
+
+        public AutoConfig pid(
+                double tP,
+                double tI,
+                double tD,
+                double rP,
+                double rI,
+                double rD) {
+            return pid(new HolonomicPidConstants(tP, tI, tD), new HolonomicPidConstants(rP, rI, rD));
+        }
+
+        public AutoConfig pid(HolonomicPidConstants translation, HolonomicPidConstants rotation) {
+            return new AutoConfig(translation, rotation, poseName, pidAutotunerConfig, registryBindings);
+        }
+
+        public AutoConfig pid(Consumer<RobotLocalizationConfig.AutoPlannerPidSection> section) {
+            RobotLocalizationConfig seed = RobotLocalizationConfig.defaults();
+            if (translationPid != null || rotationPid != null || pidAutotunerConfig != null) {
+                seed.planner().autoPlannerPid(spec -> {
+                    if (translationPid != null) {
+                        setPidAxis(spec.translation(), translationPid);
+                    }
+                    if (rotationPid != null) {
+                        setPidAxis(spec.rotation(), rotationPid);
+                    }
+                    if (pidAutotunerConfig != null) {
+                        spec.autotunerConfig(cfg -> cfg
+                                .enabled(pidAutotunerConfig.enabled())
+                                .dashboardPath(pidAutotunerConfig.dashboardPath())
+                                .program(pidAutotunerConfig.program()));
+                    }
+                });
+            }
+            seed.planner().autoPlannerPid(section);
+            return new AutoConfig(
+                    seed.translation(),
+                    seed.rotation(),
+                    poseName,
+                    seed.autoPlannerPidAutotuner(),
+                    registryBindings);
+        }
+
+        public AutoConfig pose(String poseName) {
+            return new AutoConfig(translationPid, rotationPid, poseName, pidAutotunerConfig, registryBindings);
+        }
+
+        public AutoConfig registry(Consumer<RobotAuto.RegistrySection> section) {
+            if (section == null) {
+                return this;
+            }
+            List<Consumer<RobotAuto.RegistrySection>> merged = new ArrayList<>(registryBindings);
+            merged.add(section);
+            return new AutoConfig(translationPid, rotationPid, poseName, pidAutotunerConfig, merged);
+        }
+
+        private static String normalizePoseName(String poseName) {
+            if (poseName == null) {
+                return null;
+            }
+            String trimmed = poseName.trim();
+            return trimmed.isEmpty() ? null : trimmed;
+        }
+
+        private static void setPidAxis(
+                RobotLocalizationConfig.PidAxisSection axis,
+                HolonomicPidConstants constants) {
+            if (axis == null || constants == null) {
+                return;
+            }
+            axis.kp(constants.kP()).ki(constants.kI()).kd(constants.kD()).iZone(constants.iZone());
+        }
+    }
+
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
             boolean autoInitResetEnabled, TelemetryRegistry.TelemetryConfig telemetryConfig,
             List<RegisterableMechanism> mechanisms, boolean performanceMode,
-            boolean timingDebugEnabled, boolean telemetryEnabled, RobotCoreHooks<T> hooks) {
+            boolean timingDebugEnabled, boolean telemetryEnabled, AutoConfig autoConfig, RobotCoreHooks<T> hooks) {
 
         public RobotCoreConfig {
             mechanisms = mechanisms != null ? List.copyOf(mechanisms) : List.of();
+            autoConfig = autoConfig != null ? autoConfig : AutoConfig.defaults();
             hooks = hooks != null ? hooks : RobotCoreHooks.<T>empty();
         }
 
@@ -104,6 +202,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     false,
                     false,
                     true,
+                    AutoConfig.defaults(),
                     RobotCoreHooks.empty());
         }
 
@@ -118,6 +217,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     false,
                     false,
                     true,
+                    AutoConfig.defaults(),
                     RobotCoreHooks.empty());
         }
 
@@ -132,6 +232,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -146,6 +247,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -160,6 +262,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -174,6 +277,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -188,6 +292,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -210,6 +315,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -224,6 +330,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     enabled,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -238,6 +345,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     enabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -252,6 +360,22 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     enabled,
+                    autoConfig,
+                    hooks);
+        }
+
+        public RobotCoreConfig<T> auto(AutoConfig autoConfig) {
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled,
+                    autoConfig,
                     hooks);
         }
 
@@ -269,6 +393,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks.hooks(section));
         }
 
@@ -286,6 +411,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     performanceMode,
                     timingDebugEnabled,
                     telemetryEnabled,
+                    autoConfig,
                     hooks.inputs(section));
         }
 
@@ -299,6 +425,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final RobotVision vision;
     private final RobotNetworkTables robotNetworkTables = new RobotNetworkTables();
     private final RobotNetworkTables.Node mechanismsRootNode;
+    private final RobotNetworkTables.Node autoRootNode;
     private RobotVisionSim visionSim;
     private Notifier visionSimNotifier;
     private final RobotAuto autos;
@@ -319,6 +446,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final TelemetryRegistry telemetry;
     private boolean autoInitResetEnabled;
     private NetworkTableEntry autoInitResetEntry;
+    private final StructArrayPublisher<Pose2d> selectedAutoTrajectoryPublisher;
+    private NtSendablePublisher autoProgramChooserPublisher;
+    private final List<Consumer<RobotAuto.RegistrySection>> configuredAutoRegistryBindings;
     private final List<RegisterableMechanism> configuredMechanisms;
     private boolean configuredMechanismsRegistered;
     private final boolean timingDebugEnabled;
@@ -396,14 +526,21 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public RobotCore(RobotCoreConfig<T> config) {
         double constructorStart = Timer.getFPGATimestamp();
         activeInstance = this;
+        AutoConfig autoConfig = config.autoConfig() != null ? config.autoConfig() : AutoConfig.defaults();
+        RobotLocalizationConfig resolvedLocalizationConfig =
+                applyAutoConfigToLocalization(config.localizationConfig(), autoConfig);
         drivetrain = timedStartupStep("constructor.driveTrain.build", () -> config.driveTrain.build());
         localization = timedStartupStep(
                 "constructor.localization.create",
-                () -> createLocalizationForDrivetrain(drivetrain, config.localizationConfig()));
+                () -> createLocalizationForDrivetrain(drivetrain, resolvedLocalizationConfig));
         vision = timedStartupStep("constructor.vision.create", () -> RobotVision.fromConfig(config.visionConfig));
         autos = new RobotAuto().attachRobotCore(this);
         copilot = new RobotCopilot(drivetrain, localization, RobotCopilot.inferDriveStyle(drivetrain));
         mechanismsRootNode = robotNetworkTables.root().child("Mechanisms");
+        autoRootNode = robotNetworkTables.root().child("Auto");
+        selectedAutoTrajectoryPublisher = NetworkTableInstance.getDefault()
+                .getStructArrayTopic("Athena/Auto/Selected/Trajectory", Pose2d.struct)
+                .publish();
         mechanisms = new HashMap<>();
         registeredSuperstructures = new ArrayList<>();
         superstructuresByName = new HashMap<>();
@@ -425,6 +562,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         autonomousCommand = null;
         telemetry = TelemetryRegistry.create(config.telemetryConfig());
         autoInitResetEnabled = config.autoInitResetEnabled();
+        configuredAutoRegistryBindings = autoConfig.registryBindings();
         configuredMechanisms = config.mechanisms() != null ? List.copyOf(config.mechanisms()) : List.of();
         configuredMechanismsRegistered = false;
         timingDebugEnabled = config.timingDebugEnabled();
@@ -510,6 +648,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (localization != null) {
             localization.diagnostics(diagnosticsSection.localization());
             localization.attachRobotNetworkTables(robotNetworkTables);
+            localization.setAutoPlannerPidAutotunerRequirement(drivetrain);
             if (vision != null) {
                 localization.setRobotVision(vision);
             }
@@ -520,7 +659,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             timedStartupStep("constructor.localization.configureChoreo", () -> localization.configureChoreo(drivetrain));
         }
         if (localization != null) {
-            String autoPose = config.localizationConfig().autoPoseName();
+            String autoPose = resolvedLocalizationConfig.autoPoseName();
             autos.reset().poseResetter(pose -> Commands.runOnce(() -> localization.resetPose(autoPose, pose)));
         }
 
@@ -546,6 +685,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         double robotInitStart = Timer.getFPGATimestamp();
         timedStartupStep("robotInit.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
         timedStartupStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded);
+        timedStartupStep("robotInit.configureAutoRegistry", this::configureAutoRegistry);
         timedStartupStep("robotInit.configureAutos", () -> configureAutos(autos));
         timedStartupStep("robotInit.autos.finalizeRegistration", () -> autos.execution().prepare());
         timedStartupStep("robotInit.ensureAutoChooserPublished", this::ensureAutoChooserPublished);
@@ -672,6 +812,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         maybeApplyCompetitionStreamShedding();
         robotNetworkTables.refresh();
         robotNetworkTables.beginPublishCycle();
+        updateAutoChooserPublishers();
 
         // Auto publish when enabled at runtime from Athena/NetworkTableConfig.
         if (robotNetworkTables.isPublishingEnabled()) {
@@ -699,8 +840,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         CommandScheduler.getInstance().run();
         long t1Ns = System.nanoTime();
         telemetry.tick();
+        AthenaNT.tick();
         long t2Ns = System.nanoTime();
-        if (localization != null && runtimeMode != RuntimeMode.DISABLED) {
+        if (localization != null) {
             localization.updateAutoVisualization(autos);
         }
         long t3Ns = System.nanoTime();
@@ -1393,8 +1535,61 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
      */
     protected void configureAutos(RobotAuto auto) {}
 
+    private void configureAutoRegistry() {
+        if (configuredAutoRegistryBindings == null || configuredAutoRegistryBindings.isEmpty()) {
+            return;
+        }
+        RobotAuto.RegistrySection registry = autos.registry();
+        for (Consumer<RobotAuto.RegistrySection> binding : configuredAutoRegistryBindings) {
+            if (binding == null) {
+                continue;
+            }
+            binding.accept(registry);
+        }
+    }
+
     protected Command createAutonomousCommand() {
         return autos.execution().selectedCommand().orElse(null);
+    }
+
+    private static RobotLocalizationConfig applyAutoConfigToLocalization(
+            RobotLocalizationConfig localizationConfig,
+            AutoConfig autoConfig) {
+        RobotLocalizationConfig resolved =
+                localizationConfig != null ? localizationConfig : RobotLocalizationConfig.defaults();
+        AutoConfig auto = autoConfig != null ? autoConfig : AutoConfig.defaults();
+
+        if (auto.translationPid() != null || auto.rotationPid() != null || auto.pidAutotunerConfig() != null) {
+            resolved.planner().autoPlannerPid(section -> {
+                if (auto.translationPid() != null) {
+                    setPidAxis(section.translation(), auto.translationPid());
+                }
+                if (auto.rotationPid() != null) {
+                    setPidAxis(section.rotation(), auto.rotationPid());
+                }
+                if (auto.pidAutotunerConfig() != null) {
+                    RobotLocalizationConfig.AutoPlannerPidAutotunerConfig autotuner = auto.pidAutotunerConfig();
+                    section.autotunerConfig(cfg -> cfg
+                            .enabled(autotuner.enabled())
+                            .dashboardPath(autotuner.dashboardPath())
+                            .program(autotuner.program()));
+                }
+            });
+        }
+
+        if (auto.poseName() != null && !auto.poseName().isBlank()) {
+            resolved.poses().autoPoseName(auto.poseName());
+        }
+        return resolved;
+    }
+
+    private static void setPidAxis(
+            RobotLocalizationConfig.PidAxisSection axis,
+            HolonomicPidConstants constants) {
+        if (axis == null || constants == null) {
+            return;
+        }
+        axis.kp(constants.kP()).ki(constants.kI()).kd(constants.kD()).iZone(constants.iZone());
     }
 
     private static RobotLocalization<?> createLocalizationForDrivetrain(
@@ -1741,6 +1936,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (vision != null) {
             vision.networkTables(root.child("Vision"));
         }
+        publishAutoNetworkTables(autoRootNode);
         publishPerformanceMetrics(root);
 
         coreNetworkTablesPublished = true;
@@ -2254,6 +2450,26 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 memory.putDouble("systemUsedPercent", -1.0);
             }
 
+            File storagePath = resolveStorageMetricsPath();
+            long storageTotal = Math.max(0L, storagePath.getTotalSpace());
+            long storageFree = Math.max(0L, storagePath.getFreeSpace());
+            long storageUsable = Math.max(0L, storagePath.getUsableSpace());
+            long storageUsed = Math.max(0L, storageTotal - storageUsable);
+            memory.putString("storagePath", storagePath.getAbsolutePath());
+            if (storageTotal > 0L) {
+                memory.putDouble("storageTotalBytes", storageTotal);
+                memory.putDouble("storageFreeBytes", storageFree);
+                memory.putDouble("storageUsableBytes", storageUsable);
+                memory.putDouble("storageUsedBytes", storageUsed);
+                memory.putDouble("storageUsedPercent", ratioPercent(storageUsed, storageTotal));
+            } else {
+                memory.putDouble("storageTotalBytes", -1.0);
+                memory.putDouble("storageFreeBytes", -1.0);
+                memory.putDouble("storageUsableBytes", -1.0);
+                memory.putDouble("storageUsedBytes", -1.0);
+                memory.putDouble("storageUsedPercent", -1.0);
+            }
+
             long gcCollections = 0;
             long gcCollectionTimeMs = 0;
             for (GarbageCollectorMXBean gcBean : gcMxBeans) {
@@ -2306,6 +2522,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return Double.isFinite(value) ? value : fallback;
     }
 
+    private File resolveStorageMetricsPath() {
+        String logDir = DataLogManager.getLogDir();
+        if (logDir != null && !logDir.isBlank()) {
+            File configured = new File(logDir.trim());
+            if (configured.exists()) {
+                return configured;
+            }
+        }
+        if (RobotBase.isReal()) {
+            return new File("/home/lvuser");
+        }
+        return Filesystem.getOperatingDirectory();
+    }
+
     /**
      * Publishes all registered mechanisms under {@code Athena/Mechanisms/...}.
      */
@@ -2355,9 +2585,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     public SendableChooser<Command> registerAutoChooser(RobotAuto.AutoKey defaultAuto) {
-        SendableChooser<Command> chooser = autos.selection().commandChooser(defaultAuto);
-        SmartDashboard.putData("Auto Chooser", chooser);
-        return chooser;
+        // Keep a program chooser alive so selected routine/poses remain available for visualization topics.
+        autos.selection().programChooser(defaultAuto);
+        return autos.selection().commandChooser(defaultAuto);
     }
 
     public SendableChooser<RobotAuto.AutoRoutine> registerAutoRoutineChooser(RobotAuto.AutoKey defaultAuto) {
@@ -2366,7 +2596,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     public SendableChooser<RobotAuto.AutoRoutine> registerAutoProgramChooser(RobotAuto.AutoKey defaultProgram) {
         SendableChooser<RobotAuto.AutoRoutine> chooser = autos.selection().programChooser(defaultProgram);
-        SmartDashboard.putData(AUTO_PROGRAM_CHOOSER_KEY, chooser);
+        autoProgramChooserPublisher = publishSendable(
+                autoProgramChooserPublisher,
+                autoRootNode.child(AUTO_PROGRAM_CHOOSER_KEY),
+                chooser);
         return chooser;
     }
 
@@ -2413,10 +2646,134 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     private boolean isAutoInitResetEnabled() {
         if (autoInitResetEntry == null) {
-            autoInitResetEntry = SmartDashboard.getEntry("Auto/Reset Odometry On Init");
-            autoInitResetEntry.setBoolean(autoInitResetEnabled);
+            autoInitResetEntry = autoRootNode.entry("ResetOdometryOnInit");
+            initIfAbsent(autoInitResetEntry, autoInitResetEnabled);
         }
         return autoInitResetEntry.getBoolean(autoInitResetEnabled);
+    }
+
+    private void publishAutoNetworkTables(RobotNetworkTables.Node autoNode) {
+        if (autoNode == null) {
+            return;
+        }
+        autoNode.putBoolean("resetOdometryOnInit", isAutoInitResetEnabled());
+        autoNode.putDouble("routineCount", autos.routines().all().size());
+        RobotSpeeds speeds = drivetrain != null ? drivetrain.robotSpeeds() : null;
+        RobotNetworkTables.Node followerNode = autoNode.child("Follower");
+        if (speeds != null) {
+            followerNode.putBoolean("enabled", speeds.isSpeedsSourceActive(RobotSpeeds.AUTO_SOURCE));
+            ChassisSpeeds input = speeds.getInputSpeeds(RobotSpeeds.AUTO_SOURCE);
+            ChassisSpeeds output = speeds.getSpeeds(RobotSpeeds.AUTO_SOURCE);
+            followerNode.putDouble("inputVxMps", input.vxMetersPerSecond);
+            followerNode.putDouble("inputVyMps", input.vyMetersPerSecond);
+            followerNode.putDouble("inputOmegaRadPerSec", input.omegaRadiansPerSecond);
+            followerNode.putDouble("outputVxMps", output.vxMetersPerSecond);
+            followerNode.putDouble("outputVyMps", output.vyMetersPerSecond);
+            followerNode.putDouble("outputOmegaRadPerSec", output.omegaRadiansPerSecond);
+        }
+        RobotLocalization<?> localizationRef = localization;
+        if (localizationRef != null) {
+            RobotLocalizationConfig cfg = localizationRef.getLocalizationConfig();
+            HolonomicPidConstants translation = cfg.translation();
+            HolonomicPidConstants rotation = cfg.rotation();
+            followerNode.putString("pose", cfg.autoPoseName());
+            RobotNetworkTables.Node pidNode = followerNode.child("Pid");
+            if (translation != null) {
+                pidNode.putDouble("translationKp", translation.kP());
+                pidNode.putDouble("translationKi", translation.kI());
+                pidNode.putDouble("translationKd", translation.kD());
+                pidNode.putDouble("translationIZone", translation.iZone());
+            }
+            if (rotation != null) {
+                pidNode.putDouble("rotationKp", rotation.kP());
+                pidNode.putDouble("rotationKi", rotation.kI());
+                pidNode.putDouble("rotationKd", rotation.kD());
+                pidNode.putDouble("rotationIZone", rotation.iZone());
+            }
+        }
+        RobotNetworkTables.Node selectedNode = autoNode.child("Selected");
+        autos.selection().selected().ifPresentOrElse(
+                routine -> {
+                    selectedNode.putString("id", routine.key().id());
+                    selectedNode.putString("displayName", routine.key().displayName());
+                    selectedNode.putString("source", routine.source().name());
+                    selectedNode.putString("reference", routine.reference());
+                    selectedNode.putBoolean("hasStartingPose", routine.hasStartingPose());
+                },
+                () -> {
+                    selectedNode.putString("id", "");
+                    selectedNode.putString("displayName", "");
+                    selectedNode.putString("source", "");
+                    selectedNode.putString("reference", "");
+                    selectedNode.putBoolean("hasStartingPose", false);
+                });
+        java.util.Optional<java.util.List<Pose2d>> selectedPoses = autos.selection().selectedPoses();
+        if (selectedPoses.isEmpty()) {
+            selectedPoses = autos.selection().selected().flatMap(autos.routines()::poses);
+        }
+        selectedPoses
+                .filter(poses -> poses != null && !poses.isEmpty())
+                .ifPresentOrElse(
+                        poses -> {
+                            autoNode.putBoolean("hasTrajectory", true);
+                            autoNode.putDouble("trajectoryPointCount", poses.size());
+                            selectedNode.putBoolean("hasTrajectory", true);
+                            selectedNode.putDouble("trajectoryPointCount", poses.size());
+                            selectedAutoTrajectoryPublisher.set(poses.toArray(Pose2d[]::new));
+                        },
+                        () -> {
+                            autoNode.putBoolean("hasTrajectory", false);
+                            autoNode.putDouble("trajectoryPointCount", 0.0);
+                            selectedNode.putBoolean("hasTrajectory", false);
+                            selectedNode.putDouble("trajectoryPointCount", 0.0);
+                            selectedAutoTrajectoryPublisher.set(EMPTY_POSE2D_ARRAY);
+                        });
+    }
+
+    private void updateAutoChooserPublishers() {
+        updateSendablePublisher(autoProgramChooserPublisher);
+    }
+
+    private static NtSendablePublisher publishSendable(
+            NtSendablePublisher existing,
+            RobotNetworkTables.Node node,
+            Sendable sendable) {
+        if (existing != null) {
+            existing.close();
+        }
+        return new NtSendablePublisher(node, sendable);
+    }
+
+    private static void updateSendablePublisher(NtSendablePublisher publisher) {
+        if (publisher != null) {
+            publisher.update();
+        }
+    }
+
+    private static void initIfAbsent(NetworkTableEntry entry, boolean value) {
+        if (entry != null && entry.getType() == NetworkTableType.kUnassigned) {
+            entry.setBoolean(value);
+        }
+    }
+
+    private static final class NtSendablePublisher {
+        private final SendableBuilderImpl builder;
+
+        private NtSendablePublisher(RobotNetworkTables.Node node, Sendable sendable) {
+            builder = new SendableBuilderImpl();
+            builder.setTable(node.table());
+            sendable.initSendable(builder);
+            builder.startListeners();
+            builder.update();
+        }
+
+        private void update() {
+            builder.update();
+        }
+
+        private void close() {
+            builder.close();
+        }
     }
 
     private void resetAutoInitPoseIfConfigured() {

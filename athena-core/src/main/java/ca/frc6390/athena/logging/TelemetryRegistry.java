@@ -16,6 +16,8 @@ public final class TelemetryRegistry {
     private static final String DEFAULT_PREFIX = "Athena";
     private static final int DEFAULT_PERIOD_MS = 100;
     private static final int HIGH_BANDWIDTH_MIN_PERIOD_MS = 200;
+    private static final String DEFAULT_DATALOG_DIRECTORY = "";
+    private static final int DEFAULT_DATALOG_RETENTION_COUNT = 5;
     private volatile boolean enabled = true;
     private final TelemetrySink diskSink;
     private final TelemetrySink networkTablesSink;
@@ -72,7 +74,10 @@ public final class TelemetryRegistry {
     public static TelemetryRegistry create(TelemetryConfig config) {
         TelemetryConfig resolved = config != null ? config : TelemetryConfig.defaults();
         TelemetrySink disk = resolved.isDiskEnabled()
-                ? new DataLogTelemetrySink(resolved.diskPrefix())
+                ? new DataLogTelemetrySink(
+                        resolved.diskPrefix(),
+                        resolved.dataLogDirectory(),
+                        resolved.dataLogRetentionCount())
                 : null;
         TelemetrySink networkTables = resolved.isNetworkTablesEnabled()
                 ? new NetworkTableTelemetrySink(resolved.networkTablePrefix())
@@ -458,7 +463,9 @@ public final class TelemetryRegistry {
             boolean diskEnabled,
             boolean networkTablesEnabled,
             String diskPrefix,
-            String networkTablePrefix) {
+            String networkTablePrefix,
+            String dataLogDirectory,
+            int dataLogRetentionCount) {
 
         public static TelemetryConfig defaults() {
             return new TelemetryConfig(
@@ -466,29 +473,90 @@ public final class TelemetryRegistry {
                     true,
                     true,
                     DEFAULT_PREFIX,
-                    "Telemetry");
+                    "Telemetry",
+                    DEFAULT_DATALOG_DIRECTORY,
+                    DEFAULT_DATALOG_RETENTION_COUNT);
         }
 
         public TelemetryConfig defaultPeriodMs(int defaultPeriodMs) {
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, diskPrefix, networkTablePrefix);
+            return new TelemetryConfig(
+                    defaultPeriodMs,
+                    diskEnabled,
+                    networkTablesEnabled,
+                    diskPrefix,
+                    networkTablePrefix,
+                    dataLogDirectory,
+                    dataLogRetentionCount);
         }
 
         public TelemetryConfig diskEnabled(boolean enabled) {
-            return new TelemetryConfig(defaultPeriodMs, enabled, networkTablesEnabled, diskPrefix, networkTablePrefix);
+            return new TelemetryConfig(
+                    defaultPeriodMs,
+                    enabled,
+                    networkTablesEnabled,
+                    diskPrefix,
+                    networkTablePrefix,
+                    dataLogDirectory,
+                    dataLogRetentionCount);
         }
 
         public TelemetryConfig networkTablesEnabled(boolean enabled) {
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, enabled, diskPrefix, networkTablePrefix);
+            return new TelemetryConfig(
+                    defaultPeriodMs,
+                    diskEnabled,
+                    enabled,
+                    diskPrefix,
+                    networkTablePrefix,
+                    dataLogDirectory,
+                    dataLogRetentionCount);
         }
 
         public TelemetryConfig diskPrefix(String prefix) {
             String resolved = prefix != null && !prefix.isBlank() ? prefix : DEFAULT_PREFIX;
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, resolved, networkTablePrefix);
+            return new TelemetryConfig(
+                    defaultPeriodMs,
+                    diskEnabled,
+                    networkTablesEnabled,
+                    resolved,
+                    networkTablePrefix,
+                    dataLogDirectory,
+                    dataLogRetentionCount);
         }
 
         public TelemetryConfig networkTablePrefix(String prefix) {
             String resolved = prefix != null && !prefix.isBlank() ? prefix : "Telemetry";
-            return new TelemetryConfig(defaultPeriodMs, diskEnabled, networkTablesEnabled, diskPrefix, resolved);
+            return new TelemetryConfig(
+                    defaultPeriodMs,
+                    diskEnabled,
+                    networkTablesEnabled,
+                    diskPrefix,
+                    resolved,
+                    dataLogDirectory,
+                    dataLogRetentionCount);
+        }
+
+        public TelemetryConfig dataLogDirectory(String directory) {
+            String resolved = directory != null ? directory.trim() : DEFAULT_DATALOG_DIRECTORY;
+            return new TelemetryConfig(
+                    defaultPeriodMs,
+                    diskEnabled,
+                    networkTablesEnabled,
+                    diskPrefix,
+                    networkTablePrefix,
+                    resolved,
+                    dataLogRetentionCount);
+        }
+
+        public TelemetryConfig dataLogRetentionCount(int count) {
+            int resolved = count > 0 ? count : DEFAULT_DATALOG_RETENTION_COUNT;
+            return new TelemetryConfig(
+                    defaultPeriodMs,
+                    diskEnabled,
+                    networkTablesEnabled,
+                    diskPrefix,
+                    networkTablePrefix,
+                    dataLogDirectory,
+                    resolved);
         }
 
         public boolean isDiskEnabled() {

@@ -1,6 +1,8 @@
 package ca.frc6390.athena.logging;
 
+import java.io.File;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Objects;
 
 import edu.wpi.first.util.datalog.BooleanArrayLogEntry;
@@ -13,13 +15,22 @@ import edu.wpi.first.util.datalog.IntegerLogEntry;
 import edu.wpi.first.util.datalog.StringArrayLogEntry;
 import edu.wpi.first.util.datalog.StringLogEntry;
 import edu.wpi.first.wpilibj.DataLogManager;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Filesystem;
+import edu.wpi.first.wpilibj.RobotBase;
 
 public final class DataLogTelemetrySink implements TelemetrySink {
+    private static final String DEFAULT_REAL_DATALOG_DIR = "/home/lvuser/athena/logs";
+    private static final String DEFAULT_SIM_DATALOG_DIR = "athena/logs";
+
     private final DataLog log;
     private final String prefix;
 
-    public DataLogTelemetrySink(String prefix) {
-        DataLogManager.start();
+    public DataLogTelemetrySink(String prefix, String logDirectory, int retentionCount) {
+        String resolvedDirectory = resolveLogDirectory(logDirectory);
+        ensureLogDirectoryExists(resolvedDirectory);
+        pruneOldLogs(resolvedDirectory, retentionCount);
+        DataLogManager.start(resolvedDirectory);
         this.log = DataLogManager.getLog();
         this.prefix = prefix == null || prefix.isBlank() ? "" : prefix.trim();
     }
@@ -254,5 +265,60 @@ public final class DataLogTelemetrySink implements TelemetrySink {
             out[i] = values[i];
         }
         return out;
+    }
+
+    private static String resolveLogDirectory(String configuredDirectory) {
+        if (configuredDirectory != null && !configuredDirectory.isBlank()) {
+            return configuredDirectory.trim();
+        }
+        if (RobotBase.isReal()) {
+            return DEFAULT_REAL_DATALOG_DIR;
+        }
+        return new File(Filesystem.getOperatingDirectory(), DEFAULT_SIM_DATALOG_DIR).getAbsolutePath();
+    }
+
+    private static void ensureLogDirectoryExists(String logDirectory) {
+        File dir = new File(logDirectory);
+        if (dir.isDirectory()) {
+            return;
+        }
+        if (dir.exists() && !dir.isDirectory()) {
+            DriverStation.reportWarning(
+                    "Telemetry log path exists but is not a directory: " + logDirectory,
+                    false);
+            return;
+        }
+        if (!dir.mkdirs()) {
+            DriverStation.reportWarning(
+                    "Failed to create telemetry log directory: " + logDirectory,
+                    false);
+        }
+    }
+
+    private static void pruneOldLogs(String logDirectory, int retentionCount) {
+        int keepCount = Math.max(1, retentionCount);
+        File dir = new File(logDirectory);
+        if (!dir.isDirectory()) {
+            return;
+        }
+
+        File[] logFiles = dir.listFiles((ignored, name) -> name != null && name.endsWith(".wpilog"));
+        if (logFiles == null || logFiles.length <= keepCount) {
+            return;
+        }
+
+        Arrays.sort(logFiles,
+                Comparator.comparingLong(File::lastModified)
+                        .reversed()
+                        .thenComparing(File::getName));
+
+        for (int i = keepCount; i < logFiles.length; i++) {
+            File file = logFiles[i];
+            if (!file.delete()) {
+                DriverStation.reportWarning(
+                        "Failed to delete old telemetry log: " + file.getAbsolutePath(),
+                        false);
+            }
+        }
     }
 }
