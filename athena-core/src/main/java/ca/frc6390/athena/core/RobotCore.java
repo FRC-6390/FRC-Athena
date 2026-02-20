@@ -702,20 +702,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 systemSection.swappiness(systemConfig.vmSwappiness());
                 systemSection.setLoopSwapEnabled(systemConfig.loopSwapEnabled(), systemConfig.loopSwapSizeMiB());
                 systemSection.setSystemWebServerEnabled(systemConfig.systemWebServerEnabled());
-                systemSection.configServerEnabled(systemConfig.configServerEnabled());
-                systemSection.telemetryEnabled(systemConfig.telemetryEnabled());
-                systemSection.networkTablesDataLogEnabled(systemConfig.networkTablesDataLogEnabled());
-            } else {
-                SystemConfig rioDefaults = SystemConfig.rioDefaults();
-                systemSection.overcommitMode(rioDefaults.vmOvercommitMode());
-                systemSection.overcommitRatio(rioDefaults.vmOvercommitRatio());
-                systemSection.swappiness(rioDefaults.vmSwappiness());
-                systemSection.setLoopSwapEnabled(false, rioDefaults.loopSwapSizeMiB());
-                systemSection.setSystemWebServerEnabled(true);
-                systemSection.configServerEnabled(rioDefaults.configServerEnabled());
-                systemSection.telemetryEnabled(rioDefaults.telemetryEnabled());
-                systemSection.networkTablesDataLogEnabled(rioDefaults.networkTablesDataLogEnabled());
             }
+            // Runtime-only toggles apply regardless of OS tweak mode.
+            systemSection.configServerEnabled(systemConfig.configServerEnabled());
+            systemSection.telemetryEnabled(systemConfig.telemetryEnabled());
+            systemSection.networkTablesDataLogEnabled(systemConfig.networkTablesDataLogEnabled());
         }
         if (config.performanceMode()) {
             setConfigServerEnabled(false);
