@@ -776,6 +776,7 @@ public final class RobotCoreConfig {
         public SystemSection vmOvercommitMode(int mode) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
+                    current.tweaksEnabled(),
                     mode,
                     current.vmOvercommitRatio(),
                     current.vmSwappiness(),
@@ -791,6 +792,7 @@ public final class RobotCoreConfig {
         public SystemSection vmOvercommitRatio(int ratio) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
+                    current.tweaksEnabled(),
                     current.vmOvercommitMode(),
                     ratio,
                     current.vmSwappiness(),
@@ -806,6 +808,7 @@ public final class RobotCoreConfig {
         public SystemSection vmSwappiness(int value) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
+                    current.tweaksEnabled(),
                     current.vmOvercommitMode(),
                     current.vmOvercommitRatio(),
                     value,
@@ -821,6 +824,7 @@ public final class RobotCoreConfig {
         public SystemSection loopSwap(boolean enabled, int sizeMiB) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
+                    current.tweaksEnabled(),
                     current.vmOvercommitMode(),
                     current.vmOvercommitRatio(),
                     current.vmSwappiness(),
@@ -836,6 +840,7 @@ public final class RobotCoreConfig {
         public SystemSection systemWebServerEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
+                    current.tweaksEnabled(),
                     current.vmOvercommitMode(),
                     current.vmOvercommitRatio(),
                     current.vmSwappiness(),
@@ -851,6 +856,7 @@ public final class RobotCoreConfig {
         public SystemSection configServerEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
+                    current.tweaksEnabled(),
                     current.vmOvercommitMode(),
                     current.vmOvercommitRatio(),
                     current.vmSwappiness(),
@@ -866,6 +872,7 @@ public final class RobotCoreConfig {
         public SystemSection telemetryEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
+                    current.tweaksEnabled(),
                     current.vmOvercommitMode(),
                     current.vmOvercommitRatio(),
                     current.vmSwappiness(),
@@ -881,6 +888,7 @@ public final class RobotCoreConfig {
         public SystemSection networkTablesDataLogEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
+                    current.tweaksEnabled(),
                     current.vmOvercommitMode(),
                     current.vmOvercommitRatio(),
                     current.vmSwappiness(),
@@ -890,6 +898,27 @@ public final class RobotCoreConfig {
                     current.configServerEnabled(),
                     current.telemetryEnabled(),
                     enabled);
+            return this;
+        }
+
+        public SystemSection tweaksEnabled(boolean enabled) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    enabled,
+                    current.vmOvercommitMode(),
+                    current.vmOvercommitRatio(),
+                    current.vmSwappiness(),
+                    current.loopSwapEnabled(),
+                    current.loopSwapSizeMiB(),
+                    current.systemWebServerEnabled(),
+                    current.configServerEnabled(),
+                    current.telemetryEnabled(),
+                    current.networkTablesDataLogEnabled());
+            return this;
+        }
+
+        public SystemSection rioDefaults() {
+            owner.systemConfig = RobotCore.SystemConfig.rioDefaults();
             return this;
         }
     }

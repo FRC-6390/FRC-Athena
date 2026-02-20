@@ -184,6 +184,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     public record SystemConfig(
+            boolean tweaksEnabled,
             int vmOvercommitMode,
             int vmOvercommitRatio,
             int vmSwappiness,
@@ -196,6 +197,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
         public static SystemConfig defaults() {
             return new SystemConfig(
+                    true,
                     1,
                     95,
                     120,
@@ -204,6 +206,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     false,
                     false,
                     false,
+                    false);
+        }
+
+        public static SystemConfig rioDefaults() {
+            return new SystemConfig(
+                    false,
+                    RIO_DEFAULT_VM_OVERCOMMIT_MODE,
+                    RIO_DEFAULT_VM_OVERCOMMIT_RATIO,
+                    RIO_DEFAULT_VM_SWAPPINESS,
+                    false,
+                    32,
+                    true,
+                    true,
+                    true,
                     false);
         }
     }
@@ -608,6 +624,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final int SYSTEM_OVERCOMMIT_MODE_MAX = 2;
     private static final int SYSTEM_OVERCOMMIT_RATIO_MIN = 0;
     private static final int SYSTEM_OVERCOMMIT_RATIO_MAX = 100;
+    private static final int RIO_DEFAULT_VM_OVERCOMMIT_MODE = 2;
+    private static final int RIO_DEFAULT_VM_OVERCOMMIT_RATIO = 86;
+    private static final int RIO_DEFAULT_VM_SWAPPINESS = 60;
     private static final long SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS = 12L;
     private static final long SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS = 20L;
 
@@ -677,14 +696,26 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         telemetryEnabled = config.telemetryEnabled();
         if (RobotBase.isReal()) {
             SystemConfig systemConfig = config.systemConfig() != null ? config.systemConfig() : SystemConfig.defaults();
-            systemSection.overcommitMode(systemConfig.vmOvercommitMode());
-            systemSection.overcommitRatio(systemConfig.vmOvercommitRatio());
-            systemSection.swappiness(systemConfig.vmSwappiness());
-            systemSection.setLoopSwapEnabled(systemConfig.loopSwapEnabled(), systemConfig.loopSwapSizeMiB());
-            systemSection.setSystemWebServerEnabled(systemConfig.systemWebServerEnabled());
-            systemSection.configServerEnabled(systemConfig.configServerEnabled());
-            systemSection.telemetryEnabled(systemConfig.telemetryEnabled());
-            systemSection.networkTablesDataLogEnabled(systemConfig.networkTablesDataLogEnabled());
+            if (systemConfig.tweaksEnabled()) {
+                systemSection.overcommitMode(systemConfig.vmOvercommitMode());
+                systemSection.overcommitRatio(systemConfig.vmOvercommitRatio());
+                systemSection.swappiness(systemConfig.vmSwappiness());
+                systemSection.setLoopSwapEnabled(systemConfig.loopSwapEnabled(), systemConfig.loopSwapSizeMiB());
+                systemSection.setSystemWebServerEnabled(systemConfig.systemWebServerEnabled());
+                systemSection.configServerEnabled(systemConfig.configServerEnabled());
+                systemSection.telemetryEnabled(systemConfig.telemetryEnabled());
+                systemSection.networkTablesDataLogEnabled(systemConfig.networkTablesDataLogEnabled());
+            } else {
+                SystemConfig rioDefaults = SystemConfig.rioDefaults();
+                systemSection.overcommitMode(rioDefaults.vmOvercommitMode());
+                systemSection.overcommitRatio(rioDefaults.vmOvercommitRatio());
+                systemSection.swappiness(rioDefaults.vmSwappiness());
+                systemSection.setLoopSwapEnabled(false, rioDefaults.loopSwapSizeMiB());
+                systemSection.setSystemWebServerEnabled(true);
+                systemSection.configServerEnabled(rioDefaults.configServerEnabled());
+                systemSection.telemetryEnabled(rioDefaults.telemetryEnabled());
+                systemSection.networkTablesDataLogEnabled(rioDefaults.networkTablesDataLogEnabled());
+            }
         }
         if (config.performanceMode()) {
             setConfigServerEnabled(false);
