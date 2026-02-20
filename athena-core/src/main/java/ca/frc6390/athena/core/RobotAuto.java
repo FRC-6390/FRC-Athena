@@ -225,6 +225,9 @@ public class RobotAuto {
 
     /**
      * Shared runtime context available to auto program phases.
+     *
+     * <p>This context exposes robot subsystems and registered auto metadata. It is shared by
+     * {@link AutoRegisterCtx} and {@link AutoBuildCtx}.</p>
      */
     public interface AutoRuntimeCtx {
         RobotCore<?> robot();
@@ -371,22 +374,38 @@ public class RobotAuto {
 
     /**
      * Build-only context used in {@link AutoProgram#build(AutoBuildCtx)}.
+     *
+     * <p>{@code auto(...)} resolves to deferred commands so autos are looked up when the command
+     * is scheduled. Odometry reset settings are consumed by the next {@code auto(...)} call only,
+     * then automatically disarmed.</p>
      */
     public interface AutoBuildCtx extends AutoRuntimeCtx {
+        /**
+         * Pose source used when applying the one-shot odometry reset.
+         */
         enum OdometryResetTarget {
+            /** Do not apply a reset. */
             NONE,
+            /** Reset to the resolved auto path's starting pose. */
             PATH_START,
+            /** Reset to the resolved auto path's ending pose. */
             PATH_END,
+            /** Reset to an explicit pose supplied through {@link #odometryResetPose(Pose2d)}. */
             POSE
         }
 
         /**
-         * Enables or disables odometry reset for the next {@code auto(...)} command built by this ctx.
+         * Arms/disarms odometry reset for the next {@code auto(...)} call built by this ctx.
+         *
+         * <p>Reset is one-shot. After the next {@code auto(...)} call, this flag is cleared.</p>
          */
         default AutoBuildCtx odometryReset(boolean enabled) {
             return this;
         }
 
+        /**
+         * Returns whether the next {@code auto(...)} call will attempt an odometry reset.
+         */
         default boolean odometryResetEnabled() {
             return true;
         }
@@ -398,6 +417,9 @@ public class RobotAuto {
             return this;
         }
 
+        /**
+         * Returns the configured pose source for the next reset operation.
+         */
         default OdometryResetTarget odometryResetTarget() {
             return OdometryResetTarget.PATH_START;
         }
@@ -409,38 +431,66 @@ public class RobotAuto {
             return this;
         }
 
+        /**
+         * Returns the explicit pose used when target is {@link OdometryResetTarget#POSE}.
+         */
         default Optional<Pose2d> odometryResetPose() {
             return Optional.empty();
         }
 
+        /**
+         * Convenience for {@link #odometryResetTarget(OdometryResetTarget)} with {@code PATH_START}.
+         */
         default AutoBuildCtx odometryResetToPathStart() {
             return odometryResetTarget(OdometryResetTarget.PATH_START);
         }
 
+        /**
+         * Convenience for {@link #odometryResetTarget(OdometryResetTarget)} with {@code PATH_END}.
+         */
         default AutoBuildCtx odometryResetToPathEnd() {
             return odometryResetTarget(OdometryResetTarget.PATH_END);
         }
 
+        /**
+         * Convenience for {@link #odometryResetPose(Pose2d)}.
+         */
         default AutoBuildCtx odometryResetToPose(Pose2d pose) {
             return odometryResetPose(pose);
         }
 
+        /**
+         * Disables the next one-shot odometry reset.
+         */
         default AutoBuildCtx disableOdometryReset() {
             return odometryReset(false);
         }
 
+        /**
+         * Resolves a registered auto routine id to a deferred command.
+         *
+         * <p>If odometry reset is armed, it is applied to this call and then disarmed.</p>
+         */
         default Command auto(String id) {
             Objects.requireNonNull(id, "id");
             return autos().deferredAuto(id, OptionalInt.empty());
         }
 
+        /**
+         * Resolves a registered auto routine key to a deferred command.
+         */
         default Command auto(AutoKey key) {
             Objects.requireNonNull(key, "key");
             return auto(key.id());
         }
 
         /**
-         * Resolves either an explicitly registered split (id.index) or derives it from base path reference.
+         * Resolves a specific split of an auto routine to a deferred command.
+         *
+         * <p>Implementations may resolve either an explicitly registered split ({@code id.index}) or
+         * derive it from a base trajectory reference, depending on backend capabilities.</p>
+         *
+         * <p>If odometry reset is armed, it is applied to this call and then disarmed.</p>
          */
         default Command auto(String id, int splitIndex) {
             Objects.requireNonNull(id, "id");
@@ -848,6 +898,9 @@ public class RobotAuto {
             return timeout(auto(autoId), timeoutSeconds, onTimeout);
         }
 
+        /**
+         * Adapter to use this context with {@link AutoPlan} helpers.
+         */
         default AutoPlan.Context planContext() {
             return new AutoPlan.Context() {
                 @Override
@@ -908,24 +961,45 @@ public class RobotAuto {
      * </ol>
      */
     public interface AutoProgram {
+        /**
+         * Unique chooser/registry id for this program.
+         */
         String id();
 
+        /**
+         * Key form of {@link #id()}.
+         */
         default AutoKey key() {
             return AutoKey.of(id());
         }
 
+        /**
+         * Registration phase. Use this to declare dependencies before build.
+         */
         default void register(AutoRegisterCtx ctx) {}
 
+        /**
+         * Build phase. Returns the primary chooser routine for this program.
+         */
         AutoRoutine build(AutoBuildCtx ctx);
 
+        /**
+         * Creates a trajectory-backed routine using this program id as chooser key.
+         */
         default AutoRoutine path(TrajectorySource source, String reference) {
             return RobotAuto.path(key(), source, reference);
         }
 
+        /**
+         * Creates a trajectory-backed routine where reference defaults to {@link #id()}.
+         */
         default AutoRoutine path(TrajectorySource source) {
             return path(source, key().id());
         }
 
+        /**
+         * Creates a custom command-backed routine using this program id as chooser key.
+         */
         default AutoRoutine custom(Supplier<Command> factory) {
             return RobotAuto.custom(key(), factory);
         }

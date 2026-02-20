@@ -120,6 +120,9 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Configures global autonomous settings (planner PID, default pose key, and registry hooks).
+         */
         public Builder<T> auto(Consumer<AutoSection> section) {
             Objects.requireNonNull(section, "section");
             AutoSection a = new AutoSection(autoConfig);
@@ -575,6 +578,12 @@ public final class RobotCoreConfig {
 
     }
 
+    /**
+     * Builder facade for {@link RobotCore.AutoConfig}.
+     *
+     * <p>This section configures global auto behavior used by {@link RobotAuto}, while
+     * {@link RobotAuto.AutoBuildCtx} configures per-build command composition.</p>
+     */
     public static final class AutoSection {
         private RobotCore.AutoConfig config;
 
@@ -582,11 +591,17 @@ public final class RobotCoreConfig {
             this.config = config != null ? config : RobotCore.AutoConfig.defaults();
         }
 
+        /**
+         * Replaces the current auto config object.
+         */
         public AutoSection config(RobotCore.AutoConfig config) {
             this.config = config != null ? config : RobotCore.AutoConfig.defaults();
             return this;
         }
 
+        /**
+         * Sets translation/rotation planner PID gains.
+         */
         public AutoSection pid(
                 double tP,
                 double tI,
@@ -598,16 +613,25 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Configures planner PID values through the localization auto-planner section API.
+         */
         public AutoSection pid(Consumer<RobotLocalizationConfig.AutoPlannerPidSection> section) {
             config = config.pid(section);
             return this;
         }
 
+        /**
+         * Sets the pose key used by auto planner reset behavior.
+         */
         public AutoSection pose(String poseName) {
             config = config.pose(poseName);
             return this;
         }
 
+        /**
+         * Adds auto registry bindings that run against {@link RobotAuto.RegistrySection}.
+         */
         public AutoSection registry(Consumer<RobotAuto.RegistrySection> section) {
             config = config.registry(section);
             return this;
@@ -773,6 +797,10 @@ public final class RobotCoreConfig {
             }
         }
 
+        /**
+         * Sets Linux {@code vm.overcommit_memory}.
+         * Typical values: {@code 0}=heuristic, {@code 1}=always overcommit, {@code 2}=strict.
+         */
         public SystemSection vmOvercommitMode(int mode) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -789,6 +817,10 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Sets Linux {@code vm.overcommit_ratio} (percent).
+         * Primarily used when overcommit mode is {@code 2}.
+         */
         public SystemSection vmOvercommitRatio(int ratio) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -805,6 +837,10 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Sets Linux {@code vm.swappiness}.
+         * Higher values make the kernel more willing to swap memory pages.
+         */
         public SystemSection vmSwappiness(int value) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -821,6 +857,12 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Configures Athena-managed loopback swap.
+         *
+         * @param enabled whether Athena should enable loopback swap
+         * @param sizeMiB swap file size in MiB when enabled
+         */
         public SystemSection loopSwap(boolean enabled, int sizeMiB) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -837,6 +879,9 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Controls NI {@code SystemWebServer} at startup.
+         */
         public SystemSection systemWebServerEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -853,6 +898,10 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Enables/disables Athena's config/diagnostics HTTP server.
+         * This is a runtime service toggle, not an OS kernel tweak.
+         */
         public SystemSection configServerEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -869,6 +918,10 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Enables/disables Athena telemetry publishing.
+         * This is a runtime service toggle, not an OS kernel tweak.
+         */
         public SystemSection telemetryEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -885,6 +938,10 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Enables/disables NetworkTables datalogging.
+         * This is a runtime logging toggle, not an OS kernel tweak.
+         */
         public SystemSection networkTablesDataLogEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -901,6 +958,10 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Master toggle for OS-level tweaks (sysctl, loop swap, SystemWebServer commands).
+         * When disabled, tweak calls are retained in config but are no-ops at runtime.
+         */
         public SystemSection tweaksEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
             owner.systemConfig = new RobotCore.SystemConfig(
@@ -917,6 +978,9 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        /**
+         * Applies conservative roboRIO defaults for this system section.
+         */
         public SystemSection rioDefaults() {
             owner.systemConfig = RobotCore.SystemConfig.rioDefaults();
             return this;

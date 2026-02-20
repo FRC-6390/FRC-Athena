@@ -183,6 +183,24 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
+    /**
+     * Startup/runtime system behavior for {@link RobotCore}.
+     *
+     * @param tweaksEnabled master gate for OS-level tweaks. When {@code false}, Athena will not apply
+     *        Linux VM sysctl changes, loop swap changes, or NI SystemWebServer start/stop commands.
+     * @param vmOvercommitMode target value for Linux {@code vm.overcommit_memory}. Typical values are:
+     *        {@code 0}=heuristic, {@code 1}=always overcommit, {@code 2}=strict commit accounting.
+     * @param vmOvercommitRatio target value for Linux {@code vm.overcommit_ratio} (percent).
+     *        Primarily meaningful when {@code vmOvercommitMode=2}.
+     * @param vmSwappiness target value for Linux {@code vm.swappiness}. Higher values make the kernel
+     *        more willing to reclaim anonymous memory to swap.
+     * @param loopSwapEnabled whether Athena should enable a loopback swap file at startup.
+     * @param loopSwapSizeMiB loopback swap file size in MiB when enabled.
+     * @param systemWebServerEnabled whether Athena should try to start/stop NI {@code SystemWebServer}.
+     * @param configServerEnabled runtime toggle for Athena's config/diagnostics HTTP server.
+     * @param telemetryEnabled runtime toggle for Athena telemetry publishing.
+     * @param networkTablesDataLogEnabled runtime toggle for NT datalogging via {@link DataLogManager}.
+     */
     public record SystemConfig(
             boolean tweaksEnabled,
             int vmOvercommitMode,
@@ -195,6 +213,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             boolean telemetryEnabled,
             boolean networkTablesDataLogEnabled) {
 
+        /**
+         * Desktop-oriented defaults that prefer survivability under memory pressure.
+         */
         public static SystemConfig defaults() {
             return new SystemConfig(
                     true,
@@ -209,6 +230,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     false);
         }
 
+        /**
+         * roboRIO-oriented defaults that avoid Athena-managed OS tweaks.
+         */
         public static SystemConfig rioDefaults() {
             return new SystemConfig(
                     false,
@@ -536,6 +560,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final RobotCopilot copilot;
     private AthenaRuntimeServer configServer;
     private volatile boolean configServerEnabled = true;
+    private final boolean systemTweaksEnabled;
     private String configServerBaseUrl;
     private String cachedConfigExportBaseUrl = "";
     private ConfigExportUrls cachedConfigExportUrls = ConfigExportUrls.empty();
@@ -694,9 +719,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         configuredMechanismsRegistered = false;
         timingDebugEnabled = config.timingDebugEnabled();
         telemetryEnabled = config.telemetryEnabled();
+        SystemConfig systemConfig = config.systemConfig() != null ? config.systemConfig() : SystemConfig.defaults();
+        systemTweaksEnabled = RobotBase.isReal() && systemConfig.tweaksEnabled();
         if (RobotBase.isReal()) {
-            SystemConfig systemConfig = config.systemConfig() != null ? config.systemConfig() : SystemConfig.defaults();
-            if (systemConfig.tweaksEnabled()) {
+            if (systemTweaksEnabled) {
                 systemSection.overcommitMode(systemConfig.vmOvercommitMode());
                 systemSection.overcommitRatio(systemConfig.vmOvercommitRatio());
                 systemSection.swappiness(systemConfig.vmSwappiness());
@@ -2909,6 +2935,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
          * Attempts to control NI systemWebServer using sudo.
          */
         public boolean setSystemWebServerEnabled(boolean enabled) {
+            if (!systemTweaksEnabled) {
+                return false;
+            }
             return runSystemWebServerControlCommand(enabled ? "start" : "stop");
         }
 
@@ -2918,6 +2947,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         public boolean restartSystemWebServer() {
+            if (!systemTweaksEnabled) {
+                return false;
+            }
             return runSystemWebServerControlCommand("restart");
         }
 
@@ -2936,16 +2968,25 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         public boolean overcommitMode(int mode) {
+            if (!systemTweaksEnabled) {
+                return false;
+            }
             int resolvedMode = clampInt(mode, SYSTEM_OVERCOMMIT_MODE_MIN, SYSTEM_OVERCOMMIT_MODE_MAX);
             return setVmSysctl("vm.overcommit_memory", resolvedMode);
         }
 
         public boolean overcommitRatio(int ratio) {
+            if (!systemTweaksEnabled) {
+                return false;
+            }
             int resolvedRatio = clampInt(ratio, SYSTEM_OVERCOMMIT_RATIO_MIN, SYSTEM_OVERCOMMIT_RATIO_MAX);
             return setVmSysctl("vm.overcommit_ratio", resolvedRatio);
         }
 
         public boolean swappiness(int value) {
+            if (!systemTweaksEnabled) {
+                return false;
+            }
             int resolved = clampInt(value, SYSTEM_SWAPPINESS_MIN, SYSTEM_SWAPPINESS_MAX);
             return setVmSysctl("vm.swappiness", resolved);
         }
@@ -2967,20 +3008,26 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
          * Enables/disables loopback swap via direct sudo commands.
          */
         public boolean setLoopSwapEnabled(boolean enabled, int sizeMiB) {
+            if (!systemTweaksEnabled) {
+                return false;
+            }
             return configureLoopSwapEnabled(enabled, sizeMiB);
         }
 
         public boolean setLoopSwapEnabled(boolean enabled) {
+            if (!systemTweaksEnabled) {
+                return false;
+            }
             return configureLoopSwapEnabled(enabled, SYSTEM_LOOP_SWAP_DEFAULT_SIZE_MIB);
         }
 
         public SystemSection loopSwapEnabled(boolean enabled, int sizeMiB) {
-            configureLoopSwapEnabled(enabled, sizeMiB);
+            setLoopSwapEnabled(enabled, sizeMiB);
             return this;
         }
 
         public SystemSection loopSwapEnabled(boolean enabled) {
-            configureLoopSwapEnabled(enabled, SYSTEM_LOOP_SWAP_DEFAULT_SIZE_MIB);
+            setLoopSwapEnabled(enabled, SYSTEM_LOOP_SWAP_DEFAULT_SIZE_MIB);
             return this;
         }
 

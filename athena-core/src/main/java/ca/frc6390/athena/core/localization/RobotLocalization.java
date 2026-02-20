@@ -197,6 +197,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private NetworkTableEntry slipModeNtEntry;
     private ChassisSpeeds fieldRelativeSpeeds = new ChassisSpeeds();
     private ChassisSpeeds robotRelativeSpeeds = new ChassisSpeeds();
+    private final ChassisSpeeds commandedSpeedsScratchA = new ChassisSpeeds();
+    private final ChassisSpeeds commandedSpeedsScratchB = new ChassisSpeeds();
     private double normalizedMovementSpeed = 0.0;
     private Pose2d lastVelocityPose = new Pose2d();
     private double lastVelocityTimestamp = Double.NaN;
@@ -903,7 +905,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 double odomSpeed = odomVelocity.getNorm();
                 double odomAccelMag = odomAccel.getNorm();
 
-                ChassisSpeeds commandedRobot = combinedCommandedRobotSpeeds();
+                ChassisSpeeds commandedRobot = combinedCommandedRobotSpeeds(commandedSpeedsScratchA);
                 double commandedSpeed = Math.hypot(
                         commandedRobot.vxMetersPerSecond,
                         commandedRobot.vyMetersPerSecond);
@@ -1034,18 +1036,19 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         updateProcessStdDevScale(slipScore);
     }
 
-    private ChassisSpeeds combinedCommandedRobotSpeeds() {
+    private ChassisSpeeds combinedCommandedRobotSpeeds(ChassisSpeeds target) {
+        ChassisSpeeds resolved = target != null ? target : new ChassisSpeeds();
         if (robotSpeeds == null) {
-            return new ChassisSpeeds();
+            resolved.vxMetersPerSecond = 0.0;
+            resolved.vyMetersPerSecond = 0.0;
+            resolved.omegaRadiansPerSecond = 0.0;
+            return resolved;
         }
-        ChassisSpeeds speeds = robotSpeeds.calculate();
-        if (speeds == null) {
-            return new ChassisSpeeds();
-        }
-        speeds.vxMetersPerSecond = finiteOrZero(speeds.vxMetersPerSecond);
-        speeds.vyMetersPerSecond = finiteOrZero(speeds.vyMetersPerSecond);
-        speeds.omegaRadiansPerSecond = finiteOrZero(speeds.omegaRadiansPerSecond);
-        return speeds;
+        robotSpeeds.calculate(resolved);
+        resolved.vxMetersPerSecond = finiteOrZero(resolved.vxMetersPerSecond);
+        resolved.vyMetersPerSecond = finiteOrZero(resolved.vyMetersPerSecond);
+        resolved.omegaRadiansPerSecond = finiteOrZero(resolved.omegaRadiansPerSecond);
+        return resolved;
     }
 
     private static boolean hasAxisSignFlip(double previous, double current, double minimumMagnitude) {
@@ -2685,7 +2688,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private Translation2d computeCommandedFieldVelocity(Rotation2d heading) {
-        ChassisSpeeds commandedRobot = combinedCommandedRobotSpeeds();
+        ChassisSpeeds commandedRobot = combinedCommandedRobotSpeeds(commandedSpeedsScratchB);
         double cos = heading.getCos();
         double sin = heading.getSin();
         return new Translation2d(
