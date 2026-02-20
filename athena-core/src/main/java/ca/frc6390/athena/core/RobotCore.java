@@ -1006,29 +1006,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         LoopTiming.beginCycle();
         updateRuntimeModeCache();
         maybeApplyCompetitionStreamShedding();
-        robotNetworkTables.refresh();
-        robotNetworkTables.beginPublishCycle();
-        updateAutoChooserPublishers();
-
-        // Auto publish when enabled at runtime from Athena/NetworkTableConfig.
-        if (robotNetworkTables.isPublishingEnabled()) {
-            double now = nowSeconds();
-            if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
-                double period = robotNetworkTables.getDefaultPeriodSeconds();
-                boolean due = !Double.isFinite(lastCoreNetworkTablesPublishSeconds)
-                        || !Double.isFinite(now)
-                        || (now - lastCoreNetworkTablesPublishSeconds) >= period
-                        || robotNetworkTables.revision() != lastCoreNetworkTablesConfigRevision;
-                if (due) {
-                    publishNetworkTables();
-                    lastCoreNetworkTablesPublishSeconds = now;
-                    lastCoreNetworkTablesConfigRevision = robotNetworkTables.revision();
-                }
-            }
-            if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
-                autoPublishMechanismsIncremental(now);
-            }
-        }
 
         double cycleStartSeconds = nowSeconds();
 
@@ -1049,6 +1026,29 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 coreHooks.periodicBindings(),
                 periodicHookRunners);
         onRobotPeriodic();
+        robotNetworkTables.refresh();
+        robotNetworkTables.beginPublishCycle();
+        updateAutoChooserPublishers();
+
+        // Keep control-loop work ahead of NT publishing to reduce input lag under I/O stalls.
+        if (robotNetworkTables.isPublishingEnabled()) {
+            double now = nowSeconds();
+            if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
+                double period = robotNetworkTables.getDefaultPeriodSeconds();
+                boolean due = !Double.isFinite(lastCoreNetworkTablesPublishSeconds)
+                        || !Double.isFinite(now)
+                        || (now - lastCoreNetworkTablesPublishSeconds) >= period
+                        || robotNetworkTables.revision() != lastCoreNetworkTablesConfigRevision;
+                if (due) {
+                    publishNetworkTables();
+                    lastCoreNetworkTablesPublishSeconds = now;
+                    lastCoreNetworkTablesConfigRevision = robotNetworkTables.revision();
+                }
+            }
+            if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
+                autoPublishMechanismsIncremental(now);
+            }
+        }
         long t4Ns = System.nanoTime();
 
         double schedulerSeconds = (t1Ns - t0Ns) * 1e-9;
