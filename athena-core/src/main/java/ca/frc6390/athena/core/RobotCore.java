@@ -83,6 +83,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static volatile RobotCore<?> activeInstance;
     private static final String AUTO_PROGRAM_CHOOSER_KEY = "ProgramChooser";
     private static final Pose2d[] EMPTY_POSE2D_ARRAY = new Pose2d[0];
+    private static final String EMPTY_AUTO_TRAJECTORY_SIGNATURE = "";
 
     public enum RuntimeMode {
         AUTO,
@@ -431,10 +432,12 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final RobotAuto autos;
     private final RobotCopilot copilot;
     private AthenaRuntimeServer configServer;
+    private volatile boolean configServerEnabled = true;
     private String configServerBaseUrl;
     private String cachedConfigExportBaseUrl = "";
     private ConfigExportUrls cachedConfigExportUrls = ConfigExportUrls.empty();
     private final ConfigServerSection configServerSection;
+    private final SystemSection systemSection;
     private final DiagnosticsSection diagnosticsSection;
     private final Map<String, DiagnosticsChannel> diagnosticsChannels;
     private final HashMap<String, Mechanism> mechanisms;
@@ -469,6 +472,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private double lastMechanismAutoPublishSeconds = Double.NaN;
     private long lastCoreNetworkTablesConfigRevision = -1;
     private double lastCoreNetworkTablesPublishSeconds = Double.NaN;
+    private String lastPublishedAutoTrajectorySignature = EMPTY_AUTO_TRAJECTORY_SIGNATURE;
+    private int lastPublishedAutoTrajectoryPointCount = -1;
     private final RuntimeMXBean runtimeMxBean;
     private final MemoryMXBean memoryMxBean;
     private final java.lang.management.OperatingSystemMXBean osMxBean;
@@ -546,6 +551,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         superstructuresByName = new HashMap<>();
         mechanismView = new RobotMechanisms(mechanisms, superstructuresByName, registeredSuperstructures);
         configServerSection = new ConfigServerSection(this);
+        systemSection = new SystemSection();
         diagnosticsChannels = new ConcurrentHashMap<>();
         diagnosticsSection = new DiagnosticsSection(this);
         diagnosticsSection.core().info("lifecycle", "robot core constructed");
@@ -568,6 +574,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         timingDebugEnabled = config.timingDebugEnabled();
         telemetryEnabled = config.telemetryEnabled();
         if (config.performanceMode()) {
+            setConfigServerEnabled(false);
             robotNetworkTables.setPublishingEnabled(false);
             telemetry.setEnabled(false);
         }
@@ -783,6 +790,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private void startConfigServerIfNeeded() {
+        if (!configServerEnabled) {
+            return;
+        }
         if (configServer != null) {
             return;
         }
@@ -798,11 +808,53 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
+    private void stopConfigServerIfRunning() {
+        AthenaRuntimeServer server = configServer;
+        if (server == null) {
+            configServerBaseUrl = null;
+            cachedConfigExportBaseUrl = "";
+            cachedConfigExportUrls = ConfigExportUrls.empty();
+            return;
+        }
+        try {
+            server.stop();
+        } catch (RuntimeException ex) {
+            System.out.println("[Athena][ConfigServer] Failed to stop cleanly: " + ex.getMessage());
+        } finally {
+            configServer = null;
+            configServerBaseUrl = null;
+            cachedConfigExportBaseUrl = "";
+            cachedConfigExportUrls = ConfigExportUrls.empty();
+        }
+    }
+
+    private void setConfigServerEnabled(boolean enabled) {
+        configServerEnabled = enabled;
+        if (!enabled) {
+            stopConfigServerIfRunning();
+        }
+    }
+
     /**
      * Runtime API for publishing user-defined content via the Athena config server.
      */
     public ConfigServerSection configServer() {
         return configServerSection;
+    }
+
+    /**
+     * Runtime controls for memory-sensitive core services that are not managed by
+     * Athena/NetworkTableConfig.
+     */
+    public SystemSection system() {
+        return systemSection;
+    }
+
+    public RobotCore<T> system(Consumer<SystemSection> section) {
+        if (section != null) {
+            section.accept(systemSection);
+        }
+        return this;
     }
 
     @Override
@@ -2206,6 +2258,43 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
+    public final class SystemSection {
+        private SystemSection() {}
+
+        public SystemSection configServerEnabled(boolean enabled) {
+            setConfigServerEnabled(enabled);
+            return this;
+        }
+
+        public boolean configServerEnabled() {
+            return configServerEnabled;
+        }
+
+        public SystemSection telemetryEnabled(boolean enabled) {
+            telemetry.setEnabled(enabled);
+            return this;
+        }
+
+        public boolean telemetryEnabled() {
+            return telemetry.isEnabled();
+        }
+
+        public SystemSection networkTablesDataLogEnabled(boolean enabled) {
+            DataLogManager.logNetworkTables(enabled);
+            return this;
+        }
+
+        /**
+         * Conservative defaults for low-RAM targets without changing NT-controlled publish flags/period.
+         */
+        public SystemSection applyLowMemoryDefaults() {
+            setConfigServerEnabled(false);
+            telemetry.setEnabled(false);
+            DataLogManager.logNetworkTables(false);
+            return this;
+        }
+    }
+
     public final class ConfigServerSection {
         private final RobotCore<T> owner;
 
@@ -2692,42 +2781,105 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
         }
         RobotNetworkTables.Node selectedNode = autoNode.child("Selected");
-        autos.selection().selected().ifPresentOrElse(
-                routine -> {
-                    selectedNode.putString("id", routine.key().id());
-                    selectedNode.putString("displayName", routine.key().displayName());
-                    selectedNode.putString("source", routine.source().name());
-                    selectedNode.putString("reference", routine.reference());
-                    selectedNode.putBoolean("hasStartingPose", routine.hasStartingPose());
-                },
-                () -> {
-                    selectedNode.putString("id", "");
-                    selectedNode.putString("displayName", "");
-                    selectedNode.putString("source", "");
-                    selectedNode.putString("reference", "");
-                    selectedNode.putBoolean("hasStartingPose", false);
-                });
+        RobotAuto.AutoRoutine selectedRoutine = autos.selection().selected().orElse(null);
+        if (selectedRoutine != null) {
+            selectedNode.putString("id", selectedRoutine.key().id());
+            selectedNode.putString("displayName", selectedRoutine.key().displayName());
+            selectedNode.putString("source", selectedRoutine.source().name());
+            selectedNode.putString("reference", selectedRoutine.reference());
+            selectedNode.putBoolean("hasStartingPose", selectedRoutine.hasStartingPose());
+        } else {
+            selectedNode.putString("id", "");
+            selectedNode.putString("displayName", "");
+            selectedNode.putString("source", "");
+            selectedNode.putString("reference", "");
+            selectedNode.putBoolean("hasStartingPose", false);
+        }
         java.util.Optional<java.util.List<Pose2d>> selectedPoses = autos.selection().selectedPoses();
         if (selectedPoses.isEmpty()) {
-            selectedPoses = autos.selection().selected().flatMap(autos.routines()::poses);
+            selectedPoses = selectedRoutine != null ? autos.routines().poses(selectedRoutine) : java.util.Optional.empty();
         }
         selectedPoses
                 .filter(poses -> poses != null && !poses.isEmpty())
                 .ifPresentOrElse(
                         poses -> {
+                            int trajectoryPointCount = poses.size();
                             autoNode.putBoolean("hasTrajectory", true);
-                            autoNode.putDouble("trajectoryPointCount", poses.size());
+                            autoNode.putDouble("trajectoryPointCount", trajectoryPointCount);
                             selectedNode.putBoolean("hasTrajectory", true);
-                            selectedNode.putDouble("trajectoryPointCount", poses.size());
-                            selectedAutoTrajectoryPublisher.set(poses.toArray(Pose2d[]::new));
+                            selectedNode.putDouble("trajectoryPointCount", trajectoryPointCount);
+                            publishSelectedAutoTrajectoryIfChanged(
+                                    buildSelectedAutoTrajectorySignature(selectedRoutine, poses),
+                                    trajectoryPointCount,
+                                    poses);
                         },
                         () -> {
                             autoNode.putBoolean("hasTrajectory", false);
                             autoNode.putDouble("trajectoryPointCount", 0.0);
                             selectedNode.putBoolean("hasTrajectory", false);
                             selectedNode.putDouble("trajectoryPointCount", 0.0);
-                            selectedAutoTrajectoryPublisher.set(EMPTY_POSE2D_ARRAY);
+                            publishEmptySelectedAutoTrajectoryIfNeeded();
                         });
+    }
+
+    private void publishSelectedAutoTrajectoryIfChanged(
+            String signature,
+            int pointCount,
+            List<Pose2d> poses) {
+        if (poses == null || poses.isEmpty()) {
+            publishEmptySelectedAutoTrajectoryIfNeeded();
+            return;
+        }
+        String resolvedSignature = signature != null ? signature : EMPTY_AUTO_TRAJECTORY_SIGNATURE;
+        if (pointCount == lastPublishedAutoTrajectoryPointCount
+                && resolvedSignature.equals(lastPublishedAutoTrajectorySignature)) {
+            return;
+        }
+        selectedAutoTrajectoryPublisher.set(poses.toArray(Pose2d[]::new));
+        lastPublishedAutoTrajectorySignature = resolvedSignature;
+        lastPublishedAutoTrajectoryPointCount = pointCount;
+    }
+
+    private void publishEmptySelectedAutoTrajectoryIfNeeded() {
+        if (lastPublishedAutoTrajectoryPointCount == 0
+                && EMPTY_AUTO_TRAJECTORY_SIGNATURE.equals(lastPublishedAutoTrajectorySignature)) {
+            return;
+        }
+        selectedAutoTrajectoryPublisher.set(EMPTY_POSE2D_ARRAY);
+        lastPublishedAutoTrajectorySignature = EMPTY_AUTO_TRAJECTORY_SIGNATURE;
+        lastPublishedAutoTrajectoryPointCount = 0;
+    }
+
+    private static String buildSelectedAutoTrajectorySignature(
+            RobotAuto.AutoRoutine selectedRoutine,
+            List<Pose2d> poses) {
+        String routineId = "";
+        String routineSource = "";
+        String routineReference = "";
+        if (selectedRoutine != null) {
+            routineId = selectedRoutine.key() != null && selectedRoutine.key().id() != null
+                    ? selectedRoutine.key().id()
+                    : "";
+            routineSource = selectedRoutine.source() != null ? selectedRoutine.source().name() : "";
+            routineReference = selectedRoutine.reference() != null ? selectedRoutine.reference() : "";
+        }
+        int count = poses != null ? poses.size() : 0;
+        if (count <= 0) {
+            return routineId + "|" + routineSource + "|" + routineReference + "|0";
+        }
+        Pose2d first = poses.get(0);
+        Pose2d last = poses.get(count - 1);
+        return routineId + "|" + routineSource + "|" + routineReference + "|" + count + "|"
+                + poseSignature(first) + "|" + poseSignature(last);
+    }
+
+    private static String poseSignature(Pose2d pose) {
+        if (pose == null) {
+            return "null";
+        }
+        return Double.doubleToLongBits(pose.getX()) + ","
+                + Double.doubleToLongBits(pose.getY()) + ","
+                + Double.doubleToLongBits(pose.getRotation().getRadians());
     }
 
     private void updateAutoChooserPublishers() {
