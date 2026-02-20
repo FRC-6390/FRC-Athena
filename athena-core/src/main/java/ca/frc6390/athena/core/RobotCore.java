@@ -186,8 +186,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     /**
      * Startup/runtime system behavior for {@link RobotCore}.
      *
-     * @param tweaksEnabled master gate for OS-level tweaks. When {@code false}, Athena will not apply
-     *        Linux VM sysctl changes, loop swap changes, or NI SystemWebServer start/stop commands.
+     * @param tweaksEnabled startup gate for OS-level tweaks. When {@code true}, Athena applies the
+     *        configured sysctl/swap/SystemWebServer settings at boot; when {@code false}, Athena
+     *        resets those knobs toward {@link #rioDefaults()} behavior at boot.
      * @param vmOvercommitMode target value for Linux {@code vm.overcommit_memory}. Typical values are:
      *        {@code 0}=heuristic, {@code 1}=always overcommit, {@code 2}=strict commit accounting.
      * @param vmOvercommitRatio target value for Linux {@code vm.overcommit_ratio} (percent).
@@ -560,7 +561,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final RobotCopilot copilot;
     private AthenaRuntimeServer configServer;
     private volatile boolean configServerEnabled = true;
-    private final boolean systemTweaksEnabled;
     private String configServerBaseUrl;
     private String cachedConfigExportBaseUrl = "";
     private ConfigExportUrls cachedConfigExportUrls = ConfigExportUrls.empty();
@@ -720,14 +720,16 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         timingDebugEnabled = config.timingDebugEnabled();
         telemetryEnabled = config.telemetryEnabled();
         SystemConfig systemConfig = config.systemConfig() != null ? config.systemConfig() : SystemConfig.defaults();
-        systemTweaksEnabled = RobotBase.isReal() && systemConfig.tweaksEnabled();
         if (RobotBase.isReal()) {
-            if (systemTweaksEnabled) {
-                systemSection.overcommitMode(systemConfig.vmOvercommitMode());
-                systemSection.overcommitRatio(systemConfig.vmOvercommitRatio());
-                systemSection.swappiness(systemConfig.vmSwappiness());
-                systemSection.setLoopSwapEnabled(systemConfig.loopSwapEnabled(), systemConfig.loopSwapSizeMiB());
-                systemSection.setSystemWebServerEnabled(systemConfig.systemWebServerEnabled());
+            boolean tweaksOk = systemConfig.tweaksEnabled()
+                    ? applySystemTweaks(systemConfig)
+                    : resetSystemTweaksToRioDefaults();
+            if (!tweaksOk) {
+                diagnosticsSection.core().warn(
+                        "system",
+                        systemConfig.tweaksEnabled()
+                                ? "one or more system tweaks failed to apply"
+                                : "one or more system tweaks failed to reset");
             }
             // Runtime-only toggles apply regardless of OS tweak mode.
             systemSection.configServerEnabled(systemConfig.configServerEnabled());
@@ -1949,6 +1951,27 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return Math.max(min, Math.min(max, value));
     }
 
+    private boolean applySystemTweaks(SystemConfig config) {
+        boolean ok = true;
+        ok = systemSection.overcommitMode(config.vmOvercommitMode()) && ok;
+        ok = systemSection.overcommitRatio(config.vmOvercommitRatio()) && ok;
+        ok = systemSection.swappiness(config.vmSwappiness()) && ok;
+        ok = systemSection.setLoopSwapEnabled(config.loopSwapEnabled(), config.loopSwapSizeMiB()) && ok;
+        ok = systemSection.setSystemWebServerEnabled(config.systemWebServerEnabled()) && ok;
+        return ok;
+    }
+
+    private boolean resetSystemTweaksToRioDefaults() {
+        SystemConfig defaults = SystemConfig.rioDefaults();
+        boolean ok = true;
+        ok = systemSection.overcommitMode(defaults.vmOvercommitMode()) && ok;
+        ok = systemSection.overcommitRatio(defaults.vmOvercommitRatio()) && ok;
+        ok = systemSection.swappiness(defaults.vmSwappiness()) && ok;
+        ok = systemSection.setLoopSwapEnabled(false, defaults.loopSwapSizeMiB()) && ok;
+        ok = systemSection.setSystemWebServerEnabled(defaults.systemWebServerEnabled()) && ok;
+        return ok;
+    }
+
     private boolean setVmSysctl(String key, int value) {
         if (key == null || key.isBlank()) {
             return false;
@@ -1958,12 +1981,23 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (current != null && current.intValue() == value) {
             return true;
         }
-        return runSudoCommandAndReport(
+        boolean updated = runSudoCommandAndReport(
                 "sysctl " + key + "=" + value,
                 SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS,
                 "/sbin/sysctl",
                 "-w",
                 key + "=" + value);
+        if (!updated) {
+            return false;
+        }
+        Integer applied = readIntFromFile(procPath);
+        if (applied != null && applied.intValue() == value) {
+            return true;
+        }
+        String message = "sysctl verify failed for " + key + " (expected " + value + ")";
+        DriverStation.reportWarning("[Athena][System] " + message, false);
+        diagnosticsSection.core().warn("system", message);
+        return false;
     }
 
     private Integer readIntFromFile(String path) {
@@ -2066,15 +2100,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 if (!isSystemWebServerRunning()) {
                     yield true;
                 }
-                boolean stopped = killProcessesByName(SYSTEM_WEBCONTAINER_PROCESS_NAME)
-                        && killProcessesByName(SYSTEM_WEBSERVER_PROCESS_NAME);
-                yield stopped && !isSystemWebServerRunning();
+                killProcessesByName(SYSTEM_WEBCONTAINER_PROCESS_NAME);
+                killProcessesByName(SYSTEM_WEBSERVER_PROCESS_NAME);
+                yield !isSystemWebServerRunning();
             }
             case "start" -> {
                 if (isSystemWebServerRunning()) {
                     yield true;
                 }
-                boolean started = runSudoCommandAndReport(
+                runSudoCommandAndReport(
                         "systemWebServer start",
                         SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS,
                         "/sbin/start-stop-daemon",
@@ -2088,9 +2122,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                         "-child-timeout",
                         "20",
                         "-system");
-                if (!started) {
-                    yield false;
-                }
                 yield isSystemWebServerRunning();
             }
             case "restart" -> runSystemWebServerControlCommand("stop")
@@ -2131,24 +2162,40 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return true;
     }
 
-    private String findLoopDeviceForSwapFile() {
+    private List<String> findLoopDevicesForSwapFile() {
         SystemCommandResult result = runPrivilegedCommand(
                 SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
                 "/sbin/losetup",
                 "-j",
                 SYSTEM_LOOP_SWAP_FILE_PATH);
-        if (result.timedOut() || result.exitCode() != 0 || result.output().isBlank()) {
-            return null;
+        if (result.timedOut()) {
+            return List.of();
         }
-        String firstLine = result.output().lines().findFirst().orElse("").trim();
-        if (firstLine.isEmpty()) {
-            return null;
+        if (result.exitCode() != 0) {
+            return List.of();
         }
-        int colon = firstLine.indexOf(':');
-        if (colon <= 0) {
-            return null;
+        if (result.output().isBlank()) {
+            return List.of();
         }
-        return firstLine.substring(0, colon).trim();
+        List<String> devices = new ArrayList<>();
+        for (String rawLine : result.output().lines().toList()) {
+            String line = rawLine != null ? rawLine.trim() : "";
+            if (line.isBlank()) {
+                continue;
+            }
+            int colon = line.indexOf(':');
+            if (colon <= 0) {
+                continue;
+            }
+            String device = line.substring(0, colon).trim();
+            if (device.isBlank()) {
+                continue;
+            }
+            if (!devices.contains(device)) {
+                devices.add(device);
+            }
+        }
+        return devices;
     }
 
     private String findFreeLoopDevice() {
@@ -2162,15 +2209,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return result.output().lines().findFirst().orElse("").trim();
     }
 
-    private boolean isSwapDeviceActive(String loopDevice) {
-        if (loopDevice == null || loopDevice.isBlank()) {
+    private boolean isSwapPathActive(String path) {
+        if (path == null || path.isBlank()) {
             return false;
         }
+        String normalizedPath = path.trim();
         try {
             List<String> lines = java.nio.file.Files.readAllLines(java.nio.file.Path.of("/proc/swaps"));
             for (int i = 1; i < lines.size(); i++) {
-                String line = lines.get(i);
-                if (line != null && line.startsWith(loopDevice)) {
+                String line = lines.get(i) != null ? lines.get(i).trim() : "";
+                if (line.isBlank()) {
+                    continue;
+                }
+                String[] columns = line.split("\\s+");
+                if (columns.length > 0 && normalizedPath.equals(columns[0])) {
                     return true;
                 }
             }
@@ -2180,6 +2232,65 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return false;
     }
 
+    private boolean isSwapDeviceActive(String loopDevice) {
+        return isSwapPathActive(loopDevice);
+    }
+
+    private boolean deleteLoopSwapFileIfPresent() {
+        java.nio.file.Path path = java.nio.file.Path.of(SYSTEM_LOOP_SWAP_FILE_PATH);
+        try {
+            java.nio.file.Files.deleteIfExists(path);
+            return true;
+        } catch (IOException ignored) {
+            boolean removed = runSudoCommandAndReport(
+                    "loop swap file delete",
+                    SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                    "/bin/rm",
+                    "-f",
+                    SYSTEM_LOOP_SWAP_FILE_PATH);
+            if (removed) {
+                return true;
+            }
+            String message = "loop swap file cleanup failed: " + SYSTEM_LOOP_SWAP_FILE_PATH;
+            DriverStation.reportWarning("[Athena][System] " + message, false);
+            diagnosticsSection.core().warn("system", message);
+            return false;
+        }
+    }
+
+    private boolean disableLoopSwap(boolean deleteFile) {
+        boolean ok = true;
+        if (isSwapPathActive(SYSTEM_LOOP_SWAP_FILE_PATH)) {
+            ok = runSudoCommandAndReport(
+                            "loop swapoff (file)",
+                            SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                            "/sbin/swapoff",
+                            SYSTEM_LOOP_SWAP_FILE_PATH)
+                    && ok;
+        }
+        for (String loopDevice : findLoopDevicesForSwapFile()) {
+            if (isSwapDeviceActive(loopDevice)) {
+                ok = runSudoCommandAndReport(
+                                "loop swapoff",
+                                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                                "/sbin/swapoff",
+                                loopDevice)
+                        && ok;
+            }
+            ok = runSudoCommandAndReport(
+                            "loop detach",
+                            SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                            "/sbin/losetup",
+                            "-d",
+                            loopDevice)
+                    && ok;
+        }
+        if (deleteFile) {
+            ok = deleteLoopSwapFileIfPresent() && ok;
+        }
+        return ok && !isLoopSwapRunning();
+    }
+
     private boolean configureLoopSwapEnabled(boolean enabled, int sizeMiB) {
         if (!RobotBase.isReal()) {
             return true;
@@ -2187,78 +2298,42 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         int resolvedSizeMiB = clampLoopSwapSizeMiB(sizeMiB);
         long expectedBytes = (long) resolvedSizeMiB * 1024L * 1024L;
         long existingBytes = loopSwapFileSizeBytes();
-        String loopDevice = findLoopDeviceForSwapFile();
-        boolean active = isSwapDeviceActive(loopDevice);
+        List<String> loopDevices = findLoopDevicesForSwapFile();
+        boolean active = loopDevices.stream().anyMatch(this::isSwapDeviceActive);
+        boolean directFileSwapActive = isSwapPathActive(SYSTEM_LOOP_SWAP_FILE_PATH);
 
         if (!enabled) {
-            if (loopDevice == null || loopDevice.isBlank()) {
-                return true;
-            }
-            boolean ok = true;
-            if (active) {
-                ok = runSudoCommandAndReport(
-                                "loop swapoff",
-                                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
-                                "/sbin/swapoff",
-                                loopDevice)
-                        && ok;
-            }
-            ok = runSudoCommandAndReport(
-                            "loop detach",
-                            SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
-                            "/sbin/losetup",
-                            "-d",
-                            loopDevice)
-                    && ok;
-            return ok && !isLoopSwapRunning();
+            return disableLoopSwap(true);
         }
 
-        if (loopDevice != null && !loopDevice.isBlank() && active && existingBytes == expectedBytes) {
+        if (!directFileSwapActive
+                && loopDevices.size() == 1
+                && active
+                && existingBytes == expectedBytes) {
             return true;
         }
 
-        if (loopDevice != null && !loopDevice.isBlank() && (active || existingBytes != expectedBytes)) {
-            boolean ok = true;
-            if (active) {
-                ok = runSudoCommandAndReport(
-                                "loop swapoff",
-                                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
-                                "/sbin/swapoff",
-                                loopDevice)
-                        && ok;
-            }
-            ok = runSudoCommandAndReport(
-                            "loop detach",
-                            SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
-                            "/sbin/losetup",
-                            "-d",
-                            loopDevice)
-                    && ok;
-            if (!ok) {
-                return false;
-            }
-            loopDevice = null;
+        if (!disableLoopSwap(false)) {
+            return false;
         }
 
         if (!ensureLoopSwapFileSized(resolvedSizeMiB)) {
             return false;
         }
+        String loopDevice = findFreeLoopDevice();
         if (loopDevice == null || loopDevice.isBlank()) {
-            loopDevice = findFreeLoopDevice();
-            if (loopDevice == null || loopDevice.isBlank()) {
-                String message = "loop device allocation failed";
-                DriverStation.reportWarning("[Athena][System] " + message, false);
-                diagnosticsSection.core().warn("system", message);
-                return false;
-            }
-            if (!runSudoCommandAndReport(
-                    "loop attach",
-                    SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
-                    "/sbin/losetup",
-                    loopDevice,
-                    SYSTEM_LOOP_SWAP_FILE_PATH)) {
-                return false;
-            }
+            String message = "loop device allocation failed";
+            DriverStation.reportWarning("[Athena][System] " + message, false);
+            diagnosticsSection.core().warn("system", message);
+            return false;
+        }
+        if (!runSudoCommandAndReport(
+                "loop attach",
+                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                "/sbin/losetup",
+                loopDevice,
+                SYSTEM_LOOP_SWAP_FILE_PATH)) {
+            return false;
         }
 
         if (isSwapDeviceActive(loopDevice)) {
@@ -2287,8 +2362,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (!RobotBase.isReal()) {
             return false;
         }
-        String loopDevice = findLoopDeviceForSwapFile();
-        return isSwapDeviceActive(loopDevice);
+        if (isSwapPathActive(SYSTEM_LOOP_SWAP_FILE_PATH)) {
+            return true;
+        }
+        for (String loopDevice : findLoopDevicesForSwapFile()) {
+            if (isSwapDeviceActive(loopDevice)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static RobotLocalization<?> createLocalizationForDrivetrain(
@@ -2935,9 +3017,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
          * Attempts to control NI systemWebServer using sudo.
          */
         public boolean setSystemWebServerEnabled(boolean enabled) {
-            if (!systemTweaksEnabled) {
-                return false;
-            }
             return runSystemWebServerControlCommand(enabled ? "start" : "stop");
         }
 
@@ -2947,14 +3026,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         public boolean restartSystemWebServer() {
-            if (!systemTweaksEnabled) {
-                return false;
-            }
             return runSystemWebServerControlCommand("restart");
         }
 
         public boolean systemWebServerRunning() {
             return isSystemWebServerRunning();
+        }
+
+        /**
+         * Resets OS-level tweaks to {@link SystemConfig#rioDefaults()} values.
+         */
+        public boolean resetTweaksToRioDefaults() {
+            return resetSystemTweaksToRioDefaults();
         }
 
         /**
@@ -2968,25 +3051,16 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         public boolean overcommitMode(int mode) {
-            if (!systemTweaksEnabled) {
-                return false;
-            }
             int resolvedMode = clampInt(mode, SYSTEM_OVERCOMMIT_MODE_MIN, SYSTEM_OVERCOMMIT_MODE_MAX);
             return setVmSysctl("vm.overcommit_memory", resolvedMode);
         }
 
         public boolean overcommitRatio(int ratio) {
-            if (!systemTweaksEnabled) {
-                return false;
-            }
             int resolvedRatio = clampInt(ratio, SYSTEM_OVERCOMMIT_RATIO_MIN, SYSTEM_OVERCOMMIT_RATIO_MAX);
             return setVmSysctl("vm.overcommit_ratio", resolvedRatio);
         }
 
         public boolean swappiness(int value) {
-            if (!systemTweaksEnabled) {
-                return false;
-            }
             int resolved = clampInt(value, SYSTEM_SWAPPINESS_MIN, SYSTEM_SWAPPINESS_MAX);
             return setVmSysctl("vm.swappiness", resolved);
         }
@@ -3008,16 +3082,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
          * Enables/disables loopback swap via direct sudo commands.
          */
         public boolean setLoopSwapEnabled(boolean enabled, int sizeMiB) {
-            if (!systemTweaksEnabled) {
-                return false;
-            }
             return configureLoopSwapEnabled(enabled, sizeMiB);
         }
 
         public boolean setLoopSwapEnabled(boolean enabled) {
-            if (!systemTweaksEnabled) {
-                return false;
-            }
             return configureLoopSwapEnabled(enabled, SYSTEM_LOOP_SWAP_DEFAULT_SIZE_MIB);
         }
 

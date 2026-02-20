@@ -42,6 +42,8 @@ public class RobotAuto {
     private final Map<String, AutoRoutine> autoRoutines;
     private final Map<String, AutoInputBinding<?>> autoInputs;
     private final Map<String, List<AutoRoutine>> programPathRoutines;
+    private final Map<String, Optional<List<Pose2d>>> autoPoseCache;
+    private final Map<String, Optional<List<Pose2d>>> programPoseCache;
     private final Map<Command, AutoRoutine> commandChooserRoutineByCommand;
     private SendableChooser<AutoRoutine> chooser;
     private SendableChooser<Command> commandChooser;
@@ -72,6 +74,8 @@ public class RobotAuto {
         autoRoutines = new LinkedHashMap<>();
         autoInputs = new LinkedHashMap<>();
         programPathRoutines = new LinkedHashMap<>();
+        autoPoseCache = new LinkedHashMap<>();
+        programPoseCache = new LinkedHashMap<>();
         commandChooserRoutineByCommand = new IdentityHashMap<>();
         chooser = null;
         commandChooser = null;
@@ -1681,20 +1685,35 @@ public class RobotAuto {
         if (selectedRoutine == null) {
             return Optional.empty();
         }
+        AutoKey key = selectedRoutine.key();
+        String programId = key != null ? key.id() : null;
+        if (programId != null) {
+            Optional<List<Pose2d>> cached = programPoseCache.get(programId);
+            if (cached != null) {
+                return cached;
+            }
+        }
         List<AutoRoutine> routines = programPathRoutines.get(selectedRoutine.key().id());
+        Optional<List<Pose2d>> resolved;
         if (routines == null || routines.isEmpty()) {
-            return getAutoPoses(selectedRoutine);
+            resolved = getAutoPoses(selectedRoutine);
+        } else {
+            List<Pose2d> merged = new ArrayList<>();
+            for (AutoRoutine routine : routines) {
+                getAutoPoses(routine)
+                        .filter(poses -> poses != null && !poses.isEmpty())
+                        .ifPresent(merged::addAll);
+            }
+            if (merged.isEmpty()) {
+                resolved = Optional.empty();
+            } else {
+                resolved = Optional.of(List.copyOf(merged));
+            }
         }
-        List<Pose2d> merged = new ArrayList<>();
-        for (AutoRoutine routine : routines) {
-            getAutoPoses(routine)
-                    .filter(poses -> poses != null && !poses.isEmpty())
-                    .ifPresent(merged::addAll);
+        if (programId != null) {
+            programPoseCache.put(programId, resolved);
         }
-        if (merged.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(List.copyOf(merged));
+        return resolved;
     }
 
     private void recordProgramPathRoutines(
@@ -1723,8 +1742,16 @@ public class RobotAuto {
         if (routine == null || routine.source() == AutoSource.CUSTOM) {
             return Optional.empty();
         }
-        return AutoBackends.forSource(routine.source())
+        String cacheKey = routine.source().name() + "|" + routine.reference();
+        Optional<List<Pose2d>> cached = autoPoseCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        Optional<List<Pose2d>> resolved = AutoBackends.forSource(routine.source())
                 .flatMap(backend -> backend.getAutoPoses(routine.source(), routine.reference()));
+        resolved = resolved.map(List::copyOf);
+        autoPoseCache.put(cacheKey, resolved);
+        return resolved;
     }
 
     private Optional<Command> buildSelectedCommand() {
@@ -2257,6 +2284,8 @@ public class RobotAuto {
     private void resetChoosers() {
         chooser = null;
         commandChooser = null;
+        autoPoseCache.clear();
+        programPoseCache.clear();
     }
 
     public final class RegistrySection {

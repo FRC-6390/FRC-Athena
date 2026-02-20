@@ -960,7 +960,8 @@ public final class RobotCoreConfig {
 
         /**
          * Master toggle for OS-level tweaks (sysctl, loop swap, SystemWebServer commands).
-         * When disabled, tweak calls are retained in config but are no-ops at runtime.
+         * When enabled, configured tweak values are applied during startup.
+         * When disabled, Athena resets these OS-level tweaks toward rio defaults during startup.
          */
         public SystemSection tweaksEnabled(boolean enabled) {
             RobotCore.SystemConfig current = owner.systemConfig;
