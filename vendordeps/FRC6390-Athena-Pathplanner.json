@@ -1,7 +1,7 @@
 {
     "fileName": "FRC6390-Athena-Pathplanner.json",
     "name": "FRC6390 Athena Pathplanner",
-    "version": "2026.1.29",
+    "version": "2026.1.31",
     "frcYear": "2026",
     "uuid": "8e35b9f3-0f7d-4d52-90fc-7dbd06c7c2b0",
     "mavenUrls": [
@@ -12,7 +12,7 @@
         {
             "groupId": "ca.frc6390.athena",
             "artifactId": "athena-pathplanner",
-            "version": "2026.1.29"
+            "version": "2026.1.31"
         }
     ],
     "requires": [

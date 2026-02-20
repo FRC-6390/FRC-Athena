@@ -78,6 +78,7 @@ public final class RobotCoreConfig {
         private boolean performanceMode = false;
         private boolean timingDebugEnabled = false;
         private boolean telemetryEnabled = true;
+        private RobotCore.SystemConfig systemConfig = RobotCore.SystemConfig.defaults();
 
         private final List<RegisterableMechanism> mechanisms = new ArrayList<>();
         private RobotCoreHooks<T> hooks = RobotCoreHooks.<T>empty();
@@ -167,7 +168,8 @@ public final class RobotCoreConfig {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig != null ? systemConfig : RobotCore.SystemConfig.defaults());
         }
     }
 
@@ -750,6 +752,144 @@ public final class RobotCoreConfig {
 
         public CoreSection telemetryEnabled(boolean enabled) {
             owner.telemetryEnabled = enabled;
+            return this;
+        }
+
+        public CoreSection system(Consumer<SystemSection> section) {
+            Objects.requireNonNull(section, "section");
+            SystemSection s = new SystemSection(owner);
+            section.accept(s);
+            return this;
+        }
+    }
+
+    public static final class SystemSection {
+        private final Builder<?> owner;
+
+        private SystemSection(Builder<?> owner) {
+            this.owner = Objects.requireNonNull(owner, "owner");
+            if (this.owner.systemConfig == null) {
+                this.owner.systemConfig = RobotCore.SystemConfig.defaults();
+            }
+        }
+
+        public SystemSection vmOvercommitMode(int mode) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    mode,
+                    current.vmOvercommitRatio(),
+                    current.vmSwappiness(),
+                    current.loopSwapEnabled(),
+                    current.loopSwapSizeMiB(),
+                    current.systemWebServerEnabled(),
+                    current.configServerEnabled(),
+                    current.telemetryEnabled(),
+                    current.networkTablesDataLogEnabled());
+            return this;
+        }
+
+        public SystemSection vmOvercommitRatio(int ratio) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    current.vmOvercommitMode(),
+                    ratio,
+                    current.vmSwappiness(),
+                    current.loopSwapEnabled(),
+                    current.loopSwapSizeMiB(),
+                    current.systemWebServerEnabled(),
+                    current.configServerEnabled(),
+                    current.telemetryEnabled(),
+                    current.networkTablesDataLogEnabled());
+            return this;
+        }
+
+        public SystemSection vmSwappiness(int value) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    current.vmOvercommitMode(),
+                    current.vmOvercommitRatio(),
+                    value,
+                    current.loopSwapEnabled(),
+                    current.loopSwapSizeMiB(),
+                    current.systemWebServerEnabled(),
+                    current.configServerEnabled(),
+                    current.telemetryEnabled(),
+                    current.networkTablesDataLogEnabled());
+            return this;
+        }
+
+        public SystemSection loopSwap(boolean enabled, int sizeMiB) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    current.vmOvercommitMode(),
+                    current.vmOvercommitRatio(),
+                    current.vmSwappiness(),
+                    enabled,
+                    sizeMiB,
+                    current.systemWebServerEnabled(),
+                    current.configServerEnabled(),
+                    current.telemetryEnabled(),
+                    current.networkTablesDataLogEnabled());
+            return this;
+        }
+
+        public SystemSection systemWebServerEnabled(boolean enabled) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    current.vmOvercommitMode(),
+                    current.vmOvercommitRatio(),
+                    current.vmSwappiness(),
+                    current.loopSwapEnabled(),
+                    current.loopSwapSizeMiB(),
+                    enabled,
+                    current.configServerEnabled(),
+                    current.telemetryEnabled(),
+                    current.networkTablesDataLogEnabled());
+            return this;
+        }
+
+        public SystemSection configServerEnabled(boolean enabled) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    current.vmOvercommitMode(),
+                    current.vmOvercommitRatio(),
+                    current.vmSwappiness(),
+                    current.loopSwapEnabled(),
+                    current.loopSwapSizeMiB(),
+                    current.systemWebServerEnabled(),
+                    enabled,
+                    current.telemetryEnabled(),
+                    current.networkTablesDataLogEnabled());
+            return this;
+        }
+
+        public SystemSection telemetryEnabled(boolean enabled) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    current.vmOvercommitMode(),
+                    current.vmOvercommitRatio(),
+                    current.vmSwappiness(),
+                    current.loopSwapEnabled(),
+                    current.loopSwapSizeMiB(),
+                    current.systemWebServerEnabled(),
+                    current.configServerEnabled(),
+                    enabled,
+                    current.networkTablesDataLogEnabled());
+            return this;
+        }
+
+        public SystemSection networkTablesDataLogEnabled(boolean enabled) {
+            RobotCore.SystemConfig current = owner.systemConfig;
+            owner.systemConfig = new RobotCore.SystemConfig(
+                    current.vmOvercommitMode(),
+                    current.vmOvercommitRatio(),
+                    current.vmSwappiness(),
+                    current.loopSwapEnabled(),
+                    current.loopSwapSizeMiB(),
+                    current.systemWebServerEnabled(),
+                    current.configServerEnabled(),
+                    current.telemetryEnabled(),
+                    enabled);
             return this;
         }
     }

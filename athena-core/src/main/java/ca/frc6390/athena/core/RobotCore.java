@@ -8,11 +8,13 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.io.File;
+import java.io.IOException;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 import java.lang.management.RuntimeMXBean;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,6 +24,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.concurrent.TimeUnit;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
@@ -180,16 +183,70 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
+    public record SystemConfig(
+            int vmOvercommitMode,
+            int vmOvercommitRatio,
+            int vmSwappiness,
+            boolean loopSwapEnabled,
+            int loopSwapSizeMiB,
+            boolean systemWebServerEnabled,
+            boolean configServerEnabled,
+            boolean telemetryEnabled,
+            boolean networkTablesDataLogEnabled) {
+
+        public static SystemConfig defaults() {
+            return new SystemConfig(
+                    1,
+                    95,
+                    120,
+                    true,
+                    32,
+                    false,
+                    false,
+                    false,
+                    false);
+        }
+    }
+
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
             boolean autoInitResetEnabled, TelemetryRegistry.TelemetryConfig telemetryConfig,
             List<RegisterableMechanism> mechanisms, boolean performanceMode,
-            boolean timingDebugEnabled, boolean telemetryEnabled, AutoConfig autoConfig, RobotCoreHooks<T> hooks) {
+            boolean timingDebugEnabled, boolean telemetryEnabled, AutoConfig autoConfig, RobotCoreHooks<T> hooks,
+            SystemConfig systemConfig) {
 
         public RobotCoreConfig {
             mechanisms = mechanisms != null ? List.copyOf(mechanisms) : List.of();
             autoConfig = autoConfig != null ? autoConfig : AutoConfig.defaults();
             hooks = hooks != null ? hooks : RobotCoreHooks.<T>empty();
+            systemConfig = systemConfig != null ? systemConfig : SystemConfig.defaults();
+        }
+
+        public RobotCoreConfig(
+                RobotDrivetrainConfig<T> driveTrain,
+                RobotLocalizationConfig localizationConfig,
+                RobotVisionConfig visionConfig,
+                boolean autoInitResetEnabled,
+                TelemetryRegistry.TelemetryConfig telemetryConfig,
+                List<RegisterableMechanism> mechanisms,
+                boolean performanceMode,
+                boolean timingDebugEnabled,
+                boolean telemetryEnabled,
+                AutoConfig autoConfig,
+                RobotCoreHooks<T> hooks) {
+            this(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled,
+                    autoConfig,
+                    hooks,
+                    SystemConfig.defaults());
         }
 
         public static RobotCoreConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
@@ -204,7 +261,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     false,
                     true,
                     AutoConfig.defaults(),
-                    RobotCoreHooks.empty());
+                    RobotCoreHooks.empty(),
+                    SystemConfig.defaults());
         }
 
         public static RobotCoreConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
@@ -219,7 +277,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     false,
                     true,
                     AutoConfig.defaults(),
-                    RobotCoreHooks.empty());
+                    RobotCoreHooks.empty(),
+                    SystemConfig.defaults());
         }
 
         public RobotCoreConfig<T> localization(RobotLocalizationConfig localizationConfig) {
@@ -234,7 +293,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> vision(RobotVisionConfig visionConfig) {
@@ -249,7 +309,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> cameras(ConfigurableCamera... cameras) {
@@ -264,7 +325,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> autoInitResetEnabled(boolean enabled) {
@@ -279,7 +341,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> telemetry(TelemetryRegistry.TelemetryConfig telemetryConfig) {
@@ -294,7 +357,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         /**
@@ -317,7 +381,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> performanceMode(boolean enabled) {
@@ -332,7 +397,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> timingDebugEnabled(boolean enabled) {
@@ -347,7 +413,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     enabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> telemetryEnabled(boolean enabled) {
@@ -362,7 +429,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     enabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> auto(AutoConfig autoConfig) {
@@ -377,7 +445,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks);
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> hooks(java.util.function.Consumer<RobotCoreHooks.HooksSection<T>> section) {
@@ -395,7 +464,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks.hooks(section));
+                    hooks.hooks(section),
+                    systemConfig);
         }
 
         public RobotCoreConfig<T> inputs(java.util.function.Consumer<RobotCoreHooks.InputsSection<T>> section) {
@@ -413,7 +483,24 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     timingDebugEnabled,
                     telemetryEnabled,
                     autoConfig,
-                    hooks.inputs(section));
+                    hooks.inputs(section),
+                    systemConfig);
+        }
+
+        public RobotCoreConfig<T> system(SystemConfig systemConfig) {
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled,
+                    autoConfig,
+                    hooks,
+                    systemConfig);
         }
 
         public RobotCore<T> create() {
@@ -508,6 +595,21 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final double PERFORMANCE_VERY_SLOW_METRICS_PERIOD_SECONDS = 5.0;
     private static final double COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS = 0.2;
     private static final double STARTUP_LOG_THRESHOLD_SECONDS = 0.05;
+    private static final String SYSTEM_WEBSERVER_BINARY_PATH = "/usr/local/natinst/share/NIWebServer/SystemWebServer";
+    private static final String SYSTEM_WEBSERVER_PROCESS_NAME = "SystemWebServer";
+    private static final String SYSTEM_WEBCONTAINER_PROCESS_NAME = "NIWebServiceContainer";
+    private static final String SYSTEM_LOOP_SWAP_FILE_PATH = "/home/lvuser/athena-swap.img";
+    private static final int SYSTEM_LOOP_SWAP_MIN_SIZE_MIB = 8;
+    private static final int SYSTEM_LOOP_SWAP_MAX_SIZE_MIB = 256;
+    private static final int SYSTEM_LOOP_SWAP_DEFAULT_SIZE_MIB = 32;
+    private static final int SYSTEM_SWAPPINESS_MIN = 0;
+    private static final int SYSTEM_SWAPPINESS_MAX = 200;
+    private static final int SYSTEM_OVERCOMMIT_MODE_MIN = 0;
+    private static final int SYSTEM_OVERCOMMIT_MODE_MAX = 2;
+    private static final int SYSTEM_OVERCOMMIT_RATIO_MIN = 0;
+    private static final int SYSTEM_OVERCOMMIT_RATIO_MAX = 100;
+    private static final long SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS = 12L;
+    private static final long SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS = 20L;
 
     private record ConfigExportUrls(
             String baseUrl,
@@ -573,6 +675,17 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         configuredMechanismsRegistered = false;
         timingDebugEnabled = config.timingDebugEnabled();
         telemetryEnabled = config.telemetryEnabled();
+        if (RobotBase.isReal()) {
+            SystemConfig systemConfig = config.systemConfig() != null ? config.systemConfig() : SystemConfig.defaults();
+            systemSection.overcommitMode(systemConfig.vmOvercommitMode());
+            systemSection.overcommitRatio(systemConfig.vmOvercommitRatio());
+            systemSection.swappiness(systemConfig.vmSwappiness());
+            systemSection.setLoopSwapEnabled(systemConfig.loopSwapEnabled(), systemConfig.loopSwapSizeMiB());
+            systemSection.setSystemWebServerEnabled(systemConfig.systemWebServerEnabled());
+            systemSection.configServerEnabled(systemConfig.configServerEnabled());
+            systemSection.telemetryEnabled(systemConfig.telemetryEnabled());
+            systemSection.networkTablesDataLogEnabled(systemConfig.networkTablesDataLogEnabled());
+        }
         if (config.performanceMode()) {
             setConfigServerEnabled(false);
             robotNetworkTables.setPublishingEnabled(false);
@@ -1644,6 +1757,492 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         axis.kp(constants.kP()).ki(constants.kI()).kd(constants.kD()).iZone(constants.iZone());
     }
 
+    private record SystemCommandResult(int exitCode, String output, boolean timedOut) {}
+
+    private SystemCommandResult runCommand(long timeoutSeconds, String... command) {
+        Process process = null;
+        try {
+            process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            boolean exited = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            if (!exited) {
+                process.destroyForcibly();
+                return new SystemCommandResult(-1, "", true);
+            }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            return new SystemCommandResult(process.exitValue(), output, false);
+        } catch (IOException e) {
+            return new SystemCommandResult(-1, e.getMessage(), false);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new SystemCommandResult(-1, "interrupted", false);
+        } finally {
+            if (process != null) {
+                process.destroy();
+            }
+        }
+    }
+
+    private SystemCommandResult runSudoCommand(long timeoutSeconds, String... args) {
+        String[] command = new String[2 + args.length];
+        command[0] = "sudo";
+        command[1] = "-n";
+        System.arraycopy(args, 0, command, 2, args.length);
+        return runCommand(timeoutSeconds, command);
+    }
+
+    private static String shellQuote(String value) {
+        if (value == null || value.isEmpty()) {
+            return "''";
+        }
+        return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
+    private SystemCommandResult runSuAdminCommand(long timeoutSeconds, String... args) {
+        if (args == null || args.length == 0) {
+            return new SystemCommandResult(-1, "no command", false);
+        }
+        StringBuilder commandBuilder = new StringBuilder();
+        for (String arg : args) {
+            if (arg == null) {
+                continue;
+            }
+            if (!commandBuilder.isEmpty()) {
+                commandBuilder.append(' ');
+            }
+            commandBuilder.append(shellQuote(arg));
+        }
+        if (commandBuilder.isEmpty()) {
+            return new SystemCommandResult(-1, "no command", false);
+        }
+        String suInvocation = "su admin -c " + shellQuote(commandBuilder.toString());
+
+        Process process = null;
+        try {
+            process = new ProcessBuilder("/usr/bin/script", "-q", "-c", suInvocation, "/dev/null")
+                    .redirectErrorStream(true)
+                    .start();
+            try {
+                process.getOutputStream().write('\n');
+                process.getOutputStream().flush();
+            } catch (IOException ignored) {
+                // best effort only: blank password is sent when possible
+            } finally {
+                try {
+                    process.getOutputStream().close();
+                } catch (IOException ignored) {
+                    // no-op
+                }
+            }
+            boolean exited = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            if (!exited) {
+                process.destroyForcibly();
+                return new SystemCommandResult(-1, "", true);
+            }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            return new SystemCommandResult(process.exitValue(), output, false);
+        } catch (IOException e) {
+            return new SystemCommandResult(-1, e.getMessage(), false);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new SystemCommandResult(-1, "interrupted", false);
+        } finally {
+            if (process != null) {
+                process.destroy();
+            }
+        }
+    }
+
+    private SystemCommandResult runPrivilegedCommand(long timeoutSeconds, String... args) {
+        SystemCommandResult sudoResult = runSudoCommand(timeoutSeconds, args);
+        if (!sudoResult.timedOut() && sudoResult.exitCode() == 0) {
+            return sudoResult;
+        }
+        SystemCommandResult suResult = runSuAdminCommand(timeoutSeconds, args);
+        if (!suResult.timedOut() && suResult.exitCode() == 0) {
+            return suResult;
+        }
+        String mergedOutput = "";
+        if (sudoResult.output() != null && !sudoResult.output().isBlank()) {
+            mergedOutput = "sudo: " + sudoResult.output();
+        }
+        if (suResult.output() != null && !suResult.output().isBlank()) {
+            mergedOutput = mergedOutput.isBlank()
+                    ? "su-admin: " + suResult.output()
+                    : mergedOutput + " | su-admin: " + suResult.output();
+        }
+        return new SystemCommandResult(
+                suResult.exitCode() != 0 ? suResult.exitCode() : sudoResult.exitCode(),
+                mergedOutput,
+                sudoResult.timedOut() && suResult.timedOut());
+    }
+
+    private boolean runSudoCommandAndReport(String operation, long timeoutSeconds, String... args) {
+        SystemCommandResult result = runPrivilegedCommand(timeoutSeconds, args);
+        if (result.timedOut()) {
+            String message = operation + " timed out";
+            DriverStation.reportWarning("[Athena][System] " + message, false);
+            diagnosticsSection.core().warn("system", message);
+            return false;
+        }
+        if (result.exitCode() != 0) {
+            String message = operation + " failed (exit " + result.exitCode() + ")"
+                    + (!result.output().isEmpty() ? ": " + result.output() : "");
+            DriverStation.reportWarning("[Athena][System] " + message, false);
+            diagnosticsSection.core().warn("system", message);
+            return false;
+        }
+        if (!result.output().isEmpty()) {
+            diagnosticsSection.core().info("system", operation + ": " + result.output());
+        }
+        return true;
+    }
+
+    private static int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private boolean setVmSysctl(String key, int value) {
+        if (key == null || key.isBlank()) {
+            return false;
+        }
+        String procPath = "/proc/sys/" + key.replace('.', '/');
+        Integer current = readIntFromFile(procPath);
+        if (current != null && current.intValue() == value) {
+            return true;
+        }
+        return runSudoCommandAndReport(
+                "sysctl " + key + "=" + value,
+                SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS,
+                "/sbin/sysctl",
+                "-w",
+                key + "=" + value);
+    }
+
+    private Integer readIntFromFile(String path) {
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+        try {
+            String raw = java.nio.file.Files.readString(java.nio.file.Path.of(path), StandardCharsets.UTF_8);
+            String trimmed = raw != null ? raw.trim() : "";
+            if (trimmed.isEmpty()) {
+                return null;
+            }
+            return Integer.parseInt(trimmed);
+        } catch (IOException | NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private boolean processRunningByName(String processName) {
+        if (processName == null || processName.isBlank()) {
+            return false;
+        }
+        SystemCommandResult result = runPrivilegedCommand(
+                SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS,
+                "/usr/bin/pgrep",
+                "-x",
+                processName);
+        if (result.timedOut()) {
+            return false;
+        }
+        return result.exitCode() == 0;
+    }
+
+    private boolean killProcessesByName(String processName) {
+        if (processName == null || processName.isBlank()) {
+            return false;
+        }
+        SystemCommandResult pidsResult = runPrivilegedCommand(
+                SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS,
+                "/usr/bin/pgrep",
+                "-x",
+                processName);
+        if (pidsResult.timedOut()) {
+            String message = "system process lookup timed out: " + processName;
+            DriverStation.reportWarning("[Athena][System] " + message, false);
+            diagnosticsSection.core().warn("system", message);
+            return false;
+        }
+        if (pidsResult.exitCode() == 1 || pidsResult.output().isBlank()) {
+            return true;
+        }
+        if (pidsResult.exitCode() != 0) {
+            String message = "system process lookup failed (" + processName + "): " + pidsResult.output();
+            DriverStation.reportWarning("[Athena][System] " + message, false);
+            diagnosticsSection.core().warn("system", message);
+            return false;
+        }
+        String[] pids = pidsResult.output()
+                .lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank() && line.chars().allMatch(Character::isDigit))
+                .toArray(String[]::new);
+        if (pids.length == 0) {
+            return true;
+        }
+
+        String[] termCommand = new String[2 + pids.length];
+        termCommand[0] = "/bin/kill";
+        termCommand[1] = "-TERM";
+        System.arraycopy(pids, 0, termCommand, 2, pids.length);
+        if (!runSudoCommandAndReport(
+                "system process terminate " + processName,
+                SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS,
+                termCommand)) {
+            return false;
+        }
+        if (!processRunningByName(processName)) {
+            return true;
+        }
+
+        String[] killCommand = new String[2 + pids.length];
+        killCommand[0] = "/bin/kill";
+        killCommand[1] = "-KILL";
+        System.arraycopy(pids, 0, killCommand, 2, pids.length);
+        return runSudoCommandAndReport(
+                "system process kill " + processName,
+                SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS,
+                killCommand);
+    }
+
+    private boolean runSystemWebServerControlCommand(String action) {
+        if (action == null || action.isBlank()) {
+            return false;
+        }
+        if (!RobotBase.isReal()) {
+            return true;
+        }
+        return switch (action) {
+            case "stop" -> {
+                if (!isSystemWebServerRunning()) {
+                    yield true;
+                }
+                boolean stopped = killProcessesByName(SYSTEM_WEBCONTAINER_PROCESS_NAME)
+                        && killProcessesByName(SYSTEM_WEBSERVER_PROCESS_NAME);
+                yield stopped && !isSystemWebServerRunning();
+            }
+            case "start" -> {
+                if (isSystemWebServerRunning()) {
+                    yield true;
+                }
+                boolean started = runSudoCommandAndReport(
+                        "systemWebServer start",
+                        SYSTEM_WEBSERVER_CONTROL_TIMEOUT_SECONDS,
+                        "/sbin/start-stop-daemon",
+                        "-S",
+                        "-b",
+                        "-x",
+                        SYSTEM_WEBSERVER_BINARY_PATH,
+                        "--",
+                        "-timeout",
+                        "50",
+                        "-child-timeout",
+                        "20",
+                        "-system");
+                if (!started) {
+                    yield false;
+                }
+                yield isSystemWebServerRunning();
+            }
+            case "restart" -> runSystemWebServerControlCommand("stop")
+                    && runSystemWebServerControlCommand("start");
+            default -> false;
+        };
+    }
+
+    private boolean isSystemWebServerRunning() {
+        if (!RobotBase.isReal()) {
+            return false;
+        }
+        return processRunningByName(SYSTEM_WEBSERVER_PROCESS_NAME)
+                || processRunningByName(SYSTEM_WEBCONTAINER_PROCESS_NAME);
+    }
+
+    private static int clampLoopSwapSizeMiB(int sizeMiB) {
+        return clampInt(sizeMiB, SYSTEM_LOOP_SWAP_MIN_SIZE_MIB, SYSTEM_LOOP_SWAP_MAX_SIZE_MIB);
+    }
+
+    private boolean ensureLoopSwapFileSized(int sizeMiB) {
+        File file = new File(SYSTEM_LOOP_SWAP_FILE_PATH);
+        long expectedBytes = (long) sizeMiB * 1024L * 1024L;
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "rw")) {
+            if (raf.length() != expectedBytes) {
+                raf.setLength(expectedBytes);
+            }
+        } catch (IOException e) {
+            String message = "loop swap file setup failed: " + e.getMessage();
+            DriverStation.reportWarning("[Athena][System] " + message, false);
+            diagnosticsSection.core().warn("system", message);
+            return false;
+        }
+        file.setReadable(false, false);
+        file.setWritable(false, false);
+        file.setReadable(true, true);
+        file.setWritable(true, true);
+        return true;
+    }
+
+    private String findLoopDeviceForSwapFile() {
+        SystemCommandResult result = runPrivilegedCommand(
+                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                "/sbin/losetup",
+                "-j",
+                SYSTEM_LOOP_SWAP_FILE_PATH);
+        if (result.timedOut() || result.exitCode() != 0 || result.output().isBlank()) {
+            return null;
+        }
+        String firstLine = result.output().lines().findFirst().orElse("").trim();
+        if (firstLine.isEmpty()) {
+            return null;
+        }
+        int colon = firstLine.indexOf(':');
+        if (colon <= 0) {
+            return null;
+        }
+        return firstLine.substring(0, colon).trim();
+    }
+
+    private String findFreeLoopDevice() {
+        SystemCommandResult result = runPrivilegedCommand(
+                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                "/sbin/losetup",
+                "-f");
+        if (result.timedOut() || result.exitCode() != 0 || result.output().isBlank()) {
+            return null;
+        }
+        return result.output().lines().findFirst().orElse("").trim();
+    }
+
+    private boolean isSwapDeviceActive(String loopDevice) {
+        if (loopDevice == null || loopDevice.isBlank()) {
+            return false;
+        }
+        try {
+            List<String> lines = java.nio.file.Files.readAllLines(java.nio.file.Path.of("/proc/swaps"));
+            for (int i = 1; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (line != null && line.startsWith(loopDevice)) {
+                    return true;
+                }
+            }
+        } catch (IOException ignored) {
+            return false;
+        }
+        return false;
+    }
+
+    private boolean configureLoopSwapEnabled(boolean enabled, int sizeMiB) {
+        if (!RobotBase.isReal()) {
+            return true;
+        }
+        int resolvedSizeMiB = clampLoopSwapSizeMiB(sizeMiB);
+        long expectedBytes = (long) resolvedSizeMiB * 1024L * 1024L;
+        long existingBytes = loopSwapFileSizeBytes();
+        String loopDevice = findLoopDeviceForSwapFile();
+        boolean active = isSwapDeviceActive(loopDevice);
+
+        if (!enabled) {
+            if (loopDevice == null || loopDevice.isBlank()) {
+                return true;
+            }
+            boolean ok = true;
+            if (active) {
+                ok = runSudoCommandAndReport(
+                                "loop swapoff",
+                                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                                "/sbin/swapoff",
+                                loopDevice)
+                        && ok;
+            }
+            ok = runSudoCommandAndReport(
+                            "loop detach",
+                            SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                            "/sbin/losetup",
+                            "-d",
+                            loopDevice)
+                    && ok;
+            return ok && !isLoopSwapRunning();
+        }
+
+        if (loopDevice != null && !loopDevice.isBlank() && active && existingBytes == expectedBytes) {
+            return true;
+        }
+
+        if (loopDevice != null && !loopDevice.isBlank() && (active || existingBytes != expectedBytes)) {
+            boolean ok = true;
+            if (active) {
+                ok = runSudoCommandAndReport(
+                                "loop swapoff",
+                                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                                "/sbin/swapoff",
+                                loopDevice)
+                        && ok;
+            }
+            ok = runSudoCommandAndReport(
+                            "loop detach",
+                            SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                            "/sbin/losetup",
+                            "-d",
+                            loopDevice)
+                    && ok;
+            if (!ok) {
+                return false;
+            }
+            loopDevice = null;
+        }
+
+        if (!ensureLoopSwapFileSized(resolvedSizeMiB)) {
+            return false;
+        }
+        if (loopDevice == null || loopDevice.isBlank()) {
+            loopDevice = findFreeLoopDevice();
+            if (loopDevice == null || loopDevice.isBlank()) {
+                String message = "loop device allocation failed";
+                DriverStation.reportWarning("[Athena][System] " + message, false);
+                diagnosticsSection.core().warn("system", message);
+                return false;
+            }
+            if (!runSudoCommandAndReport(
+                    "loop attach",
+                    SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                    "/sbin/losetup",
+                    loopDevice,
+                    SYSTEM_LOOP_SWAP_FILE_PATH)) {
+                return false;
+            }
+        }
+
+        if (isSwapDeviceActive(loopDevice)) {
+            return true;
+        }
+        if (!runSudoCommandAndReport(
+                "loop mkswap",
+                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                "/sbin/mkswap",
+                loopDevice)) {
+            return false;
+        }
+        return runSudoCommandAndReport(
+                "loop swapon",
+                SYSTEM_LOOP_SWAP_CONTROL_TIMEOUT_SECONDS,
+                "/sbin/swapon",
+                loopDevice);
+    }
+
+    private long loopSwapFileSizeBytes() {
+        File file = new File(SYSTEM_LOOP_SWAP_FILE_PATH);
+        return file.exists() ? file.length() : -1L;
+    }
+
+    private boolean isLoopSwapRunning() {
+        if (!RobotBase.isReal()) {
+            return false;
+        }
+        String loopDevice = findLoopDeviceForSwapFile();
+        return isSwapDeviceActive(loopDevice);
+    }
+
     private static RobotLocalization<?> createLocalizationForDrivetrain(
             RobotDrivetrain<?> drivetrain,
             RobotLocalizationConfig localizationConfig) {
@@ -2285,6 +2884,26 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         /**
+         * Attempts to control NI systemWebServer using sudo.
+         */
+        public boolean setSystemWebServerEnabled(boolean enabled) {
+            return runSystemWebServerControlCommand(enabled ? "start" : "stop");
+        }
+
+        public SystemSection systemWebServerEnabled(boolean enabled) {
+            setSystemWebServerEnabled(enabled);
+            return this;
+        }
+
+        public boolean restartSystemWebServer() {
+            return runSystemWebServerControlCommand("restart");
+        }
+
+        public boolean systemWebServerRunning() {
+            return isSystemWebServerRunning();
+        }
+
+        /**
          * Conservative defaults for low-RAM targets without changing NT-controlled publish flags/period.
          */
         public SystemSection applyLowMemoryDefaults() {
@@ -2292,6 +2911,59 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             telemetry.setEnabled(false);
             DataLogManager.logNetworkTables(false);
             return this;
+        }
+
+        public boolean overcommitMode(int mode) {
+            int resolvedMode = clampInt(mode, SYSTEM_OVERCOMMIT_MODE_MIN, SYSTEM_OVERCOMMIT_MODE_MAX);
+            return setVmSysctl("vm.overcommit_memory", resolvedMode);
+        }
+
+        public boolean overcommitRatio(int ratio) {
+            int resolvedRatio = clampInt(ratio, SYSTEM_OVERCOMMIT_RATIO_MIN, SYSTEM_OVERCOMMIT_RATIO_MAX);
+            return setVmSysctl("vm.overcommit_ratio", resolvedRatio);
+        }
+
+        public boolean swappiness(int value) {
+            int resolved = clampInt(value, SYSTEM_SWAPPINESS_MIN, SYSTEM_SWAPPINESS_MAX);
+            return setVmSysctl("vm.swappiness", resolved);
+        }
+
+        /**
+         * Aggressive mode: reduces optional services, enables swap, and relaxes strict commit limits.
+         */
+        public SystemSection applyAggressiveLowMemoryMode() {
+            setSystemWebServerEnabled(false);
+            setLoopSwapEnabled(true, SYSTEM_LOOP_SWAP_DEFAULT_SIZE_MIB);
+            overcommitMode(1);
+            overcommitRatio(95);
+            swappiness(120);
+            applyLowMemoryDefaults();
+            return this;
+        }
+
+        /**
+         * Enables/disables loopback swap via direct sudo commands.
+         */
+        public boolean setLoopSwapEnabled(boolean enabled, int sizeMiB) {
+            return configureLoopSwapEnabled(enabled, sizeMiB);
+        }
+
+        public boolean setLoopSwapEnabled(boolean enabled) {
+            return configureLoopSwapEnabled(enabled, SYSTEM_LOOP_SWAP_DEFAULT_SIZE_MIB);
+        }
+
+        public SystemSection loopSwapEnabled(boolean enabled, int sizeMiB) {
+            configureLoopSwapEnabled(enabled, sizeMiB);
+            return this;
+        }
+
+        public SystemSection loopSwapEnabled(boolean enabled) {
+            configureLoopSwapEnabled(enabled, SYSTEM_LOOP_SWAP_DEFAULT_SIZE_MIB);
+            return this;
+        }
+
+        public boolean loopSwapRunning() {
+            return isLoopSwapRunning();
         }
     }
 

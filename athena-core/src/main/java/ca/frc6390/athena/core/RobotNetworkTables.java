@@ -77,10 +77,14 @@ public final class RobotNetworkTables {
     private volatile boolean publishedConfig = false;
     private volatile boolean cachedPublishingEnabled = true;
     private volatile double cachedDefaultPeriodSeconds = 1.0;
+    private volatile int cachedMaxPublisherCount = DEFAULT_MAX_PUBLISHER_COUNT;
+    private volatile long lastDroppedPublisherCreatesPublished = Long.MIN_VALUE;
     private NetworkTable configTable;
     private NetworkTable flagsTable;
     private NetworkTableEntry publishingEnabledEntry;
     private NetworkTableEntry defaultPeriodEntry;
+    private NetworkTableEntry maxPublisherCountEntry;
+    private NetworkTableEntry droppedPublisherCreatesEntry;
 
     // Raw topic publishers for data output (not config toggles).
     private final ConcurrentHashMap<String, BooleanPublisher> booleanPublishers = new ConcurrentHashMap<>();
@@ -90,8 +94,14 @@ public final class RobotNetworkTables {
     private final ConcurrentHashMap<String, Long> lastDoubleBits = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> lastStringValues = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> topicLastSeenCycle = new ConcurrentHashMap<>();
+    private final AtomicLong droppedPublisherCreates = new AtomicLong(0L);
     private static final long TOPIC_STALE_CYCLES = 750L;
     private static final int TOPIC_PRUNE_SCAN_BUDGET_PER_CYCLE = 64;
+    private static final int DEFAULT_MAX_PUBLISHER_COUNT = 384;
+    private static final int MIN_MAX_PUBLISHER_COUNT = 64;
+    private static final int MAX_MAX_PUBLISHER_COUNT = 4096;
+    private static final int NODE_CHILD_CACHE_LIMIT = 128;
+    private static final int NODE_RESOLVED_KEY_CACHE_LIMIT = 512;
     private final AtomicLong publishCycle = new AtomicLong(0L);
     private volatile Iterator<Map.Entry<String, Long>> topicPruneIterator;
     private static final double CONFIG_REFRESH_PERIOD_SECONDS = 0.1;
@@ -143,6 +153,23 @@ public final class RobotNetworkTables {
         revision.incrementAndGet();
     }
 
+    public int getMaxPublisherCount() {
+        return cachedMaxPublisherCount;
+    }
+
+    public void setMaxPublisherCount(int count) {
+        int sanitized = sanitizeMaxPublisherCount(count);
+        cachedMaxPublisherCount = sanitized;
+        if (publishedConfig && maxPublisherCountEntry != null) {
+            maxPublisherCountEntry.setDouble(sanitized);
+        }
+        revision.incrementAndGet();
+    }
+
+    public long droppedPublisherCreates() {
+        return droppedPublisherCreates.get();
+    }
+
     /**
      * Creates the config topics under {@code Athena/NetworkTableConfig}. Safe to call multiple times.
      *
@@ -163,12 +190,19 @@ public final class RobotNetworkTables {
 
         publishingEnabledEntry = configTable.getEntry("EnablePublishing");
         defaultPeriodEntry = configTable.getEntry("DefaultPeriodSec");
+        maxPublisherCountEntry = configTable.getEntry("MaxPublisherCount");
+        droppedPublisherCreatesEntry = configTable.getEntry("DroppedPublisherCreates");
 
         initIfAbsent(publishingEnabledEntry, true);
         initIfAbsent(defaultPeriodEntry, cachedDefaultPeriodSeconds);
+        initIfAbsent(maxPublisherCountEntry, cachedMaxPublisherCount);
+        initIfAbsent(droppedPublisherCreatesEntry, 0.0);
 
         cachedPublishingEnabled = publishingEnabledEntry.getBoolean(true);
         cachedDefaultPeriodSeconds = sanitizePeriod(defaultPeriodEntry.getDouble(cachedDefaultPeriodSeconds));
+        cachedMaxPublisherCount =
+                sanitizeMaxPublisherCount((int) Math.round(maxPublisherCountEntry.getDouble(cachedMaxPublisherCount)));
+        publishDroppedPublisherCreatesIfNeeded();
 
         for (Flag flag : Flag.values()) {
             NetworkTableEntry entry = flagsTable.getEntry(flag.name());
@@ -228,6 +262,13 @@ public final class RobotNetworkTables {
         double period = sanitizePeriod(defaultPeriodEntry.getDouble(cachedDefaultPeriodSeconds));
         if (period != cachedDefaultPeriodSeconds) {
             cachedDefaultPeriodSeconds = period;
+            changed = true;
+        }
+
+        int maxPublishers =
+                sanitizeMaxPublisherCount((int) Math.round(maxPublisherCountEntry.getDouble(cachedMaxPublisherCount)));
+        if (maxPublishers != cachedMaxPublisherCount) {
+            cachedMaxPublisherCount = maxPublishers;
             changed = true;
         }
 
@@ -301,6 +342,7 @@ public final class RobotNetworkTables {
         if (changed) {
             revision.incrementAndGet();
         }
+        publishDroppedPublisherCreatesIfNeeded();
     }
 
     public RobotNetworkTables setFlag(Flag flag, boolean enabled) {
@@ -701,6 +743,10 @@ public final class RobotNetworkTables {
         }
     }
 
+    public int totalPublisherCount() {
+        return booleanPublishers.size() + doublePublishers.size() + stringPublishers.size();
+    }
+
     public final class Node {
         private final String path; // absolute, no trailing slash
         private final ConcurrentHashMap<String, Node> childNodes = new ConcurrentHashMap<>();
@@ -732,60 +778,64 @@ public final class RobotNetworkTables {
                 return cached;
             }
             Node created = new Node(path + "/" + normalized);
+            if (childNodes.size() >= NODE_CHILD_CACHE_LIMIT) {
+                // Avoid retaining unbounded dynamic child paths on low-memory targets.
+                return created;
+            }
             Node raced = childNodes.putIfAbsent(normalized, created);
             return raced != null ? raced : created;
         }
 
         public void putBoolean(String key, boolean value) {
             String full = resolveKey(key);
-            markTopicSeen(full);
             if (!cachedPublishingEnabled) {
                 return;
             }
+            BooleanPublisher pub = ensureBooleanPublisher(full);
+            if (pub == null) {
+                return;
+            }
+            markTopicSeen(full);
             Boolean previous = lastBooleanValues.put(full, value);
             if (previous != null && previous.booleanValue() == value) {
                 return;
             }
-            BooleanPublisher pub = booleanPublishers.computeIfAbsent(full, p -> {
-                BooleanTopic topic = nt.getBooleanTopic(p);
-                return topic.publish();
-            });
             pub.set(value);
         }
 
         public void putDouble(String key, double value) {
             String full = resolveKey(key);
-            markTopicSeen(full);
             if (!cachedPublishingEnabled) {
                 return;
             }
+            DoublePublisher pub = ensureDoublePublisher(full);
+            if (pub == null) {
+                return;
+            }
+            markTopicSeen(full);
             long bits = Double.doubleToLongBits(value);
             Long previousBits = lastDoubleBits.put(full, bits);
             if (previousBits != null && previousBits.longValue() == bits) {
                 return;
             }
-            DoublePublisher pub = doublePublishers.computeIfAbsent(full, p -> {
-                DoubleTopic topic = nt.getDoubleTopic(p);
-                return topic.publish();
-            });
             pub.set(value);
         }
 
         public void putString(String key, String value) {
             String full = resolveKey(key);
-            markTopicSeen(full);
             if (!cachedPublishingEnabled) {
                 return;
             }
+            StringPublisher pub = ensureStringPublisher(full);
+            if (pub == null) {
+                return;
+            }
+            markTopicSeen(full);
             String safeValue = value != null ? value : "";
             String previous = lastStringValues.put(full, safeValue);
             if (safeValue.equals(previous)) {
                 return;
             }
-            StringPublisher pub = stringPublishers.computeIfAbsent(full, p -> {
-                StringTopic topic = nt.getStringTopic(p);
-                return topic.publish();
-            });
             pub.set(safeValue);
         }
 
@@ -815,8 +865,68 @@ public final class RobotNetworkTables {
                 return cached;
             }
             String resolved = path + "/" + normalized;
+            if (relativeResolvedKeys.size() >= NODE_RESOLVED_KEY_CACHE_LIMIT) {
+                return resolved;
+            }
             String raced = relativeResolvedKeys.putIfAbsent(normalized, resolved);
             return raced != null ? raced : resolved;
+        }
+
+        private BooleanPublisher ensureBooleanPublisher(String fullPath) {
+            BooleanPublisher existing = booleanPublishers.get(fullPath);
+            if (existing != null) {
+                return existing;
+            }
+            if (publisherLimitReached()) {
+                recordDroppedPublisherCreate();
+                return null;
+            }
+            BooleanTopic topic = nt.getBooleanTopic(fullPath);
+            BooleanPublisher created = topic.publish();
+            BooleanPublisher raced = booleanPublishers.putIfAbsent(fullPath, created);
+            if (raced != null) {
+                created.close();
+                return raced;
+            }
+            return created;
+        }
+
+        private DoublePublisher ensureDoublePublisher(String fullPath) {
+            DoublePublisher existing = doublePublishers.get(fullPath);
+            if (existing != null) {
+                return existing;
+            }
+            if (publisherLimitReached()) {
+                recordDroppedPublisherCreate();
+                return null;
+            }
+            DoubleTopic topic = nt.getDoubleTopic(fullPath);
+            DoublePublisher created = topic.publish();
+            DoublePublisher raced = doublePublishers.putIfAbsent(fullPath, created);
+            if (raced != null) {
+                created.close();
+                return raced;
+            }
+            return created;
+        }
+
+        private StringPublisher ensureStringPublisher(String fullPath) {
+            StringPublisher existing = stringPublishers.get(fullPath);
+            if (existing != null) {
+                return existing;
+            }
+            if (publisherLimitReached()) {
+                recordDroppedPublisherCreate();
+                return null;
+            }
+            StringTopic topic = nt.getStringTopic(fullPath);
+            StringPublisher created = topic.publish();
+            StringPublisher raced = stringPublishers.putIfAbsent(fullPath, created);
+            if (raced != null) {
+                created.close();
+                return raced;
+            }
+            return created;
         }
 
         private static String normalizeChildPath(String childPath) {
@@ -883,6 +993,36 @@ public final class RobotNetworkTables {
             }
             return key.substring(start, end);
         }
+    }
+
+    private int sanitizeMaxPublisherCount(int count) {
+        if (count < MIN_MAX_PUBLISHER_COUNT) {
+            return MIN_MAX_PUBLISHER_COUNT;
+        }
+        if (count > MAX_MAX_PUBLISHER_COUNT) {
+            return MAX_MAX_PUBLISHER_COUNT;
+        }
+        return count;
+    }
+
+    private boolean publisherLimitReached() {
+        return totalPublisherCount() >= cachedMaxPublisherCount;
+    }
+
+    private void recordDroppedPublisherCreate() {
+        droppedPublisherCreates.incrementAndGet();
+    }
+
+    private void publishDroppedPublisherCreatesIfNeeded() {
+        if (!publishedConfig || droppedPublisherCreatesEntry == null) {
+            return;
+        }
+        long dropped = droppedPublisherCreates.get();
+        if (dropped == lastDroppedPublisherCreatesPublished) {
+            return;
+        }
+        droppedPublisherCreatesEntry.setDouble(dropped);
+        lastDroppedPublisherCreatesPublished = dropped;
     }
 
     private void markTopicSeen(String key) {
