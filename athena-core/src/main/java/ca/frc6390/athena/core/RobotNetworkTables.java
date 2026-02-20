@@ -93,10 +93,19 @@ public final class RobotNetworkTables {
     private final ConcurrentHashMap<String, Boolean> lastBooleanValues = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastDoubleBits = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> lastStringValues = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Boolean> pendingBooleanWrites = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> pendingDoubleBitsWrites = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> pendingStringWrites = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> topicLastSeenCycle = new ConcurrentHashMap<>();
     private final AtomicLong droppedPublisherCreates = new AtomicLong(0L);
+    private final Object publishStateLock = new Object();
+    private final Object asyncWriteSignal = new Object();
+    private volatile boolean asyncPublishingEnabled = true;
+    private volatile boolean asyncWriterRunning = true;
+    private final Thread asyncWriterThread;
     private static final long TOPIC_STALE_CYCLES = 750L;
     private static final int TOPIC_PRUNE_SCAN_BUDGET_PER_CYCLE = 64;
+    private static final long ASYNC_WRITER_IDLE_WAIT_MILLIS = 5L;
     private static final int DEFAULT_MAX_PUBLISHER_COUNT = 384;
     private static final int MIN_MAX_PUBLISHER_COUNT = 64;
     private static final int MAX_MAX_PUBLISHER_COUNT = 4096;
@@ -117,6 +126,9 @@ public final class RobotNetworkTables {
         for (Flag flag : Flag.values()) {
             cached.put(flag, new AtomicBoolean(flag.defaultValue()));
         }
+        asyncWriterThread = new Thread(this::runAsyncWriterLoop, "Athena-NTWriter");
+        asyncWriterThread.setDaemon(true);
+        asyncWriterThread.start();
     }
 
     public long revision() {
@@ -134,10 +146,26 @@ public final class RobotNetworkTables {
 
     public void setPublishingEnabled(boolean enabled) {
         cachedPublishingEnabled = enabled;
+        if (!enabled) {
+            clearPendingWrites();
+        }
         if (publishedConfig && publishingEnabledEntry != null) {
             publishingEnabledEntry.setBoolean(enabled);
         }
         revision.incrementAndGet();
+    }
+
+    public boolean isAsyncPublishingEnabled() {
+        return asyncPublishingEnabled;
+    }
+
+    public void setAsyncPublishingEnabled(boolean enabled) {
+        asyncPublishingEnabled = enabled;
+        if (!enabled) {
+            clearPendingWrites();
+        } else {
+            signalAsyncWriter();
+        }
     }
 
     public double getDefaultPeriodSeconds() {
@@ -256,6 +284,11 @@ public final class RobotNetworkTables {
         boolean enabled = publishingEnabledEntry.getBoolean(cachedPublishingEnabled);
         if (enabled != cachedPublishingEnabled) {
             cachedPublishingEnabled = enabled;
+            if (!enabled) {
+                clearPendingWrites();
+            } else {
+                signalAsyncWriter();
+            }
             changed = true;
         }
 
@@ -343,6 +376,110 @@ public final class RobotNetworkTables {
             revision.incrementAndGet();
         }
         publishDroppedPublisherCreatesIfNeeded();
+    }
+
+    private void runAsyncWriterLoop() {
+        while (asyncWriterRunning) {
+            try {
+                if (!asyncPublishingEnabled || !cachedPublishingEnabled || !hasPendingWrites()) {
+                    synchronized (asyncWriteSignal) {
+                        asyncWriteSignal.wait(ASYNC_WRITER_IDLE_WAIT_MILLIS);
+                    }
+                    continue;
+                }
+                flushPendingWrites();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    private void signalAsyncWriter() {
+        synchronized (asyncWriteSignal) {
+            asyncWriteSignal.notifyAll();
+        }
+    }
+
+    private boolean hasPendingWrites() {
+        return !pendingBooleanWrites.isEmpty()
+                || !pendingDoubleBitsWrites.isEmpty()
+                || !pendingStringWrites.isEmpty();
+    }
+
+    private void clearPendingWrites() {
+        pendingBooleanWrites.clear();
+        pendingDoubleBitsWrites.clear();
+        pendingStringWrites.clear();
+    }
+
+    private void enqueueBooleanWrite(String key, boolean value) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
+        pendingBooleanWrites.put(key, value);
+        signalAsyncWriter();
+    }
+
+    private void enqueueDoubleWriteBits(String key, long bits) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
+        pendingDoubleBitsWrites.put(key, bits);
+        signalAsyncWriter();
+    }
+
+    private void enqueueStringWrite(String key, String value) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
+        pendingStringWrites.put(key, value != null ? value : "");
+        signalAsyncWriter();
+    }
+
+    private void flushPendingWrites() {
+        for (Map.Entry<String, Boolean> entry : pendingBooleanWrites.entrySet()) {
+            if (entry == null) {
+                continue;
+            }
+            String key = entry.getKey();
+            Boolean value = entry.getValue();
+            if (key == null || value == null) {
+                continue;
+            }
+            if (!pendingBooleanWrites.remove(key, value)) {
+                continue;
+            }
+            publishBooleanImmediate(key, value.booleanValue(), false);
+        }
+        for (Map.Entry<String, Long> entry : pendingDoubleBitsWrites.entrySet()) {
+            if (entry == null) {
+                continue;
+            }
+            String key = entry.getKey();
+            Long bits = entry.getValue();
+            if (key == null || bits == null) {
+                continue;
+            }
+            if (!pendingDoubleBitsWrites.remove(key, bits)) {
+                continue;
+            }
+            publishDoubleImmediateBits(key, bits.longValue(), false);
+        }
+        for (Map.Entry<String, String> entry : pendingStringWrites.entrySet()) {
+            if (entry == null) {
+                continue;
+            }
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key == null || value == null) {
+                continue;
+            }
+            if (!pendingStringWrites.remove(key, value)) {
+                continue;
+            }
+            publishStringImmediate(key, value, false);
+        }
     }
 
     public RobotNetworkTables setFlag(Flag flag, boolean enabled) {
@@ -747,6 +884,124 @@ public final class RobotNetworkTables {
         return booleanPublishers.size() + doublePublishers.size() + stringPublishers.size();
     }
 
+    private void publishBooleanImmediate(String fullPath, boolean value, boolean dedupe) {
+        if (!cachedPublishingEnabled || fullPath == null || fullPath.isBlank()) {
+            return;
+        }
+        synchronized (publishStateLock) {
+            if (dedupe) {
+                Boolean previous = lastBooleanValues.put(fullPath, value);
+                if (previous != null && previous.booleanValue() == value) {
+                    return;
+                }
+            }
+            BooleanPublisher publisher = ensureBooleanPublisher(fullPath);
+            if (publisher == null) {
+                return;
+            }
+            markTopicSeen(fullPath);
+            publisher.set(value);
+        }
+    }
+
+    private void publishDoubleImmediateBits(String fullPath, long bits, boolean dedupe) {
+        if (!cachedPublishingEnabled || fullPath == null || fullPath.isBlank()) {
+            return;
+        }
+        synchronized (publishStateLock) {
+            if (dedupe) {
+                Long previousBits = lastDoubleBits.put(fullPath, bits);
+                if (previousBits != null && previousBits.longValue() == bits) {
+                    return;
+                }
+            }
+            DoublePublisher publisher = ensureDoublePublisher(fullPath);
+            if (publisher == null) {
+                return;
+            }
+            markTopicSeen(fullPath);
+            publisher.set(Double.longBitsToDouble(bits));
+        }
+    }
+
+    private void publishStringImmediate(String fullPath, String value, boolean dedupe) {
+        if (!cachedPublishingEnabled || fullPath == null || fullPath.isBlank()) {
+            return;
+        }
+        String safeValue = value != null ? value : "";
+        synchronized (publishStateLock) {
+            if (dedupe) {
+                String previous = lastStringValues.put(fullPath, safeValue);
+                if (safeValue.equals(previous)) {
+                    return;
+                }
+            }
+            StringPublisher publisher = ensureStringPublisher(fullPath);
+            if (publisher == null) {
+                return;
+            }
+            markTopicSeen(fullPath);
+            publisher.set(safeValue);
+        }
+    }
+
+    private BooleanPublisher ensureBooleanPublisher(String fullPath) {
+        BooleanPublisher existing = booleanPublishers.get(fullPath);
+        if (existing != null) {
+            return existing;
+        }
+        if (publisherLimitReached()) {
+            recordDroppedPublisherCreate();
+            return null;
+        }
+        BooleanTopic topic = nt.getBooleanTopic(fullPath);
+        BooleanPublisher created = topic.publish();
+        BooleanPublisher raced = booleanPublishers.putIfAbsent(fullPath, created);
+        if (raced != null) {
+            created.close();
+            return raced;
+        }
+        return created;
+    }
+
+    private DoublePublisher ensureDoublePublisher(String fullPath) {
+        DoublePublisher existing = doublePublishers.get(fullPath);
+        if (existing != null) {
+            return existing;
+        }
+        if (publisherLimitReached()) {
+            recordDroppedPublisherCreate();
+            return null;
+        }
+        DoubleTopic topic = nt.getDoubleTopic(fullPath);
+        DoublePublisher created = topic.publish();
+        DoublePublisher raced = doublePublishers.putIfAbsent(fullPath, created);
+        if (raced != null) {
+            created.close();
+            return raced;
+        }
+        return created;
+    }
+
+    private StringPublisher ensureStringPublisher(String fullPath) {
+        StringPublisher existing = stringPublishers.get(fullPath);
+        if (existing != null) {
+            return existing;
+        }
+        if (publisherLimitReached()) {
+            recordDroppedPublisherCreate();
+            return null;
+        }
+        StringTopic topic = nt.getStringTopic(fullPath);
+        StringPublisher created = topic.publish();
+        StringPublisher raced = stringPublishers.putIfAbsent(fullPath, created);
+        if (raced != null) {
+            created.close();
+            return raced;
+        }
+        return created;
+    }
+
     public final class Node {
         private final String path; // absolute, no trailing slash
         private final ConcurrentHashMap<String, Node> childNodes = new ConcurrentHashMap<>();
@@ -791,16 +1046,15 @@ public final class RobotNetworkTables {
             if (!cachedPublishingEnabled) {
                 return;
             }
-            BooleanPublisher pub = ensureBooleanPublisher(full);
-            if (pub == null) {
-                return;
-            }
-            markTopicSeen(full);
             Boolean previous = lastBooleanValues.put(full, value);
             if (previous != null && previous.booleanValue() == value) {
                 return;
             }
-            pub.set(value);
+            if (asyncPublishingEnabled) {
+                enqueueBooleanWrite(full, value);
+                return;
+            }
+            publishBooleanImmediate(full, value, false);
         }
 
         public void putDouble(String key, double value) {
@@ -808,17 +1062,16 @@ public final class RobotNetworkTables {
             if (!cachedPublishingEnabled) {
                 return;
             }
-            DoublePublisher pub = ensureDoublePublisher(full);
-            if (pub == null) {
-                return;
-            }
-            markTopicSeen(full);
             long bits = Double.doubleToLongBits(value);
             Long previousBits = lastDoubleBits.put(full, bits);
             if (previousBits != null && previousBits.longValue() == bits) {
                 return;
             }
-            pub.set(value);
+            if (asyncPublishingEnabled) {
+                enqueueDoubleWriteBits(full, bits);
+                return;
+            }
+            publishDoubleImmediateBits(full, bits, false);
         }
 
         public void putString(String key, String value) {
@@ -826,17 +1079,16 @@ public final class RobotNetworkTables {
             if (!cachedPublishingEnabled) {
                 return;
             }
-            StringPublisher pub = ensureStringPublisher(full);
-            if (pub == null) {
-                return;
-            }
-            markTopicSeen(full);
             String safeValue = value != null ? value : "";
             String previous = lastStringValues.put(full, safeValue);
             if (safeValue.equals(previous)) {
                 return;
             }
-            pub.set(safeValue);
+            if (asyncPublishingEnabled) {
+                enqueueStringWrite(full, safeValue);
+                return;
+            }
+            publishStringImmediate(full, safeValue, false);
         }
 
         public NetworkTable table() {
@@ -870,63 +1122,6 @@ public final class RobotNetworkTables {
             }
             String raced = relativeResolvedKeys.putIfAbsent(normalized, resolved);
             return raced != null ? raced : resolved;
-        }
-
-        private BooleanPublisher ensureBooleanPublisher(String fullPath) {
-            BooleanPublisher existing = booleanPublishers.get(fullPath);
-            if (existing != null) {
-                return existing;
-            }
-            if (publisherLimitReached()) {
-                recordDroppedPublisherCreate();
-                return null;
-            }
-            BooleanTopic topic = nt.getBooleanTopic(fullPath);
-            BooleanPublisher created = topic.publish();
-            BooleanPublisher raced = booleanPublishers.putIfAbsent(fullPath, created);
-            if (raced != null) {
-                created.close();
-                return raced;
-            }
-            return created;
-        }
-
-        private DoublePublisher ensureDoublePublisher(String fullPath) {
-            DoublePublisher existing = doublePublishers.get(fullPath);
-            if (existing != null) {
-                return existing;
-            }
-            if (publisherLimitReached()) {
-                recordDroppedPublisherCreate();
-                return null;
-            }
-            DoubleTopic topic = nt.getDoubleTopic(fullPath);
-            DoublePublisher created = topic.publish();
-            DoublePublisher raced = doublePublishers.putIfAbsent(fullPath, created);
-            if (raced != null) {
-                created.close();
-                return raced;
-            }
-            return created;
-        }
-
-        private StringPublisher ensureStringPublisher(String fullPath) {
-            StringPublisher existing = stringPublishers.get(fullPath);
-            if (existing != null) {
-                return existing;
-            }
-            if (publisherLimitReached()) {
-                recordDroppedPublisherCreate();
-                return null;
-            }
-            StringTopic topic = nt.getStringTopic(fullPath);
-            StringPublisher created = topic.publish();
-            StringPublisher raced = stringPublishers.putIfAbsent(fullPath, created);
-            if (raced != null) {
-                created.close();
-                return raced;
-            }
-            return created;
         }
 
         private static String normalizeChildPath(String childPath) {
@@ -1033,57 +1228,62 @@ public final class RobotNetworkTables {
     }
 
     private void pruneStaleTopics(long currentCycle) {
-        long cutoff = currentCycle - TOPIC_STALE_CYCLES;
-        if (cutoff <= 0) {
-            return;
-        }
-        Iterator<Map.Entry<String, Long>> iterator = topicPruneIterator;
-        if (iterator == null || !iterator.hasNext()) {
-            iterator = topicLastSeenCycle.entrySet().iterator();
-            topicPruneIterator = iterator;
-        }
+        synchronized (publishStateLock) {
+            long cutoff = currentCycle - TOPIC_STALE_CYCLES;
+            if (cutoff <= 0) {
+                return;
+            }
+            Iterator<Map.Entry<String, Long>> iterator = topicPruneIterator;
+            if (iterator == null || !iterator.hasNext()) {
+                iterator = topicLastSeenCycle.entrySet().iterator();
+                topicPruneIterator = iterator;
+            }
 
-        int processed = 0;
-        while (iterator != null && iterator.hasNext() && processed < TOPIC_PRUNE_SCAN_BUDGET_PER_CYCLE) {
-            Map.Entry<String, Long> entry = iterator.next();
-            processed++;
-            if (entry == null) {
-                continue;
-            }
-            String key = entry.getKey();
-            if (key == null) {
-                continue;
-            }
-            Long seen = entry.getValue();
-            if (seen != null && seen.longValue() >= cutoff) {
-                continue;
-            }
-            if (seen != null && !topicLastSeenCycle.remove(key, seen)) {
-                continue;
-            }
-            if (seen == null) {
-                topicLastSeenCycle.remove(key);
-            }
-            lastBooleanValues.remove(key);
-            lastDoubleBits.remove(key);
-            lastStringValues.remove(key);
+            int processed = 0;
+            while (iterator != null && iterator.hasNext() && processed < TOPIC_PRUNE_SCAN_BUDGET_PER_CYCLE) {
+                Map.Entry<String, Long> entry = iterator.next();
+                processed++;
+                if (entry == null) {
+                    continue;
+                }
+                String key = entry.getKey();
+                if (key == null) {
+                    continue;
+                }
+                Long seen = entry.getValue();
+                if (seen != null && seen.longValue() >= cutoff) {
+                    continue;
+                }
+                if (seen != null && !topicLastSeenCycle.remove(key, seen)) {
+                    continue;
+                }
+                if (seen == null) {
+                    topicLastSeenCycle.remove(key);
+                }
+                lastBooleanValues.remove(key);
+                lastDoubleBits.remove(key);
+                lastStringValues.remove(key);
+                pendingBooleanWrites.remove(key);
+                pendingDoubleBitsWrites.remove(key);
+                pendingStringWrites.remove(key);
 
-            BooleanPublisher booleanPublisher = booleanPublishers.remove(key);
-            if (booleanPublisher != null) {
-                booleanPublisher.close();
+                BooleanPublisher booleanPublisher = booleanPublishers.remove(key);
+                if (booleanPublisher != null) {
+                    booleanPublisher.close();
+                }
+                DoublePublisher doublePublisher = doublePublishers.remove(key);
+                if (doublePublisher != null) {
+                    doublePublisher.close();
+                }
+                StringPublisher stringPublisher = stringPublishers.remove(key);
+                if (stringPublisher != null) {
+                    stringPublisher.close();
+                }
             }
-            DoublePublisher doublePublisher = doublePublishers.remove(key);
-            if (doublePublisher != null) {
-                doublePublisher.close();
-            }
-            StringPublisher stringPublisher = stringPublishers.remove(key);
-            if (stringPublisher != null) {
-                stringPublisher.close();
-            }
-        }
 
-        if (iterator == null || !iterator.hasNext()) {
-            topicPruneIterator = null;
+            if (iterator == null || !iterator.hasNext()) {
+                topicPruneIterator = null;
+            }
         }
     }
 }
