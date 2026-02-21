@@ -830,7 +830,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         if (localization != null) {
             String autoPose = resolvedLocalizationConfig.autoPoseName();
-            autos.reset().poseResetter(pose -> Commands.runOnce(() -> localization.resetPose(autoPose, pose)));
+            autos.reset().poseResetter(pose -> Commands.runOnce(() -> {
+                localization.resetPose(autoPose, pose);
+                syncHeadingAxesToFieldPose();
+            }));
         }
 
         if (vision != null && edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
@@ -1197,6 +1200,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         diagnosticsSection.core().info("mode", "autonomousInit");
         prepareDrivetrainForModeTransition(false, true);
         resetAutoInitPoseIfConfigured();
+        syncHeadingAxesToFieldPose();
         scheduleAutonomousCommand();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_INIT);
         resetPeriodicRunners(autonomousPeriodicHookRunners);
@@ -3749,5 +3753,21 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             localization.resetPose(localization.getLocalizationConfig().autoPoseName(), routine.startingPose());
         });
+    }
+
+    private void syncHeadingAxesToFieldPose() {
+        RobotLocalization<?> localizationRef = localization;
+        RobotDrivetrain<?> drivetrainRef = drivetrain;
+        if (localizationRef == null || drivetrainRef == null) {
+            return;
+        }
+        Imu imu = drivetrainRef.imu().device();
+        if (imu == null) {
+            return;
+        }
+        Rotation2d heading = localizationRef.getFieldPose().getRotation();
+        imu.setVirtualAxis("field", heading);
+        imu.setVirtualAxis("driver", heading);
+        imu.setVirtualAxis("drift", heading);
     }
 }
