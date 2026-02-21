@@ -4,17 +4,18 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 
 import edu.wpi.first.util.datalog.BooleanArrayLogEntry;
 import edu.wpi.first.util.datalog.BooleanLogEntry;
 import edu.wpi.first.util.datalog.DataLog;
+import edu.wpi.first.util.datalog.DataLogBackgroundWriter;
 import edu.wpi.first.util.datalog.DoubleArrayLogEntry;
 import edu.wpi.first.util.datalog.DoubleLogEntry;
 import edu.wpi.first.util.datalog.IntegerArrayLogEntry;
 import edu.wpi.first.util.datalog.IntegerLogEntry;
 import edu.wpi.first.util.datalog.StringArrayLogEntry;
 import edu.wpi.first.util.datalog.StringLogEntry;
-import edu.wpi.first.wpilibj.DataLogManager;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj.RobotBase;
@@ -22,6 +23,9 @@ import edu.wpi.first.wpilibj.RobotBase;
 public final class DataLogTelemetrySink implements TelemetrySink {
     private static final String DEFAULT_REAL_DATALOG_DIR = "/home/lvuser/athena/logs";
     private static final String DEFAULT_SIM_DATALOG_DIR = "athena/logs";
+    private static final String ATHENA_LOG_FILENAME_PREFIX = "ATHENA_";
+    private static final String WPILOG_EXTENSION = ".wpilog";
+    private static final double DEFAULT_FLUSH_PERIOD_SECONDS = 0.25;
 
     private final DataLog log;
     private final String prefix;
@@ -30,8 +34,10 @@ public final class DataLogTelemetrySink implements TelemetrySink {
         String resolvedDirectory = resolveLogDirectory(logDirectory);
         ensureLogDirectoryExists(resolvedDirectory);
         pruneOldLogs(resolvedDirectory, retentionCount);
-        DataLogManager.start(resolvedDirectory);
-        this.log = DataLogManager.getLog();
+        this.log = new DataLogBackgroundWriter(
+                resolvedDirectory,
+                buildAthenaLogFilename(),
+                DEFAULT_FLUSH_PERIOD_SECONDS);
         this.prefix = prefix == null || prefix.isBlank() ? "" : prefix.trim();
     }
 
@@ -302,7 +308,10 @@ public final class DataLogTelemetrySink implements TelemetrySink {
             return;
         }
 
-        File[] logFiles = dir.listFiles((ignored, name) -> name != null && name.endsWith(".wpilog"));
+        File[] logFiles = dir.listFiles((ignored, name) ->
+                name != null
+                        && name.startsWith(ATHENA_LOG_FILENAME_PREFIX)
+                        && name.endsWith(WPILOG_EXTENSION));
         if (logFiles == null || logFiles.length <= keepCount) {
             return;
         }
@@ -320,5 +329,11 @@ public final class DataLogTelemetrySink implements TelemetrySink {
                         false);
             }
         }
+    }
+
+    private static String buildAthenaLogFilename() {
+        long nowMs = System.currentTimeMillis();
+        String nonce = Integer.toUnsignedString(ThreadLocalRandom.current().nextInt(), 16);
+        return ATHENA_LOG_FILENAME_PREFIX + nowMs + "_" + nonce + WPILOG_EXTENSION;
     }
 }

@@ -1002,7 +1002,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                                 directionalMismatch * 0.85);
                     }
                 }
-                reversalComponent = filterSlipEvidenceComponent(
+                double reversalComponent = filterSlipEvidenceComponent(
                         slipReversalComponent,
                         reversalComponentInstant,
                         dt,
@@ -1655,13 +1655,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         slipReversalComponent = 0.0;
         slipMode = SlipMode.NOMINAL;
         slipActive = false;
-        slipRecoverUntilSeconds = Double.NEGATIVE_INFINITY;
         lastUpdateTimestamp = resolvedTimestamp;
         lastFieldPoseForSlip = resolvedPose;
         lastFieldVelocityForSlip = new Translation2d();
         lastCommandedVxForSlip = 0.0;
         lastCommandedVyForSlip = 0.0;
-        reversalEventUntilSeconds = Double.NEGATIVE_INFINITY;
         lastSlipCause = "none";
         updateProcessStdDevScale(0.0);
     }
@@ -2602,7 +2600,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         Pose2d resolvedRawPose = rawPose != null ? rawPose : ZERO_POSE_2D;
         Rotation2d resolvedHeading = heading != null ? heading : resolvedRawPose.getRotation();
         boolean contactAssistActive = slipContactComponent >= CONTACT_ASSIST_COMPONENT;
-        boolean reversalAssistActive = slipReversalComponent > 0.30;
+        boolean reversalAssistActive = slipReversalComponent >= SLIP_REVERSAL_SUSTAIN_COMPONENT * 0.75;
         boolean tractionAssistActive =
                 slipMode == SlipMode.TRANSIENT
                         || slipMode == SlipMode.SLIP
@@ -2673,8 +2671,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (commandDirection != null) {
             double imuParallel = imuFieldVelocity.getX() * commandDirection.getX()
                     + imuFieldVelocity.getY() * commandDirection.getY();
-            boolean reversalWindowActive = nowSeconds <= reversalEventUntilSeconds;
-            if (reversalWindowActive && imuParallel < -REVERSAL_INERTIA_IMU_OPPOSE_MPS) {
+            if (reversalAssistActive && imuParallel < -REVERSAL_INERTIA_IMU_OPPOSE_MPS) {
                 double opposeNorm = clamp01(
                         (-imuParallel - REVERSAL_INERTIA_IMU_OPPOSE_MPS) / Math.max(commandedNorm, 0.2));
                 double reversalBlend = Math.max(
@@ -2704,7 +2701,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             Translation2d fusedPerpendicular = fusedVelocity.minus(direction.times(fusedParallel));
             double odomParallel = rawOdomVelocity.getX() * direction.getX() + rawOdomVelocity.getY() * direction.getY();
             double imuParallel = imuFieldVelocity.getX() * direction.getX() + imuFieldVelocity.getY() * direction.getY();
-            boolean reversalWindowActive = nowSeconds <= reversalEventUntilSeconds;
 
             if (slipContactComponent > 0.35) {
                 double contactBlend = clamp01((slipContactComponent - 0.35) / 0.65);
@@ -2737,7 +2733,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 }
             }
 
-            if (reversalWindowActive && imuParallel < -REVERSAL_INERTIA_IMU_OPPOSE_MPS) {
+            if (reversalAssistActive && imuParallel < -REVERSAL_INERTIA_IMU_OPPOSE_MPS) {
                 double opposeBlend = clamp01(
                         (-imuParallel - REVERSAL_INERTIA_IMU_OPPOSE_MPS) / Math.max(commandedNorm, 0.2));
                 double positiveAllowance = MathUtil.interpolate(
