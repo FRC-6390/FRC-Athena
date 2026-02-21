@@ -834,7 +834,10 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
                                     .location(locations[i]);
 
             if(rotationPID != null){
-                modules[i] = modules[i].pid(rotationPID);
+                modules[i] = modules[i].pid(p -> p
+                        .p(rotationPID.getP())
+                        .i(rotationPID.getI())
+                        .d(rotationPID.getD()));
             }
         } 
         if (imu != null) {

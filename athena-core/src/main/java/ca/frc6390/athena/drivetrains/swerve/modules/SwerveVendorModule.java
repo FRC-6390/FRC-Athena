@@ -84,7 +84,14 @@ public interface SwerveVendorModule {
         }
 
         default SwerveModuleConfig config(Translation2d location, AthenaMotor driveMotor, int drive, AthenaMotor steerMotor, int steer, PIDController rotationPID){
-            return config(location, driveMotor, drive, steerMotor, steer).pid(rotationPID);
+            SwerveModuleConfig module = config(location, driveMotor, drive, steerMotor, steer);
+            if (rotationPID == null) {
+                return module;
+            }
+            return module.pid(p -> p
+                    .p(rotationPID.getP())
+                    .i(rotationPID.getI())
+                    .d(rotationPID.getD()));
         }
 
         default SwerveModuleConfig config(Translation2d location, AthenaMotor driveMotor, int drive, AthenaMotor steerMotor, int steer, PIDController rotationPID, AthenaEncoder encoderType, int encoder){

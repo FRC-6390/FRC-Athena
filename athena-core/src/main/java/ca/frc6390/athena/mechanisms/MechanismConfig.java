@@ -395,6 +395,12 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
+        public EncoderSection<T> canbus(String canbus) {
+            owner.updateData(builder -> builder.canbus(canbus));
+            return this;
+        }
+
+
         public EncoderSection<T> custom(java.util.function.DoubleSupplier positionSupplier) {
             owner.shouldCustomEncoder = true;
             owner.customEncoderPos = positionSupplier;
