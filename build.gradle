@@ -82,7 +82,7 @@ dependencies {
     implementation "com.pathplanner.lib:PathplannerLib-java:${athenaVersions.pathplanner}"
     implementation "com.revrobotics.frc:REVLib-java:${athenaVersions.rev}"
     implementation "choreo:ChoreoLib-java:${athenaVersions.choreo}"
-    implementation "com.studica.frc:Studica-java:${athenaVersions.studica}"
+    // implementation "com.studica.frc:Studica-java:${athenaVersions.studica}"
 }
 
 // Set up exports properly
