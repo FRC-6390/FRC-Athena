@@ -127,6 +127,59 @@ final class RobotLocalizationSlipSolverTest {
     }
 
     @Test
+    void wallContactHoldPersistsWhenCorrectedOdomTemporarilyDrops() throws Exception {
+        TestImu imu = new TestImu();
+        imu.xSpeedMetersPerSecond = 1.0;
+        imu.ySpeedMetersPerSecond = 0.0;
+
+        RobotSpeeds robotSpeeds = new RobotSpeeds(4.5, Math.PI);
+        robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 2.0, 0.0, 0.0);
+
+        MutableWheelPositions wheelPositions = new MutableWheelPositions();
+        RobotLocalization<DifferentialDriveWheelPositions> localization = new RobotLocalization<>(
+                new DifferentialTestEstimatorFactory(0.62),
+                new RobotLocalizationConfig(),
+                robotSpeeds,
+                imu,
+                wheelPositions::snapshot);
+
+        setField(localization, "lastUpdateTimestamp", 0.0);
+        setField(localization, "lastFieldPoseForSlip", new Pose2d());
+        setField(localization, "lastFieldVelocityForSlip", new Translation2d());
+
+        setField(localization, "fieldPose", new Pose2d(0.20, 0.0, new Rotation2d()));
+        invoke(localization, "updateSlipState", new Class<?>[] { double.class }, 0.10);
+
+        imu.xSpeedMetersPerSecond = 0.0;
+        setField(localization, "fieldPose", new Pose2d(0.40, 0.0, new Rotation2d()));
+        invoke(localization, "updateSlipState", new Class<?>[] { double.class }, 0.20);
+
+        setField(localization, "fieldPose", new Pose2d(0.42, 0.0, new Rotation2d()));
+        invoke(localization, "updateSlipState", new Class<?>[] { double.class }, 0.30);
+
+        double contactComponent = (double) getField(localization, "slipContactComponent");
+        assertTrue(
+                contactComponent >= 0.40,
+                "expected recent wall-contact mismatch evidence to remain latched for a short hold window");
+
+        setField(localization, "lastRawEstimatorPoseForSlipFusion", new Pose2d(0.40, 0.0, new Rotation2d()));
+        setField(localization, "lastCorrectedPoseForSlipFusion", new Pose2d(0.22, 0.0, new Rotation2d()));
+        setField(localization, "lastSlipFusionTimestamp", 0.20);
+
+        Translation2d corrected = (Translation2d) invoke(
+                localization,
+                "computeSlipAwareFieldTranslation",
+                new Class<?>[] { Pose2d.class, Rotation2d.class, double.class },
+                new Pose2d(0.60, 0.0, new Rotation2d()),
+                new Rotation2d(),
+                0.30);
+
+        assertTrue(
+                corrected.getX() < 0.28,
+                "expected held contact evidence to keep translation from pushing through a static obstacle");
+    }
+
+    @Test
     void quickDirectionChangeWheelspinSuppressesReversalTranslationSpike() throws Exception {
         TestImu imu = new TestImu();
         imu.xSpeedMetersPerSecond = 1.0;
@@ -173,6 +226,49 @@ final class RobotLocalizationSlipSolverTest {
         assertTrue(
                 corrected.getX() > 0.15,
                 "expected slip fusion to reject the instantaneous reversal jump from wheelspin");
+    }
+
+    @Test
+    void reversalSlipLatchPreventsImmediateClearOnSingleCalmCycle() throws Exception {
+        TestImu imu = new TestImu();
+        imu.xSpeedMetersPerSecond = 1.0;
+        imu.ySpeedMetersPerSecond = 0.0;
+
+        RobotSpeeds robotSpeeds = new RobotSpeeds(4.5, Math.PI);
+        robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 2.0, 0.0, 0.0);
+
+        MutableWheelPositions wheelPositions = new MutableWheelPositions();
+        RobotLocalization<DifferentialDriveWheelPositions> localization = new RobotLocalization<>(
+                new DifferentialTestEstimatorFactory(0.62),
+                new RobotLocalizationConfig(),
+                robotSpeeds,
+                imu,
+                wheelPositions::snapshot);
+
+        setField(localization, "lastUpdateTimestamp", 0.0);
+        setField(localization, "lastFieldPoseForSlip", new Pose2d());
+        setField(localization, "lastFieldVelocityForSlip", new Translation2d());
+
+        setField(localization, "fieldPose", new Pose2d(0.20, 0.0, new Rotation2d()));
+        invoke(localization, "updateSlipState", new Class<?>[] { double.class }, 0.10);
+
+        robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, -2.0, 0.0, 0.0);
+        imu.xSpeedMetersPerSecond = 0.0;
+        setField(localization, "fieldPose", new Pose2d(0.00, 0.0, new Rotation2d()));
+        invoke(localization, "updateSlipState", new Class<?>[] { double.class }, 0.20);
+        Map<String, Object> summary = localization.getDiagnosticsSummary();
+        assertEquals("SLIP", summary.get("slipMode"),
+                "expected reversal mismatch to enter SLIP before hold behavior is evaluated");
+
+        robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 0.0, 0.0, 0.0);
+        setField(localization, "fieldPose", new Pose2d(0.00, 0.0, new Rotation2d()));
+        invoke(localization, "updateSlipState", new Class<?>[] { double.class }, 0.30);
+        Map<String, Object> afterSingleCalmCycle = localization.getDiagnosticsSummary();
+        assertEquals("SLIP", afterSingleCalmCycle.get("slipMode"),
+                "expected SLIP mode to remain latched through brief calm windows instead of clearing instantly");
+        assertTrue(
+                Boolean.TRUE.equals(afterSingleCalmCycle.get("slipActive")),
+                "expected slipActive to remain true while latch hold is active");
     }
 
     @Test
@@ -223,6 +319,12 @@ final class RobotLocalizationSlipSolverTest {
         Field field = RobotLocalization.class.getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    private static Object getField(Object target, String fieldName) throws Exception {
+        Field field = RobotLocalization.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private static Object invoke(Object target, String name, Class<?>[] parameterTypes, Object... args) throws Exception {

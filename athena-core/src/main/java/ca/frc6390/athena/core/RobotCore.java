@@ -1199,8 +1199,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void autonomousInit() {
         diagnosticsSection.core().info("mode", "autonomousInit");
         prepareDrivetrainForModeTransition(false, true);
-        resetAutoInitPoseIfConfigured();
-        syncHeadingAxesToFieldPose();
+        boolean autoPoseReset = resetAutoInitPoseIfConfigured();
+        if (autoPoseReset) {
+            syncHeadingAxesToFieldPose();
+        }
         scheduleAutonomousCommand();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_INIT);
         resetPeriodicRunners(autonomousPeriodicHookRunners);
@@ -3741,18 +3743,35 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
-    private void resetAutoInitPoseIfConfigured() {
+    private boolean resetAutoInitPoseIfConfigured() {
         if (localization == null) {
-            return;
+            return false;
         }
-        autos.selection().selected().ifPresent(routine -> {
-            Boolean override = routine.autoInitResetOverride();
-            boolean shouldReset = override != null ? override : isAutoInitResetEnabled();
-            if (!shouldReset || !routine.hasStartingPose()) {
-                return;
-            }
-            localization.resetPose(localization.getLocalizationConfig().autoPoseName(), routine.startingPose());
-        });
+        RobotAuto.AutoRoutine routine = autos.selection().selected().orElse(null);
+        if (routine == null) {
+            return false;
+        }
+        Boolean override = routine.autoInitResetOverride();
+        boolean shouldReset = override != null ? override : isAutoInitResetEnabled();
+        if (!shouldReset) {
+            return false;
+        }
+
+        Pose2d resetPose = null;
+        if (routine.hasStartingPose()) {
+            resetPose = routine.startingPose();
+        } else {
+            resetPose = autos.selection().selectedPoses()
+                    .filter(poses -> poses != null && !poses.isEmpty())
+                    .map(poses -> poses.get(0))
+                    .orElse(null);
+        }
+        if (resetPose == null) {
+            return false;
+        }
+
+        localization.resetPose(localization.getLocalizationConfig().autoPoseName(), resetPose);
+        return true;
     }
 
     private void syncHeadingAxesToFieldPose() {

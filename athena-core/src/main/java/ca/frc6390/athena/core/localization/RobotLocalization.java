@@ -114,6 +114,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final double CONTACT_LOCK_MAX_ODOM_WEIGHT = 0.08;
     private static final double REVERSAL_INERTIA_IMU_OPPOSE_MPS = 0.05;
     private static final double REVERSAL_NEW_DIRECTION_ALLOWANCE_MPS = 0.06;
+    private static final double CONTACT_COMPONENT_HOLD_SECONDS = 0.45;
+    private static final double REVERSAL_COMPONENT_HOLD_SECONDS = 0.30;
+    private static final double REVERSAL_COMPONENT_HOLD_TRIGGER = 0.25;
+    private static final double SLIP_MODE_MIN_HOLD_SECONDS = 0.30;
+    private static final double SLIP_CLEAR_CONFIRM_SECONDS = 0.22;
+    private static final double SLIP_REVERSAL_SUSTAIN_COMPONENT = 0.20;
     private static final int POSE_STRUCT_PRUNE_PER_CYCLE = 8;
     private static final int BOUNDING_BOX_STATIC_PUBLISH_PERIOD = 10;
 
@@ -170,6 +176,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private double slipScoreRaw = 0.0;
     private double slipContactComponent = 0.0;
     private double slipReversalComponent = 0.0;
+    private double heldContactComponent = 0.0;
+    private double heldContactUntilSeconds = Double.NEGATIVE_INFINITY;
+    private double heldReversalComponent = 0.0;
+    private double heldReversalUntilSeconds = Double.NEGATIVE_INFINITY;
+    private double slipModeHoldUntilSeconds = Double.NEGATIVE_INFINITY;
+    private double slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
     private double slipRecoverUntilSeconds = Double.NEGATIVE_INFINITY;
     private SlipMode slipMode = SlipMode.NOMINAL;
     private Pose2d lastRawEstimatorPoseForSlipFusion = new Pose2d();
@@ -963,17 +975,20 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                             / Math.max(REVERSAL_IMU_ACCEL_MIN_MPS2, 1e-6));
                     reversalComponent = odomExcess * imuDeficit;
                 }
+                reversalComponent = applyReversalComponentHold(now, reversalComponent, backend);
                 slipReversalComponent = reversalComponent;
 
                 double contactComponent = 0.0;
+                boolean sustainingSlipEvidence =
+                        slipMode != SlipMode.NOMINAL || slipScore >= SLIP_TRANSIENT_EXIT_SCORE;
                 if (imuLinearSignalObserved
                         && commandedSpeed > WHEELSPIN_COMMAND_SPEED_MPS
-                        && odomSpeed > WHEELSPIN_ODOM_SPEED_MPS) {
+                        && (odomSpeed > WHEELSPIN_ODOM_SPEED_MPS || sustainingSlipEvidence)) {
+                    double expectedLinearSpeed = Math.max(commandedSpeed, odomSpeed);
                     double allowedImuSpeed =
-                            Math.max(WHEELSPIN_IMU_SPEED_FLOOR_MPS, odomSpeed * WHEELSPIN_IMU_SPEED_RATIO);
+                            Math.max(WHEELSPIN_IMU_SPEED_FLOOR_MPS, expectedLinearSpeed * WHEELSPIN_IMU_SPEED_RATIO);
                     contactComponent = clamp01((allowedImuSpeed - imuLinearSpeed) / Math.max(allowedImuSpeed, 0.05));
 
-                    double expectedLinearSpeed = Math.max(commandedSpeed, odomSpeed);
                     if (expectedLinearSpeed > 1e-6) {
                         double imuSpeedRatio = imuLinearSpeed / expectedLinearSpeed;
                         double deficitComponent = clamp01(
@@ -984,6 +999,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                         contactComponent = Math.max(contactComponent, deficitComponent);
                     }
                 }
+                contactComponent = applyContactComponentHold(now, contactComponent, backend);
                 slipContactComponent = contactComponent;
 
                 slipScoreRaw = clamp01(
@@ -1012,6 +1028,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 lastCommandedVxForSlip = 0.0;
                 lastCommandedVyForSlip = 0.0;
                 reversalEventUntilSeconds = Double.NEGATIVE_INFINITY;
+                heldContactComponent = 0.0;
+                heldContactUntilSeconds = Double.NEGATIVE_INFINITY;
+                heldReversalComponent = 0.0;
+                heldReversalUntilSeconds = Double.NEGATIVE_INFINITY;
+                slipModeHoldUntilSeconds = Double.NEGATIVE_INFINITY;
+                slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
                 slipContactComponent = 0.0;
                 slipReversalComponent = 0.0;
                 slipScoreRaw = slipScore;
@@ -1069,46 +1091,139 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return MathUtil.clamp(value, 0.0, 1.0);
     }
 
+    private double applyContactComponentHold(
+            double nowSeconds,
+            double contactComponent,
+            RobotLocalizationConfig.BackendConfig backend) {
+        double holdSeconds = Math.max(CONTACT_COMPONENT_HOLD_SECONDS, backend.slipHoldSeconds());
+        if (contactComponent >= CONTACT_ASSIST_COMPONENT) {
+            heldContactComponent = Math.max(heldContactComponent, contactComponent);
+            heldContactUntilSeconds = nowSeconds + holdSeconds;
+            return contactComponent;
+        }
+        if (nowSeconds <= heldContactUntilSeconds) {
+            double remaining = Math.max(0.0, heldContactUntilSeconds - nowSeconds);
+            double decayScale = holdSeconds > 1e-6 ? clamp01(remaining / holdSeconds) : 0.0;
+            double heldComponent = heldContactComponent * decayScale;
+            if (decayScale <= 1e-4) {
+                heldContactComponent = 0.0;
+            }
+            return Math.max(contactComponent, heldComponent);
+        }
+        heldContactComponent = 0.0;
+        heldContactUntilSeconds = Double.NEGATIVE_INFINITY;
+        return contactComponent;
+    }
+
+    private double applyReversalComponentHold(
+            double nowSeconds,
+            double reversalComponent,
+            RobotLocalizationConfig.BackendConfig backend) {
+        double holdSeconds = Math.max(REVERSAL_COMPONENT_HOLD_SECONDS, backend.slipHoldSeconds() * 0.75);
+        if (reversalComponent >= REVERSAL_COMPONENT_HOLD_TRIGGER) {
+            heldReversalComponent = Math.max(heldReversalComponent, reversalComponent);
+            heldReversalUntilSeconds = nowSeconds + holdSeconds;
+            return reversalComponent;
+        }
+        if (nowSeconds <= heldReversalUntilSeconds) {
+            double remaining = Math.max(0.0, heldReversalUntilSeconds - nowSeconds);
+            double decayScale = holdSeconds > 1e-6 ? clamp01(remaining / holdSeconds) : 0.0;
+            double heldComponent = heldReversalComponent * decayScale;
+            if (decayScale <= 1e-4) {
+                heldReversalComponent = 0.0;
+            }
+            return Math.max(reversalComponent, heldComponent);
+        }
+        heldReversalComponent = 0.0;
+        heldReversalUntilSeconds = Double.NEGATIVE_INFINITY;
+        return reversalComponent;
+    }
+
     private void updateSlipMode(
             double now,
             double score,
             double contactComponent,
             RobotLocalizationConfig.BackendConfig backend) {
         double recoverHoldSeconds = Math.max(SLIP_RECOVER_TIME_SECONDS, backend.slipHoldSeconds());
+        double modeHoldSeconds = Math.max(SLIP_MODE_MIN_HOLD_SECONDS, backend.slipHoldSeconds());
+        boolean slipEvidencePresent = score >= SLIP_TRANSIENT_EXIT_SCORE
+                || contactComponent >= CONTACT_ASSIST_COMPONENT
+                || slipReversalComponent >= SLIP_REVERSAL_SUSTAIN_COMPONENT;
+        if (slipEvidencePresent && slipMode != SlipMode.NOMINAL) {
+            slipModeHoldUntilSeconds = now + modeHoldSeconds;
+            slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
+        }
+        boolean holdActive = now < slipModeHoldUntilSeconds;
+        boolean clearConfirmed = updateSlipClearConfirmation(now, slipEvidencePresent);
+
         switch (slipMode) {
             case NOMINAL:
                 if (score >= SLIP_ACTIVE_ENTER_SCORE || contactComponent >= 0.90) {
-                    slipMode = SlipMode.SLIP;
-                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE || contactComponent >= CONTACT_ASSIST_COMPONENT) {
-                    slipMode = SlipMode.TRANSIENT;
+                    enterSlipMode(SlipMode.SLIP, now, modeHoldSeconds);
+                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE
+                        || contactComponent >= CONTACT_ASSIST_COMPONENT
+                        || slipReversalComponent >= SLIP_REVERSAL_SUSTAIN_COMPONENT) {
+                    enterSlipMode(SlipMode.TRANSIENT, now, modeHoldSeconds);
                 }
                 break;
             case TRANSIENT:
                 if (score >= SLIP_ACTIVE_ENTER_SCORE || contactComponent >= 0.90) {
-                    slipMode = SlipMode.SLIP;
-                } else if (score <= SLIP_TRANSIENT_EXIT_SCORE && contactComponent < CONTACT_ASSIST_COMPONENT) {
+                    enterSlipMode(SlipMode.SLIP, now, modeHoldSeconds);
+                } else if (!holdActive
+                        && clearConfirmed
+                        && score <= SLIP_TRANSIENT_EXIT_SCORE
+                        && contactComponent < CONTACT_ASSIST_COMPONENT
+                        && slipReversalComponent < SLIP_REVERSAL_SUSTAIN_COMPONENT) {
                     slipMode = SlipMode.NOMINAL;
+                    slipModeHoldUntilSeconds = Double.NEGATIVE_INFINITY;
+                    slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
                 }
                 break;
             case SLIP:
-                if (score <= SLIP_ACTIVE_EXIT_SCORE) {
+                if (!holdActive && clearConfirmed && score <= SLIP_ACTIVE_EXIT_SCORE) {
                     slipMode = SlipMode.RECOVER;
                     slipRecoverUntilSeconds = now + recoverHoldSeconds;
+                    slipModeHoldUntilSeconds = now + modeHoldSeconds;
+                    slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
                 }
                 break;
             case RECOVER:
                 if (score >= SLIP_ACTIVE_ENTER_SCORE) {
-                    slipMode = SlipMode.SLIP;
-                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE || contactComponent >= CONTACT_ASSIST_COMPONENT) {
-                    slipMode = SlipMode.TRANSIENT;
-                } else if (now >= slipRecoverUntilSeconds) {
+                    enterSlipMode(SlipMode.SLIP, now, modeHoldSeconds);
+                } else if (score >= SLIP_TRANSIENT_ENTER_SCORE
+                        || contactComponent >= CONTACT_ASSIST_COMPONENT
+                        || slipReversalComponent >= SLIP_REVERSAL_SUSTAIN_COMPONENT) {
+                    enterSlipMode(SlipMode.TRANSIENT, now, modeHoldSeconds);
+                } else if (!holdActive && clearConfirmed && now >= slipRecoverUntilSeconds) {
                     slipMode = SlipMode.NOMINAL;
+                    slipModeHoldUntilSeconds = Double.NEGATIVE_INFINITY;
+                    slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
                 }
                 break;
             default:
                 slipMode = SlipMode.NOMINAL;
+                slipModeHoldUntilSeconds = Double.NEGATIVE_INFINITY;
+                slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
                 break;
         }
+    }
+
+    private void enterSlipMode(SlipMode mode, double nowSeconds, double holdSeconds) {
+        slipMode = mode;
+        slipModeHoldUntilSeconds = nowSeconds + Math.max(0.0, holdSeconds);
+        slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
+    }
+
+    private boolean updateSlipClearConfirmation(double nowSeconds, boolean slipEvidencePresent) {
+        if (slipEvidencePresent) {
+            slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
+            return false;
+        }
+        if (!Double.isFinite(slipClearCandidateSinceSeconds)) {
+            slipClearCandidateSinceSeconds = nowSeconds;
+            return false;
+        }
+        return (nowSeconds - slipClearCandidateSinceSeconds) >= SLIP_CLEAR_CONFIRM_SECONDS;
     }
 
     private static String dominantSlipCause(
@@ -1555,6 +1670,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         slipScoreRaw = 0.0;
         slipContactComponent = 0.0;
         slipReversalComponent = 0.0;
+        heldContactComponent = 0.0;
+        heldContactUntilSeconds = Double.NEGATIVE_INFINITY;
+        heldReversalComponent = 0.0;
+        heldReversalUntilSeconds = Double.NEGATIVE_INFINITY;
+        slipModeHoldUntilSeconds = Double.NEGATIVE_INFINITY;
+        slipClearCandidateSinceSeconds = Double.NEGATIVE_INFINITY;
         slipMode = SlipMode.NOMINAL;
         slipActive = false;
         slipRecoverUntilSeconds = Double.NEGATIVE_INFINITY;

@@ -48,7 +48,9 @@ import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.sysid.SysIdRoutineLog;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
+import edu.wpi.first.wpilibj.smartdashboard.SendableBuilderImpl;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
@@ -111,6 +113,13 @@ public class SwerveDrivetrain extends SubsystemBase
   private RobotNetworkTables.Node ntSysIdNode;
   private RobotNetworkTables.Node ntSimNode;
   private RobotNetworkTables.Node[] ntModuleNodes;
+  private String ntSysIdCommandsPath;
+  private NtCommandButton ntSysIdQuasistaticForwardButton;
+  private NtCommandButton ntSysIdQuasistaticReverseButton;
+  private NtCommandButton ntSysIdDynamicForwardButton;
+  private NtCommandButton ntSysIdDynamicReverseButton;
+  private NtCommandButton ntSysIdCancelButton;
+  private Command activeSysIdCommand;
   
   public SwerveDrivetrain(Imu imu, SwerveModuleConfig... modules) {
 
@@ -457,8 +466,13 @@ public class SwerveDrivetrain extends SubsystemBase
     ChassisSpeeds speed = calculatedSpeeds;
     double nowSeconds = nowSeconds();
 
-    if (enableDriftCorrection) {
+    boolean driverControlActive =
+        robotSpeeds.isSpeedsSourceActive(RobotSpeeds.DRIVE_SOURCE);
+    if (enableDriftCorrection && driverControlActive) {
       speed.omegaRadiansPerSecond += driftCorrection(speed);
+    } else {
+      // Prevent stale teleop heading hold from biasing auto rotation after mode transitions.
+      desiredHeading = imu.getVirtualAxis("drift").getRadians();
     }
     speed = applyMotionLimits(speed, nowSeconds);
 
@@ -554,6 +568,7 @@ public class SwerveDrivetrain extends SubsystemBase
     ntSysIdNode.putDouble("stepVoltageV", sysIdStepVoltage());
     ntSysIdNode.putDouble("timeoutSec", sysIdTimeoutSeconds());
     ntSysIdNode.putBoolean("active", sysIdActive());
+    processNetworkTablesSysIdCommands(ntSysIdNode.child("Commands"));
 
     if (simulation != null) {
       Pose2d pose = simulationPose();
@@ -696,6 +711,135 @@ public class SwerveDrivetrain extends SubsystemBase
     return Commands.runOnce(this::startSysId)
         .andThen(base)
         .finallyDo(this::stopSysId);
+  }
+
+  private void processNetworkTablesSysIdCommands(RobotNetworkTables.Node commandsNode) {
+    if (commandsNode == null) {
+      return;
+    }
+    ensureSysIdCommandEntries(commandsNode);
+    updateCommandButton(ntSysIdQuasistaticForwardButton);
+    updateCommandButton(ntSysIdQuasistaticReverseButton);
+    updateCommandButton(ntSysIdDynamicForwardButton);
+    updateCommandButton(ntSysIdDynamicReverseButton);
+    updateCommandButton(ntSysIdCancelButton);
+    if (activeSysIdCommand != null && !CommandScheduler.getInstance().isScheduled(activeSysIdCommand)) {
+      activeSysIdCommand = null;
+    }
+  }
+
+  private void ensureSysIdCommandEntries(RobotNetworkTables.Node commandsNode) {
+    String path = commandsNode.path();
+    boolean samePath = (path == null && ntSysIdCommandsPath == null)
+        || (path != null && path.equals(ntSysIdCommandsPath));
+    if (samePath
+        && ntSysIdQuasistaticForwardButton != null
+        && ntSysIdQuasistaticReverseButton != null
+        && ntSysIdDynamicForwardButton != null
+        && ntSysIdDynamicReverseButton != null
+        && ntSysIdCancelButton != null) {
+      return;
+    }
+    closeSysIdCommandButtons();
+    ntSysIdCommandsPath = path;
+    ntSysIdQuasistaticForwardButton = createCommandButton(
+        commandsNode.child("RunQuasistaticForward"),
+        "RunQuasistaticForward",
+        Commands.runOnce(() -> scheduleSysIdCommand(
+            sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward)))));
+    ntSysIdQuasistaticReverseButton = createCommandButton(
+        commandsNode.child("RunQuasistaticReverse"),
+        "RunQuasistaticReverse",
+        Commands.runOnce(() -> scheduleSysIdCommand(
+            sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse)))));
+    ntSysIdDynamicForwardButton = createCommandButton(
+        commandsNode.child("RunDynamicForward"),
+        "RunDynamicForward",
+        Commands.runOnce(() -> scheduleSysIdCommand(
+            sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward)))));
+    ntSysIdDynamicReverseButton = createCommandButton(
+        commandsNode.child("RunDynamicReverse"),
+        "RunDynamicReverse",
+        Commands.runOnce(() -> scheduleSysIdCommand(
+            sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse)))));
+    ntSysIdCancelButton = createCommandButton(
+        commandsNode.child("Cancel"),
+        "Cancel",
+        Commands.runOnce(this::cancelActiveSysIdCommand).ignoringDisable(true));
+  }
+
+  private void scheduleSysIdCommand(Command command) {
+    if (command == null) {
+      return;
+    }
+    if (activeSysIdCommand != null && CommandScheduler.getInstance().isScheduled(activeSysIdCommand)) {
+      return;
+    }
+    activeSysIdCommand = command;
+    CommandScheduler.getInstance().schedule(command);
+  }
+
+  private void cancelActiveSysIdCommand() {
+    if (activeSysIdCommand == null) {
+      return;
+    }
+    if (CommandScheduler.getInstance().isScheduled(activeSysIdCommand)) {
+      activeSysIdCommand.cancel();
+    }
+    activeSysIdCommand = null;
+  }
+
+  private void closeSysIdCommandButtons() {
+    closeCommandButton(ntSysIdQuasistaticForwardButton);
+    closeCommandButton(ntSysIdQuasistaticReverseButton);
+    closeCommandButton(ntSysIdDynamicForwardButton);
+    closeCommandButton(ntSysIdDynamicReverseButton);
+    closeCommandButton(ntSysIdCancelButton);
+    ntSysIdQuasistaticForwardButton = null;
+    ntSysIdQuasistaticReverseButton = null;
+    ntSysIdDynamicForwardButton = null;
+    ntSysIdDynamicReverseButton = null;
+    ntSysIdCancelButton = null;
+  }
+
+  private static void closeCommandButton(NtCommandButton button) {
+    if (button != null) {
+      button.close();
+    }
+  }
+
+  private static void updateCommandButton(NtCommandButton button) {
+    if (button != null) {
+      button.update();
+    }
+  }
+
+  private static NtCommandButton createCommandButton(RobotNetworkTables.Node node, String name, Command command) {
+    if (node == null || command == null) {
+      return null;
+    }
+    Command named = command.withName(name != null ? name : command.getName());
+    return new NtCommandButton(node, named);
+  }
+
+  private static final class NtCommandButton {
+    private final SendableBuilderImpl builder;
+
+    private NtCommandButton(RobotNetworkTables.Node node, Command command) {
+      builder = new SendableBuilderImpl();
+      builder.setTable(node.table());
+      command.initSendable(builder);
+      builder.startListeners();
+      builder.update();
+    }
+
+    private void update() {
+      builder.update();
+    }
+
+    private void close() {
+      builder.close();
+    }
   }
 
   private double getVoltageLimit() {
