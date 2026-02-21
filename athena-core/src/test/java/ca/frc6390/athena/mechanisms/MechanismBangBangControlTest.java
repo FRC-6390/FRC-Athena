@@ -37,13 +37,13 @@ final class MechanismBangBangControlTest {
                 .bangBang("assist", OutputType.VOLTAGE, 5.0, -3.0, 0.2)
                 .periodic("assist"));
 
-        MechanismConfig.BangBangProfile resolved = cfg.controlLoopBangBangProfiles.get("assist");
+        MechanismConfig.BangBangProfile resolved = cfg.controlLoopBangBangProfiles().get("assist");
         assertEquals(OutputType.VOLTAGE, resolved.outputType());
         assertEquals(5.0, resolved.highOutput(), 1e-9);
         assertEquals(-3.0, resolved.lowOutput(), 1e-9);
         assertEquals(0.2, resolved.tolerance(), 1e-9);
-        assertEquals(1, cfg.controlLoops.size());
-        assertEquals("assist", cfg.controlLoops.get(0).name());
-        assertTrue(cfg.controlLoopBangBangProfiles.containsKey("assist"));
+        assertEquals(1, cfg.controlLoops().size());
+        assertEquals("assist", cfg.controlLoops().get(0).name());
+        assertTrue(cfg.controlLoopBangBangProfiles().containsKey("assist"));
     }
 }

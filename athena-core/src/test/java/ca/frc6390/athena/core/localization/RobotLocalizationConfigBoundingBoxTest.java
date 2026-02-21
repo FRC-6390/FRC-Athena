@@ -14,8 +14,8 @@ final class RobotLocalizationConfigBoundingBoxTest {
         PoseBoundingBox2d first = new PoseBoundingBox2d(1.0, 2.0, 3.0, 4.0);
         PoseBoundingBox2d second = new PoseBoundingBox2d(5.0, 6.0, 7.0, 8.0);
 
-        config.addBoundingBox("lane", first);
-        config.addBoundingBox("lane", second);
+        config.config().boundingBox("lane", first);
+        config.config().boundingBox("lane", second);
 
         List<RobotLocalizationConfig.NamedBoundingBox> boxes = config.boundingBoxes();
         assertEquals(1, boxes.size());
@@ -29,8 +29,8 @@ final class RobotLocalizationConfigBoundingBoxTest {
         PoseBoundingBox2d lane = new PoseBoundingBox2d(1.0, 2.0, 3.0, 4.0);
         PoseBoundingBox2d source = new PoseBoundingBox2d(5.0, 6.0, 7.0, 8.0);
 
-        config.addBoundingBox("lane", lane);
-        config.addBoundingBox("source", source);
+        config.config().boundingBox("lane", lane);
+        config.config().boundingBox("source", source);
 
         List<RobotLocalizationConfig.NamedBoundingBox> boxes = config.boundingBoxes();
         assertEquals(2, boxes.size());

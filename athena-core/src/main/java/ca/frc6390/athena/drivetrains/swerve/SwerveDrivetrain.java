@@ -772,9 +772,7 @@ public class SwerveDrivetrain extends SubsystemBase
     if (command == null) {
       return;
     }
-    if (activeSysIdCommand != null && CommandScheduler.getInstance().isScheduled(activeSysIdCommand)) {
-      return;
-    }
+    cancelActiveSysIdCommand();
     activeSysIdCommand = command;
     CommandScheduler.getInstance().schedule(command);
   }

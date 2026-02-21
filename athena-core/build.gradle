@@ -2,6 +2,10 @@ plugins {
     id 'java'
 }
 
+configurations {
+    wpilibTestNatives
+}
+
 dependencies {
     // Core stays vendor-free; shared interfaces and bridges live here.
     implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
@@ -10,15 +14,41 @@ dependencies {
     implementation "edu.wpi.first.cscore:cscore-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.hal:hal-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.ext.wpilibVersion}"
+    implementation "us.hebi.quickbuf:quickbuf-runtime:1.4"
     implementation "com.fasterxml.jackson.core:jackson-annotations:${rootProject.ext.athenaVersions.jackson}"
     implementation "com.fasterxml.jackson.core:jackson-core:${rootProject.ext.athenaVersions.jackson}"
     implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.athenaVersions.jackson}"
     implementation "org.tomlj:tomlj:1.1.1"
     testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+
+    // WPILib JNI libraries are distributed as native zips and are needed for tests that
+    // construct SubsystemBase/CommandScheduler or touch WPILib JNI-backed APIs.
+    wpilibTestNatives "edu.wpi.first.hal:hal-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.wpinet:wpinet-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.ntcore:ntcore-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.cscore:cscore-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.apriltag:apriltag-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+}
+
+def extractedWpilibNativesDir = layout.buildDirectory.dir("wpilib-test-natives")
+
+tasks.register("extractWpilibTestNatives", Copy) {
+    from {
+        configurations.wpilibTestNatives.collect { zipTree(it) }
+    }
+    include "linux/x86-64/shared/*.so"
+    into extractedWpilibNativesDir
 }
 
 test {
+    dependsOn tasks.named("extractWpilibTestNatives")
     useJUnitPlatform()
+    def nativePath = extractedWpilibNativesDir.get().file("linux/x86-64/shared").asFile.absolutePath
+    systemProperty "java.library.path", nativePath
+    environment "LD_LIBRARY_PATH", nativePath
 }

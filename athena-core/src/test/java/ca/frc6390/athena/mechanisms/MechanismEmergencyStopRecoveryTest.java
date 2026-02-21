@@ -20,16 +20,16 @@ final class MechanismEmergencyStopRecoveryTest {
         Mechanism mechanism = createMechanism(motor);
 
         mechanism.update();
-        assertFalse(mechanism.isEmergencyStopped());
+        assertFalse(mechanism.emergencyStopped());
 
         motor.setConnected(false);
         mechanism.update();
-        assertTrue(mechanism.isEmergencyStopped());
+        assertTrue(mechanism.emergencyStopped());
         assertTrue(motor.stopCalls > 0);
 
         motor.setConnected(true);
         mechanism.update();
-        assertFalse(mechanism.isEmergencyStopped());
+        assertFalse(mechanism.emergencyStopped());
     }
 
     @Test
@@ -37,21 +37,21 @@ final class MechanismEmergencyStopRecoveryTest {
         FakeMotor motor = new FakeMotor();
         Mechanism mechanism = createMechanism(motor);
 
-        mechanism.setEmergencyStopped(true);
+        mechanism.control().emergencyStop(true);
         mechanism.update();
-        assertTrue(mechanism.isEmergencyStopped());
+        assertTrue(mechanism.emergencyStopped());
 
         motor.setConnected(false);
         mechanism.update();
-        assertTrue(mechanism.isEmergencyStopped());
+        assertTrue(mechanism.emergencyStopped());
 
         motor.setConnected(true);
         mechanism.update();
-        assertTrue(mechanism.isEmergencyStopped());
+        assertTrue(mechanism.emergencyStopped());
 
-        mechanism.setEmergencyStopped(false);
+        mechanism.control().emergencyStop(false);
         mechanism.update();
-        assertFalse(mechanism.isEmergencyStopped());
+        assertFalse(mechanism.emergencyStopped());
     }
 
     private static Mechanism createMechanism(FakeMotor motor) {

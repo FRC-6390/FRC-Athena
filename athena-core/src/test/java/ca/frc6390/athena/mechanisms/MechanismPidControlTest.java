@@ -18,11 +18,11 @@ final class MechanismPidControlTest {
                         .constraints(35.0, 120.0))
                 .periodic("profiled"));
 
-        MechanismConfig.PidProfile resolved = cfg.controlLoopPidProfiles.get("profiled");
+        MechanismConfig.PidProfile resolved = cfg.controlLoopPidProfiles().get("profiled");
         assertEquals(35.0, resolved.maxVelocity(), 1e-9);
         assertEquals(120.0, resolved.maxAcceleration(), 1e-9);
-        assertEquals(1, cfg.controlLoops.size());
-        assertEquals("profiled", cfg.controlLoops.get(0).name());
+        assertEquals(1, cfg.controlLoops().size());
+        assertEquals("profiled", cfg.controlLoops().get(0).name());
     }
 
     @Test

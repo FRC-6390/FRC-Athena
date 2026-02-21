@@ -127,7 +127,7 @@ final class RobotLocalizationSlipSolverTest {
     }
 
     @Test
-    void wallContactHoldPersistsWhenCorrectedOdomTemporarilyDrops() throws Exception {
+    void wallContactEvidenceTrackingPersistsWhenCorrectedOdomTemporarilyDrops() throws Exception {
         TestImu imu = new TestImu();
         imu.xSpeedMetersPerSecond = 1.0;
         imu.ySpeedMetersPerSecond = 0.0;
@@ -160,7 +160,7 @@ final class RobotLocalizationSlipSolverTest {
         double contactComponent = (double) getField(localization, "slipContactComponent");
         assertTrue(
                 contactComponent >= 0.40,
-                "expected recent wall-contact mismatch evidence to remain latched for a short hold window");
+                "expected recent wall-contact mismatch evidence to remain tracked across cycles");
 
         setField(localization, "lastRawEstimatorPoseForSlipFusion", new Pose2d(0.40, 0.0, new Rotation2d()));
         setField(localization, "lastCorrectedPoseForSlipFusion", new Pose2d(0.22, 0.0, new Rotation2d()));
@@ -176,7 +176,7 @@ final class RobotLocalizationSlipSolverTest {
 
         assertTrue(
                 corrected.getX() < 0.28,
-                "expected held contact evidence to keep translation from pushing through a static obstacle");
+                "expected tracked contact evidence to keep translation from pushing through a static obstacle");
     }
 
     @Test
@@ -229,7 +229,7 @@ final class RobotLocalizationSlipSolverTest {
     }
 
     @Test
-    void reversalSlipLatchPreventsImmediateClearOnSingleCalmCycle() throws Exception {
+    void reversalSlipEvidenceTrackingPreventsImmediateClearOnSingleCalmCycle() throws Exception {
         TestImu imu = new TestImu();
         imu.xSpeedMetersPerSecond = 1.0;
         imu.ySpeedMetersPerSecond = 0.0;
@@ -258,17 +258,17 @@ final class RobotLocalizationSlipSolverTest {
         invoke(localization, "updateSlipState", new Class<?>[] { double.class }, 0.20);
         Map<String, Object> summary = localization.getDiagnosticsSummary();
         assertEquals("SLIP", summary.get("slipMode"),
-                "expected reversal mismatch to enter SLIP before hold behavior is evaluated");
+                "expected reversal mismatch to enter SLIP before persistence tracking is evaluated");
 
         robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 0.0, 0.0, 0.0);
         setField(localization, "fieldPose", new Pose2d(0.00, 0.0, new Rotation2d()));
         invoke(localization, "updateSlipState", new Class<?>[] { double.class }, 0.30);
         Map<String, Object> afterSingleCalmCycle = localization.getDiagnosticsSummary();
         assertEquals("SLIP", afterSingleCalmCycle.get("slipMode"),
-                "expected SLIP mode to remain latched through brief calm windows instead of clearing instantly");
+                "expected SLIP mode to remain active while recent evidence is still elevated");
         assertTrue(
                 Boolean.TRUE.equals(afterSingleCalmCycle.get("slipActive")),
-                "expected slipActive to remain true while latch hold is active");
+                "expected slipActive to remain true while evidence tracking still indicates slip");
     }
 
     @Test
