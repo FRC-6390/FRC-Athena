@@ -68,6 +68,8 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private double[] encoderOffsets = {0,0,0,0};
     /** CAN bus identifier shared by all configured devices. */
     private String canbus = "rio";
+    /** Optional CAN bus override used specifically by the IMU. */
+    private String imuCanbus = null;
     /** Module corner locations relative to the robot center. */
     private Translation2d[] locations = null;
     /** Optional physics configuration used when running drivetrain simulation. */
@@ -217,6 +219,11 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
 
         public HardwareSection canbus(String bus) {
             applyCanbus(bus);
+            return this;
+        }
+
+        public HardwareSection imuCanbus(String bus) {
+            applyImuCanbus(bus);
             return this;
         }
 
@@ -428,6 +435,11 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
 
         public ConfigSection canbus(String bus) {
             applyCanbus(bus);
+            return this;
+        }
+
+        public ConfigSection imuCanbus(String bus) {
+            applyImuCanbus(bus);
             return this;
         }
 
@@ -762,6 +774,14 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     } 
 
     /**
+     * Sets an optional CAN bus override for the IMU only.
+     */
+    private SwerveDrivetrainConfig applyImuCanbus(String imuCanbus) {
+        this.imuCanbus = imuCanbus;
+        return this;
+    }
+
+    /**
      * Declares the physical module locations relative to robot center (FL, FR, BL, BR).
      */
     private SwerveDrivetrainConfig applyModuleLocations(Translation2d[] locations){
@@ -840,8 +860,9 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
                         .d(rotationPID.getD()));
             }
         } 
+        String resolvedImuCanbus = imuCanbus != null ? imuCanbus : canbus;
         if (imu != null) {
-            imu = imu.hardware(h -> h.id(gryoId).canbus(canbus));
+            imu = imu.hardware(h -> h.id(gryoId).canbus(resolvedImuCanbus));
         }
 
         Imu resolvedImu = imu == null ? null : new VirtualImu(HardwareFactories.imu(imu));

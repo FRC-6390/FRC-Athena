@@ -241,6 +241,11 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public SwerveSection imuCanbus(String canbus) {
+            config.hardware().imuCanbus(canbus);
+            return this;
+        }
+
         public SwerveSection modules(SwerveModuleConfig... modules) {
             config.hardware().modules(modules);
             return this;
