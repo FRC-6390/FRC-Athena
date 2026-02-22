@@ -117,10 +117,10 @@ public class SwerveModule implements RobotSendableDevice {
                 new Translation2d(other.module_location().getX(), other.module_location().getY()),
                 other.wheelDiameter(),
                 other.maxSpeedMetersPerSecond(),
-                other.driveMotor(),
-                other.rotationMotor(),
+                cloneMotorConfig(other.driveMotor()),
+                cloneMotorConfig(other.rotationMotor()),
                 clonePid(other.rotationPID()),
-                other.encoder(),
+                cloneEncoderConfig(other.encoder()),
                 other.sim(),
                 cloneFeedforward(other.driveFeedforward()),
                 other.driveFeedforwardEnabled()
@@ -139,6 +139,46 @@ public class SwerveModule implements RobotSendableDevice {
                 return null;
             }
             return new SimpleMotorFeedforward(source.getKs(), source.getKv(), source.getKa());
+        }
+
+        private static MotorControllerConfig cloneMotorConfig(MotorControllerConfig source) {
+            if (source == null) {
+                return null;
+            }
+            MotorControllerConfig copy = new MotorControllerConfig();
+            copy.hardware(h -> h
+                    .type(source.type())
+                    .id(source.id())
+                    .canbus(source.canbus())
+                    .inverted(source.inverted())
+                    .currentLimit(source.currentLimit())
+                    .neutralMode(source.neutralMode()));
+            if (source.pid() != null) {
+                copy.control(c -> c.pid(clonePid(source.pid())));
+            }
+            EncoderConfig encoderCopy = cloneEncoderConfig(source.encoderConfig());
+            if (encoderCopy != null) {
+                copy.encoder(e -> e.config(encoderCopy));
+            }
+            return copy;
+        }
+
+        private static EncoderConfig cloneEncoderConfig(EncoderConfig source) {
+            if (source == null) {
+                return null;
+            }
+            return EncoderConfig.create()
+                    .hardware(h -> h
+                            .type(source.type())
+                            .id(source.id())
+                            .canbus(source.canbus())
+                            .inverted(source.inverted()))
+                    .measurement(m -> m
+                            .gearRatio(source.gearRatio())
+                            .conversion(source.conversion())
+                            .conversionOffset(source.conversionOffset())
+                            .offset(source.offset())
+                            .discontinuity(source.discontinuityPoint(), source.discontinuityRange()));
         }
 
         public SwerveModuleConfig canbus(String canbus){

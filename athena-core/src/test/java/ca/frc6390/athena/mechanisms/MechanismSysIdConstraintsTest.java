@@ -47,7 +47,7 @@ final class MechanismSysIdConstraintsTest {
     }
 
     @Test
-    void sysIdRespectsMotionLimitSuppression() {
+    void sysIdIgnoresMotionLimits() {
         FakeMotor motor = new FakeMotor();
         FakeEncoder encoder = new FakeEncoder();
         encoder.velocity = 2.6;
@@ -55,7 +55,7 @@ final class MechanismSysIdConstraintsTest {
         mechanism.motors().motionLimits(2.5, 0.0);
 
         invokeApplySysIdVoltage(mechanism, 4.0);
-        assertEquals(0.0, motor.lastVoltage, 1e-9);
+        assertEquals(4.0, motor.lastVoltage, 1e-9);
     }
 
     private static Mechanism createMechanism(FakeMotor motor, FakeEncoder encoder, GenericLimitSwitch... limitSwitches) {

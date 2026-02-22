@@ -841,12 +841,18 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         }
 
         for (int i = 0; i < modules.length; i++) {
-            modules[i] = modules[i].encoderId(encoderIds[i])
-                                    .steerId(steerIDs[i])
-                                    .driveId(driveIds[i])
-                                    .encoderInverted(encoderInverted)
-                                    .steerInverted(steerInverted)
-                                    .driveInverted(driveInverted)
+            int encoderId = resolvedModuleId(encoderIds[i]);
+            int steerId = resolvedModuleId(steerIDs[i]);
+            int driveId = resolvedModuleId(driveIds[i]);
+            boolean resolvedEncoderInverted = resolvedModuleInverted(encoderInverted, encoderIds[i]);
+            boolean resolvedSteerInverted = resolvedModuleInverted(steerInverted, steerIDs[i]);
+            boolean resolvedDriveInverted = resolvedModuleInverted(driveInverted, driveIds[i]);
+            modules[i] = modules[i].encoderId(encoderId)
+                                    .steerId(steerId)
+                                    .driveId(driveId)
+                                    .encoderInverted(resolvedEncoderInverted)
+                                    .steerInverted(resolvedSteerInverted)
+                                    .driveInverted(resolvedDriveInverted)
                                     .steerCurrentLimit(steerCurrentLimit)
                                     .driveCurrentLimit(driveCurrentLimit)
                                     .offset(encoderOffsets[i])
@@ -886,5 +892,13 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         dt.driftActivationSpeed = driftActivationSpeed;
         speedConfig.apply(dt.robotSpeeds());
         return dt;
+    }
+
+    static int resolvedModuleId(int configuredId) {
+        return Math.abs(configuredId);
+    }
+
+    static boolean resolvedModuleInverted(boolean baseInverted, int configuredId) {
+        return baseInverted ^ (configuredId < 0);
     }
 }

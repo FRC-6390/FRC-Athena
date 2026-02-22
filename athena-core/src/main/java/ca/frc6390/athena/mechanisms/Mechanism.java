@@ -2452,7 +2452,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         double constrained = Double.isFinite(output) ? output : 0.0;
         constrained = applyHardstopSuppression(constrained);
         constrained = applyBoundsSuppression(constrained);
-        constrained = applyMotionLimitSuppression(constrained);
         return constrained;
     }
 
