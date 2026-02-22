@@ -155,6 +155,8 @@ public class MechanismConfig<T extends Mechanism> {
     private MechanismSensorSimulationConfig sensorSimulationConfig = null;
     private boolean shouldCustomEncoder = false;
     private DoubleSupplier customEncoderPos;
+    /** Tracks whether encoder CAN bus was explicitly overridden from the motors/default bus. */
+    private boolean encoderCanbusOverride = false;
     /**
      * Loads a JSON/TOML deploy-file mechanism config into this builder and applies it using
      * {@link MechanismConfigApplier}. This is intended for teams to keep hardware/constants in deploy
@@ -300,6 +302,12 @@ public class MechanismConfig<T extends Mechanism> {
 
         public EncoderSection<T> config(ca.frc6390.athena.hardware.encoder.EncoderConfig config) {
             owner.updateData(builder -> builder.encoder(config));
+            if (config != null) {
+                String configCanbus = config.canbus();
+                if (configCanbus != null && !configCanbus.isBlank() && !"rio".equalsIgnoreCase(configCanbus)) {
+                    owner.encoderCanbusOverride = true;
+                }
+            }
             return this;
         }
 
@@ -396,7 +404,15 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         public EncoderSection<T> canbus(String canbus) {
-            owner.updateData(builder -> builder.canbus(canbus));
+            owner.encoderCanbusOverride = canbus != null && !canbus.isBlank();
+            owner.updateData(builder -> {
+                ca.frc6390.athena.hardware.encoder.EncoderConfig encoder = builder.encoder();
+                if (encoder == null) {
+                    encoder = ca.frc6390.athena.hardware.encoder.EncoderConfig.create();
+                    builder.encoder(encoder);
+                }
+                encoder.hardware().canbus(canbus);
+            });
             return this;
         }
 
@@ -1822,6 +1838,15 @@ public class MechanismConfig<T extends Mechanism> {
 
     public MechanismConfig<T> data(MechanismConfigRecord data) {
         this.data = data != null ? data : MechanismConfigRecord.defaults();
+        ca.frc6390.athena.hardware.encoder.EncoderConfig encoderConfig = this.data.encoder();
+        if (encoderConfig != null) {
+            String encoderCanbus = encoderConfig.canbus();
+            this.encoderCanbusOverride = encoderCanbus != null
+                    && !encoderCanbus.isBlank()
+                    && !"rio".equalsIgnoreCase(encoderCanbus);
+        } else {
+            this.encoderCanbusOverride = false;
+        }
         return this;
     }
 
@@ -2812,7 +2837,14 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         if (cfg.encoder() != null) {
-             cfg.encoder().hardware().canbus(cfg.canbus());
+             String resolvedEncoderCanbus = cfg.canbus();
+             if (encoderCanbusOverride) {
+                 String configuredEncoderCanbus = cfg.encoder().canbus();
+                 if (configuredEncoderCanbus != null && !configuredEncoderCanbus.isBlank()) {
+                     resolvedEncoderCanbus = configuredEncoderCanbus;
+                 }
+             }
+             cfg.encoder().hardware().canbus(resolvedEncoderCanbus);
              cfg.encoder().measurement()
                     .conversion(cfg.encoderConversion())
                     .conversionOffset(cfg.encoderConversionOffset())
