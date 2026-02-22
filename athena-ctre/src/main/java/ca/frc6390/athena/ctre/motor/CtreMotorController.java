@@ -10,6 +10,7 @@ import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.PositionDutyCycle;
 import com.ctre.phoenix6.controls.VelocityDutyCycle;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import ca.frc6390.athena.ctre.CtreCanBusRegistry;
@@ -94,6 +95,9 @@ public class CtreMotorController implements MotorController {
         talonConfig.MotorOutput.NeutralMode = config.neutralMode() == MotorNeutralMode.Brake
                 ? NeutralModeValue.Brake
                 : NeutralModeValue.Coast;
+        talonConfig.MotorOutput.Inverted = config.inverted()
+                ? InvertedValue.Clockwise_Positive
+                : InvertedValue.CounterClockwise_Positive;
         if (config.pid() != null) {
             talonConfig.Slot0.kP = config.pid().getP();
             talonConfig.Slot0.kI = config.pid().getI();

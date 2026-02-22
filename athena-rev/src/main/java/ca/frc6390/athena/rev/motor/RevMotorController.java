@@ -108,6 +108,7 @@ public class RevMotorController implements MotorController {
             cfg.closedLoop.pid(config.pid().getP(), config.pid().getI(), config.pid().getD());
         }
         applyConfig(controller, cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "initial");
+        controller.setInverted(config.inverted());
 
         EncoderConfig encoderCfg = config.encoderConfig();
         Encoder encoder = null;
@@ -192,6 +193,7 @@ public class RevMotorController implements MotorController {
             cfg.closedLoop.pid(config.pid().getP(), config.pid().getI(), config.pid().getD());
         }
         applyConfig(controller, cfg, INITIAL_RESET_MODE, RUNTIME_PERSIST_MODE, config.id(), "initial");
+        controller.setInverted(config.inverted());
 
         EncoderConfig encoderCfg = config.encoderConfig();
         Encoder encoder = null;
