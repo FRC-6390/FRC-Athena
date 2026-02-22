@@ -82,6 +82,9 @@ public class ElevatorMechanism extends Mechanism {
                                          E initialState) {
             super(config, feedforward, feedforwardOutputType);
             stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+            if (initialState != null && initialState.getSetpoint() != null) {
+                control().setpoint(initialState.getSetpoint());
+            }
         }
 
         @Override

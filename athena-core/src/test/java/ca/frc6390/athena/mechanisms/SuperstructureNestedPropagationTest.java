@@ -110,6 +110,11 @@ final class SuperstructureNestedPropagationTest {
         StatefulMechanism<TurretState> turret = turretSuper.mechanisms().generic(TurretTuple::turret);
         StatefulMechanism<HoodState> hood = turretSuper.mechanisms().generic(TurretTuple::hood);
 
+        assertEquals(90.0, turret.setpoint(), 1e-9);
+        assertEquals(80.0, hood.setpoint(), 1e-9);
+        assertNotEquals(0.0, turret.setpoint(), 1e-9);
+        assertNotEquals(0.0, hood.setpoint(), 1e-9);
+
         tick(top, turretSuper, turret, hood, 3);
         assertEquals(TopState.Home, top.stateMachine().goal());
         assertEquals(TurretSuperState.Stowed, turretSuper.stateMachine().goal());

@@ -24,6 +24,9 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
     public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
         super(config);
         stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+        if (initialState != null && initialState.getSetpoint() != null) {
+            control().setpoint(initialState.getSetpoint());
+        }
     }
 
     @Override
