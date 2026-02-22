@@ -2414,7 +2414,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
 
-        output = applyOpenLoopSafetyConstraints(output);
+        output = applyHardstopSuppression(output);
 
         outputMotor(output);
     }
@@ -2448,7 +2448,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return suppressed;
     }
 
-    private double applyOpenLoopSafetyConstraints(double output) {
+    private double applySysIdSafetyConstraints(double output) {
         double constrained = Double.isFinite(output) ? output : 0.0;
         constrained = applyHardstopSuppression(constrained);
         constrained = applyBoundsSuppression(constrained);
@@ -4737,7 +4737,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private void applySysIdVoltage(Voltage voltage) {
         double requested = voltage.in(edu.wpi.first.units.Units.Volts);
-        double constrained = applyOpenLoopSafetyConstraints(requested);
+        double constrained = applySysIdSafetyConstraints(requested);
         if (emergencyStopped) {
             constrained = 0.0;
         }
