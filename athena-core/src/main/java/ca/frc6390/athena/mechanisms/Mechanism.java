@@ -2414,7 +2414,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
 
-        output = applyHardstopSuppression(output);
+        output = applyOpenLoopSafetyConstraints(output);
 
         outputMotor(output);
     }
@@ -2446,6 +2446,49 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             }
         }
         return suppressed;
+    }
+
+    private double applyOpenLoopSafetyConstraints(double output) {
+        double constrained = Double.isFinite(output) ? output : 0.0;
+        constrained = applyHardstopSuppression(constrained);
+        constrained = applyBoundsSuppression(constrained);
+        constrained = applyMotionLimitSuppression(constrained);
+        return constrained;
+    }
+
+    private double applyBoundsSuppression(double output) {
+        if (!boundsEnabled || output == 0.0) {
+            return output;
+        }
+        double position = getPosition();
+        if (!Double.isFinite(position)) {
+            return output;
+        }
+        if (position <= minBound && output < 0.0) {
+            return 0.0;
+        }
+        if (position >= maxBound && output > 0.0) {
+            return 0.0;
+        }
+        return output;
+    }
+
+    private double applyMotionLimitSuppression(double output) {
+        if (output == 0.0) {
+            return output;
+        }
+        MotionLimits.AxisLimits limits = resolveMotionLimits();
+        if (limits == null || limits.maxVelocity() <= 0.0) {
+            return output;
+        }
+        double velocity = getVelocity();
+        if (!Double.isFinite(velocity)) {
+            return output;
+        }
+        if (Math.abs(velocity) >= limits.maxVelocity() && Math.signum(output) == Math.signum(velocity)) {
+            return 0.0;
+        }
+        return output;
     }
 
     private void logEmergencyStopReason(boolean encoderDisconnected, boolean motorsDisconnected, double nowSeconds) {
@@ -4693,7 +4736,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void applySysIdVoltage(Voltage voltage) {
-        sysIdLastVoltage = voltage.in(edu.wpi.first.units.Units.Volts);
+        double requested = voltage.in(edu.wpi.first.units.Units.Volts);
+        double constrained = applyOpenLoopSafetyConstraints(requested);
+        if (emergencyStopped) {
+            constrained = 0.0;
+        }
+        sysIdLastVoltage = constrained;
         setVoltage(sysIdLastVoltage);
     }
 
