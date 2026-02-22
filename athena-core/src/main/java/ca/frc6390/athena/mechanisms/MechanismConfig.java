@@ -405,13 +405,12 @@ public class MechanismConfig<T extends Mechanism> {
 
         public EncoderSection<T> canbus(String canbus) {
             owner.encoderCanbusOverride = canbus != null && !canbus.isBlank();
+            ca.frc6390.athena.hardware.encoder.EncoderConfig existing = owner.data.encoder();
             owner.updateData(builder -> {
-                ca.frc6390.athena.hardware.encoder.EncoderConfig encoder = builder.encoder();
-                if (encoder == null) {
-                    encoder = ca.frc6390.athena.hardware.encoder.EncoderConfig.create();
-                    builder.encoder(encoder);
-                }
+                ca.frc6390.athena.hardware.encoder.EncoderConfig encoder =
+                        existing != null ? existing : ca.frc6390.athena.hardware.encoder.EncoderConfig.create();
                 encoder.hardware().canbus(canbus);
+                builder.encoder(encoder);
             });
             return this;
         }
