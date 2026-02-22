@@ -355,13 +355,36 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return queuedSetpoint != null ? queuedSetpoint : stateMachine.getGoalStateSetpoint();
     }
 
+    /**
+     * Setpoint that should currently be pushed to child mechanisms/superstructures.
+     *
+     * <p>When a new superstate is queued, we drive children toward that next state's tuple
+     * immediately (instead of waiting for the parent goal to flip). This prevents top-level
+     * superstructures from stalling at initial/off tuples when parent transitions are gated on
+     * child at-goal conditions.</p>
+     */
+    private SP desiredChildSetpoint() {
+        if (queuedSetpoint != null) {
+            return queuedSetpoint;
+        }
+        S goal = stateMachine.getGoalState();
+        S next = stateMachine.getNextState();
+        if (next != null && !Objects.equals(next, goal)) {
+            SP nextSetpoint = next.getSetpoint();
+            if (nextSetpoint != null) {
+                return nextSetpoint;
+            }
+        }
+        return stateMachine.getGoalStateSetpoint();
+    }
+
     private void applySetpointsIfChanged() {
-        SP current = currentSetpoint();
-        if (Objects.equals(lastAppliedSetpoint, current)) {
+        SP desired = desiredChildSetpoint();
+        if (Objects.equals(lastAppliedSetpoint, desired)) {
             return;
         }
-        applySetpoints(current);
-        lastAppliedSetpoint = current;
+        applySetpoints(desired);
+        lastAppliedSetpoint = desired;
     }
 
     private void updateQueuedSetpoint() {

@@ -6,6 +6,7 @@ import edu.wpi.first.networktables.DoublePublisher;
 import edu.wpi.first.networktables.DoubleTopic;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.networktables.NetworkTableEvent;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.networktables.StringPublisher;
@@ -112,6 +113,7 @@ public final class RobotNetworkTables {
     private static final int NODE_CHILD_CACHE_LIMIT = 128;
     private static final int NODE_RESOLVED_KEY_CACHE_LIMIT = 512;
     private final AtomicLong publishCycle = new AtomicLong(0L);
+    private final AtomicBoolean forceRepublishAllTopics = new AtomicBoolean(false);
     private volatile Iterator<Map.Entry<String, Long>> topicPruneIterator;
     private static final double CONFIG_REFRESH_PERIOD_SECONDS = 0.1;
     private double lastConfigRefreshSeconds = Double.NaN;
@@ -129,6 +131,8 @@ public final class RobotNetworkTables {
         asyncWriterThread = new Thread(this::runAsyncWriterLoop, "Athena-NTWriter");
         asyncWriterThread.setDaemon(true);
         asyncWriterThread.start();
+        // When a dashboard/client reconnects, resend current values even if they did not change.
+        this.nt.addConnectionListener(true, this::onConnectionEvent);
     }
 
     public long revision() {
@@ -258,8 +262,34 @@ public final class RobotNetworkTables {
      * Advances the publish cycle and periodically prunes stale topic caches/publishers.
      */
     public void beginPublishCycle() {
+        if (forceRepublishAllTopics.getAndSet(false)) {
+            clearDedupeCaches();
+        }
         long cycle = publishCycle.incrementAndGet();
         pruneStaleTopics(cycle);
+    }
+
+    private void onConnectionEvent(NetworkTableEvent event) {
+        if (event == null) {
+            return;
+        }
+        if (event.is(NetworkTableEvent.Kind.kConnected)) {
+            requestRepublishAllTopics();
+        }
+    }
+
+    private void requestRepublishAllTopics() {
+        forceRepublishAllTopics.set(true);
+        revision.incrementAndGet();
+        signalAsyncWriter();
+    }
+
+    private void clearDedupeCaches() {
+        synchronized (publishStateLock) {
+            lastBooleanValues.clear();
+            lastDoubleBits.clear();
+            lastStringValues.clear();
+        }
     }
 
     private void refresh0() {
@@ -1048,6 +1078,8 @@ public final class RobotNetworkTables {
             }
             Boolean previous = lastBooleanValues.put(full, value);
             if (previous != null && previous.booleanValue() == value) {
+                // Value is unchanged, but the topic is still active this cycle.
+                markTopicSeen(full);
                 return;
             }
             if (asyncPublishingEnabled) {
@@ -1065,6 +1097,8 @@ public final class RobotNetworkTables {
             long bits = Double.doubleToLongBits(value);
             Long previousBits = lastDoubleBits.put(full, bits);
             if (previousBits != null && previousBits.longValue() == bits) {
+                // Value is unchanged, but the topic is still active this cycle.
+                markTopicSeen(full);
                 return;
             }
             if (asyncPublishingEnabled) {
@@ -1082,6 +1116,8 @@ public final class RobotNetworkTables {
             String safeValue = value != null ? value : "";
             String previous = lastStringValues.put(full, safeValue);
             if (safeValue.equals(previous)) {
+                // Value is unchanged, but the topic is still active this cycle.
+                markTopicSeen(full);
                 return;
             }
             if (asyncPublishingEnabled) {

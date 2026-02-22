@@ -1179,11 +1179,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (superstructure == null || key == null) {
                 continue;
             }
+            // Superstructure state (state machine/inputs) is dynamic and must be published continuously.
+            // Keep this round-robin batched to avoid bursting NT bandwidth.
             boolean needsRefresh = remainingSuperstructureRefreshCount > 0;
-            boolean needsInitialPublish = !publishedSuperstructuresComp.contains(key);
-            if (!needsRefresh && !needsInitialPublish) {
-                continue;
-            }
             superstructure.networkTables(mechanismsNode.child(key));
             publishedSuperstructuresComp.add(key);
             if (needsRefresh) {
