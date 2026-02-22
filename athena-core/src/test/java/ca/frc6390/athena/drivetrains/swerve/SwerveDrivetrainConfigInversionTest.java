@@ -26,8 +26,8 @@ final class SwerveDrivetrainConfigInversionTest {
 
     @Test
     void clonedModuleConfigsDoNotShareMutableMotorOrEncoderConfigs() {
-        MotorControllerConfig drive = MotorControllerConfig.create();
-        MotorControllerConfig steer = MotorControllerConfig.create();
+        MotorControllerConfig drive = new MotorControllerConfig();
+        MotorControllerConfig steer = new MotorControllerConfig();
         EncoderConfig encoder = EncoderConfig.create();
 
         SwerveModule.SwerveModuleConfig base = new SwerveModule.SwerveModuleConfig(
