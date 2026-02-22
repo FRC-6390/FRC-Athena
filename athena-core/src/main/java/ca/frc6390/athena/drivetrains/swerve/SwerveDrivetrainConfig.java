@@ -48,12 +48,18 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private int[] encoderIds = EncoderIDs.SWERVE_CHASSIS_STANDARD.getIDs();
     /** Device ID of the inertial gyro used for heading. */
     private int gryoId = DrivetrainIDs.SWERVE_CHASSIS_STANDARD.getGyro();
-    /** Whether each steer motor should be inverted during configuration. */
+    /** Legacy/default steer inversion used when neither module nor drivetrain overrides are explicit. */
     private boolean steerInverted = true;
-    /** Whether each steering encoder should be inverted. */
+    /** True once the drivetrain-level steer inversion is explicitly configured. */
+    private boolean steerInvertedConfigured = false;
+    /** Legacy/default encoder inversion used when neither module nor drivetrain overrides are explicit. */
     private boolean encoderInverted = false;
-    /** Whether each drive motor should be inverted. */
+    /** True once the drivetrain-level encoder inversion is explicitly configured. */
+    private boolean encoderInvertedConfigured = false;
+    /** Legacy/default drive inversion used when neither module nor drivetrain overrides are explicit. */
     private boolean driveInverted = false;
+    /** True once the drivetrain-level drive inversion is explicitly configured. */
+    private boolean driveInvertedConfigured = false;
     /** PID controller that maintains heading when commanded setpoints demand rotation. */
     private PIDController rotationPID = null;
     /** Optional drive feedforward used to command wheel velocities as voltages. */
@@ -667,6 +673,7 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
      */
     private SwerveDrivetrainConfig applyDriveInverted(boolean driveInverted){
         this.driveInverted = driveInverted;
+        this.driveInvertedConfigured = true;
         return this;
     } 
 
@@ -675,6 +682,7 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
      */
     private SwerveDrivetrainConfig applySteerInverted(boolean steerInverted){
         this.steerInverted = steerInverted;
+        this.steerInvertedConfigured = true;
         return this;
     } 
 
@@ -683,6 +691,7 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
      */
     private SwerveDrivetrainConfig applyEncoderInverted(boolean encoderInverted){
         this.encoderInverted = encoderInverted;
+        this.encoderInvertedConfigured = true;
         return this;
     } 
 
@@ -844,9 +853,27 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
             int encoderId = resolvedModuleId(encoderIds[i]);
             int steerId = resolvedModuleId(steerIDs[i]);
             int driveId = resolvedModuleId(driveIds[i]);
-            boolean resolvedEncoderInverted = resolvedModuleInverted(encoderInverted, encoderIds[i]);
-            boolean resolvedSteerInverted = resolvedModuleInverted(steerInverted, steerIDs[i]);
-            boolean resolvedDriveInverted = resolvedModuleInverted(driveInverted, driveIds[i]);
+            boolean resolvedEncoderInverted = resolvedModuleInverted(
+                    encoderInverted,
+                    modules[i].encoderInvertedExplicit(),
+                    moduleEncoderInverted(modules[i]),
+                    encoderInvertedConfigured,
+                    encoderInverted,
+                    encoderIds[i]);
+            boolean resolvedSteerInverted = resolvedModuleInverted(
+                    steerInverted,
+                    modules[i].steerInvertedExplicit(),
+                    moduleSteerInverted(modules[i]),
+                    steerInvertedConfigured,
+                    steerInverted,
+                    steerIDs[i]);
+            boolean resolvedDriveInverted = resolvedModuleInverted(
+                    driveInverted,
+                    modules[i].driveInvertedExplicit(),
+                    moduleDriveInverted(modules[i]),
+                    driveInvertedConfigured,
+                    driveInverted,
+                    driveIds[i]);
             modules[i] = modules[i].encoderId(encoderId)
                                     .steerId(steerId)
                                     .driveId(driveId)
@@ -898,7 +925,36 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         return Math.abs(configuredId);
     }
 
+    static boolean resolvedModuleInverted(
+            boolean defaultInverted,
+            boolean moduleOverrideConfigured,
+            boolean moduleInverted,
+            boolean drivetrainOverrideConfigured,
+            boolean drivetrainInverted,
+            int configuredId) {
+        boolean baseInverted = defaultInverted;
+        if (moduleOverrideConfigured) {
+            baseInverted = moduleInverted;
+        }
+        if (drivetrainOverrideConfigured) {
+            baseInverted = drivetrainInverted;
+        }
+        return resolvedModuleInverted(baseInverted, configuredId);
+    }
+
     static boolean resolvedModuleInverted(boolean baseInverted, int configuredId) {
         return baseInverted ^ (configuredId < 0);
+    }
+
+    private static boolean moduleDriveInverted(SwerveModuleConfig config) {
+        return config != null && config.driveMotor() != null && config.driveMotor().inverted();
+    }
+
+    private static boolean moduleSteerInverted(SwerveModuleConfig config) {
+        return config != null && config.rotationMotor() != null && config.rotationMotor().inverted();
+    }
+
+    private static boolean moduleEncoderInverted(SwerveModuleConfig config) {
+        return config != null && config.encoder() != null && config.encoder().inverted();
     }
 }

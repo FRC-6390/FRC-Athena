@@ -266,6 +266,21 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public SwerveSection driveInverted(boolean inverted) {
+            config.hardware().driveInverted(inverted);
+            return this;
+        }
+
+        public SwerveSection steerInverted(boolean inverted) {
+            config.hardware().steerInverted(inverted);
+            return this;
+        }
+
+        public SwerveSection encoderInverted(boolean inverted) {
+            config.hardware().encoderInverted(inverted);
+            return this;
+        }
+
         public SwerveSection currents(double driveAmps, double steerAmps) {
             return driveCurrentLimit(driveAmps).steerCurrentLimit(steerAmps);
         }

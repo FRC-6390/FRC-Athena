@@ -66,4 +66,16 @@ final class SwerveModuleConfigDslTest {
         assertNotNull(cfg.driveFeedforward());
         assertFalse(cfg.driveFeedforwardEnabled());
     }
+
+    @Test
+    void inversionDslTracksExplicitOverrides() {
+        SwerveModule.SwerveModuleConfig cfg = baseConfig()
+                .driveInverted(true)
+                .steerInverted(true)
+                .encoderInverted(true);
+
+        assertTrue(cfg.driveInvertedExplicit());
+        assertTrue(cfg.steerInvertedExplicit());
+        assertTrue(cfg.encoderInvertedExplicit());
+    }
 }

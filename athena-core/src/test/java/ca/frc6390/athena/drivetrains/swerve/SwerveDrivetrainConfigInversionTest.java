@@ -25,6 +25,63 @@ final class SwerveDrivetrainConfigInversionTest {
     }
 
     @Test
+    void moduleOverrideWinsWhenDrivetrainOverrideNotConfigured() {
+        assertTrue(SwerveDrivetrainConfig.resolvedModuleInverted(
+                true,
+                true,
+                true,
+                false,
+                false,
+                4));
+
+        assertFalse(SwerveDrivetrainConfig.resolvedModuleInverted(
+                true,
+                true,
+                false,
+                false,
+                true,
+                4));
+    }
+
+    @Test
+    void drivetrainOverrideWinsWhenConfigured() {
+        assertFalse(SwerveDrivetrainConfig.resolvedModuleInverted(
+                true,
+                true,
+                true,
+                true,
+                false,
+                4));
+
+        assertTrue(SwerveDrivetrainConfig.resolvedModuleInverted(
+                false,
+                true,
+                false,
+                true,
+                true,
+                4));
+    }
+
+    @Test
+    void signedIdsStillFlipResolvedBaseInversion() {
+        assertFalse(SwerveDrivetrainConfig.resolvedModuleInverted(
+                false,
+                true,
+                true,
+                false,
+                false,
+                -4));
+
+        assertFalse(SwerveDrivetrainConfig.resolvedModuleInverted(
+                true,
+                false,
+                false,
+                false,
+                false,
+                -4));
+    }
+
+    @Test
     void clonedModuleConfigsDoNotShareMutableMotorOrEncoderConfigs() {
         MotorControllerConfig drive = new MotorControllerConfig();
         MotorControllerConfig steer = new MotorControllerConfig();

@@ -54,7 +54,10 @@ public class SwerveModule implements RobotSendableDevice {
             EncoderConfig encoder,
             SwerveModuleSimConfig sim,
             SimpleMotorFeedforward driveFeedforward,
-            boolean driveFeedforwardEnabled) {
+            boolean driveFeedforwardEnabled,
+            boolean driveInvertedExplicit,
+            boolean steerInvertedExplicit,
+            boolean encoderInvertedExplicit) {
         public SwerveModuleConfig {
             if (driveFeedforward == null) {
                 driveFeedforwardEnabled = false;
@@ -80,6 +83,9 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     null,
+                    false,
+                    false,
+                    false,
                     false);
         }
 
@@ -94,6 +100,9 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     SwerveModuleSimConfig.fromMotors(null, null),
                     null,
+                    false,
+                    false,
+                    false,
                     false);
         }
 
@@ -108,6 +117,9 @@ public class SwerveModule implements RobotSendableDevice {
                     rotationMotor.encoderConfig(),
                     SwerveModuleSimConfig.fromMotors(null, null),
                     null,
+                    false,
+                    false,
+                    false,
                     false);
         }
 
@@ -123,7 +135,10 @@ public class SwerveModule implements RobotSendableDevice {
                 cloneEncoderConfig(other.encoder()),
                 other.sim(),
                 cloneFeedforward(other.driveFeedforward()),
-                other.driveFeedforwardEnabled()
+                other.driveFeedforwardEnabled(),
+                other.driveInvertedExplicit(),
+                other.steerInvertedExplicit(),
+                other.encoderInvertedExplicit()
             );
         }
 
@@ -197,7 +212,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig pid(Consumer<PidSection> section) {
@@ -219,7 +237,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig ff(Consumer<FeedforwardSection> section) {
@@ -245,7 +266,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     feedforward,
-                    feedforward != null && enabled);
+                    feedforward != null && enabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig encoder(EncoderConfig encoder){
@@ -259,7 +283,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig encoder(EncoderType encoder){
@@ -275,7 +302,10 @@ public class SwerveModule implements RobotSendableDevice {
                     cfg,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig offset(double offset){
@@ -292,7 +322,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig location(Translation2d module_location){
@@ -306,7 +339,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig driveId(int id){
@@ -321,7 +357,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled); 
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig steerId(int id){
@@ -336,7 +375,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled); 
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig encoderId(int id){
@@ -353,7 +395,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled); 
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig driveInverted(boolean inverted){
@@ -368,7 +413,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled); 
+                    driveFeedforwardEnabled,
+                    true,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig steerInverted(boolean inverted){
@@ -383,7 +431,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled); 
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    true,
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig encoderInverted(boolean inverted){
@@ -400,7 +451,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled); 
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    true); 
         }
 
         public SwerveModuleConfig currentLimit(double currentLimit) {
@@ -419,7 +473,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig steerCurrentLimit(double currentLimit) {
@@ -434,7 +491,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
@@ -457,7 +517,10 @@ public class SwerveModule implements RobotSendableDevice {
                     encoder,
                     sim,
                     driveFeedforward,
-                    driveFeedforwardEnabled);
+                    driveFeedforwardEnabled,
+                    driveInvertedExplicit,
+                    steerInvertedExplicit,
+                    encoderInvertedExplicit);
         }
 
         public static final class PidSection {
