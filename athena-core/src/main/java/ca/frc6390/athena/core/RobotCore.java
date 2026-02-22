@@ -1139,11 +1139,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (mech == null) {
                 continue;
             }
+            // Mechanism control/status values are dynamic and should stream continuously.
+            // Keep publication round-robin/batched to cap per-cycle NT overhead.
             boolean needsRefresh = remainingMechanismRefreshCount > 0;
-            boolean needsInitialPublish = !publishedMechanismsComp.contains(name);
-            if (!needsRefresh && !needsInitialPublish) {
-                continue;
-            }
             mech.networkTables(mech.networkTables().resolveNode(mechanismsNode));
             publishedMechanismsComp.add(name);
             if (needsRefresh) {

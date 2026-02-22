@@ -3146,7 +3146,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         applyPeriodicHooks(nowSeconds);
 
-        update(nowSeconds);
+        // Use polymorphic update() so stateful subclasses can run their own state-machine
+        // bookkeeping before delegating to Mechanism's control/output update path.
+        update();
 
         updateNetworkTablesCache(nowSeconds);
         refreshNetworkTablesOnConfigChange();
