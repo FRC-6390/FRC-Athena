@@ -5,6 +5,7 @@ import java.util.function.Consumer;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.PositionDutyCycle;
@@ -241,6 +242,12 @@ public class CtreMotorController implements MotorController {
     @Override
     public void setInverted(boolean inverted) {
         config.hardware().inverted(inverted);
+        MotorOutputConfigs output = new MotorOutputConfigs();
+        controller.getConfigurator().refresh(output, 0.0);
+        output.Inverted = inverted
+                ? InvertedValue.Clockwise_Positive
+                : InvertedValue.CounterClockwise_Positive;
+        controller.getConfigurator().apply(output, 0.0);
     }
 
     @Override

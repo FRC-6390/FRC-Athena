@@ -57,12 +57,12 @@ public class MotorControllerAdapter implements MotorController {
 
     @Override
     public void setSpeed(double percent) {
-        raw.setSpeed(isInverted() ? -percent : percent);
+        raw.setSpeed(percent);
     }
 
     @Override
     public void setVoltage(double volts) {
-        raw.setVoltage(isInverted() ? -volts : volts);
+        raw.setVoltage(volts);
     }
 
     @Override
@@ -75,12 +75,12 @@ public class MotorControllerAdapter implements MotorController {
 
     @Override
     public void setPosition(double rotations) {
-        raw.setPosition(isInverted() ? -rotations : rotations);
+        raw.setPosition(rotations);
     }
 
     @Override
     public void setVelocity(double rotationsPerSecond) {
-        raw.setVelocity(isInverted() ? -rotationsPerSecond : rotationsPerSecond);
+        raw.setVelocity(rotationsPerSecond);
     }
 
     @Override
@@ -140,6 +140,7 @@ public class MotorControllerAdapter implements MotorController {
         if (config != null) {
             config.hardware().inverted(inverted);
         }
+        raw.setInverted(inverted);
     }
 
     @Override
