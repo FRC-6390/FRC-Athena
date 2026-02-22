@@ -193,6 +193,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double sysIdLastVoltage = 0.0;
     private boolean sysIdActive = false;
     private boolean sysIdPreviousOverride = false;
+    private boolean sysIdConstraintAbortIssued = false;
+    private static final double SYSID_BLOCKED_OUTPUT_EPSILON = 1e-6;
     private Command activeSysIdCommand;
     private final List<Consumer<?>> periodicHooks;
     private final List<TimedRunner<Consumer<Mechanism>>> timedPeriodicHooks;
@@ -4737,6 +4739,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private void applySysIdVoltage(Voltage voltage) {
         double requested = voltage.in(edu.wpi.first.units.Units.Volts);
         double constrained = applySysIdSafetyConstraints(requested);
+        if (!sysIdConstraintAbortIssued && isSysIdSafetyBlocked(requested, constrained)) {
+            sysIdConstraintAbortIssued = true;
+            appendDiagnosticLog("WARN", "sysid", "stopping run because a hardstop or bounds limit is active");
+            cancelActiveSysIdCommand();
+        }
         if (emergencyStopped) {
             constrained = 0.0;
         }
@@ -4755,14 +4762,24 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private void startSysId() {
         sysIdActive = true;
+        sysIdConstraintAbortIssued = false;
         sysIdPreviousOverride = override;
         setOverride(true);
     }
 
     private void stopSysId() {
         sysIdActive = false;
+        sysIdConstraintAbortIssued = false;
         setOverride(sysIdPreviousOverride);
         motors.stopMotors();
+    }
+
+    private boolean isSysIdSafetyBlocked(double requested, double constrained) {
+        if (emergencyStopped) {
+            return false;
+        }
+        return Math.abs(requested) > SYSID_BLOCKED_OUTPUT_EPSILON
+                && Math.abs(constrained) <= SYSID_BLOCKED_OUTPUT_EPSILON;
     }
 
     private edu.wpi.first.wpilibj2.command.Command sysIdCommand(java.util.function.Supplier<edu.wpi.first.wpilibj2.command.Command> supplier) {

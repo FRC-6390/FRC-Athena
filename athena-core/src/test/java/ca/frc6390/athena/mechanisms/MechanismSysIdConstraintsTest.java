@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanisms;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
@@ -12,6 +13,10 @@ import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.units.Units;
 import edu.wpi.first.units.measure.Voltage;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.Commands;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import org.junit.jupiter.api.Test;
 
@@ -58,6 +63,29 @@ final class MechanismSysIdConstraintsTest {
         assertEquals(4.0, motor.lastVoltage, 1e-9);
     }
 
+    @Test
+    void sysIdCancelsActiveCommandWhenSuppressedByRestrictions() {
+        FakeMotor motor = new FakeMotor();
+        FakeEncoder encoder = new FakeEncoder();
+        GenericLimitSwitch hardstop = new GenericLimitSwitch(0, false);
+        hardstop.setHardstop(true);
+        hardstop.setBlockDirection(GenericLimitSwitch.BlockDirection.PositiveInput);
+        hardstop.setSimulatedTriggered(true);
+        CommandScheduler scheduler = CommandScheduler.getInstance();
+        Command active = Commands.run(() -> {});
+        try {
+            scheduler.cancelAll();
+            scheduler.schedule(active);
+            Mechanism mechanism = createMechanism(motor, encoder, hardstop);
+            setActiveSysIdCommand(mechanism, active);
+            invokeApplySysIdVoltage(mechanism, 6.0);
+            assertFalse(scheduler.isScheduled(active));
+        } finally {
+            scheduler.cancelAll();
+            hardstop.close();
+        }
+    }
+
     private static Mechanism createMechanism(FakeMotor motor, FakeEncoder encoder, GenericLimitSwitch... limitSwitches) {
         return new Mechanism(
                 new MotorControllerGroup(motor),
@@ -76,6 +104,16 @@ final class MechanismSysIdConstraintsTest {
             Method method = Mechanism.class.getDeclaredMethod("applySysIdVoltage", Voltage.class);
             method.setAccessible(true);
             method.invoke(mechanism, Units.Volts.of(volts));
+        } catch (ReflectiveOperationException ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    private static void setActiveSysIdCommand(Mechanism mechanism, Command command) {
+        try {
+            Field field = Mechanism.class.getDeclaredField("activeSysIdCommand");
+            field.setAccessible(true);
+            field.set(mechanism, command);
         } catch (ReflectiveOperationException ex) {
             throw new RuntimeException(ex);
         }
