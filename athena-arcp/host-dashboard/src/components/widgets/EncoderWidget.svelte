@@ -227,8 +227,14 @@
   const velocityRow = $derived(rowFor(config.velocitySignalId));
   const absoluteRow = $derived(rowFor(config.absoluteSignalId));
   const connectedRow = $derived(rowFor(config.connectedSignalId));
-  const ratioRow = $derived(rowFor(config.ratioSignalId));
-  const offsetRow = $derived(rowFor(config.offsetSignalId));
+  const ratioRow = $derived(
+    rowFor(config.ratioSignalId) ??
+      findSiblingByTokens(['gear_ratio', 'ratio', 'conversion'], ['f64', 'i64'])
+  );
+  const offsetRow = $derived(
+    rowFor(config.offsetSignalId) ??
+      findSiblingByTokens(['offset_rot', 'offset', 'zero_offset', 'calibration_offset'], ['f64', 'i64'])
+  );
 
   const canIdRow = $derived(
     rowFor(config.canIdSignalId) ??
@@ -261,8 +267,8 @@
       config.velocitySignalId,
       config.absoluteSignalId,
       config.connectedSignalId,
-      config.ratioSignalId,
-      config.offsetSignalId,
+      ratioRow?.signal_id ?? null,
+      offsetRow?.signal_id ?? null,
       canIdRow?.signal_id ?? null,
       canbusRow?.signal_id ?? null,
       typeRow?.signal_id ?? null,
@@ -286,8 +292,8 @@
   const position = $derived(numberFor(config.positionSignalId));
   const velocity = $derived(numberFor(config.velocitySignalId));
   const absolute = $derived(numberFor(config.absoluteSignalId));
-  const ratio = $derived(numberFor(config.ratioSignalId));
-  const offset = $derived(numberFor(config.offsetSignalId));
+  const ratio = $derived(ratioRow ? numberFor(ratioRow.signal_id) : null);
+  const offset = $derived(offsetRow ? numberFor(offsetRow.signal_id) : null);
   const rawAbsolute = $derived(
     rawAbsoluteRow ? numberFor(rawAbsoluteRow.signal_id) : null
   );
@@ -541,44 +547,36 @@
     <article class="metric-card compact">
       <header><span>Gear ratio</span><strong>{formatNumber(ratio, 4)}</strong></header>
       <div class="bar"><span style={`width:${(ratioUsage * 100).toFixed(1)}%;`}></span></div>
-    </article>
-    <article class="metric-card compact">
-      <header><span>Offset rot</span><strong>{formatNumber(offset, 4)}</strong></header>
-      <div class="bar"><span style={`width:${(offsetUsage * 100).toFixed(1)}%;`}></span></div>
-    </article>
-  </section>
-
-  <section class="control-grid">
-    {#if ratioWritable && ratioRow}
-      <article class="control-card">
-        <h5>Conversion Ratio</h5>
-        <div class="control-row compact">
+      {#if ratioWritable && ratioRow}
+        <div class="inline-edit">
           <input
             value={ratioDraft}
             oninput={(event) => {
               ratioDraft = (event.currentTarget as HTMLInputElement).value;
             }}
           />
-          <button class="btn btn-primary" onclick={sendRatio}>Set</button>
+          <button class="btn btn-mini btn-primary" onclick={sendRatio}>Set</button>
         </div>
-      </article>
-    {/if}
-
-    {#if offsetWritable && offsetRow}
-      <article class="control-card">
-        <h5>Conversion Offset</h5>
-        <div class="control-row compact">
+      {/if}
+    </article>
+    <article class="metric-card compact">
+      <header><span>Offset rot</span><strong>{formatNumber(offset, 4)}</strong></header>
+      <div class="bar"><span style={`width:${(offsetUsage * 100).toFixed(1)}%;`}></span></div>
+      {#if offsetWritable && offsetRow}
+        <div class="inline-edit">
           <input
             value={offsetDraft}
             oninput={(event) => {
               offsetDraft = (event.currentTarget as HTMLInputElement).value;
             }}
           />
-          <button class="btn btn-primary" onclick={sendOffset}>Set</button>
+          <button class="btn btn-mini btn-primary" onclick={sendOffset}>Set</button>
         </div>
-      </article>
-    {/if}
+      {/if}
+    </article>
+  </section>
 
+  <section class="control-grid">
     {#if canIdWritable && canIdRow}
       <article class="control-card">
         <h5>CAN ID</h5>
@@ -631,7 +629,7 @@
       </article>
     {/if}
 
-    {#if !ratioWritable && !offsetWritable && !canIdWritable && !canbusWritable && !invertedWritable}
+    {#if !canIdWritable && !canbusWritable && !invertedWritable}
       <article class="control-card empty">
         <h5>Writable Controls</h5>
         <p>No writable encoder controls were discovered for this signal group.</p>
@@ -814,6 +812,20 @@
   .metric-card.compact {
     background: rgba(27, 33, 44, 0.78);
     padding-bottom: 0.28rem;
+  }
+
+  .inline-edit {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.26rem;
+    align-items: center;
+  }
+
+  .inline-edit input {
+    width: 100%;
+    min-width: 0;
+    font-size: 0.66rem;
+    padding: 0.24rem 0.32rem;
   }
 
   .dial-card {

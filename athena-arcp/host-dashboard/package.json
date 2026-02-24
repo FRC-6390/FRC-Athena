@@ -32,7 +32,8 @@
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
     "@fortawesome/free-solid-svg-icons": "^7.2.0",
     "@fortawesome/svelte-fontawesome": "^0.2.4",
-    "@tauri-apps/api": "2.10.1"
+    "@tauri-apps/api": "2.10.1",
+    "three": "^0.183.1"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.0.0",

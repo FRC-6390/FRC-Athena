@@ -2,6 +2,7 @@
   import type { SignalRow } from '../../lib/arcp';
   import type { WidgetConfigRecord } from '../../lib/dashboard';
   import { parseNumericArray, readImuConfig, type ImuViewMode } from '../../lib/widget-config';
+  import ImuOrientation3dScene from './ImuOrientation3dScene.svelte';
 
   type Props = {
     signal: SignalRow;
@@ -443,10 +444,6 @@
     }
   ]);
 
-  const cubeTransform = $derived(
-    `transform: rotateZ(${(yaw ?? heading).toFixed(2)}deg) rotateX(${(pitch ?? 0).toFixed(2)}deg) rotateY(${(roll ?? 0).toFixed(2)}deg);`
-  );
-
   const canIdWritable = $derived(isWritable(canIdRow));
   const canbusWritable = $derived(isWritable(canbusRow));
   const invertedWritable = $derived(isWritable(invertedRow));
@@ -584,18 +581,12 @@
       </header>
 
       {#if orientationMode === '3d'}
-        <div class="orientation-3d" aria-label="3d imu orientation">
-          <div class="scene">
-            <div class="cube" style={cubeTransform}>
-              <div class="face front">F</div>
-              <div class="face back">B</div>
-              <div class="face right">R</div>
-              <div class="face left">L</div>
-              <div class="face top">U</div>
-              <div class="face bottom">D</div>
-            </div>
-          </div>
-        </div>
+        <ImuOrientation3dScene
+          className="orientation-3d-real"
+          rollDeg={roll ?? 0}
+          pitchDeg={pitch ?? 0}
+          yawDeg={yaw ?? heading}
+        />
       {:else if orientationMode === '2d'}
         <div class="orientation-2d" aria-label="heading compass">
           <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
@@ -947,7 +938,6 @@
     grid-column: span 2;
   }
 
-  .orientation-3d,
   .orientation-2d,
   .vector-3d,
   .vector-2d {
@@ -960,73 +950,16 @@
     place-items: center;
   }
 
+  .orientation-3d-real {
+    min-height: 8.9rem;
+  }
+
   .orientation-2d svg,
   .vector-3d svg,
   .vector-2d svg {
     width: 100%;
     height: 100%;
     display: block;
-  }
-
-  .orientation-3d {
-    perspective: 620px;
-  }
-
-  .scene {
-    --cube-size: clamp(2.4rem, 48%, 6.7rem);
-    width: 100%;
-    height: 100%;
-    min-height: 6.8rem;
-    display: grid;
-    place-items: center;
-  }
-
-  .cube {
-    width: var(--cube-size);
-    aspect-ratio: 1 / 1;
-    position: relative;
-    transform-style: preserve-3d;
-    transition: transform 110ms linear;
-  }
-
-  .face {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    border-radius: 3px;
-    border: 1px solid rgba(148, 163, 184, 0.46);
-    background: rgba(15, 23, 42, 0.78);
-    color: rgba(226, 232, 240, 0.88);
-    font-size: 0.56rem;
-    font-family: var(--font-mono);
-    font-weight: 700;
-  }
-
-  .front {
-    transform: translateZ(calc(var(--cube-size) / 2));
-    background: rgba(248, 113, 113, 0.24);
-    border-color: rgba(248, 113, 113, 0.55);
-  }
-
-  .back {
-    transform: rotateY(180deg) translateZ(calc(var(--cube-size) / 2));
-  }
-
-  .right {
-    transform: rotateY(90deg) translateZ(calc(var(--cube-size) / 2));
-  }
-
-  .left {
-    transform: rotateY(-90deg) translateZ(calc(var(--cube-size) / 2));
-  }
-
-  .top {
-    transform: rotateX(90deg) translateZ(calc(var(--cube-size) / 2));
-  }
-
-  .bottom {
-    transform: rotateX(-90deg) translateZ(calc(var(--cube-size) / 2));
   }
 
   .orientation-1d,
