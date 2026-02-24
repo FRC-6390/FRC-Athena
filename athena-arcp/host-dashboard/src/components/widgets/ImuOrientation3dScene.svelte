@@ -25,12 +25,16 @@
     renderer.render(scene, camera);
   }
 
-  function syncOrientation() {
+  function finiteAngleDeg(value: number): number {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function syncOrientation(nextRollDeg: number, nextPitchDeg: number, nextYawDeg: number) {
     if (!imuBody) return;
-    imuBody.rotation.order = 'ZXY';
-    imuBody.rotation.x = THREE.MathUtils.degToRad(pitchDeg);
-    imuBody.rotation.y = THREE.MathUtils.degToRad(rollDeg);
-    imuBody.rotation.z = THREE.MathUtils.degToRad(yawDeg);
+    const pitch = THREE.MathUtils.degToRad(finiteAngleDeg(nextPitchDeg));
+    const roll = THREE.MathUtils.degToRad(finiteAngleDeg(nextRollDeg));
+    const yaw = THREE.MathUtils.degToRad(finiteAngleDeg(nextYawDeg));
+    imuBody.setRotationFromEuler(new THREE.Euler(pitch, roll, yaw, 'ZXY'));
   }
 
   function resizeRenderer() {
@@ -59,7 +63,10 @@
   }
 
   $effect(() => {
-    syncOrientation();
+    const nextRoll = rollDeg;
+    const nextPitch = pitchDeg;
+    const nextYaw = yawDeg;
+    syncOrientation(nextRoll, nextPitch, nextYaw);
     renderNow();
   });
 
@@ -138,7 +145,7 @@
 
     scene.add(imuBody);
 
-    syncOrientation();
+    syncOrientation(rollDeg, pitchDeg, yawDeg);
 
     resizeObserver = new ResizeObserver(() => resizeRenderer());
     resizeObserver.observe(hostEl);

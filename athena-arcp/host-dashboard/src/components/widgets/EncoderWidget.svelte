@@ -13,11 +13,15 @@
 
   let { signal, signals, signalById, configRaw, onSendSet }: Props = $props();
 
+  let conversionOffsetDraft = $state('0.0');
+  let conversionDraft = $state('1.0');
   let ratioDraft = $state('1.0');
   let offsetDraft = $state('0.0');
   let canIdDraft = $state('0');
   let canbusDraft = $state('');
   let invertedDraft = $state(false);
+  let conversionOffsetSeedSignalId = $state<number | null>(null);
+  let conversionSeedSignalId = $state<number | null>(null);
   let ratioSeedSignalId = $state<number | null>(null);
   let offsetSeedSignalId = $state<number | null>(null);
   let canIdSeedSignalId = $state<number | null>(null);
@@ -102,12 +106,6 @@
     return raw;
   }
 
-  function usagePercent(value: number | null, min: number, max: number): number {
-    if (value === null) return 0;
-    if (max <= min) return 0;
-    return clamp01((value - min) / (max - min));
-  }
-
   function sendRaw(row: SignalRow, valueRaw: string) {
     onSendSet(row.signal_id, valueRaw);
   }
@@ -124,6 +122,21 @@
     const suffix = unit.trim();
     if (!suffix) return value.toFixed(digits);
     return `${value.toFixed(digits)} ${suffix}`;
+  }
+
+  function polar(cx: number, cy: number, radius: number, angleDeg: number) {
+    const radians = ((angleDeg - 90) * Math.PI) / 180;
+    return {
+      x: cx + radius * Math.cos(radians),
+      y: cy + radius * Math.sin(radians)
+    };
+  }
+
+  function arcPath(startAngle: number, endAngle: number): string {
+    const start = polar(50, 50, 34, endAngle);
+    const end = polar(50, 50, 34, startAngle);
+    const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+    return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A 34 34 0 ${largeArcFlag} 0 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
   }
 
   function resolveDialSpec(
@@ -193,16 +206,23 @@
     };
   }
 
-  function findSiblingByTokens(tokens: string[], allowTypes: string[]): SignalRow | null {
+  function findSiblingByTokens(
+    tokens: string[],
+    allowTypes: string[],
+    excludeTokens: string[] = []
+  ): SignalRow | null {
     const normalizedTokens = tokens.map((entry) => normalizeToken(entry));
+    const normalizedExcludes = excludeTokens.map((entry) => normalizeToken(entry));
     for (const row of siblingSignals) {
       if (!allowTypes.includes(row.signal_type)) continue;
       const token = normalizeToken(leafPath(row.path));
+      if (normalizedExcludes.some((candidate) => token.includes(candidate) || token.endsWith(candidate))) continue;
       if (normalizedTokens.includes(token)) return row;
     }
     for (const row of siblingSignals) {
       if (!allowTypes.includes(row.signal_type)) continue;
       const token = normalizeToken(leafPath(row.path));
+      if (normalizedExcludes.some((candidate) => token.includes(candidate) || token.endsWith(candidate))) continue;
       if (normalizedTokens.some((candidate) => token.includes(candidate) || token.endsWith(candidate))) {
         return row;
       }
@@ -227,13 +247,30 @@
   const velocityRow = $derived(rowFor(config.velocitySignalId));
   const absoluteRow = $derived(rowFor(config.absoluteSignalId));
   const connectedRow = $derived(rowFor(config.connectedSignalId));
+  const conversionOffsetRow = $derived(
+    findSiblingByTokens(
+      ['conversion_offset', 'conversionoffset', 'offset_conversion', 'conversion_zero_offset'],
+      ['f64', 'i64']
+    )
+  );
+  const conversionRow = $derived(
+    findSiblingByTokens(
+      ['conversion', 'conversion_ratio', 'conversion_factor', 'rotations_per_unit'],
+      ['f64', 'i64'],
+      ['conversionoffset', 'offsetconversion']
+    )
+  );
   const ratioRow = $derived(
     rowFor(config.ratioSignalId) ??
-      findSiblingByTokens(['gear_ratio', 'ratio', 'conversion'], ['f64', 'i64'])
+      findSiblingByTokens(['gear_ratio', 'ratio'], ['f64', 'i64'], ['conversion'])
   );
   const offsetRow = $derived(
     rowFor(config.offsetSignalId) ??
-      findSiblingByTokens(['offset_rot', 'offset', 'zero_offset', 'calibration_offset'], ['f64', 'i64'])
+      findSiblingByTokens(
+        ['offset_rot', 'offset', 'zero_offset', 'calibration_offset'],
+        ['f64', 'i64'],
+        ['conversionoffset', 'offsetconversion']
+      )
   );
 
   const canIdRow = $derived(
@@ -267,6 +304,8 @@
       config.velocitySignalId,
       config.absoluteSignalId,
       config.connectedSignalId,
+      conversionOffsetRow?.signal_id ?? null,
+      conversionRow?.signal_id ?? null,
       ratioRow?.signal_id ?? null,
       offsetRow?.signal_id ?? null,
       canIdRow?.signal_id ?? null,
@@ -292,11 +331,14 @@
   const position = $derived(numberFor(config.positionSignalId));
   const velocity = $derived(numberFor(config.velocitySignalId));
   const absolute = $derived(numberFor(config.absoluteSignalId));
+  const conversionOffset = $derived(
+    conversionOffsetRow ? numberFor(conversionOffsetRow.signal_id) : null
+  );
+  const conversion = $derived(
+    conversionRow ? numberFor(conversionRow.signal_id) : null
+  );
   const ratio = $derived(ratioRow ? numberFor(ratioRow.signal_id) : null);
   const offset = $derived(offsetRow ? numberFor(offsetRow.signal_id) : null);
-  const rawAbsolute = $derived(
-    rawAbsoluteRow ? numberFor(rawAbsoluteRow.signal_id) : null
-  );
 
   const canId = $derived(canIdRow ? numberFor(canIdRow.signal_id) : null);
   const canbus = $derived(canbusRow ? textFor(canbusRow.signal_id) : null);
@@ -306,15 +348,16 @@
     supportsSimRow ? boolFor(supportsSimRow.signal_id) : null
   );
 
+  const conversionOffsetWritable = $derived(isWritable(conversionOffsetRow));
+  const conversionWritable = $derived(isWritable(conversionRow));
   const ratioWritable = $derived(isWritable(ratioRow));
   const offsetWritable = $derived(isWritable(offsetRow));
   const canIdWritable = $derived(isWritable(canIdRow));
   const canbusWritable = $derived(isWritable(canbusRow));
   const invertedWritable = $derived(isWritable(invertedRow));
 
-  const velocityUsage = $derived(usagePercent(Math.abs(velocity ?? 0), 0, 120));
-  const ratioUsage = $derived(usagePercent(ratio, 1, 20));
-  const offsetUsage = $derived(clamp01(((offset ?? 0) + 1.0) / 2.0));
+  const velocityDial = $derived(resolveDialSpec(velocity, 'distance', -120, 120, 'rps'));
+  const velocityGaugeAngle = $derived(-135 + velocityDial.normalized * 270);
   const positionDial = $derived(
     resolveDialSpec(
       position,
@@ -333,6 +376,26 @@
       config.absoluteUnit
     )
   );
+
+  $effect(() => {
+    if (!conversionOffsetWritable || !conversionOffsetRow) {
+      conversionOffsetSeedSignalId = null;
+      return;
+    }
+    if (conversionOffsetSeedSignalId === conversionOffsetRow.signal_id) return;
+    conversionOffsetSeedSignalId = conversionOffsetRow.signal_id;
+    conversionOffsetDraft = String(conversionOffset ?? 0.0);
+  });
+
+  $effect(() => {
+    if (!conversionWritable || !conversionRow) {
+      conversionSeedSignalId = null;
+      return;
+    }
+    if (conversionSeedSignalId === conversionRow.signal_id) return;
+    conversionSeedSignalId = conversionRow.signal_id;
+    conversionDraft = String(conversion ?? 1.0);
+  });
 
   $effect(() => {
     if (!ratioWritable || !ratioRow) {
@@ -413,6 +476,20 @@
     const parsed = parseFloatDraft(ratioDraft);
     if (parsed === null) return;
     sendRaw(ratioRow, String(parsed));
+  }
+
+  function sendConversionOffset() {
+    if (!conversionOffsetRow || !conversionOffsetWritable) return;
+    const parsed = parseFloatDraft(conversionOffsetDraft);
+    if (parsed === null) return;
+    sendRaw(conversionOffsetRow, String(parsed));
+  }
+
+  function sendConversion() {
+    if (!conversionRow || !conversionWritable) return;
+    const parsed = parseFloatDraft(conversionDraft);
+    if (parsed === null) return;
+    sendRaw(conversionRow, String(parsed));
   }
 
   function sendOffset() {
@@ -513,12 +590,25 @@
           <circle class="hub" cx="50" cy="50" r="2.2" />
         </svg>
       </div>
-      <div class="bar"><span style={`width:${(positionDial.normalized * 100).toFixed(1)}%;`}></span></div>
       <small>{positionDial.modeLabel}</small>
     </article>
     <article class="metric-card">
-      <header><span>Velocity rps</span><strong>{formatNumber(velocity, 3)}</strong></header>
-      <div class="bar"><span style={`width:${(velocityUsage * 100).toFixed(1)}%;`}></span></div>
+      <header><span>Velocity rps</span><strong>{velocityDial.valueLabel}</strong></header>
+      <div class="gauge-wrap" aria-label="velocity gauge">
+        <svg viewBox="0 0 100 74" preserveAspectRatio="xMidYMid meet">
+          <path class="gauge-track" d={arcPath(-135, 135)} />
+          <path class="gauge-value" d={arcPath(-135, velocityGaugeAngle)} />
+          <line
+            class="gauge-needle"
+            x1="50"
+            y1="50"
+            x2={polar(50, 50, 28, velocityGaugeAngle).x.toFixed(2)}
+            y2={polar(50, 50, 28, velocityGaugeAngle).y.toFixed(2)}
+          />
+          <circle cx="50" cy="50" r="1.8" class="gauge-hub" />
+        </svg>
+      </div>
+      <small>{velocityDial.modeLabel}</small>
     </article>
     <article class="metric-card dial-card">
       <header><span>Absolute Pose</span><strong>{absoluteDial.valueLabel}</strong></header>
@@ -538,15 +628,38 @@
           <circle class="hub" cx="50" cy="50" r="2.2" />
         </svg>
       </div>
-      <div class="bar"><span style={`width:${(absoluteDial.normalized * 100).toFixed(1)}%;`}></span></div>
       <small>{absoluteDial.modeLabel}</small>
     </article>
-    <article class="metric-card">
-      <header><span>Raw abs rot</span><strong>{formatNumber(rawAbsolute, 3)}</strong></header>
+    <article class="metric-card compact">
+      <header><span>Conversion offset</span><strong>{formatNumber(conversionOffset, 4)}</strong></header>
+      {#if conversionOffsetWritable && conversionOffsetRow}
+        <div class="inline-edit">
+          <input
+            value={conversionOffsetDraft}
+            oninput={(event) => {
+              conversionOffsetDraft = (event.currentTarget as HTMLInputElement).value;
+            }}
+          />
+          <button class="btn btn-mini btn-primary" onclick={sendConversionOffset}>Set</button>
+        </div>
+      {/if}
+    </article>
+    <article class="metric-card compact">
+      <header><span>Conversion</span><strong>{formatNumber(conversion, 4)}</strong></header>
+      {#if conversionWritable && conversionRow}
+        <div class="inline-edit">
+          <input
+            value={conversionDraft}
+            oninput={(event) => {
+              conversionDraft = (event.currentTarget as HTMLInputElement).value;
+            }}
+          />
+          <button class="btn btn-mini btn-primary" onclick={sendConversion}>Set</button>
+        </div>
+      {/if}
     </article>
     <article class="metric-card compact">
       <header><span>Gear ratio</span><strong>{formatNumber(ratio, 4)}</strong></header>
-      <div class="bar"><span style={`width:${(ratioUsage * 100).toFixed(1)}%;`}></span></div>
       {#if ratioWritable && ratioRow}
         <div class="inline-edit">
           <input
@@ -560,8 +673,7 @@
       {/if}
     </article>
     <article class="metric-card compact">
-      <header><span>Offset rot</span><strong>{formatNumber(offset, 4)}</strong></header>
-      <div class="bar"><span style={`width:${(offsetUsage * 100).toFixed(1)}%;`}></span></div>
+      <header><span>Offset</span><strong>{formatNumber(offset, 4)}</strong></header>
       {#if offsetWritable && offsetRow}
         <div class="inline-edit">
           <input
@@ -871,18 +983,41 @@
     stroke-width: 1.1;
   }
 
-  .bar {
-    height: 5px;
-    border-radius: 999px;
-    background: rgba(51, 65, 85, 0.55);
-    overflow: hidden;
+  .gauge-wrap {
+    width: min(148px, 100%);
+    margin: 0 auto;
   }
 
-  .bar span {
+  .gauge-wrap svg {
     display: block;
-    height: 100%;
-    background: linear-gradient(90deg, #ef4444, #f87171);
-    transition: width 90ms linear;
+    width: 100%;
+    height: auto;
+    min-height: 3.2rem;
+  }
+
+  .gauge-track {
+    fill: none;
+    stroke: rgba(148, 163, 184, 0.28);
+    stroke-width: 6;
+    stroke-linecap: round;
+  }
+
+  .gauge-value {
+    fill: none;
+    stroke: rgba(239, 68, 68, 0.92);
+    stroke-width: 6;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.32));
+  }
+
+  .gauge-needle {
+    stroke: #e2e8f0;
+    stroke-width: 1.2;
+    stroke-linecap: round;
+  }
+
+  .gauge-hub {
+    fill: #e2e8f0;
   }
 
   .control-grid {

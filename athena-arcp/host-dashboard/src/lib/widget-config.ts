@@ -118,6 +118,7 @@ export type DropdownWidgetCommit = 'auto' | 'button';
 export type DropdownWidgetConfig = {
   options: DropdownOption[];
   commit: DropdownWidgetCommit;
+  buttonLabel: string;
 };
 
 export type ToggleWidgetStyle = 'switch' | 'button';
@@ -814,7 +815,8 @@ export function readDropdownConfig(
 
   return {
     options: options.length > 0 ? options : defaultDropdownOptions(signal),
-    commit
+    commit,
+    buttonLabel: toString(base.buttonLabel, 'Set')
   };
 }
 

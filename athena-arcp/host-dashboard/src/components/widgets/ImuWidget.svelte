@@ -374,6 +374,7 @@
   const extraSignals = $derived.by(() =>
     siblingSignals.filter((entry) => {
       if (knownSignalIds.has(entry.signal_id)) return false;
+      if (entry.access !== 'write') return false;
       const token = normalizeToken(leafPath(entry.path));
       for (const hidden of hiddenExtraTokens) {
         if (token.includes(hidden)) return false;
@@ -574,19 +575,21 @@
   </section>
 
   <section class="metric-grid">
-    <article class="metric-card orientation-card">
+    <article class="metric-card orientation-card" data-mode={orientationMode}>
       <header>
         <span>Orientation</span>
         <strong>{heading.toFixed(1)} deg</strong>
       </header>
 
       {#if orientationMode === '3d'}
-        <ImuOrientation3dScene
-          className="orientation-3d-real"
-          rollDeg={roll ?? 0}
-          pitchDeg={pitch ?? 0}
-          yawDeg={yaw ?? heading}
-        />
+        <div class="orientation-3d-shell">
+          <ImuOrientation3dScene
+            className="orientation-3d-real"
+            rollDeg={roll ?? 0}
+            pitchDeg={pitch ?? 0}
+            yawDeg={yaw ?? heading}
+          />
+        </div>
       {:else if orientationMode === '2d'}
         <div class="orientation-2d" aria-label="heading compass">
           <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
@@ -631,65 +634,67 @@
       </footer>
     </article>
 
-    {#each vectorCards as vector (vector.key)}
-      <article class="metric-card vector-card">
-        <header>
-          <span>{vector.label} vector</span>
-          <strong>{formatNumber(vector.magnitude, 2)} {vector.unit}</strong>
-        </header>
+    <div class="vector-grid">
+      {#each vectorCards as vector (vector.key)}
+        <article class="metric-card vector-card">
+          <header>
+            <span>{vector.label} vector</span>
+            <strong>{formatNumber(vector.magnitude, 2)} {vector.unit}</strong>
+          </header>
 
-        {#if vector.mode === '3d'}
-          <div class="vector-3d" aria-label={`${vector.label} 3d vector`}>
-            <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
-              <line class="axis axis-x" x1={vector.view3d.origin.x} y1={vector.view3d.origin.y} x2={vector.view3d.axisX.x} y2={vector.view3d.axisX.y} />
-              <line class="axis axis-y" x1={vector.view3d.origin.x} y1={vector.view3d.origin.y} x2={vector.view3d.axisY.x} y2={vector.view3d.axisY.y} />
-              <line class="axis axis-z" x1={vector.view3d.origin.x} y1={vector.view3d.origin.y} x2={vector.view3d.axisZ.x} y2={vector.view3d.axisZ.y} />
-              <text class="axis-label" x={vector.view3d.axisX.x + 2} y={vector.view3d.axisX.y}>X</text>
-              <text class="axis-label" x={vector.view3d.axisY.x - 2} y={vector.view3d.axisY.y}>Y</text>
-              <text class="axis-label" x={vector.view3d.axisZ.x} y={vector.view3d.axisZ.y - 2}>Z</text>
-              {#if vector.view3d.end.hasData}
-                <line class="vector-line" x1={vector.view3d.origin.x} y1={vector.view3d.origin.y} x2={vector.view3d.end.x} y2={vector.view3d.end.y} />
-                <circle class="vector-tip" cx={vector.view3d.end.x} cy={vector.view3d.end.y} r="2.4" />
-              {/if}
-            </svg>
-          </div>
-        {:else if vector.mode === '2d'}
-          <div class="vector-2d" aria-label={`${vector.label} 2d vector`}>
-            <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
-              <circle class="ring" cx="50" cy="50" r="40" />
-              <line class="axis" x1="10" y1="50" x2="90" y2="50" />
-              <line class="axis" x1="50" y1="10" x2="50" y2="90" />
-              {#if vector.view2d.hasData}
-                <line class="vector-line" x1="50" y1="50" x2={vector.view2d.x} y2={vector.view2d.y} />
-                <circle class="vector-tip" cx={vector.view2d.x} cy={vector.view2d.y} r="2.4" />
-              {/if}
-            </svg>
-          </div>
-        {:else if vector.mode === '1d'}
-          <div class="vector-1d">
-            <div class="axis-strip">
-              <span>X</span>
-              <strong>{formatNumber(vector.values[0], 2)}</strong>
-              <div class="bar"><span style={`width:${axisWidth(vector.values[0], vector.scale).toFixed(1)}%;`}></span></div>
+          {#if vector.mode === '3d'}
+            <div class="vector-3d" aria-label={`${vector.label} 3d vector`}>
+              <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+                <line class="axis axis-x" x1={vector.view3d.origin.x} y1={vector.view3d.origin.y} x2={vector.view3d.axisX.x} y2={vector.view3d.axisX.y} />
+                <line class="axis axis-y" x1={vector.view3d.origin.x} y1={vector.view3d.origin.y} x2={vector.view3d.axisY.x} y2={vector.view3d.axisY.y} />
+                <line class="axis axis-z" x1={vector.view3d.origin.x} y1={vector.view3d.origin.y} x2={vector.view3d.axisZ.x} y2={vector.view3d.axisZ.y} />
+                <text class="axis-label" x={vector.view3d.axisX.x + 2} y={vector.view3d.axisX.y}>X</text>
+                <text class="axis-label" x={vector.view3d.axisY.x - 2} y={vector.view3d.axisY.y}>Y</text>
+                <text class="axis-label" x={vector.view3d.axisZ.x} y={vector.view3d.axisZ.y - 2}>Z</text>
+                {#if vector.view3d.end.hasData}
+                  <line class="vector-line" x1={vector.view3d.origin.x} y1={vector.view3d.origin.y} x2={vector.view3d.end.x} y2={vector.view3d.end.y} />
+                  <circle class="vector-tip" cx={vector.view3d.end.x} cy={vector.view3d.end.y} r="2.4" />
+                {/if}
+              </svg>
             </div>
-            <div class="axis-strip">
-              <span>Y</span>
-              <strong>{formatNumber(vector.values[1], 2)}</strong>
-              <div class="bar"><span style={`width:${axisWidth(vector.values[1], vector.scale).toFixed(1)}%;`}></span></div>
+          {:else if vector.mode === '2d'}
+            <div class="vector-2d" aria-label={`${vector.label} 2d vector`}>
+              <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+                <circle class="ring" cx="50" cy="50" r="40" />
+                <line class="axis" x1="10" y1="50" x2="90" y2="50" />
+                <line class="axis" x1="50" y1="10" x2="50" y2="90" />
+                {#if vector.view2d.hasData}
+                  <line class="vector-line" x1="50" y1="50" x2={vector.view2d.x} y2={vector.view2d.y} />
+                  <circle class="vector-tip" cx={vector.view2d.x} cy={vector.view2d.y} r="2.4" />
+                {/if}
+              </svg>
             </div>
-            <div class="axis-strip">
-              <span>Z</span>
-              <strong>{formatNumber(vector.values[2], 2)}</strong>
-              <div class="bar"><span style={`width:${axisWidth(vector.values[2], vector.scale).toFixed(1)}%;`}></span></div>
+          {:else if vector.mode === '1d'}
+            <div class="vector-1d">
+              <div class="axis-strip">
+                <span>X</span>
+                <strong>{formatNumber(vector.values[0], 2)}</strong>
+                <div class="bar"><span style={`width:${axisWidth(vector.values[0], vector.scale).toFixed(1)}%;`}></span></div>
+              </div>
+              <div class="axis-strip">
+                <span>Y</span>
+                <strong>{formatNumber(vector.values[1], 2)}</strong>
+                <div class="bar"><span style={`width:${axisWidth(vector.values[1], vector.scale).toFixed(1)}%;`}></span></div>
+              </div>
+              <div class="axis-strip">
+                <span>Z</span>
+                <strong>{formatNumber(vector.values[2], 2)}</strong>
+                <div class="bar"><span style={`width:${axisWidth(vector.values[2], vector.scale).toFixed(1)}%;`}></span></div>
+              </div>
             </div>
-          </div>
-        {:else}
-          <p class="empty-copy">No {vector.label.toLowerCase()} vector data.</p>
-        {/if}
+          {:else}
+            <p class="empty-copy">No {vector.label.toLowerCase()} vector data.</p>
+          {/if}
 
-        <code>{formatNumber(vector.values[0], 2)}, {formatNumber(vector.values[1], 2)}, {formatNumber(vector.values[2], 2)}</code>
-      </article>
-    {/each}
+          <code>{formatNumber(vector.values[0], 2)}, {formatNumber(vector.values[1], 2)}, {formatNumber(vector.values[2], 2)}</code>
+        </article>
+      {/each}
+    </div>
   </section>
 
   <section class="control-grid">
@@ -884,10 +889,18 @@
     min-height: 0;
     overflow: auto;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.28rem;
     align-content: start;
     padding-right: 0.1rem;
+  }
+
+  .vector-grid {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.28rem;
+    align-content: start;
   }
 
   .metric-card {
@@ -935,7 +948,21 @@
   }
 
   .orientation-card {
-    grid-column: span 2;
+    grid-column: 1 / -1;
+  }
+
+  .orientation-card[data-mode='3d'] {
+    min-height: 12.2rem;
+  }
+
+  .orientation-3d-shell {
+    min-height: 10.6rem;
+  }
+
+  .orientation-3d-shell :global(.imu-3d-host) {
+    width: 100%;
+    height: 100%;
+    min-height: 10.6rem;
   }
 
   .orientation-2d,
@@ -1287,13 +1314,9 @@
   }
 
   @media (max-width: 700px) {
-    .metric-grid,
+    .vector-grid,
     .control-grid {
       grid-template-columns: minmax(0, 1fr);
-    }
-
-    .orientation-card {
-      grid-column: auto;
     }
   }
 </style>

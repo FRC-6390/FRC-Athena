@@ -1992,6 +1992,835 @@
             }
           }
         ]
+      },
+      {
+        "id": "tab-digital-sensors",
+        "name": "Digital Sensors",
+        "widgets": [
+          {
+            "id": "w-digital-status-matrix",
+            "signalId": 601,
+            "kind": "status_matrix",
+            "title": "Digital States",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 4
+            },
+            "config": {
+              "columns": 3,
+              "showSummary": true,
+              "items": [
+                {
+                  "signalId": 601,
+                  "label": "arm_lower",
+                  "group": "limits",
+                  "healthyWhen": "false"
+                },
+                {
+                  "signalId": 609,
+                  "label": "arm_upper",
+                  "group": "limits",
+                  "healthyWhen": "false"
+                },
+                {
+                  "signalId": 701,
+                  "label": "driver_a",
+                  "group": "buttons",
+                  "healthyWhen": "false"
+                },
+                {
+                  "signalId": 705,
+                  "label": "driver_b",
+                  "group": "buttons",
+                  "healthyWhen": "false"
+                },
+                {
+                  "signalId": 709,
+                  "label": "driver_x",
+                  "group": "buttons",
+                  "healthyWhen": "false"
+                },
+                {
+                  "signalId": 761,
+                  "label": "intake_entry",
+                  "group": "beams",
+                  "healthyWhen": "false"
+                },
+                {
+                  "signalId": 765,
+                  "label": "intake_exit",
+                  "group": "beams",
+                  "healthyWhen": "false"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-limit-lower-state",
+            "signalId": 601,
+            "kind": "state",
+            "title": "Arm Lower",
+            "layout": {
+              "x": 1,
+              "y": 5,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-limit-upper-state",
+            "signalId": 609,
+            "kind": "state",
+            "title": "Arm Upper",
+            "layout": {
+              "x": 7,
+              "y": 5,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-limit-lower-inverted",
+            "signalId": 606,
+            "kind": "toggle",
+            "title": "Lower Invert",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-limit-upper-inverted",
+            "signalId": 614,
+            "kind": "toggle",
+            "title": "Upper Invert",
+            "layout": {
+              "x": 19,
+              "y": 1,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-limit-lower-delay",
+            "signalId": 605,
+            "kind": "input",
+            "title": "Lower Delay",
+            "layout": {
+              "x": 13,
+              "y": 2,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0",
+              "max": "2",
+              "step": "0.01"
+            }
+          },
+          {
+            "id": "w-limit-upper-delay",
+            "signalId": 613,
+            "kind": "input",
+            "title": "Upper Delay",
+            "layout": {
+              "x": 19,
+              "y": 2,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0",
+              "max": "2",
+              "step": "0.01"
+            }
+          },
+          {
+            "id": "w-button-a-state",
+            "signalId": 701,
+            "kind": "state",
+            "title": "Driver A",
+            "layout": {
+              "x": 13,
+              "y": 3,
+              "w": 4,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-button-b-state",
+            "signalId": 705,
+            "kind": "state",
+            "title": "Driver B",
+            "layout": {
+              "x": 17,
+              "y": 3,
+              "w": 4,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-button-x-state",
+            "signalId": 709,
+            "kind": "state",
+            "title": "Driver X",
+            "layout": {
+              "x": 21,
+              "y": 3,
+              "w": 4,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-button-a-inverted",
+            "signalId": 702,
+            "kind": "toggle",
+            "title": "A Invert",
+            "layout": {
+              "x": 13,
+              "y": 4,
+              "w": 4,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inv",
+              "falseLabel": "Norm"
+            }
+          },
+          {
+            "id": "w-button-b-inverted",
+            "signalId": 706,
+            "kind": "toggle",
+            "title": "B Invert",
+            "layout": {
+              "x": 17,
+              "y": 4,
+              "w": 4,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inv",
+              "falseLabel": "Norm"
+            }
+          },
+          {
+            "id": "w-button-x-inverted",
+            "signalId": 710,
+            "kind": "toggle",
+            "title": "X Invert",
+            "layout": {
+              "x": 21,
+              "y": 4,
+              "w": 4,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inv",
+              "falseLabel": "Norm"
+            }
+          },
+          {
+            "id": "w-beam-entry-state",
+            "signalId": 761,
+            "kind": "state",
+            "title": "Beam Entry",
+            "layout": {
+              "x": 13,
+              "y": 5,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-beam-exit-state",
+            "signalId": 765,
+            "kind": "state",
+            "title": "Beam Exit",
+            "layout": {
+              "x": 19,
+              "y": 5,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-beam-entry-inverted",
+            "signalId": 762,
+            "kind": "toggle",
+            "title": "Entry Invert",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-beam-exit-inverted",
+            "signalId": 766,
+            "kind": "toggle",
+            "title": "Exit Invert",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-digital-hardware-status",
+            "signalId": 950,
+            "kind": "text",
+            "title": "Hardware Status",
+            "layout": {
+              "x": 1,
+              "y": 6,
+              "w": 12,
+              "h": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-drive-groups",
+        "name": "Drive Groups",
+        "widgets": [
+          {
+            "id": "w-group-motor",
+            "signalId": 560,
+            "kind": "motor",
+            "title": "Motor Group",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "showOtherFields": false,
+              "canIdSignalId": null,
+              "canbusSignalId": null,
+              "typeSignalId": 571,
+              "connectedSignalId": 566,
+              "stalledSignalId": 567,
+              "neutralModeSignalId": null,
+              "currentLimitSignalId": 569,
+              "invertedSignalId": null,
+              "brakeModeSignalId": null,
+              "outputSignalId": 560,
+              "velocitySignalId": 561,
+              "positionSignalId": 562,
+              "currentSignalId": 563,
+              "temperatureSignalId": 564,
+              "voltageSignalId": 565,
+              "commandSignalId": 568
+            }
+          },
+          {
+            "id": "w-group-encoder",
+            "signalId": 580,
+            "kind": "encoder",
+            "title": "Encoder Group",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "positionSignalId": 580,
+              "velocitySignalId": 581,
+              "absoluteSignalId": 582,
+              "connectedSignalId": 583,
+              "ratioSignalId": 584,
+              "offsetSignalId": 585,
+              "canIdSignalId": null,
+              "canbusSignalId": null,
+              "typeSignalId": 589,
+              "invertedSignalId": null,
+              "supportsSimulationSignalId": 588,
+              "rawAbsoluteSignalId": 582,
+              "positionViewMode": "continuous",
+              "absoluteViewMode": "zero_to_one",
+              "positionMin": -5,
+              "positionMax": 5,
+              "absoluteMin": 0,
+              "absoluteMax": 1,
+              "positionUnit": "rot",
+              "absoluteUnit": "rot"
+            }
+          },
+          {
+            "id": "w-group-motor-graph",
+            "signalId": 560,
+            "kind": "graph",
+            "title": "Motor Group Trend",
+            "layout": {
+              "x": 1,
+              "y": 11,
+              "w": 12,
+              "h": 3
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -100,
+              "yMax": 100,
+              "series": [
+                {
+                  "signalId": 560,
+                  "label": "Output",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 561,
+                  "label": "Velocity",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 568,
+                  "label": "Command",
+                  "role": "tunable",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-group-encoder-graph",
+            "signalId": 580,
+            "kind": "graph",
+            "title": "Encoder Group Trend",
+            "layout": {
+              "x": 13,
+              "y": 11,
+              "w": 12,
+              "h": 3
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -10,
+              "yMax": 10,
+              "series": [
+                {
+                  "signalId": 580,
+                  "label": "Position",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#34d399"
+                },
+                {
+                  "signalId": 581,
+                  "label": "Velocity",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#22d3ee"
+                },
+                {
+                  "signalId": 586,
+                  "label": "Position Cmd",
+                  "role": "tunable",
+                  "style": "dot",
+                  "color": "#a78bfa"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-group-command",
+            "signalId": 568,
+            "kind": "input",
+            "title": "Group Cmd %",
+            "layout": {
+              "x": 1,
+              "y": 14,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "range",
+              "commit": "auto",
+              "min": "-1",
+              "max": "1",
+              "step": "0.01",
+              "buttonLabel": "Set"
+            }
+          },
+          {
+            "id": "w-group-current-limit",
+            "signalId": 569,
+            "kind": "input",
+            "title": "Group Current A",
+            "layout": {
+              "x": 7,
+              "y": 14,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "1",
+              "max": "200",
+              "step": "1"
+            }
+          },
+          {
+            "id": "w-group-position-command",
+            "signalId": 586,
+            "kind": "input",
+            "title": "Group Position",
+            "layout": {
+              "x": 13,
+              "y": 14,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-100",
+              "max": "100",
+              "step": "0.1"
+            }
+          },
+          {
+            "id": "w-group-connected-state",
+            "signalId": 566,
+            "kind": "state",
+            "title": "Drive Group Connected",
+            "layout": {
+              "x": 19,
+              "y": 14,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-group-hardware-status",
+            "signalId": 950,
+            "kind": "text",
+            "title": "Hardware Status",
+            "layout": {
+              "x": 1,
+              "y": 15,
+              "w": 24,
+              "h": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-state-machine",
+        "name": "State Machine",
+        "widgets": [
+          {
+            "id": "w-sm-current",
+            "signalId": 590,
+            "kind": "text",
+            "title": "Current State",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-goal",
+            "signalId": 591,
+            "kind": "text",
+            "title": "Goal State",
+            "layout": {
+              "x": 7,
+              "y": 1,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-next",
+            "signalId": 592,
+            "kind": "text",
+            "title": "Next State",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-at-goal",
+            "signalId": 594,
+            "kind": "state",
+            "title": "At Goal",
+            "layout": {
+              "x": 19,
+              "y": 1,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-queue",
+            "signalId": 593,
+            "kind": "text",
+            "title": "Queue",
+            "layout": {
+              "x": 1,
+              "y": 2,
+              "w": 12,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-last-transition",
+            "signalId": 598,
+            "kind": "text",
+            "title": "Last Transition",
+            "layout": {
+              "x": 13,
+              "y": 2,
+              "w": 12,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-goal-dropdown",
+            "signalId": 591,
+            "kind": "dropdown",
+            "title": "Set Goal",
+            "layout": {
+              "x": 1,
+              "y": 3,
+              "w": 10,
+              "h": 1
+            },
+            "config": {
+              "commit": "button",
+              "buttonLabel": "Apply",
+              "options": [
+                {
+                  "label": "STOW",
+                  "value": "STOW"
+                },
+                {
+                  "label": "CLEARANCE",
+                  "value": "CLEARANCE"
+                },
+                {
+                  "label": "INTAKE",
+                  "value": "INTAKE"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-sm-clearance-toggle",
+            "signalId": 595,
+            "kind": "toggle",
+            "title": "Clearance Ready",
+            "layout": {
+              "x": 11,
+              "y": 3,
+              "w": 7,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Ready",
+              "falseLabel": "Blocked"
+            }
+          },
+          {
+            "id": "w-sm-append-toggle",
+            "signalId": 596,
+            "kind": "toggle",
+            "title": "Append Mode",
+            "layout": {
+              "x": 18,
+              "y": 3,
+              "w": 7,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Append",
+              "falseLabel": "Replace"
+            }
+          },
+          {
+            "id": "w-sm-action-intake",
+            "signalId": 902,
+            "kind": "action",
+            "title": "Force INTAKE",
+            "layout": {
+              "x": 1,
+              "y": 4,
+              "w": 8,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-action-stow",
+            "signalId": 901,
+            "kind": "action",
+            "title": "Force STOW",
+            "layout": {
+              "x": 9,
+              "y": 4,
+              "w": 8,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-action-clear",
+            "signalId": 903,
+            "kind": "action",
+            "title": "Clear Queue",
+            "layout": {
+              "x": 17,
+              "y": 4,
+              "w": 8,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-sm-transition-count",
+            "signalId": 597,
+            "kind": "metric",
+            "title": "Transition Count",
+            "layout": {
+              "x": 1,
+              "y": 5,
+              "w": 12,
+              "h": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-control-panels",
+        "name": "Control Panels",
+        "widgets": [
+          {
+            "id": "w-control-pid",
+            "signalId": 620,
+            "kind": "controller",
+            "title": "Drive PID",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 8,
+              "h": 6
+            }
+          },
+          {
+            "id": "w-control-ff",
+            "signalId": 625,
+            "kind": "controller",
+            "title": "Drive FF",
+            "layout": {
+              "x": 9,
+              "y": 1,
+              "w": 8,
+              "h": 6
+            }
+          },
+          {
+            "id": "w-control-bang-bang",
+            "signalId": 630,
+            "kind": "controller",
+            "title": "Intake Bang-Bang",
+            "layout": {
+              "x": 17,
+              "y": 1,
+              "w": 8,
+              "h": 6
+            },
+            "config": {
+              "params": [
+                {
+                  "key": "setpoint",
+                  "label": "Setpoint",
+                  "signalId": 630
+                },
+                {
+                  "key": "tolerance",
+                  "label": "Tolerance",
+                  "signalId": 631
+                },
+                {
+                  "key": "hysteresis",
+                  "label": "Hysteresis",
+                  "signalId": 632
+                },
+                {
+                  "key": "high_output",
+                  "label": "High Out",
+                  "signalId": 633
+                },
+                {
+                  "key": "low_output",
+                  "label": "Low Out",
+                  "signalId": 634
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-control-status",
+            "signalId": 950,
+            "kind": "text",
+            "title": "Hardware Status",
+            "layout": {
+              "x": 1,
+              "y": 7,
+              "w": 24,
+              "h": 1
+            }
+          }
+        ]
       }
     ]
   }

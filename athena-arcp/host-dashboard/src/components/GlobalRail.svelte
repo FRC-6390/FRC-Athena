@@ -130,7 +130,28 @@
 
   @media (max-width: 1380px) {
     .global-rail {
-      display: none;
+      padding: 0.44rem 0.24rem;
+      gap: 0.54rem;
+    }
+
+    .rail-logo {
+      width: 1.76rem;
+      height: 1.76rem;
+    }
+
+    .rail-item {
+      width: 1.84rem;
+      height: 1.84rem;
+    }
+
+    .rail-icon {
+      width: 0.94rem;
+      height: 0.94rem;
+    }
+
+    .rail-footer {
+      font-size: 0.58rem;
+      letter-spacing: 0.05em;
     }
   }
 </style>

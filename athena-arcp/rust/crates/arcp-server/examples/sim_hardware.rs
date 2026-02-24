@@ -11,6 +11,9 @@ const LAYOUT_PROFILE_HARDWARE: &str = "sim-hardware";
 
 const MOTOR_NAMES: [&str; 4] = ["front_left", "front_right", "back_left", "back_right"];
 const ENCODER_NAMES: [&str; 4] = ["front_left", "front_right", "back_left", "back_right"];
+const LIMIT_SWITCH_NAMES: [&str; 2] = ["arm_lower", "arm_upper"];
+const BUTTON_NAMES: [&str; 3] = ["driver_a", "driver_b", "driver_x"];
+const BEAM_BREAK_NAMES: [&str; 2] = ["intake_entry", "intake_exit"];
 
 const MOTOR_BASE_ID: u16 = 100;
 const MOTOR_STRIDE: u16 = 16;
@@ -18,6 +21,12 @@ const MOTOR_OUTPUT_COMMAND_BASE_ID: u16 = 180;
 const MOTOR_OUTPUT_COMMAND_STRIDE: u16 = 4;
 const ENCODER_BASE_ID: u16 = 300;
 const ENCODER_STRIDE: u16 = 12;
+const LIMIT_SWITCH_BASE_ID: u16 = 600;
+const LIMIT_SWITCH_STRIDE: u16 = 8;
+const BUTTON_BASE_ID: u16 = 700;
+const BUTTON_STRIDE: u16 = 4;
+const BEAM_BREAK_BASE_ID: u16 = 760;
+const BEAM_BREAK_STRIDE: u16 = 4;
 
 const SIG_IMU_ROLL_DEG: u16 = 501;
 const SIG_IMU_PITCH_DEG: u16 = 502;
@@ -48,7 +57,60 @@ const SIG_IMU_VEL_Y_DPS: u16 = 526;
 const SIG_IMU_VEL_Z_DPS: u16 = 527;
 const SIG_IMU_MAG_XYZ_UT: u16 = 528;
 
+const SIG_MOTOR_GROUP_OUTPUT: u16 = 560;
+const SIG_MOTOR_GROUP_VELOCITY_RPS: u16 = 561;
+const SIG_MOTOR_GROUP_POSITION_ROT: u16 = 562;
+const SIG_MOTOR_GROUP_CURRENT_A: u16 = 563;
+const SIG_MOTOR_GROUP_TEMPERATURE_C: u16 = 564;
+const SIG_MOTOR_GROUP_VOLTAGE_V: u16 = 565;
+const SIG_MOTOR_GROUP_CONNECTED: u16 = 566;
+const SIG_MOTOR_GROUP_STALLED: u16 = 567;
+const SIG_MOTOR_GROUP_COMMAND: u16 = 568;
+const SIG_MOTOR_GROUP_CURRENT_LIMIT_A: u16 = 569;
+const SIG_MOTOR_GROUP_SIZE: u16 = 570;
+const SIG_MOTOR_GROUP_TYPE: u16 = 571;
+
+const SIG_ENCODER_GROUP_POSITION_ROT: u16 = 580;
+const SIG_ENCODER_GROUP_VELOCITY_RPS: u16 = 581;
+const SIG_ENCODER_GROUP_ABSOLUTE_ROT: u16 = 582;
+const SIG_ENCODER_GROUP_CONNECTED: u16 = 583;
+const SIG_ENCODER_GROUP_GEAR_RATIO: u16 = 584;
+const SIG_ENCODER_GROUP_OFFSET_ROT: u16 = 585;
+const SIG_ENCODER_GROUP_POSITION_COMMAND: u16 = 586;
+const SIG_ENCODER_GROUP_SIZE: u16 = 587;
+const SIG_ENCODER_GROUP_SUPPORTS_SIMULATION: u16 = 588;
+const SIG_ENCODER_GROUP_TYPE: u16 = 589;
+const SIG_SM_CURRENT_STATE: u16 = 590;
+const SIG_SM_GOAL_STATE: u16 = 591;
+const SIG_SM_NEXT_STATE: u16 = 592;
+const SIG_SM_QUEUE: u16 = 593;
+const SIG_SM_AT_GOAL: u16 = 594;
+const SIG_SM_CLEARANCE_READY: u16 = 595;
+const SIG_SM_APPEND_MODE: u16 = 596;
+const SIG_SM_TRANSITION_COUNT: u16 = 597;
+const SIG_SM_LAST_TRANSITION: u16 = 598;
+const SIG_SM_AVAILABLE_STATES: u16 = 599;
+
+const SIG_CTRL_PID_KP: u16 = 620;
+const SIG_CTRL_PID_KI: u16 = 621;
+const SIG_CTRL_PID_KD: u16 = 622;
+const SIG_CTRL_PID_IZONE: u16 = 623;
+const SIG_CTRL_PID_SETPOINT: u16 = 624;
+const SIG_CTRL_FF_KS: u16 = 625;
+const SIG_CTRL_FF_KV: u16 = 626;
+const SIG_CTRL_FF_KA: u16 = 627;
+const SIG_CTRL_FF_KG: u16 = 628;
+const SIG_CTRL_FF_SETPOINT: u16 = 629;
+const SIG_CTRL_BANG_BANG_SETPOINT: u16 = 630;
+const SIG_CTRL_BANG_BANG_TOLERANCE: u16 = 631;
+const SIG_CTRL_BANG_BANG_HYSTERESIS: u16 = 632;
+const SIG_CTRL_BANG_BANG_OUTPUT_HIGH: u16 = 633;
+const SIG_CTRL_BANG_BANG_OUTPUT_LOW: u16 = 634;
+
 const SIG_CMD_RESET: u16 = 900;
+const SIG_CMD_SM_FORCE_STOW: u16 = 901;
+const SIG_CMD_SM_FORCE_INTAKE: u16 = 902;
+const SIG_CMD_SM_CLEAR_QUEUE: u16 = 903;
 const SIG_HW_STATUS: u16 = 950;
 
 const MOTOR_FIELD_OUTPUT: u16 = 1;
@@ -85,6 +147,25 @@ const ENCODER_FIELD_INVERTED: u16 = 10;
 const ENCODER_FIELD_SUPPORTS_SIMULATION: u16 = 11;
 const ENCODER_FIELD_RAW_ABSOLUTE_ROT: u16 = 12;
 
+const LIMIT_SWITCH_FIELD_TRIGGERED: u16 = 1;
+const LIMIT_SWITCH_FIELD_HARDSTOP: u16 = 2;
+const LIMIT_SWITCH_FIELD_BLOCK_DIRECTION: u16 = 3;
+const LIMIT_SWITCH_FIELD_POSITION_ROT: u16 = 4;
+const LIMIT_SWITCH_FIELD_DELAY_SEC: u16 = 5;
+const LIMIT_SWITCH_FIELD_INVERTED: u16 = 6;
+const LIMIT_SWITCH_FIELD_PORT: u16 = 7;
+const LIMIT_SWITCH_FIELD_NAME: u16 = 8;
+
+const BUTTON_FIELD_PRESSED: u16 = 1;
+const BUTTON_FIELD_INVERTED: u16 = 2;
+const BUTTON_FIELD_PORT: u16 = 3;
+const BUTTON_FIELD_NAME: u16 = 4;
+
+const BEAM_BREAK_FIELD_BLOCKED: u16 = 1;
+const BEAM_BREAK_FIELD_INVERTED: u16 = 2;
+const BEAM_BREAK_FIELD_PORT: u16 = 3;
+const BEAM_BREAK_FIELD_NAME: u16 = 4;
+
 const MOTOR_CAN_IDS: [i64; MOTOR_NAMES.len()] = [1, 2, 3, 4];
 const MOTOR_CANBUS: [&str; MOTOR_NAMES.len()] = ["rio", "rio", "rio", "rio"];
 const MOTOR_TYPES: [&str; MOTOR_NAMES.len()] = ["talonfx", "talonfx", "talonfx", "talonfx"];
@@ -98,6 +179,15 @@ const ENCODER_TYPES: [&str; ENCODER_NAMES.len()] = ["cancoder", "cancoder", "can
 const IMU_CAN_ID: i64 = 42;
 const IMU_CANBUS: &str = "rio";
 const IMU_TYPE: &str = "pigeon2";
+const MOTOR_GROUP_NAME: &str = "drive";
+const ENCODER_GROUP_NAME: &str = "drive";
+
+const LIMIT_SWITCH_POSITIONS_ROT: [f64; LIMIT_SWITCH_NAMES.len()] = [0.0, 1.0];
+const LIMIT_SWITCH_HARDSTOP: [bool; LIMIT_SWITCH_NAMES.len()] = [true, true];
+const LIMIT_SWITCH_BLOCK_DIRECTION: [i64; LIMIT_SWITCH_NAMES.len()] = [-1, 1];
+const LIMIT_SWITCH_PORTS: [i64; LIMIT_SWITCH_NAMES.len()] = [0, 1];
+const BUTTON_PORTS: [i64; BUTTON_NAMES.len()] = [2, 3, 4];
+const BEAM_BREAK_PORTS: [i64; BEAM_BREAK_NAMES.len()] = [5, 6];
 
 const fn motor_id(index: usize, field: u16) -> u16 {
     MOTOR_BASE_ID + (index as u16) * MOTOR_STRIDE + field
@@ -109,6 +199,138 @@ const fn encoder_id(index: usize, field: u16) -> u16 {
 
 const fn motor_output_command_id(index: usize, field: u16) -> u16 {
     MOTOR_OUTPUT_COMMAND_BASE_ID + (index as u16) * MOTOR_OUTPUT_COMMAND_STRIDE + field
+}
+
+const fn limit_switch_id(index: usize, field: u16) -> u16 {
+    LIMIT_SWITCH_BASE_ID + (index as u16) * LIMIT_SWITCH_STRIDE + field
+}
+
+const fn button_id(index: usize, field: u16) -> u16 {
+    BUTTON_BASE_ID + (index as u16) * BUTTON_STRIDE + field
+}
+
+const fn beam_break_id(index: usize, field: u16) -> u16 {
+    BEAM_BREAK_BASE_ID + (index as u16) * BEAM_BREAK_STRIDE + field
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntakeState {
+    Stow,
+    Clearance,
+    Intake,
+}
+
+impl IntakeState {
+    const ALL: [IntakeState; 3] = [
+        IntakeState::Stow,
+        IntakeState::Clearance,
+        IntakeState::Intake,
+    ];
+
+    fn as_str(self) -> &'static str {
+        match self {
+            IntakeState::Stow => "STOW",
+            IntakeState::Clearance => "CLEARANCE",
+            IntakeState::Intake => "INTAKE",
+        }
+    }
+
+    fn from_str(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_uppercase().as_str() {
+            "STOW" => Some(IntakeState::Stow),
+            "CLEARANCE" => Some(IntakeState::Clearance),
+            "INTAKE" => Some(IntakeState::Intake),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct StateMachineSim {
+    current: IntakeState,
+    goal: IntakeState,
+    queue: Vec<IntakeState>,
+    clearance_ready: bool,
+    append_mode: bool,
+    transition_count: i64,
+    last_transition: String,
+}
+
+impl Default for StateMachineSim {
+    fn default() -> Self {
+        Self {
+            current: IntakeState::Stow,
+            goal: IntakeState::Stow,
+            queue: Vec::new(),
+            clearance_ready: true,
+            append_mode: false,
+            transition_count: 0,
+            last_transition: "none".to_string(),
+        }
+    }
+}
+
+impl StateMachineSim {
+    fn path(from: IntakeState, to: IntakeState) -> Vec<IntakeState> {
+        use IntakeState::{Clearance, Intake, Stow};
+        match (from, to) {
+            (a, b) if a == b => Vec::new(),
+            (Stow, Clearance) => vec![Clearance],
+            (Stow, Intake) => vec![Clearance, Intake],
+            (Clearance, Stow) => vec![Stow],
+            (Clearance, Intake) => vec![Intake],
+            (Intake, Clearance) => vec![Clearance],
+            (Intake, Stow) => vec![Clearance, Stow],
+            (_, target) => vec![target],
+        }
+    }
+
+    fn guard_allows(&self, from: IntakeState, to: IntakeState) -> bool {
+        !matches!((from, to), (IntakeState::Stow, IntakeState::Clearance)) || self.clearance_ready
+    }
+
+    fn force(&mut self, target: IntakeState, append: bool) {
+        let start = if append {
+            self.queue.last().copied().unwrap_or(self.current)
+        } else {
+            self.queue.clear();
+            self.current
+        };
+        self.goal = target;
+        self.queue.extend(Self::path(start, target));
+    }
+
+    fn clear_queue(&mut self) {
+        self.queue.clear();
+        self.goal = self.current;
+    }
+
+    fn next_state(&self) -> Option<IntakeState> {
+        self.queue.first().copied()
+    }
+
+    fn at_goal(&self) -> bool {
+        self.queue.is_empty() && self.current == self.goal
+    }
+
+    fn update(&mut self) {
+        if let Some(next) = self.next_state() {
+            if self.guard_allows(self.current, next) {
+                let from = self.current;
+                self.current = next;
+                self.queue.remove(0);
+                self.transition_count = self.transition_count.saturating_add(1);
+                self.last_transition = format!("{}->{}", from.as_str(), next.as_str());
+            }
+        }
+    }
+
+    fn queue_as_strings(&self) -> Vec<String> {
+        self.queue
+            .iter()
+            .map(|state| state.as_str().to_string())
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -126,6 +348,15 @@ struct SimState {
     encoder_can_id: [i64; ENCODER_NAMES.len()],
     encoder_canbus: [String; ENCODER_NAMES.len()],
     encoder_inverted: [bool; ENCODER_NAMES.len()],
+    limit_switch_delay_sec: [f64; LIMIT_SWITCH_NAMES.len()],
+    limit_switch_inverted: [bool; LIMIT_SWITCH_NAMES.len()],
+    button_inverted: [bool; BUTTON_NAMES.len()],
+    beam_break_inverted: [bool; BEAM_BREAK_NAMES.len()],
+    encoder_group_position_command: f64,
+    drive_pid: [f64; 5],
+    drive_ff: [f64; 5],
+    intake_bang_bang: [f64; 5],
+    state_machine: StateMachineSim,
     imu_inverted: bool,
     imu_can_id: i64,
     imu_canbus: String,
@@ -150,6 +381,15 @@ impl Default for SimState {
             encoder_can_id: ENCODER_CAN_IDS,
             encoder_canbus: ENCODER_CANBUS.map(|entry| entry.to_string()),
             encoder_inverted: [false, false, false, false],
+            limit_switch_delay_sec: [0.05, 0.05],
+            limit_switch_inverted: [false, false],
+            button_inverted: [false, false, false],
+            beam_break_inverted: [false, false],
+            encoder_group_position_command: 0.0,
+            drive_pid: [0.22, 0.0, 0.01, 0.25, 0.0],
+            drive_ff: [0.12, 2.1, 0.08, 0.0, 0.0],
+            intake_bang_bang: [0.0, 0.08, 0.04, 1.0, -1.0],
+            state_machine: StateMachineSim::default(),
             imu_inverted: false,
             imu_can_id: IMU_CAN_ID,
             imu_canbus: IMU_CANBUS.to_string(),
@@ -189,6 +429,15 @@ fn main() {
                     tick = 0;
                     phase = 0.0;
                     println!("hardware reset command received");
+                }
+                RuntimeEvent::Action { signal_id } if signal_id == SIG_CMD_SM_FORCE_STOW => {
+                    state.state_machine.force(IntakeState::Stow, false);
+                }
+                RuntimeEvent::Action { signal_id } if signal_id == SIG_CMD_SM_FORCE_INTAKE => {
+                    state.state_machine.force(IntakeState::Intake, false);
+                }
+                RuntimeEvent::Action { signal_id } if signal_id == SIG_CMD_SM_CLEAR_QUEUE => {
+                    state.state_machine.clear_queue();
                 }
                 RuntimeEvent::TunableSet { signal_id, value } => {
                     apply_tunable(&mut state, signal_id, value);
@@ -512,6 +761,546 @@ fn hardware_descriptor_catalog() -> Vec<SignalDescriptor> {
         ));
     }
 
+    let motor_group_root = format!("/Athena/Hardware/MotorGroups/{MOTOR_GROUP_NAME}");
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_OUTPUT,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/output"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_VELOCITY_RPS,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/velocity_rps"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_POSITION_ROT,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/position_rot"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_CURRENT_A,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/current_a"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_TEMPERATURE_C,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/temperature_c"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_VOLTAGE_V,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/voltage_v"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_CONNECTED,
+        SignalType::Bool,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/connected"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_STALLED,
+        SignalType::Bool,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/stalled"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_COMMAND,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{motor_group_root}/command"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_CURRENT_LIMIT_A,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{motor_group_root}/current_limit_a"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_SIZE,
+        SignalType::I64,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/group_size"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_MOTOR_GROUP_TYPE,
+        SignalType::Str,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{motor_group_root}/type"),
+    ));
+
+    let encoder_group_root = format!("/Athena/Hardware/EncoderGroups/{ENCODER_GROUP_NAME}");
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_POSITION_ROT,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/position_rot"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_VELOCITY_RPS,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/velocity_rps"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_ABSOLUTE_ROT,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::HighRate,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/absolute_rot"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_CONNECTED,
+        SignalType::Bool,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/connected"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_GEAR_RATIO,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/gear_ratio"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_OFFSET_ROT,
+        SignalType::F64,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/offset_rot"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_POSITION_COMMAND,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{encoder_group_root}/position_command"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_SIZE,
+        SignalType::I64,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/group_size"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_SUPPORTS_SIMULATION,
+        SignalType::Bool,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/supports_simulation"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_ENCODER_GROUP_TYPE,
+        SignalType::Str,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{encoder_group_root}/type"),
+    ));
+
+    let state_machine_root = "/Athena/StateMachine/Intake";
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_CURRENT_STATE,
+        SignalType::Str,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{state_machine_root}/current_state"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_GOAL_STATE,
+        SignalType::Str,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{state_machine_root}/goal_state"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_NEXT_STATE,
+        SignalType::Str,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{state_machine_root}/next_state"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_QUEUE,
+        SignalType::StrArray,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{state_machine_root}/queue"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_AT_GOAL,
+        SignalType::Bool,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{state_machine_root}/at_goal"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_CLEARANCE_READY,
+        SignalType::Bool,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{state_machine_root}/clearance_ready"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_APPEND_MODE,
+        SignalType::Bool,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{state_machine_root}/append_mode"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_TRANSITION_COUNT,
+        SignalType::I64,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{state_machine_root}/transition_count"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_LAST_TRANSITION,
+        SignalType::Str,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{state_machine_root}/last_transition"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_SM_AVAILABLE_STATES,
+        SignalType::StrArray,
+        SignalAccess::Observe,
+        SignalPolicy::OnChange,
+        SignalDurability::Retained,
+        format!("{state_machine_root}/available_states"),
+    ));
+
+    let control_root = "/Athena/Control";
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_PID_KP,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_pid/kp"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_PID_KI,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_pid/ki"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_PID_KD,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_pid/kd"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_PID_IZONE,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_pid/izone"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_PID_SETPOINT,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_pid/setpoint"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_FF_KS,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_ff/ks"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_FF_KV,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_ff/kv"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_FF_KA,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_ff/ka"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_FF_KG,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_ff/kg"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_FF_SETPOINT,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/drive_ff/setpoint"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_BANG_BANG_SETPOINT,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/intake_bang_bang/setpoint"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_BANG_BANG_TOLERANCE,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/intake_bang_bang/tolerance"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_BANG_BANG_HYSTERESIS,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/intake_bang_bang/hysteresis"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_BANG_BANG_OUTPUT_HIGH,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/intake_bang_bang/output_high"),
+    ));
+    descriptors.push(SignalDescriptor::telemetry(
+        SIG_CTRL_BANG_BANG_OUTPUT_LOW,
+        SignalType::F64,
+        SignalAccess::Write,
+        SignalPolicy::Sampled,
+        SignalDurability::Persistent,
+        format!("{control_root}/intake_bang_bang/output_low"),
+    ));
+
+    descriptors.push(SignalDescriptor::command(
+        SIG_CMD_SM_FORCE_STOW,
+        SignalType::Bool,
+        "/Athena/StateMachine/Intake/command/force_stow",
+    ));
+    descriptors.push(SignalDescriptor::command(
+        SIG_CMD_SM_FORCE_INTAKE,
+        SignalType::Bool,
+        "/Athena/StateMachine/Intake/command/force_intake",
+    ));
+    descriptors.push(SignalDescriptor::command(
+        SIG_CMD_SM_CLEAR_QUEUE,
+        SignalType::Bool,
+        "/Athena/StateMachine/Intake/command/clear_queue",
+    ));
+
+    for (index, name) in LIMIT_SWITCH_NAMES.iter().enumerate() {
+        let root = format!("/Athena/Hardware/LimitSwitches/{name}");
+        descriptors.push(SignalDescriptor::telemetry(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_TRIGGERED),
+            SignalType::Bool,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/triggered"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_HARDSTOP),
+            SignalType::Bool,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/hardstop"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_BLOCK_DIRECTION),
+            SignalType::I64,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/block_direction"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_POSITION_ROT),
+            SignalType::F64,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/position_rot"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_DELAY_SEC),
+            SignalType::F64,
+            SignalAccess::Write,
+            SignalPolicy::Sampled,
+            SignalDurability::Persistent,
+            format!("{root}/delay_sec"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_INVERTED),
+            SignalType::Bool,
+            SignalAccess::Write,
+            SignalPolicy::Sampled,
+            SignalDurability::Persistent,
+            format!("{root}/inverted"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_PORT),
+            SignalType::I64,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/port"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_NAME),
+            SignalType::Str,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/name"),
+        ));
+    }
+
+    for (index, name) in BUTTON_NAMES.iter().enumerate() {
+        let root = format!("/Athena/Hardware/Buttons/{name}");
+        descriptors.push(SignalDescriptor::telemetry(
+            button_id(index, BUTTON_FIELD_PRESSED),
+            SignalType::Bool,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/pressed"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            button_id(index, BUTTON_FIELD_INVERTED),
+            SignalType::Bool,
+            SignalAccess::Write,
+            SignalPolicy::Sampled,
+            SignalDurability::Persistent,
+            format!("{root}/inverted"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            button_id(index, BUTTON_FIELD_PORT),
+            SignalType::I64,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/port"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            button_id(index, BUTTON_FIELD_NAME),
+            SignalType::Str,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/name"),
+        ));
+    }
+
+    for (index, name) in BEAM_BREAK_NAMES.iter().enumerate() {
+        let root = format!("/Athena/Hardware/BeamBreaks/{name}");
+        descriptors.push(SignalDescriptor::telemetry(
+            beam_break_id(index, BEAM_BREAK_FIELD_BLOCKED),
+            SignalType::Bool,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/blocked"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            beam_break_id(index, BEAM_BREAK_FIELD_INVERTED),
+            SignalType::Bool,
+            SignalAccess::Write,
+            SignalPolicy::Sampled,
+            SignalDurability::Persistent,
+            format!("{root}/inverted"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            beam_break_id(index, BEAM_BREAK_FIELD_PORT),
+            SignalType::I64,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/port"),
+        ));
+        descriptors.push(SignalDescriptor::telemetry(
+            beam_break_id(index, BEAM_BREAK_FIELD_NAME),
+            SignalType::Str,
+            SignalAccess::Observe,
+            SignalPolicy::OnChange,
+            SignalDurability::Retained,
+            format!("{root}/name"),
+        ));
+    }
+
     descriptors.push(SignalDescriptor::telemetry(
         SIG_IMU_ROLL_DEG,
         SignalType::F64,
@@ -755,8 +1544,15 @@ fn hardware_descriptor_catalog() -> Vec<SignalDescriptor> {
 }
 
 fn publish_high_rate(server: &ArcpServer, tick: u64, phase: f64, state: &mut SimState) {
+    state.state_machine.update();
+
     let mut motor_velocity = [0.0_f64; MOTOR_NAMES.len()];
     let mut motor_connected = [true; MOTOR_NAMES.len()];
+    let mut motor_output_sum = 0.0_f64;
+    let mut motor_current_sum = 0.0_f64;
+    let mut motor_temp_sum = 0.0_f64;
+    let mut motor_voltage_sum = 0.0_f64;
+    let mut motor_any_stalled = false;
 
     for index in 0..MOTOR_NAMES.len() {
         let command = state.motor_command[index].clamp(-1.0, 1.0);
@@ -788,6 +1584,11 @@ fn publish_high_rate(server: &ArcpServer, tick: u64, phase: f64, state: &mut Sim
 
         motor_velocity[index] = velocity_rps;
         motor_connected[index] = connected;
+        motor_output_sum += output;
+        motor_current_sum += current_a;
+        motor_temp_sum += state.motor_temp_c[index];
+        motor_voltage_sum += voltage_v.max(0.0);
+        motor_any_stalled |= stalled;
 
         let _ = server.publish_f64(motor_id(index, MOTOR_FIELD_OUTPUT), output);
         let _ = server.publish_f64(motor_id(index, MOTOR_FIELD_VELOCITY_RPS), velocity_rps);
@@ -807,7 +1608,10 @@ fn publish_high_rate(server: &ArcpServer, tick: u64, phase: f64, state: &mut Sim
             neutral_mode.to_string(),
         );
         let _ = server.publish_f64(motor_id(index, MOTOR_FIELD_COMMAND), command);
-        let _ = server.publish_i64(motor_id(index, MOTOR_FIELD_CAN_ID), state.motor_can_id[index]);
+        let _ = server.publish_i64(
+            motor_id(index, MOTOR_FIELD_CAN_ID),
+            state.motor_can_id[index],
+        );
         let _ = server.publish_string(
             motor_id(index, MOTOR_FIELD_CANBUS),
             state.motor_canbus[index].clone(),
@@ -840,6 +1644,55 @@ fn publish_high_rate(server: &ArcpServer, tick: u64, phase: f64, state: &mut Sim
         );
     }
 
+    let motor_count = MOTOR_NAMES.len() as f64;
+    let motor_inv_count = if motor_count > 0.0 {
+        1.0 / motor_count
+    } else {
+        0.0
+    };
+    let motor_connected_all = motor_connected.iter().all(|connected| *connected);
+    let motor_command_avg = if MOTOR_NAMES.is_empty() {
+        0.0
+    } else {
+        state.motor_command.iter().sum::<f64>() * motor_inv_count
+    };
+    let motor_current_limit_avg = if MOTOR_NAMES.is_empty() {
+        0.0
+    } else {
+        state.motor_current_limit_a.iter().sum::<f64>() * motor_inv_count
+    };
+    let _ = server.publish_f64(SIG_MOTOR_GROUP_OUTPUT, motor_output_sum * motor_inv_count);
+    let _ = server.publish_f64(
+        SIG_MOTOR_GROUP_VELOCITY_RPS,
+        motor_velocity.iter().sum::<f64>() * motor_inv_count,
+    );
+    let _ = server.publish_f64(
+        SIG_MOTOR_GROUP_POSITION_ROT,
+        state.motor_position.iter().sum::<f64>() * motor_inv_count,
+    );
+    let _ = server.publish_f64(
+        SIG_MOTOR_GROUP_CURRENT_A,
+        motor_current_sum * motor_inv_count,
+    );
+    let _ = server.publish_f64(
+        SIG_MOTOR_GROUP_TEMPERATURE_C,
+        motor_temp_sum * motor_inv_count,
+    );
+    let _ = server.publish_f64(
+        SIG_MOTOR_GROUP_VOLTAGE_V,
+        motor_voltage_sum * motor_inv_count,
+    );
+    let _ = server.publish_bool(SIG_MOTOR_GROUP_CONNECTED, motor_connected_all);
+    let _ = server.publish_bool(SIG_MOTOR_GROUP_STALLED, motor_any_stalled);
+    let _ = server.publish_f64(SIG_MOTOR_GROUP_COMMAND, motor_command_avg);
+    let _ = server.publish_f64(SIG_MOTOR_GROUP_CURRENT_LIMIT_A, motor_current_limit_avg);
+    let _ = server.publish_i64(SIG_MOTOR_GROUP_SIZE, MOTOR_NAMES.len() as i64);
+    let _ = server.publish_string(SIG_MOTOR_GROUP_TYPE, "group".to_string());
+
+    let mut encoder_position_sum = 0.0_f64;
+    let mut encoder_velocity_sum = 0.0_f64;
+    let mut encoder_absolute_sum = 0.0_f64;
+    let mut encoder_connected_all = true;
     for index in 0..ENCODER_NAMES.len() {
         let ratio = state.encoder_ratio[index];
         let offset = state.encoder_offset[index];
@@ -852,6 +1705,10 @@ fn publish_high_rate(server: &ArcpServer, tick: u64, phase: f64, state: &mut Sim
         let velocity = direction * motor_velocity[index] * ratio;
         let absolute = position.rem_euclid(1.0);
         let raw_absolute = (absolute + (phase * 1.8 + index as f64).sin() * 0.0018).rem_euclid(1.0);
+        encoder_position_sum += position;
+        encoder_velocity_sum += velocity;
+        encoder_absolute_sum += absolute;
+        encoder_connected_all &= motor_connected[index];
 
         let _ = server.publish_f64(encoder_id(index, ENCODER_FIELD_POSITION_ROT), position);
         let _ = server.publish_f64(encoder_id(index, ENCODER_FIELD_VELOCITY_RPS), velocity);
@@ -882,6 +1739,174 @@ fn publish_high_rate(server: &ArcpServer, tick: u64, phase: f64, state: &mut Sim
         let _ = server.publish_f64(
             encoder_id(index, ENCODER_FIELD_RAW_ABSOLUTE_ROT),
             raw_absolute,
+        );
+    }
+
+    let encoder_count = ENCODER_NAMES.len() as f64;
+    let encoder_inv_count = if encoder_count > 0.0 {
+        1.0 / encoder_count
+    } else {
+        0.0
+    };
+    let _ = server.publish_f64(
+        SIG_ENCODER_GROUP_POSITION_ROT,
+        encoder_position_sum * encoder_inv_count,
+    );
+    let _ = server.publish_f64(
+        SIG_ENCODER_GROUP_VELOCITY_RPS,
+        encoder_velocity_sum * encoder_inv_count,
+    );
+    let _ = server.publish_f64(
+        SIG_ENCODER_GROUP_ABSOLUTE_ROT,
+        encoder_absolute_sum * encoder_inv_count,
+    );
+    let _ = server.publish_bool(SIG_ENCODER_GROUP_CONNECTED, encoder_connected_all);
+    let _ = server.publish_f64(
+        SIG_ENCODER_GROUP_GEAR_RATIO,
+        state.encoder_ratio.iter().sum::<f64>() * encoder_inv_count,
+    );
+    let _ = server.publish_f64(
+        SIG_ENCODER_GROUP_OFFSET_ROT,
+        state.encoder_offset.iter().sum::<f64>() * encoder_inv_count,
+    );
+    let _ = server.publish_f64(
+        SIG_ENCODER_GROUP_POSITION_COMMAND,
+        state.encoder_group_position_command,
+    );
+    let _ = server.publish_i64(SIG_ENCODER_GROUP_SIZE, ENCODER_NAMES.len() as i64);
+    let _ = server.publish_bool(SIG_ENCODER_GROUP_SUPPORTS_SIMULATION, true);
+    let _ = server.publish_string(SIG_ENCODER_GROUP_TYPE, "group".to_string());
+
+    let state_machine = &state.state_machine;
+    let next_state = state_machine
+        .next_state()
+        .map(|state| state.as_str().to_string())
+        .unwrap_or_else(|| "NONE".to_string());
+    let _ = server.publish_string(
+        SIG_SM_CURRENT_STATE,
+        state_machine.current.as_str().to_string(),
+    );
+    let _ = server.publish_string(SIG_SM_GOAL_STATE, state_machine.goal.as_str().to_string());
+    let _ = server.publish_string(SIG_SM_NEXT_STATE, next_state);
+    let _ = server.publish_string_array(SIG_SM_QUEUE, state_machine.queue_as_strings());
+    let _ = server.publish_bool(SIG_SM_AT_GOAL, state_machine.at_goal());
+    let _ = server.publish_bool(SIG_SM_CLEARANCE_READY, state_machine.clearance_ready);
+    let _ = server.publish_bool(SIG_SM_APPEND_MODE, state_machine.append_mode);
+    let _ = server.publish_i64(SIG_SM_TRANSITION_COUNT, state_machine.transition_count);
+    let _ = server.publish_string(
+        SIG_SM_LAST_TRANSITION,
+        state_machine.last_transition.clone(),
+    );
+    let _ = server.publish_string_array(
+        SIG_SM_AVAILABLE_STATES,
+        IntakeState::ALL
+            .iter()
+            .map(|state| state.as_str().to_string())
+            .collect(),
+    );
+    let _ = server.publish_f64(SIG_CTRL_PID_KP, state.drive_pid[0]);
+    let _ = server.publish_f64(SIG_CTRL_PID_KI, state.drive_pid[1]);
+    let _ = server.publish_f64(SIG_CTRL_PID_KD, state.drive_pid[2]);
+    let _ = server.publish_f64(SIG_CTRL_PID_IZONE, state.drive_pid[3]);
+    let _ = server.publish_f64(SIG_CTRL_PID_SETPOINT, state.drive_pid[4]);
+    let _ = server.publish_f64(SIG_CTRL_FF_KS, state.drive_ff[0]);
+    let _ = server.publish_f64(SIG_CTRL_FF_KV, state.drive_ff[1]);
+    let _ = server.publish_f64(SIG_CTRL_FF_KA, state.drive_ff[2]);
+    let _ = server.publish_f64(SIG_CTRL_FF_KG, state.drive_ff[3]);
+    let _ = server.publish_f64(SIG_CTRL_FF_SETPOINT, state.drive_ff[4]);
+    let _ = server.publish_f64(SIG_CTRL_BANG_BANG_SETPOINT, state.intake_bang_bang[0]);
+    let _ = server.publish_f64(SIG_CTRL_BANG_BANG_TOLERANCE, state.intake_bang_bang[1]);
+    let _ = server.publish_f64(SIG_CTRL_BANG_BANG_HYSTERESIS, state.intake_bang_bang[2]);
+    let _ = server.publish_f64(SIG_CTRL_BANG_BANG_OUTPUT_HIGH, state.intake_bang_bang[3]);
+    let _ = server.publish_f64(SIG_CTRL_BANG_BANG_OUTPUT_LOW, state.intake_bang_bang[4]);
+
+    for index in 0..LIMIT_SWITCH_NAMES.len() {
+        let axis = (phase * 0.72).sin();
+        let raw_triggered = if index == 0 {
+            axis < -0.86
+        } else {
+            axis > 0.86
+        };
+        let triggered = if state.limit_switch_inverted[index] {
+            !raw_triggered
+        } else {
+            raw_triggered
+        };
+
+        let _ = server.publish_bool(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_TRIGGERED),
+            triggered,
+        );
+        let _ = server.publish_bool(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_HARDSTOP),
+            LIMIT_SWITCH_HARDSTOP[index],
+        );
+        let _ = server.publish_i64(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_BLOCK_DIRECTION),
+            LIMIT_SWITCH_BLOCK_DIRECTION[index],
+        );
+        let _ = server.publish_f64(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_POSITION_ROT),
+            LIMIT_SWITCH_POSITIONS_ROT[index],
+        );
+        let _ = server.publish_f64(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_DELAY_SEC),
+            state.limit_switch_delay_sec[index],
+        );
+        let _ = server.publish_bool(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_INVERTED),
+            state.limit_switch_inverted[index],
+        );
+        let _ = server.publish_i64(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_PORT),
+            LIMIT_SWITCH_PORTS[index],
+        );
+        let _ = server.publish_string(
+            limit_switch_id(index, LIMIT_SWITCH_FIELD_NAME),
+            LIMIT_SWITCH_NAMES[index].to_string(),
+        );
+    }
+
+    for index in 0..BUTTON_NAMES.len() {
+        let raw_pressed = ((tick / (12 + index as u64 * 4) + index as u64 * 5) % 40) < 3;
+        let pressed = if state.button_inverted[index] {
+            !raw_pressed
+        } else {
+            raw_pressed
+        };
+
+        let _ = server.publish_bool(button_id(index, BUTTON_FIELD_PRESSED), pressed);
+        let _ = server.publish_bool(
+            button_id(index, BUTTON_FIELD_INVERTED),
+            state.button_inverted[index],
+        );
+        let _ = server.publish_i64(button_id(index, BUTTON_FIELD_PORT), BUTTON_PORTS[index]);
+        let _ = server.publish_string(
+            button_id(index, BUTTON_FIELD_NAME),
+            BUTTON_NAMES[index].to_string(),
+        );
+    }
+
+    for index in 0..BEAM_BREAK_NAMES.len() {
+        let raw_blocked = ((tick / (9 + index as u64 * 3) + index as u64 * 7) % 30) < 8;
+        let blocked = if state.beam_break_inverted[index] {
+            !raw_blocked
+        } else {
+            raw_blocked
+        };
+
+        let _ = server.publish_bool(beam_break_id(index, BEAM_BREAK_FIELD_BLOCKED), blocked);
+        let _ = server.publish_bool(
+            beam_break_id(index, BEAM_BREAK_FIELD_INVERTED),
+            state.beam_break_inverted[index],
+        );
+        let _ = server.publish_i64(
+            beam_break_id(index, BEAM_BREAK_FIELD_PORT),
+            BEAM_BREAK_PORTS[index],
+        );
+        let _ = server.publish_string(
+            beam_break_id(index, BEAM_BREAK_FIELD_NAME),
+            BEAM_BREAK_NAMES[index].to_string(),
         );
     }
 
@@ -954,17 +1979,227 @@ fn publish_high_rate(server: &ArcpServer, tick: u64, phase: f64, state: &mut Sim
 fn publish_low_rate(server: &ArcpServer, tick: u64, phase: f64, state: &SimState) {
     let cycle = ((tick / 100) % 4) as usize;
     let active_motor = MOTOR_NAMES[cycle];
+    let limit_triggered = (0..LIMIT_SWITCH_NAMES.len())
+        .filter(|index| {
+            let axis = (phase * 0.72).sin();
+            let raw = if *index == 0 {
+                axis < -0.86
+            } else {
+                axis > 0.86
+            };
+            if state.limit_switch_inverted[*index] {
+                !raw
+            } else {
+                raw
+            }
+        })
+        .count();
+    let buttons_pressed = (0..BUTTON_NAMES.len())
+        .filter(|index| {
+            let raw = ((tick / (12 + *index as u64 * 4) + *index as u64 * 5) % 40) < 3;
+            if state.button_inverted[*index] {
+                !raw
+            } else {
+                raw
+            }
+        })
+        .count();
+    let beams_blocked = (0..BEAM_BREAK_NAMES.len())
+        .filter(|index| {
+            let raw = ((tick / (9 + *index as u64 * 3) + *index as u64 * 7) % 30) < 8;
+            if state.beam_break_inverted[*index] {
+                !raw
+            } else {
+                raw
+            }
+        })
+        .count();
+    let state_machine = &state.state_machine;
     let status_message = format!(
-        "active={} cmd={:.2} heading={:.1}",
+        "active={} cmd={:.2} heading={:.1} limits={}/{} buttons={}/{} beams={}/{} sm={}=>{} q={}",
         active_motor,
         state.motor_command[cycle],
-        (phase * 82.0).rem_euclid(360.0)
+        (phase * 82.0).rem_euclid(360.0),
+        limit_triggered,
+        LIMIT_SWITCH_NAMES.len(),
+        buttons_pressed,
+        BUTTON_NAMES.len(),
+        beams_blocked,
+        BEAM_BREAK_NAMES.len(),
+        state_machine.current.as_str(),
+        state_machine.goal.as_str(),
+        state_machine.queue.len()
     );
 
     let _ = server.publish_string(SIG_HW_STATUS, status_message);
 }
 
 fn apply_tunable(state: &mut SimState, signal_id: u16, value: SignalValue) {
+    if signal_id == SIG_SM_GOAL_STATE {
+        if let Some(next) = signal_value_as_string(&value) {
+            if let Some(target) = IntakeState::from_str(&next) {
+                let append = state.state_machine.append_mode;
+                state.state_machine.force(target, append);
+            }
+        }
+        return;
+    }
+
+    if signal_id == SIG_SM_CLEARANCE_READY {
+        if let Some(next) = signal_value_as_bool(&value) {
+            state.state_machine.clearance_ready = next;
+        }
+        return;
+    }
+
+    if signal_id == SIG_SM_APPEND_MODE {
+        if let Some(next) = signal_value_as_bool(&value) {
+            state.state_machine.append_mode = next;
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_PID_KP {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_pid[0] = next.clamp(0.0, 20.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_PID_KI {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_pid[1] = next.clamp(0.0, 10.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_PID_KD {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_pid[2] = next.clamp(0.0, 10.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_PID_IZONE {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_pid[3] = next.clamp(0.0, 100.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_PID_SETPOINT {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_pid[4] = next.clamp(-100.0, 100.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_FF_KS {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_ff[0] = next.clamp(-20.0, 20.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_FF_KV {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_ff[1] = next.clamp(-20.0, 20.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_FF_KA {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_ff[2] = next.clamp(-20.0, 20.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_FF_KG {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_ff[3] = next.clamp(-20.0, 20.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_FF_SETPOINT {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.drive_ff[4] = next.clamp(-100.0, 100.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_BANG_BANG_SETPOINT {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.intake_bang_bang[0] = next.clamp(-100.0, 100.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_BANG_BANG_TOLERANCE {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.intake_bang_bang[1] = next.clamp(0.0, 20.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_BANG_BANG_HYSTERESIS {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.intake_bang_bang[2] = next.clamp(0.0, 20.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_BANG_BANG_OUTPUT_HIGH {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.intake_bang_bang[3] = next.clamp(-1.0, 1.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_CTRL_BANG_BANG_OUTPUT_LOW {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.intake_bang_bang[4] = next.clamp(-1.0, 1.0);
+        }
+        return;
+    }
+
+    if signal_id == SIG_MOTOR_GROUP_COMMAND {
+        if let Some(next) = signal_value_as_f64(&value) {
+            let clamped = next.clamp(-1.0, 1.0);
+            for command in &mut state.motor_command {
+                *command = clamped;
+            }
+        }
+        return;
+    }
+
+    if signal_id == SIG_MOTOR_GROUP_CURRENT_LIMIT_A {
+        if let Some(next) = signal_value_as_f64(&value) {
+            let clamped = next.clamp(1.0, 200.0);
+            for current_limit in &mut state.motor_current_limit_a {
+                *current_limit = clamped;
+            }
+        }
+        return;
+    }
+
+    if signal_id == SIG_ENCODER_GROUP_POSITION_COMMAND {
+        if let Some(next) = signal_value_as_f64(&value) {
+            state.encoder_group_position_command = next;
+            for index in 0..ENCODER_NAMES.len() {
+                let direction = if state.encoder_inverted[index] {
+                    -1.0
+                } else {
+                    1.0
+                };
+                state.encoder_offset[index] =
+                    next / direction - state.motor_position[index] * state.encoder_ratio[index];
+            }
+        }
+        return;
+    }
+
     for index in 0..MOTOR_NAMES.len() {
         if signal_id == motor_id(index, MOTOR_FIELD_COMMAND) {
             if let Some(next) = signal_value_as_f64(&value) {
@@ -980,8 +2215,7 @@ fn apply_tunable(state: &mut SimState, signal_id: u16, value: SignalValue) {
         }
         if signal_id == motor_output_command_id(index, MOTOR_OUTPUT_COMMAND_VOLTAGE_V) {
             if let Some(next) = signal_value_as_f64(&value) {
-                state.motor_command[index] =
-                    (next / MOTOR_COMMAND_MAX_VOLTAGE_V).clamp(-1.0, 1.0);
+                state.motor_command[index] = (next / MOTOR_COMMAND_MAX_VOLTAGE_V).clamp(-1.0, 1.0);
             }
             return;
         }
@@ -1058,6 +2292,39 @@ fn apply_tunable(state: &mut SimState, signal_id: u16, value: SignalValue) {
         if signal_id == encoder_id(index, ENCODER_FIELD_INVERTED) {
             if let Some(next) = signal_value_as_bool(&value) {
                 state.encoder_inverted[index] = next;
+            }
+            return;
+        }
+    }
+
+    for index in 0..LIMIT_SWITCH_NAMES.len() {
+        if signal_id == limit_switch_id(index, LIMIT_SWITCH_FIELD_DELAY_SEC) {
+            if let Some(next) = signal_value_as_f64(&value) {
+                state.limit_switch_delay_sec[index] = next.clamp(0.0, 2.0);
+            }
+            return;
+        }
+        if signal_id == limit_switch_id(index, LIMIT_SWITCH_FIELD_INVERTED) {
+            if let Some(next) = signal_value_as_bool(&value) {
+                state.limit_switch_inverted[index] = next;
+            }
+            return;
+        }
+    }
+
+    for index in 0..BUTTON_NAMES.len() {
+        if signal_id == button_id(index, BUTTON_FIELD_INVERTED) {
+            if let Some(next) = signal_value_as_bool(&value) {
+                state.button_inverted[index] = next;
+            }
+            return;
+        }
+    }
+
+    for index in 0..BEAM_BREAK_NAMES.len() {
+        if signal_id == beam_break_id(index, BEAM_BREAK_FIELD_INVERTED) {
+            if let Some(next) = signal_value_as_bool(&value) {
+                state.beam_break_inverted[index] = next;
             }
             return;
         }

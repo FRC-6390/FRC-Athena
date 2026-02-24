@@ -58,7 +58,7 @@
   </select>
 
   {#if config.commit === 'button'}
-    <button class="btn btn-primary set-btn" onclick={applySelection}>Set</button>
+    <button class="btn btn-primary set-btn" onclick={applySelection}>{config.buttonLabel}</button>
   {/if}
 </div>
 
