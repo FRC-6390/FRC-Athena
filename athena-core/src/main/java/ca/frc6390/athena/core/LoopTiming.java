@@ -42,6 +42,14 @@ public final class LoopTiming {
         mechanismDurationsMs.put(name, previous != null ? previous + durationMs : durationMs);
     }
 
+    static void clearMechanismDurationsForTest() {
+        mechanismDurationsMs.clear();
+    }
+
+    static Map<String, Double> mechanismDurationsForTest() {
+        return mechanismDurationsMs;
+    }
+
     static void endCycle(double t0, double t1, double t2, double t3, double t4) {
         double total = t4 - t0;
         boolean overBudget = total > LOOP_BUDGET_SECONDS;

@@ -70,7 +70,7 @@ public class RotateToTagCommand extends Command {
     public void execute() {
         OptionalDouble yawDegrees = camera.getTargetYawDegrees();
         if (yawDegrees.isEmpty()) {
-            robotSpeeds.stopSpeeds("feedback");
+            robotSpeeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
             return;
         }
 
@@ -81,12 +81,12 @@ public class RotateToTagCommand extends Command {
                 -Math.toRadians(controllerOutput); // negate so positive yaw rotates back toward centre
         double clampedOmega = MathUtil.clamp(omega, -maxAngularVelocityRadPerSec, maxAngularVelocityRadPerSec);
 
-        robotSpeeds.setSpeeds("feedback", 0.0, 0.0, clampedOmega);
+        robotSpeeds.setSpeeds(RobotSpeeds.FEEDBACK_SOURCE, 0.0, 0.0, clampedOmega);
     }
 
     @Override
     public void end(boolean interrupted) {
-        robotSpeeds.stopSpeeds("feedback");
+        robotSpeeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
     }
 
     @Override

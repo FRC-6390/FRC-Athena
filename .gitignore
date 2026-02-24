@@ -1,8 +1,28 @@
-**/build/**
-/gradle
-# /.vscode
-.env
-/.gradle
-/bin
+# Build outputs
+**/build/
+**/target/
 /target
+/bin
 */bin/*
+
+# Tooling caches
+/gradle
+/.gradle
+**/.gradle/
+**/.idea/
+**/.vscode/
+**/.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Frontend artifacts
+**/node_modules/
+**/dist/
+**/.svelte-kit/
+**/.vite/
+**/coverage/
+
+# Host dashboard docker build cache
+athena-arcp/host-dashboard/.docker-cache/

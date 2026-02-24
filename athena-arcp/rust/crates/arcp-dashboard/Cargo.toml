@@ -1,0 +1,26 @@
+[package]
+name = "arcp-dashboard"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "arcp_dashboard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "arcp-dashboard-cli"
+path = "src/bin/cli.rs"
+
+[[bin]]
+name = "arcp-dashboard-web"
+path = "src/bin/web.rs"
+
+[dependencies]
+arcp-core = { path = "../arcp-core" }
+crossterm = "0.29"
+ratatui = { version = "0.30.0", default-features = false, features = ["crossterm"] }
+
+[dev-dependencies]
+arcp-server = { path = "../arcp-server" }

@@ -1,0 +1,16 @@
+[package]
+name = "arcp-jni"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "arcp_jni"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+arcp-core = { path = "../arcp-core" }
+arcp-server = { path = "../arcp-server" }
+jni = "0.22"

@@ -15,6 +15,13 @@ public final class RobotTime {
         RobotTime.nowSeconds = nowSeconds;
     }
 
+    /**
+     * Test hook for clearing the cached loop timestamp.
+     */
+    public static void resetNowSecondsForTest() {
+        RobotTime.nowSeconds = Double.NaN;
+    }
+
     public static double nowSeconds() {
         return nowSeconds;
     }

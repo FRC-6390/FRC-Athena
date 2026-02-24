@@ -3,6 +3,7 @@ package ca.frc6390.athena.core.registry;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.ServiceLoader;
 import java.util.Set;
@@ -19,7 +20,15 @@ public abstract class PluginRegistryBase<V> {
     }
 
     protected final V require(String key) {
-        return Objects.requireNonNull(values.get(key), missingMessage(key));
+        V value = values.get(key);
+        if (value != null) {
+            return value;
+        }
+        String message = missingMessage(key);
+        if (message == null || message.isBlank()) {
+            message = "Missing registry key '" + key + "'";
+        }
+        throw new NoSuchElementException(message);
     }
 
     protected abstract String missingMessage(String key);

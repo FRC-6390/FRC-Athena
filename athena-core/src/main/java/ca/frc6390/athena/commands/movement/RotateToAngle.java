@@ -8,6 +8,7 @@ import ca.frc6390.athena.controllers.DelayedOutput;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.hardware.imu.Imu;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -15,6 +16,7 @@ import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.wpilibj2.command.Command;
 
 public class RotateToAngle extends Command{
+    private static final double DEFAULT_TOLERANCE_RADIANS = Math.toRadians(2.5);
 
     private final RobotSpeeds speeds;
     private final Imu imu;
@@ -31,7 +33,7 @@ public class RotateToAngle extends Command{
 
         this.rotationPID = new ProfiledPIDController(0, 0, 0, new Constraints(0, 0));
         this.rotationPID.enableContinuousInput(-Math.PI, Math.PI);
-        this.rotationPID.setTolerance(2.5);
+        this.rotationPID.setTolerance(DEFAULT_TOLERANCE_RADIANS);
         delayedOutput = new DelayedOutput(rotationPID::atSetpoint, 1);
     }
 
@@ -48,35 +50,58 @@ public class RotateToAngle extends Command{
     }
 
     public RotateToAngle(RobotCore<?> base){
-        this(base, () -> null);
+        this(base, () -> base.localization().pose().getRotation());
     }
 
     public RotateToAngle setPID(ProfiledPIDController rotationPID){
+        if (rotationPID == null) {
+            throw new IllegalArgumentException("rotationPID cannot be null");
+        }
         this.rotationPID = rotationPID;
         this.rotationPID.enableContinuousInput(-Math.PI, Math.PI);
-        this.rotationPID.setTolerance(0.05);
+        this.rotationPID.setTolerance(DEFAULT_TOLERANCE_RADIANS);
         return this;
     }
 
-    public RotateToAngle setSupplier(Function<Pose2d, Double> func){
+    public RotateToAngle setSupplierDegrees(Function<Pose2d, Double> func){
+        if (func == null) {
+            throw new IllegalArgumentException("func cannot be null");
+        }
         this.angle = () -> Rotation2d.fromDegrees(func.apply(pose.get()));
+        return this;
+    }
+
+    public RotateToAngle setSupplierRadians(Function<Pose2d, Double> func){
+        if (func == null) {
+            throw new IllegalArgumentException("func cannot be null");
+        }
+        this.angle = () -> Rotation2d.fromRadians(func.apply(pose.get()));
         return this;
     }
 
     @Override
     public void initialize() {
-        rotationPID.reset(pose.get().getRotation().getDegrees(), imu.getVelocityZ().getDegrees());
+        rotationPID.reset(pose.get().getRotation().getRadians(), imu.getVelocityZ().getRadians());
     }
 
     @Override
     public void execute() {
-        double turnRate = rotationPID.calculate(pose.get().getRotation().getDegrees(), angle.get().getDegrees());
-        speeds.setSpeeds("feedback", 0, 0, turnRate);
+        Rotation2d target = angle.get();
+        if (target == null) {
+            speeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
+            return;
+        }
+        double turnRate = rotationPID.calculate(pose.get().getRotation().getRadians(), target.getRadians());
+        double maxAngularVelocity = speeds.getMaxAngularVelocity();
+        if (Double.isFinite(maxAngularVelocity) && maxAngularVelocity > 0.0) {
+            turnRate = MathUtil.clamp(turnRate, -maxAngularVelocity, maxAngularVelocity);
+        }
+        speeds.setSpeeds(RobotSpeeds.FEEDBACK_SOURCE, 0, 0, turnRate);
     }
 
     @Override
     public void end(boolean interrupted) {
-        speeds.stopSpeeds("feedback");
+        speeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
     }
 
     @Override

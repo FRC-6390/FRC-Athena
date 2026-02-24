@@ -232,15 +232,15 @@ public final class MechanismConfigExport {
                 if (e == null || e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                     continue;
                 }
-                var ff = e.getValue().feedforward();
-                Double toleranceProfile = Double.isFinite(e.getValue().tolerance()) ? e.getValue().tolerance() : null;
+                MechanismConfig.FeedforwardProfile ff = e.getValue();
+                Double toleranceProfile = Double.isFinite(ff.tolerance()) ? ff.tolerance() : null;
                 ffProfiles.add(new MechanismFeedforwardConfig(
                         e.getKey(),
-                        "simple_motor",
-                        ff.getKs(),
-                        null,
-                        ff.getKv(),
-                        ff.getKa(),
+                        ff.type() != null ? ff.type().configKey() : MechanismConfig.FeedforwardType.SIMPLE.configKey(),
+                        ff.kS(),
+                        ff.kG(),
+                        ff.kV(),
+                        ff.kA(),
                         toleranceProfile));
             }
             if (ffProfiles.isEmpty()) {

@@ -104,6 +104,7 @@ public class SwerveDrivetrain extends SubsystemBase
   private double sysIdRampRateVoltsPerSecond = 1.0;
   private double sysIdStepVoltage = 7.0;
   private double sysIdTimeoutSeconds = 10.0;
+  private double sysIdVoltageLimit = Double.NaN;
   private double sysIdLastVoltage = 0.0;
   private boolean sysIdActive = false;
   private final Rotation2d sysIdSteerAngle = new Rotation2d();
@@ -263,7 +264,10 @@ public class SwerveDrivetrain extends SubsystemBase
     return speedsModel();
   }
 
-  public SwerveDrivetrain withDriftCorretion(PIDController controller){
+  public SwerveDrivetrain withDriftCorrection(PIDController controller){
+    if (controller == null) {
+      throw new IllegalArgumentException("controller cannot be null");
+    }
     driftpid = controller;
     driftpid.enableContinuousInput(-Math.PI, Math.PI);
     enableDriftCorrection = true;
@@ -277,7 +281,7 @@ public class SwerveDrivetrain extends SubsystemBase
   private SwerveModulePosition[] positions(){
     SwerveModulePosition[] positions = new SwerveModulePosition[swerveModules.length];
     for (int i = 0; i < swerveModules.length; i++) {
-      SwerveModulePosition modulePosition = swerveModules[i].getPostion();
+      SwerveModulePosition modulePosition = swerveModules[i].getPosition();
       positions[i] = new SwerveModulePosition(
           modulePosition.distanceMeters,
           modulePosition.angle);
@@ -416,6 +420,26 @@ public class SwerveDrivetrain extends SubsystemBase
     }
     sysIdTimeoutSeconds = timeoutSeconds;
     invalidateSysIdRoutine();
+  }
+
+  private double sysIdVoltageLimit() {
+    return sysIdVoltageLimit;
+  }
+
+  private void sysIdVoltageLimit(double volts) {
+    if (!Double.isFinite(volts) || volts <= 0.0) {
+      sysIdVoltageLimit = Double.NaN;
+      return;
+    }
+    sysIdVoltageLimit = volts;
+  }
+
+  private double resolveSysIdVoltageLimit() {
+    double voltageLimit = getVoltageLimit();
+    if (!Double.isFinite(sysIdVoltageLimit) || sysIdVoltageLimit <= 0.0) {
+      return voltageLimit;
+    }
+    return Math.min(voltageLimit, sysIdVoltageLimit);
   }
 
   private boolean sysIdActive() {
@@ -567,6 +591,7 @@ public class SwerveDrivetrain extends SubsystemBase
     ntSysIdNode.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
     ntSysIdNode.putDouble("stepVoltageV", sysIdStepVoltage());
     ntSysIdNode.putDouble("timeoutSec", sysIdTimeoutSeconds());
+    ntSysIdNode.putDouble("voltageLimitV", sysIdVoltageLimit());
     ntSysIdNode.putBoolean("active", sysIdActive());
     processNetworkTablesSysIdCommands(ntSysIdNode.child("Commands"));
 
@@ -664,7 +689,7 @@ public class SwerveDrivetrain extends SubsystemBase
 
   private void applySysIdVoltage(Voltage voltage) {
     double requested = voltage.in(edu.wpi.first.units.Units.Volts);
-    double voltageLimit = getVoltageLimit();
+    double voltageLimit = resolveSysIdVoltageLimit();
     double applied = MathUtil.clamp(requested, -voltageLimit, voltageLimit);
     sysIdLastVoltage = applied;
     for (SwerveModule module : swerveModules) {
@@ -685,9 +710,9 @@ public class SwerveDrivetrain extends SubsystemBase
 
   private void startSysId() {
     sysIdActive = true;
-    robotSpeeds.stopSpeeds("drive");
-    robotSpeeds.stopSpeeds("auto");
-    robotSpeeds.stopSpeeds("feedback");
+    robotSpeeds.stopSpeeds(RobotSpeeds.DRIVE_SOURCE);
+    robotSpeeds.stopSpeeds(RobotSpeeds.AUTO_SOURCE);
+    robotSpeeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
   }
 
   private void stopSysId() {
@@ -1115,6 +1140,16 @@ public class SwerveDrivetrain extends SubsystemBase
     @Override
     public void timeoutSeconds(double seconds) {
       sysIdTimeoutSeconds(seconds);
+    }
+
+    @Override
+    public double voltageLimit() {
+      return sysIdVoltageLimit();
+    }
+
+    @Override
+    public void voltageLimit(double volts) {
+      sysIdVoltageLimit(volts);
     }
 
     @Override

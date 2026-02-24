@@ -12,6 +12,7 @@ import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
@@ -101,11 +102,45 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
 
         void timeoutSeconds(double seconds);
 
+        double voltageLimit();
+
+        void voltageLimit(double volts);
+
         boolean active();
 
         Command quasistatic(SysIdRoutine.Direction direction);
 
         Command dynamic(SysIdRoutine.Direction direction);
+
+        default SysIdSection bindQuasistatic(Trigger trigger, SysIdRoutine.Direction direction) {
+            if (trigger != null) {
+                trigger.onTrue(quasistatic(direction));
+            }
+            return this;
+        }
+
+        default SysIdSection bindDynamic(Trigger trigger, SysIdRoutine.Direction direction) {
+            if (trigger != null) {
+                trigger.onTrue(dynamic(direction));
+            }
+            return this;
+        }
+
+        default SysIdSection bindQuasistaticForward(Trigger trigger) {
+            return bindQuasistatic(trigger, SysIdRoutine.Direction.kForward);
+        }
+
+        default SysIdSection bindQuasistaticReverse(Trigger trigger) {
+            return bindQuasistatic(trigger, SysIdRoutine.Direction.kReverse);
+        }
+
+        default SysIdSection bindDynamicForward(Trigger trigger) {
+            return bindDynamic(trigger, SysIdRoutine.Direction.kForward);
+        }
+
+        default SysIdSection bindDynamicReverse(Trigger trigger) {
+            return bindDynamic(trigger, SysIdRoutine.Direction.kReverse);
+        }
     }
 
     interface ImuSection {

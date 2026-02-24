@@ -1,0 +1,1694 @@
+{
+  "format": "arcp.host.layout.export",
+  "version": 1,
+  "exported_at": "2026-02-24T00:00:00.000Z",
+  "layout": {
+    "activeTabId": "tab-nt4-core",
+    "tabs": [
+      {
+        "id": "tab-showcase",
+        "name": "Showcase",
+        "widgets": [
+          {
+            "id": "w-layout-section",
+            "signalId": 0,
+            "kind": "layout_title",
+            "title": "ARCP Signal + Widget Showcase",
+            "layout": { "x": 1, "y": 1, "w": 24, "h": 1 },
+            "config": {
+              "text": "ARCP Signal + Widget Showcase",
+              "color": "#f5f7fb"
+            }
+          },
+          {
+            "id": "w-layout-divider",
+            "signalId": 0,
+            "kind": "layout_divider",
+            "title": "Divider",
+            "layout": { "x": 1, "y": 2, "w": 24, "h": 1 }
+          },
+          {
+            "id": "w-layout-grid",
+            "signalId": 0,
+            "kind": "layout_grid",
+            "title": "Primary Grid",
+            "layout": { "x": 1, "y": 3, "w": 16, "h": 10 }
+          },
+          {
+            "id": "w-layout-list",
+            "signalId": 0,
+            "kind": "layout_list",
+            "title": "Status + Vision List",
+            "layout": { "x": 17, "y": 3, "w": 8, "h": 10 }
+          },
+          {
+            "id": "w-layout-spacer",
+            "signalId": 0,
+            "kind": "layout_spacer",
+            "title": "Spacer",
+            "layout": { "x": 1, "y": 13, "w": 24, "h": 1 }
+          },
+
+          {
+            "id": "w-match-timer",
+            "signalId": 50,
+            "kind": "timer",
+            "title": "Match Time",
+            "layout": { "x": 1, "y": 4, "w": 6, "h": 3 },
+            "parentLayoutId": "w-layout-grid",
+            "config": {
+              "mode": "countdown",
+              "durationSec": 150
+            }
+          },
+          {
+            "id": "w-robot-state",
+            "signalId": 62,
+            "kind": "metric",
+            "title": "Robot State",
+            "layout": { "x": 7, "y": 4, "w": 5, "h": 1 },
+            "parentLayoutId": "w-layout-grid"
+          },
+          {
+            "id": "w-game-state",
+            "signalId": 63,
+            "kind": "metric",
+            "title": "Game State",
+            "layout": { "x": 12, "y": 4, "w": 5, "h": 1 },
+            "parentLayoutId": "w-layout-grid"
+          },
+          {
+            "id": "w-state-enabled",
+            "signalId": 1,
+            "kind": "state",
+            "title": "Enabled",
+            "layout": { "x": 7, "y": 6, "w": 2, "h": 1 },
+            "parentLayoutId": "w-layout-grid"
+          },
+          {
+            "id": "w-trend-a",
+            "signalId": 67,
+            "kind": "trend",
+            "title": "Graph A Trend",
+            "layout": { "x": 9, "y": 6, "w": 4, "h": 1 },
+            "parentLayoutId": "w-layout-grid"
+          },
+          {
+            "id": "w-highrate-metric",
+            "signalId": 3,
+            "kind": "metric",
+            "title": "High-Rate f64",
+            "layout": { "x": 13, "y": 6, "w": 4, "h": 1 },
+            "parentLayoutId": "w-layout-grid"
+          },
+          {
+            "id": "w-graph",
+            "signalId": 67,
+            "kind": "graph",
+            "title": "Multi-Series Graph",
+            "layout": { "x": 1, "y": 7, "w": 8, "h": 3 },
+            "parentLayoutId": "w-layout-grid",
+            "config": {
+              "showLegend": true,
+              "yMin": -3.5,
+              "yMax": 3.5,
+              "series": [
+                {
+                  "signalId": 67,
+                  "label": "Channel A",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 68,
+                  "label": "Channel B",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 69,
+                  "label": "Channel C",
+                  "role": "metric",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-bar",
+            "signalId": 51,
+            "kind": "bar",
+            "title": "Battery Meter",
+            "layout": { "x": 9, "y": 7, "w": 4, "h": 1 },
+            "parentLayoutId": "w-layout-grid",
+            "config": {
+              "min": 8.0,
+              "max": 13.0,
+              "unit": "V",
+              "mode": "usage",
+              "warn": 0.68,
+              "crit": 0.88
+            }
+          },
+          {
+            "id": "w-dial",
+            "signalId": 51,
+            "kind": "dial",
+            "title": "Battery Dial",
+            "layout": { "x": 13, "y": 7, "w": 4, "h": 3 },
+            "parentLayoutId": "w-layout-grid",
+            "config": {
+              "min": 8.0,
+              "max": 13.0,
+              "unit": "V"
+            }
+          },
+          {
+            "id": "w-dropdown",
+            "signalId": 57,
+            "kind": "dropdown",
+            "title": "Mode Select",
+            "layout": { "x": 9, "y": 8, "w": 4, "h": 1 },
+            "parentLayoutId": "w-layout-grid",
+            "config": {
+              "commit": "button",
+              "options": [
+                { "label": "Disabled", "value": "disabled" },
+                { "label": "Tele", "value": "tele" },
+                { "label": "Auto", "value": "auto" },
+                { "label": "Test", "value": "test" }
+              ]
+            }
+          },
+          {
+            "id": "w-action-reset",
+            "signalId": 40,
+            "kind": "action",
+            "title": "Reset",
+            "layout": { "x": 9, "y": 9, "w": 4, "h": 1 },
+            "parentLayoutId": "w-layout-grid"
+          },
+          {
+            "id": "w-field",
+            "signalId": 52,
+            "kind": "field",
+            "title": "Field Pose + Trajectory",
+            "layout": { "x": 1, "y": 10, "w": 10, "h": 3 },
+            "parentLayoutId": "w-layout-grid",
+            "config": {
+              "xSignalId": 59,
+              "ySignalId": 60,
+              "headingSignalId": 61,
+              "trajectorySignalId": 53,
+              "imageUrl": "/fields/FieldImage2026.svg",
+              "imageSignalId": 85,
+              "imageOpacity": 0.82,
+              "fieldLength": 16.54,
+              "fieldWidth": 8.02,
+              "allowPoseSet": false
+            }
+          },
+          {
+            "id": "w-controller",
+            "signalId": 70,
+            "kind": "controller",
+            "title": "Drive PID/FF",
+            "layout": { "x": 11, "y": 10, "w": 6, "h": 3 },
+            "parentLayoutId": "w-layout-grid"
+          },
+
+          {
+            "id": "w-text-status",
+            "signalId": 4,
+            "kind": "text",
+            "title": "Status String",
+            "layout": { "x": 17, "y": 4, "w": 8, "h": 1 },
+            "parentLayoutId": "w-layout-list"
+          },
+          {
+            "id": "w-list-robot-state",
+            "signalId": 62,
+            "kind": "metric",
+            "title": "Robot State",
+            "layout": { "x": 17, "y": 5, "w": 8, "h": 1 },
+            "parentLayoutId": "w-layout-list"
+          },
+          {
+            "id": "w-list-game-state",
+            "signalId": 63,
+            "kind": "metric",
+            "title": "Game State",
+            "layout": { "x": 17, "y": 6, "w": 8, "h": 1 },
+            "parentLayoutId": "w-layout-list"
+          },
+          {
+            "id": "w-status-matrix",
+            "signalId": 54,
+            "kind": "status_matrix",
+            "title": "Subsystem Health",
+            "layout": { "x": 17, "y": 7, "w": 8, "h": 2 },
+            "parentLayoutId": "w-layout-list",
+            "config": {
+              "columns": 3,
+              "showSummary": true,
+              "items": [
+                { "signalId": 1, "label": "enabled", "group": "robot", "healthyWhen": "true" },
+                { "signalId": 11, "label": "on_change", "group": "robot", "healthyWhen": "true" },
+                { "signalId": 21, "label": "tunable", "group": "robot", "healthyWhen": "true" }
+              ]
+            }
+          },
+          {
+            "id": "w-camera",
+            "signalId": 64,
+            "kind": "camera_overlay",
+            "title": "Camera Overlay",
+            "layout": { "x": 17, "y": 9, "w": 8, "h": 4 },
+            "parentLayoutId": "w-layout-list",
+            "config": {
+              "streamSignalId": 64,
+              "poseXSignalId": 59,
+              "poseYSignalId": 60,
+              "headingSignalId": 61,
+              "targetsSignalId": 65,
+              "detectionsSignalId": 66,
+              "showPose": true,
+              "showTargets": true,
+              "showDetections": true,
+              "mirrorX": false,
+              "sourceWidth": 640,
+              "sourceHeight": 360
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-layout-tools",
+        "name": "Layout Tools",
+        "widgets": [
+          {
+            "id": "w2-layout-section",
+            "signalId": 0,
+            "kind": "layout_section",
+            "title": "List/Grid Behavior",
+            "layout": { "x": 1, "y": 1, "w": 24, "h": 1 }
+          },
+          {
+            "id": "w2-layout-divider",
+            "signalId": 0,
+            "kind": "layout_divider",
+            "title": "Divider",
+            "layout": { "x": 1, "y": 2, "w": 24, "h": 1 }
+          },
+          {
+            "id": "w2-layout-list",
+            "signalId": 0,
+            "kind": "layout_list",
+            "title": "Vertical List",
+            "layout": { "x": 1, "y": 3, "w": 10, "h": 10 }
+          },
+          {
+            "id": "w2-layout-grid",
+            "signalId": 0,
+            "kind": "layout_grid",
+            "title": "Dense Grid",
+            "layout": { "x": 11, "y": 3, "w": 14, "h": 13 }
+          },
+
+          {
+            "id": "w2-list-mode",
+            "signalId": 57,
+            "kind": "dropdown",
+            "title": "Mode",
+            "layout": { "x": 1, "y": 4, "w": 10, "h": 1 },
+            "parentLayoutId": "w2-layout-list",
+            "config": {
+              "commit": "button",
+              "options": [
+                { "label": "Disabled", "value": "disabled" },
+                { "label": "Tele", "value": "tele" },
+                { "label": "Auto", "value": "auto" },
+                { "label": "Test", "value": "test" }
+              ]
+            }
+          },
+          {
+            "id": "w2-list-robot-state",
+            "signalId": 62,
+            "kind": "metric",
+            "title": "Robot State",
+            "layout": { "x": 1, "y": 5, "w": 10, "h": 1 },
+            "parentLayoutId": "w2-layout-list"
+          },
+          {
+            "id": "w2-list-battery",
+            "signalId": 51,
+            "kind": "bar",
+            "title": "Battery",
+            "layout": { "x": 1, "y": 6, "w": 10, "h": 1 },
+            "parentLayoutId": "w2-layout-list",
+            "config": {
+              "min": 8.0,
+              "max": 13.0,
+              "unit": "V",
+              "mode": "usage",
+              "warn": 0.68,
+              "crit": 0.88
+            }
+          },
+          {
+            "id": "w2-list-action",
+            "signalId": 41,
+            "kind": "action",
+            "title": "Toggle Enabled",
+            "layout": { "x": 1, "y": 7, "w": 10, "h": 1 },
+            "parentLayoutId": "w2-layout-list"
+          },
+          {
+            "id": "w2-list-health",
+            "signalId": 54,
+            "kind": "status_matrix",
+            "title": "Health Board",
+            "layout": { "x": 1, "y": 8, "w": 10, "h": 3 },
+            "parentLayoutId": "w2-layout-list",
+            "config": {
+              "columns": 5,
+              "showSummary": false,
+              "items": [
+                { "signalId": 1, "label": "enabled", "group": "robot", "healthyWhen": "true" },
+                { "signalId": 11, "label": "on_change", "group": "robot", "healthyWhen": "true" },
+                { "signalId": 21, "label": "tunable", "group": "robot", "healthyWhen": "true" }
+              ]
+            }
+          },
+          {
+            "id": "w2-list-toggle",
+            "signalId": 21,
+            "kind": "toggle",
+            "title": "Boolean Toggle",
+            "layout": { "x": 1, "y": 11, "w": 10, "h": 1 },
+            "parentLayoutId": "w2-layout-list",
+            "config": {
+              "style": "switch",
+              "trueLabel": "Enabled",
+              "falseLabel": "Disabled"
+            }
+          },
+          {
+            "id": "w2-list-input",
+            "signalId": 23,
+            "kind": "input",
+            "title": "Numeric Input",
+            "layout": { "x": 1, "y": 12, "w": 10, "h": 1 },
+            "parentLayoutId": "w2-layout-list",
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Apply",
+              "step": "0.01",
+              "min": "0",
+              "max": "1"
+            }
+          },
+
+          {
+            "id": "w2-grid-a",
+            "signalId": 67,
+            "kind": "trend",
+            "title": "A",
+            "layout": { "x": 11, "y": 4, "w": 3, "h": 2 },
+            "parentLayoutId": "w2-layout-grid"
+          },
+          {
+            "id": "w2-grid-b",
+            "signalId": 68,
+            "kind": "trend",
+            "title": "B",
+            "layout": { "x": 14, "y": 4, "w": 3, "h": 2 },
+            "parentLayoutId": "w2-layout-grid"
+          },
+          {
+            "id": "w2-grid-c",
+            "signalId": 69,
+            "kind": "trend",
+            "title": "C",
+            "layout": { "x": 17, "y": 4, "w": 3, "h": 2 },
+            "parentLayoutId": "w2-layout-grid"
+          },
+          {
+            "id": "w2-grid-x",
+            "signalId": 59,
+            "kind": "metric",
+            "title": "Pose X",
+            "layout": { "x": 20, "y": 4, "w": 5, "h": 2 },
+            "parentLayoutId": "w2-layout-grid"
+          },
+          {
+            "id": "w2-grid-y",
+            "signalId": 60,
+            "kind": "metric",
+            "title": "Pose Y",
+            "layout": { "x": 11, "y": 6, "w": 4, "h": 2 },
+            "parentLayoutId": "w2-layout-grid"
+          },
+          {
+            "id": "w2-grid-heading",
+            "signalId": 61,
+            "kind": "compass",
+            "title": "Heading Compass",
+            "layout": { "x": 15, "y": 6, "w": 4, "h": 3 },
+            "parentLayoutId": "w2-layout-grid"
+          },
+          {
+            "id": "w2-grid-timer",
+            "signalId": 50,
+            "kind": "timer",
+            "title": "Timer",
+            "layout": { "x": 19, "y": 6, "w": 6, "h": 3 },
+            "parentLayoutId": "w2-layout-grid",
+            "config": {
+              "mode": "countdown",
+              "durationSec": 150
+            }
+          },
+          {
+            "id": "w2-grid-graph",
+            "signalId": 67,
+            "kind": "graph",
+            "title": "Channels",
+            "layout": { "x": 11, "y": 8, "w": 8, "h": 3 },
+            "parentLayoutId": "w2-layout-grid",
+            "config": {
+              "showLegend": false,
+              "series": [
+                { "signalId": 67, "label": "A", "style": "line", "color": "#f43f5e", "role": "metric" },
+                { "signalId": 68, "label": "B", "style": "step", "color": "#38bdf8", "role": "metric" },
+                { "signalId": 69, "label": "C", "style": "dot", "color": "#f59e0b", "role": "metric" }
+              ]
+            }
+          },
+          {
+            "id": "w2-grid-summary",
+            "signalId": 55,
+            "kind": "text",
+            "title": "Overlay Summary",
+            "layout": { "x": 19, "y": 9, "w": 6, "h": 2 },
+            "parentLayoutId": "w2-layout-grid"
+          },
+          {
+            "id": "w2-grid-input-string",
+            "signalId": 24,
+            "kind": "input",
+            "title": "String Input",
+            "layout": { "x": 11, "y": 11, "w": 4, "h": 1 },
+            "parentLayoutId": "w2-layout-grid",
+            "config": {
+              "inputType": "text",
+              "placeholder": "status text",
+              "commit": "enter"
+            }
+          },
+          {
+            "id": "w2-grid-input-number",
+            "signalId": 23,
+            "kind": "input",
+            "title": "Number Input",
+            "layout": { "x": 15, "y": 11, "w": 4, "h": 1 },
+            "parentLayoutId": "w2-layout-grid",
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "step": "0.01",
+              "min": "0",
+              "max": "1"
+            }
+          },
+          {
+            "id": "w2-grid-input-range",
+            "signalId": 23,
+            "kind": "input",
+            "title": "Range Input",
+            "layout": { "x": 19, "y": 11, "w": 6, "h": 1 },
+            "parentLayoutId": "w2-layout-grid",
+            "config": {
+              "inputType": "range",
+              "commit": "auto",
+              "step": "0.01",
+              "min": "0",
+              "max": "1"
+            }
+          },
+          {
+            "id": "w2-grid-textarea",
+            "signalId": 24,
+            "kind": "textarea",
+            "title": "Text Area",
+            "layout": { "x": 11, "y": 12, "w": 8, "h": 4 },
+            "parentLayoutId": "w2-layout-grid",
+            "config": {
+              "rows": 4,
+              "commit": "ctrl-enter",
+              "buttonLabel": "Send",
+              "placeholder": "longer status..."
+            }
+          },
+          {
+            "id": "w2-grid-buttons",
+            "signalId": 57,
+            "kind": "button_group",
+            "title": "Mode Buttons",
+            "layout": { "x": 19, "y": 12, "w": 6, "h": 2 },
+            "parentLayoutId": "w2-layout-grid",
+            "config": {
+              "direction": "horizontal",
+              "commit": "auto",
+              "options": [
+                { "label": "Disabled", "value": "disabled" },
+                { "label": "Tele", "value": "tele" },
+                { "label": "Auto", "value": "auto" },
+                { "label": "Test", "value": "test" }
+              ]
+            }
+          },
+          {
+            "id": "w2-grid-radio",
+            "signalId": 57,
+            "kind": "radio",
+            "title": "Mode Radio",
+            "layout": { "x": 19, "y": 14, "w": 6, "h": 2 },
+            "parentLayoutId": "w2-layout-grid",
+            "config": {
+              "direction": "vertical",
+              "commit": "button",
+              "buttonLabel": "Apply Mode",
+              "options": [
+                { "label": "Disabled", "value": "disabled" },
+                { "label": "Tele", "value": "tele" },
+                { "label": "Auto", "value": "auto" },
+                { "label": "Test", "value": "test" }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-drivetrain",
+        "name": "Drivetrain + Mechanism",
+        "widgets": [
+          {
+            "id": "w3-layout-section",
+            "signalId": 0,
+            "kind": "layout_section",
+            "title": "Swerve, Differential, Field, Mechanism, PID",
+            "layout": { "x": 1, "y": 1, "w": 24, "h": 1 }
+          },
+          {
+            "id": "w3-layout-grid",
+            "signalId": 0,
+            "kind": "layout_grid",
+            "title": "Drive Visuals",
+            "layout": { "x": 1, "y": 2, "w": 15, "h": 14 }
+          },
+          {
+            "id": "w3-layout-list",
+            "signalId": 0,
+            "kind": "layout_list",
+            "title": "Controllers + States",
+            "layout": { "x": 16, "y": 2, "w": 9, "h": 14 }
+          },
+
+          {
+            "id": "w3-swerve-drive",
+            "signalId": 87,
+            "kind": "swerve_drive",
+            "title": "Swerve Drive Viewer",
+            "layout": { "x": 1, "y": 3, "w": 9, "h": 6 },
+            "parentLayoutId": "w3-layout-grid",
+            "config": {
+              "headingSignalId": 61,
+              "maxSpeed": 5.0,
+              "modules": [
+                { "key": "fl", "label": "FL", "angleSignalId": 88, "speedSignalId": 89 },
+                { "key": "fr", "label": "FR", "angleSignalId": 90, "speedSignalId": 91 },
+                { "key": "bl", "label": "BL", "angleSignalId": 92, "speedSignalId": 93 },
+                { "key": "br", "label": "BR", "angleSignalId": 94, "speedSignalId": 95 }
+              ]
+            }
+          },
+          {
+            "id": "w3-diff-drive",
+            "signalId": 96,
+            "kind": "differential_drive",
+            "title": "Differential Drive Viewer",
+            "layout": { "x": 10, "y": 3, "w": 6, "h": 4 },
+            "parentLayoutId": "w3-layout-grid",
+            "config": {
+              "leftSpeedSignalId": 96,
+              "rightSpeedSignalId": 97,
+              "headingSignalId": 98,
+              "maxSpeed": 4.0
+            }
+          },
+          {
+            "id": "w3-swerve-fl",
+            "signalId": 88,
+            "kind": "swerve_module",
+            "title": "FL Module",
+            "layout": { "x": 10, "y": 7, "w": 3, "h": 3 },
+            "parentLayoutId": "w3-layout-grid",
+            "config": {
+              "label": "FL",
+              "angleSignalId": 88,
+              "speedSignalId": 89,
+              "maxSpeed": 5.0
+            }
+          },
+          {
+            "id": "w3-swerve-fr",
+            "signalId": 90,
+            "kind": "swerve_module",
+            "title": "FR Module",
+            "layout": { "x": 13, "y": 7, "w": 3, "h": 3 },
+            "parentLayoutId": "w3-layout-grid",
+            "config": {
+              "label": "FR",
+              "angleSignalId": 90,
+              "speedSignalId": 91,
+              "maxSpeed": 5.0
+            }
+          },
+          {
+            "id": "w3-swerve-bl",
+            "signalId": 92,
+            "kind": "swerve_module",
+            "title": "BL Module",
+            "layout": { "x": 10, "y": 10, "w": 3, "h": 3 },
+            "parentLayoutId": "w3-layout-grid",
+            "config": {
+              "label": "BL",
+              "angleSignalId": 92,
+              "speedSignalId": 93,
+              "maxSpeed": 5.0
+            }
+          },
+          {
+            "id": "w3-swerve-br",
+            "signalId": 94,
+            "kind": "swerve_module",
+            "title": "BR Module",
+            "layout": { "x": 13, "y": 10, "w": 3, "h": 3 },
+            "parentLayoutId": "w3-layout-grid",
+            "config": {
+              "label": "BR",
+              "angleSignalId": 94,
+              "speedSignalId": 95,
+              "maxSpeed": 5.0
+            }
+          },
+          {
+            "id": "w3-mech2d",
+            "signalId": 86,
+            "kind": "mech2d",
+            "title": "Mechanism2d",
+            "layout": { "x": 1, "y": 9, "w": 9, "h": 4 },
+            "parentLayoutId": "w3-layout-grid",
+            "config": {
+              "showGrid": true,
+              "lineWidth": 0.025
+            }
+          },
+          {
+            "id": "w3-field",
+            "signalId": 52,
+            "kind": "field",
+            "title": "Field (Image + Pose + Trajectory)",
+            "layout": { "x": 1, "y": 13, "w": 15, "h": 3 },
+            "parentLayoutId": "w3-layout-grid",
+            "config": {
+              "xSignalId": 59,
+              "ySignalId": 60,
+              "headingSignalId": 61,
+              "trajectorySignalId": 53,
+              "imageUrl": "/fields/FieldImage2026.svg",
+              "imageSignalId": 85,
+              "imageOpacity": 0.84,
+              "fieldLength": 16.54,
+              "fieldWidth": 8.02,
+              "allowPoseSet": false
+            }
+          },
+
+          {
+            "id": "w3-controller-drive",
+            "signalId": 70,
+            "kind": "controller",
+            "title": "Drive PID/FF",
+            "layout": { "x": 16, "y": 3, "w": 9, "h": 3 },
+            "parentLayoutId": "w3-layout-list"
+          },
+          {
+            "id": "w3-controller-arm",
+            "signalId": 77,
+            "kind": "controller",
+            "title": "Arm PID/FF",
+            "layout": { "x": 16, "y": 6, "w": 9, "h": 3 },
+            "parentLayoutId": "w3-layout-list"
+          },
+          {
+            "id": "w3-mode-dropdown",
+            "signalId": 57,
+            "kind": "dropdown",
+            "title": "Mode Select",
+            "layout": { "x": 16, "y": 9, "w": 9, "h": 1 },
+            "parentLayoutId": "w3-layout-list",
+            "config": {
+              "commit": "button",
+              "options": [
+                { "label": "Disabled", "value": "disabled" },
+                { "label": "Tele", "value": "tele" },
+                { "label": "Auto", "value": "auto" },
+                { "label": "Test", "value": "test" }
+              ]
+            }
+          },
+          {
+            "id": "w3-cycle-mode",
+            "signalId": 58,
+            "kind": "action",
+            "title": "Cycle Mode",
+            "layout": { "x": 16, "y": 10, "w": 9, "h": 1 },
+            "parentLayoutId": "w3-layout-list"
+          },
+          {
+            "id": "w3-bool-toggle",
+            "signalId": 21,
+            "kind": "toggle",
+            "title": "Tunable Enabled",
+            "layout": { "x": 16, "y": 11, "w": 9, "h": 1 },
+            "parentLayoutId": "w3-layout-list",
+            "config": {
+              "style": "switch",
+              "trueLabel": "Enabled",
+              "falseLabel": "Disabled"
+            }
+          },
+          {
+            "id": "w3-bool-state",
+            "signalId": 11,
+            "kind": "state",
+            "title": "On-change Boolean",
+            "layout": { "x": 16, "y": 12, "w": 9, "h": 1 },
+            "parentLayoutId": "w3-layout-list"
+          },
+          {
+            "id": "w3-status-board",
+            "signalId": 54,
+            "kind": "status_matrix",
+            "title": "Subsystem Health",
+            "layout": { "x": 16, "y": 13, "w": 9, "h": 3 },
+            "parentLayoutId": "w3-layout-list",
+            "config": {
+              "columns": 3,
+              "showSummary": true,
+              "items": [
+                { "signalId": 1, "label": "enabled", "group": "robot", "healthyWhen": "true" },
+                { "signalId": 11, "label": "on_change", "group": "robot", "healthyWhen": "true" },
+                { "signalId": 21, "label": "tunable", "group": "robot", "healthyWhen": "true" }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-signal-types",
+        "name": "Signal Types",
+        "widgets": [
+          {
+            "id": "w4-title",
+            "signalId": 0,
+            "kind": "layout_title",
+            "title": "Signal Types + Policies",
+            "layout": { "x": 1, "y": 1, "w": 24, "h": 2 },
+            "config": {
+              "text": "Signal Types + Policies",
+              "color": "#fca5a5"
+            }
+          },
+          {
+            "id": "w4-divider",
+            "signalId": 0,
+            "kind": "layout_divider",
+            "title": "Divider",
+            "layout": { "x": 1, "y": 3, "w": 24, "h": 1 }
+          },
+
+          {
+            "id": "w4-hr-bool",
+            "signalId": 1,
+            "kind": "state",
+            "title": "HR bool",
+            "layout": { "x": 1, "y": 4, "w": 3, "h": 1 }
+          },
+          {
+            "id": "w4-hr-i64",
+            "signalId": 2,
+            "kind": "metric",
+            "title": "HR i64",
+            "layout": { "x": 4, "y": 4, "w": 3, "h": 1 }
+          },
+          {
+            "id": "w4-hr-f64",
+            "signalId": 3,
+            "kind": "metric",
+            "title": "HR f64",
+            "layout": { "x": 7, "y": 4, "w": 3, "h": 1 }
+          },
+          {
+            "id": "w4-hr-str",
+            "signalId": 4,
+            "kind": "text",
+            "title": "HR string",
+            "layout": { "x": 10, "y": 4, "w": 6, "h": 1 }
+          },
+          {
+            "id": "w4-hr-bool-array",
+            "signalId": 5,
+            "kind": "text",
+            "title": "HR bool[]",
+            "layout": { "x": 16, "y": 4, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-hr-i64-array",
+            "signalId": 6,
+            "kind": "text",
+            "title": "HR i64[]",
+            "layout": { "x": 20, "y": 4, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-hr-f64-array",
+            "signalId": 7,
+            "kind": "text",
+            "title": "HR f64[]",
+            "layout": { "x": 1, "y": 5, "w": 6, "h": 1 }
+          },
+          {
+            "id": "w4-hr-str-array",
+            "signalId": 8,
+            "kind": "text",
+            "title": "HR string[]",
+            "layout": { "x": 7, "y": 5, "w": 6, "h": 1 }
+          },
+
+          {
+            "id": "w4-oc-bool",
+            "signalId": 11,
+            "kind": "state",
+            "title": "OC bool",
+            "layout": { "x": 1, "y": 7, "w": 3, "h": 1 }
+          },
+          {
+            "id": "w4-oc-i64",
+            "signalId": 12,
+            "kind": "metric",
+            "title": "OC i64",
+            "layout": { "x": 4, "y": 7, "w": 3, "h": 1 }
+          },
+          {
+            "id": "w4-oc-f64",
+            "signalId": 13,
+            "kind": "metric",
+            "title": "OC f64",
+            "layout": { "x": 7, "y": 7, "w": 3, "h": 1 }
+          },
+          {
+            "id": "w4-oc-str",
+            "signalId": 14,
+            "kind": "text",
+            "title": "OC string",
+            "layout": { "x": 10, "y": 7, "w": 6, "h": 1 }
+          },
+          {
+            "id": "w4-oc-bool-array",
+            "signalId": 15,
+            "kind": "text",
+            "title": "OC bool[]",
+            "layout": { "x": 16, "y": 7, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-oc-i64-array",
+            "signalId": 16,
+            "kind": "text",
+            "title": "OC i64[]",
+            "layout": { "x": 20, "y": 7, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-oc-f64-array",
+            "signalId": 17,
+            "kind": "text",
+            "title": "OC f64[]",
+            "layout": { "x": 1, "y": 8, "w": 6, "h": 1 }
+          },
+          {
+            "id": "w4-oc-str-array",
+            "signalId": 18,
+            "kind": "text",
+            "title": "OC string[]",
+            "layout": { "x": 7, "y": 8, "w": 6, "h": 1 }
+          },
+
+          {
+            "id": "w4-tunable-bool",
+            "signalId": 21,
+            "kind": "toggle",
+            "title": "Tunable bool",
+            "layout": { "x": 1, "y": 10, "w": 4, "h": 1 },
+            "config": {
+              "style": "switch",
+              "trueLabel": "true",
+              "falseLabel": "false"
+            }
+          },
+          {
+            "id": "w4-tunable-i64",
+            "signalId": 22,
+            "kind": "tunable",
+            "title": "Tunable i64",
+            "layout": { "x": 5, "y": 10, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-tunable-f64",
+            "signalId": 23,
+            "kind": "tunable",
+            "title": "Tunable f64",
+            "layout": { "x": 9, "y": 10, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-tunable-str",
+            "signalId": 24,
+            "kind": "input",
+            "title": "Tunable string",
+            "layout": { "x": 13, "y": 10, "w": 5, "h": 1 },
+            "config": {
+              "inputType": "text",
+              "commit": "button",
+              "buttonLabel": "Set"
+            }
+          },
+          {
+            "id": "w4-tunable-bool-array",
+            "signalId": 25,
+            "kind": "text",
+            "title": "Tunable bool[]",
+            "layout": { "x": 18, "y": 10, "w": 6, "h": 1 }
+          },
+          {
+            "id": "w4-tunable-i64-array",
+            "signalId": 26,
+            "kind": "text",
+            "title": "Tunable i64[]",
+            "layout": { "x": 1, "y": 11, "w": 6, "h": 1 }
+          },
+          {
+            "id": "w4-tunable-f64-array",
+            "signalId": 27,
+            "kind": "text",
+            "title": "Tunable f64[]",
+            "layout": { "x": 7, "y": 11, "w": 6, "h": 1 }
+          },
+          {
+            "id": "w4-tunable-str-array",
+            "signalId": 28,
+            "kind": "text",
+            "title": "Tunable string[]",
+            "layout": { "x": 13, "y": 11, "w": 6, "h": 1 }
+          },
+
+          {
+            "id": "w4-action-reset",
+            "signalId": 40,
+            "kind": "action",
+            "title": "Reset Command",
+            "layout": { "x": 1, "y": 13, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-action-toggle",
+            "signalId": 41,
+            "kind": "action",
+            "title": "Toggle Enabled",
+            "layout": { "x": 5, "y": 13, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-action-cycle",
+            "signalId": 58,
+            "kind": "action",
+            "title": "Cycle Mode",
+            "layout": { "x": 9, "y": 13, "w": 4, "h": 1 }
+          },
+          {
+            "id": "w4-mode-options",
+            "signalId": 56,
+            "kind": "text",
+            "title": "Mode options",
+            "layout": { "x": 13, "y": 13, "w": 6, "h": 1 }
+          },
+          {
+            "id": "w4-mode-selected",
+            "signalId": 57,
+            "kind": "dropdown",
+            "title": "Selected mode",
+            "layout": { "x": 19, "y": 13, "w": 5, "h": 1 },
+            "config": {
+              "commit": "button",
+              "options": [
+                { "label": "Disabled", "value": "disabled" },
+                { "label": "Tele", "value": "tele" },
+                { "label": "Auto", "value": "auto" },
+                { "label": "Test", "value": "test" }
+              ]
+            }
+          },
+
+          {
+            "id": "w4-heading-compass",
+            "signalId": 61,
+            "kind": "compass",
+            "title": "Heading Compass",
+            "layout": { "x": 19, "y": 5, "w": 5, "h": 5 }
+          }
+        ]
+      },
+      {
+        "id": "tab-nt4-core",
+        "name": "Athena NT4 Core",
+        "widgets": [
+          {
+            "id": "w5-title",
+            "signalId": 0,
+            "kind": "layout_title",
+            "title": "Athena NT4 Core Groups in ARCP",
+            "layout": { "x": 1, "y": 1, "w": 24, "h": 1 },
+            "config": {
+              "text": "Athena NT4 Core Groups in ARCP",
+              "color": "#fca5a5"
+            }
+          },
+          {
+            "id": "w5-layout-grid",
+            "signalId": 0,
+            "kind": "layout_grid",
+            "title": "Performance + Auto",
+            "layout": { "x": 1, "y": 2, "w": 16, "h": 14 }
+          },
+          {
+            "id": "w5-layout-list",
+            "signalId": 0,
+            "kind": "layout_list",
+            "title": "Config + Match",
+            "layout": { "x": 17, "y": 2, "w": 8, "h": 14 }
+          },
+
+          {
+            "id": "w5-status-sim",
+            "signalId": 120,
+            "kind": "state",
+            "title": "Simulation",
+            "layout": { "x": 1, "y": 3, "w": 3, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-status-ds",
+            "signalId": 121,
+            "kind": "state",
+            "title": "DS Attached",
+            "layout": { "x": 4, "y": 3, "w": 3, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-status-fms",
+            "signalId": 122,
+            "kind": "state",
+            "title": "FMS Attached",
+            "layout": { "x": 7, "y": 3, "w": 3, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-loop-period",
+            "signalId": 123,
+            "kind": "metric",
+            "title": "Loop Period (s)",
+            "layout": { "x": 1, "y": 4, "w": 4, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-loop-total-ms",
+            "signalId": 124,
+            "kind": "metric",
+            "title": "Loop Total (ms)",
+            "layout": { "x": 5, "y": 4, "w": 4, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-loop-util",
+            "signalId": 125,
+            "kind": "bar",
+            "title": "Loop Utilization",
+            "layout": { "x": 9, "y": 4, "w": 8, "h": 1 },
+            "parentLayoutId": "w5-layout-grid",
+            "config": {
+              "min": 0,
+              "max": 100,
+              "unit": "%",
+              "mode": "usage",
+              "warn": 0.7,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w5-battery-voltage",
+            "signalId": 126,
+            "kind": "bar",
+            "title": "Battery Voltage",
+            "layout": { "x": 1, "y": 5, "w": 8, "h": 1 },
+            "parentLayoutId": "w5-layout-grid",
+            "config": {
+              "min": 8.0,
+              "max": 13.0,
+              "unit": "V",
+              "mode": "usage",
+              "warn": 0.68,
+              "crit": 0.88
+            }
+          },
+          {
+            "id": "w5-input-current",
+            "signalId": 127,
+            "kind": "metric",
+            "title": "Input Current (A)",
+            "layout": { "x": 9, "y": 5, "w": 4, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-cpu-temp",
+            "signalId": 128,
+            "kind": "dial",
+            "title": "CPU Temp (C)",
+            "layout": { "x": 13, "y": 5, "w": 4, "h": 3 },
+            "parentLayoutId": "w5-layout-grid",
+            "config": {
+              "min": 20,
+              "max": 90,
+              "unit": "C"
+            }
+          },
+          {
+            "id": "w5-heap-used",
+            "signalId": 129,
+            "kind": "metric",
+            "title": "Heap Used (bytes)",
+            "layout": { "x": 1, "y": 6, "w": 6, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-heap-committed",
+            "signalId": 130,
+            "kind": "metric",
+            "title": "Heap Committed (bytes)",
+            "layout": { "x": 7, "y": 6, "w": 6, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-auto-routines",
+            "signalId": 131,
+            "kind": "metric",
+            "title": "Auto Routine Count",
+            "layout": { "x": 1, "y": 7, "w": 4, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-auto-follower",
+            "signalId": 132,
+            "kind": "state",
+            "title": "Auto Follower",
+            "layout": { "x": 5, "y": 7, "w": 4, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-auto-has-trajectory",
+            "signalId": 135,
+            "kind": "state",
+            "title": "Has Trajectory",
+            "layout": { "x": 9, "y": 7, "w": 4, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-auto-selected-id",
+            "signalId": 133,
+            "kind": "text",
+            "title": "Selected Auto ID",
+            "layout": { "x": 1, "y": 8, "w": 8, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-auto-selected-name",
+            "signalId": 134,
+            "kind": "text",
+            "title": "Selected Auto Name",
+            "layout": { "x": 9, "y": 8, "w": 8, "h": 1 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-loop-trend",
+            "signalId": 125,
+            "kind": "trend",
+            "title": "Utilization Trend",
+            "layout": { "x": 1, "y": 9, "w": 8, "h": 2 },
+            "parentLayoutId": "w5-layout-grid"
+          },
+          {
+            "id": "w5-loop-graph",
+            "signalId": 124,
+            "kind": "graph",
+            "title": "Loop Graph",
+            "layout": { "x": 9, "y": 9, "w": 8, "h": 3 },
+            "parentLayoutId": "w5-layout-grid",
+            "config": {
+              "showLegend": true,
+              "series": [
+                { "signalId": 124, "label": "total_ms", "style": "line", "color": "#f43f5e", "role": "metric" },
+                { "signalId": 125, "label": "util_percent", "style": "step", "color": "#38bdf8", "role": "metric" }
+              ]
+            }
+          },
+
+          {
+            "id": "w5-config-base-url",
+            "signalId": 143,
+            "kind": "text",
+            "title": "Config Base URL",
+            "layout": { "x": 17, "y": 3, "w": 8, "h": 2 },
+            "parentLayoutId": "w5-layout-list"
+          },
+          {
+            "id": "w5-config-diagnostics-url",
+            "signalId": 144,
+            "kind": "text",
+            "title": "Diagnostics URL",
+            "layout": { "x": 17, "y": 5, "w": 8, "h": 2 },
+            "parentLayoutId": "w5-layout-list"
+          },
+          {
+            "id": "w5-robot-state",
+            "signalId": 62,
+            "kind": "metric",
+            "title": "Robot State",
+            "layout": { "x": 17, "y": 7, "w": 8, "h": 1 },
+            "parentLayoutId": "w5-layout-list"
+          },
+          {
+            "id": "w5-game-state",
+            "signalId": 63,
+            "kind": "metric",
+            "title": "Game State",
+            "layout": { "x": 17, "y": 8, "w": 8, "h": 1 },
+            "parentLayoutId": "w5-layout-list"
+          },
+          {
+            "id": "w5-match-timer",
+            "signalId": 50,
+            "kind": "timer",
+            "title": "Match Timer",
+            "layout": { "x": 17, "y": 9, "w": 8, "h": 3 },
+            "parentLayoutId": "w5-layout-list",
+            "config": {
+              "mode": "countdown",
+              "durationSec": 150
+            }
+          },
+          {
+            "id": "w5-health-board",
+            "signalId": 54,
+            "kind": "status_matrix",
+            "title": "Core Health",
+            "layout": { "x": 17, "y": 12, "w": 8, "h": 4 },
+            "parentLayoutId": "w5-layout-list",
+            "config": {
+              "columns": 2,
+              "showSummary": true,
+              "items": [
+                { "signalId": 120, "label": "sim", "group": "status", "healthyWhen": "true" },
+                { "signalId": 121, "label": "ds", "group": "status", "healthyWhen": "true" },
+                { "signalId": 132, "label": "follower", "group": "auto", "healthyWhen": "true" },
+                { "signalId": 135, "label": "trajectory", "group": "auto", "healthyWhen": "true" }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-nt4-drive-localization",
+        "name": "Athena NT4 Drive + Localization",
+        "widgets": [
+          {
+            "id": "w6-title",
+            "signalId": 0,
+            "kind": "layout_title",
+            "title": "Drivetrain + Localization NT4 Mapping",
+            "layout": { "x": 1, "y": 1, "w": 24, "h": 1 },
+            "config": {
+              "text": "Drivetrain + Localization NT4 Mapping",
+              "color": "#fca5a5"
+            }
+          },
+          {
+            "id": "w6-layout-grid",
+            "signalId": 0,
+            "kind": "layout_grid",
+            "title": "Drive Visuals",
+            "layout": { "x": 1, "y": 2, "w": 15, "h": 14 }
+          },
+          {
+            "id": "w6-layout-list",
+            "signalId": 0,
+            "kind": "layout_list",
+            "title": "Drive + Health Values",
+            "layout": { "x": 16, "y": 2, "w": 9, "h": 14 }
+          },
+
+          {
+            "id": "w6-swerve-drive",
+            "signalId": 87,
+            "kind": "swerve_drive",
+            "title": "Swerve Modules",
+            "layout": { "x": 1, "y": 3, "w": 9, "h": 6 },
+            "parentLayoutId": "w6-layout-grid",
+            "config": {
+              "headingSignalId": 61,
+              "maxSpeed": 5.0,
+              "modules": [
+                { "key": "fl", "label": "FL", "angleSignalId": 88, "speedSignalId": 89 },
+                { "key": "fr", "label": "FR", "angleSignalId": 90, "speedSignalId": 91 },
+                { "key": "bl", "label": "BL", "angleSignalId": 92, "speedSignalId": 93 },
+                { "key": "br", "label": "BR", "angleSignalId": 94, "speedSignalId": 95 }
+              ]
+            }
+          },
+          {
+            "id": "w6-diff-drive",
+            "signalId": 96,
+            "kind": "differential_drive",
+            "title": "Differential Drive",
+            "layout": { "x": 10, "y": 3, "w": 6, "h": 4 },
+            "parentLayoutId": "w6-layout-grid",
+            "config": {
+              "leftSpeedSignalId": 96,
+              "rightSpeedSignalId": 97,
+              "headingSignalId": 98,
+              "maxSpeed": 4.0
+            }
+          },
+          {
+            "id": "w6-field",
+            "signalId": 52,
+            "kind": "field",
+            "title": "Localization Field",
+            "layout": { "x": 1, "y": 9, "w": 15, "h": 7 },
+            "parentLayoutId": "w6-layout-grid",
+            "config": {
+              "xSignalId": 59,
+              "ySignalId": 60,
+              "headingSignalId": 61,
+              "trajectorySignalId": 53,
+              "imageUrl": "/fields/FieldImage2026.svg",
+              "imageSignalId": 85,
+              "imageOpacity": 0.84,
+              "fieldLength": 16.54,
+              "fieldWidth": 8.02,
+              "allowPoseSet": false
+            }
+          },
+
+          {
+            "id": "w6-driver-vx",
+            "signalId": 145,
+            "kind": "metric",
+            "title": "RobotSpeeds driver vx",
+            "layout": { "x": 16, "y": 3, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list"
+          },
+          {
+            "id": "w6-driver-vy",
+            "signalId": 146,
+            "kind": "metric",
+            "title": "RobotSpeeds driver vy",
+            "layout": { "x": 16, "y": 4, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list"
+          },
+          {
+            "id": "w6-driver-omega",
+            "signalId": 147,
+            "kind": "metric",
+            "title": "RobotSpeeds driver omega",
+            "layout": { "x": 16, "y": 5, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list"
+          },
+          {
+            "id": "w6-drift-enabled",
+            "signalId": 148,
+            "kind": "state",
+            "title": "DriftCorrection enabled",
+            "layout": { "x": 16, "y": 6, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list"
+          },
+          {
+            "id": "w6-drift-heading",
+            "signalId": 149,
+            "kind": "compass",
+            "title": "Drift desired heading",
+            "layout": { "x": 16, "y": 7, "w": 9, "h": 3 },
+            "parentLayoutId": "w6-layout-list"
+          },
+          {
+            "id": "w6-pose-jump",
+            "signalId": 136,
+            "kind": "metric",
+            "title": "Health poseJumpMeters",
+            "layout": { "x": 16, "y": 10, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list"
+          },
+          {
+            "id": "w6-drift-rate",
+            "signalId": 137,
+            "kind": "metric",
+            "title": "Health driftRateMetersPerSec",
+            "layout": { "x": 16, "y": 11, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list"
+          },
+          {
+            "id": "w6-vision-accept",
+            "signalId": 138,
+            "kind": "bar",
+            "title": "Health visionAcceptRate",
+            "layout": { "x": 16, "y": 12, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list",
+            "config": {
+              "min": 0.0,
+              "max": 1.0,
+              "unit": "",
+              "mode": "progress",
+              "warn": 0.35,
+              "crit": 0.2
+            }
+          },
+          {
+            "id": "w6-slip-active",
+            "signalId": 139,
+            "kind": "state",
+            "title": "Health slipActive",
+            "layout": { "x": 16, "y": 13, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list"
+          },
+          {
+            "id": "w6-slip-mode",
+            "signalId": 140,
+            "kind": "text",
+            "title": "Health slipMode",
+            "layout": { "x": 16, "y": 14, "w": 9, "h": 1 },
+            "parentLayoutId": "w6-layout-list"
+          }
+        ]
+      },
+      {
+        "id": "tab-nt4-vision-mechanism",
+        "name": "Athena NT4 Vision + Mechanism",
+        "widgets": [
+          {
+            "id": "w7-title",
+            "signalId": 0,
+            "kind": "layout_title",
+            "title": "Vision + Mechanism NT4 Mapping",
+            "layout": { "x": 1, "y": 1, "w": 24, "h": 1 },
+            "config": {
+              "text": "Vision + Mechanism NT4 Mapping",
+              "color": "#fca5a5"
+            }
+          },
+          {
+            "id": "w7-layout-grid",
+            "signalId": 0,
+            "kind": "layout_grid",
+            "title": "Vision + Mechanism Visuals",
+            "layout": { "x": 1, "y": 2, "w": 14, "h": 14 }
+          },
+          {
+            "id": "w7-layout-list",
+            "signalId": 0,
+            "kind": "layout_list",
+            "title": "Vision Values",
+            "layout": { "x": 15, "y": 2, "w": 10, "h": 14 }
+          },
+
+          {
+            "id": "w7-camera-overlay",
+            "signalId": 64,
+            "kind": "camera_overlay",
+            "title": "Camera Overlay",
+            "layout": { "x": 1, "y": 3, "w": 14, "h": 7 },
+            "parentLayoutId": "w7-layout-grid",
+            "config": {
+              "streamSignalId": 64,
+              "poseXSignalId": 59,
+              "poseYSignalId": 60,
+              "headingSignalId": 61,
+              "targetsSignalId": 65,
+              "detectionsSignalId": 66,
+              "showPose": true,
+              "showTargets": true,
+              "showDetections": true,
+              "mirrorX": false,
+              "sourceWidth": 640,
+              "sourceHeight": 360
+            }
+          },
+          {
+            "id": "w7-mech2d",
+            "signalId": 86,
+            "kind": "mech2d",
+            "title": "Mechanism2d",
+            "layout": { "x": 1, "y": 10, "w": 7, "h": 6 },
+            "parentLayoutId": "w7-layout-grid",
+            "config": {
+              "showGrid": true,
+              "lineWidth": 0.025
+            }
+          },
+          {
+            "id": "w7-field-mini",
+            "signalId": 52,
+            "kind": "field",
+            "title": "Field Pose",
+            "layout": { "x": 8, "y": 10, "w": 7, "h": 6 },
+            "parentLayoutId": "w7-layout-grid",
+            "config": {
+              "xSignalId": 59,
+              "ySignalId": 60,
+              "headingSignalId": 61,
+              "trajectorySignalId": 53,
+              "imageUrl": "/fields/FieldImage2026.svg",
+              "imageSignalId": 85,
+              "imageOpacity": 0.84,
+              "fieldLength": 16.54,
+              "fieldWidth": 8.02,
+              "allowPoseSet": false
+            }
+          },
+
+          {
+            "id": "w7-camera-count",
+            "signalId": 141,
+            "kind": "metric",
+            "title": "Vision cameraCount",
+            "layout": { "x": 15, "y": 3, "w": 10, "h": 1 },
+            "parentLayoutId": "w7-layout-list"
+          },
+          {
+            "id": "w7-has-localization",
+            "signalId": 142,
+            "kind": "state",
+            "title": "Vision hasLocalization",
+            "layout": { "x": 15, "y": 4, "w": 10, "h": 1 },
+            "parentLayoutId": "w7-layout-list"
+          },
+          {
+            "id": "w7-stream-url",
+            "signalId": 64,
+            "kind": "text",
+            "title": "Vision stream_url",
+            "layout": { "x": 15, "y": 5, "w": 10, "h": 2 },
+            "parentLayoutId": "w7-layout-list"
+          },
+          {
+            "id": "w7-targets",
+            "signalId": 65,
+            "kind": "text",
+            "title": "Vision targets",
+            "layout": { "x": 15, "y": 7, "w": 10, "h": 2 },
+            "parentLayoutId": "w7-layout-list"
+          },
+          {
+            "id": "w7-detections",
+            "signalId": 66,
+            "kind": "text",
+            "title": "Vision detections",
+            "layout": { "x": 15, "y": 9, "w": 10, "h": 2 },
+            "parentLayoutId": "w7-layout-list"
+          },
+          {
+            "id": "w7-robot-state",
+            "signalId": 62,
+            "kind": "metric",
+            "title": "Robot State",
+            "layout": { "x": 15, "y": 11, "w": 10, "h": 1 },
+            "parentLayoutId": "w7-layout-list"
+          },
+          {
+            "id": "w7-game-state",
+            "signalId": 63,
+            "kind": "metric",
+            "title": "Game State",
+            "layout": { "x": 15, "y": 12, "w": 10, "h": 1 },
+            "parentLayoutId": "w7-layout-list"
+          },
+          {
+            "id": "w7-mode-select",
+            "signalId": 57,
+            "kind": "dropdown",
+            "title": "Mode Select",
+            "layout": { "x": 15, "y": 13, "w": 10, "h": 1 },
+            "parentLayoutId": "w7-layout-list",
+            "config": {
+              "commit": "button",
+              "options": [
+                { "label": "Disabled", "value": "disabled" },
+                { "label": "Tele", "value": "tele" },
+                { "label": "Auto", "value": "auto" },
+                { "label": "Test", "value": "test" }
+              ]
+            }
+          },
+          {
+            "id": "w7-cycle-mode",
+            "signalId": 58,
+            "kind": "action",
+            "title": "Cycle Mode",
+            "layout": { "x": 15, "y": 14, "w": 10, "h": 1 },
+            "parentLayoutId": "w7-layout-list"
+          }
+        ]
+      }
+    ]
+  }
+}

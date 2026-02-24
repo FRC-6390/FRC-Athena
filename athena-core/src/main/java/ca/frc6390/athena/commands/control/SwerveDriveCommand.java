@@ -2,8 +2,9 @@ package ca.frc6390.athena.commands.control;
 
 import java.util.function.DoubleSupplier;
 
-import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
+import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
 
@@ -40,12 +41,12 @@ public class SwerveDriveCommand extends Command {
         ? ChassisSpeeds.fromFieldRelativeSpeeds(xSpeed, ySpeed, thetaSpeed, driveTrain.imu().device().getVirtualAxis("driver"))
         : new ChassisSpeeds(xSpeed, ySpeed, thetaSpeed);
 
-    driveTrain.speeds().set("drive", chassisSpeeds);
+    driveTrain.speeds().set(RobotSpeeds.DRIVE_SOURCE, chassisSpeeds);
   }
 
   @Override
   public void end(boolean interrupted) {
-    driveTrain.speeds().stop("drive");
+    driveTrain.speeds().stop(RobotSpeeds.DRIVE_SOURCE);
   }
 
   @Override

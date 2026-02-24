@@ -737,7 +737,7 @@ public class SwerveModule implements RobotSendableDevice {
         return stateView;
     }
 
-    public SwerveModulePosition getPostion() {
+    public SwerveModulePosition getPosition() {
         positionView.distanceMeters = getDriveMotorPosition();
         positionView.angle = getEncoderPosition();
         return positionView;

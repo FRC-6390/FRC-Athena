@@ -238,7 +238,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         this.baseStateStdDevs3d = config.getStd3d();
         this.fieldPose = ZERO_POSE_2D;
         this.fieldPose3d = ZERO_POSE_3D;
-        this.autoDrive = (speeds, feed) -> robotSpeeds.setSpeeds("auto", speeds);
+        this.autoDrive = (speeds, feed) -> robotSpeeds.setSpeeds(RobotSpeeds.AUTO_SOURCE, speeds);
 
         this.fieldPublisher = new RobotLocalizationFieldPublisher(() -> vision);
         this.cameraManager = new RobotVisionCameraManager(STD_EPSILON, fieldPublisher.getField());
@@ -693,7 +693,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                             fieldSpeeds,
                             measuredHeading);
 
-                    robotSpeeds.setSpeeds("auto", robotRelative);
+                    robotSpeeds.setSpeeds(RobotSpeeds.AUTO_SOURCE, robotRelative);
                 },
                 true,
                 drivetrain);
@@ -879,6 +879,52 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (slipModeNtEntry != null) {
             slipModeNtEntry.setString(slipMode.name());
         }
+    }
+
+    void setLastUpdateTimestampForTest(double timestampSeconds) {
+        this.lastUpdateTimestamp = timestampSeconds;
+    }
+
+    void setLastFieldPoseForSlipForTest(Pose2d pose) {
+        this.lastFieldPoseForSlip = pose != null ? pose : ZERO_POSE_2D;
+    }
+
+    void setLastFieldVelocityForSlipForTest(Translation2d velocity) {
+        this.lastFieldVelocityForSlip = velocity != null ? velocity : new Translation2d();
+    }
+
+    void setFieldPoseForTest(Pose2d pose) {
+        this.fieldPose = pose != null ? pose : ZERO_POSE_2D;
+    }
+
+    void setLastRawEstimatorPoseForSlipFusionForTest(Pose2d pose) {
+        this.lastRawEstimatorPoseForSlipFusion = pose != null ? pose : ZERO_POSE_2D;
+    }
+
+    void setLastCorrectedPoseForSlipFusionForTest(Pose2d pose) {
+        this.lastCorrectedPoseForSlipFusion = pose != null ? pose : ZERO_POSE_2D;
+    }
+
+    void setLastSlipFusionTimestampForTest(double timestampSeconds) {
+        this.lastSlipFusionTimestamp = timestampSeconds;
+    }
+
+    void setSlipFusionStateForTest(Pose2d lastRaw, Pose2d lastCorrected, double timestampSeconds) {
+        this.lastRawEstimatorPoseForSlipFusion = lastRaw != null ? lastRaw : ZERO_POSE_2D;
+        this.lastCorrectedPoseForSlipFusion = lastCorrected != null ? lastCorrected : ZERO_POSE_2D;
+        this.lastSlipFusionTimestamp = timestampSeconds;
+    }
+
+    double slipContactComponentForTest() {
+        return slipContactComponent;
+    }
+
+    void updateSlipStateForTest(double nowSeconds) {
+        updateSlipState(nowSeconds);
+    }
+
+    Translation2d computeSlipAwareFieldTranslationForTest(Pose2d rawPose, Rotation2d heading, double nowSeconds) {
+        return computeSlipAwareFieldTranslation(rawPose, heading, nowSeconds);
     }
 
     private void updateSlipState(double now) {
@@ -1825,7 +1871,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     /**
      * Returns an immutable view of registered localization bounding boxes.
      */
-    private Map<String, PoseBoundingBox2d> zonesMap() {
+    Map<String, PoseBoundingBox2d> zonesMap() {
         return Map.copyOf(namedBoundingBoxes);
     }
 
@@ -1840,12 +1886,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return getFieldPose3d();
     }
 
-    public SpeedsView speeds() {
-        return new SpeedsView(this);
+    public RobotLocalizationSpeedsView speeds() {
+        return new RobotLocalizationSpeedsView(this);
     }
 
-    public ZonesView zones() {
-        return new ZonesView(this);
+    public RobotLocalizationZonesView zones() {
+        return new RobotLocalizationZonesView(this);
     }
 
     public Pose2d getFieldPose(){
@@ -1971,71 +2017,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public Field2d getVisionField2d() {
         return cameraManager.getVisionField();
-    }
-
-    public static final class SpeedsView {
-        private final RobotLocalization<?> owner;
-
-        private SpeedsView(RobotLocalization<?> owner) {
-            this.owner = owner;
-        }
-
-        public ChassisSpeeds robotRelative() {
-            return owner.getRobotRelativeSpeeds();
-        }
-
-        public ChassisSpeeds fieldRelative() {
-            return owner.getFieldRelativeSpeeds();
-        }
-
-        public double xMetersPerSecond() {
-            return owner.getXSpeedMetersPerSecond();
-        }
-
-        public double yMetersPerSecond() {
-            return owner.getYSpeedMetersPerSecond();
-        }
-
-        public double thetaRadiansPerSecond() {
-            return owner.getThetaSpeedRadiansPerSecond();
-        }
-
-        public double movementMetersPerSecond() {
-            return owner.getMovementSpeedMetersPerSecond();
-        }
-
-        public double normalizedMovement() {
-            return owner.getNormalizedMovementSpeed();
-        }
-    }
-
-    public static final class ZonesView {
-        private final RobotLocalization<?> owner;
-
-        private ZonesView(RobotLocalization<?> owner) {
-            this.owner = owner;
-        }
-
-        public Map<String, PoseBoundingBox2d> all() {
-            return owner.zonesMap();
-        }
-
-        public boolean contains(String name) {
-            return name != null && owner.zonesMap().containsKey(name);
-        }
-
-        public boolean in(String name) {
-            PoseBoundingBox2d box = owner.zonesMap().get(name);
-            return box != null && owner.inZone(box);
-        }
-
-        public boolean in(PoseBoundingBox2d box) {
-            return owner.inZone(box);
-        }
-
-        public boolean updateCorners(String name, Translation2d cornerA, Translation2d cornerB) {
-            return owner.updateZoneCorners(name, cornerA, cornerB);
-        }
     }
 
     public final class DiagnosticsView {

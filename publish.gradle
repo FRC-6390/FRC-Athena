@@ -335,6 +335,150 @@ tasks.register('buildAllModules') {
     dependsOn subprojects.collect { it.path + ":build" }
 }
 
+def athenaModuleNames = {
+    return subprojects
+            .collect { it.name }
+            .findAll { it.startsWith('athena-') }
+            .toSorted()
+}
+
+def runGitLines = { List<String> args ->
+    def stdout = new ByteArrayOutputStream()
+    def result = exec {
+        commandLine(['git'] + args)
+        standardOutput = stdout
+        errorOutput = new ByteArrayOutputStream()
+        ignoreExitValue = true
+    }
+    if (result.exitValue != 0) {
+        return [] as List<String>
+    }
+    return stdout.toString('UTF-8')
+            .readLines()
+            .collect { it.trim().replace('\\', '/') }
+            .findAll { !it.isEmpty() }
+}
+
+def resolveModuleDependencyMap = {
+    def moduleNames = athenaModuleNames()
+    def depMap = [:].withDefault { [] as Set<String> }
+    moduleNames.each { moduleName ->
+        depMap[moduleName] = [] as Set<String>
+    }
+
+    subprojects.each { subproj ->
+        if (!moduleNames.contains(subproj.name)) return
+        ['implementation', 'api', 'compileOnly', 'runtimeOnly'].each { cfgName ->
+            def cfg = subproj.configurations.findByName(cfgName)
+            if (cfg == null) return
+            cfg.dependencies
+                    .withType(org.gradle.api.artifacts.ProjectDependency)
+                    .each { dep ->
+                        if (moduleNames.contains(dep.dependencyProject.name)) {
+                            depMap[subproj.name] << dep.dependencyProject.name
+                        }
+                    }
+        }
+    }
+    return depMap.collectEntries { k, v -> [k, v.toList().toSorted()] }
+}
+
+def resolveChangedAthenaModules = {
+    def moduleNames = athenaModuleNames()
+    if (moduleNames.isEmpty()) {
+        return [] as List<String>
+    }
+
+    def forceAll = (project.findProperty('buildAllModules')?.toString()?.toBoolean() ?: false)
+    if (forceAll) {
+        logger.lifecycle("buildAllModules=true; building all Athena modules.")
+        return moduleNames
+    }
+
+    def diffBase = project.findProperty('changedSince')?.toString() ?: 'HEAD'
+    def changedFiles = ([] as Set<String>)
+    changedFiles.addAll(runGitLines(['diff', '--name-only', '--relative', diffBase]))
+    changedFiles.addAll(runGitLines(['ls-files', '--others', '--exclude-standard']))
+
+    if (changedFiles.isEmpty()) {
+        logger.lifecycle("No changed files detected from git (base: ${diffBase}); skipping Athena module builds.")
+        return [] as List<String>
+    }
+
+    def changedModules = [] as Set<String>
+    def rootAffectsAll = [
+            'build.gradle',
+            'settings.gradle',
+            'config.gradle',
+            'publish.gradle',
+            'gradle/libs.versions.toml',
+            'gradle/wrapper/gradle-wrapper.properties',
+            'gradlew',
+            'gradlew.bat'
+    ] as Set<String>
+
+    def vendordepModuleByFile = vendordepDescriptors.collectEntries { [(it.file.name): it.artifactId] }
+    vendordepModuleByFile['Studica-2026.0.0.json'] = 'athena-studica'
+
+    changedFiles.each { path ->
+        if (rootAffectsAll.contains(path) || path.startsWith('gradle/')) {
+            changedModules.addAll(moduleNames)
+            return
+        }
+
+        def moduleHit = moduleNames.find { module ->
+            path == module || path.startsWith("${module}/")
+        }
+        if (moduleHit != null) {
+            changedModules << moduleHit
+            return
+        }
+
+        if (path.startsWith('vendordeps/')) {
+            def vendordepName = path.substring('vendordeps/'.length())
+            def mappedModule = vendordepModuleByFile[vendordepName]
+            if (mappedModule != null) {
+                changedModules << mappedModule
+            } else {
+                changedModules.addAll(moduleNames)
+            }
+        }
+    }
+
+    if (changedModules.isEmpty()) {
+        logger.lifecycle("Changed files did not touch Athena modules; skipping Athena module builds.")
+        return [] as List<String>
+    }
+
+    def depMap = resolveModuleDependencyMap()
+    def affected = new LinkedHashSet<String>(changedModules)
+    def added = true
+    while (added) {
+        added = false
+        depMap.each { module, deps ->
+            if (!affected.contains(module) && deps.any { affected.contains(it) }) {
+                affected << module
+                added = true
+            }
+        }
+    }
+
+    return affected.toList().toSorted()
+}
+
+tasks.register('buildChangedModules') {
+    description = 'Builds only changed Athena modules and downstream dependents. Use -PbuildAllModules=true to force all.'
+    group = 'Build'
+    dependsOn {
+        def affected = resolveChangedAthenaModules()
+        if (affected.isEmpty()) {
+            return []
+        }
+        logger.lifecycle("Affected Athena modules: ${affected.join(', ')}")
+        return affected.collect { ":${it}:build" }
+    }
+}
+
 // Utility extension to attach build artifacts to copyAllOutputs
 ext.addTaskToCopyAllOutputs = { theTask ->
     copyAllOutputs.dependsOn theTask
@@ -353,9 +497,8 @@ ext.addTaskToCopyAllOutputs = { theTask ->
 // -----------------------------------------------------------------------------
 
 build.dependsOn outputVersions
-build.dependsOn copyAllOutputs
 build.dependsOn updateAthenaJson
-build.dependsOn buildAllModules
+build.dependsOn buildChangedModules
 libraryBuild.dependsOn build
 copyToWpilib.mustRunAfter publishToMavenLocal
 copyJsonToVendordeps.mustRunAfter publishToMavenLocal

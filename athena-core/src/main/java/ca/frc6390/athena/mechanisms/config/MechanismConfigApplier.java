@@ -276,7 +276,7 @@ public final class MechanismConfigApplier {
                 if (ff == null || ff.name() == null || ff.name().isBlank()) {
                     continue;
                 }
-                String type = ff.type() != null ? ff.type().trim().toLowerCase(Locale.ROOT) : "simple_motor";
+                MechanismConfig.FeedforwardType type = MechanismConfig.FeedforwardType.fromConfig(ff.type());
                 double ks = ff.kS() != null ? ff.kS() : 0.0;
                 double kg = ff.kG() != null ? ff.kG() : 0.0;
                 double kv = ff.kV() != null ? ff.kV() : 0.0;
@@ -284,12 +284,17 @@ public final class MechanismConfigApplier {
                 double tolerance = ff.tolerance() != null
                         ? ff.tolerance()
                         : (control.tolerance() != null ? control.tolerance() : Double.NaN);
-                switch (type) {
-                    case "arm" -> target.control(c -> c.armFeedforwardProfile(ff.name(), ks, kg, kv, ka));
-                    case "elevator" -> target.control(c -> c.elevatorFeedforwardProfile(ff.name(), ks, kg, kv, ka));
-                    case "simple_motor" -> target.control(c -> c.ff(ff.name(), OutputType.VOLTAGE, ks, kv, ka, tolerance));
-                    default -> target.control(c -> c.ff(ff.name(), OutputType.VOLTAGE, ks, kv, ka, tolerance));
-                }
+                target.control(c -> c.ff(ff.name(), builder -> {
+                    builder.output(OutputType.VOLTAGE);
+                    switch (type) {
+                        case ARM -> builder.arm(ks, kg, kv, ka);
+                        case ELEVATOR -> builder.elevator(ks, kg, kv, ka);
+                        case SIMPLE -> builder.simple(ks, kv, ka);
+                    }
+                    if (Double.isFinite(tolerance)) {
+                        builder.tolerance(tolerance);
+                    }
+                }));
             }
         }
     }
@@ -367,8 +372,12 @@ public final class MechanismConfigApplier {
     }
 
     private static MotorNeutralMode parseNeutralMode(String value) {
-        String v = value.trim().toUpperCase(Locale.ROOT);
-        return MotorNeutralMode.valueOf(v);
+        String v = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+        return switch (v) {
+            case "BRAKE" -> MotorNeutralMode.Brake;
+            case "COAST" -> MotorNeutralMode.Coast;
+            default -> throw new IllegalArgumentException("Unknown motor neutral mode: " + value);
+        };
     }
 
     private static OutputType parseOutput(String value) {

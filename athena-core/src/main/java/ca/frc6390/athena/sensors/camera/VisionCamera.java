@@ -99,7 +99,6 @@ public class VisionCamera {
             Double confidence) {}
 
     private static final double LATENCY_TIMESTAMP_THRESHOLD_SECONDS = 5.0;
-    private static final double FALLBACK_UPDATE_WINDOW_SECONDS = 1e-3;
     private static final Pose2d ZERO_POSE = new Pose2d();
     private static final Pose3d ZERO_POSE3D = new Pose3d();
 
@@ -338,8 +337,7 @@ public class VisionCamera {
             }
         } else {
             nowSeconds = Timer.getFPGATimestamp();
-            if (Double.isFinite(lastUpdateTimestampSeconds)
-                    && (nowSeconds - lastUpdateTimestampSeconds) < FALLBACK_UPDATE_WINDOW_SECONDS) {
+            if (nowSeconds == lastUpdateTimestampSeconds) {
                 return this;
             }
         }
@@ -795,6 +793,9 @@ public class VisionCamera {
      */
     public OptionalDouble getTargetYawDegrees() {
         update();
+        if (!hasCurrentTarget()) {
+            return OptionalDouble.empty();
+        }
         return optionalFinite(cachedTargetYawDegrees);
     }
 
@@ -804,6 +805,9 @@ public class VisionCamera {
      */
     public OptionalDouble getTargetPitchDegrees() {
         update();
+        if (!hasCurrentTarget()) {
+            return OptionalDouble.empty();
+        }
         return optionalFinite(cachedTargetPitchDegrees);
     }
 
@@ -813,6 +817,9 @@ public class VisionCamera {
      */
     public OptionalDouble getTargetDistanceMeters() {
         update();
+        if (!hasCurrentTarget()) {
+            return OptionalDouble.empty();
+        }
         return optionalFinite(cachedTargetDistanceMeters);
     }
 
@@ -821,6 +828,9 @@ public class VisionCamera {
      */
     public OptionalInt getLatestTagId() {
         update();
+        if (!hasCurrentTarget()) {
+            return OptionalInt.empty();
+        }
         return cachedTagId >= 0 ? OptionalInt.of(cachedTagId) : OptionalInt.empty();
     }
 
@@ -829,6 +839,9 @@ public class VisionCamera {
      */
     public List<TargetMeasurement> getTargetMeasurements() {
         update();
+        if (!hasCurrentTarget()) {
+            return List.of();
+        }
         if (measurementCacheSnapshotSource != measurementCache) {
             measurementCacheSnapshot =
                     measurementCache.isEmpty() ? List.of() : List.copyOf(measurementCache);
@@ -843,6 +856,9 @@ public class VisionCamera {
      */
     public Optional<Translation2d> getCameraRelativeTranslation() {
         update();
+        if (!hasCurrentTarget()) {
+            return Optional.empty();
+        }
         return getPrimaryCameraTranslation();
     }
 
@@ -888,6 +904,9 @@ public class VisionCamera {
      */
     public Optional<TargetObservation> getLatestObservation(CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
         update();
+        if (!hasCurrentTarget()) {
+            return Optional.empty();
+        }
         TargetMeasurement measurement = resolvePrimaryMeasurement();
         if (measurement == null) {
             return Optional.empty();
@@ -914,6 +933,9 @@ public class VisionCamera {
      */
     public List<TargetObservation> getObservations(CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
         update();
+        if (!hasCurrentTarget()) {
+            return List.of();
+        }
         List<TargetMeasurement> measurements = measurementCache;
         if (measurements.isEmpty()) {
             TargetMeasurement fallback = buildFallbackMeasurement();
@@ -976,6 +998,9 @@ public class VisionCamera {
             return Optional.empty();
         }
         update();
+        if (!hasCurrentTarget()) {
+            return Optional.empty();
+        }
         return getPrimaryCameraTranslation().map(cameraToTarget -> {
             Translation2d offset = cameraOffsetMeters != null ? cameraOffsetMeters : robotToCameraTranslation;
             Translation2d robotRelative = toRobotTranslation(cameraToTarget, offset);
@@ -995,6 +1020,9 @@ public class VisionCamera {
             return Optional.empty();
         }
         update();
+        if (!hasCurrentTarget()) {
+            return Optional.empty();
+        }
         return getPrimaryCameraTranslation().map(cameraToTarget -> {
             var robotRotation = getLocalizationPose().getRotation();
             Translation2d offset = cameraOffsetMeters != null ? cameraOffsetMeters : robotToCameraTranslation;
@@ -1039,6 +1067,9 @@ public class VisionCamera {
      */
     public Optional<Translation2d> getTargetTranslation(CoordinateSpace space, Pose2d robotPose, Pose2d tagPose) {
         update();
+        if (!hasCurrentTarget()) {
+            return Optional.empty();
+        }
         TargetMeasurement measurement = resolvePrimaryMeasurement();
         if (measurement == null) {
             return Optional.empty();
@@ -1057,6 +1088,10 @@ public class VisionCamera {
             return measurements.get(0);
         }
         return buildFallbackMeasurement();
+    }
+
+    private boolean hasCurrentTarget() {
+        return cachedConnected && cachedHasTargets;
     }
 
     private TargetObservation buildObservation(

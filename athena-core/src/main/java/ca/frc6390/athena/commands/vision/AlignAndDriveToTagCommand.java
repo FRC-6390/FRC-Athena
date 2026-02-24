@@ -3,7 +3,6 @@ package ca.frc6390.athena.commands.vision;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -220,9 +219,9 @@ public class AlignAndDriveToTagCommand extends Command {
         this.headingController = Objects.requireNonNull(headingController, "headingController");
         this.targetOffset = Objects.requireNonNull(targetOffset, "targetOffset");
         this.tolerancePose = Objects.requireNonNull(tolerancePose, "tolerancePose");
-        this.xToleranceMeters = sanitizeToleranceMeters(tolerancePose.getX());
-        this.yToleranceMeters = sanitizeToleranceMeters(tolerancePose.getY());
-        this.headingToleranceDegrees = sanitizeToleranceDegrees(tolerancePose.getRotation().getDegrees());
+        this.xToleranceMeters = AlignAndDriveToTagPolicy.sanitizeToleranceMeters(tolerancePose.getX());
+        this.yToleranceMeters = AlignAndDriveToTagPolicy.sanitizeToleranceMeters(tolerancePose.getY());
+        this.headingToleranceDegrees = AlignAndDriveToTagPolicy.sanitizeToleranceDegrees(tolerancePose.getRotation().getDegrees());
         this.maxLinearVelocityMetersPerSec =
                 maxLinearVelocityMetersPerSec > 0.0 ? maxLinearVelocityMetersPerSec : Double.POSITIVE_INFINITY;
         this.maxAngularVelocityRadPerSec =
@@ -238,8 +237,8 @@ public class AlignAndDriveToTagCommand extends Command {
         this.localization = robotBase.localization();
 
         this.cameraSources = new ArrayList<>();
-        this.cameraTables = sanitiseCameraTables(cameraTables);
-        this.requiredRoles = sanitiseRoles(cameraRoles);
+        this.cameraTables = AlignAndDriveToTagPolicy.sanitizeCameraTables(cameraTables);
+        this.requiredRoles = AlignAndDriveToTagPolicy.sanitizeRoles(cameraRoles);
 
         headingController.enableContinuousInput(-180.0, 180.0);
     }
@@ -271,7 +270,7 @@ public class AlignAndDriveToTagCommand extends Command {
 
         if (selection == null) {
             haveMeasurement = false;
-            robotSpeeds.stopSpeeds("feedback");
+            robotSpeeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
             return;
         }
 
@@ -279,7 +278,7 @@ public class AlignAndDriveToTagCommand extends Command {
         Translation2d translation = observation.translation();
         if (translation == null || !observation.hasYaw()) {
             haveMeasurement = false;
-            robotSpeeds.stopSpeeds("feedback");
+            robotSpeeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
             return;
         }
 
@@ -295,12 +294,12 @@ public class AlignAndDriveToTagCommand extends Command {
         double clampedOmega =
                 MathUtil.clamp(omegaRadPerSec, -maxAngularVelocityRadPerSec, maxAngularVelocityRadPerSec);
 
-        robotSpeeds.setSpeeds("feedback", clampedVx, clampedVy, clampedOmega);
+        robotSpeeds.setSpeeds(RobotSpeeds.FEEDBACK_SOURCE, clampedVx, clampedVy, clampedOmega);
     }
 
     @Override
     public void end(boolean interrupted) {
-        robotSpeeds.stopSpeeds("feedback");
+        robotSpeeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
     }
 
     @Override
@@ -363,7 +362,7 @@ public class AlignAndDriveToTagCommand extends Command {
             if (!observation.hasTranslation() || !observation.hasYaw()) {
                 continue;
             }
-            TargetObservation candidate = pickBetterObservation(best, observation);
+            TargetObservation candidate = AlignAndDriveToTagPolicy.pickBetterObservation(best, observation);
             if (candidate == observation) {
                 best = observation;
                 bestKey = source.key();
@@ -375,74 +374,6 @@ public class AlignAndDriveToTagCommand extends Command {
         }
 
         return null;
-    }
-
-    private static TargetObservation pickBetterObservation(TargetObservation current, TargetObservation candidate) {
-        if (candidate == null) {
-            return current;
-        }
-        if (current == null) {
-            return candidate;
-        }
-
-        double currentConfidence = current.hasConfidence() ? current.confidence() : 0.0;
-        double candidateConfidence = candidate.hasConfidence() ? candidate.confidence() : 0.0;
-        if (candidateConfidence > currentConfidence + 1e-9) {
-            return candidate;
-        }
-        if (currentConfidence > candidateConfidence + 1e-9) {
-            return current;
-        }
-
-        double currentDistance = current.hasDistance() ? Math.abs(current.distanceMeters()) : Double.POSITIVE_INFINITY;
-        double candidateDistance = candidate.hasDistance() ? Math.abs(candidate.distanceMeters()) : Double.POSITIVE_INFINITY;
-        if (candidateDistance < currentDistance) {
-            return candidate;
-        }
-
-        double currentMagnitude = current.hasTranslation() ? current.translation().getNorm() : Double.POSITIVE_INFINITY;
-        double candidateMagnitude = candidate.hasTranslation() ? candidate.translation().getNorm() : Double.POSITIVE_INFINITY;
-        if (candidateMagnitude < currentMagnitude) {
-            return candidate;
-        }
-
-        return current;
-    }
-
-    private static Set<String> sanitiseCameraTables(Collection<String> cameraTables) {
-        LinkedHashSet<String> tables = new LinkedHashSet<>();
-        if (cameraTables != null) {
-            for (String table : cameraTables) {
-                if (table == null) {
-                    continue;
-                }
-                String trimmed = table.trim();
-                if (!trimmed.isEmpty()) {
-                    tables.add(trimmed);
-                }
-            }
-        }
-        if (tables.isEmpty()) {
-            throw new IllegalArgumentException("At least one camera table name must be provided.");
-        }
-        return Set.copyOf(tables);
-    }
-
-    private static EnumSet<CameraRole> sanitiseRoles(EnumSet<CameraRole> roles) {
-        if (roles == null || roles.isEmpty()) {
-            return EnumSet.noneOf(CameraRole.class);
-        }
-        return EnumSet.copyOf(roles);
-    }
-
-    private static double sanitizeToleranceMeters(double value) {
-        double sanitized = Math.abs(value);
-        return Double.isFinite(sanitized) ? sanitized : 0.0;
-    }
-
-    private static double sanitizeToleranceDegrees(double value) {
-        double sanitized = Math.abs(value);
-        return Double.isFinite(sanitized) ? sanitized : 0.0;
     }
 
     private record CameraSource(String key, VisionCamera camera) {}

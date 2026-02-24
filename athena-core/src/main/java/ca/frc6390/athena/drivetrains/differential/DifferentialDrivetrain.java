@@ -89,6 +89,7 @@ public class DifferentialDrivetrain extends SubsystemBase
     private double sysIdRampRateVoltsPerSecond = 1.0;
     private double sysIdStepVoltage = 7.0;
     private double sysIdTimeoutSeconds = 10.0;
+    private double sysIdVoltageLimit = Double.NaN;
     private double sysIdLastVoltage = 0.0;
     private boolean sysIdActive = false;
     private String ntRootPath;
@@ -305,6 +306,26 @@ public class DifferentialDrivetrain extends SubsystemBase
         invalidateSysIdRoutine();
     }
 
+    private double sysIdVoltageLimit() {
+        return sysIdVoltageLimit;
+    }
+
+    private void sysIdVoltageLimit(double volts) {
+        if (!Double.isFinite(volts) || volts <= 0.0) {
+            sysIdVoltageLimit = Double.NaN;
+            return;
+        }
+        sysIdVoltageLimit = volts;
+    }
+
+    private double resolveSysIdVoltageLimit() {
+        double voltageLimit = getVoltageLimit();
+        if (!Double.isFinite(sysIdVoltageLimit) || sysIdVoltageLimit <= 0.0) {
+            return voltageLimit;
+        }
+        return Math.min(voltageLimit, sysIdVoltageLimit);
+    }
+
     private boolean sysIdActive() {
         return sysIdActive;
     }
@@ -463,6 +484,7 @@ public class DifferentialDrivetrain extends SubsystemBase
         ntSysIdNode.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
         ntSysIdNode.putDouble("stepVoltageV", sysIdStepVoltage());
         ntSysIdNode.putDouble("timeoutSec", sysIdTimeoutSeconds());
+        ntSysIdNode.putDouble("voltageLimitV", sysIdVoltageLimit());
         ntSysIdNode.putBoolean("active", sysIdActive());
 
         if (simulation != null) {
@@ -579,7 +601,7 @@ public class DifferentialDrivetrain extends SubsystemBase
 
     private void applySysIdVoltage(Voltage voltage) {
         double requested = voltage.in(edu.wpi.first.units.Units.Volts);
-        double voltageLimit = getVoltageLimit();
+        double voltageLimit = resolveSysIdVoltageLimit();
         double applied = MathUtil.clamp(requested, -voltageLimit, voltageLimit);
         sysIdLastVoltage = applied;
         setLeftVoltage(applied, voltageLimit);
@@ -606,9 +628,9 @@ public class DifferentialDrivetrain extends SubsystemBase
 
     private void startSysId() {
         sysIdActive = true;
-        robotSpeeds.stopSpeeds("drive");
-        robotSpeeds.stopSpeeds("auto");
-        robotSpeeds.stopSpeeds("feedback");
+        robotSpeeds.stopSpeeds(RobotSpeeds.DRIVE_SOURCE);
+        robotSpeeds.stopSpeeds(RobotSpeeds.AUTO_SOURCE);
+        robotSpeeds.stopSpeeds(RobotSpeeds.FEEDBACK_SOURCE);
     }
 
     private void stopSysId() {
@@ -856,6 +878,16 @@ public class DifferentialDrivetrain extends SubsystemBase
         @Override
         public void timeoutSeconds(double seconds) {
             sysIdTimeoutSeconds(seconds);
+        }
+
+        @Override
+        public double voltageLimit() {
+            return sysIdVoltageLimit();
+        }
+
+        @Override
+        public void voltageLimit(double volts) {
+            sysIdVoltageLimit(volts);
         }
 
         @Override

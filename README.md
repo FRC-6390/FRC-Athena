@@ -1,9 +1,8 @@
-# Vendordeps
-Use the module-specific vendordeps from the `vendordeps/` folder (e.g., Core, CTRE, REV, PhotonVision, Limelight, Pathplanner, Choreo, Studica). Each JSON lives at:
-```
-https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/<file>.json
-```
-Direct links:
+# FRC-Athena
+
+## Vendordep URLs
+
+Athena vendordeps (install these from WPILib vendordep manager):
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-CTRE.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-REV.json
@@ -12,187 +11,113 @@ Direct links:
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Pathplanner.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Choreo.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Studica.json
+- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/Studica-2026.0.0.json
 
-# Publishing
+External vendordeps required by Athena modules:
+- https://maven.ctr-electronics.com/release/com/ctre/phoenix6/latest/Phoenix6-frc2026-latest.json
+- https://software-metadata.revrobotics.com/REVLib-2026.json
+- https://maven.photonvision.org/repository/internal/org/photonvision/photonlib-json/1.0/photonlib-json-1.0.json
+- https://3015rangerrobotics.github.io/pathplannerlib/PathplannerLib.json
+- https://choreo.autos/lib/ChoreoLib2026.json
+
+## Blank WPILib Project Setup (Required Gradle Changes)
+
+Minimum required for most teams:
+
+Full guide:
+- `docs/core/wpilib-project-setup.md`
+
+- Install Athena vendordep(s).
+- Keep WPILib executable/fat-jar wiring for rio deploy (especially if you edit `jar`):
+```groovy
+def ROBOT_MAIN_CLASS = "frc.robot.Main"
+def deployArtifact = deploy.targets.roborio.artifacts.frcJava
+
+jar {
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    from sourceSets.main.allSource
+    manifest edu.wpi.first.gradlerio.GradleRIOPlugin.javaManifest(ROBOT_MAIN_CLASS)
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+deployArtifact.jarTask = jar
+wpi.java.configureExecutableTasks(jar)
+```
+
+Only if using Athena State DSL/compiler-plugin features:
+- add Athena maven to `pluginManagement.repositories` in `settings.gradle`
+- add `athena-plugin` classpath + `apply plugin: "ca.frc6390.athena.plugin"` in `build.gradle`
+
+## Build Commands
+
+Build changed Athena modules and downstream dependents (default `build` behavior):
 ```bash
-export $(cat .env | xargs)
- ```
+./gradlew build
+```
 
+Run the changed-module task directly:
 ```bash
- ./gradlew publish -PpublishMode=local # version/year auto-resolve
- ```
-
- ```bash
-export $(cat .env | xargs)
- ./gradlew publish -PpublishMode=online # version/year auto-resolve
- ```
-
-To publish with a specific version, append `-Pversion=<major.minor.patch>` to override the automatic increment. To pin the FRC season manually, append `-PfrcYear=<season>`.
-
-## Autonomous Registration
-`RobotAuto` now uses a single fail-fast path API and a program context model:
-
-- Register trajectories with `path(reference, source)`.
-- Alias only when needed with `path(reference, source, id)`.
-- Build command flow in `build(ctx)` using sequence/parallel/select/wait fallback helpers.
-
-```java
-public final class TestAuto implements RobotAuto.AutoProgram {
-    @Override
-    public String id() {
-        return "TestAuto";
-    }
-
-    @Override
-    public void register(RobotAuto.AutoRegisterCtx ctx) {
-        ctx.registerNamedCommand("Home", superstructure.homeCommand());
-        ctx.path("TestAuto", RobotAuto.TrajectorySource.CHOREO);
-    }
-
-    @Override
-    public RobotAuto.AutoRoutine build(RobotAuto.AutoBuildCtx ctx) {
-        return custom(() -> ctx.auto(id()));
-    }
-}
-
-autos.registerProgram(this, new TestAuto());
-registerAutoChooser("TestAuto");
+./gradlew buildChangedModules
 ```
 
-`path(...)` validates the reference at registration time. Bad source/file combinations throw immediately instead of silently scheduling `Commands.none()` later.
-
-### Basic path + markers
-Use the trajectory file name as id unless you intentionally alias it:
-
-```java
-ctx.path("HCDKS", RobotAuto.TrajectorySource.CHOREO);                 // id = HCDKS
-ctx.path("traj.0", RobotAuto.TrajectorySource.CHOREO, "Opening");   // id = Opening
+Build changed modules from a specific git base:
+```bash
+./gradlew buildChangedModules -PchangedSince=origin/main
 ```
 
-### Complex branching + fallback
-Split conditions, parallel behavior, and timeout fallbacks are built in:
-
-```java
-RobotAuto.AutoInput<Boolean> intakeBeam = RobotAuto.AutoInput.of("intakeBeam", Boolean.class);
-RobotAuto.AutoInput<Integer> routeIndex = RobotAuto.AutoInput.of("routeIndex", Integer.class);
-
-@Override
-public void register(RobotAuto.AutoRegisterCtx ctx) {
-    ctx.input(intakeBeam, sensors::hasNote);
-    ctx.input(routeIndex, strategy::selectedRoute);
-
-    ctx.path("CenterStart", RobotAuto.TrajectorySource.PATH_PLANNER);
-    ctx.path("PickupA", RobotAuto.TrajectorySource.PATH_PLANNER);
-    ctx.path("PickupB", RobotAuto.TrajectorySource.PATH_PLANNER);
-    ctx.path("Bailout", RobotAuto.TrajectorySource.PATH_PLANNER);
-}
-
-@Override
-public RobotAuto.AutoRoutine build(RobotAuto.AutoBuildCtx ctx) {
-    return custom(() -> ctx.sequence(
-        ctx.auto("CenterStart"),
-        ctx.selectIndex(() -> ctx.inputValue(routeIndex), "Bailout", "PickupA", "PickupB"),
-        ctx.parallel(
-            superstructure.scorePrepCommand(),
-            ctx.waitFor(() -> ctx.inputValue(intakeBeam), 0.8, superstructure.recoverCommand()))));
-}
+Force build all Athena modules:
+```bash
+./gradlew buildAllModules
 ```
 
-`ctx.auto("Path", 1)` resolves split paths (`Path.1`) directly. It uses an explicit registered split id first, then derives from base trajectory reference if needed.
-
-### Auto Planner PID DSL + Autotuner
-Localization planner PID can now be configured with a structured DSL:
-
-```java
-.localization(l -> l
-    .autoPlannerPid(p -> {
-        p.translation().kp(7.0).ki(0.0).kd(0.0).iZone(0.0);
-        p.rotation().kp(2.0).ki(0.0).kd(0.0).iZone(0.0);
-
-        // Enable built-in autotuner publish (defaults to relay-theta tuner)
-        p.autotuner();
-
-        // Optional advanced tuning config:
-        // p.autotunerConfig(a -> a
-        //     .enabled(true)
-        //     .dashboardPath("Athena/Localization/AutoPlannerPidAutotuner")
-        //     .program(ctx -> ctx.relayTheta()));
-    }))
+Force all modules through root build:
+```bash
+./gradlew build -PbuildAllModules=true
 ```
 
-When enabled, Athena publishes a `Run` command at:
-`Athena/Localization/AutoPlannerPidAutotuner/Run`
-
-Default relay-theta tuner output keys:
-- `.../Suggested/Rotation/kP`
-- `.../Suggested/Rotation/kI`
-- `.../Suggested/Rotation/kD`
-- `.../Ku`
-- `.../TuSec`
-
-## Localization Camera Auto Align
-Use the `AlignAndDriveToTagCommand` to close the loop on robot-relative translations produced by any configured localization camera. Supply tuned PID controllers, the desired standoff pose (as a `Pose2d`), a tolerance pose, and clamp limits to make the command suit your drivetrain. The command always targets one or more specific camera tables, so pass the NetworkTables names you want it to consume.
-
-```java
-PIDController xController = new PIDController(1.6, 0.0, 0.0);
-PIDController yController = new PIDController(1.6, 0.0, 0.0);
-PIDController headingController = new PIDController(0.04, 0.0, 0.001);
-
-Command autoAlign = new AlignAndDriveToTagCommand(
-        robot,
-        xController,
-        yController,
-        headingController,
-        new Pose2d(Units.inchesToMeters(18.0), 0.0, new Rotation2d()), // hold 18" off the tag
-        new Pose2d(0.03, 0.03, Rotation2d.fromDegrees(2.5)), // per-axis tolerance
-        2.0,                          // clamp translation speed
-        3.0,                          // clamp rotation speed
-        3.0,                          // optional timeout
-        "limelight-front");
-
-robot.getAutos().registerNamedCommand("AutoAlignToTag", autoAlign);
+Build each module directly (per dependency module):
+```bash
+./gradlew :athena-core:build
+./gradlew :athena-ctre:build
+./gradlew :athena-rev:build
+./gradlew :athena-photonvision:build
+./gradlew :athena-limelight:build
+./gradlew :athena-pathplanner:build
+./gradlew :athena-choreo:build
+./gradlew :athena-studica:build
 ```
 
-You can restrict the command to particular cameras or roles when needed:
-
-```java
-EnumSet<VisionCameraConfig.CameraRole> preferredRoles =
-        EnumSet.of(VisionCameraConfig.CameraRole.AUTO);
-Set<String> cameraTables = Set.of("limelight-left", "photon-front");
-
-Command filteredAlign = new AlignAndDriveToTagCommand(
-        robot,
-        xController,
-        yController,
-        headingController,
-        new Pose2d(Units.inchesToMeters(18.0), 0.0, new Rotation2d()),
-        new Pose2d(0.03, 0.03, Rotation2d.fromDegrees(2.5)),
-        2.0,
-        3.0,
-        3.0,
-        cameraTables,
-        preferredRoles);
+Publish all modules locally to WPILib:
+```bash
+./gradlew publish -PpublishMode=local
 ```
 
-Tune the controller gains/tolerances to match your drivetrain and sensor noise profile. The command stops driving when all three controllers report on-target or when the timeout elapses.
-
-## Stateful Mechanisms
-`MechanismConfig.stateful*` builders now accept a `StateGraph` so you can declare required transition states and guard conditions in one place. The graph expands any `requestState(...)` call into the full path and injects boolean predicates that must pass before each hop:
-
-```java
-BooleanSupplier armClear = arm::atSafeAngle;
-BooleanSupplier elevatorClear = elevator::atSafeHeight;
-
-StateGraph<SuperState> graph = StateGraph
-        .create(SuperState.class)
-        .path(SuperState.STOW, SuperState.CLEARANCE, SuperState.SCORE_HIGH)
-        .guardPath(StateGraph.Guards.allOf(armClear, elevatorClear),
-                   SuperState.STOW, SuperState.CLEARANCE);
-
-MechanismConfig.statefulGeneric(SuperState.STOW)
-        .setStateGraph(graph)
-        .hooks(h -> h.stateAction(superstructure::zeroSensors, SuperState.STOW))
-        .build();
+Publish all modules online:
+```bash
+./gradlew publish -PpublishMode=online
 ```
 
-At runtime request goals declaratively: `superstructure.getStateMachine().requestState(SuperState.SCORE_HIGH);` or continue using `queueState(...)`—the graph expands either call, inserts any intermediate states, and waits on the attached guards before each hop. See `src/main/java/ca/frc6390/athena/mechanisms/examples/ExampleSuperstructure.java` for a complete mock-up.
+Publish a single module locally:
+```bash
+./gradlew :athena-core:publishToMavenLocal
+./gradlew :athena-ctre:publishToMavenLocal
+./gradlew :athena-rev:publishToMavenLocal
+./gradlew :athena-photonvision:publishToMavenLocal
+./gradlew :athena-limelight:publishToMavenLocal
+./gradlew :athena-pathplanner:publishToMavenLocal
+./gradlew :athena-choreo:publishToMavenLocal
+./gradlew :athena-studica:publishToMavenLocal
+```
+
+Set explicit version/FRC year during build or publish:
+```bash
+./gradlew build -Pversion="2026.1.99" -PfrcYear="2026"
+./gradlew publish -PpublishMode=local -Pversion="2026.1.99" -PfrcYear="2026"
+```
+
+Online publish credentials:
+```bash
+export MAVEN_USERNAME=<username>
+export MAVEN_PASSWORD=<token-or-password>
+./gradlew publish -PpublishMode=online
+```

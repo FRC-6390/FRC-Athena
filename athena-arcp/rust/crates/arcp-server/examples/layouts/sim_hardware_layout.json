@@ -1,0 +1,1998 @@
+{
+  "format": "arcp.host.layout.export",
+  "version": 1,
+  "exported_at": "2026-02-24T00:00:00.000Z",
+  "layout": {
+    "activeTabId": "tab-motor-front_left",
+    "tabs": [
+      {
+        "id": "tab-motor-front_left",
+        "name": "Motor FL",
+        "widgets": [
+          {
+            "id": "w-motor-front_left",
+            "signalId": 101,
+            "kind": "motor",
+            "title": "Front Left Motor",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "showOtherFields": false,
+              "canIdSignalId": 110,
+              "canbusSignalId": 111,
+              "typeSignalId": 112,
+              "connectedSignalId": 107,
+              "stalledSignalId": 113,
+              "neutralModeSignalId": 108,
+              "currentLimitSignalId": 114,
+              "invertedSignalId": 115,
+              "brakeModeSignalId": 116,
+              "outputSignalId": 101,
+              "velocitySignalId": 102,
+              "positionSignalId": 103,
+              "currentSignalId": 104,
+              "temperatureSignalId": 105,
+              "voltageSignalId": 106,
+              "commandSignalId": 180
+            }
+          },
+          {
+            "id": "w-motor-front_left-graph",
+            "signalId": 101,
+            "kind": "graph",
+            "title": "Telemetry",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 5
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -100,
+              "yMax": 100,
+              "series": [
+                {
+                  "signalId": 101,
+                  "label": "Output",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 102,
+                  "label": "Velocity RPS",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 180,
+                  "label": "Cmd %",
+                  "role": "tunable",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-motor-front_left-current-bar",
+            "signalId": 104,
+            "kind": "bar",
+            "title": "Current A",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 0,
+              "max": 80,
+              "unit": "A",
+              "mode": "usage",
+              "warn": 0.75,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-motor-front_left-voltage-bar",
+            "signalId": 106,
+            "kind": "bar",
+            "title": "Voltage",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 8,
+              "max": 13,
+              "unit": "V",
+              "mode": "usage",
+              "warn": 0.68,
+              "crit": 0.88
+            }
+          },
+          {
+            "id": "w-motor-front_left-temp-dial",
+            "signalId": 105,
+            "kind": "dial",
+            "title": "Temp C",
+            "layout": {
+              "x": 13,
+              "y": 7,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "min": 20,
+              "max": 120,
+              "unit": "C"
+            }
+          },
+          {
+            "id": "w-motor-front_left-set-percent",
+            "signalId": 180,
+            "kind": "input",
+            "title": "Set Percent",
+            "layout": {
+              "x": 19,
+              "y": 7,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "range",
+              "commit": "auto",
+              "min": "-1",
+              "max": "1",
+              "step": "0.01",
+              "buttonLabel": "Set"
+            }
+          },
+          {
+            "id": "w-motor-front_left-set-voltage",
+            "signalId": 181,
+            "kind": "input",
+            "title": "Set Volts",
+            "layout": {
+              "x": 19,
+              "y": 8,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-12",
+              "max": "12",
+              "step": "0.1"
+            }
+          },
+          {
+            "id": "w-motor-front_left-set-velocity",
+            "signalId": 182,
+            "kind": "input",
+            "title": "Set RPS",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-90",
+              "max": "90",
+              "step": "1"
+            }
+          },
+          {
+            "id": "w-motor-front_left-toggle-inverted",
+            "signalId": 115,
+            "kind": "toggle",
+            "title": "Inverted",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-motor-front_left-toggle-brake",
+            "signalId": 116,
+            "kind": "toggle",
+            "title": "Brake Mode",
+            "layout": {
+              "x": 19,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Brake",
+              "falseLabel": "Coast"
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-motor-front_right",
+        "name": "Motor FR",
+        "widgets": [
+          {
+            "id": "w-motor-front_right",
+            "signalId": 117,
+            "kind": "motor",
+            "title": "Front Right Motor",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "showOtherFields": false,
+              "canIdSignalId": 126,
+              "canbusSignalId": 127,
+              "typeSignalId": 128,
+              "connectedSignalId": 123,
+              "stalledSignalId": 129,
+              "neutralModeSignalId": 124,
+              "currentLimitSignalId": 130,
+              "invertedSignalId": 131,
+              "brakeModeSignalId": 132,
+              "outputSignalId": 117,
+              "velocitySignalId": 118,
+              "positionSignalId": 119,
+              "currentSignalId": 120,
+              "temperatureSignalId": 121,
+              "voltageSignalId": 122,
+              "commandSignalId": 184
+            }
+          },
+          {
+            "id": "w-motor-front_right-graph",
+            "signalId": 117,
+            "kind": "graph",
+            "title": "Telemetry",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 5
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -100,
+              "yMax": 100,
+              "series": [
+                {
+                  "signalId": 117,
+                  "label": "Output",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 118,
+                  "label": "Velocity RPS",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 184,
+                  "label": "Cmd %",
+                  "role": "tunable",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-motor-front_right-current-bar",
+            "signalId": 120,
+            "kind": "bar",
+            "title": "Current A",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 0,
+              "max": 80,
+              "unit": "A",
+              "mode": "usage",
+              "warn": 0.75,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-motor-front_right-voltage-bar",
+            "signalId": 122,
+            "kind": "bar",
+            "title": "Voltage",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 8,
+              "max": 13,
+              "unit": "V",
+              "mode": "usage",
+              "warn": 0.68,
+              "crit": 0.88
+            }
+          },
+          {
+            "id": "w-motor-front_right-temp-dial",
+            "signalId": 121,
+            "kind": "dial",
+            "title": "Temp C",
+            "layout": {
+              "x": 13,
+              "y": 7,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "min": 20,
+              "max": 120,
+              "unit": "C"
+            }
+          },
+          {
+            "id": "w-motor-front_right-set-percent",
+            "signalId": 184,
+            "kind": "input",
+            "title": "Set Percent",
+            "layout": {
+              "x": 19,
+              "y": 7,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "range",
+              "commit": "auto",
+              "min": "-1",
+              "max": "1",
+              "step": "0.01",
+              "buttonLabel": "Set"
+            }
+          },
+          {
+            "id": "w-motor-front_right-set-voltage",
+            "signalId": 185,
+            "kind": "input",
+            "title": "Set Volts",
+            "layout": {
+              "x": 19,
+              "y": 8,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-12",
+              "max": "12",
+              "step": "0.1"
+            }
+          },
+          {
+            "id": "w-motor-front_right-set-velocity",
+            "signalId": 186,
+            "kind": "input",
+            "title": "Set RPS",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-90",
+              "max": "90",
+              "step": "1"
+            }
+          },
+          {
+            "id": "w-motor-front_right-toggle-inverted",
+            "signalId": 131,
+            "kind": "toggle",
+            "title": "Inverted",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-motor-front_right-toggle-brake",
+            "signalId": 132,
+            "kind": "toggle",
+            "title": "Brake Mode",
+            "layout": {
+              "x": 19,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Brake",
+              "falseLabel": "Coast"
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-motor-back_left",
+        "name": "Motor BL",
+        "widgets": [
+          {
+            "id": "w-motor-back_left",
+            "signalId": 133,
+            "kind": "motor",
+            "title": "Back Left Motor",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "showOtherFields": false,
+              "canIdSignalId": 142,
+              "canbusSignalId": 143,
+              "typeSignalId": 144,
+              "connectedSignalId": 139,
+              "stalledSignalId": 145,
+              "neutralModeSignalId": 140,
+              "currentLimitSignalId": 146,
+              "invertedSignalId": 147,
+              "brakeModeSignalId": 148,
+              "outputSignalId": 133,
+              "velocitySignalId": 134,
+              "positionSignalId": 135,
+              "currentSignalId": 136,
+              "temperatureSignalId": 137,
+              "voltageSignalId": 138,
+              "commandSignalId": 188
+            }
+          },
+          {
+            "id": "w-motor-back_left-graph",
+            "signalId": 133,
+            "kind": "graph",
+            "title": "Telemetry",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 5
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -100,
+              "yMax": 100,
+              "series": [
+                {
+                  "signalId": 133,
+                  "label": "Output",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 134,
+                  "label": "Velocity RPS",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 188,
+                  "label": "Cmd %",
+                  "role": "tunable",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-motor-back_left-current-bar",
+            "signalId": 136,
+            "kind": "bar",
+            "title": "Current A",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 0,
+              "max": 80,
+              "unit": "A",
+              "mode": "usage",
+              "warn": 0.75,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-motor-back_left-voltage-bar",
+            "signalId": 138,
+            "kind": "bar",
+            "title": "Voltage",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 8,
+              "max": 13,
+              "unit": "V",
+              "mode": "usage",
+              "warn": 0.68,
+              "crit": 0.88
+            }
+          },
+          {
+            "id": "w-motor-back_left-temp-dial",
+            "signalId": 137,
+            "kind": "dial",
+            "title": "Temp C",
+            "layout": {
+              "x": 13,
+              "y": 7,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "min": 20,
+              "max": 120,
+              "unit": "C"
+            }
+          },
+          {
+            "id": "w-motor-back_left-set-percent",
+            "signalId": 188,
+            "kind": "input",
+            "title": "Set Percent",
+            "layout": {
+              "x": 19,
+              "y": 7,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "range",
+              "commit": "auto",
+              "min": "-1",
+              "max": "1",
+              "step": "0.01",
+              "buttonLabel": "Set"
+            }
+          },
+          {
+            "id": "w-motor-back_left-set-voltage",
+            "signalId": 189,
+            "kind": "input",
+            "title": "Set Volts",
+            "layout": {
+              "x": 19,
+              "y": 8,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-12",
+              "max": "12",
+              "step": "0.1"
+            }
+          },
+          {
+            "id": "w-motor-back_left-set-velocity",
+            "signalId": 190,
+            "kind": "input",
+            "title": "Set RPS",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-90",
+              "max": "90",
+              "step": "1"
+            }
+          },
+          {
+            "id": "w-motor-back_left-toggle-inverted",
+            "signalId": 147,
+            "kind": "toggle",
+            "title": "Inverted",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-motor-back_left-toggle-brake",
+            "signalId": 148,
+            "kind": "toggle",
+            "title": "Brake Mode",
+            "layout": {
+              "x": 19,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Brake",
+              "falseLabel": "Coast"
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-motor-back_right",
+        "name": "Motor BR",
+        "widgets": [
+          {
+            "id": "w-motor-back_right",
+            "signalId": 149,
+            "kind": "motor",
+            "title": "Back Right Motor",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "showOtherFields": false,
+              "canIdSignalId": 158,
+              "canbusSignalId": 159,
+              "typeSignalId": 160,
+              "connectedSignalId": 155,
+              "stalledSignalId": 161,
+              "neutralModeSignalId": 156,
+              "currentLimitSignalId": 162,
+              "invertedSignalId": 163,
+              "brakeModeSignalId": 164,
+              "outputSignalId": 149,
+              "velocitySignalId": 150,
+              "positionSignalId": 151,
+              "currentSignalId": 152,
+              "temperatureSignalId": 153,
+              "voltageSignalId": 154,
+              "commandSignalId": 192
+            }
+          },
+          {
+            "id": "w-motor-back_right-graph",
+            "signalId": 149,
+            "kind": "graph",
+            "title": "Telemetry",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 5
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -100,
+              "yMax": 100,
+              "series": [
+                {
+                  "signalId": 149,
+                  "label": "Output",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 150,
+                  "label": "Velocity RPS",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 192,
+                  "label": "Cmd %",
+                  "role": "tunable",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-motor-back_right-current-bar",
+            "signalId": 152,
+            "kind": "bar",
+            "title": "Current A",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 0,
+              "max": 80,
+              "unit": "A",
+              "mode": "usage",
+              "warn": 0.75,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-motor-back_right-voltage-bar",
+            "signalId": 154,
+            "kind": "bar",
+            "title": "Voltage",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 8,
+              "max": 13,
+              "unit": "V",
+              "mode": "usage",
+              "warn": 0.68,
+              "crit": 0.88
+            }
+          },
+          {
+            "id": "w-motor-back_right-temp-dial",
+            "signalId": 153,
+            "kind": "dial",
+            "title": "Temp C",
+            "layout": {
+              "x": 13,
+              "y": 7,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "min": 20,
+              "max": 120,
+              "unit": "C"
+            }
+          },
+          {
+            "id": "w-motor-back_right-set-percent",
+            "signalId": 192,
+            "kind": "input",
+            "title": "Set Percent",
+            "layout": {
+              "x": 19,
+              "y": 7,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "range",
+              "commit": "auto",
+              "min": "-1",
+              "max": "1",
+              "step": "0.01",
+              "buttonLabel": "Set"
+            }
+          },
+          {
+            "id": "w-motor-back_right-set-voltage",
+            "signalId": 193,
+            "kind": "input",
+            "title": "Set Volts",
+            "layout": {
+              "x": 19,
+              "y": 8,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-12",
+              "max": "12",
+              "step": "0.1"
+            }
+          },
+          {
+            "id": "w-motor-back_right-set-velocity",
+            "signalId": 194,
+            "kind": "input",
+            "title": "Set RPS",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-90",
+              "max": "90",
+              "step": "1"
+            }
+          },
+          {
+            "id": "w-motor-back_right-toggle-inverted",
+            "signalId": 163,
+            "kind": "toggle",
+            "title": "Inverted",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-motor-back_right-toggle-brake",
+            "signalId": 164,
+            "kind": "toggle",
+            "title": "Brake Mode",
+            "layout": {
+              "x": 19,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Brake",
+              "falseLabel": "Coast"
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-encoder-front_left",
+        "name": "Encoder FL",
+        "widgets": [
+          {
+            "id": "w-encoder-front_left",
+            "signalId": 301,
+            "kind": "encoder",
+            "title": "Front Left Encoder",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "positionSignalId": 301,
+              "velocitySignalId": 302,
+              "absoluteSignalId": 303,
+              "connectedSignalId": 304,
+              "ratioSignalId": 305,
+              "offsetSignalId": 306,
+              "canIdSignalId": 307,
+              "canbusSignalId": 308,
+              "typeSignalId": 309,
+              "invertedSignalId": 310,
+              "supportsSimulationSignalId": 311,
+              "rawAbsoluteSignalId": 312,
+              "positionViewMode": "continuous",
+              "absoluteViewMode": "zero_to_one",
+              "positionMin": -2,
+              "positionMax": 2,
+              "absoluteMin": 0,
+              "absoluteMax": 1,
+              "positionUnit": "rot",
+              "absoluteUnit": "rot"
+            }
+          },
+          {
+            "id": "w-encoder-front_left-graph",
+            "signalId": 302,
+            "kind": "graph",
+            "title": "Telemetry",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 5
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -600,
+              "yMax": 600,
+              "series": [
+                {
+                  "signalId": 302,
+                  "label": "Velocity RPS",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 301,
+                  "label": "Position Rot",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 312,
+                  "label": "Raw Abs Rot",
+                  "role": "metric",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-encoder-front_left-absolute-dial",
+            "signalId": 303,
+            "kind": "dial",
+            "title": "Absolute Rot",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "min": 0,
+              "max": 1,
+              "unit": "rot"
+            }
+          },
+          {
+            "id": "w-encoder-front_left-velocity-bar",
+            "signalId": 302,
+            "kind": "bar",
+            "title": "Velocity",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": -600,
+              "max": 600,
+              "unit": "rps",
+              "mode": "progress",
+              "warn": 0.75,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-encoder-front_left-set-ratio",
+            "signalId": 305,
+            "kind": "input",
+            "title": "Set Ratio",
+            "layout": {
+              "x": 19,
+              "y": 7,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0.01",
+              "max": "100",
+              "step": "0.01"
+            }
+          },
+          {
+            "id": "w-encoder-front_left-set-offset",
+            "signalId": 306,
+            "kind": "input",
+            "title": "Set Offset",
+            "layout": {
+              "x": 19,
+              "y": 8,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-10",
+              "max": "10",
+              "step": "0.001"
+            }
+          },
+          {
+            "id": "w-encoder-front_left-toggle-inverted",
+            "signalId": 310,
+            "kind": "toggle",
+            "title": "Inverted",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-encoder-front_left-connected",
+            "signalId": 304,
+            "kind": "state",
+            "title": "Connected",
+            "layout": {
+              "x": 13,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-encoder-front_left-can-id",
+            "signalId": 307,
+            "kind": "metric",
+            "title": "CAN ID",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-encoder-front_left-type",
+            "signalId": 309,
+            "kind": "text",
+            "title": "Type",
+            "layout": {
+              "x": 19,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-encoder-front_right",
+        "name": "Encoder FR",
+        "widgets": [
+          {
+            "id": "w-encoder-front_right",
+            "signalId": 313,
+            "kind": "encoder",
+            "title": "Front Right Encoder",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "positionSignalId": 313,
+              "velocitySignalId": 314,
+              "absoluteSignalId": 315,
+              "connectedSignalId": 316,
+              "ratioSignalId": 317,
+              "offsetSignalId": 318,
+              "canIdSignalId": 319,
+              "canbusSignalId": 320,
+              "typeSignalId": 321,
+              "invertedSignalId": 322,
+              "supportsSimulationSignalId": 323,
+              "rawAbsoluteSignalId": 324,
+              "positionViewMode": "continuous",
+              "absoluteViewMode": "zero_to_one",
+              "positionMin": -2,
+              "positionMax": 2,
+              "absoluteMin": 0,
+              "absoluteMax": 1,
+              "positionUnit": "rot",
+              "absoluteUnit": "rot"
+            }
+          },
+          {
+            "id": "w-encoder-front_right-graph",
+            "signalId": 314,
+            "kind": "graph",
+            "title": "Telemetry",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 5
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -600,
+              "yMax": 600,
+              "series": [
+                {
+                  "signalId": 314,
+                  "label": "Velocity RPS",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 313,
+                  "label": "Position Rot",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 324,
+                  "label": "Raw Abs Rot",
+                  "role": "metric",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-encoder-front_right-absolute-dial",
+            "signalId": 315,
+            "kind": "dial",
+            "title": "Absolute Rot",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "min": 0,
+              "max": 1,
+              "unit": "rot"
+            }
+          },
+          {
+            "id": "w-encoder-front_right-velocity-bar",
+            "signalId": 314,
+            "kind": "bar",
+            "title": "Velocity",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": -600,
+              "max": 600,
+              "unit": "rps",
+              "mode": "progress",
+              "warn": 0.75,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-encoder-front_right-set-ratio",
+            "signalId": 317,
+            "kind": "input",
+            "title": "Set Ratio",
+            "layout": {
+              "x": 19,
+              "y": 7,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0.01",
+              "max": "100",
+              "step": "0.01"
+            }
+          },
+          {
+            "id": "w-encoder-front_right-set-offset",
+            "signalId": 318,
+            "kind": "input",
+            "title": "Set Offset",
+            "layout": {
+              "x": 19,
+              "y": 8,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-10",
+              "max": "10",
+              "step": "0.001"
+            }
+          },
+          {
+            "id": "w-encoder-front_right-toggle-inverted",
+            "signalId": 322,
+            "kind": "toggle",
+            "title": "Inverted",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-encoder-front_right-connected",
+            "signalId": 316,
+            "kind": "state",
+            "title": "Connected",
+            "layout": {
+              "x": 13,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-encoder-front_right-can-id",
+            "signalId": 319,
+            "kind": "metric",
+            "title": "CAN ID",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-encoder-front_right-type",
+            "signalId": 321,
+            "kind": "text",
+            "title": "Type",
+            "layout": {
+              "x": 19,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-encoder-back_left",
+        "name": "Encoder BL",
+        "widgets": [
+          {
+            "id": "w-encoder-back_left",
+            "signalId": 325,
+            "kind": "encoder",
+            "title": "Back Left Encoder",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "positionSignalId": 325,
+              "velocitySignalId": 326,
+              "absoluteSignalId": 327,
+              "connectedSignalId": 328,
+              "ratioSignalId": 329,
+              "offsetSignalId": 330,
+              "canIdSignalId": 331,
+              "canbusSignalId": 332,
+              "typeSignalId": 333,
+              "invertedSignalId": 334,
+              "supportsSimulationSignalId": 335,
+              "rawAbsoluteSignalId": 336,
+              "positionViewMode": "continuous",
+              "absoluteViewMode": "zero_to_one",
+              "positionMin": -2,
+              "positionMax": 2,
+              "absoluteMin": 0,
+              "absoluteMax": 1,
+              "positionUnit": "rot",
+              "absoluteUnit": "rot"
+            }
+          },
+          {
+            "id": "w-encoder-back_left-graph",
+            "signalId": 326,
+            "kind": "graph",
+            "title": "Telemetry",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 5
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -600,
+              "yMax": 600,
+              "series": [
+                {
+                  "signalId": 326,
+                  "label": "Velocity RPS",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 325,
+                  "label": "Position Rot",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 336,
+                  "label": "Raw Abs Rot",
+                  "role": "metric",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-encoder-back_left-absolute-dial",
+            "signalId": 327,
+            "kind": "dial",
+            "title": "Absolute Rot",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "min": 0,
+              "max": 1,
+              "unit": "rot"
+            }
+          },
+          {
+            "id": "w-encoder-back_left-velocity-bar",
+            "signalId": 326,
+            "kind": "bar",
+            "title": "Velocity",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": -600,
+              "max": 600,
+              "unit": "rps",
+              "mode": "progress",
+              "warn": 0.75,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-encoder-back_left-set-ratio",
+            "signalId": 329,
+            "kind": "input",
+            "title": "Set Ratio",
+            "layout": {
+              "x": 19,
+              "y": 7,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0.01",
+              "max": "100",
+              "step": "0.01"
+            }
+          },
+          {
+            "id": "w-encoder-back_left-set-offset",
+            "signalId": 330,
+            "kind": "input",
+            "title": "Set Offset",
+            "layout": {
+              "x": 19,
+              "y": 8,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-10",
+              "max": "10",
+              "step": "0.001"
+            }
+          },
+          {
+            "id": "w-encoder-back_left-toggle-inverted",
+            "signalId": 334,
+            "kind": "toggle",
+            "title": "Inverted",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-encoder-back_left-connected",
+            "signalId": 328,
+            "kind": "state",
+            "title": "Connected",
+            "layout": {
+              "x": 13,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-encoder-back_left-can-id",
+            "signalId": 331,
+            "kind": "metric",
+            "title": "CAN ID",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-encoder-back_left-type",
+            "signalId": 333,
+            "kind": "text",
+            "title": "Type",
+            "layout": {
+              "x": 19,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-encoder-back_right",
+        "name": "Encoder BR",
+        "widgets": [
+          {
+            "id": "w-encoder-back_right",
+            "signalId": 337,
+            "kind": "encoder",
+            "title": "Back Right Encoder",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "positionSignalId": 337,
+              "velocitySignalId": 338,
+              "absoluteSignalId": 339,
+              "connectedSignalId": 340,
+              "ratioSignalId": 341,
+              "offsetSignalId": 342,
+              "canIdSignalId": 343,
+              "canbusSignalId": 344,
+              "typeSignalId": 345,
+              "invertedSignalId": 346,
+              "supportsSimulationSignalId": 347,
+              "rawAbsoluteSignalId": 348,
+              "positionViewMode": "continuous",
+              "absoluteViewMode": "zero_to_one",
+              "positionMin": -2,
+              "positionMax": 2,
+              "absoluteMin": 0,
+              "absoluteMax": 1,
+              "positionUnit": "rot",
+              "absoluteUnit": "rot"
+            }
+          },
+          {
+            "id": "w-encoder-back_right-graph",
+            "signalId": 338,
+            "kind": "graph",
+            "title": "Telemetry",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 12,
+              "h": 5
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -600,
+              "yMax": 600,
+              "series": [
+                {
+                  "signalId": 338,
+                  "label": "Velocity RPS",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 337,
+                  "label": "Position Rot",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 348,
+                  "label": "Raw Abs Rot",
+                  "role": "metric",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-encoder-back_right-absolute-dial",
+            "signalId": 339,
+            "kind": "dial",
+            "title": "Absolute Rot",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "min": 0,
+              "max": 1,
+              "unit": "rot"
+            }
+          },
+          {
+            "id": "w-encoder-back_right-velocity-bar",
+            "signalId": 338,
+            "kind": "bar",
+            "title": "Velocity",
+            "layout": {
+              "x": 19,
+              "y": 6,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": -600,
+              "max": 600,
+              "unit": "rps",
+              "mode": "progress",
+              "warn": 0.75,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-encoder-back_right-set-ratio",
+            "signalId": 341,
+            "kind": "input",
+            "title": "Set Ratio",
+            "layout": {
+              "x": 19,
+              "y": 7,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0.01",
+              "max": "100",
+              "step": "0.01"
+            }
+          },
+          {
+            "id": "w-encoder-back_right-set-offset",
+            "signalId": 342,
+            "kind": "input",
+            "title": "Set Offset",
+            "layout": {
+              "x": 19,
+              "y": 8,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "-10",
+              "max": "10",
+              "step": "0.001"
+            }
+          },
+          {
+            "id": "w-encoder-back_right-toggle-inverted",
+            "signalId": 346,
+            "kind": "toggle",
+            "title": "Inverted",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-encoder-back_right-connected",
+            "signalId": 340,
+            "kind": "state",
+            "title": "Connected",
+            "layout": {
+              "x": 13,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-encoder-back_right-can-id",
+            "signalId": 343,
+            "kind": "metric",
+            "title": "CAN ID",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            }
+          },
+          {
+            "id": "w-encoder-back_right-type",
+            "signalId": 345,
+            "kind": "text",
+            "title": "Type",
+            "layout": {
+              "x": 19,
+              "y": 10,
+              "w": 6,
+              "h": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-imu-pigeon2",
+        "name": "IMU",
+        "widgets": [
+          {
+            "id": "w-imu-pigeon2",
+            "signalId": 504,
+            "kind": "imu",
+            "title": "Pigeon2",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 12,
+              "h": 10
+            },
+            "config": {
+              "rollSignalId": 501,
+              "pitchSignalId": 502,
+              "yawSignalId": 503,
+              "headingSignalId": 504,
+              "connectedSignalId": 507,
+              "accelSignalId": 505,
+              "gyroSignalId": 506,
+              "magSignalId": 528,
+              "canIdSignalId": 509,
+              "canbusSignalId": 510,
+              "typeSignalId": 511,
+              "invertedSignalId": 508,
+              "orientationViewMode": "auto",
+              "accelViewMode": "3d",
+              "gyroViewMode": "3d",
+              "magViewMode": "3d",
+              "units": "deg"
+            }
+          },
+          {
+            "id": "w-imu-3d",
+            "signalId": 501,
+            "kind": "imu_3d",
+            "title": "Orientation 3D",
+            "layout": {
+              "x": 13,
+              "y": 1,
+              "w": 6,
+              "h": 5
+            },
+            "config": {
+              "rollSignalId": 501,
+              "pitchSignalId": 502,
+              "yawSignalId": 503,
+              "units": "deg"
+            }
+          },
+          {
+            "id": "w-imu-compass",
+            "signalId": 504,
+            "kind": "compass",
+            "title": "Heading",
+            "layout": {
+              "x": 19,
+              "y": 1,
+              "w": 6,
+              "h": 5
+            }
+          },
+          {
+            "id": "w-imu-rpy-graph",
+            "signalId": 501,
+            "kind": "graph",
+            "title": "RPY Trend",
+            "layout": {
+              "x": 13,
+              "y": 6,
+              "w": 12,
+              "h": 3
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -180,
+              "yMax": 180,
+              "series": [
+                {
+                  "signalId": 501,
+                  "label": "Roll",
+                  "role": "metric",
+                  "style": "line",
+                  "color": "#f43f5e"
+                },
+                {
+                  "signalId": 502,
+                  "label": "Pitch",
+                  "role": "metric",
+                  "style": "step",
+                  "color": "#38bdf8"
+                },
+                {
+                  "signalId": 503,
+                  "label": "Yaw",
+                  "role": "metric",
+                  "style": "dot",
+                  "color": "#f59e0b"
+                }
+              ]
+            }
+          },
+          {
+            "id": "w-imu-move-speed",
+            "signalId": 523,
+            "kind": "bar",
+            "title": "Move Speed",
+            "layout": {
+              "x": 13,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 0,
+              "max": 1,
+              "unit": "ratio",
+              "mode": "usage",
+              "warn": 0.7,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-imu-turn-speed",
+            "signalId": 524,
+            "kind": "bar",
+            "title": "Turn Speed",
+            "layout": {
+              "x": 19,
+              "y": 9,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "min": 0,
+              "max": 1,
+              "unit": "ratio",
+              "mode": "usage",
+              "warn": 0.7,
+              "crit": 0.9
+            }
+          },
+          {
+            "id": "w-imu-set-max-linear",
+            "signalId": 512,
+            "kind": "input",
+            "title": "Max Lin",
+            "layout": {
+              "x": 13,
+              "y": 10,
+              "w": 4,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0.1",
+              "max": "50",
+              "step": "0.1"
+            }
+          },
+          {
+            "id": "w-imu-set-max-radial",
+            "signalId": 513,
+            "kind": "input",
+            "title": "Max Rad",
+            "layout": {
+              "x": 17,
+              "y": 10,
+              "w": 4,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0.1",
+              "max": "200",
+              "step": "0.1"
+            }
+          },
+          {
+            "id": "w-imu-set-window",
+            "signalId": 514,
+            "kind": "input",
+            "title": "Max Window",
+            "layout": {
+              "x": 21,
+              "y": 10,
+              "w": 4,
+              "h": 1
+            },
+            "config": {
+              "inputType": "number",
+              "commit": "button",
+              "buttonLabel": "Set",
+              "min": "0.05",
+              "max": "5",
+              "step": "0.01"
+            }
+          },
+          {
+            "id": "w-imu-inverted",
+            "signalId": 508,
+            "kind": "toggle",
+            "title": "IMU Inverted",
+            "layout": {
+              "x": 13,
+              "y": 11,
+              "w": 6,
+              "h": 1
+            },
+            "config": {
+              "style": "switch",
+              "trueLabel": "Inverted",
+              "falseLabel": "Normal"
+            }
+          },
+          {
+            "id": "w-hardware-status",
+            "signalId": 950,
+            "kind": "text",
+            "title": "Hardware Status",
+            "layout": {
+              "x": 19,
+              "y": 11,
+              "w": 6,
+              "h": 1
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

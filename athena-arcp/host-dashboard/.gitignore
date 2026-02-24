@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.docker-cache/
+src-tauri/target/
+src-tauri/gen/
+*.log

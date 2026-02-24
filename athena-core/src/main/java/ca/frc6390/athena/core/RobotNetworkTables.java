@@ -1,16 +1,13 @@
 package ca.frc6390.athena.core;
 
 import edu.wpi.first.networktables.BooleanPublisher;
-import edu.wpi.first.networktables.BooleanTopic;
 import edu.wpi.first.networktables.DoublePublisher;
-import edu.wpi.first.networktables.DoubleTopic;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableEvent;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.networktables.StringPublisher;
-import edu.wpi.first.networktables.StringTopic;
 import edu.wpi.first.wpilibj.Timer;
 import java.util.EnumMap;
 import java.util.Iterator;
@@ -86,11 +83,9 @@ public final class RobotNetworkTables {
     private NetworkTableEntry defaultPeriodEntry;
     private NetworkTableEntry maxPublisherCountEntry;
     private NetworkTableEntry droppedPublisherCreatesEntry;
+    private final NtPublisherPool publisherPool;
 
     // Raw topic publishers for data output (not config toggles).
-    private final ConcurrentHashMap<String, BooleanPublisher> booleanPublishers = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, DoublePublisher> doublePublishers = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, StringPublisher> stringPublishers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Boolean> lastBooleanValues = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastDoubleBits = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> lastStringValues = new ConcurrentHashMap<>();
@@ -98,7 +93,6 @@ public final class RobotNetworkTables {
     private final ConcurrentHashMap<String, Long> pendingDoubleBitsWrites = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> pendingStringWrites = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> topicLastSeenCycle = new ConcurrentHashMap<>();
-    private final AtomicLong droppedPublisherCreates = new AtomicLong(0L);
     private final Object publishStateLock = new Object();
     private final Object asyncWriteSignal = new Object();
     private volatile boolean asyncPublishingEnabled = true;
@@ -125,6 +119,7 @@ public final class RobotNetworkTables {
 
     RobotNetworkTables(NetworkTableInstance nt) {
         this.nt = Objects.requireNonNull(nt, "nt");
+        this.publisherPool = new NtPublisherPool(nt);
         for (Flag flag : Flag.values()) {
             cached.put(flag, new AtomicBoolean(flag.defaultValue()));
         }
@@ -199,7 +194,7 @@ public final class RobotNetworkTables {
     }
 
     public long droppedPublisherCreates() {
-        return droppedPublisherCreates.get();
+        return publisherPool.droppedPublisherCreates();
     }
 
     /**
@@ -893,15 +888,15 @@ public final class RobotNetworkTables {
     }
 
     public int booleanPublisherCount() {
-        return booleanPublishers.size();
+        return publisherPool.booleanPublisherCount();
     }
 
     public int doublePublisherCount() {
-        return doublePublishers.size();
+        return publisherPool.doublePublisherCount();
     }
 
     public int stringPublisherCount() {
-        return stringPublishers.size();
+        return publisherPool.stringPublisherCount();
     }
 
     public int mechanismToggleCount() {
@@ -911,7 +906,7 @@ public final class RobotNetworkTables {
     }
 
     public int totalPublisherCount() {
-        return booleanPublishers.size() + doublePublishers.size() + stringPublishers.size();
+        return publisherPool.totalPublisherCount();
     }
 
     private void publishBooleanImmediate(String fullPath, boolean value, boolean dedupe) {
@@ -925,7 +920,7 @@ public final class RobotNetworkTables {
                     return;
                 }
             }
-            BooleanPublisher publisher = ensureBooleanPublisher(fullPath);
+            BooleanPublisher publisher = publisherPool.ensureBooleanPublisher(fullPath, cachedMaxPublisherCount);
             if (publisher == null) {
                 return;
             }
@@ -945,7 +940,7 @@ public final class RobotNetworkTables {
                     return;
                 }
             }
-            DoublePublisher publisher = ensureDoublePublisher(fullPath);
+            DoublePublisher publisher = publisherPool.ensureDoublePublisher(fullPath, cachedMaxPublisherCount);
             if (publisher == null) {
                 return;
             }
@@ -966,70 +961,13 @@ public final class RobotNetworkTables {
                     return;
                 }
             }
-            StringPublisher publisher = ensureStringPublisher(fullPath);
+            StringPublisher publisher = publisherPool.ensureStringPublisher(fullPath, cachedMaxPublisherCount);
             if (publisher == null) {
                 return;
             }
             markTopicSeen(fullPath);
             publisher.set(safeValue);
         }
-    }
-
-    private BooleanPublisher ensureBooleanPublisher(String fullPath) {
-        BooleanPublisher existing = booleanPublishers.get(fullPath);
-        if (existing != null) {
-            return existing;
-        }
-        if (publisherLimitReached()) {
-            recordDroppedPublisherCreate();
-            return null;
-        }
-        BooleanTopic topic = nt.getBooleanTopic(fullPath);
-        BooleanPublisher created = topic.publish();
-        BooleanPublisher raced = booleanPublishers.putIfAbsent(fullPath, created);
-        if (raced != null) {
-            created.close();
-            return raced;
-        }
-        return created;
-    }
-
-    private DoublePublisher ensureDoublePublisher(String fullPath) {
-        DoublePublisher existing = doublePublishers.get(fullPath);
-        if (existing != null) {
-            return existing;
-        }
-        if (publisherLimitReached()) {
-            recordDroppedPublisherCreate();
-            return null;
-        }
-        DoubleTopic topic = nt.getDoubleTopic(fullPath);
-        DoublePublisher created = topic.publish();
-        DoublePublisher raced = doublePublishers.putIfAbsent(fullPath, created);
-        if (raced != null) {
-            created.close();
-            return raced;
-        }
-        return created;
-    }
-
-    private StringPublisher ensureStringPublisher(String fullPath) {
-        StringPublisher existing = stringPublishers.get(fullPath);
-        if (existing != null) {
-            return existing;
-        }
-        if (publisherLimitReached()) {
-            recordDroppedPublisherCreate();
-            return null;
-        }
-        StringTopic topic = nt.getStringTopic(fullPath);
-        StringPublisher created = topic.publish();
-        StringPublisher raced = stringPublishers.putIfAbsent(fullPath, created);
-        if (raced != null) {
-            created.close();
-            return raced;
-        }
-        return created;
     }
 
     public final class Node {
@@ -1236,19 +1174,11 @@ public final class RobotNetworkTables {
         return count;
     }
 
-    private boolean publisherLimitReached() {
-        return totalPublisherCount() >= cachedMaxPublisherCount;
-    }
-
-    private void recordDroppedPublisherCreate() {
-        droppedPublisherCreates.incrementAndGet();
-    }
-
     private void publishDroppedPublisherCreatesIfNeeded() {
         if (!publishedConfig || droppedPublisherCreatesEntry == null) {
             return;
         }
-        long dropped = droppedPublisherCreates.get();
+        long dropped = publisherPool.droppedPublisherCreates();
         if (dropped == lastDroppedPublisherCreatesPublished) {
             return;
         }
@@ -1303,18 +1233,7 @@ public final class RobotNetworkTables {
                 pendingDoubleBitsWrites.remove(key);
                 pendingStringWrites.remove(key);
 
-                BooleanPublisher booleanPublisher = booleanPublishers.remove(key);
-                if (booleanPublisher != null) {
-                    booleanPublisher.close();
-                }
-                DoublePublisher doublePublisher = doublePublishers.remove(key);
-                if (doublePublisher != null) {
-                    doublePublisher.close();
-                }
-                StringPublisher stringPublisher = stringPublishers.remove(key);
-                if (stringPublisher != null) {
-                    stringPublisher.close();
-                }
+                publisherPool.closePublishers(key);
             }
 
             if (iterator == null || !iterator.hasNext()) {

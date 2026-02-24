@@ -46,7 +46,7 @@ public class RobotCopilot {
 
     private static final Pose2d DEFAULT_TOLERANCE =
             new Pose2d(0.05, 0.05, Rotation2d.fromDegrees(2.0));
-    private static final String DEFAULT_SPEED_SOURCE = "feedback";
+    private static final String DEFAULT_SPEED_SOURCE = RobotSpeeds.FEEDBACK_SOURCE;
 
     private final RobotDrivetrain<?> drivetrain;
     private final RobotLocalization<?> localization;

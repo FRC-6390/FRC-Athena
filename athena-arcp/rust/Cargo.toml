@@ -1,0 +1,21 @@
+[workspace]
+members = [
+  "crates/arcp-core",
+  "crates/arcp-server",
+  "crates/arcp-jni",
+  "crates/arcp-dashboard",
+]
+default-members = [
+  "crates/arcp-core",
+  "crates/arcp-server",
+  "crates/arcp-jni",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+authors = ["FRC 6390 Athena"]
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

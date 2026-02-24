@@ -1,0 +1,60 @@
+plugins {
+    id 'java'
+}
+
+configurations {
+    wpilibTestNatives
+}
+
+dependencies {
+    testImplementation project(':athena-core')
+    testImplementation project(':athena-examples')
+    testImplementation project(':athena-plugin')
+    testImplementation gradleApi()
+    testImplementation gradleTestKit()
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.apriltag:apriltag-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.cscore:cscore-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.hal:hal-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.cameraserver:cameraserver-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "org.ejml:ejml-simple:${rootProject.ext.athenaVersions.ejml}"
+    testImplementation "com.fasterxml.jackson.core:jackson-annotations:${rootProject.ext.athenaVersions.jackson}"
+    testImplementation "com.fasterxml.jackson.core:jackson-core:${rootProject.ext.athenaVersions.jackson}"
+    testImplementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.athenaVersions.jackson}"
+    testImplementation "org.tomlj:tomlj:1.1.1"
+
+    // WPILib JNI libraries are distributed as native zips and are needed for tests that
+    // construct SubsystemBase/CommandScheduler or touch WPILib JNI-backed APIs.
+    wpilibTestNatives "edu.wpi.first.hal:hal-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.wpinet:wpinet-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.ntcore:ntcore-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.cscore:cscore-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.apriltag:apriltag-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+}
+
+def extractedWpilibNativesDir = layout.buildDirectory.dir('wpilib-test-natives')
+
+tasks.register('extractWpilibTestNatives', Copy) {
+    from {
+        configurations.wpilibTestNatives.collect { zipTree(it) }
+    }
+    include 'linux/x86-64/shared/*.so'
+    into extractedWpilibNativesDir
+}
+
+test {
+    dependsOn tasks.named('extractWpilibTestNatives')
+    useJUnitPlatform()
+    jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED'
+    def nativePath = extractedWpilibNativesDir.get().file('linux/x86-64/shared').asFile.absolutePath
+    systemProperty 'java.library.path', nativePath
+    environment 'LD_LIBRARY_PATH', nativePath
+}
