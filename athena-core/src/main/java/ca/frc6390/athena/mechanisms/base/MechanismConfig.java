@@ -47,6 +47,7 @@ import ca.frc6390.athena.mechanisms.config.MechanismConfigFile;
 import ca.frc6390.athena.mechanisms.config.MechanismConfigLoader;
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
+import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
@@ -792,7 +793,14 @@ public class MechanismConfig<T extends Mechanism> {
                     output += ctx.bangBangOut(normalizedName, measurement, setpoint);
                 }
                 if (hasFf) {
-                    output += ctx.feedforwardOut(normalizedName, measurement, setpoint, setpoint);
+                    // Feedforward expects a velocity target. Position setpoint scaling (for example
+                    // degrees/radians) can explode outputs if treated as velocity.
+                    double velocitySetpoint = 0.0;
+                    ProfiledPIDController profiled = ctx.profiledPid(normalizedName);
+                    if (profiled != null) {
+                        velocitySetpoint = profiled.getSetpoint().velocity;
+                    }
+                    output += ctx.feedforwardOut(normalizedName, velocitySetpoint);
                 }
                 return output;
             });
@@ -1705,9 +1713,28 @@ public class MechanismConfig<T extends Mechanism> {
                 }
             }
             this.state = resolvedState;
-            this.setpoint = resolvedState != null
-                    ? resolvedState.getSetpoint()
-                    : mechanism.setpoint();
+            Double resolvedSetpoint = null;
+            if (resolvedState != null) {
+                try {
+                    resolvedSetpoint = resolvedState.getSetpoint();
+                } catch (NullPointerException ignored) {
+                    // Some state providers intentionally leave setpoint unset.
+                    resolvedSetpoint = null;
+                }
+                if (resolvedSetpoint == null && resolvedState instanceof ca.frc6390.athena.mechanisms.statespec.StateSeedProvider<?> seedProvider) {
+                    @SuppressWarnings("rawtypes")
+                    ca.frc6390.athena.mechanisms.statespec.StateSeed seed =
+                            ((ca.frc6390.athena.mechanisms.statespec.StateSeedProvider) seedProvider).seed();
+                    resolvedSetpoint = ca.frc6390.athena.mechanisms.statespec.StateSeedRuntime.doubleSetpoint(seed);
+                }
+            }
+            if (resolvedSetpoint == null) {
+                double mechanismSetpoint = mechanism.setpoint();
+                if (Double.isFinite(mechanismSetpoint)) {
+                    resolvedSetpoint = mechanismSetpoint;
+                }
+            }
+            this.setpoint = resolvedSetpoint != null ? resolvedSetpoint : Double.NaN;
             this.inputsView = new TypedInputResolver(
                     "LifecycleMechanismContext",
                     TypedInputResolver.ValueMode.STRICT,

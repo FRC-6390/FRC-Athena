@@ -20,3 +20,6 @@ include 'athena-pathplanner'
 include 'athena-choreo'
 include 'athena-studica'
 include 'athena-plugin'
+include 'athena-arcp-java'
+
+project(':athena-arcp-java').projectDir = file('athena-arcp/java')

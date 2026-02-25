@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use arcp_core::{encode_update, SignalValue};
+use arcp_core::{encode_update_into, SignalValue};
 
 pub(crate) enum PublishMessage {
     Value { signal_id: u16, value: SignalValue },
@@ -15,6 +15,7 @@ pub(crate) fn run_realtime_loop(
     subscribers: Arc<Mutex<Vec<SocketAddr>>>,
     running: Arc<AtomicBool>,
 ) {
+    let mut encoded = Vec::with_capacity(256);
     while running.load(Ordering::SeqCst) {
         let message = match publish_rx.recv_timeout(Duration::from_millis(100)) {
             Ok(message) => message,
@@ -22,12 +23,14 @@ pub(crate) fn run_realtime_loop(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
 
-        let encoded = match message {
-            PublishMessage::Value { signal_id, value } => match encode_update(signal_id, &value) {
-                Ok(encoded) => encoded,
-                Err(_) => continue,
-            },
+        let encode_ok = match message {
+            PublishMessage::Value { signal_id, value } => {
+                encode_update_into(signal_id, &value, &mut encoded).is_ok()
+            }
         };
+        if !encode_ok {
+            continue;
+        }
 
         let endpoints = match subscribers.lock() {
             Ok(list) => list.clone(),

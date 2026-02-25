@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.io.File;
 import java.io.IOException;
@@ -28,6 +29,9 @@ import java.util.concurrent.TimeUnit;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
+import ca.frc6390.athena.arcp.ArcpRuntime;
+import ca.frc6390.athena.core.arcp.ArcpDashboardLayout;
+import ca.frc6390.athena.core.arcp.ArcpNativePublisher;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
@@ -250,18 +254,71 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
+    /**
+     * ARCP runtime/layout behavior for {@link RobotCore}.
+     *
+     * @param enabled master runtime toggle for ARCP.
+     * @param layoutProfileName default profile name used for mechanism layout publishing.
+     * @param autoMechanismPages when enabled, RobotCore writes one dashboard page per mechanism.
+     */
+    public record ArcpConfig(
+            boolean enabled,
+            String layoutProfileName,
+            boolean autoMechanismPages) {
+
+        public ArcpConfig {
+            layoutProfileName = (layoutProfileName == null || layoutProfileName.isBlank())
+                    ? "athena-mechanisms"
+                    : layoutProfileName.trim();
+        }
+
+        public static ArcpConfig defaults() {
+            return new ArcpConfig(false, "athena-mechanisms", true);
+        }
+    }
+
     public record RobotCoreConfig<T extends RobotDrivetrain<T>>(RobotDrivetrainConfig<T> driveTrain,
             RobotLocalizationConfig localizationConfig, RobotVisionConfig visionConfig,
             boolean autoInitResetEnabled, TelemetryRegistry.TelemetryConfig telemetryConfig,
             List<RegisterableMechanism> mechanisms, boolean performanceMode,
             boolean timingDebugEnabled, boolean telemetryEnabled, AutoConfig autoConfig, RobotCoreHooks<T> hooks,
-            SystemConfig systemConfig) {
+            SystemConfig systemConfig, ArcpConfig arcpConfig) {
 
         public RobotCoreConfig {
             mechanisms = mechanisms != null ? List.copyOf(mechanisms) : List.of();
             autoConfig = autoConfig != null ? autoConfig : AutoConfig.defaults();
             hooks = hooks != null ? hooks : RobotCoreHooks.<T>empty();
             systemConfig = systemConfig != null ? systemConfig : SystemConfig.defaults();
+            arcpConfig = arcpConfig != null ? arcpConfig : ArcpConfig.defaults();
+        }
+
+        public RobotCoreConfig(
+                RobotDrivetrainConfig<T> driveTrain,
+                RobotLocalizationConfig localizationConfig,
+                RobotVisionConfig visionConfig,
+                boolean autoInitResetEnabled,
+                TelemetryRegistry.TelemetryConfig telemetryConfig,
+                List<RegisterableMechanism> mechanisms,
+                boolean performanceMode,
+                boolean timingDebugEnabled,
+                boolean telemetryEnabled,
+                AutoConfig autoConfig,
+                RobotCoreHooks<T> hooks,
+                SystemConfig systemConfig) {
+            this(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled,
+                    autoConfig,
+                    hooks,
+                    systemConfig,
+                    ArcpConfig.defaults());
         }
 
         public RobotCoreConfig(
@@ -288,7 +345,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    SystemConfig.defaults());
+                    SystemConfig.defaults(),
+                    ArcpConfig.defaults());
         }
 
         public static RobotCoreConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
@@ -336,7 +394,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> vision(RobotVisionConfig visionConfig) {
@@ -352,7 +411,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> cameras(ConfigurableCamera... cameras) {
@@ -368,7 +428,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> autoInitResetEnabled(boolean enabled) {
@@ -384,7 +445,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> telemetry(TelemetryRegistry.TelemetryConfig telemetryConfig) {
@@ -400,7 +462,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         /**
@@ -424,7 +487,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> performanceMode(boolean enabled) {
@@ -440,7 +504,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> timingDebugEnabled(boolean enabled) {
@@ -456,7 +521,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> telemetryEnabled(boolean enabled) {
@@ -472,7 +538,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     enabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> auto(AutoConfig autoConfig) {
@@ -488,7 +555,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> hooks(java.util.function.Consumer<RobotCoreHooks.HooksSection<T>> section) {
@@ -507,7 +575,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks.hooks(section),
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> inputs(java.util.function.Consumer<RobotCoreHooks.InputsSection<T>> section) {
@@ -526,7 +595,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks.inputs(section),
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCoreConfig<T> system(SystemConfig systemConfig) {
@@ -542,7 +612,25 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig);
+                    systemConfig,
+                    arcpConfig);
+        }
+
+        public RobotCoreConfig<T> arcp(ArcpConfig arcpConfig) {
+            return new RobotCoreConfig<>(
+                    driveTrain,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled,
+                    autoConfig,
+                    hooks,
+                    systemConfig,
+                    arcpConfig);
         }
 
         public RobotCore<T> create() {
@@ -562,13 +650,21 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final RobotCopilot copilot;
     private AthenaRuntimeServer configServer;
     private volatile boolean configServerEnabled = true;
+    private ArcpRuntime arcpRuntime;
+    private ArcpNativePublisher arcpNativePublisher;
+    private volatile boolean arcpEnabled = false;
+    private volatile boolean arcpAutoMechanismPages = true;
+    private volatile String arcpLayoutProfileName = "athena-mechanisms";
+    private boolean arcpPublishFailureReported;
     private String configServerBaseUrl;
     private String cachedConfigExportBaseUrl = "";
     private ConfigExportUrls cachedConfigExportUrls = ConfigExportUrls.empty();
     private final ConfigServerSection configServerSection;
+    private final ArcpSection arcpSection;
     private final SystemSection systemSection;
     private final DiagnosticsSection diagnosticsSection;
     private final Map<String, DiagnosticsChannel> diagnosticsChannels;
+    private final Map<String, ArcpDashboardLayout.Page> arcpMechanismPages;
     private final HashMap<String, Mechanism> mechanisms;
     private final List<SuperstructureMechanism<?, ?>> registeredSuperstructures;
     private final HashMap<String, SuperstructureMechanism<?, ?>> superstructuresByName;
@@ -603,6 +699,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private double lastMechanismAutoPublishSeconds = Double.NaN;
     private long lastCoreNetworkTablesConfigRevision = -1;
     private double lastCoreNetworkTablesPublishSeconds = Double.NaN;
+    private double lastArcpPublishSeconds = Double.NaN;
     private String lastPublishedAutoTrajectorySignature = EMPTY_AUTO_TRAJECTORY_SIGNATURE;
     private int lastPublishedAutoTrajectoryPointCount = -1;
     private final RuntimeMXBean runtimeMxBean;
@@ -637,6 +734,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final int MECHANISM_AUTO_PUBLISH_BATCH_SIZE = 2;
     private static final double PERFORMANCE_SLOW_METRICS_PERIOD_SECONDS = 1.0;
     private static final double PERFORMANCE_VERY_SLOW_METRICS_PERIOD_SECONDS = 5.0;
+    private static final double ARCP_NATIVE_PUBLISH_PERIOD_SECONDS = 0.02;
     private static final double COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS = 0.2;
     private static final double STARTUP_LOG_THRESHOLD_SECONDS = 0.05;
     private static final String SYSTEM_WEBSERVER_BINARY_PATH = "/usr/local/natinst/share/NIWebServer/SystemWebServer";
@@ -709,8 +807,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         mechanismView = new RobotMechanisms(mechanisms, superstructuresByName, registeredSuperstructures);
         stateSection = new StateSection();
         configServerSection = new ConfigServerSection(this);
+        arcpSection = new ArcpSection();
         systemSection = new SystemSection();
         diagnosticsChannels = new ConcurrentHashMap<>();
+        arcpMechanismPages = new LinkedHashMap<>();
         diagnosticsSection = new DiagnosticsSection(this);
         diagnosticsSection.core().info("lifecycle", "robot core constructed");
         scheduledCustomPidMechanisms = new HashSet<>();
@@ -732,6 +832,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         timingDebugEnabled = config.timingDebugEnabled();
         telemetryEnabled = config.telemetryEnabled();
         SystemConfig systemConfig = config.systemConfig() != null ? config.systemConfig() : SystemConfig.defaults();
+        ArcpConfig resolvedArcpConfig = config.arcpConfig() != null ? config.arcpConfig() : ArcpConfig.defaults();
+        arcpEnabled = resolvedArcpConfig.enabled();
+        arcpAutoMechanismPages = resolvedArcpConfig.autoMechanismPages();
+        arcpLayoutProfileName = resolvedArcpConfig.layoutProfileName();
         if (RobotBase.isReal()) {
             boolean tweaksOk = systemConfig.tweaksEnabled()
                     ? applySystemTweaks(systemConfig)
@@ -750,6 +854,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         if (config.performanceMode()) {
             setConfigServerEnabled(false);
+            setArcpEnabled(false);
             robotNetworkTables.setPublishingEnabled(false);
             telemetry.setEnabled(false);
         }
@@ -870,6 +975,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         double robotInitStart = Timer.getFPGATimestamp();
         timedStartupStep("robotInit.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
         timedStartupStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded);
+        timedStartupStep("robotInit.startArcpIfNeeded", this::startArcpIfNeeded);
         timedStartupStep("robotInit.configureAutoRegistry", this::configureAutoRegistry);
         timedStartupStep("robotInit.configureAutos", () -> configureAutos(autos));
         timedStartupStep("robotInit.autos.finalizeRegistration", () -> autos.execution().prepare());
@@ -1013,11 +1119,273 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
+    private void startArcpIfNeeded() {
+        if (!arcpEnabled) {
+            publishAthenaRuntimeNtStatus();
+            return;
+        }
+        if (arcpRuntime != null) {
+            publishAthenaRuntimeNtStatus();
+            return;
+        }
+        try {
+            ArcpRuntime runtime = ArcpRuntime.create();
+            runtime.start();
+            arcpRuntime = runtime;
+            arcpNativePublisher = new ArcpNativePublisher(runtime);
+            lastArcpPublishSeconds = Double.NaN;
+            arcpPublishFailureReported = false;
+            diagnosticsSection.core().info(
+                    "athena",
+                    "runtime started (control="
+                            + runtime.controlPort()
+                            + ", realtime="
+                            + runtime.realtimePort()
+                            + ")");
+            publishAthenaRuntimeNtStatus();
+            if (arcpAutoMechanismPages) {
+                writeArcpMechanismLayoutProfile(arcpLayoutProfileName);
+            }
+        } catch (RuntimeException ex) {
+            diagnosticsSection.core().error("athena", "failed to start ARCP runtime: " + ex.getMessage());
+            arcpRuntime = null;
+            arcpNativePublisher = null;
+            publishAthenaRuntimeNtStatus();
+        }
+    }
+
+    private void stopArcpIfRunning() {
+        ArcpRuntime runtime = arcpRuntime;
+        if (runtime == null) {
+            return;
+        }
+        arcpNativePublisher = null;
+        try {
+            runtime.close();
+        } catch (RuntimeException ex) {
+            diagnosticsSection.core().warn("athena", "failed to stop ARCP runtime cleanly: " + ex.getMessage());
+        } finally {
+            arcpRuntime = null;
+            lastArcpPublishSeconds = Double.NaN;
+            arcpPublishFailureReported = false;
+            publishAthenaRuntimeNtStatus();
+        }
+    }
+
+    private void setArcpEnabled(boolean enabled) {
+        arcpEnabled = enabled;
+        publishAthenaRuntimeNtStatus();
+        if (!enabled) {
+            stopArcpIfRunning();
+            return;
+        }
+        startArcpIfNeeded();
+    }
+
+    private void publishAthenaRuntimeNtStatus() {
+        ArcpRuntime runtime = arcpRuntime;
+        boolean running = runtime != null && runtime.isRunning();
+        int controlPort = runtime != null ? runtime.controlPort() : 0;
+        int realtimePort = runtime != null ? runtime.realtimePort() : 0;
+
+        AthenaNT.put("Runtime/Athena/Enabled", arcpEnabled);
+        AthenaNT.put("Runtime/Athena/Running", running);
+        AthenaNT.put("Runtime/Athena/ControlPort", controlPort);
+        AthenaNT.put("Runtime/Athena/RealtimePort", realtimePort);
+    }
+
+    private void publishArcpSignals(double nowSeconds) {
+        ArcpRuntime runtime = arcpRuntime;
+        ArcpNativePublisher publisher = arcpNativePublisher;
+        if (!arcpEnabled || runtime == null || !runtime.isRunning() || publisher == null) {
+            return;
+        }
+        if (Double.isFinite(nowSeconds) && Double.isFinite(lastArcpPublishSeconds)) {
+            double elapsed = nowSeconds - lastArcpPublishSeconds;
+            if (elapsed >= 0.0 && elapsed < ARCP_NATIVE_PUBLISH_PERIOD_SECONDS) {
+                return;
+            }
+        }
+
+        try {
+            publisher.publishBoolean("Athena/Runtime/Enabled", arcpEnabled);
+            publisher.publishBoolean("Athena/Runtime/Running", true);
+            publisher.publishI64("Athena/Runtime/ControlPort", runtime.controlPort());
+            publisher.publishI64("Athena/Runtime/RealtimePort", runtime.realtimePort());
+            publisher.publishString("Athena/Runtime/Mode", runtimeMode.name());
+
+            for (Map.Entry<String, Mechanism> entry : mechanisms.entrySet()) {
+                if (entry == null || entry.getValue() == null) {
+                    continue;
+                }
+                String mechanismName = normalizeArcpSignalSegment(entry.getKey());
+                String root = "Athena/Mechanisms/" + mechanismName;
+                Mechanism mechanism = entry.getValue();
+
+                publisher.publishString(root + "/Name", mechanism.getName());
+                publisher.publishBoolean(root + "/AtSetpoint", mechanism.atSetpoint());
+                publisher.publishBoolean(root + "/EmergencyStopped", mechanism.emergencyStopped());
+                publisher.publishDouble(root + "/Position", mechanism.position());
+                publisher.publishDouble(root + "/Velocity", mechanism.velocity());
+                publisher.publishDouble(root + "/Setpoint", mechanism.setpoint());
+                publisher.publishDouble(root + "/Output", mechanism.output());
+                publisher.publishString(root + "/OutputType", String.valueOf(mechanism.outputType()));
+
+                if (mechanism instanceof StatefulLike<?> stateful) {
+                    StatefulLike.StateMachineSection<?> stateSection = stateful.stateMachine();
+                    Enum<?> goal = stateSection.goal();
+                    Enum<?> next = stateSection.next();
+                    String queue = stateSection.queue();
+
+                    publisher.publishString(root + "/State/Goal", goal != null ? goal.name() : "");
+                    publisher.publishString(root + "/State/Next", next != null ? next.name() : "");
+                    publisher.publishString(root + "/State/Queue", queue != null ? queue : "");
+                    publisher.publishBoolean(root + "/State/AtGoal", stateSection.atGoal());
+                    publisher.publishDouble(root + "/State/Setpoint", stateSection.setpoint());
+                }
+            }
+            if (Double.isFinite(nowSeconds)) {
+                lastArcpPublishSeconds = nowSeconds;
+            }
+            arcpPublishFailureReported = false;
+        } catch (RuntimeException ex) {
+            if (!arcpPublishFailureReported) {
+                diagnosticsSection.core().warn("athena", "ARCP signal publish failed: " + ex.getMessage());
+                arcpPublishFailureReported = true;
+            }
+        }
+    }
+
+    private void refreshArcpMechanismLayoutIfNeeded() {
+        if (!arcpEnabled || !arcpAutoMechanismPages) {
+            return;
+        }
+        writeArcpMechanismLayoutProfile(arcpLayoutProfileName);
+    }
+
+    private void writeArcpMechanismLayoutProfile(String profileName) {
+        ArcpRuntime runtime = arcpRuntime;
+        if (runtime == null || !runtime.isRunning()) {
+            return;
+        }
+        String resolvedProfileName = normalizeArcpProfileName(profileName);
+        List<ArcpDashboardLayout.Page> pages = new ArrayList<>();
+        Set<String> usedPageIds = new HashSet<>();
+        synchronized (arcpMechanismPages) {
+            for (Map.Entry<String, Mechanism> entry : mechanisms.entrySet()) {
+                if (entry == null) {
+                    continue;
+                }
+                String mechanismName = entry.getKey();
+                String mechanismKey = normalizeMechanismPageKey(mechanismName);
+                ArcpDashboardLayout.Page page = arcpMechanismPages.get(mechanismKey);
+                if (page == null) {
+                    page = defaultArcpPageForMechanism(mechanismName);
+                }
+                if (!usedPageIds.add(page.id())) {
+                    continue;
+                }
+                pages.add(page);
+            }
+        }
+        if (pages.isEmpty()) {
+            pages.add(defaultArcpPageForMechanism("Dashboard"));
+        }
+
+        ArcpDashboardLayout.Builder layoutBuilder = ArcpDashboardLayout.builder()
+                .activeTabId(pages.get(0).id());
+        for (ArcpDashboardLayout.Page page : pages) {
+            layoutBuilder.page(page);
+        }
+
+        runtime.saveLayout(resolvedProfileName, layoutBuilder.build().toJson());
+    }
+
+    private static ArcpDashboardLayout.Page defaultArcpPageForMechanism(String mechanismName) {
+        String displayName =
+                (mechanismName == null || mechanismName.isBlank()) ? "Mechanism" : mechanismName.trim();
+        String slug = normalizeMechanismPageKey(displayName);
+        return ArcpDashboardLayout.Page.builder()
+                .id("tab-" + slug)
+                .name(displayName)
+                .build();
+    }
+
+    private static String normalizeArcpProfileName(String profileName) {
+        if (profileName == null || profileName.isBlank()) {
+            return "athena-mechanisms";
+        }
+        return profileName.trim();
+    }
+
+    private static String normalizeArcpSignalSegment(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "mechanism";
+        }
+        String input = raw.trim();
+        StringBuilder out = new StringBuilder(input.length());
+        for (int i = 0; i < input.length(); i++) {
+            char ch = input.charAt(i);
+            boolean valid = (ch >= 'a' && ch <= 'z')
+                    || (ch >= 'A' && ch <= 'Z')
+                    || (ch >= '0' && ch <= '9')
+                    || ch == '-'
+                    || ch == '_';
+            out.append(valid ? ch : '_');
+        }
+        String normalized = out.toString();
+        return normalized.isEmpty() ? "mechanism" : normalized;
+    }
+
+    private static String normalizeMechanismPageKey(String mechanismName) {
+        if (mechanismName == null || mechanismName.isBlank()) {
+            return "mechanism";
+        }
+        String lower = mechanismName.trim().toLowerCase();
+        StringBuilder out = new StringBuilder(lower.length());
+        boolean lastDash = false;
+        for (int i = 0; i < lower.length(); i++) {
+            char ch = lower.charAt(i);
+            boolean valid = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
+            if (valid) {
+                out.append(ch);
+                lastDash = false;
+                continue;
+            }
+            if (!lastDash) {
+                out.append('-');
+                lastDash = true;
+            }
+        }
+        String normalized = out.toString();
+        while (normalized.startsWith("-")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("-")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized.isEmpty() ? "mechanism" : normalized;
+    }
+
     /**
      * Runtime API for publishing user-defined content via the Athena config server.
      */
     public ConfigServerSection configServer() {
         return configServerSection;
+    }
+
+    /**
+     * Runtime ARCP controls.
+     */
+    public ArcpSection arcp() {
+        return arcpSection;
+    }
+
+    public RobotCore<T> arcp(Consumer<ArcpSection> section) {
+        if (section != null) {
+            section.accept(arcpSection);
+        }
+        return this;
     }
 
     /**
@@ -1085,6 +1453,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 autoPublishMechanismsIncremental(now);
             }
         }
+        publishArcpSignals(cycleStartSeconds);
         long t4Ns = System.nanoTime();
 
         double schedulerSeconds = (t1Ns - t0Ns) * 1e-9;
@@ -2447,6 +2816,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             scheduleCustomPidCycle(mech);
             indexMechanismStateEndpoint(mech);
         }
+        refreshArcpMechanismLayoutIfNeeded();
         return this;
     }
 
@@ -3170,6 +3540,142 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
+    public final class ArcpSection {
+        private ArcpSection() {
+        }
+
+        public ArcpSection enabled(boolean enabled) {
+            setArcpEnabled(enabled);
+            return this;
+        }
+
+        public ArcpSection start() {
+            setArcpEnabled(true);
+            return this;
+        }
+
+        public ArcpSection stop() {
+            setArcpEnabled(false);
+            return this;
+        }
+
+        public ArcpSection restart() {
+            setArcpEnabled(false);
+            setArcpEnabled(true);
+            return this;
+        }
+
+        public boolean enabled() {
+            return arcpEnabled;
+        }
+
+        public ArcpSection autoMechanismPages(boolean enabled) {
+            arcpAutoMechanismPages = enabled;
+            if (enabled) {
+                refreshArcpMechanismLayoutIfNeeded();
+            }
+            return this;
+        }
+
+        public boolean autoMechanismPages() {
+            return arcpAutoMechanismPages;
+        }
+
+        public ArcpSection layoutProfileName(String profileName) {
+            arcpLayoutProfileName = normalizeArcpProfileName(profileName);
+            if (arcpAutoMechanismPages) {
+                refreshArcpMechanismLayoutIfNeeded();
+            }
+            return this;
+        }
+
+        public String layoutProfileName() {
+            return arcpLayoutProfileName;
+        }
+
+        public boolean running() {
+            ArcpRuntime runtime = arcpRuntime;
+            return runtime != null && runtime.isRunning();
+        }
+
+        public int controlPort() {
+            ArcpRuntime runtime = arcpRuntime;
+            return runtime != null ? runtime.controlPort() : 0;
+        }
+
+        public int realtimePort() {
+            ArcpRuntime runtime = arcpRuntime;
+            return runtime != null ? runtime.realtimePort() : 0;
+        }
+
+        public ArcpRuntime runtime() {
+            return arcpRuntime;
+        }
+
+        public ArcpSection page(String mechanismName, Consumer<ArcpDashboardLayout.Page.Builder> section) {
+            if (section == null) {
+                return this;
+            }
+            ArcpDashboardLayout.Page.Builder builder = ArcpDashboardLayout.Page.builder();
+            section.accept(builder);
+            return page(mechanismName, builder.build());
+        }
+
+        public ArcpSection page(String mechanismName, ArcpDashboardLayout.Page page) {
+            if (page == null) {
+                return this;
+            }
+            String keySource = mechanismName;
+            if (keySource == null || keySource.isBlank()) {
+                keySource = page.name();
+            }
+            String key = normalizeMechanismPageKey(keySource);
+            synchronized (arcpMechanismPages) {
+                arcpMechanismPages.put(key, page);
+            }
+            refreshArcpMechanismLayoutIfNeeded();
+            return this;
+        }
+
+        public ArcpSection clearPages() {
+            synchronized (arcpMechanismPages) {
+                arcpMechanismPages.clear();
+            }
+            refreshArcpMechanismLayoutIfNeeded();
+            return this;
+        }
+
+        public ArcpSection publishMechanismPages() {
+            writeArcpMechanismLayoutProfile(arcpLayoutProfileName);
+            return this;
+        }
+
+        public ArcpSection saveLayoutProfile(String profileName, String layoutJson) {
+            ArcpRuntime runtime = arcpRuntime;
+            if (runtime == null || !runtime.isRunning()) {
+                throw new IllegalStateException("ARCP runtime is not running");
+            }
+            runtime.saveLayout(normalizeArcpProfileName(profileName), layoutJson);
+            return this;
+        }
+
+        public String loadLayoutProfile(String profileName) {
+            ArcpRuntime runtime = arcpRuntime;
+            if (runtime == null || !runtime.isRunning()) {
+                throw new IllegalStateException("ARCP runtime is not running");
+            }
+            return runtime.loadLayout(normalizeArcpProfileName(profileName));
+        }
+
+        public String[] listLayoutProfiles() {
+            ArcpRuntime runtime = arcpRuntime;
+            if (runtime == null || !runtime.isRunning()) {
+                return new String[0];
+            }
+            return runtime.listLayouts();
+        }
+    }
+
     public final class SystemSection {
         private SystemSection() {}
 
@@ -3228,6 +3734,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
          */
         public SystemSection applyLowMemoryDefaults() {
             setConfigServerEnabled(false);
+            setArcpEnabled(false);
             telemetry.setEnabled(false);
             DataLogManager.logNetworkTables(false);
             return this;

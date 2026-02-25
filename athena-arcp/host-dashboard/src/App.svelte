@@ -22,12 +22,15 @@
     clampLayout,
     createDefaultLayout,
     createEmptyTab,
+    defaultLeafWidgetKind,
     defaultWidgetKind,
     formatCpu,
     formatMemory,
     formatUptime,
+    hardwareWidgetKindForPath,
     isActionSignal,
     isLayoutWidgetKind,
+    isWritableSignal,
     leafPath,
     loadLayout,
     makeLayoutWidget,
@@ -57,6 +60,8 @@
   import InspectorPanel from './components/InspectorPanel.svelte';
   import SettingsScreen from './components/SettingsScreen.svelte';
   import ActionsScreen from './components/ActionsScreen.svelte';
+  import CameraTuningScreen from './components/CameraTuningScreen.svelte';
+  import DiagnosticsScreen from './components/DiagnosticsScreen.svelte';
   import MechanismsScreen from './components/MechanismsScreen.svelte';
   import FloatingDock from './components/FloatingDock.svelte';
   import DashboardContextMenu from './components/DashboardContextMenu.svelte';
@@ -65,7 +70,14 @@
   const SERVER_LAYOUT_POLL_MS = 2000;
   const HISTORY_LIMIT = 120;
 
-  type RailSection = 'dashboards' | 'signals' | 'mechanisms' | 'actions' | 'settings';
+  type RailSection =
+    | 'dashboards'
+    | 'signals'
+    | 'mechanisms'
+    | 'actions'
+    | 'diagnostics'
+    | 'camera_tuning'
+    | 'settings';
   type CommitLayoutOptions = {
     recordHistory?: boolean;
     clearRedo?: boolean;
@@ -91,6 +103,11 @@
     noneLabel: string;
     onPick: (signalId: number | null) => void;
   };
+
+  function isIgnoredPublishSignal(signal: SignalRow): boolean {
+    const token = signal.path.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    return token.includes('publish');
+  }
 
   let host = $state('127.0.0.1');
   let controlPort = $state('5805');
@@ -129,7 +146,7 @@
   let dashboardMenu = $state<DashboardContextMenuState | null>(null);
   let pendingSignalMapRequest = $state<SignalMapRequest | null>(null);
 
-  const signalRows = $derived(snapshot?.signals ?? []);
+  const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
   const signalById = $derived(new Map(signalRows.map((signal) => [signal.signal_id, signal])));
   const filteredSignals = $derived(applyFilters(signalRows, query, roleFilter, typeFilter));
   const explorerSignals = $derived.by(() =>
@@ -162,7 +179,7 @@
   );
 
   const dashboardStates = $derived([
-    { key: 'signals', label: 'signals', value: String(snapshot?.signal_count ?? 0), valueWidthCh: 5 },
+    { key: 'signals', label: 'signals', value: String(signalRows.length), valueWidthCh: 5 },
     { key: 'updates', label: 'updates', value: String(snapshot?.update_count ?? 0), valueWidthCh: 7 },
     { key: 'uptime', label: 'uptime', value: snapshot ? formatUptime(snapshot.uptime_ms) : '0m 0s', valueWidthCh: 9 },
     { key: 'server-cpu', label: 'server cpu', value: snapshot ? formatCpu(snapshot.server_cpu_percent) : 'n/a', valueWidthCh: 6 },
@@ -195,6 +212,20 @@
         showInspector = true;
         break;
       case 'mechanisms':
+        roleFilter = 'all';
+        typeFilter = 'all';
+        query = '';
+        showInspector = false;
+        selectedWidgetId = null;
+        break;
+      case 'diagnostics':
+        roleFilter = 'all';
+        typeFilter = 'all';
+        query = '';
+        showInspector = false;
+        selectedWidgetId = null;
+        break;
+      case 'camera_tuning':
         roleFilter = 'all';
         typeFilter = 'all';
         query = '';
@@ -576,6 +607,75 @@
     historyBySignal = next;
   }
 
+  const TOPIC_HARDWARE_PRIORITY: WidgetKind[] = [
+    'state_machine',
+    'dio',
+    'motor',
+    'encoder',
+    'imu'
+  ];
+
+  function normalizeTopicPath(path: string): string {
+    const trimmed = path.trim();
+    if (!trimmed) return '';
+    const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
+    const withoutAthenaRoot = withoutLeadingSlash.replace(/^athena\/?/i, '');
+    const withoutTrailingSlash = withoutAthenaRoot.replace(/\/+$/, '');
+    return withoutTrailingSlash ? `/${withoutTrailingSlash}` : '';
+  }
+
+  function isSignalInTopic(signalPath: string, topicPath: string): boolean {
+    if (!topicPath) return false;
+    const normalizedSignalPath = normalizeTopicPath(signalPath);
+    if (!normalizedSignalPath) return false;
+    return (
+      normalizedSignalPath === topicPath || normalizedSignalPath.startsWith(`${topicPath}/`)
+    );
+  }
+
+  function resolveTopicDrop(
+    topicPathRaw: string
+  ): { signal: SignalRow; kind: WidgetKind; title: string } | null {
+    const topicPath = normalizeTopicPath(topicPathRaw);
+    if (!topicPath) return null;
+
+    const scopedSignals = signalRows.filter((signal) => isSignalInTopic(signal.path, topicPath));
+    if (scopedSignals.length === 0) return null;
+
+    const topicLabel = leafPath(topicPath);
+    const hardwareKindFromTopic = hardwareWidgetKindForPath(topicPath);
+    if (hardwareKindFromTopic) {
+      const anchorSignal =
+        scopedSignals.find(
+          (signal) => hardwareWidgetKindForPath(signal.path) === hardwareKindFromTopic
+        ) ?? scopedSignals[0];
+      return {
+        signal: anchorSignal,
+        kind: hardwareKindFromTopic,
+        title: topicLabel
+      };
+    }
+
+    for (const preferredKind of TOPIC_HARDWARE_PRIORITY) {
+      const anchorSignal = scopedSignals.find(
+        (signal) => hardwareWidgetKindForPath(signal.path) === preferredKind
+      );
+      if (!anchorSignal) continue;
+      return {
+        signal: anchorSignal,
+        kind: preferredKind,
+        title: topicLabel
+      };
+    }
+
+    const fallbackSignal = scopedSignals.find((signal) => !isWritableSignal(signal)) ?? scopedSignals[0];
+    return {
+      signal: fallbackSignal,
+      kind: defaultLeafWidgetKind(fallbackSignal),
+      title: topicLabel
+    };
+  }
+
   function createWidget(
     signal: SignalRow,
     kind: WidgetKind,
@@ -651,6 +751,31 @@
     };
     selectedWidgetId = nextWidget.id;
     selectedId = signal.signal_id;
+  }
+
+  function showAsWidgetKind(kind: WidgetKind) {
+    if (!selectedSignal) return;
+
+    if (!selectedWidget) {
+      createWidget(selectedSignal, kind);
+      return;
+    }
+
+    const anchorSignal = signalById.get(selectedWidget.signalId) ?? selectedSignal;
+    const nextConfig = buildDefaultWidgetConfig(kind, anchorSignal, signalRows);
+
+    setActiveWidgets(
+      widgets.map((widget) =>
+        widget.id === selectedWidget.id
+          ? {
+              ...widget,
+              kind,
+              config: cloneWidgetConfig(nextConfig)
+            }
+          : widget
+      )
+    );
+    selectedId = anchorSignal.signal_id;
   }
 
   function createLayoutWidget(
@@ -1247,9 +1372,10 @@
       connected = next.connected;
       status = next.status;
 
-      updateHistory(next.signals);
+      const filteredSignals = next.signals.filter((signal) => !isIgnoredPublishSignal(signal));
+      updateHistory(filteredSignals);
 
-      const validIds = new Set(next.signals.map((signal) => signal.signal_id));
+      const validIds = new Set(filteredSignals.map((signal) => signal.signal_id));
       const nextTabs = layoutState.tabs.map((tab) => {
         const filtered = tab.widgets.filter(
           (widget) => isLayoutWidgetKind(widget.kind) || validIds.has(widget.signalId)
@@ -1573,9 +1699,7 @@
                 {selectedWidget}
                 widgetKinds={widgetKindsFor(selectedSignal)}
                 {widgetKindLabel}
-                onAddWidgetKind={(kind) => {
-                  if (selectedSignal) createWidget(selectedSignal, kind);
-                }}
+                onShowAsKind={showAsWidgetKind}
                 onTriggerAction={sendAction}
                 onSelectTunableWidget={() => {
                   if (selectedSignal) createWidget(selectedSignal, 'tunable');
@@ -1607,9 +1731,7 @@
                 {selectedWidget}
                 widgetKinds={widgetKindsFor(selectedSignal)}
                 {widgetKindLabel}
-                onAddWidgetKind={(kind) => {
-                  if (selectedSignal) createWidget(selectedSignal, kind);
-                }}
+                onShowAsKind={showAsWidgetKind}
                 onTriggerAction={sendAction}
                 onSelectTunableWidget={() => {
                   if (selectedSignal) createWidget(selectedSignal, 'tunable');
@@ -1631,6 +1753,31 @@
             selectedWidgetId = null;
           }}
           onTriggerAction={sendAction}
+          onSendSet={sendSet}
+        />
+      {:else if railSection === 'diagnostics'}
+        <DiagnosticsScreen
+          {connected}
+          {status}
+          {lastError}
+          {snapshot}
+          signals={signalRows}
+          onSelectSignal={(signalId) => {
+            selectedId = signalId;
+            selectedWidgetId = null;
+            railSection = 'signals';
+            showInspector = true;
+          }}
+        />
+      {:else if railSection === 'camera_tuning'}
+        <CameraTuningScreen
+          signals={signalRows}
+          onSelectSignal={(signalId) => {
+            selectedId = signalId;
+            selectedWidgetId = null;
+            railSection = 'signals';
+            showInspector = true;
+          }}
           onSendSet={sendSet}
         />
       {:else}
@@ -1665,7 +1812,19 @@
                 const signal = signalById.get(signalId);
                 if (!signal) return;
                 selectedId = signalId;
-                createWidget(signal, defaultWidgetKind(signal), '', position, parentLayoutId ?? null);
+                createWidget(signal, defaultLeafWidgetKind(signal), '', position, parentLayoutId ?? null);
+              }}
+              onDropTopic={(topicPath, position, parentLayoutId) => {
+                const resolved = resolveTopicDrop(topicPath);
+                if (!resolved) return;
+                selectedId = resolved.signal.signal_id;
+                createWidget(
+                  resolved.signal,
+                  resolved.kind,
+                  resolved.title,
+                  position,
+                  parentLayoutId ?? null
+                );
               }}
               onDropLayoutTool={(kind, position, parentLayoutId) => {
                 createLayoutWidget(kind, position, parentLayoutId ?? null);
@@ -1781,9 +1940,7 @@
                 widgetKinds={widgetKindsFor(selectedSignal)}
                 {widgetKindLabel}
                 showHeader={false}
-                onAddWidgetKind={(kind) => {
-                  if (selectedSignal) createWidget(selectedSignal, kind);
-                }}
+                onShowAsKind={showAsWidgetKind}
                 onTriggerAction={sendAction}
                 onSelectTunableWidget={() => {
                   if (selectedSignal) createWidget(selectedSignal, 'tunable');

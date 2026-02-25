@@ -3,6 +3,8 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotCore;
+import ca.frc6390.athena.core.arcp.ArcpDashboardLayout;
+import ca.frc6390.athena.core.arcp.ArcpDeviceWidgets;
 import ca.frc6390.athena.core.LoopTiming;
 import ca.frc6390.athena.core.RobotCoreHooks;
 import ca.frc6390.athena.core.RobotTime;
@@ -190,6 +192,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, String> sanitizedTopicKeyCache = new HashMap<>();
     private static final int SANITIZED_TOPIC_KEY_CACHE_MAX = 256;
     private RobotCore<?> robotCore;
+    private ArcpDashboardLayout.Page arcpPage;
     private SysIdRoutine sysIdRoutine;
     private double sysIdRampRateVoltsPerSecond = 1.0;
     private double sysIdStepVoltage = 7.0;
@@ -841,6 +844,70 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public MechanismNetworkTablesSection networkTables() {
         return networkTablesSection;
+    }
+
+    public Mechanism arcpPage(Consumer<ArcpDashboardLayout.Page.Builder> section) {
+        if (section == null) {
+            return this;
+        }
+        ArcpDashboardLayout.Page.Builder builder = ArcpDashboardLayout.Page.builder();
+        section.accept(builder);
+        return arcpPage(builder.build());
+    }
+
+    public Mechanism arcpPage(ArcpDashboardLayout.Page page) {
+        this.arcpPage = page;
+        publishArcpPageIfPossible();
+        return this;
+    }
+
+    public ArcpDashboardLayout.Page arcpPage() {
+        return arcpPage;
+    }
+
+    public Mechanism arcpMotorWidget(int signalId, Consumer<ArcpDeviceWidgets.MotorWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.motor(signalId, section));
+    }
+
+    public Mechanism arcpEncoderWidget(int signalId, Consumer<ArcpDeviceWidgets.EncoderWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.encoder(signalId, section));
+    }
+
+    public Mechanism arcpImuWidget(int signalId, Consumer<ArcpDeviceWidgets.ImuWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.imu(signalId, section));
+    }
+
+    public Mechanism arcpDioWidget(int signalId, Consumer<ArcpDeviceWidgets.DioWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.dio(signalId, section));
+    }
+
+    public Mechanism arcpVisionWidget(int signalId, Consumer<ArcpDeviceWidgets.VisionWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.vision(signalId, section));
+    }
+
+    private Mechanism appendArcpWidget(ArcpDashboardLayout.Widget widget) {
+        if (widget == null) {
+            return this;
+        }
+        ArcpDashboardLayout.Page existing = this.arcpPage;
+        ArcpDashboardLayout.Page.Builder builder = ArcpDashboardLayout.Page.builder();
+        if (existing != null) {
+            builder.id(existing.id()).name(existing.name());
+            for (ArcpDashboardLayout.Widget existingWidget : existing.widgets()) {
+                builder.widget(existingWidget);
+            }
+        } else {
+            builder.name(getName());
+        }
+        builder.widget(widget);
+        return arcpPage(builder.build());
+    }
+
+    private void publishArcpPageIfPossible() {
+        if (arcpPage == null || robotCore == null) {
+            return;
+        }
+        robotCore.arcp().page(getName(), arcpPage);
     }
 
     public Mechanism visualization(Consumer<VisualizationSection> section) {
@@ -1815,6 +1882,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public void setRobotCore(RobotCore<?> robotCore) {
         this.robotCore = robotCore;
+        publishArcpPageIfPossible();
     }
 
     public RobotCore<?> getRobotCore() {

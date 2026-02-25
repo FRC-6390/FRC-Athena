@@ -79,6 +79,7 @@ public final class RobotCoreConfig {
         private boolean timingDebugEnabled = false;
         private boolean telemetryEnabled = true;
         private RobotCore.SystemConfig systemConfig = RobotCore.SystemConfig.defaults();
+        private RobotCore.ArcpConfig arcpConfig = RobotCore.ArcpConfig.defaults();
 
         private final List<RegisterableMechanism> mechanisms = new ArrayList<>();
         private RobotCoreHooks<T> hooks = RobotCoreHooks.<T>empty();
@@ -172,7 +173,8 @@ public final class RobotCoreConfig {
                     telemetryEnabled,
                     autoConfig,
                     hooks,
-                    systemConfig != null ? systemConfig : RobotCore.SystemConfig.defaults());
+                    systemConfig != null ? systemConfig : RobotCore.SystemConfig.defaults(),
+                    arcpConfig != null ? arcpConfig : RobotCore.ArcpConfig.defaults());
         }
     }
 
@@ -805,6 +807,13 @@ public final class RobotCoreConfig {
             section.accept(s);
             return this;
         }
+
+        public CoreSection arcp(Consumer<ArcpSection> section) {
+            Objects.requireNonNull(section, "section");
+            ArcpSection s = new ArcpSection(owner);
+            section.accept(s);
+            return this;
+        }
     }
 
     public static final class SystemSection {
@@ -1004,6 +1013,44 @@ public final class RobotCoreConfig {
          */
         public SystemSection rioDefaults() {
             owner.systemConfig = RobotCore.SystemConfig.rioDefaults();
+            return this;
+        }
+    }
+
+    public static final class ArcpSection {
+        private final Builder<?> owner;
+
+        private ArcpSection(Builder<?> owner) {
+            this.owner = Objects.requireNonNull(owner, "owner");
+            if (this.owner.arcpConfig == null) {
+                this.owner.arcpConfig = RobotCore.ArcpConfig.defaults();
+            }
+        }
+
+        public ArcpSection enabled(boolean enabled) {
+            RobotCore.ArcpConfig current = owner.arcpConfig;
+            owner.arcpConfig = new RobotCore.ArcpConfig(
+                    enabled,
+                    current.layoutProfileName(),
+                    current.autoMechanismPages());
+            return this;
+        }
+
+        public ArcpSection layoutProfileName(String profileName) {
+            RobotCore.ArcpConfig current = owner.arcpConfig;
+            owner.arcpConfig = new RobotCore.ArcpConfig(
+                    current.enabled(),
+                    profileName,
+                    current.autoMechanismPages());
+            return this;
+        }
+
+        public ArcpSection autoMechanismPages(boolean enabled) {
+            RobotCore.ArcpConfig current = owner.arcpConfig;
+            owner.arcpConfig = new RobotCore.ArcpConfig(
+                    current.enabled(),
+                    current.layoutProfileName(),
+                    enabled);
             return this;
         }
     }

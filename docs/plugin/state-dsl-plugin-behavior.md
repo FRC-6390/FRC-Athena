@@ -40,5 +40,8 @@ athenaPlugin {
   - `athena-plugin/src/main/java/ca/frc6390/athena/plugin/statespec/AthenaPluginGradlePlugin.java`
   - `athena-plugin/src/main/java/ca/frc6390/athena/plugin/statespec/AthenaPluginExtension.java`
   - `athena-plugin/src/main/java/ca/frc6390/athena/plugin/statespec/AthenaStateDslJavacPlugin.java`
+- Plugin-style examples:
+  - `athena-examples/src/main/java/ca/frc6390/athena/mechanisms/examples/state/StateDslPluginExamples.java`
 - Behavior tests:
   - `athena-test/src/test/java/ca/frc6390/athena/plugin/statespec/AthenaPluginStatespecContractTest.java`
+  - `athena-test/src/test/java/ca/frc6390/athena/mechanisms/state/StateDslPluginExamplesTest.java`

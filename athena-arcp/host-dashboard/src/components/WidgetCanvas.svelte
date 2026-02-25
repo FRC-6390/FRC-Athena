@@ -9,6 +9,7 @@ import ControllerEditorWidget from './widgets/ControllerEditorWidget.svelte';
 import DialWidget from './widgets/DialWidget.svelte';
 import CompassWidget from './widgets/CompassWidget.svelte';
 import DifferentialDriveWidget from './widgets/DifferentialDriveWidget.svelte';
+import DioWidget from './widgets/DioWidget.svelte';
 import DropdownWidget from './widgets/DropdownWidget.svelte';
 import EncoderWidget from './widgets/EncoderWidget.svelte';
 import FieldViewerWidget from './widgets/FieldViewerWidget.svelte';
@@ -18,6 +19,7 @@ import Imu3dWidget from './widgets/Imu3dWidget.svelte';
 import InputWidget from './widgets/InputWidget.svelte';
 import Mech2dWidget from './widgets/Mech2dWidget.svelte';
 import MotorWidget from './widgets/MotorWidget.svelte';
+import StateMachineWidget from './widgets/StateMachineWidget.svelte';
 import RadioWidget from './widgets/RadioWidget.svelte';
 import StatusMatrixWidget from './widgets/StatusMatrixWidget.svelte';
 import SwerveDriveWidget from './widgets/SwerveDriveWidget.svelte';
@@ -64,6 +66,11 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       position: Pick<WidgetLayout, 'x' | 'y'>,
       parentLayoutId?: string | null
     ) => void;
+    onDropTopic: (
+      topicPath: string,
+      position: Pick<WidgetLayout, 'x' | 'y'>,
+      parentLayoutId?: string | null
+    ) => void;
     onDropLayoutTool: (
       kind: LayoutToolKind,
       position: Pick<WidgetLayout, 'x' | 'y'>,
@@ -91,6 +98,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     onSendSet,
     onRequestInspector,
     onDropSignal,
+    onDropTopic,
     onDropLayoutTool,
     onGridColumnsChange
   }: Props = $props();
@@ -102,6 +110,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   const MAX_GRID_COLUMNS = 96;
   const SCROLLBAR_SAFETY_GUTTER = 18;
   const SIGNAL_DRAG_TYPE = 'application/x-arcp-signal-id';
+  const TOPIC_DRAG_TYPE = 'application/x-arcp-topic-path';
   const LAYOUT_DRAG_TYPE = 'application/x-arcp-layout-kind';
   const DEFAULT_SIGNAL_DROP_SIZE = { w: 2, h: 1 };
 
@@ -1376,9 +1385,10 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     const transfer = event.dataTransfer;
     if (!transfer) return;
     const hasSignalId = transfer.types.includes(SIGNAL_DRAG_TYPE);
+    const hasTopicPath = transfer.types.includes(TOPIC_DRAG_TYPE);
     const hasLayoutKind = transfer.types.includes(LAYOUT_DRAG_TYPE);
     const hasFallback = transfer.types.includes('text/plain');
-    if (!hasSignalId && !hasLayoutKind && !hasFallback) return;
+    if (!hasSignalId && !hasTopicPath && !hasLayoutKind && !hasFallback) return;
 
     event.preventDefault();
     transfer.dropEffect = 'copy';
@@ -1396,6 +1406,9 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
 
     const rawLayout = transfer.getData(LAYOUT_DRAG_TYPE).trim();
     const fallback = transfer.getData('text/plain').trim();
+    const topicRaw =
+      transfer.getData(TOPIC_DRAG_TYPE).trim() ||
+      (fallback.startsWith('topic:') ? fallback.slice('topic:'.length).trim() : '');
     const layoutKindRaw =
       rawLayout || (fallback.startsWith('layout:') ? fallback.slice('layout:'.length).trim() : '');
     const signalRaw = transfer.getData(SIGNAL_DRAG_TYPE).trim() || fallback;
@@ -1404,6 +1417,10 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     if (!gridEl) {
       if (isLayoutWidgetKind(layoutKindRaw)) {
         onDropLayoutTool(layoutKindRaw, { x: 1, y: 1 }, null);
+        return;
+      }
+      if (topicRaw) {
+        onDropTopic(topicRaw, { x: 1, y: 1 }, null);
         return;
       }
       const signalId = Number(signalRaw);
@@ -1432,6 +1449,10 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
 
     if (isLayoutWidgetKind(layoutKindRaw)) {
       onDropLayoutTool(layoutKindRaw, resolvedPosition, parentLayoutId);
+      return;
+    }
+    if (topicRaw) {
+      onDropTopic(topicRaw, resolvedPosition, parentLayoutId);
       return;
     }
 
@@ -1663,9 +1684,27 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
                   {signalById}
                   configRaw={widget.config}
                   onSendSet={onSendSet}
+                  onSendAction={onSendAction}
+                />
+              {:else if widget.kind === 'state_machine'}
+                <StateMachineWidget
+                  {signal}
+                  {signals}
+                  {signalById}
+                  configRaw={widget.config}
+                  onSendSet={onSendSet}
+                  onSendAction={onSendAction}
                 />
               {:else if widget.kind === 'motor'}
                 <MotorWidget
+                  {signal}
+                  {signals}
+                  {signalById}
+                  configRaw={widget.config}
+                  onSendSet={onSendSet}
+                />
+              {:else if widget.kind === 'dio'}
+                <DioWidget
                   {signal}
                   {signals}
                   {signalById}
@@ -2086,7 +2125,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     min-height: 0;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: safe center;
     gap: 0.28rem;
     overflow: auto;
   }

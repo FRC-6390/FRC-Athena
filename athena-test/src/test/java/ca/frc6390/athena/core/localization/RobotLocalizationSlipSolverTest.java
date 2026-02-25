@@ -1,5 +1,6 @@
 package ca.frc6390.athena.core.localization;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
@@ -250,6 +251,47 @@ final class RobotLocalizationSlipSolverTest {
         assertTrue(
                 Boolean.TRUE.equals(afterSingleCalmCycle.get("slipActive")),
                 "expected slipActive to remain true while evidence tracking still indicates slip");
+    }
+
+    @Test
+    void lowCommandTailDoesNotKeepSlipDetectionLatchedAfterInitialEvent() throws Exception {
+        TestImu imu = new TestImu();
+        imu.xSpeedMetersPerSecond = 1.0;
+        imu.ySpeedMetersPerSecond = 0.0;
+
+        RobotSpeeds robotSpeeds = new RobotSpeeds(4.5, Math.PI);
+        robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 2.0, 0.0, 0.0);
+
+        MutableWheelPositions wheelPositions = new MutableWheelPositions();
+        RobotLocalization<DifferentialDriveWheelPositions> localization = new RobotLocalization<>(
+                new DifferentialTestEstimatorFactory(0.62),
+                new RobotLocalizationConfig(),
+                robotSpeeds,
+                imu,
+                wheelPositions::snapshot);
+
+        localization.setLastUpdateTimestampForTest(0.0);
+        localization.setLastFieldPoseForSlipForTest(new Pose2d());
+        localization.setLastFieldVelocityForSlipForTest(new Translation2d());
+
+        localization.setFieldPoseForTest(new Pose2d(0.20, 0.0, new Rotation2d()));
+        localization.updateSlipStateForTest(0.10);
+
+        imu.xSpeedMetersPerSecond = 0.0;
+        localization.setFieldPoseForTest(new Pose2d(0.40, 0.0, new Rotation2d()));
+        localization.updateSlipStateForTest(0.20);
+
+        robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 0.20, 0.0, 0.0);
+        for (int i = 3; i <= 12; i++) {
+            double x = 0.40 + 0.002 * (i - 2);
+            localization.setFieldPoseForTest(new Pose2d(x, 0.0, new Rotation2d()));
+            localization.updateSlipStateForTest(i * 0.10);
+        }
+
+        Map<String, Object> summary = localization.getDiagnosticsSummary();
+        assertFalse(
+                Boolean.TRUE.equals(summary.get("slipActive")),
+                "expected slip detection to clear after command drops to low-speed tail");
     }
 
     @Test

@@ -234,6 +234,35 @@ public final class ArcpRuntime implements AutoCloseable {
         return ArcpNative.pollEvents(handle, target, target.capacity());
     }
 
+    public void saveLayout(String name, String layoutJson) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("name must be non-empty");
+        }
+        if (layoutJson == null || layoutJson.isBlank()) {
+            throw new IllegalArgumentException("layoutJson must be non-empty");
+        }
+        int rc = ArcpNative.saveLayout(handle, name, layoutJson);
+        if (rc != 0) {
+            throw new IllegalStateException("ARCP saveLayout failed: " + rc);
+        }
+    }
+
+    public String loadLayout(String name) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("name must be non-empty");
+        }
+        String payload = ArcpNative.loadLayout(handle, name);
+        if (payload == null) {
+            throw new IllegalStateException("ARCP loadLayout failed for profile: " + name);
+        }
+        return payload;
+    }
+
+    public String[] listLayouts() {
+        String[] values = ArcpNative.listLayouts(handle);
+        return values != null ? values : new String[0];
+    }
+
     public boolean isRunning() {
         return running;
     }

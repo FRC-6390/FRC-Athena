@@ -4,6 +4,7 @@ plugins {
 
 dependencies {
     // Core stays vendor-free; shared interfaces and bridges live here.
+    implementation project(':athena-arcp-java')
     implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
     implementation "edu.wpi.first.apriltag:apriltag-java:${rootProject.ext.wpilibVersion}"

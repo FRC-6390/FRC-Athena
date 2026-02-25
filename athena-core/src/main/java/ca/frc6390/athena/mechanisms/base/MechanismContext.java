@@ -22,6 +22,23 @@ public interface MechanismContext<T extends Mechanism, E extends Enum<E> & Setpo
 
     double setpoint();
 
+    /**
+     * Returns {@code true} when this context has a meaningful setpoint value.
+     * Contexts that do not have an explicit setpoint return {@link Double#NaN} from
+     * {@link #setpoint()}.
+     */
+    default boolean hasSetpoint() {
+        return Double.isFinite(setpoint());
+    }
+
+    /**
+     * Nullable view of {@link #setpoint()} for call sites that prefer explicit optional handling.
+     */
+    default Double setpointOrNull() {
+        double value = setpoint();
+        return Double.isFinite(value) ? value : null;
+    }
+
     default RobotCore<?> robotCore() {
         RobotCore<?> core = mechanism().getRobotCore();
         return core != null ? core : RobotCore.activeInstance();

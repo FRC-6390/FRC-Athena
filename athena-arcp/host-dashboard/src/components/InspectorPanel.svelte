@@ -21,7 +21,7 @@
     selectedWidget: DashboardWidget | null;
     widgetKinds: WidgetKind[];
     widgetKindLabel: (kind: WidgetKind) => string;
-    onAddWidgetKind: (kind: WidgetKind) => void;
+    onShowAsKind: (kind: WidgetKind) => void;
     onTriggerAction: (signalId: number) => void;
     onSelectTunableWidget: () => void;
     onRemoveWidget: (widgetId: string) => void;
@@ -38,7 +38,7 @@
     selectedWidget,
     widgetKinds,
     widgetKindLabel,
-    onAddWidgetKind,
+    onShowAsKind,
     onTriggerAction,
     onSelectTunableWidget,
     onRemoveWidget,
@@ -87,10 +87,10 @@
     </dl>
 
     <section class="inspector-block">
-      <h3>Create Widget</h3>
+      <h3>Show As</h3>
       <div class="kind-grid">
         {#each widgetKinds as kind}
-          <button class="btn" onclick={() => onAddWidgetKind(kind)}>{widgetKindLabel(kind)}</button>
+          <button class="btn" onclick={() => onShowAsKind(kind)}>{widgetKindLabel(kind)}</button>
         {/each}
       </div>
     </section>
@@ -111,7 +111,7 @@
       </div>
     </section>
   {:else}
-    <p>Select a signal from the explorer to inspect metadata and create panels.</p>
+    <p>Select a signal from the explorer to inspect metadata and choose a widget view.</p>
   {/if}
 
   {#if selectedWidget}

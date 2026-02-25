@@ -16,6 +16,7 @@
 - `athena-test/src/test/java/ca/frc6390/athena/mechanisms/superstructure/SuperstructureExamplesTest.java`
 - `athena-test/src/test/java/ca/frc6390/athena/mechanisms/superstructure/SuperstructureNestedPropagationTest.java`
 - `athena-test/src/test/java/ca/frc6390/athena/mechanisms/state/StateMachineExamplesTest.java`
+- `athena-test/src/test/java/ca/frc6390/athena/mechanisms/state/StateDslPluginExamplesTest.java`
 - `athena-test/src/test/java/ca/frc6390/athena/mechanisms/statespec/StateSeedRuntimeExamplesTest.java`
 
 ## Config and Simulation Utilities

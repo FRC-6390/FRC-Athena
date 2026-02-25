@@ -4,6 +4,7 @@
 
 - `athena-examples/src/main/java/ca/frc6390/athena/mechanisms/examples/state/StateMachineExamples.java`
 - `athena-examples/src/main/java/ca/frc6390/athena/mechanisms/examples/state/StateSeedExamples.java`
+- `athena-examples/src/main/java/ca/frc6390/athena/mechanisms/examples/state/StateDslPluginExamples.java`
 
 ## Infrastructure
 

@@ -5,7 +5,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use arcp_core::{encode_event, RuntimeEvent, SignalDescriptor, SignalValue};
+use arcp_core::{encode_event_into, RuntimeEvent, SignalDescriptor, SignalValue};
 
 use crate::config::ArcpServerConfig;
 use crate::control::run_control_loop;
@@ -223,16 +223,16 @@ impl ArcpServer {
         };
 
         let mut written = 0_usize;
+        let mut encoded = Vec::with_capacity(64);
         loop {
             let event = match receiver.try_recv() {
                 Ok(event) => event,
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => break,
             };
-            let encoded = match encode_event(&event) {
-                Ok(encoded) => encoded,
-                Err(_) => continue,
-            };
+            if encode_event_into(&event, &mut encoded).is_err() {
+                continue;
+            }
             let record_len = encoded.len();
             if record_len > u16::MAX as usize {
                 continue;
@@ -304,6 +304,18 @@ impl ArcpServer {
     pub fn load_layout(&self, name: &str) -> Option<String> {
         let store = self.layout_store.lock().ok()?;
         store.get(name).cloned()
+    }
+
+    pub fn list_layout_names(&self) -> Result<Vec<String>, &'static str> {
+        let mut names = self
+            .layout_store
+            .lock()
+            .map_err(|_| "layout store unavailable")?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        names.sort();
+        Ok(names)
     }
 
     fn publish_value(&self, signal_id: u16, value: SignalValue) -> Result<(), &'static str> {

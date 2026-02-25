@@ -793,8 +793,7 @@
 
 <style>
   .encoder-root {
-    height: 100%;
-    min-height: 0;
+    min-height: 100%;
     display: grid;
     grid-template-rows: auto auto auto minmax(0, 1fr);
     gap: 0.34rem;
@@ -1128,7 +1127,7 @@
     border-radius: 8px;
     background: rgba(27, 33, 44, 0.74);
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
   }
 
   .extra-section > header {
@@ -1157,8 +1156,7 @@
   }
 
   .extra-list {
-    min-height: 0;
-    overflow: auto;
+    overflow: visible;
     display: grid;
     gap: 0.3rem;
     padding: 0.4rem;

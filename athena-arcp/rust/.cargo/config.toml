@@ -1,0 +1,9 @@
+[target.armv7-unknown-linux-gnueabihf]
+rustflags = [
+  "-C", "target-cpu=cortex-a9",
+]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = [
+  "-C", "target-cpu=cortex-a53",
+]

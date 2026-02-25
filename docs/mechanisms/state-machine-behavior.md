@@ -19,5 +19,7 @@ This document defines expected behavior for `StateMachine` with `StateGraph`-exp
 
 - Example API patterns:
   - `athena-examples/src/main/java/ca/frc6390/athena/mechanisms/examples/state/StateMachineExamples.java`
+  - `athena-examples/src/main/java/ca/frc6390/athena/mechanisms/examples/state/StateDslPluginExamples.java`
 - Behavior tests:
   - `athena-test/src/test/java/ca/frc6390/athena/mechanisms/state/StateMachineExamplesTest.java`
+  - `athena-test/src/test/java/ca/frc6390/athena/mechanisms/state/StateDslPluginExamplesTest.java`

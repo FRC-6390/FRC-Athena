@@ -2554,187 +2554,26 @@
         "name": "State Machine",
         "widgets": [
           {
-            "id": "w-sm-current",
+            "id": "w-sm-panel",
             "signalId": 590,
-            "kind": "text",
-            "title": "Current State",
+            "kind": "state_machine",
+            "title": "Intake State Machine",
             "layout": {
               "x": 1,
               "y": 1,
-              "w": 6,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-goal",
-            "signalId": 591,
-            "kind": "text",
-            "title": "Goal State",
-            "layout": {
-              "x": 7,
-              "y": 1,
-              "w": 6,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-next",
-            "signalId": 592,
-            "kind": "text",
-            "title": "Next State",
-            "layout": {
-              "x": 13,
-              "y": 1,
-              "w": 6,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-at-goal",
-            "signalId": 594,
-            "kind": "state",
-            "title": "At Goal",
-            "layout": {
-              "x": 19,
-              "y": 1,
-              "w": 6,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-queue",
-            "signalId": 593,
-            "kind": "text",
-            "title": "Queue",
-            "layout": {
-              "x": 1,
-              "y": 2,
-              "w": 12,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-last-transition",
-            "signalId": 598,
-            "kind": "text",
-            "title": "Last Transition",
-            "layout": {
-              "x": 13,
-              "y": 2,
-              "w": 12,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-goal-dropdown",
-            "signalId": 591,
-            "kind": "dropdown",
-            "title": "Set Goal",
-            "layout": {
-              "x": 1,
-              "y": 3,
-              "w": 10,
-              "h": 1
+              "w": 24,
+              "h": 8
             },
             "config": {
-              "commit": "button",
-              "buttonLabel": "Apply",
-              "options": [
-                {
-                  "label": "STOW",
-                  "value": "STOW"
-                },
-                {
-                  "label": "CLEARANCE",
-                  "value": "CLEARANCE"
-                },
-                {
-                  "label": "INTAKE",
-                  "value": "INTAKE"
-                }
-              ]
-            }
-          },
-          {
-            "id": "w-sm-clearance-toggle",
-            "signalId": 595,
-            "kind": "toggle",
-            "title": "Clearance Ready",
-            "layout": {
-              "x": 11,
-              "y": 3,
-              "w": 7,
-              "h": 1
-            },
-            "config": {
-              "style": "switch",
-              "trueLabel": "Ready",
-              "falseLabel": "Blocked"
-            }
-          },
-          {
-            "id": "w-sm-append-toggle",
-            "signalId": 596,
-            "kind": "toggle",
-            "title": "Append Mode",
-            "layout": {
-              "x": 18,
-              "y": 3,
-              "w": 7,
-              "h": 1
-            },
-            "config": {
-              "style": "switch",
-              "trueLabel": "Append",
-              "falseLabel": "Replace"
-            }
-          },
-          {
-            "id": "w-sm-action-intake",
-            "signalId": 902,
-            "kind": "action",
-            "title": "Force INTAKE",
-            "layout": {
-              "x": 1,
-              "y": 4,
-              "w": 8,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-action-stow",
-            "signalId": 901,
-            "kind": "action",
-            "title": "Force STOW",
-            "layout": {
-              "x": 9,
-              "y": 4,
-              "w": 8,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-action-clear",
-            "signalId": 903,
-            "kind": "action",
-            "title": "Clear Queue",
-            "layout": {
-              "x": 17,
-              "y": 4,
-              "w": 8,
-              "h": 1
-            }
-          },
-          {
-            "id": "w-sm-transition-count",
-            "signalId": 597,
-            "kind": "metric",
-            "title": "Transition Count",
-            "layout": {
-              "x": 1,
-              "y": 5,
-              "w": 12,
-              "h": 1
+              "currentStateSignalId": 590,
+              "goalStateSignalId": 591,
+              "nextStateSignalId": 592,
+              "queueSignalId": 593,
+              "atGoalSignalId": 594,
+              "transitionCountSignalId": 597,
+              "lastTransitionSignalId": 598,
+              "availableStatesSignalId": 599,
+              "clearQueueCommandSignalId": 903
             }
           }
         ]

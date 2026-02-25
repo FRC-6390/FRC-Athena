@@ -58,10 +58,13 @@ public class RevEncoder implements Encoder {
         if (RobotBase.isSimulation()) {
             return simPosition;
         }
+        if (relative != null) {
+            return relative.getPosition();
+        }
         if (absolute != null) {
             return absolute.getPosition();
         }
-        return relative.getPosition();
+        return 0.0;
     }
 
     @Override
@@ -69,15 +72,37 @@ public class RevEncoder implements Encoder {
         if (RobotBase.isSimulation()) {
             return simVelocity;
         }
-        if (absolute != null) {
-            return absolute.getVelocity();
+        double rpm;
+        if (relative != null) {
+            rpm = relative.getVelocity();
+        } else if (absolute != null) {
+            rpm = absolute.getVelocity();
+        } else {
+            return 0.0;
         }
-        return relative.getVelocity();
+        double rps = rpm / 60.0;
+        return Double.isFinite(rps) ? rps : 0.0;
+    }
+
+    @Override
+    public double getAbsolutePosition() {
+        if (RobotBase.isSimulation()) {
+            return simPosition;
+        }
+        if (absolute != null) {
+            return absolute.getPosition();
+        }
+        if (relative != null) {
+            return relative.getPosition();
+        }
+        return 0.0;
     }
 
     @Override
     public void setPosition(double position) {
-        relative.setPosition(position);
+        if (relative != null) {
+            relative.setPosition(position);
+        }
         if (RobotBase.isSimulation()) {
             simPosition = position;
         }
@@ -126,7 +151,10 @@ public class RevEncoder implements Encoder {
         if (absolute != null) {
             return absolute.getPosition();
         }
-        return relative.getPosition();
+        if (relative != null) {
+            return relative.getPosition();
+        }
+        return 0.0;
     }
 
     @Override

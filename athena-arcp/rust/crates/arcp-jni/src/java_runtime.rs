@@ -2,13 +2,14 @@ use std::ffi::c_void;
 use std::ptr;
 
 use arcp_core::{SignalAccess, SignalDurability, SignalKind, SignalPolicy, SignalType};
-use jni::objects::{JByteBuffer, JClass, JObject, JString};
-use jni::sys::{jint, jlong};
+use jni::objects::{JByteBuffer, JClass, JObject, JObjectArray, JString};
+use jni::sys::{jint, jlong, jobjectArray, jstring};
 use jni::{EnvUnowned, Outcome};
 
 use crate::runtime::{
-    poll_events_into_slice, register_signal, runtime_control_port, runtime_create, runtime_destroy,
-    runtime_realtime_port, runtime_start, runtime_stop, ArcpRuntimeHandle,
+    list_layouts, load_layout, poll_events_into_slice, register_signal, runtime_control_port,
+    runtime_create, runtime_destroy, runtime_realtime_port, runtime_start, runtime_stop,
+    save_layout, ArcpRuntimeHandle,
 };
 
 fn with_env_code(
@@ -21,6 +22,34 @@ fn with_env_code(
         .into_outcome()
     {
         Outcome::Ok(code) => code,
+        Outcome::Err(_) | Outcome::Panic(_) => fallback,
+    }
+}
+
+fn with_env_string(
+    env: &mut EnvUnowned<'_>,
+    fallback: jstring,
+    f: impl FnOnce(&mut jni::Env<'_>) -> jstring,
+) -> jstring {
+    match env
+        .with_env(|env| -> jni::errors::Result<jstring> { Ok(f(env)) })
+        .into_outcome()
+    {
+        Outcome::Ok(value) => value,
+        Outcome::Err(_) | Outcome::Panic(_) => fallback,
+    }
+}
+
+fn with_env_object_array(
+    env: &mut EnvUnowned<'_>,
+    fallback: jobjectArray,
+    f: impl FnOnce(&mut jni::Env<'_>) -> jobjectArray,
+) -> jobjectArray {
+    match env
+        .with_env(|env| -> jni::errors::Result<jobjectArray> { Ok(f(env)) })
+        .into_outcome()
+    {
+        Outcome::Ok(value) => value,
         Outcome::Err(_) | Outcome::Panic(_) => fallback,
     }
 }
@@ -163,5 +192,89 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_pollEvents(
         let out_slice =
             unsafe { std::slice::from_raw_parts_mut(raw_ptr as *mut u8, out_capacity as usize) };
         poll_events_into_slice(handle as *mut ArcpRuntimeHandle, out_slice) as jint
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_saveLayout(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    name: JString,
+    layout_json: JString,
+) -> jint {
+    with_env_code(&mut env, -8, |env| {
+        let name_string = match name.try_to_string(env) {
+            Ok(value) => value,
+            Err(_) => return -8,
+        };
+        let layout_string = match layout_json.try_to_string(env) {
+            Ok(value) => value,
+            Err(_) => return -8,
+        };
+        save_layout(
+            handle as *mut ArcpRuntimeHandle,
+            &name_string,
+            &layout_string,
+        ) as jint
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_loadLayout(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    name: JString,
+) -> jstring {
+    with_env_string(&mut env, ptr::null_mut(), |env| {
+        let name_string = match name.try_to_string(env) {
+            Ok(value) => value,
+            Err(_) => return ptr::null_mut(),
+        };
+        let payload = match load_layout(handle as *mut ArcpRuntimeHandle, &name_string) {
+            Ok(payload) => payload,
+            Err(_) => return ptr::null_mut(),
+        };
+        match JString::from_str(env, payload) {
+            Ok(value) => {
+                let raw: JObject = value.into();
+                raw.into_raw() as jstring
+            }
+            Err(_) => ptr::null_mut(),
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_listLayouts(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jobjectArray {
+    with_env_object_array(&mut env, ptr::null_mut(), |env| {
+        let names = match list_layouts(handle as *mut ArcpRuntimeHandle) {
+            Ok(names) => names,
+            Err(_) => return ptr::null_mut(),
+        };
+        let seed = match JString::from_str(env, "") {
+            Ok(seed) => seed,
+            Err(_) => return ptr::null_mut(),
+        };
+        let array = match JObjectArray::<JString>::new(env, names.len(), &seed) {
+            Ok(array) => array,
+            Err(_) => return ptr::null_mut(),
+        };
+        for (index, name) in names.into_iter().enumerate() {
+            let value = match JString::from_str(env, name) {
+                Ok(value) => value,
+                Err(_) => return ptr::null_mut(),
+            };
+            if array.set_element(env, index, &value).is_err() {
+                return ptr::null_mut();
+            }
+        }
+        let raw: JObject = array.into();
+        raw.into_raw() as jobjectArray
     })
 }

@@ -5,11 +5,20 @@ use crate::{RuntimeEvent, SignalType, SignalValue};
 
 pub fn encode_update(signal_id: u16, value: &SignalValue) -> Result<Vec<u8>, &'static str> {
     let mut out = Vec::with_capacity(32);
+    encode_update_into(signal_id, value, &mut out)?;
+    Ok(out)
+}
+
+pub fn encode_update_into(
+    signal_id: u16,
+    value: &SignalValue,
+    out: &mut Vec<u8>,
+) -> Result<(), &'static str> {
+    out.clear();
     out.push(ARCP_PROTOCOL_VERSION);
     out.push(value.signal_type().wire_kind());
     out.extend_from_slice(&signal_id.to_le_bytes());
-    encode_value_payload(value, &mut out)?;
-    Ok(out)
+    encode_value_payload(value, out)
 }
 
 pub fn decode_update(frame: &[u8]) -> Result<(u16, SignalValue), &'static str> {
@@ -27,13 +36,19 @@ pub fn decode_update(frame: &[u8]) -> Result<(u16, SignalValue), &'static str> {
 
 pub fn encode_event(event: &RuntimeEvent) -> Result<Vec<u8>, &'static str> {
     let mut out = Vec::with_capacity(32);
+    encode_event_into(event, &mut out)?;
+    Ok(out)
+}
+
+pub fn encode_event_into(event: &RuntimeEvent, out: &mut Vec<u8>) -> Result<(), &'static str> {
+    out.clear();
     out.push(ARCP_PROTOCOL_VERSION);
     match event {
         RuntimeEvent::TunableSet { signal_id, value } => {
             out.push(EVENT_TUNABLE_SET);
             out.extend_from_slice(&signal_id.to_le_bytes());
             out.push(value.signal_type().wire_kind());
-            encode_value_payload(value, &mut out)?;
+            encode_value_payload(value, out)?;
         }
         RuntimeEvent::Action { signal_id } => {
             out.push(EVENT_ACTION);
@@ -41,7 +56,7 @@ pub fn encode_event(event: &RuntimeEvent) -> Result<Vec<u8>, &'static str> {
             out.push(0);
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 pub fn decode_event(data: &[u8]) -> Result<RuntimeEvent, &'static str> {
@@ -76,15 +91,11 @@ fn encode_value_payload(value: &SignalValue, out: &mut Vec<u8>) -> Result<(), &'
         }
         SignalValue::I64Array(values) => {
             encode_len(values.len(), out)?;
-            for value in values {
-                out.extend_from_slice(&value.to_le_bytes());
-            }
+            extend_i64_le_bytes(values, out);
         }
         SignalValue::F64Array(values) => {
             encode_len(values.len(), out)?;
-            for value in values {
-                out.extend_from_slice(&value.to_le_bytes());
-            }
+            extend_f64_le_bytes(values, out);
         }
         SignalValue::StrArray(values) => {
             encode_len(values.len(), out)?;
@@ -187,9 +198,9 @@ fn decode_f64_array_payload(payload: &[u8]) -> Result<Vec<f64>, &'static str> {
 
     let bytes = &payload[offset..];
 
-    #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
+    #[cfg(target_endian = "little")]
     {
-        return Ok(decode_f64_array_neon(bytes, count));
+        return Ok(decode_f64_array_native_endian(bytes, count));
     }
 
     #[allow(unreachable_code)]
@@ -208,32 +219,55 @@ fn decode_f64_array_scalar(bytes: &[u8], count: usize) -> Vec<f64> {
     values
 }
 
-#[cfg(all(target_arch = "aarch64", target_endian = "little"))]
-fn decode_f64_array_neon(bytes: &[u8], count: usize) -> Vec<f64> {
-    use core::arch::aarch64::{vld1q_u8, vst1q_u8};
-
+#[cfg(target_endian = "little")]
+fn decode_f64_array_native_endian(bytes: &[u8], count: usize) -> Vec<f64> {
     let mut values = vec![0_f64; count];
     if bytes.is_empty() {
         return values;
     }
 
-    // On little-endian AArch64, ARCP f64 payload bytes can be copied directly.
+    // On little-endian targets, ARCP f64 payload bytes can be copied directly.
     unsafe {
-        let src = bytes.as_ptr();
-        let dst = values.as_mut_ptr() as *mut u8;
-        let mut offset = 0_usize;
-
-        while offset + 16 <= bytes.len() {
-            let chunk = vld1q_u8(src.add(offset));
-            vst1q_u8(dst.add(offset), chunk);
-            offset += 16;
-        }
-        if offset < bytes.len() {
-            std::ptr::copy_nonoverlapping(src.add(offset), dst.add(offset), bytes.len() - offset);
-        }
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), values.as_mut_ptr() as *mut u8, bytes.len());
     }
 
     values
+}
+
+#[cfg(target_endian = "little")]
+fn extend_i64_le_bytes(values: &[i64], out: &mut Vec<u8>) {
+    if values.is_empty() {
+        return;
+    }
+    let byte_len = values.len() * std::mem::size_of::<i64>();
+    // SAFETY: i64 is plain data and the resulting byte slice is valid for read-only copy.
+    let bytes = unsafe { std::slice::from_raw_parts(values.as_ptr() as *const u8, byte_len) };
+    out.extend_from_slice(bytes);
+}
+
+#[cfg(not(target_endian = "little"))]
+fn extend_i64_le_bytes(values: &[i64], out: &mut Vec<u8>) {
+    for value in values {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
+#[cfg(target_endian = "little")]
+fn extend_f64_le_bytes(values: &[f64], out: &mut Vec<u8>) {
+    if values.is_empty() {
+        return;
+    }
+    let byte_len = values.len() * std::mem::size_of::<f64>();
+    // SAFETY: f64 is plain data and the resulting byte slice is valid for read-only copy.
+    let bytes = unsafe { std::slice::from_raw_parts(values.as_ptr() as *const u8, byte_len) };
+    out.extend_from_slice(bytes);
+}
+
+#[cfg(not(target_endian = "little"))]
+fn extend_f64_le_bytes(values: &[f64], out: &mut Vec<u8>) {
+    for value in values {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
 }
 
 fn encode_len(len: usize, out: &mut Vec<u8>) -> Result<(), &'static str> {

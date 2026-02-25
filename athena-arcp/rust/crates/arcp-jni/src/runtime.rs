@@ -217,6 +217,36 @@ pub(crate) fn poll_events_into_slice(handle: *mut ArcpRuntimeHandle, out_slice: 
     runtime.server.poll_events_into(out_slice) as i32
 }
 
+pub(crate) fn save_layout(handle: *mut ArcpRuntimeHandle, name: &str, layout_json: &str) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    // SAFETY: null-checked above; caller owns lifetime.
+    let runtime = unsafe { &mut *handle };
+    match runtime.server.store_layout(name, layout_json) {
+        Ok(()) => 0,
+        Err(_) => -2,
+    }
+}
+
+pub(crate) fn load_layout(handle: *mut ArcpRuntimeHandle, name: &str) -> Result<String, i32> {
+    if handle.is_null() {
+        return Err(-1);
+    }
+    // SAFETY: null-checked above; caller owns lifetime.
+    let runtime = unsafe { &mut *handle };
+    runtime.server.load_layout(name).ok_or(-2)
+}
+
+pub(crate) fn list_layouts(handle: *mut ArcpRuntimeHandle) -> Result<Vec<String>, i32> {
+    if handle.is_null() {
+        return Err(-1);
+    }
+    // SAFETY: null-checked above; caller owns lifetime.
+    let runtime = unsafe { &mut *handle };
+    runtime.server.list_layout_names().map_err(|_| -2)
+}
+
 #[no_mangle]
 pub extern "C" fn arcp_runtime_create() -> *mut ArcpRuntimeHandle {
     runtime_create()

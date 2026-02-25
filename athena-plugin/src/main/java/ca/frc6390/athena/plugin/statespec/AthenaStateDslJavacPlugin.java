@@ -7,6 +7,7 @@ import com.sun.source.util.TaskListener;
 import com.sun.tools.javac.api.BasicJavacTask;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.TypeTag;
+import com.sun.tools.javac.tree.TreeCopier;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.tree.TreeTranslator;
@@ -76,10 +77,12 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
     private static final class StateEnumTranslator extends TreeTranslator {
         private final TreeMaker maker;
         private final Names names;
+        private final TreeCopier<Void> copier;
 
         private StateEnumTranslator(TreeMaker maker, Names names) {
             this.maker = maker;
             this.names = names;
+            this.copier = new TreeCopier<>(maker);
         }
 
         @Override
@@ -169,7 +172,10 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
 
                 argsByConstant.put(var.getName().toString(), init.args);
                 if (init.args != null && !init.args.isEmpty()) {
+                    argsByConstant.put(var.getName().toString(), copyExpressions(init.args));
                     init.args = List.nil();
+                } else {
+                    argsByConstant.put(var.getName().toString(), List.nil());
                 }
             }
             return argsByConstant;
@@ -287,7 +293,7 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
                 JCTree.JCExpression setpointExpr = setpointExpression(
                         classDecl.name.toString(),
                         setpointTypeName,
-                        constantArgs.get(var.getName().toString()));
+                        copyExpressions(constantArgs.get(var.getName().toString())));
                 JCTree.JCExpression cond = maker.Binary(
                         JCTree.Tag.EQ,
                         maker.Ident(names._this),
@@ -328,7 +334,7 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
                     continue;
                 }
 
-                JCTree.JCExpression seedExpr = seedExpression(constantArgs.get(var.getName().toString()));
+                JCTree.JCExpression seedExpr = seedExpression(copyExpressions(constantArgs.get(var.getName().toString())));
                 JCTree.JCExpression cond = maker.Binary(
                         JCTree.Tag.EQ,
                         maker.Ident(names._this),
@@ -469,6 +475,17 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
                 expr = maker.Select(expr, names.fromString(parts[i]));
             }
             return expr;
+        }
+
+        private List<JCTree.JCExpression> copyExpressions(List<JCTree.JCExpression> source) {
+            if (source == null || source.isEmpty()) {
+                return List.nil();
+            }
+            ListBuffer<JCTree.JCExpression> copied = new ListBuffer<>();
+            for (JCTree.JCExpression expression : source) {
+                copied.add((JCTree.JCExpression) copier.copy(expression));
+            }
+            return copied.toList();
         }
 
         private boolean hasMethod(JCTree.JCClassDecl classDecl, String methodName) {

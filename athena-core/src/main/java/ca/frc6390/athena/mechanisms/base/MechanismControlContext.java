@@ -405,14 +405,7 @@ public interface MechanismControlContext<T extends Mechanism>
             case ROTATIONS -> value;
             case RADIANS -> value / (2.0 * Math.PI);
             case DEGREES -> value / 360.0;
-            case ENCODER_UNITS -> {
-                Encoder encoder = mechanism().encoder().device();
-                double conversion = encoder != null ? encoder.getConversion() : 0.0;
-                if (!Double.isFinite(conversion) || conversion == 0.0) {
-                    yield 0.0;
-                }
-                yield value / conversion;
-            }
+            case ENCODER_UNITS -> mechanismPositionToEncoderRaw(value);
         };
     }
 
@@ -427,14 +420,7 @@ public interface MechanismControlContext<T extends Mechanism>
             case ROTATIONS_PER_SEC -> value;
             case RAD_PER_SEC -> value / (2.0 * Math.PI);
             case DEG_PER_SEC -> value / 360.0;
-            case ENCODER_UNITS_PER_SEC -> {
-                Encoder encoder = mechanism().encoder().device();
-                double conversion = encoder != null ? encoder.getConversion() : 0.0;
-                if (!Double.isFinite(conversion) || conversion == 0.0) {
-                    yield 0.0;
-                }
-                yield value / conversion;
-            }
+            case ENCODER_UNITS_PER_SEC -> mechanismVelocityToEncoderRaw(value);
         };
     }
 

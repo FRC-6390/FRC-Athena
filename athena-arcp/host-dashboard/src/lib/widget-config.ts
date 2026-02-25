@@ -80,8 +80,18 @@ export type ControllerParam = {
   signalId: number;
 };
 
+export type ControllerAutoTuneConfig = {
+  enabled: boolean;
+  modeSignalId: number | null;
+  statusSignalId: number | null;
+  resultSignalId: number | null;
+  startActionSignalId: number | null;
+  stopActionSignalId: number | null;
+};
+
 export type ControllerWidgetConfig = {
   params: ControllerParam[];
+  autotune: ControllerAutoTuneConfig;
 };
 
 export type BarWidgetMode = 'progress' | 'usage';
@@ -189,6 +199,18 @@ export type Imu3dWidgetConfig = {
   units: Imu3dUnits;
 };
 
+export type DioWidgetConfig = {
+  showOtherFields: boolean;
+  valueSignalId: number | null;
+  outputSignalId: number | null;
+  invertedSignalId: number | null;
+  channelSignalId: number | null;
+  portSignalId: number | null;
+  modeSignalId: number | null;
+  nameSignalId: number | null;
+  typeSignalId: number | null;
+};
+
 export type MotorWidgetConfig = {
   showOtherFields: boolean;
   canIdSignalId: number | null;
@@ -250,6 +272,18 @@ export type ImuWidgetConfig = {
   gyroViewMode: ImuViewMode;
   magViewMode: ImuViewMode;
   units: Imu3dUnits;
+};
+
+export type StateMachineWidgetConfig = {
+  currentStateSignalId: number | null;
+  goalStateSignalId: number | null;
+  nextStateSignalId: number | null;
+  queueSignalId: number | null;
+  atGoalSignalId: number | null;
+  transitionCountSignalId: number | null;
+  lastTransitionSignalId: number | null;
+  availableStatesSignalId: number | null;
+  clearQueueCommandSignalId: number | null;
 };
 
 export type LayoutTitleConfig = {
@@ -457,6 +491,11 @@ function signalRole(signal: SignalRow): string {
   return 'metric';
 }
 
+function isNtPublishToggleSignal(signal: SignalRow): boolean {
+  const token = normalizeToken(signal.path);
+  return token.includes('publish');
+}
+
 function graphColor(index: number): string {
   return GRAPH_COLORS[index % GRAPH_COLORS.length] ?? GRAPH_COLORS[0];
 }
@@ -546,6 +585,7 @@ function buildControllerDefaultParams(anchor: SignalRow, signals: SignalRow[]): 
   const anchorParent = parentPath(anchor.path);
 
   const siblings = signals.filter((signal) => {
+    if (isNtPublishToggleSignal(signal)) return false;
     if (!isNumericSignal(signal)) return false;
     if (signal.access !== 'write') return false;
     if (signal.signal_id === anchor.signal_id) return true;
@@ -593,11 +633,111 @@ function buildControllerDefaultParams(anchor: SignalRow, signals: SignalRow[]): 
   ];
 }
 
+function defaultControllerAutoTune(
+  anchor: SignalRow,
+  signals: SignalRow[]
+): ControllerAutoTuneConfig {
+  const anchorParent = parentPath(anchor.path);
+  const fallbackParent = anchorParent ? parentPath(anchorParent) : '';
+
+  const startAction =
+    findActionSignalByLeaf(
+      signals,
+      anchorParent,
+      ['start_autotune', 'autotune_start', 'start_sysid', 'sysid_start', 'start', 'run']
+    ) ??
+    (fallbackParent
+      ? findActionSignalByLeaf(
+          signals,
+          fallbackParent,
+          ['start_autotune', 'autotune_start', 'start_sysid', 'sysid_start', 'start', 'run']
+        )
+      : null);
+  const stopAction =
+    findActionSignalByLeaf(
+      signals,
+      anchorParent,
+      ['stop_autotune', 'autotune_stop', 'stop_sysid', 'sysid_stop', 'stop', 'cancel']
+    ) ??
+    (fallbackParent
+      ? findActionSignalByLeaf(
+          signals,
+          fallbackParent,
+          ['stop_autotune', 'autotune_stop', 'stop_sysid', 'sysid_stop', 'stop', 'cancel']
+        )
+      : null);
+
+  const modeSignal =
+    findSignalByLeaf(
+      signals,
+      anchorParent,
+      ['autotune_mode', 'autotuner_mode', 'sysid_mode', 'mode'],
+      ['string', 'i64', 'f64', 'bool']
+    ) ??
+    (fallbackParent
+      ? findSignalByLeaf(
+          signals,
+          fallbackParent,
+          ['autotune_mode', 'autotuner_mode', 'sysid_mode', 'mode'],
+          ['string', 'i64', 'f64', 'bool']
+        )
+      : null);
+
+  const statusSignal =
+    findSignalByLeaf(
+      signals,
+      anchorParent,
+      ['autotune_status', 'autotuner_status', 'sysid_status', 'status'],
+      ['string', 'bool', 'i64', 'f64']
+    ) ??
+    (fallbackParent
+      ? findSignalByLeaf(
+          signals,
+          fallbackParent,
+          ['autotune_status', 'autotuner_status', 'sysid_status', 'status'],
+          ['string', 'bool', 'i64', 'f64']
+        )
+      : null);
+
+  const resultSignal =
+    findSignalByLeaf(
+      signals,
+      anchorParent,
+      ['autotune_result', 'autotuner_result', 'sysid_result', 'result', 'summary'],
+      ['string', 'string[]']
+    ) ??
+    (fallbackParent
+      ? findSignalByLeaf(
+          signals,
+          fallbackParent,
+          ['autotune_result', 'autotuner_result', 'sysid_result', 'result', 'summary'],
+          ['string', 'string[]']
+        )
+      : null);
+
+  const enabled =
+    startAction !== null ||
+    stopAction !== null ||
+    modeSignal !== null ||
+    statusSignal !== null ||
+    resultSignal !== null;
+
+  return {
+    enabled,
+    modeSignalId: modeSignal?.signal_id ?? null,
+    statusSignalId: statusSignal?.signal_id ?? null,
+    resultSignalId: resultSignal?.signal_id ?? null,
+    startActionSignalId: startAction?.signal_id ?? null,
+    stopActionSignalId: stopAction?.signal_id ?? null
+  };
+}
+
 export function readControllerConfig(
   raw: WidgetConfigRecord | undefined,
   fallbackSignal: SignalRow,
   signals: SignalRow[]
 ): ControllerWidgetConfig {
+  const defaults = defaultControllerAutoTune(fallbackSignal, signals);
   const base = isObject(raw) ? raw : {};
   const parsed = Array.isArray(base.params)
     ? base.params
@@ -615,9 +755,37 @@ export function readControllerConfig(
         })
         .filter((entry): entry is ControllerParam => entry !== null)
     : [];
+  const autotuneBase = isObject(base.autotune) ? base.autotune : {};
+  const legacyAutotuneBase = isObject(base.autoTune) ? base.autoTune : {};
+  const source = Object.keys(autotuneBase).length > 0 ? autotuneBase : legacyAutotuneBase;
 
   return {
-    params: parsed.length > 0 ? parsed : buildControllerDefaultParams(fallbackSignal, signals)
+    params: parsed.length > 0 ? parsed : buildControllerDefaultParams(fallbackSignal, signals),
+    autotune: {
+      enabled: toBoolean(source.enabled, defaults.enabled),
+      modeSignalId:
+        normalizeSignalId(source.modeSignalId) ??
+        normalizeSignalId(source.modeId) ??
+        defaults.modeSignalId,
+      statusSignalId:
+        normalizeSignalId(source.statusSignalId) ??
+        normalizeSignalId(source.statusId) ??
+        defaults.statusSignalId,
+      resultSignalId:
+        normalizeSignalId(source.resultSignalId) ??
+        normalizeSignalId(source.resultId) ??
+        defaults.resultSignalId,
+      startActionSignalId:
+        normalizeSignalId(source.startActionSignalId) ??
+        normalizeSignalId(source.startSignalId) ??
+        normalizeSignalId(source.startActionId) ??
+        defaults.startActionSignalId,
+      stopActionSignalId:
+        normalizeSignalId(source.stopActionSignalId) ??
+        normalizeSignalId(source.stopSignalId) ??
+        normalizeSignalId(source.stopActionId) ??
+        defaults.stopActionSignalId
+    }
   };
 }
 
@@ -1120,6 +1288,7 @@ function findSignalByLeaf(
   const fullPool = parentScoped.length > 0 ? parentScoped : signals;
 
   for (const signal of fullPool) {
+    if (isNtPublishToggleSignal(signal)) continue;
     if (allowedTypes && !allowedTypes.includes(signal.signal_type)) continue;
     const token = normalizeToken(leafPath(signal.path));
     if (!token) continue;
@@ -1128,6 +1297,7 @@ function findSignalByLeaf(
   }
 
   for (const signal of fullPool) {
+    if (isNtPublishToggleSignal(signal)) continue;
     if (allowedTypes && !allowedTypes.includes(signal.signal_type)) continue;
     const token = normalizeToken(leafPath(signal.path));
     if (!token) continue;
@@ -1294,6 +1464,7 @@ function findWritableNumericSignalByLeaf(
   const normalizedCandidates = candidates.map((candidate) => normalizeToken(candidate));
 
   for (const signal of pool) {
+    if (isNtPublishToggleSignal(signal)) continue;
     if (!isNumericSignal(signal) || signal.access !== 'write') continue;
     const token = normalizeToken(leafPath(signal.path));
     if (normalizedCandidates.includes(token)) {
@@ -1302,6 +1473,7 @@ function findWritableNumericSignalByLeaf(
   }
 
   for (const signal of pool) {
+    if (isNtPublishToggleSignal(signal)) continue;
     if (!isNumericSignal(signal) || signal.access !== 'write') continue;
     const token = normalizeToken(leafPath(signal.path));
     if (normalizedCandidates.some((candidate) => token.endsWith(candidate) || token.includes(candidate))) {
@@ -1310,6 +1482,174 @@ function findWritableNumericSignalByLeaf(
   }
 
   return null;
+}
+
+function stateMachineRootPath(path: string): string {
+  const parts = path.split('/').filter(Boolean);
+  const index = parts.findIndex((part) => {
+    const token = normalizeToken(part);
+    return token === 'statemachine' || token === 'fsm';
+  });
+  if (index >= 0) {
+    const end = Math.min(parts.length, index + 2);
+    return parts.slice(0, end).join('/');
+  }
+  return parentPath(path);
+}
+
+function findActionSignalByLeaf(
+  signals: SignalRow[],
+  anchorParent: string,
+  candidates: string[]
+): SignalRow | null {
+  const parentScoped = signals.filter((signal) => parentPath(signal.path) === anchorParent);
+  const pool = parentScoped.length > 0 ? parentScoped : signals;
+  const actionPool = pool.filter(
+    (signal) => signal.access === 'invoke' || signal.kind === 'command'
+  );
+
+  const normalizedCandidates = new Set(candidates.map((candidate) => normalizeToken(candidate)));
+
+  for (const signal of actionPool) {
+    if (isNtPublishToggleSignal(signal)) continue;
+    const token = normalizeToken(leafPath(signal.path));
+    if (!token) continue;
+    if (normalizedCandidates.has(token)) {
+      return signal;
+    }
+  }
+
+  for (const signal of actionPool) {
+    if (isNtPublishToggleSignal(signal)) continue;
+    const token = normalizeToken(leafPath(signal.path));
+    if (!token) continue;
+    for (const candidate of normalizedCandidates) {
+      if (token.endsWith(candidate) || token.includes(candidate)) {
+        return signal;
+      }
+    }
+  }
+
+  return null;
+}
+
+function defaultStateMachineConfig(
+  anchor: SignalRow,
+  signals: SignalRow[]
+): StateMachineWidgetConfig {
+  const root = stateMachineRootPath(anchor.path);
+  const commandRoot = root ? `${root}/command` : parentPath(anchor.path);
+
+  const currentStateSignal = findSignalByLeaf(
+    signals,
+    root,
+    ['current_state', 'current', 'state'],
+    ['string']
+  );
+  const goalStateSignal = findSignalByLeaf(
+    signals,
+    root,
+    ['goal_state', 'goal', 'target_state', 'target'],
+    ['string']
+  );
+  const nextStateSignal = findSignalByLeaf(
+    signals,
+    root,
+    ['next_state', 'next'],
+    ['string']
+  );
+  const queueSignal = findSignalByLeaf(
+    signals,
+    root,
+    ['queue', 'pending', 'state_queue'],
+    ['string[]', 'string']
+  );
+  const atGoalSignal = findSignalByLeaf(
+    signals,
+    root,
+    ['at_goal', 'goal_reached'],
+    ['bool']
+  );
+  const transitionCountSignal = findSignalByLeaf(
+    signals,
+    root,
+    ['transition_count', 'transitions', 'count'],
+    ['i64', 'f64']
+  );
+  const lastTransitionSignal = findSignalByLeaf(
+    signals,
+    root,
+    ['last_transition', 'transition'],
+    ['string']
+  );
+  const availableStatesSignal = findSignalByLeaf(
+    signals,
+    root,
+    ['available_states', 'states', 'state_list'],
+    ['string[]', 'string']
+  );
+
+  const clearQueueCommand = findActionSignalByLeaf(
+    signals,
+    commandRoot,
+    ['clear_queue', 'clear']
+  );
+
+  const leaf = normalizeToken(leafPath(anchor.path));
+  const currentStateSignalId =
+    currentStateSignal?.signal_id ??
+    (anchor.signal_type === 'string' && leaf.includes('current') ? anchor.signal_id : null);
+  const goalStateSignalId =
+    goalStateSignal?.signal_id ??
+    (anchor.signal_type === 'string' && leaf.includes('goal') ? anchor.signal_id : null);
+
+  return {
+    currentStateSignalId,
+    goalStateSignalId,
+    nextStateSignalId: nextStateSignal?.signal_id ?? null,
+    queueSignalId: queueSignal?.signal_id ?? null,
+    atGoalSignalId: atGoalSignal?.signal_id ?? null,
+    transitionCountSignalId: transitionCountSignal?.signal_id ?? null,
+    lastTransitionSignalId: lastTransitionSignal?.signal_id ?? null,
+    availableStatesSignalId: availableStatesSignal?.signal_id ?? null,
+    clearQueueCommandSignalId: clearQueueCommand?.signal_id ?? null
+  };
+}
+
+export function readStateMachineConfig(
+  raw: WidgetConfigRecord | undefined,
+  fallbackSignal: SignalRow,
+  signals: SignalRow[]
+): StateMachineWidgetConfig {
+  const defaults = defaultStateMachineConfig(fallbackSignal, signals);
+  const base = isObject(raw) ? raw : {};
+
+  return {
+    currentStateSignalId:
+      normalizeSignalId(base.currentStateSignalId) ??
+      normalizeSignalId(base.currentSignalId) ??
+      defaults.currentStateSignalId,
+    goalStateSignalId:
+      normalizeSignalId(base.goalStateSignalId) ??
+      normalizeSignalId(base.goalSignalId) ??
+      defaults.goalStateSignalId,
+    nextStateSignalId:
+      normalizeSignalId(base.nextStateSignalId) ??
+      normalizeSignalId(base.nextSignalId) ??
+      defaults.nextStateSignalId,
+    queueSignalId: normalizeSignalId(base.queueSignalId) ?? defaults.queueSignalId,
+    atGoalSignalId: normalizeSignalId(base.atGoalSignalId) ?? defaults.atGoalSignalId,
+    transitionCountSignalId:
+      normalizeSignalId(base.transitionCountSignalId) ?? defaults.transitionCountSignalId,
+    lastTransitionSignalId:
+      normalizeSignalId(base.lastTransitionSignalId) ?? defaults.lastTransitionSignalId,
+    availableStatesSignalId:
+      normalizeSignalId(base.availableStatesSignalId) ?? defaults.availableStatesSignalId,
+    clearQueueCommandSignalId:
+      normalizeSignalId(base.clearQueueCommandSignalId) ??
+      normalizeSignalId(base.clearQueueSignalId) ??
+      defaults.clearQueueCommandSignalId
+  };
 }
 
 function defaultMotorConfig(anchor: SignalRow, signals: SignalRow[]): MotorWidgetConfig {
@@ -1749,6 +2089,133 @@ export function readImuConfig(
         ? base.magViewMode
         : defaults.magViewMode,
     units
+  };
+}
+
+function findWritableBoolSignalByLeaf(
+  signals: SignalRow[],
+  anchorParent: string,
+  candidates: string[]
+): SignalRow | null {
+  const scoped = signals.filter((signal) => parentPath(signal.path) === anchorParent);
+  const pool = scoped.length > 0 ? scoped : signals;
+  const normalizedCandidates = candidates.map((candidate) => normalizeToken(candidate));
+
+  for (const signal of pool) {
+    if (isNtPublishToggleSignal(signal)) continue;
+    if (signal.signal_type !== 'bool' || signal.access !== 'write') continue;
+    const token = normalizeToken(leafPath(signal.path));
+    if (normalizedCandidates.includes(token)) {
+      return signal;
+    }
+  }
+
+  for (const signal of pool) {
+    if (isNtPublishToggleSignal(signal)) continue;
+    if (signal.signal_type !== 'bool' || signal.access !== 'write') continue;
+    const token = normalizeToken(leafPath(signal.path));
+    if (normalizedCandidates.some((candidate) => token.endsWith(candidate) || token.includes(candidate))) {
+      return signal;
+    }
+  }
+
+  return null;
+}
+
+function defaultDioConfig(anchor: SignalRow, signals: SignalRow[]): DioWidgetConfig {
+  const anchorParent = parentPath(anchor.path);
+
+  const valueSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['value', 'state', 'pressed', 'triggered', 'blocked', 'active', 'detected'],
+    ['bool']
+  );
+  const outputSignal = findWritableBoolSignalByLeaf(
+    signals,
+    anchorParent,
+    ['output', 'set', 'command', 'enabled', 'state', 'value']
+  );
+  const invertedSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['inverted', 'invert'],
+    ['bool']
+  );
+  const channelSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['channel', 'dio_channel', 'diochannel'],
+    ['i64', 'f64']
+  );
+  const portSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['port', 'dio_port'],
+    ['i64', 'f64']
+  );
+  const modeSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['mode', 'direction'],
+    ['string', 'bool', 'i64', 'f64']
+  );
+  const nameSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['name', 'label'],
+    ['string']
+  );
+  const typeSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['type', 'sensor_type'],
+    ['string']
+  );
+
+  const leaf = normalizeToken(leafPath(anchor.path));
+  const fallbackValueSignalId =
+    anchor.signal_type === 'bool' &&
+    ['value', 'state', 'pressed', 'triggered', 'blocked', 'active', 'detected'].some((token) =>
+      leaf.includes(normalizeToken(token))
+    )
+      ? anchor.signal_id
+      : null;
+
+  return {
+    showOtherFields: true,
+    valueSignalId: valueSignal?.signal_id ?? fallbackValueSignalId,
+    outputSignalId: outputSignal?.signal_id ?? null,
+    invertedSignalId: invertedSignal?.signal_id ?? null,
+    channelSignalId: channelSignal?.signal_id ?? null,
+    portSignalId: portSignal?.signal_id ?? null,
+    modeSignalId: modeSignal?.signal_id ?? null,
+    nameSignalId: nameSignal?.signal_id ?? null,
+    typeSignalId: typeSignal?.signal_id ?? null
+  };
+}
+
+export function readDioConfig(
+  raw: WidgetConfigRecord | undefined,
+  fallbackSignal: SignalRow,
+  signals: SignalRow[]
+): DioWidgetConfig {
+  const defaults = defaultDioConfig(fallbackSignal, signals);
+  const base = isObject(raw) ? raw : {};
+
+  return {
+    showOtherFields: toBoolean(base.showOtherFields, defaults.showOtherFields),
+    valueSignalId: normalizeSignalId(base.valueSignalId) ?? defaults.valueSignalId,
+    outputSignalId: normalizeSignalId(base.outputSignalId) ?? defaults.outputSignalId,
+    invertedSignalId: normalizeSignalId(base.invertedSignalId) ?? defaults.invertedSignalId,
+    channelSignalId:
+      normalizeSignalId(base.channelSignalId) ??
+      normalizeSignalId(base.dioChannelSignalId) ??
+      defaults.channelSignalId,
+    portSignalId: normalizeSignalId(base.portSignalId) ?? defaults.portSignalId,
+    modeSignalId: normalizeSignalId(base.modeSignalId) ?? defaults.modeSignalId,
+    nameSignalId: normalizeSignalId(base.nameSignalId) ?? defaults.nameSignalId,
+    typeSignalId: normalizeSignalId(base.typeSignalId) ?? defaults.typeSignalId
   };
 }
 
@@ -2212,6 +2679,10 @@ export function buildDefaultWidgetConfig(
   signals: SignalRow[]
 ): WidgetConfigRecord | undefined {
   switch (kind) {
+    case 'state_machine':
+      return readStateMachineConfig(undefined, signal, signals);
+    case 'dio':
+      return readDioConfig(undefined, signal, signals);
     case 'motor':
       return readMotorConfig(undefined, signal, signals);
     case 'encoder':

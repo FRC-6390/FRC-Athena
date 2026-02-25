@@ -90,9 +90,9 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static final double REVERSAL_IMU_ACCEL_MIN_MPS2 = 0.75;
     private static final double REVERSAL_COMMAND_FULL_SCALE_MPS = 2.2;
     private static final double WHEELSPIN_COMMAND_SPEED_MPS = 0.8;
-    private static final double WHEELSPIN_COMMAND_SUSTAIN_MPS = 0.18;
+    private static final double WHEELSPIN_COMMAND_SUSTAIN_MPS = 0.45;
     private static final double WHEELSPIN_ODOM_SPEED_MPS = 1.0;
-    private static final double WHEELSPIN_ODOM_SUSTAIN_MPS = 0.15;
+    private static final double WHEELSPIN_ODOM_SUSTAIN_MPS = 0.30;
     private static final double WHEELSPIN_IMU_SPEED_RATIO = 0.30;
     private static final double WHEELSPIN_IMU_SPEED_FLOOR_MPS = 0.25;
     private static final double WHEELSPIN_DEFICIT_RATIO_START = 0.80;
@@ -1058,10 +1058,10 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
                 double contactComponentInstant = 0.0;
                 boolean sustainingSlipEvidence =
-                        slipMode != SlipMode.NOMINAL
-                                || slipScore >= SLIP_TRANSIENT_EXIT_SCORE
-                                || slipContactComponent >= CONTACT_ASSIST_COMPONENT * 0.40
-                                || slipReversalComponent >= SLIP_REVERSAL_SUSTAIN_COMPONENT * 0.75;
+                        slipMode == SlipMode.SLIP
+                                || slipScore >= SLIP_TRANSIENT_ENTER_SCORE
+                                || slipContactComponent >= CONTACT_ASSIST_COMPONENT
+                                || slipReversalComponent >= SLIP_REVERSAL_SUSTAIN_COMPONENT;
                 double commandGate = sustainingSlipEvidence
                         ? WHEELSPIN_COMMAND_SUSTAIN_MPS
                         : WHEELSPIN_COMMAND_SPEED_MPS;
@@ -1072,8 +1072,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 boolean contactDetectionEnabled =
                         imuLinearSignalObserved
                                 || wheelspinCandidate
-                                || slipContactComponent >= CONTACT_ASSIST_COMPONENT * 0.30
-                                || slipMode != SlipMode.NOMINAL;
+                                || slipContactComponent >= CONTACT_ASSIST_COMPONENT
+                                || slipMode == SlipMode.SLIP;
                 if (contactDetectionEnabled
                         && commandedSpeed > commandGate
                         && (odomSpeed > odomGate || sustainingSlipEvidence)) {

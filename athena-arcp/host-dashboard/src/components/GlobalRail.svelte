@@ -2,7 +2,9 @@
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import {
     faBolt,
+    faCamera,
     faChartLine,
+    faStethoscope,
     faMicrochip,
     faGear,
     faTableCellsLarge,
@@ -10,7 +12,14 @@
   } from '@fortawesome/free-solid-svg-icons';
   import athenaSymbol from '../assets/athena-symbol-red.svg';
 
-  type RailSection = 'dashboards' | 'signals' | 'mechanisms' | 'actions' | 'settings';
+  type RailSection =
+    | 'dashboards'
+    | 'signals'
+    | 'mechanisms'
+    | 'actions'
+    | 'diagnostics'
+    | 'camera_tuning'
+    | 'settings';
 
   type Props = {
     section: RailSection;
@@ -22,6 +31,8 @@
     { key: 'signals', label: 'Signals', icon: faChartLine },
     { key: 'mechanisms', label: 'Mechanisms', icon: faMicrochip },
     { key: 'actions', label: 'Actions', icon: faBolt },
+    { key: 'diagnostics', label: 'Diagnostics', icon: faStethoscope },
+    { key: 'camera_tuning', label: 'Camera Tuning', icon: faCamera },
     { key: 'settings', label: 'Settings', icon: faGear }
   ];
 

@@ -37,6 +37,8 @@ export type SignalWidgetKind =
   | 'trend'
   | 'action'
   | 'tunable'
+  | 'state_machine'
+  | 'dio'
   | 'motor'
   | 'encoder'
   | 'imu'
@@ -61,6 +63,7 @@ export type SignalWidgetKind =
   | 'status_matrix'
   | 'camera_overlay';
 export type WidgetKind = SignalWidgetKind | LayoutToolKind;
+export type HardwareWidgetKind = 'state_machine' | 'dio' | 'motor' | 'encoder' | 'imu';
 export type WidgetConfigRecord = Record<string, unknown>;
 
 export type WidgetLayout = {
@@ -126,6 +129,8 @@ export function widgetKindsFor(signal: SignalRow | null): WidgetKind[] {
       'state',
       'text',
       'trend',
+      'state_machine',
+      'dio',
       'motor',
       'encoder',
       'imu',
@@ -150,6 +155,8 @@ export function widgetKindsFor(signal: SignalRow | null): WidgetKind[] {
     ];
   }
   const hardwareKinds: WidgetKind[] = [];
+  if (looksLikeStateMachinePath(signal.path)) hardwareKinds.push('state_machine');
+  if (looksLikeDioPath(signal.path)) hardwareKinds.push('dio');
   if (looksLikeMotorPath(signal.path)) hardwareKinds.push('motor');
   if (looksLikeEncoderPath(signal.path)) hardwareKinds.push('encoder');
   if (looksLikeImuPath(signal.path)) hardwareKinds.push('imu');
@@ -260,6 +267,10 @@ export function widgetKindLabel(kind: WidgetKind): string {
       return 'Action';
     case 'tunable':
       return 'Tunable';
+    case 'state_machine':
+      return 'State Machine';
+    case 'dio':
+      return 'DIO';
     case 'motor':
       return 'Motor';
     case 'encoder':
@@ -325,10 +336,16 @@ export function widgetKindLabel(kind: WidgetKind): string {
 
 export function defaultWidgetKind(signal: SignalRow): WidgetKind {
   if (isActionSignal(signal)) return 'action';
+  const hardwareKind = hardwareWidgetKindForPath(signal.path);
+  if (hardwareKind === 'state_machine' || hardwareKind === 'dio') return hardwareKind;
   if (isWritableSignal(signal)) return 'tunable';
-  if (looksLikeMotorPath(signal.path)) return 'motor';
-  if (looksLikeEncoderPath(signal.path)) return 'encoder';
-  if (looksLikeImuPath(signal.path)) return 'imu';
+  if (hardwareKind) return hardwareKind;
+  return defaultLeafWidgetKind(signal);
+}
+
+export function defaultLeafWidgetKind(signal: SignalRow): WidgetKind {
+  if (isActionSignal(signal)) return 'action';
+  if (isWritableSignal(signal)) return 'tunable';
   if (signal.signal_type === 'f64[]' || signal.signal_type === 'i64[]') {
     const leaf = leafPath(signal.path).toLowerCase();
     if (
@@ -371,6 +388,10 @@ export function defaultWidgetKind(signal: SignalRow): WidgetKind {
 
 export function defaultLayoutFor(kind: WidgetKind): WidgetLayout {
   switch (kind) {
+    case 'state_machine':
+      return { x: 1, y: 1, w: 10, h: 5 };
+    case 'dio':
+      return { x: 1, y: 1, w: 4, h: 2 };
     case 'motor':
       return { x: 1, y: 1, w: 4, h: 2 };
     case 'encoder':
@@ -454,12 +475,40 @@ function looksLikeMotorPath(path: string): boolean {
   return pathLooksLike(path, ['/motor', '/motors/', '/drive/', '/steer/', '/falcon', '/spark']);
 }
 
+function looksLikeStateMachinePath(path: string): boolean {
+  return pathLooksLike(path, ['/statemachine/', '/state_machine/', '/fsm/', '/machine_state/']);
+}
+
+function looksLikeDioPath(path: string): boolean {
+  return pathLooksLike(path, [
+    '/dio/',
+    '/digitalinput/',
+    '/digitaloutput/',
+    '/digitalsensor/',
+    '/buttons/',
+    '/button/',
+    '/beambreaks/',
+    '/beambreak/',
+    '/limitswitches/',
+    '/limitswitch/'
+  ]);
+}
+
 function looksLikeEncoderPath(path: string): boolean {
   return pathLooksLike(path, ['/encoder', '/encoders/', '/absoluteencoder', '/cancoder', '/dutycycle']);
 }
 
 function looksLikeImuPath(path: string): boolean {
   return pathLooksLike(path, ['/imu', '/gyro', '/pigeon', '/navx', '/orientation', '/attitude']);
+}
+
+export function hardwareWidgetKindForPath(path: string): HardwareWidgetKind | null {
+  if (looksLikeStateMachinePath(path)) return 'state_machine';
+  if (looksLikeDioPath(path)) return 'dio';
+  if (looksLikeMotorPath(path)) return 'motor';
+  if (looksLikeEncoderPath(path)) return 'encoder';
+  if (looksLikeImuPath(path)) return 'imu';
+  return null;
 }
 
 export function defaultLayoutTitle(kind: LayoutToolKind): string {
@@ -523,7 +572,13 @@ function parentPath(path: string): string {
 }
 
 function defaultSignalWidgetTitle(signal: SignalRow, kind: WidgetKind): string {
-  if (kind === 'motor' || kind === 'encoder' || kind === 'imu') {
+  if (
+    kind === 'motor' ||
+    kind === 'encoder' ||
+    kind === 'imu' ||
+    kind === 'dio' ||
+    kind === 'state_machine'
+  ) {
     const parentLeaf = leafPath(parentPath(signal.path));
     if (parentLeaf && parentLeaf !== signal.path) {
       return parentLeaf;

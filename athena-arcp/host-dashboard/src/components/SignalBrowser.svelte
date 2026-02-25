@@ -60,6 +60,7 @@
   }: Props = $props();
 
   const SIGNAL_DRAG_TYPE = 'application/x-arcp-signal-id';
+  const TOPIC_DRAG_TYPE = 'application/x-arcp-topic-path';
 
   const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
 
@@ -219,6 +220,18 @@
     dragGhostEl = null;
   }
 
+  function normalizeTopicDragPath(groupKey: string): string {
+    const trimmed = groupKey.trim();
+    if (!trimmed) return '/';
+    const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
+    const withoutAthenaRoot =
+      explorerTab === 'nt'
+        ? withoutLeadingSlash.replace(/^athena\/?/i, '')
+        : withoutLeadingSlash;
+    const withoutTrailingSlash = withoutAthenaRoot.replace(/\/+$/, '');
+    return withoutTrailingSlash ? `/${withoutTrailingSlash}` : '/';
+  }
+
   function makeDragGhost(label: string, chipText: string): HTMLDivElement {
     clearDragGhost();
 
@@ -278,6 +291,19 @@
     event.dataTransfer.effectAllowed = 'copy';
 
     const ghost = makeDragGhost(leafPath(signalPath(signal)), signal.signal_type);
+    moveDragGhost(event);
+    event.dataTransfer.setDragImage(ghost, 14, 14);
+  }
+
+  function startGroupDrag(event: DragEvent, group: ExplorerGroupRow) {
+    if (!event.dataTransfer) return;
+    const topicPath = normalizeTopicDragPath(group.key);
+    event.dataTransfer.setData(TOPIC_DRAG_TYPE, topicPath);
+    event.dataTransfer.setData('text/plain', `topic:${topicPath}`);
+    event.dataTransfer.effectAllowed = 'copy';
+
+    const signalCountLabel = group.signalCount === 1 ? '1 signal' : `${group.signalCount} signals`;
+    const ghost = makeDragGhost(group.label, `topic · ${signalCountLabel}`);
     moveDragGhost(event);
     event.dataTransfer.setDragImage(ghost, 14, 14);
   }
@@ -403,8 +429,13 @@
           <button
             class="group-row"
             style={`--depth:${row.depth};`}
+            draggable="true"
+            title={`${normalizeTopicDragPath(row.key)} (${row.signalCount})`}
             aria-expanded={row.open}
             onclick={() => toggleGroup(row.key)}
+            ondragstart={(event) => startGroupDrag(event, row)}
+            ondrag={moveDragGhost}
+            ondragend={endDrag}
           >
             <span class={`group-chevron ${row.open ? 'open' : ''}`} aria-hidden="true">
               <FontAwesomeIcon icon={faChevronRight} />

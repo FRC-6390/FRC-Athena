@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getContext } from 'svelte';
   import type { SignalRow } from '../lib/arcp';
   import type { DashboardWidget, WidgetConfigRecord } from '../lib/dashboard';
   import SignalMapField from './SignalMapField.svelte';
@@ -12,6 +13,7 @@
     readChoiceConfig,
     readControllerConfig,
     readDialConfig,
+    readDioConfig,
     readDifferentialDriveConfig,
     readDropdownConfig,
     readFieldConfig,
@@ -21,6 +23,7 @@
     readLayoutGridConfig,
     readLayoutTitleConfig,
     readMotorConfig,
+    readStateMachineConfig,
     readEncoderConfig,
     readImuConfig,
     readMech2dConfig,
@@ -32,6 +35,7 @@
     readToggleConfig,
     type ControllerParam,
     type ControllerWidgetConfig,
+    type DioWidgetConfig,
     type EncoderWidgetConfig,
     type ChoiceWidgetCommit,
     type ChoiceWidgetDirection,
@@ -40,6 +44,7 @@
     type InputWidgetCommit,
     type ImuWidgetConfig,
     type MotorWidgetConfig,
+    type StateMachineWidgetConfig,
     type TextAreaWidgetCommit,
     type ToggleWidgetStyle
   } from '../lib/widget-config';
@@ -50,6 +55,15 @@
     signals: SignalRow[];
     signalById: Map<number, SignalRow>;
     onUpdateConfig: (widgetId: string, config: WidgetConfigRecord | undefined) => void;
+  };
+
+  type SignalMapRequest = {
+    title: string;
+    candidates: SignalRow[];
+    selectedSignalId: number | null;
+    allowNone: boolean;
+    noneLabel: string;
+    onPick: (signalId: number | null) => void;
   };
 
   let { selectedWidget, selectedSignal, signals, signalById, onUpdateConfig }: Props = $props();
@@ -83,9 +97,19 @@
     numericSignals.filter((signal) => signal.access === 'write')
   );
 
+  const writableBoolSignals = $derived(
+    boolSignals.filter((signal) => signal.access === 'write')
+  );
+
   const vectorSignals = $derived(
     signals
       .filter((signal) => signal.signal_type === 'f64[]' || signal.signal_type === 'i64[]')
+      .sort((a, b) => a.path.localeCompare(b.path))
+  );
+
+  const actionSignals = $derived(
+    signals
+      .filter((signal) => signal.access === 'invoke' || signal.kind === 'command')
       .sort((a, b) => a.path.localeCompare(b.path))
   );
 
@@ -123,6 +147,9 @@
   const preferredMotorCommandSignals = $derived(
     writableMotorCommandSignals.length > 0 ? writableMotorCommandSignals : writableNumericSignals
   );
+
+  const requestSignalMap =
+    getContext<((request: SignalMapRequest) => void) | undefined>('arcp.signal-map-request');
 
   function setConfig(config: WidgetConfigRecord | undefined) {
     onUpdateConfig(selectedWidget.id, config);
@@ -226,6 +253,47 @@
     addControllerParam(selectedSignal);
   }
 
+  function requestGraphSignalFromExplorer() {
+    if (!primarySignal) return;
+    if (!requestSignalMap) {
+      addSelectedSignalToGraph();
+      return;
+    }
+    requestSignalMap({
+      title: 'Add graph series',
+      candidates: numericSignals,
+      selectedSignalId: isNumeric(selectedSignal) ? selectedSignal.signal_id : null,
+      allowNone: false,
+      noneLabel: 'Required',
+      onPick: (signalId) => {
+        if (signalId === null) return;
+        const signal = signalById.get(signalId);
+        if (!isNumeric(signal)) return;
+        setConfig(addGraphSeries(selectedWidget.config, primarySignal, signal));
+      }
+    });
+  }
+
+  function requestControllerSignalFromExplorer() {
+    if (!requestSignalMap) {
+      addSelectedControllerParam();
+      return;
+    }
+    requestSignalMap({
+      title: 'Add controller parameter signal',
+      candidates: writableNumericSignals,
+      selectedSignalId: isWritableNumeric(selectedSignal) ? selectedSignal.signal_id : null,
+      allowNone: false,
+      noneLabel: 'Required',
+      onPick: (signalId) => {
+        if (signalId === null) return;
+        const signal = signalById.get(signalId);
+        if (!isWritableNumeric(signal)) return;
+        addControllerParam(signal);
+      }
+    });
+  }
+
   function updateGraphSeriesStyle(signalId: number, style: GraphSeriesStyle) {
     if (!primarySignal) return;
     const graph = readGraphConfig(selectedWidget.config, primarySignal);
@@ -267,6 +335,27 @@
     if (!primarySignal || !selectedSignal) return;
     if (selectedSignal.signal_type !== 'bool') return;
     setConfig(addStatusMatrixSignal(selectedWidget.config, primarySignal, signals, selectedSignal));
+  }
+
+  function requestStatusMatrixSignalFromExplorer() {
+    if (!primarySignal) return;
+    if (!requestSignalMap) {
+      addSelectedBoolToMatrix();
+      return;
+    }
+    requestSignalMap({
+      title: 'Add status board signal',
+      candidates: boolSignals,
+      selectedSignalId: selectedSignal?.signal_type === 'bool' ? selectedSignal.signal_id : null,
+      allowNone: false,
+      noneLabel: 'Required',
+      onPick: (signalId) => {
+        if (signalId === null) return;
+        const signal = signalById.get(signalId);
+        if (!signal || signal.signal_type !== 'bool') return;
+        setConfig(addStatusMatrixSignal(selectedWidget.config, primarySignal, signals, signal));
+      }
+    });
   }
 
   $effect(() => {
@@ -349,8 +438,8 @@
       </label>
     </div>
 
-    <button class="btn" disabled={!isNumeric(selectedSignal)} onclick={addSelectedSignalToGraph}>
-      Add selected signal
+    <button class="btn" disabled={numericSignals.length === 0} onclick={requestGraphSignalFromExplorer}>
+      Add signal from explorer
     </button>
 
     <div class="series-list">
@@ -398,8 +487,12 @@
       Auto remap from selected signal
     </button>
 
-    <button class="btn" disabled={!isWritableNumeric(selectedSignal)} onclick={addSelectedControllerParam}>
-      Add selected writable signal
+    <button
+      class="btn"
+      disabled={writableNumericSignals.length === 0}
+      onclick={requestControllerSignalFromExplorer}
+    >
+      Add writable signal from explorer
     </button>
 
     <div class="series-list">
@@ -436,6 +529,346 @@
           </button>
         </div>
       {/each}
+    </div>
+
+    <details class="config-collapsible">
+      <summary>Autotuner</summary>
+      <label class="check-row">
+        <input
+          type="checkbox"
+          checked={controller.autotune.enabled}
+          onchange={(event) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                enabled: (event.currentTarget as HTMLInputElement).checked
+              }
+            } satisfies ControllerWidgetConfig)}
+        />
+        Enable autotuner controls
+      </label>
+      <div class="row-grid">
+        <SignalMapField
+          label="Mode signal"
+          selectedSignalId={controller.autotune.modeSignalId}
+          candidates={modeSignals}
+          {signalById}
+          optional={true}
+          enabled={controller.autotune.modeSignalId !== null}
+          onToggleEnabled={(enabled) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                modeSignalId: toggleSignalMapping(
+                  controller.autotune.modeSignalId,
+                  enabled,
+                  modeSignals
+                )
+              }
+            } satisfies ControllerWidgetConfig)}
+          onChange={(signalId) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                modeSignalId: signalId
+              }
+            } satisfies ControllerWidgetConfig)}
+        />
+        <SignalMapField
+          label="Status signal"
+          selectedSignalId={controller.autotune.statusSignalId}
+          candidates={signals}
+          {signalById}
+          optional={true}
+          enabled={controller.autotune.statusSignalId !== null}
+          onToggleEnabled={(enabled) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                statusSignalId: toggleSignalMapping(
+                  controller.autotune.statusSignalId,
+                  enabled,
+                  signals
+                )
+              }
+            } satisfies ControllerWidgetConfig)}
+          onChange={(signalId) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                statusSignalId: signalId
+              }
+            } satisfies ControllerWidgetConfig)}
+        />
+        <SignalMapField
+          label="Result signal"
+          selectedSignalId={controller.autotune.resultSignalId}
+          candidates={signals}
+          {signalById}
+          optional={true}
+          enabled={controller.autotune.resultSignalId !== null}
+          onToggleEnabled={(enabled) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                resultSignalId: toggleSignalMapping(
+                  controller.autotune.resultSignalId,
+                  enabled,
+                  signals
+                )
+              }
+            } satisfies ControllerWidgetConfig)}
+          onChange={(signalId) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                resultSignalId: signalId
+              }
+            } satisfies ControllerWidgetConfig)}
+        />
+        <SignalMapField
+          label="Start action"
+          selectedSignalId={controller.autotune.startActionSignalId}
+          candidates={actionSignals}
+          {signalById}
+          optional={true}
+          enabled={controller.autotune.startActionSignalId !== null}
+          onToggleEnabled={(enabled) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                startActionSignalId: toggleSignalMapping(
+                  controller.autotune.startActionSignalId,
+                  enabled,
+                  actionSignals
+                )
+              }
+            } satisfies ControllerWidgetConfig)}
+          onChange={(signalId) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                startActionSignalId: signalId
+              }
+            } satisfies ControllerWidgetConfig)}
+        />
+        <SignalMapField
+          label="Stop action"
+          selectedSignalId={controller.autotune.stopActionSignalId}
+          candidates={actionSignals}
+          {signalById}
+          optional={true}
+          enabled={controller.autotune.stopActionSignalId !== null}
+          onToggleEnabled={(enabled) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                stopActionSignalId: toggleSignalMapping(
+                  controller.autotune.stopActionSignalId,
+                  enabled,
+                  actionSignals
+                )
+              }
+            } satisfies ControllerWidgetConfig)}
+          onChange={(signalId) =>
+            setConfig({
+              ...controller,
+              autotune: {
+                ...controller.autotune,
+                stopActionSignalId: signalId
+              }
+            } satisfies ControllerWidgetConfig)}
+        />
+      </div>
+    </details>
+  </section>
+{:else if selectedWidget.kind === 'state_machine' && primarySignal}
+  {@const stateMachine = readStateMachineConfig(selectedWidget.config, primarySignal, signals)}
+  {@const mappedCount = [
+    stateMachine.currentStateSignalId,
+    stateMachine.goalStateSignalId,
+    stateMachine.nextStateSignalId,
+    stateMachine.queueSignalId,
+    stateMachine.atGoalSignalId,
+    stateMachine.transitionCountSignalId,
+    stateMachine.lastTransitionSignalId,
+    stateMachine.availableStatesSignalId,
+    stateMachine.clearQueueCommandSignalId
+  ].filter((id) => id !== null).length}
+  <section class="config-block">
+    <h4>State Machine</h4>
+    <p class="hint">Maps state telemetry, writable toggles, and command actions into one panel.</p>
+    <button
+      class="btn"
+      onclick={() => {
+        const seed = selectedSignal ?? primarySignal;
+        setConfig(readStateMachineConfig(undefined, seed, signals));
+      }}
+    >
+      Auto remap from selected signal
+    </button>
+    <div class="chips">
+      <span>{mappedCount} mapped fields</span>
+      {#if stateMachine.goalStateSignalId !== null}<span>goal setpoint</span>{/if}
+      {#if stateMachine.clearQueueCommandSignalId !== null}<span>clear queue</span>{/if}
+    </div>
+    <div class="row-grid">
+      <SignalMapField
+        label="Current state signal"
+        selectedSignalId={stateMachine.currentStateSignalId}
+        candidates={stringSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.currentStateSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            currentStateSignalId: toggleSignalMapping(stateMachine.currentStateSignalId, enabled, stringSignals)
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...stateMachine, currentStateSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
+      <SignalMapField
+        label="Goal state signal"
+        selectedSignalId={stateMachine.goalStateSignalId}
+        candidates={stringSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.goalStateSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            goalStateSignalId: toggleSignalMapping(stateMachine.goalStateSignalId, enabled, stringSignals)
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...stateMachine, goalStateSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
+      <SignalMapField
+        label="Next state signal"
+        selectedSignalId={stateMachine.nextStateSignalId}
+        candidates={stringSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.nextStateSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            nextStateSignalId: toggleSignalMapping(stateMachine.nextStateSignalId, enabled, stringSignals)
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...stateMachine, nextStateSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
+      <SignalMapField
+        label="Queue signal"
+        selectedSignalId={stateMachine.queueSignalId}
+        candidates={stringSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.queueSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            queueSignalId: toggleSignalMapping(stateMachine.queueSignalId, enabled, stringSignals)
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...stateMachine, queueSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
+      <SignalMapField
+        label="At-goal signal"
+        selectedSignalId={stateMachine.atGoalSignalId}
+        candidates={boolSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.atGoalSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            atGoalSignalId: toggleSignalMapping(stateMachine.atGoalSignalId, enabled, boolSignals)
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...stateMachine, atGoalSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
+      <SignalMapField
+        label="Transition-count signal"
+        selectedSignalId={stateMachine.transitionCountSignalId}
+        candidates={numericSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.transitionCountSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            transitionCountSignalId: toggleSignalMapping(
+              stateMachine.transitionCountSignalId,
+              enabled,
+              numericSignals
+            )
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) =>
+          setConfig({ ...stateMachine, transitionCountSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
+      <SignalMapField
+        label="Last-transition signal"
+        selectedSignalId={stateMachine.lastTransitionSignalId}
+        candidates={stringSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.lastTransitionSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            lastTransitionSignalId: toggleSignalMapping(
+              stateMachine.lastTransitionSignalId,
+              enabled,
+              stringSignals
+            )
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) =>
+          setConfig({ ...stateMachine, lastTransitionSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
+      <SignalMapField
+        label="Available-states signal"
+        selectedSignalId={stateMachine.availableStatesSignalId}
+        candidates={stringSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.availableStatesSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            availableStatesSignalId: toggleSignalMapping(
+              stateMachine.availableStatesSignalId,
+              enabled,
+              stringSignals
+            )
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) =>
+          setConfig({ ...stateMachine, availableStatesSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
+      <SignalMapField
+        label="Clear-queue action"
+        selectedSignalId={stateMachine.clearQueueCommandSignalId}
+        candidates={actionSignals}
+        {signalById}
+        optional={true}
+        enabled={stateMachine.clearQueueCommandSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...stateMachine,
+            clearQueueCommandSignalId: toggleSignalMapping(
+              stateMachine.clearQueueCommandSignalId,
+              enabled,
+              actionSignals
+            )
+          } satisfies StateMachineWidgetConfig)}
+        onChange={(signalId) =>
+          setConfig({ ...stateMachine, clearQueueCommandSignalId: signalId } satisfies StateMachineWidgetConfig)}
+      />
     </div>
   </section>
 {:else if selectedWidget.kind === 'motor' && primarySignal}
@@ -711,6 +1144,150 @@
               stalledSignalId: toggleSignalMapping(motor.stalledSignalId, enabled, boolSignals)
             } satisfies MotorWidgetConfig)}
           onChange={(signalId) => setConfig({ ...motor, stalledSignalId: signalId } satisfies MotorWidgetConfig)}
+        />
+      </div>
+    </details>
+  </section>
+{:else if selectedWidget.kind === 'dio' && primarySignal}
+  {@const dio = readDioConfig(selectedWidget.config, primarySignal, signals)}
+  <section class="config-block">
+    <h4>DIO</h4>
+    <p class="hint">Maps digital inputs/outputs (buttons, beam breaks, switches, DIO channels).</p>
+    <button
+      class="btn"
+      onclick={() => {
+        const seed = selectedSignal ?? primarySignal;
+        setConfig(readDioConfig(undefined, seed, signals));
+      }}
+    >
+      Auto remap from selected signal
+    </button>
+    <label class="check-row">
+      <input
+        type="checkbox"
+        checked={dio.showOtherFields}
+        onchange={(event) =>
+          setConfig({ ...dio, showOtherFields: (event.currentTarget as HTMLInputElement).checked } satisfies DioWidgetConfig)}
+      />
+      Show Other DIO Fields
+    </label>
+    <div class="row-grid">
+      <SignalMapField
+        label="Value signal"
+        selectedSignalId={dio.valueSignalId}
+        candidates={boolSignals}
+        {signalById}
+        optional={true}
+        enabled={dio.valueSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...dio,
+            valueSignalId: toggleSignalMapping(dio.valueSignalId, enabled, boolSignals)
+          } satisfies DioWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...dio, valueSignalId: signalId } satisfies DioWidgetConfig)}
+      />
+      <SignalMapField
+        label="Output signal"
+        selectedSignalId={dio.outputSignalId}
+        candidates={writableBoolSignals}
+        {signalById}
+        optional={true}
+        enabled={dio.outputSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...dio,
+            outputSignalId: toggleSignalMapping(dio.outputSignalId, enabled, writableBoolSignals)
+          } satisfies DioWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...dio, outputSignalId: signalId } satisfies DioWidgetConfig)}
+      />
+      <SignalMapField
+        label="Inverted signal"
+        selectedSignalId={dio.invertedSignalId}
+        candidates={writableBoolSignals}
+        {signalById}
+        optional={true}
+        enabled={dio.invertedSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...dio,
+            invertedSignalId: toggleSignalMapping(dio.invertedSignalId, enabled, writableBoolSignals)
+          } satisfies DioWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...dio, invertedSignalId: signalId } satisfies DioWidgetConfig)}
+      />
+      <SignalMapField
+        label="Channel signal"
+        selectedSignalId={dio.channelSignalId}
+        candidates={numericSignals}
+        {signalById}
+        optional={true}
+        enabled={dio.channelSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...dio,
+            channelSignalId: toggleSignalMapping(dio.channelSignalId, enabled, numericSignals)
+          } satisfies DioWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...dio, channelSignalId: signalId } satisfies DioWidgetConfig)}
+      />
+      <SignalMapField
+        label="Port signal"
+        selectedSignalId={dio.portSignalId}
+        candidates={numericSignals}
+        {signalById}
+        optional={true}
+        enabled={dio.portSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...dio,
+            portSignalId: toggleSignalMapping(dio.portSignalId, enabled, numericSignals)
+          } satisfies DioWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...dio, portSignalId: signalId } satisfies DioWidgetConfig)}
+      />
+      <SignalMapField
+        label="Mode signal"
+        selectedSignalId={dio.modeSignalId}
+        candidates={modeSignals}
+        {signalById}
+        optional={true}
+        enabled={dio.modeSignalId !== null}
+        onToggleEnabled={(enabled) =>
+          setConfig({
+            ...dio,
+            modeSignalId: toggleSignalMapping(dio.modeSignalId, enabled, modeSignals)
+          } satisfies DioWidgetConfig)}
+        onChange={(signalId) => setConfig({ ...dio, modeSignalId: signalId } satisfies DioWidgetConfig)}
+      />
+    </div>
+
+    <details class="config-collapsible">
+      <summary>Other DIO fields</summary>
+      <div class="row-grid">
+        <SignalMapField
+          label="Name signal"
+          selectedSignalId={dio.nameSignalId}
+          candidates={stringSignals}
+          {signalById}
+          optional={true}
+          enabled={dio.nameSignalId !== null}
+          onToggleEnabled={(enabled) =>
+            setConfig({
+              ...dio,
+              nameSignalId: toggleSignalMapping(dio.nameSignalId, enabled, stringSignals)
+            } satisfies DioWidgetConfig)}
+          onChange={(signalId) => setConfig({ ...dio, nameSignalId: signalId } satisfies DioWidgetConfig)}
+        />
+        <SignalMapField
+          label="Type signal"
+          selectedSignalId={dio.typeSignalId}
+          candidates={stringSignals}
+          {signalById}
+          optional={true}
+          enabled={dio.typeSignalId !== null}
+          onToggleEnabled={(enabled) =>
+            setConfig({
+              ...dio,
+              typeSignalId: toggleSignalMapping(dio.typeSignalId, enabled, stringSignals)
+            } satisfies DioWidgetConfig)}
+          onChange={(signalId) => setConfig({ ...dio, typeSignalId: signalId } satisfies DioWidgetConfig)}
         />
       </div>
     </details>
@@ -1368,8 +1945,8 @@
       Show summary chips
     </label>
 
-    <button class="btn" disabled={selectedSignal?.signal_type !== 'bool'} onclick={addSelectedBoolToMatrix}>
-      Add selected bool signal
+    <button class="btn" disabled={boolSignals.length === 0} onclick={requestStatusMatrixSignalFromExplorer}>
+      Add bool signal from explorer
     </button>
 
     <div class="series-list">
@@ -2432,6 +3009,20 @@
   }
 
   .row-inline input[type='checkbox'] {
+    width: auto;
+    margin: 0;
+  }
+
+  .check-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.34rem;
+    width: fit-content;
+    font-size: 0.68rem;
+    color: var(--text-soft);
+  }
+
+  .check-row input[type='checkbox'] {
     width: auto;
     margin: 0;
   }
