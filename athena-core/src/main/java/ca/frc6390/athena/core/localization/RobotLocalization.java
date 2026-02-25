@@ -1068,10 +1068,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 double odomGate = sustainingSlipEvidence
                         ? WHEELSPIN_ODOM_SUSTAIN_MPS
                         : WHEELSPIN_ODOM_SPEED_MPS;
-                boolean wheelspinCandidate = commandedSpeed > commandGate && odomSpeed > odomGate;
                 boolean contactDetectionEnabled =
                         imuLinearSignalObserved
-                                || wheelspinCandidate
                                 || slipContactComponent >= CONTACT_ASSIST_COMPONENT
                                 || slipMode == SlipMode.SLIP;
                 if (contactDetectionEnabled

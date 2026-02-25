@@ -295,6 +295,34 @@ final class RobotLocalizationSlipSolverTest {
     }
 
     @Test
+    void odomOnlyWheelspinCandidateDoesNotTriggerSlipWithoutImuLinearSignal() throws Exception {
+        TestImu imu = new TestImu();
+
+        RobotSpeeds robotSpeeds = new RobotSpeeds(4.5, Math.PI);
+        robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 2.0, 0.0, 0.0);
+
+        MutableWheelPositions wheelPositions = new MutableWheelPositions();
+        RobotLocalization<DifferentialDriveWheelPositions> localization = new RobotLocalization<>(
+                new DifferentialTestEstimatorFactory(0.62),
+                new RobotLocalizationConfig(),
+                robotSpeeds,
+                imu,
+                wheelPositions::snapshot);
+
+        localization.setLastUpdateTimestampForTest(0.0);
+        localization.setLastFieldPoseForSlipForTest(new Pose2d());
+        localization.setLastFieldVelocityForSlipForTest(new Translation2d());
+        localization.setFieldPoseForTest(new Pose2d(0.20, 0.0, new Rotation2d()));
+
+        localization.updateSlipStateForTest(0.10);
+        Map<String, Object> summary = localization.getDiagnosticsSummary();
+
+        assertFalse(
+                Boolean.TRUE.equals(summary.get("slipActive")),
+                "expected no slip activation when only odometry indicates motion and IMU linear signal has never been observed");
+    }
+
+    @Test
     void highSpeedRubbingUnderSpeedTriggersSlipAssistAndDampsOdom() throws Exception {
         TestImu imu = new TestImu();
         imu.xSpeedMetersPerSecond = 2.4;
