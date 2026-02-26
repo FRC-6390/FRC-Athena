@@ -106,7 +106,9 @@ Native cross-build (without Docker) requires additional linker toolchains:
 
 - `armv7-unknown-linux-gnueabihf` -> `arm-linux-gnueabihf-gcc`
 - `aarch64-unknown-linux-gnu` -> `aarch64-linux-gnu-gcc`
-- `x86_64-pc-windows-gnu` -> `x86_64-w64-mingw32-gcc`
+- `x86_64-pc-windows-gnu` -> `x86_64-w64-mingw32-gcc` (for direct GNU Windows target builds)
+
+Windows host note: without Docker cross-build, the Windows JNI target falls back to `x86_64-pc-windows-msvc` and still stages to `native/windows-x86_64/arcp_jni.dll`.
 
 Host-only native build (fast local dev):
 

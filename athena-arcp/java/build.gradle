@@ -155,6 +155,13 @@ def targetLinkers = [
         'x86_64-pc-windows-gnu'        : 'x86_64-w64-mingw32-gcc'
 ]
 
+def resolveNativeTargetTriple = { String triple ->
+    if (triple == 'x86_64-pc-windows-gnu' && hostOs.isWindows() && !useDockerCross) {
+        return 'x86_64-pc-windows-msvc'
+    }
+    triple
+}
+
 def optionalTargetsRaw = (project.findProperty('arcpOptionalTargets')
         ?: System.getenv('ARCP_OPTIONAL_TARGETS')
         ?: 'armv7-unknown-linux-gnueabihf') as String
@@ -168,12 +175,21 @@ def requireAllTargets = ((project.findProperty('arcpRequireAllTargets')
         ?: 'false') as String).toBoolean()
 
 def hasExecutable = { String executable ->
-    def probe = exec {
-        workingDir rootProject.projectDir
-        commandLine 'bash', '--noprofile', '--norc', '-c', "command -v ${executable} >/dev/null 2>&1"
-        ignoreExitValue = true
+    def probeCommand = hostOs.isWindows()
+            ? ['where', executable]
+            : ['sh', '-c', "command -v ${executable} >/dev/null 2>&1"]
+    try {
+        def probe = exec {
+            workingDir rootProject.projectDir
+            commandLine probeCommand
+            standardOutput = new ByteArrayOutputStream()
+            errorOutput = new ByteArrayOutputStream()
+            ignoreExitValue = true
+        }
+        return probe.exitValue == 0
+    } catch (Exception ignored) {
+        return false
     }
-    probe.exitValue == 0
 }
 
 def ensureExecutableAvailable = { String executable, String context ->
@@ -245,13 +261,14 @@ def checkTargetBuildReadiness = { String triple ->
         return missing
     }
     def missing = [] as List<String>
+    def nativeTriple = resolveNativeTargetTriple(triple)
     if (!hasExecutable('cargo')) {
         missing << 'cargo'
     }
     if (triple != 'host' && !hasExecutable('rustup')) {
         missing << 'rustup'
     }
-    def linker = targetLinkers[triple]
+    def linker = targetLinkers[nativeTriple]
     if (linker != null && !hasExecutable(linker as String)) {
         missing << (linker as String)
     }
@@ -397,6 +414,7 @@ tasks.register('prepareArcpNativeResources') {
             if (info == null) {
                 throw new GradleException("Unsupported ARCP JNI target '${target}'. Known targets: ${knownTargets.keySet().sort().join(', ')}")
             }
+            def nativeTarget = resolveNativeTargetTriple(target)
 
             def missing = checkTargetBuildReadiness(target)
             if (!missing.isEmpty()) {
@@ -410,14 +428,19 @@ tasks.register('prepareArcpNativeResources') {
             }
 
             if (target != 'host' && !useDockerCross) {
-                ensureRustTargetInstalled(target)
+                if (nativeTarget != target) {
+                    logger.lifecycle("ARCP JNI native Windows fallback: ${target} -> ${nativeTarget}")
+                }
+                ensureRustTargetInstalled(nativeTarget)
             }
             if (target != 'host' && useDockerCross) {
                 runCargoBuildDocker(target)
             } else {
-                runCargoBuild(target)
+                runCargoBuild(nativeTarget)
             }
-            File artifact = info.artifactPath()
+            File artifact = (target == 'x86_64-pc-windows-gnu' && nativeTarget == 'x86_64-pc-windows-msvc')
+                    ? new File(rustTargetDir, 'x86_64-pc-windows-msvc/release/arcp_jni.dll')
+                    : info.artifactPath()
             if (!artifact.exists()) {
                 throw new GradleException("Expected ARCP JNI artifact not found for '${target}': ${artifact}")
             }

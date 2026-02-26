@@ -60,11 +60,16 @@ Properties/env:
 - `-ParcpOptionalTargets=triple1,triple2,...` (targets allowed to skip if toolchain is missing)
 - `-ParcpRequireAllTargets=<true|false>` (when true, fail build instead of skipping optional targets)
 
-Native-mode cross-linker prerequisites for Linux targets:
+Native-mode cross-linker prerequisites (non-Docker):
 
 - `armv7-unknown-linux-gnueabihf` -> `arm-linux-gnueabihf-gcc`
 - `aarch64-unknown-linux-gnu` -> `aarch64-linux-gnu-gcc`
-- `x86_64-pc-windows-gnu` -> `x86_64-w64-mingw32-gcc`
+- `x86_64-pc-windows-gnu` -> `x86_64-w64-mingw32-gcc` (required when directly building GNU Windows target)
+
+Windows host behavior:
+
+- With `-ParcpUseDockerCross=true`, Docker is detected with native Windows path lookup (`where docker`).
+- With `-ParcpUseDockerCross=false`, requested `x86_64-pc-windows-gnu` is built as `x86_64-pc-windows-msvc` and still staged to `native/windows-x86_64/arcp_jni.dll`.
 
 Vendor matrix targets:
 
