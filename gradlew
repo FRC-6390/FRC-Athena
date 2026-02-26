@@ -140,6 +140,61 @@ location of your Java installation."
     fi
 fi
 
+# Gradle 8.5 does not support running on Java 25+.
+# Prefer an installed Java 21/17 runtime when available.
+java_version=$("$JAVACMD" -version 2>&1 | sed -n '1s/.*"\([^"]*\)".*/\1/p')
+java_major=${java_version%%.*}
+if [ "$java_major" = "1" ] ; then
+    java_major=$(printf '%s' "$java_version" | cut -d. -f2)
+fi
+case $java_major in
+  ''|*[!0-9]*)
+    java_major=0
+    ;;
+esac
+
+if [ "$java_major" -ge 25 ] ; then
+    for compat_java_home in \
+        "${JAVA21_HOME:-}" \
+        "${JAVA17_HOME:-}" \
+        /usr/lib/jvm/java-21 \
+        /usr/lib/jvm/java-21-openjdk \
+        /usr/lib/jvm/java-17 \
+        /usr/lib/jvm/java-17-openjdk \
+        /usr/lib/jvm/temurin-17-jdk \
+        /usr/lib/jvm/java-17-temurin-jdk \
+        /Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home \
+        /Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home \
+        /Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home \
+        /Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home
+    do
+        if [ -n "$compat_java_home" ] && [ -x "$compat_java_home/bin/java" ] ; then
+            JAVA_HOME=$compat_java_home
+            JAVACMD=$JAVA_HOME/bin/java
+            java_version=$("$JAVACMD" -version 2>&1 | sed -n '1s/.*"\([^"]*\)".*/\1/p')
+            java_major=${java_version%%.*}
+            if [ "$java_major" = "1" ] ; then
+                java_major=$(printf '%s' "$java_version" | cut -d. -f2)
+            fi
+            case $java_major in
+              ''|*[!0-9]*)
+                java_major=0
+                ;;
+            esac
+            if [ "$java_major" -lt 25 ] ; then
+                warn "Gradle 8.5 detected Java ${java_version}; using compatible JAVA_HOME=${JAVA_HOME}."
+                break
+            fi
+        fi
+    done
+fi
+
+if [ "$java_major" -ge 25 ] ; then
+    die "ERROR: Gradle 8.5 cannot run on Java ${java_version}.
+
+Install Java 21 or 17 and set JAVA_HOME (or JAVA21_HOME/JAVA17_HOME), then retry."
+fi
+
 # Increase the maximum file descriptors if we can.
 if ! "$cygwin" && ! "$darwin" && ! "$nonstop" ; then
     case $MAX_FD in #(

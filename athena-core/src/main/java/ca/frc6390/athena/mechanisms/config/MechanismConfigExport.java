@@ -218,7 +218,19 @@ public final class MechanismConfigExport {
                 MechanismConfig.PidProfile p = e.getValue();
                 Double iZone = Double.isFinite(p.iZone()) ? p.iZone() : null;
                 Double toleranceProfile = Double.isFinite(p.tolerance()) ? p.tolerance() : null;
-                pidProfiles.add(new MechanismPidConfig(e.getKey(), p.kP(), p.kI(), p.kD(), iZone, null, toleranceProfile));
+                Double maxVelocity = Double.isFinite(p.maxVelocity()) ? p.maxVelocity() : null;
+                Double maxAcceleration = Double.isFinite(p.maxAcceleration()) ? p.maxAcceleration() : null;
+                pidProfiles.add(new MechanismPidConfig(
+                        e.getKey(),
+                        p.kP(),
+                        p.kI(),
+                        p.kD(),
+                        iZone,
+                        null,
+                        toleranceProfile,
+                        maxVelocity,
+                        maxAcceleration,
+                        formatInputSource(p.source())));
             }
             if (pidProfiles.isEmpty()) {
                 pidProfiles = null;
@@ -241,7 +253,8 @@ public final class MechanismConfigExport {
                         ff.kG(),
                         ff.kV(),
                         ff.kA(),
-                        toleranceProfile));
+                        toleranceProfile,
+                        formatInputSource(ff.source())));
             }
             if (ffProfiles.isEmpty()) {
                 ffProfiles = null;
@@ -262,7 +275,8 @@ public final class MechanismConfigExport {
                         outputProfile,
                         profile.highOutput(),
                         profile.lowOutput(),
-                        profile.tolerance()));
+                        profile.tolerance(),
+                        formatInputSource(profile.source())));
             }
             if (bangBangProfiles.isEmpty()) {
                 bangBangProfiles = null;
@@ -279,6 +293,20 @@ public final class MechanismConfigExport {
                 pidProfiles,
                 bangBangProfiles,
                 ffProfiles);
+    }
+
+    private static String formatInputSource(MechanismConfig.InputSource source) {
+        if (source == null) {
+            return null;
+        }
+        return switch (source.kind()) {
+            case POSITION -> "position";
+            case VELOCITY -> "velocity";
+            case SETPOINT -> "setpoint";
+            case INPUT -> source.inputKey() != null && !source.inputKey().isBlank()
+                    ? "input:" + source.inputKey()
+                    : null;
+        };
     }
 
     private static MechanismSimConfig exportSim(MechanismConfig<?> cfg) {

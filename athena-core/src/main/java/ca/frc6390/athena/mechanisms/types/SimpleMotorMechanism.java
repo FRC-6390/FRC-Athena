@@ -11,7 +11,6 @@ import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 public class SimpleMotorMechanism  extends Mechanism  {
     
     private final SimpleMotorFeedForwardsSendable feedforward;
-    private final OutputType feedforwardOutputType;
 
     public SimpleMotorMechanism(MechanismConfig<? extends SimpleMotorMechanism> config) {
         super(config);
@@ -20,22 +19,10 @@ public class SimpleMotorMechanism  extends Mechanism  {
         SimpleMotorFeedforward feedforward = profile != null ? profile.simple() : null;
         if (feedforward != null) {
             this.feedforward = new SimpleMotorFeedForwardsSendable(feedforward.getKs(), feedforward.getKv(), feedforward.getKa());
-            this.feedforwardOutputType =
-                    profile.outputType() != null ? profile.outputType() : OutputType.VOLTAGE;
             control().feedforwardEnabled(true);
         } else {
             this.feedforward = null;
-            this.feedforwardOutputType = null;
         }
-    }
-
-    @Override
-    public double calculateFeedForward() {
-        if (feedforward == null) {
-            return 0.0;
-        }
-        double valueVolts = feedforward.calculate(controllerSetpointVelocity());
-        return toOutput(feedforwardOutputType, valueVolts);
     }
 
     @Override

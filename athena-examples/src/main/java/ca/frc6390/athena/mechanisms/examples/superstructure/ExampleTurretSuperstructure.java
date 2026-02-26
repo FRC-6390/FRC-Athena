@@ -157,7 +157,11 @@ public final class ExampleTurretSuperstructure {
                                         .gearRatio(100.0)
                                         .conversion(2.0 * Math.PI))))
                         .control(control -> control
-                                .pid("main", OutputType.PERCENT, 2.0, 0.0, 0.1)
+                                .pid("main", p -> p
+                                        .output(OutputType.PERCENT)
+                                        .kp(2.0)
+                                        .ki(0.0)
+                                        .kd(0.1))
                                 .periodic("main"))
                         .constraints(constraints -> constraints.bounds(Math.toRadians(-170.0), Math.toRadians(170.0)))
                         .sim(sim -> sim.simpleMotor(new MechanismConfig.SimpleMotorSimulationParameters()
@@ -181,7 +185,11 @@ public final class ExampleTurretSuperstructure {
                                         .gearRatio(50.0)
                                         .conversion(2.0 * Math.PI))))
                         .control(control -> control
-                                .pid("main", OutputType.PERCENT, 3.0, 0.0, 0.2)
+                                .pid("main", p -> p
+                                        .output(OutputType.PERCENT)
+                                        .kp(3.0)
+                                        .ki(0.0)
+                                        .kd(0.2))
                                 .periodic("main"))
                         .constraints(constraints -> constraints.bounds(Math.toRadians(0.0), Math.toRadians(60.0)))
                         .sim(sim -> sim.arm(new MechanismConfig.ArmSimulationParameters()
@@ -203,8 +211,15 @@ public final class ExampleTurretSuperstructure {
                                         .gearRatio(1.0)
                                         .conversion(2.0 * Math.PI))))
                         .control(control -> control
-                                .ff("mainFF", 0.15, 0.12, 0.0)
-                                .pid("mainPid", OutputType.PERCENT, 0.1, 0.0, 0.0)
+                                .ff("mainFF", ff -> ff
+                                        .simple(0.15, 0.12, 0.0)
+                                        .source(MechanismConfig.InputSource.setpoint))
+                                .pid("mainPid", p -> p
+                                        .output(OutputType.PERCENT)
+                                        .source(MechanismConfig.InputSource.velocity)
+                                        .kp(0.1)
+                                        .ki(0.0)
+                                        .kd(0.0))
                                 .periodic("mainFF")
                                 .periodic("mainPid")
                                 .setpointAsOutput(false))

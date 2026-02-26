@@ -59,6 +59,7 @@ Properties/env:
 - `-ParcpInstallRustTargets=<true|false>` (auto-run `rustup target add` for missing targets)
 - `-ParcpOptionalTargets=triple1,triple2,...` (targets allowed to skip if toolchain is missing)
 - `-ParcpRequireAllTargets=<true|false>` (when true, fail build instead of skipping optional targets)
+- Docker cargo cache is persisted at `athena-arcp/rust/.docker-cache/cargo-home` to avoid full dependency rebuilds between runs (delete it for a clean cache reset).
 
 Native-mode cross-linker prerequisites (non-Docker):
 

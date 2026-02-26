@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core.localization;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -8,6 +9,8 @@ import java.util.function.Consumer;
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.math.numbers.N1;
@@ -252,13 +255,8 @@ public class RobotLocalizationConfig {
             return this;
         }
 
-        public ConfigSection poseConfigs(List<PoseConfig> configs) {
-            applyPoseConfigs(configs);
-            return this;
-        }
-
-        public ConfigSection pose(PoseConfig poseConfig) {
-            addPoseConfig(poseConfig);
+        public ConfigSection pose(String name, Consumer<PoseSection> section) {
+            upsertPoseConfig(buildPoseConfig(name, section));
             return this;
         }
 
@@ -314,6 +312,11 @@ public class RobotLocalizationConfig {
 
         public ConfigSection slipProcessStdDevScale(double value) {
             applySlipProcessStdDevScale(value);
+            return this;
+        }
+
+        public ConfigSection slipDetectionEnabled(boolean enabled) {
+            applySlipDetectionEnabled(enabled);
             return this;
         }
 
@@ -698,6 +701,11 @@ public class RobotLocalizationConfig {
             return this;
         }
 
+        public BackendSection slipDetectionEnabled(boolean enabled) {
+            applySlipDetectionEnabled(enabled);
+            return this;
+        }
+
         public BackendSection imuStrategy(BackendConfig.ImuStrategy strategy) {
             applyImuStrategy(strategy);
             return this;
@@ -750,13 +758,8 @@ public class RobotLocalizationConfig {
     }
 
     public final class PosesSection {
-        public PosesSection poseConfigs(List<PoseConfig> configs) {
-            applyPoseConfigs(configs);
-            return this;
-        }
-
-        public PosesSection pose(PoseConfig poseConfig) {
-            addPoseConfig(poseConfig);
+        public PosesSection pose(String name, Consumer<PoseSection> section) {
+            upsertPoseConfig(buildPoseConfig(name, section));
             return this;
         }
 
@@ -778,6 +781,444 @@ public class RobotLocalizationConfig {
         public PosesSection autoPoseName(String name) {
             applyAutoPoseName(name);
             return this;
+        }
+    }
+
+    public static final class PoseSection {
+        private static final EnumSet<PoseInput> PRESET_DEFAULT_INPUTS = EnumSet.of(
+                PoseInput.ODOMETRY,
+                PoseInput.IMU_YAW,
+                PoseInput.VISION);
+        private static final EnumSet<PoseInput> PRESET_ODOMETRY_INPUTS = EnumSet.of(PoseInput.ODOMETRY);
+        private static final EnumSet<PoseInput> PRESET_VISION_INPUTS = EnumSet.of(PoseInput.VISION);
+
+        private final String name;
+        private PoseFrame frame;
+        private EnumSet<PoseInput> continuousInputs;
+        private EnumSet<PoseInput> onDemandInputs;
+        private PoseConstraints constraints;
+        private BackendConfig backendOverride;
+        private boolean active;
+        private boolean publishToNetworkTables;
+        private Pose2d startPose2d;
+        private Pose3d startPose3d;
+
+        private PoseSection(PoseConfig seed) {
+            PoseConfig resolved = seed != null ? seed : defaultsPreset("field");
+            this.name = resolved.name();
+            this.frame = resolved.frame();
+            this.continuousInputs = copyInputs(resolved.continuousInputs());
+            this.onDemandInputs = copyInputs(resolved.onDemandInputs());
+            this.constraints = resolved.constraints();
+            this.backendOverride = resolved.backendOverride();
+            this.active = resolved.active();
+            this.publishToNetworkTables = resolved.publishToNetworkTables();
+            this.startPose2d = resolved.startPose2d();
+            this.startPose3d = resolved.startPose3d();
+        }
+
+        static PoseSection from(String name, PoseConfig seed) {
+            PoseConfig resolvedSeed = seed != null ? seed : defaultsPreset(name);
+            return new PoseSection(resolvedSeed);
+        }
+
+        public PoseSection defaults() {
+            return applyPreset(defaultsPreset(name));
+        }
+
+        public PoseSection odometry() {
+            return applyPreset(odometryPreset(name));
+        }
+
+        public PoseSection vision() {
+            return applyPreset(visionPreset(name));
+        }
+
+        public PoseSection custom() {
+            return applyPreset(customPreset(name));
+        }
+
+        public PoseSection frame(PoseFrame frame) {
+            this.frame = frame;
+            return this;
+        }
+
+        public PoseSection continuousInputs(EnumSet<PoseInput> inputs) {
+            this.continuousInputs = copyInputs(inputs);
+            return this;
+        }
+
+        public PoseSection continuousInputs(PoseInput... inputs) {
+            this.continuousInputs = copyInputs(inputs);
+            return this;
+        }
+
+        public PoseSection onDemandInputs(EnumSet<PoseInput> inputs) {
+            this.onDemandInputs = copyInputs(inputs);
+            return this;
+        }
+
+        public PoseSection onDemandInputs(PoseInput... inputs) {
+            this.onDemandInputs = copyInputs(inputs);
+            return this;
+        }
+
+        public PoseSection constraints(PoseConstraints constraints) {
+            this.constraints = constraints;
+            return this;
+        }
+
+        public PoseSection constraints(Consumer<PoseConstraintsSection> section) {
+            PoseConstraintsSection builder = PoseConstraintsSection.from(constraints);
+            if (section != null) {
+                section.accept(builder);
+            }
+            this.constraints = builder.build();
+            return this;
+        }
+
+        public PoseSection backend(BackendConfig backendOverride) {
+            this.backendOverride = backendOverride;
+            return this;
+        }
+
+        public PoseSection backend(Consumer<PoseBackendSection> section) {
+            PoseBackendSection builder = PoseBackendSection.from(backendOverride);
+            if (section != null) {
+                section.accept(builder);
+            }
+            this.backendOverride = builder.build();
+            return this;
+        }
+
+        public PoseSection clearBackendOverride() {
+            this.backendOverride = null;
+            return this;
+        }
+
+        public PoseSection active(boolean active) {
+            this.active = active;
+            return this;
+        }
+
+        public PoseSection networkTablesPublishing(boolean publishToNetworkTables) {
+            this.publishToNetworkTables = publishToNetworkTables;
+            return this;
+        }
+
+        public PoseSection publishToNetworkTables(boolean publishToNetworkTables) {
+            return networkTablesPublishing(publishToNetworkTables);
+        }
+
+        public PoseSection startPose(Pose2d pose) {
+            this.startPose2d = pose;
+            this.startPose3d = null;
+            return this;
+        }
+
+        public PoseSection startPose(Pose3d pose) {
+            this.startPose3d = pose;
+            this.startPose2d = null;
+            return this;
+        }
+
+        PoseConfig build() {
+            return new PoseConfig(
+                    name,
+                    frame,
+                    continuousInputs,
+                    onDemandInputs,
+                    constraints,
+                    backendOverride,
+                    active,
+                    publishToNetworkTables,
+                    startPose2d,
+                    startPose3d);
+        }
+
+        private PoseSection applyPreset(PoseConfig preset) {
+            if (preset == null) {
+                return this;
+            }
+            this.frame = preset.frame();
+            this.continuousInputs = copyInputs(preset.continuousInputs());
+            this.onDemandInputs = copyInputs(preset.onDemandInputs());
+            this.constraints = preset.constraints();
+            return this;
+        }
+
+        private static EnumSet<PoseInput> copyInputs(EnumSet<PoseInput> inputs) {
+            return inputs != null ? EnumSet.copyOf(inputs) : EnumSet.noneOf(PoseInput.class);
+        }
+
+        private static EnumSet<PoseInput> copyInputs(PoseInput... inputs) {
+            EnumSet<PoseInput> out = EnumSet.noneOf(PoseInput.class);
+            if (inputs == null) {
+                return out;
+            }
+            for (PoseInput input : inputs) {
+                if (input != null) {
+                    out.add(input);
+                }
+            }
+            return out;
+        }
+
+        private static PoseConfig defaultsPreset(String name) {
+            return preset(name, PRESET_DEFAULT_INPUTS);
+        }
+
+        private static PoseConfig odometryPreset(String name) {
+            return preset(name, PRESET_ODOMETRY_INPUTS);
+        }
+
+        private static PoseConfig visionPreset(String name) {
+            return preset(name, PRESET_VISION_INPUTS);
+        }
+
+        private static PoseConfig customPreset(String name) {
+            return preset(name, EnumSet.noneOf(PoseInput.class));
+        }
+
+        private static PoseConfig preset(String name, EnumSet<PoseInput> continuousInputs) {
+            return new PoseConfig(
+                    name,
+                    PoseFrame.FIELD,
+                    copyInputs(continuousInputs),
+                    EnumSet.noneOf(PoseInput.class),
+                    PoseConstraints.defaults(),
+                    null,
+                    true,
+                    false,
+                    null,
+                    null);
+        }
+    }
+
+    public static final class PoseConstraintsSection {
+        private double minPeriodSeconds;
+        private double maxLatencySeconds;
+        private boolean requireVision;
+        private boolean allowSlip;
+
+        private PoseConstraintsSection(
+                double minPeriodSeconds,
+                double maxLatencySeconds,
+                boolean requireVision,
+                boolean allowSlip) {
+            this.minPeriodSeconds = minPeriodSeconds;
+            this.maxLatencySeconds = maxLatencySeconds;
+            this.requireVision = requireVision;
+            this.allowSlip = allowSlip;
+        }
+
+        static PoseConstraintsSection from(PoseConstraints constraints) {
+            PoseConstraints resolved = constraints != null ? constraints : PoseConstraints.defaults();
+            return new PoseConstraintsSection(
+                    resolved.minPeriodSeconds(),
+                    resolved.maxLatencySeconds(),
+                    resolved.requireVision(),
+                    resolved.allowSlip());
+        }
+
+        public PoseConstraintsSection minPeriodSeconds(double value) {
+            this.minPeriodSeconds = value;
+            return this;
+        }
+
+        public PoseConstraintsSection maxLatencySeconds(double value) {
+            this.maxLatencySeconds = value;
+            return this;
+        }
+
+        public PoseConstraintsSection requireVision(boolean value) {
+            this.requireVision = value;
+            return this;
+        }
+
+        public PoseConstraintsSection allowSlip(boolean value) {
+            this.allowSlip = value;
+            return this;
+        }
+
+        PoseConstraints build() {
+            return new PoseConstraints(minPeriodSeconds, maxLatencySeconds, requireVision, allowSlip);
+        }
+    }
+
+    public static final class PoseBackendSection {
+        private BackendConfig config;
+
+        private PoseBackendSection(BackendConfig config) {
+            this.config = config != null ? config : BackendConfig.defaults();
+        }
+
+        static PoseBackendSection from(BackendConfig config) {
+            return new PoseBackendSection(config);
+        }
+
+        public PoseBackendSection config(BackendConfig backendConfig) {
+            this.config = backendConfig != null ? backendConfig : BackendConfig.defaults();
+            return this;
+        }
+
+        public PoseBackendSection slip(Consumer<PoseBackendSlipSection> section) {
+            PoseBackendSlipSection slipSection = PoseBackendSlipSection.from(config);
+            if (section != null) {
+                section.accept(slipSection);
+            }
+            this.config = slipSection.build();
+            return this;
+        }
+
+        public PoseBackendSection imuStrategy(BackendConfig.ImuStrategy strategy) {
+            config = config.withImuStrategy(strategy);
+            return this;
+        }
+
+        public PoseBackendSection visionStrategy(BackendConfig.VisionStrategy strategy) {
+            config = config.withVisionStrategy(strategy);
+            return this;
+        }
+
+        public PoseBackendSection slipDetectionEnabled(boolean enabled) {
+            config = config.withSlipDetectionEnabled(enabled);
+            return this;
+        }
+
+        public PoseBackendSection slipYawRateThreshold(double value) {
+            config = config.withSlipYawRateThreshold(value);
+            return this;
+        }
+
+        public PoseBackendSection slipYawRateDisagreement(double value) {
+            config = config.withSlipYawRateDisagreement(value);
+            return this;
+        }
+
+        public PoseBackendSection slipAccelThreshold(double value) {
+            config = config.withSlipAccelThreshold(value);
+            return this;
+        }
+
+        public PoseBackendSection slipAccelDisagreement(double value) {
+            config = config.withSlipAccelDisagreement(value);
+            return this;
+        }
+
+        public PoseBackendSection slipHoldSeconds(double value) {
+            config = config.withSlipHoldSeconds(value);
+            return this;
+        }
+
+        public PoseBackendSection slipVisionStdDevScale(double value) {
+            config = config.withSlipVisionStdDevScale(value);
+            return this;
+        }
+
+        public PoseBackendSection slipProcessStdDevScale(double value) {
+            config = config.withSlipProcessStdDevScale(value);
+            return this;
+        }
+
+        public PoseBackendSection visionFusionMaxSeparationSeconds(double value) {
+            config = config.withVisionFusionMaxSeparationSeconds(value);
+            return this;
+        }
+
+        public PoseBackendSection visionFusionMinWeight(double value) {
+            config = config.withVisionFusionMinWeight(value);
+            return this;
+        }
+
+        public PoseBackendSection visionFusionDistanceWeight(double value) {
+            config = config.withVisionFusionDistanceWeight(value);
+            return this;
+        }
+
+        public PoseBackendSection visionFusionLatencyWeight(double value) {
+            config = config.withVisionFusionLatencyWeight(value);
+            return this;
+        }
+
+        public PoseBackendSection visionFusionConfidenceExponent(double value) {
+            config = config.withVisionFusionConfidenceExponent(value);
+            return this;
+        }
+
+        public PoseBackendSection poseJumpMeters(double value) {
+            config = config.withPoseJumpMeters(value);
+            return this;
+        }
+
+        public PoseBackendSection poseJumpHoldSeconds(double value) {
+            config = config.withPoseJumpHoldSeconds(value);
+            return this;
+        }
+
+        public PoseBackendSection poseJumpAgreementMeters(double value) {
+            config = config.withPoseJumpAgreementMeters(value);
+            return this;
+        }
+
+        BackendConfig build() {
+            return config;
+        }
+    }
+
+    public static final class PoseBackendSlipSection {
+        private BackendConfig config;
+
+        private PoseBackendSlipSection(BackendConfig config) {
+            this.config = config != null ? config : BackendConfig.defaults();
+        }
+
+        static PoseBackendSlipSection from(BackendConfig config) {
+            return new PoseBackendSlipSection(config);
+        }
+
+        public PoseBackendSlipSection enabled(boolean enabled) {
+            config = config.withSlipDetectionEnabled(enabled);
+            return this;
+        }
+
+        public PoseBackendSlipSection yawRateThreshold(double value) {
+            config = config.withSlipYawRateThreshold(value);
+            return this;
+        }
+
+        public PoseBackendSlipSection yawRateDisagreement(double value) {
+            config = config.withSlipYawRateDisagreement(value);
+            return this;
+        }
+
+        public PoseBackendSlipSection accelThreshold(double value) {
+            config = config.withSlipAccelThreshold(value);
+            return this;
+        }
+
+        public PoseBackendSlipSection accelDisagreement(double value) {
+            config = config.withSlipAccelDisagreement(value);
+            return this;
+        }
+
+        public PoseBackendSlipSection holdSeconds(double value) {
+            config = config.withSlipHoldSeconds(value);
+            return this;
+        }
+
+        public PoseBackendSlipSection visionStdDevScale(double value) {
+            config = config.withSlipVisionStdDevScale(value);
+            return this;
+        }
+
+        public PoseBackendSlipSection processStdDevScale(double value) {
+            config = config.withSlipProcessStdDevScale(value);
+            return this;
+        }
+
+        BackendConfig build() {
+            return config;
         }
     }
 
@@ -1015,20 +1456,43 @@ public class RobotLocalizationConfig {
         return this;
     }
 
-    private RobotLocalizationConfig applyPoseConfigs(List<PoseConfig> poseConfigs) {
-        this.poseConfigs = poseConfigs != null ? new ArrayList<>(poseConfigs) : new ArrayList<>();
-        return this;
-    }
-
-    private RobotLocalizationConfig addPoseConfig(PoseConfig poseConfig) {
+    private RobotLocalizationConfig upsertPoseConfig(PoseConfig poseConfig) {
         if (poseConfig == null) {
             return this;
         }
         if (poseConfigs == null) {
             poseConfigs = new ArrayList<>();
         }
+        for (int i = 0; i < poseConfigs.size(); i++) {
+            PoseConfig existing = poseConfigs.get(i);
+            if (existing != null && Objects.equals(existing.name(), poseConfig.name())) {
+                poseConfigs.set(i, poseConfig);
+                return this;
+            }
+        }
         poseConfigs.add(poseConfig);
         return this;
+    }
+
+    private PoseConfig buildPoseConfig(String name, Consumer<PoseSection> section) {
+        PoseConfig seed = findPoseConfig(name);
+        PoseSection builder = PoseSection.from(name, seed);
+        if (section != null) {
+            section.accept(builder);
+        }
+        return builder.build();
+    }
+
+    private PoseConfig findPoseConfig(String name) {
+        if (name == null || poseConfigs == null) {
+            return null;
+        }
+        for (PoseConfig poseConfig : poseConfigs) {
+            if (poseConfig != null && Objects.equals(poseConfig.name(), name)) {
+                return poseConfig;
+            }
+        }
+        return null;
     }
 
     private RobotLocalizationConfig applyBoundingBoxes(List<NamedBoundingBox> boundingBoxes) {
@@ -1097,6 +1561,10 @@ public class RobotLocalizationConfig {
 
     private RobotLocalizationConfig applySlipProcessStdDevScale(double slipProcessStdDevScale) {
         return applyBackend(backend().withSlipProcessStdDevScale(slipProcessStdDevScale));
+    }
+
+    private RobotLocalizationConfig applySlipDetectionEnabled(boolean enabled) {
+        return applyBackend(backend().withSlipDetectionEnabled(enabled));
     }
 
     private RobotLocalizationConfig applyImuStrategy(BackendConfig.ImuStrategy imuStrategy) {
@@ -1210,7 +1678,8 @@ public class RobotLocalizationConfig {
             double visionFusionConfidenceExponent,
             double poseJumpMeters,
             double poseJumpHoldSeconds,
-            double poseJumpAgreementMeters) {
+            double poseJumpAgreementMeters,
+            boolean slipDetectionEnabled) {
 
         public enum ImuStrategy {
             VIRTUAL_AXES,
@@ -1242,7 +1711,8 @@ public class RobotLocalizationConfig {
                     1.0,
                     2.0,
                     0.25,
-                    1.0);
+                    1.0,
+                    true);
         }
 
         public BackendConfig withImuStrategy(ImuStrategy imuStrategy) {
@@ -1263,7 +1733,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withVisionStrategy(VisionStrategy visionStrategy) {
@@ -1284,7 +1755,30 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
+        }
+
+        public BackendConfig withSlipDetectionEnabled(boolean slipDetectionEnabled) {
+            return new BackendConfig(
+                    imuStrategy,
+                    visionStrategy,
+                    slipYawRateThreshold,
+                    slipYawRateDisagreement,
+                    slipAccelThreshold,
+                    slipAccelDisagreement,
+                    slipHoldSeconds,
+                    slipVisionStdDevScale,
+                    slipProcessStdDevScale,
+                    visionFusionMaxSeparationSeconds,
+                    visionFusionMinWeight,
+                    visionFusionDistanceWeight,
+                    visionFusionLatencyWeight,
+                    visionFusionConfidenceExponent,
+                    poseJumpMeters,
+                    poseJumpHoldSeconds,
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withSlipYawRateThreshold(double slipYawRateThreshold) {
@@ -1305,7 +1799,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withSlipYawRateDisagreement(double slipYawRateDisagreement) {
@@ -1326,7 +1821,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withSlipAccelThreshold(double slipAccelThreshold) {
@@ -1347,7 +1843,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withSlipAccelDisagreement(double slipAccelDisagreement) {
@@ -1368,7 +1865,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withSlipHoldSeconds(double slipHoldSeconds) {
@@ -1389,7 +1887,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withSlipVisionStdDevScale(double slipVisionStdDevScale) {
@@ -1410,7 +1909,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withSlipProcessStdDevScale(double slipProcessStdDevScale) {
@@ -1431,7 +1931,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withVisionFusionMaxSeparationSeconds(double visionFusionMaxSeparationSeconds) {
@@ -1452,7 +1953,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withVisionFusionMinWeight(double visionFusionMinWeight) {
@@ -1473,7 +1975,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withVisionFusionDistanceWeight(double visionFusionDistanceWeight) {
@@ -1494,7 +1997,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withVisionFusionLatencyWeight(double visionFusionLatencyWeight) {
@@ -1515,7 +2019,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withVisionFusionConfidenceExponent(double visionFusionConfidenceExponent) {
@@ -1536,7 +2041,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withPoseJumpMeters(double poseJumpMeters) {
@@ -1557,7 +2063,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withPoseJumpHoldSeconds(double poseJumpHoldSeconds) {
@@ -1578,7 +2085,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public BackendConfig withPoseJumpAgreementMeters(double poseJumpAgreementMeters) {
@@ -1599,7 +2107,8 @@ public class RobotLocalizationConfig {
                     visionFusionConfidenceExponent,
                     poseJumpMeters,
                     poseJumpHoldSeconds,
-                    poseJumpAgreementMeters);
+                    poseJumpAgreementMeters,
+                    slipDetectionEnabled);
         }
 
         public boolean resolveVisionEnabled(boolean configuredVisionEnabled) {

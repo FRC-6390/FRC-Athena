@@ -241,10 +241,30 @@ public final class MechanismConfigApplier {
                 double ki = profile.kI() != null ? profile.kI() : 0.0;
                 double kd = profile.kD() != null ? profile.kD() : 0.0;
                 double iZone = profile.iZone() != null ? profile.iZone() : Double.NaN;
+                double maxVelocity = profile.maxVelocity() != null ? profile.maxVelocity() : Double.NaN;
+                double maxAcceleration = profile.maxAcceleration() != null ? profile.maxAcceleration() : Double.NaN;
                 double tolerance = profile.tolerance() != null
                         ? profile.tolerance()
                         : (control.tolerance() != null ? control.tolerance() : Double.NaN);
-                target.control(c -> c.pid(profile.name(), pidOutputTypeHintFinal, kp, ki, kd, iZone, tolerance));
+                MechanismConfig.InputSource source = parseInputSource(profile.source());
+                target.control(c -> c.pid(profile.name(), builder -> {
+                    builder.output(pidOutputTypeHintFinal)
+                            .kp(kp)
+                            .ki(ki)
+                            .kd(kd);
+                    if (Double.isFinite(iZone)) {
+                        builder.iZone(iZone);
+                    }
+                    if (Double.isFinite(maxVelocity) || Double.isFinite(maxAcceleration)) {
+                        builder.profiled(maxVelocity, maxAcceleration);
+                    }
+                    if (Double.isFinite(tolerance)) {
+                        builder.tolerance(tolerance);
+                    }
+                    if (source != null) {
+                        builder.source(source);
+                    }
+                }));
             }
         }
 
@@ -266,7 +286,13 @@ public final class MechanismConfigApplier {
                 double highOutput = profile.highOutput() != null ? profile.highOutput() : 1.0;
                 double lowOutput = profile.lowOutput() != null ? profile.lowOutput() : -highOutput;
                 double tolerance = profile.tolerance() != null ? profile.tolerance() : 0.0;
-                target.control(c -> c.bangBang(profile.name(), profileOutput, highOutput, lowOutput, tolerance));
+                MechanismConfig.InputSource source = parseInputSource(profile.source());
+                target.control(c -> c.bangBang(profile.name(), builder -> builder
+                        .output(profileOutput)
+                        .high(highOutput)
+                        .low(lowOutput)
+                        .tolerance(tolerance)
+                        .source(source)));
             }
         }
 
@@ -284,6 +310,7 @@ public final class MechanismConfigApplier {
                 double tolerance = ff.tolerance() != null
                         ? ff.tolerance()
                         : (control.tolerance() != null ? control.tolerance() : Double.NaN);
+                MechanismConfig.InputSource source = parseInputSource(ff.source());
                 target.control(c -> c.ff(ff.name(), builder -> {
                     builder.output(OutputType.VOLTAGE);
                     switch (type) {
@@ -293,6 +320,9 @@ public final class MechanismConfigApplier {
                     }
                     if (Double.isFinite(tolerance)) {
                         builder.tolerance(tolerance);
+                    }
+                    if (source != null) {
+                        builder.source(source);
                     }
                 }));
             }
@@ -394,6 +424,30 @@ public final class MechanismConfigApplier {
             throw new IllegalArgumentException("Bang-bang profile output must be PERCENT or VOLTAGE");
         }
         return parsed;
+    }
+
+    private static MechanismConfig.InputSource parseInputSource(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        String normalized = trimmed.toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "position" -> MechanismConfig.InputSource.position;
+            case "velocity" -> MechanismConfig.InputSource.velocity;
+            case "setpoint" -> MechanismConfig.InputSource.setpoint;
+            default -> {
+                if (normalized.startsWith("input:") || normalized.startsWith("inputs:")) {
+                    int separator = trimmed.indexOf(':');
+                    String key = separator >= 0 ? trimmed.substring(separator + 1).trim() : "";
+                    if (key.isBlank()) {
+                        throw new IllegalArgumentException("Input source key cannot be blank: " + value);
+                    }
+                    yield MechanismConfig.InputSource.input(key);
+                }
+                throw new IllegalArgumentException("Unknown control input source: " + value);
+            }
+        };
     }
 
     private static BlockDirection parseBlockDirection(String value) {

@@ -9,7 +9,6 @@ import edu.wpi.first.math.controller.ArmFeedforward;
 
 public class ArmMechanism extends Mechanism {
     private final ArmFeedforward feedforward;
-    private final OutputType feedforwardOutputType;
 
     public ArmMechanism(MechanismConfig<? extends ArmMechanism> config) {
         super(config);
@@ -17,25 +16,10 @@ public class ArmMechanism extends Mechanism {
                 config != null ? config.mechanismFeedforwardProfile(MechanismConfig.FeedforwardType.ARM) : null;
         if (profile != null) {
             this.feedforward = profile.arm();
-            this.feedforwardOutputType =
-                    profile.outputType() != null ? profile.outputType() : OutputType.VOLTAGE;
             control().feedforwardEnabled(true);
         } else {
             this.feedforward = null;
-            this.feedforwardOutputType = null;
         }
-    }
-
-    @Override
-    public double calculateFeedForward() {
-        if (feedforward == null) {
-            return 0.0;
-        }
-        double valueVolts =
-                feedforward.calculate(
-                        controllerSetpointPosition(),
-                        controllerSetpointVelocity());
-        return toOutput(feedforwardOutputType, valueVolts);
     }
 
     @Override

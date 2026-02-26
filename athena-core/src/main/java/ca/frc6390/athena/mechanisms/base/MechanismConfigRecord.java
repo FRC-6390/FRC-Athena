@@ -5,16 +5,12 @@ import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
-import edu.wpi.first.math.controller.PIDController;
-import edu.wpi.first.math.controller.ProfiledPIDController;
 import java.util.ArrayList;
 import java.util.List;
 
 public record MechanismConfigRecord(
         List<MotorControllerConfig> motors,
         EncoderConfig encoder,
-        PIDController pidController,
-        ProfiledPIDController profiledPIDController,
         boolean useAbsolute,
         boolean useVoltage,
         OutputType outputType,
@@ -64,8 +60,6 @@ public record MechanismConfigRecord(
         return new MechanismConfigRecord(
                 new ArrayList<>(),
                 null,
-                null,
-                null,
                 false,
                 false,
                 OutputType.PERCENT,
@@ -101,8 +95,6 @@ public record MechanismConfigRecord(
     public static final class Builder {
         private List<MotorControllerConfig> motors;
         private EncoderConfig encoder;
-        private PIDController pidController;
-        private ProfiledPIDController profiledPIDController;
         private boolean useAbsolute;
         private boolean useVoltage;
         private OutputType outputType;
@@ -133,8 +125,6 @@ public record MechanismConfigRecord(
         public Builder(MechanismConfigRecord base) {
             this.motors = base.motors();
             this.encoder = base.encoder();
-            this.pidController = base.pidController();
-            this.profiledPIDController = base.profiledPIDController();
             this.useAbsolute = base.useAbsolute();
             this.useVoltage = base.useVoltage();
             this.outputType = base.outputType();
@@ -170,16 +160,6 @@ public record MechanismConfigRecord(
 
         public Builder encoder(EncoderConfig encoder) {
             this.encoder = encoder;
-            return this;
-        }
-
-        public Builder pidController(PIDController pidController) {
-            this.pidController = pidController;
-            return this;
-        }
-
-        public Builder profiledPIDController(ProfiledPIDController profiledPIDController) {
-            this.profiledPIDController = profiledPIDController;
             return this;
         }
 
@@ -319,8 +299,6 @@ public record MechanismConfigRecord(
             return new MechanismConfigRecord(
                     motors,
                     encoder,
-                    pidController,
-                    profiledPIDController,
                     useAbsolute,
                     useVoltage,
                     outputType,

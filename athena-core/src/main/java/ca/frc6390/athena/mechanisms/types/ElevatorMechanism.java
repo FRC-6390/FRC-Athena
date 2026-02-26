@@ -9,7 +9,6 @@ import edu.wpi.first.math.controller.ElevatorFeedforward;
 public class ElevatorMechanism extends Mechanism {
 
     private final ElevatorFeedforward feedforward;
-    private final OutputType feedforwardOutputType;
 
     public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config) {
         super(ElevatorMechanismVisualization.prepare(config));
@@ -17,12 +16,9 @@ public class ElevatorMechanism extends Mechanism {
                 config != null ? config.mechanismFeedforwardProfile(MechanismConfig.FeedforwardType.ELEVATOR) : null;
         if (profile != null) {
             this.feedforward = profile.elevator();
-            this.feedforwardOutputType =
-                    profile.outputType() != null ? profile.outputType() : OutputType.VOLTAGE;
             control().feedforwardEnabled(true);
         } else {
             this.feedforward = null;
-            this.feedforwardOutputType = null;
         }
         if (config.elevatorSimulationParameters() != null) {
             MechanismConfig.ElevatorSimulationParameters params = config.elevatorSimulationParameters();
@@ -45,15 +41,6 @@ public class ElevatorMechanism extends Mechanism {
                 MechanismTravelRange.registerKnownRange(this, min, max);
             }
         }
-    }
-
-    @Override
-    public double calculateFeedForward() {
-        if (feedforward == null) {
-            return 0.0;
-        }
-        double valueVolts = feedforward.calculate(controllerSetpointVelocity());
-        return toOutput(feedforwardOutputType, valueVolts);
     }
 
     @Override

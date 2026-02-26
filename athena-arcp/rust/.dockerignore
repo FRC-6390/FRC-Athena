@@ -1,3 +1,5 @@
 target
 **/target
 .git
+.docker-cache
+**/.docker-cache

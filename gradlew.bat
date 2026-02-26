@@ -41,7 +41,7 @@ if defined JAVA_HOME goto findJavaFromJavaHome
 
 set JAVA_EXE=java.exe
 %JAVA_EXE% -version >NUL 2>&1
-if %ERRORLEVEL% equ 0 goto execute
+if %ERRORLEVEL% equ 0 goto checkJavaCompatibility
 
 echo.
 echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
@@ -55,7 +55,7 @@ goto fail
 set JAVA_HOME=%JAVA_HOME:"=%
 set JAVA_EXE=%JAVA_HOME%/bin/java.exe
 
-if exist "%JAVA_EXE%" goto execute
+if exist "%JAVA_EXE%" goto checkJavaCompatibility
 
 echo.
 echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME%
@@ -64,6 +64,52 @@ echo Please set the JAVA_HOME variable in your environment to match the
 echo location of your Java installation.
 
 goto fail
+
+:checkJavaCompatibility
+call :detectJavaVersion
+if %JAVA_MAJOR% geq 25 goto tryJava21
+goto execute
+
+:tryJava21
+if defined JAVA21_HOME if exist "%JAVA21_HOME%\bin\java.exe" (
+  set JAVA_HOME=%JAVA21_HOME%
+  set JAVA_EXE=%JAVA_HOME%\bin\java.exe
+  call :detectJavaVersion
+  if %JAVA_MAJOR% lss 25 echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
+)
+if %JAVA_MAJOR% geq 25 goto tryJava17
+goto execute
+
+:tryJava17
+if defined JAVA17_HOME if exist "%JAVA17_HOME%\bin\java.exe" (
+  set JAVA_HOME=%JAVA17_HOME%
+  set JAVA_EXE=%JAVA_HOME%\bin\java.exe
+  call :detectJavaVersion
+  if %JAVA_MAJOR% lss 25 echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
+)
+if %JAVA_MAJOR% geq 25 goto javaTooNew
+goto execute
+
+:javaTooNew
+echo.
+echo ERROR: Gradle 8.5 cannot run on Java %JAVA_VERSION%.
+echo.
+echo Install Java 21 or 17 and set JAVA_HOME (or JAVA21_HOME/JAVA17_HOME), then retry.
+echo.
+goto fail
+
+:detectJavaVersion
+set JAVA_VERSION=
+set JAVA_MAJOR=0
+for /f "tokens=3" %%v in ('"%JAVA_EXE%" -version 2^>^&1 ^| findstr /i " version "') do (
+  set JAVA_VERSION=%%~v
+  goto detectJavaVersionDone
+)
+:detectJavaVersionDone
+set JAVA_VERSION=%JAVA_VERSION:"=%
+for /f "tokens=1 delims=." %%m in ("%JAVA_VERSION%") do set JAVA_MAJOR=%%~m
+if "%JAVA_MAJOR%"=="1" for /f "tokens=2 delims=." %%m in ("%JAVA_VERSION%") do set JAVA_MAJOR=%%~m
+exit /b 0
 
 :execute
 @rem Setup the command line

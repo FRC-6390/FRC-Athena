@@ -5,9 +5,11 @@ package ca.frc6390.athena.mechanisms.config;
  *
  * <p>{@code type} should be one of:
  * simple, arm, elevator.
- * The legacy alias {@code simple_motor} is also accepted.
  *
  * <p>Fields not used by a given type are ignored (treated as 0).
+ *
+ * <p>{@code source} supports:
+ * position, velocity, setpoint, or input:&lt;key&gt;.
  */
 public record MechanismFeedforwardConfig(
         String name,
@@ -16,6 +18,17 @@ public record MechanismFeedforwardConfig(
         Double kG,
         Double kV,
         Double kA,
-        Double tolerance
+        Double tolerance,
+        String source
 ) {
+    public MechanismFeedforwardConfig(
+            String name,
+            String type,
+            Double kS,
+            Double kG,
+            Double kV,
+            Double kA,
+            Double tolerance) {
+        this(name, type, kS, kG, kV, kA, tolerance, null);
+    }
 }

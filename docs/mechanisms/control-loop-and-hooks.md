@@ -90,17 +90,26 @@ Use unified control config:
 - `ff(name, builder -> builder.arm(...))`
 - `ff(name, builder -> builder.elevator(...))`
 
+Control loops can declare their runtime input source:
+
+- `pid(name, p -> p.source(InputSource.position))` (or `velocity`, `setpoint`, `input("key")`)
+- `bangBang(name, b -> b.source(...))`
+- `ff(name, f -> f.source(...))`
+- Profiled PID is configured via `pid(name, p -> p.profiled(maxVelocity, maxAcceleration))`.
+- Built-in mechanism PID measurement/controller paths are removed; PID is run through named control loops only.
+- Built-in mechanism feedforward output paths are removed; FF output is produced through named control loops only.
+
+Default sources are:
+
+- PID: `position`
+- Bang-bang: `position`
+- Feedforward: `velocity`
+
 Feedforward profile type enum:
 
 - `SIMPLE`
 - `ARM`
 - `ELEVATOR`
-
-Legacy config alias support:
-
-- `simple_motor` is accepted on import and maps to `SIMPLE`
-
-Preferred exported type key is `simple`.
 
 ## 7. Migration Notes
 

@@ -171,8 +171,6 @@ final class MechanismSysIdConstraintsTest {
         return new Mechanism(
                 new MotorControllerGroup(motor),
                 encoder,
-                null,
-                null,
                 false,
                 true,
                 limitSwitches,

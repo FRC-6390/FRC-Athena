@@ -59,9 +59,4 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
         }
 
     }
-
-    @Override
-    protected double getPidMeasurement() {
-        return velocity();
-    }
 }

@@ -578,8 +578,10 @@ public final class RobotCoreConfig {
             return this;
         }
 
-        public LocalizationSection poseConfig(ca.frc6390.athena.core.localization.PoseConfig poseConfig) {
-            config.poses().pose(poseConfig);
+        public LocalizationSection pose(
+                String name,
+                Consumer<ca.frc6390.athena.core.localization.RobotLocalizationConfig.PoseSection> section) {
+            config.poses().pose(name, section);
             return this;
         }
 

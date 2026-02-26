@@ -15,14 +15,26 @@ final class MechanismPidControlTest {
                         .kp(0.2)
                         .ki(0.0)
                         .kd(0.0)
-                        .constraints(35.0, 120.0))
+                        .profiled(35.0, 120.0))
                 .periodic("profiled"));
 
         MechanismConfig.PidProfile resolved = cfg.controlLoopPidProfiles().get("profiled");
         assertEquals(35.0, resolved.maxVelocity(), 1e-9);
         assertEquals(120.0, resolved.maxAcceleration(), 1e-9);
+        assertEquals(MechanismConfig.InputSource.position, resolved.source());
         assertEquals(1, cfg.controlLoops().size());
         assertEquals("profiled", cfg.controlLoops().get(0).name());
+    }
+
+    @Test
+    void pidBuilderSupportsInputSourceSelection() {
+        MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
+        cfg.control(c -> c.pid("velPid", p -> p
+                .kp(0.2)
+                .source(MechanismConfig.InputSource.velocity)));
+
+        MechanismConfig.PidProfile resolved = cfg.controlLoopPidProfiles().get("velPid");
+        assertEquals(MechanismConfig.InputSource.velocity, resolved.source());
     }
 
     @Test

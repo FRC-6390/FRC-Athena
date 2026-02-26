@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import edu.wpi.first.math.controller.PIDController;
 import org.junit.jupiter.api.Test;
 
 final class MechanismConfigTurretAutoContinuousPidTest {
@@ -13,7 +12,6 @@ final class MechanismConfigTurretAutoContinuousPidTest {
     void enablesContinuousPidWhenUnboundedAndConversionLooksLikeDegrees() {
         MechanismConfigRecord base = MechanismConfigRecord.defaults();
         MechanismConfigRecord cfg = base.toBuilder()
-                .pidController(new PIDController(0.0, 0.0, 0.0))
                 .encoderConversion(360.0)
                 .minBound(Double.NaN)
                 .maxBound(Double.NaN)
@@ -30,7 +28,6 @@ final class MechanismConfigTurretAutoContinuousPidTest {
     void doesNotEnableContinuousPidWhenBoundsAreSet() {
         MechanismConfigRecord base = MechanismConfigRecord.defaults();
         MechanismConfigRecord cfg = base.toBuilder()
-                .pidController(new PIDController(0.0, 0.0, 0.0))
                 .encoderConversion(360.0)
                 .minBound(0.0)
                 .maxBound(270.0)
@@ -45,7 +42,6 @@ final class MechanismConfigTurretAutoContinuousPidTest {
     void doesNotEnableContinuousPidWhenConversionIsInvalid() {
         MechanismConfigRecord base = MechanismConfigRecord.defaults();
         MechanismConfigRecord cfg = base.toBuilder()
-                .pidController(new PIDController(0.0, 0.0, 0.0))
                 .encoderConversion(Double.NaN)
                 .build();
 
@@ -54,4 +50,3 @@ final class MechanismConfigTurretAutoContinuousPidTest {
         assertFalse(out.pidContinous());
     }
 }
-

@@ -34,7 +34,11 @@ final class MechanismBangBangControlTest {
     void controlSectionRegistersAndResolvesBangBangProfiles() {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
         cfg.control(c -> c
-                .bangBang("assist", OutputType.VOLTAGE, 5.0, -3.0, 0.2)
+                .bangBang("assist", bb -> bb
+                        .output(OutputType.VOLTAGE)
+                        .high(5.0)
+                        .low(-3.0)
+                        .tolerance(0.2))
                 .periodic("assist"));
 
         MechanismConfig.BangBangProfile resolved = cfg.controlLoopBangBangProfiles().get("assist");

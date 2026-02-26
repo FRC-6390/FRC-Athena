@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core.localization;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.core.examples.LocalizationExamples;
@@ -20,5 +21,15 @@ final class LocalizationExamplesTest {
         assertEquals(0.45, backend.slipYawRateThreshold(), 1e-9);
         assertEquals(1.2, backend.slipAccelThreshold(), 1e-9);
         assertEquals(0.8, backend.poseJumpMeters(), 1e-9);
+
+        PoseConfig fieldPose = cfg.poseConfigs().stream()
+                .filter(pose -> pose != null && "field".equals(pose.name()))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(fieldPose.publishToNetworkTables());
+        assertFalse(fieldPose.backendOverride().slipDetectionEnabled());
+        assertEquals(
+                RobotLocalizationConfig.BackendConfig.VisionStrategy.DISABLED,
+                fieldPose.backendOverride().visionStrategy());
     }
 }

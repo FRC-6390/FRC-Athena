@@ -24,8 +24,6 @@ final class MechanismSimulationOutputTest {
         Mechanism mechanism = new Mechanism(
                 new MotorControllerGroup(motor),
                 new FakeEncoder(),
-                null,
-                null,
                 false,
                 false,
                 new GenericLimitSwitch[0],

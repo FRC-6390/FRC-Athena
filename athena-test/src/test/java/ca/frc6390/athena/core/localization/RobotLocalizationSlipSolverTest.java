@@ -1,6 +1,7 @@
 package ca.frc6390.athena.core.localization;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
@@ -68,6 +69,50 @@ final class RobotLocalizationSlipSolverTest {
         assertTrue(
                 corrected.getX() < 0.16,
                 "expected slip assist to reduce forward translation under wheel/IMU mismatch");
+    }
+
+    @Test
+    void disabledSlipDetectionKeepsPoseFusionUnmodified() throws Exception {
+        TestImu imu = new TestImu();
+        imu.xSpeedMetersPerSecond = 0.30;
+        imu.ySpeedMetersPerSecond = 0.0;
+
+        RobotSpeeds robotSpeeds = new RobotSpeeds(4.5, Math.PI);
+        robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 2.0, 0.0, 0.0);
+
+        MutableWheelPositions wheelPositions = new MutableWheelPositions();
+        RobotLocalizationConfig config = RobotLocalizationConfig.create()
+                .poses(p -> p.pose("field", pose -> pose
+                        .odometry()
+                        .backend(backend -> backend.slip(slip -> slip.enabled(false)))));
+
+        RobotLocalization<DifferentialDriveWheelPositions> localization = new RobotLocalization<>(
+                new DifferentialTestEstimatorFactory(0.62),
+                config,
+                robotSpeeds,
+                imu,
+                wheelPositions::snapshot);
+
+        localization.setLastUpdateTimestampForTest(0.0);
+        localization.setLastFieldPoseForSlipForTest(new Pose2d());
+        localization.setLastFieldVelocityForSlipForTest(new Translation2d());
+        localization.setFieldPoseForTest(new Pose2d(0.20, 0.0, new Rotation2d()));
+
+        localization.updateSlipStateForTest(0.10);
+        Map<String, Object> summary = localization.getDiagnosticsSummary();
+        assertFalse(
+                Boolean.TRUE.equals(summary.get("slipActive")),
+                "expected slip detection to remain inactive when explicitly disabled");
+        assertEquals("NOMINAL", String.valueOf(summary.get("slipMode")));
+
+        localization.setLastRawEstimatorPoseForSlipFusionForTest(new Pose2d());
+        localization.setLastCorrectedPoseForSlipFusionForTest(new Pose2d());
+        localization.setLastSlipFusionTimestampForTest(0.0);
+        Translation2d corrected = localization.computeSlipAwareFieldTranslationForTest(
+                new Pose2d(0.20, 0.0, new Rotation2d()),
+                new Rotation2d(),
+                0.10);
+        assertEquals(0.20, corrected.getX(), 1e-9);
     }
 
     @Test

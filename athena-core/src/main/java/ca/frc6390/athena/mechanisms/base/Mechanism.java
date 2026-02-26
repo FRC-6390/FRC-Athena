@@ -77,19 +77,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private final MotorControllerGroup motors;
     private final Encoder encoder;
-    private final PIDController pidController;
-    private final ProfiledPIDController profiledPIDController;
     private boolean useAbsolute;
     private OutputType outputType = OutputType.PERCENT;
     private final GenericLimitSwitch[] limitSwitches;
     private static final String MOTION_AXIS_ID = "axis";
     private final MotionLimits motionLimits;
-    private final TrapezoidProfile.Constraints baseProfiledConstraints;
     private boolean override, emergencyStopped, manualEmergencyStopped, connectivityFaultEmergencyStopped,
             pidEnabled, feedforwardEnabled, setpointIsOutput, customPIDCycle;
     private boolean hooksEnabled = true;
     private boolean controlLoopsEnabled = true;
-    private double setpoint, prevSetpoint, pidOutput, feedforwardOutput, output, nudge, pidPeriod; 
+    private double setpoint, pidOutput, feedforwardOutput, output, nudge, pidPeriod; 
     private RobotMode prevRobotMode = RobotMode.DISABLE, robotMode = RobotMode.DISABLE;
     private final MechanismSimulationModel simulationModel;
     private final double simulationUpdatePeriodSeconds;
@@ -303,8 +300,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         } else {
             this.outputType = configOutputType;
         }
-        this.pidController = config.data().pidController();
-        this.profiledPIDController = config.data().profiledPIDController();
         this.override = false;
         this.limitSwitches =
                 config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new);
@@ -324,21 +319,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.simulationSection = new MechanismSimulationSection(this);
         this.networkTablesSection = new MechanismNetworkTablesSection(this);
         this.visualizationSection = new VisualizationSection(this);
-
-        if (pidController != null && config.data().pidContinous()) {
-            pidController.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
-        }
-        if (profiledPIDController != null && config.data().pidContinous()) {
-            profiledPIDController.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
-        }
-
-        if(profiledPIDController != null){
-            profiledPIDController.reset(getPosition(), getVelocity());
-        }
-        this.baseProfiledConstraints =
-                profiledPIDController != null ? profiledPIDController.getConstraints() : null;
-
-        pidEnabled = pidController != null || profiledPIDController != null;
+        pidEnabled = false;
 
         MechanismSimulationModel model = null;
         double updatePeriod = 0.02;
@@ -415,44 +396,61 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (name == null || name.isBlank() || profile == null) {
                     continue;
                 }
-                controlLoopPidProfilesConfig.put(name, profile);
+                MechanismConfig.PidProfile sanitized = new MechanismConfig.PidProfile(
+                        profile.outputType(),
+                        profile.kP(),
+                        profile.kI(),
+                        profile.kD(),
+                        profile.iZone(),
+                        profile.tolerance(),
+                        profile.maxVelocity(),
+                        profile.maxAcceleration(),
+                        profile.autotuner(),
+                        profile.source());
+                controlLoopPidProfilesConfig.put(name, sanitized);
                 OutputType profileOutput = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
                 if (profileOutput != OutputType.PERCENT && profileOutput != OutputType.VOLTAGE) {
                     throw new IllegalStateException("PID profile '" + name + "' output type must be PERCENT or VOLTAGE");
                 }
-                boolean hasProfiledVelocity = Double.isFinite(profile.maxVelocity()) && profile.maxVelocity() > 0.0;
+                boolean hasProfiledVelocity = Double.isFinite(sanitized.maxVelocity()) && sanitized.maxVelocity() > 0.0;
                 boolean hasProfiledAcceleration =
-                        Double.isFinite(profile.maxAcceleration()) && profile.maxAcceleration() > 0.0;
+                        Double.isFinite(sanitized.maxAcceleration()) && sanitized.maxAcceleration() > 0.0;
                 if (hasProfiledVelocity != hasProfiledAcceleration) {
                     throw new IllegalStateException(
                             "PID profile '" + name + "' must define both maxVelocity and maxAcceleration for profiled control");
                 }
                 if (hasProfiledVelocity) {
                     ProfiledPIDController pid = new ProfiledPIDController(
-                            profile.kP(),
-                            profile.kI(),
-                            profile.kD(),
-                            new TrapezoidProfile.Constraints(profile.maxVelocity(), profile.maxAcceleration()));
-                    if (Double.isFinite(profile.iZone()) && profile.iZone() > 0.0) {
-                        pid.setIZone(profile.iZone());
+                            sanitized.kP(),
+                            sanitized.kI(),
+                            sanitized.kD(),
+                            new TrapezoidProfile.Constraints(sanitized.maxVelocity(), sanitized.maxAcceleration()));
+                    if (Double.isFinite(sanitized.iZone()) && sanitized.iZone() > 0.0) {
+                        pid.setIZone(sanitized.iZone());
                     }
-                    if (Double.isFinite(profile.tolerance()) && profile.tolerance() > 0.0) {
-                        pid.setTolerance(profile.tolerance());
+                    if (Double.isFinite(sanitized.tolerance()) && sanitized.tolerance() > 0.0) {
+                        pid.setTolerance(sanitized.tolerance());
+                    }
+                    if (config.data().pidContinous()) {
+                        pid.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
                     }
                     controlLoopProfiledPids.put(name, pid);
                 } else {
-                    PIDController pid = new PIDController(profile.kP(), profile.kI(), profile.kD());
-                    if (Double.isFinite(profile.iZone()) && profile.iZone() > 0.0) {
-                        pid.setIZone(profile.iZone());
+                    PIDController pid = new PIDController(sanitized.kP(), sanitized.kI(), sanitized.kD());
+                    if (Double.isFinite(sanitized.iZone()) && sanitized.iZone() > 0.0) {
+                        pid.setIZone(sanitized.iZone());
                     }
-                    if (Double.isFinite(profile.tolerance()) && profile.tolerance() > 0.0) {
-                        pid.setTolerance(profile.tolerance());
+                    if (Double.isFinite(sanitized.tolerance()) && sanitized.tolerance() > 0.0) {
+                        pid.setTolerance(sanitized.tolerance());
+                    }
+                    if (config.data().pidContinous()) {
+                        pid.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
                     }
                     controlLoopPids.put(name, pid);
                 }
                 controlLoopPidOutputTypes.put(name, profileOutput);
-                controlLoopPidTolerances.put(name, sanitizeControlLoopTolerance(profile.tolerance()));
-                MechanismConfig.PidAutotunerConfig autotuner = profile.autotuner();
+                controlLoopPidTolerances.put(name, sanitizeControlLoopTolerance(sanitized.tolerance()));
+                MechanismConfig.PidAutotunerConfig autotuner = sanitized.autotuner();
                 if (autotuner != null && autotuner.enabled()) {
                     controlLoopPidAutotunerConfigs.put(name, autotuner);
                 }
@@ -478,7 +476,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                                 profileOutput,
                                 sanitizeBangBangLevel(profile.highOutput()),
                                 sanitizeBangBangLevel(profile.lowOutput()),
-                                sanitizeBangBangTolerance(profile.tolerance())));
+                                sanitizeBangBangTolerance(profile.tolerance()),
+                                profile.source()));
             }
         }
         if (config.controlLoopFeedforwardProfiles() != null) {
@@ -501,7 +500,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                         profile.kG(),
                         profile.kV(),
                         profile.kA(),
-                        sanitizeControlLoopTolerance(profile.tolerance()));
+                        sanitizeControlLoopTolerance(profile.tolerance()),
+                        profile.source());
                 controlLoopFeedforwardProfiles.put(name, sanitized);
                 if (profileType == MechanismConfig.FeedforwardType.SIMPLE) {
                     SimpleMotorFeedforward ff = sanitized.simple();
@@ -626,10 +626,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 || "rev:sparkflex".equals(key);
     }
 
-    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
-            ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage,
+    public Mechanism(MotorControllerGroup motors, Encoder encoder,
+            boolean useAbsolute, boolean useVoltage,
             GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod) {
-        this(motors, encoder, pidController, profiledPIDController, useAbsolute, useVoltage, limitSwitches, useSetpointAsOutput, pidPeriod, null, null, null);
+        this(motors, encoder, useAbsolute, useVoltage, limitSwitches, useSetpointAsOutput, pidPeriod, null, null, null);
     }
 
     @Override
@@ -637,8 +637,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return java.util.List.of(this);
     }
 
-    public Mechanism(MotorControllerGroup motors, Encoder encoder, PIDController pidController,
-            ProfiledPIDController profiledPIDController, boolean useAbsolute, boolean useVoltage,
+    public Mechanism(MotorControllerGroup motors, Encoder encoder,
+            boolean useAbsolute, boolean useVoltage,
             GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod,
             MechanismSimulationConfig simulationConfig,
             MechanismVisualizationConfig visualizationConfig,
@@ -646,8 +646,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.sourceConfig = null;
         this.motors = motors;
         this.encoder = encoder;
-        this.pidController = pidController;
-        this.profiledPIDController = profiledPIDController;
         this.useAbsolute = useAbsolute;
         this.outputType = useVoltage ? OutputType.VOLTAGE : OutputType.PERCENT;
         this.override = false;
@@ -668,14 +666,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.simulationSection = new MechanismSimulationSection(this);
         this.networkTablesSection = new MechanismNetworkTablesSection(this);
         this.visualizationSection = new VisualizationSection(this);
-
-        if(profiledPIDController != null){
-            profiledPIDController.reset(getPosition(), getVelocity());
-        }
-        this.baseProfiledConstraints =
-                profiledPIDController != null ? profiledPIDController.getConstraints() : null;
-
-        pidEnabled = pidController != null || profiledPIDController != null;
+        pidEnabled = false;
 
         MechanismSimulationModel model = null;
         double updatePeriod = 0.02;
@@ -1982,6 +1973,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private double readPosition(boolean poll) {
+        if (shouldCustomEncoder && customEncoderPos != null) {
+            return customEncoderPos.getAsDouble();
+        }
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderPosition;
         }
@@ -2114,6 +2108,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private double getPosition(){
+        if (shouldCustomEncoder && customEncoderPos != null) {
+            return customEncoderPos.getAsDouble();
+        }
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderPosition;
         }
@@ -2122,6 +2119,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private double getPosition(boolean poll){
+        if (shouldCustomEncoder && customEncoderPos != null) {
+            return customEncoderPos.getAsDouble();
+        }
         if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
             return simEncoderPosition;
         }
@@ -2156,8 +2156,41 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public boolean atSetpoint(){
-        return (pidController == null || pidController.atSetpoint()) &&
-           (profiledPIDController == null || profiledPIDController.atGoal());
+        double target = getSetpoint() + getNudge();
+
+        for (Map.Entry<String, MechanismConfig.PidProfile> entry : controlLoopPidProfilesConfig.entrySet()) {
+            String name = entry.getKey();
+            MechanismConfig.PidProfile profile = entry.getValue();
+            if (name == null || name.isBlank() || profile == null) {
+                continue;
+            }
+            double tolerance = controlLoopPidTolerances.getOrDefault(name, Double.NaN);
+            if (!Double.isFinite(tolerance) || tolerance < 0.0) {
+                continue;
+            }
+            double measurement = resolveControlLoopInputSource(profile.source(), target);
+            if (!isWithinTolerance(measurement, target, tolerance)) {
+                return false;
+            }
+        }
+
+        for (Map.Entry<String, MechanismConfig.BangBangProfile> entry : controlLoopBangBangs.entrySet()) {
+            String name = entry.getKey();
+            MechanismConfig.BangBangProfile profile = entry.getValue();
+            if (name == null || name.isBlank() || profile == null) {
+                continue;
+            }
+            double tolerance = sanitizeBangBangTolerance(profile.tolerance());
+            if (!Double.isFinite(tolerance) || tolerance < 0.0) {
+                continue;
+            }
+            double measurement = resolveControlLoopInputSource(profile.source(), target);
+            if (!isWithinTolerance(measurement, target, tolerance)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -2223,23 +2256,42 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private double getControllerSetpointVelocity(){
-        return profiledPIDController != null ? profiledPIDController.getSetpoint().velocity : pidController != null ? pidController.getSetpoint() : 0;
+        return 0.0;
     }
 
     private double getControllerSetpointPosition(){
-        return profiledPIDController != null ? profiledPIDController.getSetpoint().position : pidController != null ? pidController.getSetpoint() : 0;
+        return getSetpoint() + getNudge();
     }
 
-    /**
-     * Measurement used by PID loops. Defaults to position; mechanisms may override.
-     */
-    protected double getPidMeasurement() {
-        
-        return shouldCustomEncoder ? customEncoderPos.getAsDouble() : getPosition();
-
+    private double resolveControlLoopInputSource(MechanismConfig.InputSource source, double targetSetpoint) {
+        MechanismConfig.InputSource resolved =
+                source != null ? source : MechanismConfig.InputSource.position;
+        return switch (resolved.kind()) {
+            case POSITION -> position();
+            case VELOCITY -> velocity();
+            case SETPOINT -> targetSetpoint;
+            case INPUT -> readNamedDoubleInput(resolved.inputKey());
+        };
     }
 
-
+    private double readNamedDoubleInput(String key) {
+        if (key == null || key.isBlank()) {
+            return Double.NaN;
+        }
+        Double mutable = mutableDoubleInputs.get(key);
+        if (mutable != null) {
+            return mutable;
+        }
+        DoubleSupplier supplier = controlLoopDoubleInputs.get(key);
+        if (supplier == null) {
+            return Double.NaN;
+        }
+        try {
+            return supplier.getAsDouble();
+        } catch (RuntimeException ex) {
+            return Double.NaN;
+        }
+    }
 
     private boolean isOverride() {
         return override;
@@ -2403,7 +2455,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.tolerance(),
                 profile.maxVelocity(),
                 profile.maxAcceleration(),
-                profile.autotuner()));
+                profile.autotuner(),
+                profile.source()));
     }
 
     private void setControlLoopPidKi(String loopName, double value) {
@@ -2419,7 +2472,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.tolerance(),
                 profile.maxVelocity(),
                 profile.maxAcceleration(),
-                profile.autotuner()));
+                profile.autotuner(),
+                profile.source()));
     }
 
     private void setControlLoopPidKd(String loopName, double value) {
@@ -2435,7 +2489,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.tolerance(),
                 profile.maxVelocity(),
                 profile.maxAcceleration(),
-                profile.autotuner()));
+                profile.autotuner(),
+                profile.source()));
     }
 
     private void setControlLoopPidIZone(String loopName, double value) {
@@ -2451,7 +2506,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.tolerance(),
                 profile.maxVelocity(),
                 profile.maxAcceleration(),
-                profile.autotuner()));
+                profile.autotuner(),
+                profile.source()));
     }
 
     private void updateControlLoopFeedforwardProfile(
@@ -2492,7 +2548,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.kG(),
                 profile.kV(),
                 profile.kA(),
-                profile.tolerance()));
+                profile.tolerance(),
+                profile.source()));
     }
 
     private void setControlLoopFeedforwardKg(String loopName, double value) {
@@ -2506,7 +2563,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 value,
                 profile.kV(),
                 profile.kA(),
-                profile.tolerance()));
+                profile.tolerance(),
+                profile.source()));
     }
 
     private void setControlLoopFeedforwardKv(String loopName, double value) {
@@ -2520,7 +2578,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.kG(),
                 value,
                 profile.kA(),
-                profile.tolerance()));
+                profile.tolerance(),
+                profile.source()));
     }
 
     private void setControlLoopFeedforwardKa(String loopName, double value) {
@@ -2534,7 +2593,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.kG(),
                 profile.kV(),
                 value,
-                profile.tolerance()));
+                profile.tolerance(),
+                profile.source()));
     }
 
     private void updateControlLoopBangBangProfile(
@@ -2558,7 +2618,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                         output,
                         sanitizeBangBangLevel(updated.highOutput()),
                         sanitizeBangBangLevel(updated.lowOutput()),
-                        sanitizeBangBangTolerance(updated.tolerance())));
+                        sanitizeBangBangTolerance(updated.tolerance()),
+                        updated.source()));
     }
 
     private void setControlLoopBangBangHighOutput(String loopName, double value) {
@@ -2569,7 +2630,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.outputType(),
                 value,
                 profile.lowOutput(),
-                profile.tolerance()));
+                profile.tolerance(),
+                profile.source()));
     }
 
     private void setControlLoopBangBangLowOutput(String loopName, double value) {
@@ -2580,7 +2642,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.outputType(),
                 profile.highOutput(),
                 value,
-                profile.tolerance()));
+                profile.tolerance(),
+                profile.source()));
     }
 
     private void setControlLoopBangBangTolerance(String loopName, double value) {
@@ -2591,7 +2654,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.outputType(),
                 profile.highOutput(),
                 profile.lowOutput(),
-                value));
+                value,
+                profile.source()));
     }
 
     protected double percentToOutput(double percent) {
@@ -2759,12 +2823,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.customPIDCycle = customPIDCycle;
     }
 
-    public double calculateFeedForward(){
-        return 0;
-    }
-
-    /**
-     */
     private void setEncoderPosition(double position){
         if(encoder != null){
             encoder.setPosition(position);
@@ -2774,15 +2832,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void resetPID(){
-        if(pidController != null) pidController.reset();
-        if(profiledPIDController != null) profiledPIDController.reset(getPosition(), getVelocity());
+        for (PIDController controller : controlLoopPids.values()) {
+            if (controller != null) {
+                controller.reset();
+            }
+        }
+        for (ProfiledPIDController controller : controlLoopProfiledPids.values()) {
+            if (controller != null) {
+                controller.reset(getPosition(), getVelocity());
+            }
+        }
         this.output = 0;
     }
 
-    private PIDController getPIDController()
-    {
-        return pidController;
-    }
     private double getMin()
     {
         return minBound;
@@ -2790,58 +2852,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private double getMax()
     {
         return maxBound;
-    }
-
-    private double calculatePID(){
-        double output = 0;
-        double encoderPos = getPidMeasurement();
-        double setpoint = getSetpoint();
-        double target = setpoint + getNudge();
-        applyMotionLimits();
-
-        if (pidController != null){
-            output += pidController.calculate(encoderPos, target);
-        }
-
-        if(profiledPIDController != null){
-            if(prevSetpoint != getSetpoint()) resetPID();
-            // Profiled PID is assumed to already be expressed in the mechanism output space.
-            output += profiledPIDController.calculate(encoderPos, getSetpoint() + getNudge());
-        }
-        
-        return output;
-    }
-
-    private void applyMotionLimits() {
-        if (profiledPIDController == null || baseProfiledConstraints == null) {
-            return;
-        }
-        MotionLimits.AxisLimits limits = resolveMotionLimits();
-        double maxVel = baseProfiledConstraints.maxVelocity;
-        double maxAccel = baseProfiledConstraints.maxAcceleration;
-        if (limits != null) {
-            if (limits.maxVelocity() > 0.0) {
-                if (Double.isFinite(maxVel) && maxVel > 0.0) {
-                    maxVel = Math.min(maxVel, limits.maxVelocity());
-                } else {
-                    maxVel = limits.maxVelocity();
-                }
-            }
-            if (limits.maxAcceleration() > 0.0) {
-                if (Double.isFinite(maxAccel) && maxAccel > 0.0) {
-                    maxAccel = Math.min(maxAccel, limits.maxAcceleration());
-                } else {
-                    maxAccel = limits.maxAcceleration();
-                }
-            }
-        }
-        if (!Double.isFinite(maxVel) || maxVel <= 0.0) {
-            maxVel = baseProfiledConstraints.maxVelocity;
-        }
-        if (!Double.isFinite(maxAccel) || maxAccel <= 0.0) {
-            maxAccel = baseProfiledConstraints.maxAcceleration;
-        }
-        profiledPIDController.setConstraints(new TrapezoidProfile.Constraints(maxVel, maxAccel));
     }
 
     private void outputMotor(double output) {
@@ -2854,8 +2864,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public void updatePID(){
-        pidOutput = pidEnabled ? calculatePID() : 0.0;
-        feedforwardOutput = feedforwardEnabled ? calculateFeedForward() : 0.0;
+        pidOutput = 0.0;
+        feedforwardOutput = 0.0;
     }
 
     public void update() {
@@ -2890,8 +2900,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         this.output = output;
-
-        this.prevSetpoint = getSetpoint();
 
         // Apply limit switch encoder zeroing regardless of control mode. Previously, override
         // short-circuited the update loop and would skip zeroing entirely.
@@ -3608,6 +3616,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (pid.outputType() != null) {
                     publisher.put(pidRoot + "/outputType", pid.outputType().name());
                 }
+                if (pid.source() != null) {
+                    publisher.put(pidRoot + "/source", pid.source().toString());
+                }
             }
 
             MechanismConfig.FeedforwardProfile ff = controlLoopFeedforwardProfiles.get(loopName);
@@ -3628,6 +3639,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (ff.type() != null) {
                     publisher.put(ffRoot + "/type", ff.type().name());
                 }
+                if (ff.source() != null) {
+                    publisher.put(ffRoot + "/source", ff.source().toString());
+                }
             }
 
             MechanismConfig.BangBangProfile bangBang = controlLoopBangBangs.get(loopName);
@@ -3641,6 +3655,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 publisher.put(bbRoot + "/tolerance", bangBang.tolerance());
                 if (bangBang.outputType() != null) {
                     publisher.put(bbRoot + "/outputType", bangBang.outputType().name());
+                }
+                if (bangBang.source() != null) {
+                    publisher.put(bbRoot + "/source", bangBang.source().toString());
                 }
             }
         }
@@ -5005,7 +5022,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
             @Override
             public double measurement() {
-                return getPidMeasurement();
+                return resolveControlLoopInputSource(
+                        profile != null ? profile.source() : MechanismConfig.InputSource.position,
+                        getSetpoint() + getNudge());
             }
 
             @Override

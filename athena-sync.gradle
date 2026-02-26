@@ -1,0 +1,271 @@
+import groovy.json.JsonSlurper
+
+/*
+ * Athena sync tasks (isolated + copyable)
+ *
+ * Setup in a new project:
+ * 1) Copy this file to: gradle/athena-sync.gradle
+ * 2) Add to build.gradle:
+ *      apply from: "$rootDir/gradle/athena-sync.gradle"
+ * 3) Run one of:
+ *      ./gradlew athenaSync
+ *      ./gradlew athenaBuild
+ *
+ * Optional overrides:
+ * -PathenaRepoDir=/absolute/path/to/FRC-Athena
+ *     Force the Athena repo location if auto-detect picks the wrong folder.
+ *
+ * -PathenaBuildTasks=build,publishToMavenLocal
+ *     Comma-separated Athena tasks for athenaBuild.
+ *     Example (skip optional Docker/native tasks): -PathenaBuildTasks=:athena-plugin:publishToMavenLocal
+ *
+ * -PathenaRobotBuildFile=/absolute/path/to/build.gradle
+ *     Override which robot build file gets the plugin version update.
+ */
+
+def athenaSyncConfig = [
+        repoDirProperty   : 'athenaRepoDir',
+        repoDirEnv        : 'ATHENA_REPO_DIR',
+        buildTasksProperty: 'athenaBuildTasks',
+        robotBuildProperty: 'athenaRobotBuildFile',
+        defaultBuildTasks : ['build', 'publishToMavenLocal']
+]
+
+def canonicalOrSelf = { File dir ->
+    if (dir == null) {
+        return null
+    }
+    try {
+        return dir.canonicalFile
+    } catch (IOException ignored) {
+        return dir
+    }
+}
+
+def isLikelyAthenaRepo = { File dir ->
+    if (dir == null || !dir.isDirectory()) {
+        return false
+    }
+    def coreVendordep = new File(dir, 'vendordeps/FRC6390-Athena-Core.json')
+    def settingsGroovy = new File(dir, 'settings.gradle')
+    def settingsKts = new File(dir, 'settings.gradle.kts')
+    return coreVendordep.isFile() && (settingsGroovy.isFile() || settingsKts.isFile())
+}
+
+def collectAthenaCandidates = {
+    def candidates = [] as List<File>
+    def addCandidate = { File candidate ->
+        def normalized = canonicalOrSelf(candidate)
+        if (normalized == null) {
+            return
+        }
+        if (!candidates.any { it.absolutePath == normalized.absolutePath }) {
+            candidates << normalized
+        }
+    }
+
+    def repoOverride = project.findProperty(athenaSyncConfig.repoDirProperty)?.toString()?.trim()
+    if (repoOverride) {
+        addCandidate(file(repoOverride))
+    }
+
+    def envOverride = System.getenv(athenaSyncConfig.repoDirEnv)?.toString()?.trim()
+    if (envOverride) {
+        addCandidate(file(envOverride))
+    }
+
+    def userHome = new File(System.getProperty('user.home'))
+    addCandidate(new File(rootDir, '../FRC-Athena'))
+    addCandidate(new File(rootDir, '../frc-athena'))
+    addCandidate(new File(rootDir, '../../FRC-Athena'))
+    addCandidate(new File(rootDir, '../../frc-athena'))
+    addCandidate(new File(userHome, 'Documents/GitHub/FRC-Athena'))
+    addCandidate(new File(userHome, 'GitHub/FRC-Athena'))
+
+    [
+            rootDir.parentFile,
+            rootDir.parentFile?.parentFile,
+            new File(userHome, 'Documents/GitHub'),
+            new File(userHome, 'GitHub')
+    ].findAll { it?.isDirectory() }.each { searchRoot ->
+        searchRoot.listFiles()?.findAll { child ->
+            child.isDirectory() && child.name.equalsIgnoreCase('FRC-Athena')
+        }?.each { addCandidate(it) }
+    }
+
+    return candidates
+}
+
+def resolveAthenaRepoDir = {
+    def candidates = collectAthenaCandidates()
+    def match = candidates.find { isLikelyAthenaRepo(it) }
+    if (match != null) {
+        return match
+    }
+
+    def tried = candidates ? candidates.collect { " - ${it}" }.join(System.lineSeparator()) : ' - (no candidates found)'
+    throw new GradleException(
+            "Could not find FRC-Athena.\n" +
+                    "Set -P${athenaSyncConfig.repoDirProperty}=<path> or ${athenaSyncConfig.repoDirEnv}=<path>.\n" +
+                    "Searched:\n${tried}"
+    )
+}
+
+def resolveAthenaBuildFile = {
+    def override = project.findProperty(athenaSyncConfig.robotBuildProperty)?.toString()?.trim()
+    if (override) {
+        def fileOverride = file(override)
+        if (!fileOverride.isFile()) {
+            throw new GradleException("athenaRobotBuildFile does not exist: ${fileOverride}")
+        }
+        return fileOverride
+    }
+
+    def groovyBuild = file("$rootDir/build.gradle")
+    if (groovyBuild.isFile()) {
+        return groovyBuild
+    }
+
+    def ktsBuild = file("$rootDir/build.gradle.kts")
+    if (ktsBuild.isFile()) {
+        return ktsBuild
+    }
+
+    throw new GradleException("Could not find build.gradle or build.gradle.kts at ${rootDir}")
+}
+
+def readAthenaVersion = { File athenaRepo ->
+    def coreJson = new File(athenaRepo, 'vendordeps/FRC6390-Athena-Core.json')
+    if (!coreJson.isFile()) {
+        throw new GradleException("Missing Athena vendordep file: ${coreJson}")
+    }
+
+    def parsed = new JsonSlurper().parse(coreJson)
+    def version = parsed?.version?.toString()?.trim()
+    if (!version) {
+        throw new GradleException("Could not read Athena version from ${coreJson}")
+    }
+    return version
+}
+
+def copyAthenaVendordeps = { File athenaRepo ->
+    def sourceDir = new File(athenaRepo, 'vendordeps')
+    def targetDir = file("$rootDir/vendordeps")
+
+    if (!sourceDir.isDirectory()) {
+        throw new GradleException("Missing Athena vendordeps directory: ${sourceDir}")
+    }
+
+    def vendordepFiles = sourceDir.listFiles()?.findAll { file ->
+        file.isFile() && (file.name ==~ /FRC6390-Athena-.*\.json/)
+    }?.sort { it.name }
+
+    if (!vendordepFiles || vendordepFiles.isEmpty()) {
+        throw new GradleException("No Athena vendordep files found in ${sourceDir}")
+    }
+
+    targetDir.mkdirs()
+    project.copy {
+        from vendordepFiles
+        into targetDir
+    }
+
+    return vendordepFiles.collect { it.name }
+}
+
+def updatePluginVersion = { String newVersion ->
+    def buildFile = resolveAthenaBuildFile()
+    def fileText = buildFile.getText('UTF-8')
+    def pluginPattern = ~/(?m)(id\s*(?:\(\s*["']ca\.frc6390\.athena\.plugin["']\s*\)|["']ca\.frc6390\.athena\.plugin["'])\s*version\s*["'])([^"']+)(["'])/
+    def matcher = pluginPattern.matcher(fileText)
+
+    if (!matcher.find()) {
+        throw new GradleException("Could not find ca.frc6390.athena.plugin version declaration in ${buildFile}")
+    }
+
+    def currentVersion = matcher.group(2)
+    if (currentVersion == newVersion) {
+        return [buildFile: buildFile, oldVersion: currentVersion, changed: false]
+    }
+
+    def updatedText = fileText.substring(0, matcher.start(2)) + newVersion + fileText.substring(matcher.end(2))
+    buildFile.write(updatedText, 'UTF-8')
+    return [buildFile: buildFile, oldVersion: currentVersion, changed: true]
+}
+
+def resolveAthenaBuildTasks = {
+    def override = project.findProperty(athenaSyncConfig.buildTasksProperty)?.toString()?.trim()
+    def rawTasks = override ? override.split(',') as List<String> : athenaSyncConfig.defaultBuildTasks
+    def tasks = rawTasks.collect { it.trim() }.findAll { !it.isEmpty() }
+    if (tasks.isEmpty()) {
+        throw new GradleException("No Athena build tasks resolved. Set -P${athenaSyncConfig.buildTasksProperty}=task1,task2")
+    }
+    return tasks
+}
+
+def runAthenaBuild = { File athenaRepo ->
+    def taskNames = resolveAthenaBuildTasks()
+    def command = [] as List<String>
+    def javaHomeForChild = new File(System.getProperty('java.home'))
+    if (javaHomeForChild.name.equalsIgnoreCase('jre') && javaHomeForChild.parentFile != null) {
+        javaHomeForChild = javaHomeForChild.parentFile
+    }
+
+    if (System.getProperty('os.name').toLowerCase().contains('win')) {
+        command.addAll(['cmd', '/c', 'gradlew.bat'])
+    } else {
+        command.addAll(['bash', './gradlew'])
+    }
+    command.add('--console=plain')
+    command.addAll(taskNames)
+
+    logger.lifecycle("Running Athena build in ${athenaRepo}: ${command.join(' ')}")
+    project.exec {
+        workingDir athenaRepo
+        commandLine command
+        environment 'JAVA_HOME', javaHomeForChild.absolutePath
+    }
+}
+
+def syncFromAthenaRepo = { File athenaRepo ->
+    def athenaVersion = readAthenaVersion(athenaRepo)
+    def copiedVendordeps = copyAthenaVendordeps(athenaRepo)
+    def pluginUpdate = updatePluginVersion(athenaVersion)
+
+    logger.lifecycle("Athena repo: ${athenaRepo}")
+    logger.lifecycle("Athena version: ${athenaVersion}")
+    logger.lifecycle("Copied ${copiedVendordeps.size()} vendordep file(s): ${copiedVendordeps.join(', ')}")
+    if (pluginUpdate.changed) {
+        logger.lifecycle("Updated plugin version in ${pluginUpdate.buildFile}: ${pluginUpdate.oldVersion} -> ${athenaVersion}")
+    } else {
+        logger.lifecycle("Plugin version already up to date in ${pluginUpdate.buildFile}: ${athenaVersion}")
+    }
+}
+
+tasks.register('athenaFindRepo') {
+    group = 'Athena'
+    description = 'Prints the best-guess FRC-Athena repository path used by sync tasks.'
+    doLast {
+        def repo = resolveAthenaRepoDir()
+        logger.lifecycle("Resolved FRC-Athena repo: ${repo}")
+    }
+}
+
+tasks.register('athenaSync') {
+    group = 'Athena'
+    description = 'Copies latest Athena vendordep JSON files and updates this repo plugin version.'
+    doLast {
+        def athenaRepo = resolveAthenaRepoDir()
+        syncFromAthenaRepo(athenaRepo)
+    }
+}
+
+tasks.register('athenaBuild') {
+    group = 'Athena'
+    description = 'Runs Athena build tasks, then updates vendordeps and plugin version in this repo.'
+    doLast {
+        def athenaRepo = resolveAthenaRepoDir()
+        runAthenaBuild(athenaRepo)
+        syncFromAthenaRepo(athenaRepo)
+    }
+}

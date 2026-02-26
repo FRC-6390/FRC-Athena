@@ -12,7 +12,7 @@ final class MechanismControlLoopDisableTest {
     @Test
     void pidDisableStopsNamedPidLoopOutputImmediately() {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
-        cfg.control(c -> c.pid("hold", 1.0, 0.0, 0.0).periodic("hold"));
+        cfg.control(c -> c.pid("hold", p -> p.kp(1.0).ki(0.0).kd(0.0)).periodic("hold"));
 
         Mechanism mechanism = cfg.build();
         mechanism.control().setpoint(2.0);
@@ -27,7 +27,10 @@ final class MechanismControlLoopDisableTest {
     @Test
     void feedforwardDisableStopsNamedFeedforwardLoopOutputImmediately() {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
-        cfg.control(c -> c.ff("vel", 0.1, 0.5, 0.0).periodic("vel"));
+        cfg.control(c -> c.ff("vel", ff -> ff
+                .simple(0.1, 0.5, 0.0)
+                .source(MechanismConfig.InputSource.setpoint))
+                .periodic("vel"));
 
         Mechanism mechanism = cfg.build();
         mechanism.control().setpoint(4.0);

@@ -928,9 +928,26 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private void updateSlipState(double now) {
-        RobotLocalizationConfig.BackendConfig backend = backendConfig();
+        RobotLocalizationConfig.BackendConfig backend = slipBackendConfig();
         SlipMode previousMode = slipMode;
         boolean previousSlipActive = slipActive;
+        if (!backend.slipDetectionEnabled()) {
+            slipMode = SlipMode.NOMINAL;
+            slipActive = false;
+            slipScore = 0.0;
+            slipScoreRaw = 0.0;
+            slipContactComponent = 0.0;
+            slipReversalComponent = 0.0;
+            imuLinearSignalObserved = false;
+            lastSlipCause = "disabled";
+            lastUpdateTimestamp = now;
+            lastFieldPoseForSlip = fieldPose;
+            lastFieldVelocityForSlip = new Translation2d();
+            lastCommandedVxForSlip = 0.0;
+            lastCommandedVyForSlip = 0.0;
+            updateProcessStdDevScale(0.0, backend);
+            return;
+        }
         if (Double.isFinite(lastUpdateTimestamp)) {
             double dt = now - lastUpdateTimestamp;
             if (dt > 1e-6 && dt <= SLIP_DT_MAX_SECONDS) {
@@ -1143,7 +1160,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         lastUpdateTimestamp = now;
         lastFieldPoseForSlip = fieldPose;
-        updateProcessStdDevScale(slipScore);
+        updateProcessStdDevScale(slipScore, backend);
     }
 
     private ChassisSpeeds combinedCommandedRobotSpeeds(ChassisSpeeds target) {
@@ -1294,11 +1311,19 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private void updateProcessStdDevScale(double slipScoreValue) {
+        updateProcessStdDevScale(slipScoreValue, slipBackendConfig());
+    }
+
+    private void updateProcessStdDevScale(
+            double slipScoreValue,
+            RobotLocalizationConfig.BackendConfig backendOverride) {
         if (processStdDevUpdateFailed) {
             return;
         }
-        RobotLocalizationConfig.BackendConfig backend = backendConfig();
-        double slipTargetScale = backend.slipProcessStdDevScale();
+        RobotLocalizationConfig.BackendConfig backend = backendOverride != null ? backendOverride : backendConfig();
+        double slipTargetScale = backend.slipDetectionEnabled()
+                ? backend.slipProcessStdDevScale()
+                : 1.0;
         if (!Double.isFinite(slipTargetScale) || slipTargetScale <= 0.0) {
             slipTargetScale = 1.0;
         }
@@ -1389,7 +1414,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     }
 
     private PoseConfig defaultPoseConfig() {
-        return PoseConfig.defaults("field");
+        return new PoseConfig(
+                "field",
+                PoseFrame.FIELD,
+                EnumSet.of(PoseInput.ODOMETRY, PoseInput.IMU_YAW, PoseInput.VISION),
+                EnumSet.noneOf(PoseInput.class),
+                PoseConstraints.defaults(),
+                null,
+                true,
+                false,
+                null,
+                null);
     }
 
     public boolean addPoseConfig(PoseConfig config) {
@@ -1438,7 +1473,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (config == null) {
             return false;
         }
-        poseConfigs.put(name, config.withStartPose(pose));
+        poseConfigs.put(name, new PoseConfig(
+                config.name(),
+                config.frame(),
+                config.continuousInputs(),
+                config.onDemandInputs(),
+                config.constraints(),
+                config.backendOverride(),
+                config.active(),
+                config.publishToNetworkTables(),
+                pose,
+                null));
         resetPose(name, pose);
         return true;
     }
@@ -1451,7 +1496,17 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (config == null) {
             return false;
         }
-        poseConfigs.put(name, config.withStartPose(pose));
+        poseConfigs.put(name, new PoseConfig(
+                config.name(),
+                config.frame(),
+                config.continuousInputs(),
+                config.onDemandInputs(),
+                config.constraints(),
+                config.backendOverride(),
+                config.active(),
+                config.publishToNetworkTables(),
+                null,
+                pose));
         resetPose(name, pose);
         return true;
     }
@@ -1505,11 +1560,35 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         if (config == null) {
             return;
         }
-        applyPoseConfigUpdate(config, config.withActive(active));
+        applyPoseConfigUpdate(
+                config,
+                new PoseConfig(
+                        config.name(),
+                        config.frame(),
+                        config.continuousInputs(),
+                        config.onDemandInputs(),
+                        config.constraints(),
+                        config.backendOverride(),
+                        active,
+                        config.publishToNetworkTables(),
+                        config.startPose2d(),
+                        config.startPose3d()));
     }
 
     public boolean setPoseConfigNetworkTablesPublishing(String name, boolean publishToNetworkTables) {
-        return updatePoseConfig(name, config -> config.withNetworkTablesPublishing(publishToNetworkTables));
+        return updatePoseConfig(
+                name,
+                config -> new PoseConfig(
+                        config.name(),
+                        config.frame(),
+                        config.continuousInputs(),
+                        config.onDemandInputs(),
+                        config.constraints(),
+                        config.backendOverride(),
+                        config.active(),
+                        publishToNetworkTables,
+                        config.startPose2d(),
+                        config.startPose3d()));
     }
 
     public boolean isPoseActive(String name) {
@@ -2453,6 +2532,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         return true;
     }
 
+    private RobotLocalizationConfig.BackendConfig slipBackendConfig() {
+        PoseConfig primaryConfig = primaryPoseName != null ? poseConfigs.get(primaryPoseName) : null;
+        return resolveBackendForPose(primaryConfig);
+    }
+
     private RobotLocalizationConfig.BackendConfig resolveBackendForPose(PoseConfig config) {
         if (config == null || config.backendOverride() == null) {
             return backendConfig();
@@ -2578,6 +2662,13 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private Translation2d computeSlipAwareFieldTranslation(Pose2d rawPose, Rotation2d heading, double nowSeconds) {
         Pose2d resolvedRawPose = rawPose != null ? rawPose : ZERO_POSE_2D;
         Rotation2d resolvedHeading = heading != null ? heading : resolvedRawPose.getRotation();
+        RobotLocalizationConfig.BackendConfig backend = slipBackendConfig();
+        if (!backend.slipDetectionEnabled()) {
+            lastRawEstimatorPoseForSlipFusion = resolvedRawPose;
+            lastCorrectedPoseForSlipFusion = resolvedRawPose;
+            lastSlipFusionTimestamp = nowSeconds;
+            return resolvedRawPose.getTranslation();
+        }
         boolean contactAssistActive = slipContactComponent >= CONTACT_ASSIST_COMPONENT;
         boolean reversalAssistActive = slipReversalComponent >= SLIP_REVERSAL_SUSTAIN_COMPONENT * 0.75;
         boolean tractionAssistActive =

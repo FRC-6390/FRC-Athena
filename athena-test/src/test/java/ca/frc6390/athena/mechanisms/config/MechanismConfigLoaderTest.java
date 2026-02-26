@@ -30,6 +30,7 @@ class MechanismConfigLoaderTest {
                 k_p = 1.0
                 k_i = 0.0
                 k_d = 0.0
+                source = "position"
 
                 [[control.bang_bang_profiles]]
                 name = "pos_hold"
@@ -43,6 +44,9 @@ class MechanismConfigLoaderTest {
                 [[control.pid_profiles]]
                 name = "pos"
                 k_p = 2.0
+                source = "velocity"
+                max_velocity = 40.0
+                max_acceleration = 120.0
 
                 [[control.pid_profiles]]
                 name = "alt"
@@ -69,6 +73,9 @@ class MechanismConfigLoaderTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals(2.0, pos.kP());
+        assertEquals("velocity", pos.source());
+        assertEquals(40.0, pos.maxVelocity());
+        assertEquals(120.0, pos.maxAcceleration());
 
         assertNotNull(merged.control().bangBangProfiles());
         assertEquals(2, merged.control().bangBangProfiles().size());

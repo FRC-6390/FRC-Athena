@@ -125,6 +125,8 @@ def dockerRebuildImage = ((project.findProperty('arcpDockerRebuild')
         ?: 'false') as String).toBoolean()
 def dockerfilePath = rootProject.file('athena-arcp/rust/docker/Dockerfile.cross')
 def dockerContextDir = rustWorkspaceDir
+def dockerCacheDir = rootProject.file('athena-arcp/rust/.docker-cache')
+def dockerCargoHomeDir = new File(dockerCacheDir, 'cargo-home')
 def dockerSupportedTargets = [
         'armv7-unknown-linux-gnueabihf',
         'x86_64-unknown-linux-gnu',
@@ -420,6 +422,10 @@ def runCargoBuild = { String triple ->
 def runCargoBuildDocker = { String triple ->
     ensureDockerImageReady()
 
+    if (!dockerCargoHomeDir.exists() && !dockerCargoHomeDir.mkdirs()) {
+        throw new GradleException("Failed to create ARCP Docker cargo cache directory: ${dockerCargoHomeDir}")
+    }
+
     def linkerEnv = [] as List<String>
     switch (triple) {
         case 'armv7-unknown-linux-gnueabihf':
@@ -462,6 +468,9 @@ def runCargoBuildDocker = { String triple ->
     }
 
     command += [
+            '-e', 'CARGO_HOME=/cargo-home',
+            '-e', 'CARGO_TARGET_DIR=/workspace/athena-arcp/rust/target',
+            '-v', "${dockerCargoHomeDir.absolutePath}:/cargo-home",
             '-v', "${rootProject.projectDir.absolutePath}:/workspace",
             '-w', '/workspace/athena-arcp/rust',
     ]

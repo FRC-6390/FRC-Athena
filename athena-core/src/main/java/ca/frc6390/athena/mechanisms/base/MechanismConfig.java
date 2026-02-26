@@ -47,7 +47,6 @@ import ca.frc6390.athena.mechanisms.config.MechanismConfigFile;
 import ca.frc6390.athena.mechanisms.config.MechanismConfigLoader;
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
-import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
@@ -682,6 +681,69 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
+    public static final class InputSource {
+        public enum Kind {
+            POSITION,
+            VELOCITY,
+            SETPOINT,
+            INPUT
+        }
+
+        public static final InputSource position = new InputSource(Kind.POSITION, null);
+        public static final InputSource velocity = new InputSource(Kind.VELOCITY, null);
+        public static final InputSource setpoint = new InputSource(Kind.SETPOINT, null);
+        public static final InputSource POSITION = position;
+        public static final InputSource VELOCITY = velocity;
+        public static final InputSource SETPOINT = setpoint;
+
+        private final Kind kind;
+        private final String inputKey;
+
+        private InputSource(Kind kind, String inputKey) {
+            this.kind = Objects.requireNonNull(kind, "kind");
+            this.inputKey = inputKey;
+        }
+
+        public static InputSource input(String key) {
+            if (key == null || key.isBlank()) {
+                throw new IllegalArgumentException("input source key cannot be blank");
+            }
+            return new InputSource(Kind.INPUT, key.trim());
+        }
+
+        public Kind kind() {
+            return kind;
+        }
+
+        public String inputKey() {
+            return inputKey;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof InputSource other)) {
+                return false;
+            }
+            return kind == other.kind && Objects.equals(inputKey, other.inputKey);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(kind, inputKey);
+        }
+
+        @Override
+        public String toString() {
+            if (kind == Kind.INPUT) {
+                return "input:" + inputKey;
+            }
+            return kind.name().toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
     public static final class ControlSection<T extends Mechanism> {
         private final MechanismConfig<T> owner;
 
@@ -781,29 +843,44 @@ public class MechanismConfig<T extends Mechanism> {
                 throw new IllegalStateException(
                         "Controller name '" + normalizedName + "' collides across control registries");
             }
+            PidProfile pidProfile = hasPid ? owner.controlLoopPidProfiles.get(normalizedName) : null;
+            BangBangProfile bangBangProfile = hasBangBang ? owner.controlLoopBangBangProfiles.get(normalizedName) : null;
             return controlLoop(loopName, periodMs, ctx -> {
-                double measurement = ctx.mechanism().getPidMeasurement();
-                double setpoint =
-                        ctx.mechanism().setpoint() + ctx.mechanism().nudge();
                 double output = 0.0;
                 if (hasPid) {
+                    double measurement = resolveInputSource(
+                            ctx,
+                            pidProfile != null ? pidProfile.source() : InputSource.position);
+                    double setpoint = ctx.mechanism().setpoint() + ctx.mechanism().nudge();
                     output += ctx.pidOut(normalizedName, measurement, setpoint);
                 }
                 if (hasBangBang) {
+                    double measurement = resolveInputSource(
+                            ctx,
+                            bangBangProfile != null ? bangBangProfile.source() : InputSource.position);
+                    double setpoint = ctx.mechanism().setpoint() + ctx.mechanism().nudge();
                     output += ctx.bangBangOut(normalizedName, measurement, setpoint);
                 }
                 if (hasFf) {
-                    // Feedforward expects a velocity target. Position setpoint scaling (for example
-                    // degrees/radians) can explode outputs if treated as velocity.
-                    double velocitySetpoint = 0.0;
-                    ProfiledPIDController profiled = ctx.profiledPid(normalizedName);
-                    if (profiled != null) {
-                        velocitySetpoint = profiled.getSetpoint().velocity;
-                    }
+                    double velocitySetpoint = resolveInputSource(
+                            ctx,
+                            ffProfile != null ? ffProfile.source() : InputSource.velocity);
                     output += ctx.feedforwardOut(normalizedName, velocitySetpoint);
                 }
                 return output;
             });
+        }
+
+        private static double resolveInputSource(
+                MechanismControlContext<?> ctx,
+                InputSource source) {
+            InputSource resolved = source != null ? source : InputSource.position;
+            return switch (resolved.kind()) {
+                case POSITION -> ctx.mechanism().position();
+                case VELOCITY -> ctx.mechanism().velocity();
+                case SETPOINT -> ctx.mechanism().setpoint() + ctx.mechanism().nudge();
+                case INPUT -> ctx.doubleInput(resolved.inputKey());
+            };
         }
 
         private static String normalizeName(String name) {
@@ -818,62 +895,6 @@ public class MechanismConfig<T extends Mechanism> {
             double configured = owner.data.pidPeriod();
             double seconds = (Double.isFinite(configured) && configured > 0.0) ? configured : 0.02;
             return seconds * 1000.0;
-        }
-
-        public ControlSection<T> pid(String name, double kP, double kI, double kD) {
-            return registerPid(
-                    name,
-                    OutputType.PERCENT,
-                    kP,
-                    kI,
-                    kD,
-                    Double.NaN,
-                    Double.NaN,
-                    Double.NaN,
-                    Double.NaN,
-                    PidAutotunerConfig.defaults());
-        }
-
-        public ControlSection<T> pid(String name, OutputType outputType, double kP, double kI, double kD) {
-            return registerPid(
-                    name,
-                    outputType,
-                    kP,
-                    kI,
-                    kD,
-                    Double.NaN,
-                    Double.NaN,
-                    Double.NaN,
-                    Double.NaN,
-                    PidAutotunerConfig.defaults());
-        }
-
-        public ControlSection<T> pid(String name, double kP, double kI, double kD, double iZone, double tolerance) {
-            return registerPid(
-                    name,
-                    OutputType.PERCENT,
-                    kP,
-                    kI,
-                    kD,
-                    iZone,
-                    tolerance,
-                    Double.NaN,
-                    Double.NaN,
-                    PidAutotunerConfig.defaults());
-        }
-
-        public ControlSection<T> pid(String name, OutputType outputType, double kP, double kI, double kD, double iZone, double tolerance) {
-            return registerPid(
-                    name,
-                    outputType,
-                    kP,
-                    kI,
-                    kD,
-                    iZone,
-                    tolerance,
-                    Double.NaN,
-                    Double.NaN,
-                    PidAutotunerConfig.defaults());
         }
 
         public ControlSection<T> pid(String name, Consumer<PidBuilder> builder) {
@@ -892,23 +913,8 @@ public class MechanismConfig<T extends Mechanism> {
                     spec.tolerance,
                     spec.maxVelocity,
                     spec.maxAcceleration,
-                    spec.autotuner);
-        }
-
-        public ControlSection<T> bangBang(String name, double output) {
-            return registerBangBang(name, OutputType.PERCENT, output, -output, 0.0);
-        }
-
-        public ControlSection<T> bangBang(String name, double output, double tolerance) {
-            return registerBangBang(name, OutputType.PERCENT, output, -output, tolerance);
-        }
-
-        public ControlSection<T> bangBang(String name, OutputType outputType, double output, double tolerance) {
-            return registerBangBang(name, outputType, output, -output, tolerance);
-        }
-
-        public ControlSection<T> bangBang(String name, OutputType outputType, double highOutput, double lowOutput, double tolerance) {
-            return registerBangBang(name, outputType, highOutput, lowOutput, tolerance);
+                    spec.autotuner,
+                    spec.source);
         }
 
         public ControlSection<T> bangBang(String name, Consumer<BangBangBuilder> builder) {
@@ -926,55 +932,7 @@ public class MechanismConfig<T extends Mechanism> {
             } else {
                 low = -spec.outputLevel;
             }
-            return registerBangBang(name, spec.outputType, high, low, spec.tolerance);
-        }
-
-        public ControlSection<T> ff(String name, double kS, double kV, double kA) {
-            return registerFeedforward(
-                    name,
-                    OutputType.VOLTAGE,
-                    FeedforwardType.SIMPLE,
-                    kS,
-                    0.0,
-                    kV,
-                    kA,
-                    Double.NaN);
-        }
-
-        public ControlSection<T> ff(String name, double kS, double kV, double kA, double tolerance) {
-            return registerFeedforward(
-                    name,
-                    OutputType.VOLTAGE,
-                    FeedforwardType.SIMPLE,
-                    kS,
-                    0.0,
-                    kV,
-                    kA,
-                    tolerance);
-        }
-
-        public ControlSection<T> ff(String name, OutputType outputType, double kS, double kV, double kA) {
-            return registerFeedforward(
-                    name,
-                    outputType,
-                    FeedforwardType.SIMPLE,
-                    kS,
-                    0.0,
-                    kV,
-                    kA,
-                    Double.NaN);
-        }
-
-        public ControlSection<T> ff(String name, OutputType outputType, double kS, double kV, double kA, double tolerance) {
-            return registerFeedforward(
-                    name,
-                    outputType,
-                    FeedforwardType.SIMPLE,
-                    kS,
-                    0.0,
-                    kV,
-                    kA,
-                    tolerance);
+            return registerBangBang(name, spec.outputType, high, low, spec.tolerance, spec.source);
         }
 
         public ControlSection<T> ff(String name, Consumer<FeedforwardBuilder> builder) {
@@ -991,7 +949,8 @@ public class MechanismConfig<T extends Mechanism> {
                     spec.kG,
                     spec.kV,
                     spec.kA,
-                    spec.tolerance);
+                    spec.tolerance,
+                    spec.source);
         }
 
         private ControlSection<T> registerPid(
@@ -1004,7 +963,8 @@ public class MechanismConfig<T extends Mechanism> {
                 double tolerance,
                 double maxVelocity,
                 double maxAcceleration,
-                PidAutotunerConfig pidAutotuner) {
+                PidAutotunerConfig pidAutotuner,
+                InputSource source) {
             Objects.requireNonNull(name, "name");
             String normalized = normalizeName(name);
             if (normalized == null) {
@@ -1036,7 +996,8 @@ public class MechanismConfig<T extends Mechanism> {
                             tolerance,
                             maxVelocity,
                             maxAcceleration,
-                            pidAutotuner));
+                            pidAutotuner,
+                            source));
             return this;
         }
 
@@ -1045,7 +1006,8 @@ public class MechanismConfig<T extends Mechanism> {
                 OutputType outputType,
                 double highOutput,
                 double lowOutput,
-                double tolerance) {
+                double tolerance,
+                InputSource source) {
             Objects.requireNonNull(name, "name");
             String normalized = normalizeName(name);
             if (normalized == null) {
@@ -1062,7 +1024,8 @@ public class MechanismConfig<T extends Mechanism> {
                             resolvedOutput,
                             highOutput,
                             lowOutput,
-                            tolerance));
+                            tolerance,
+                            source));
             return this;
         }
 
@@ -1074,7 +1037,8 @@ public class MechanismConfig<T extends Mechanism> {
                 double kG,
                 double kV,
                 double kA,
-                double tolerance) {
+                double tolerance,
+                InputSource source) {
             Objects.requireNonNull(name, "name");
             String normalized = normalizeName(name);
             if (normalized == null) {
@@ -1098,7 +1062,8 @@ public class MechanismConfig<T extends Mechanism> {
                             kG,
                             kV,
                             kA,
-                            tolerance));
+                            tolerance,
+                            source));
             return this;
         }
 
@@ -1125,6 +1090,7 @@ public class MechanismConfig<T extends Mechanism> {
             private double maxVelocity = Double.NaN;
             private double maxAcceleration = Double.NaN;
             private PidAutotunerConfig autotuner = PidAutotunerConfig.defaults();
+            private InputSource source = InputSource.position;
 
             public PidBuilder output(OutputType outputType) {
                 this.outputType = outputType != null ? outputType : OutputType.PERCENT;
@@ -1163,6 +1129,22 @@ public class MechanismConfig<T extends Mechanism> {
                 this.maxVelocity = maxVelocity;
                 this.maxAcceleration = maxAcceleration;
                 return this;
+            }
+
+            /**
+             * Enables profiled PID constraints for this PID entry.
+             */
+            public PidBuilder profiled(double maxVelocity, double maxAcceleration) {
+                return constraints(maxVelocity, maxAcceleration);
+            }
+
+            public PidBuilder source(InputSource source) {
+                this.source = source != null ? source : InputSource.position;
+                return this;
+            }
+
+            public PidBuilder sourceInput(String key) {
+                return source(InputSource.input(key));
             }
 
             public PidBuilder autotuner() {
@@ -1237,6 +1219,7 @@ public class MechanismConfig<T extends Mechanism> {
             private double kV = 0.0;
             private double kA = 0.0;
             private double tolerance = Double.NaN;
+            private InputSource source = InputSource.velocity;
 
             public FeedforwardBuilder simple() {
                 this.type = FeedforwardType.SIMPLE;
@@ -1294,6 +1277,15 @@ public class MechanismConfig<T extends Mechanism> {
                 this.tolerance = tolerance;
                 return this;
             }
+
+            public FeedforwardBuilder source(InputSource source) {
+                this.source = source != null ? source : InputSource.velocity;
+                return this;
+            }
+
+            public FeedforwardBuilder sourceInput(String key) {
+                return source(InputSource.input(key));
+            }
         }
 
         public static final class BangBangBuilder {
@@ -1304,6 +1296,7 @@ public class MechanismConfig<T extends Mechanism> {
             private boolean highOutputSet;
             private boolean lowOutputSet;
             private double tolerance = 0.0;
+            private InputSource source = InputSource.position;
 
             public BangBangBuilder output(OutputType outputType) {
                 this.outputType = outputType != null ? outputType : OutputType.PERCENT;
@@ -1330,6 +1323,15 @@ public class MechanismConfig<T extends Mechanism> {
             public BangBangBuilder tolerance(double tolerance) {
                 this.tolerance = tolerance;
                 return this;
+            }
+
+            public BangBangBuilder source(InputSource source) {
+                this.source = source != null ? source : InputSource.position;
+                return this;
+            }
+
+            public BangBangBuilder sourceInput(String key) {
+                return source(InputSource.input(key));
             }
         }
 
@@ -2559,9 +2561,24 @@ public class MechanismConfig<T extends Mechanism> {
             double tolerance,
             double maxVelocity,
             double maxAcceleration,
-            PidAutotunerConfig autotuner) {
+            PidAutotunerConfig autotuner,
+            InputSource source) {
         public PidProfile {
             autotuner = autotuner != null ? autotuner : PidAutotunerConfig.defaults();
+            source = source != null ? source : InputSource.position;
+        }
+
+        public PidProfile(
+                OutputType outputType,
+                double kP,
+                double kI,
+                double kD,
+                double iZone,
+                double tolerance,
+                double maxVelocity,
+                double maxAcceleration,
+                PidAutotunerConfig autotuner) {
+            this(outputType, kP, kI, kD, iZone, tolerance, maxVelocity, maxAcceleration, autotuner, null);
         }
     }
 
@@ -2569,7 +2586,19 @@ public class MechanismConfig<T extends Mechanism> {
             OutputType outputType,
             double highOutput,
             double lowOutput,
-            double tolerance) {
+            double tolerance,
+            InputSource source) {
+        public BangBangProfile {
+            source = source != null ? source : InputSource.position;
+        }
+
+        public BangBangProfile(
+                OutputType outputType,
+                double highOutput,
+                double lowOutput,
+                double tolerance) {
+            this(outputType, highOutput, lowOutput, tolerance, null);
+        }
     }
 
     public enum FeedforwardType {
@@ -2593,7 +2622,7 @@ public class MechanismConfig<T extends Mechanism> {
             }
             String normalized = rawType.trim().toLowerCase(java.util.Locale.ROOT);
             return switch (normalized) {
-                case "simple", "simple_motor", "simple-motor" -> SIMPLE;
+                case "simple" -> SIMPLE;
                 case "arm" -> ARM;
                 case "elevator" -> ELEVATOR;
                 default -> SIMPLE;
@@ -2608,9 +2637,22 @@ public class MechanismConfig<T extends Mechanism> {
             double kG,
             double kV,
             double kA,
-            double tolerance) {
+            double tolerance,
+            InputSource source) {
         public FeedforwardProfile {
             type = type != null ? type : FeedforwardType.SIMPLE;
+            source = source != null ? source : InputSource.velocity;
+        }
+
+        public FeedforwardProfile(
+                OutputType outputType,
+                FeedforwardType type,
+                double kS,
+                double kG,
+                double kV,
+                double kA,
+                double tolerance) {
+            this(outputType, type, kS, kG, kV, kA, tolerance, null);
         }
 
         public SimpleMotorFeedforward simple() {
