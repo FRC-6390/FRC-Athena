@@ -52,7 +52,8 @@ Windows troubleshooting:
 
 - If you see `failed to connect to Docker API at npipe:////./pipe/...`, Docker Desktop is installed but the engine is not running/reachable.
 - Start Docker Desktop and wait until it reports "Engine running", then retry.
-- If you only need host-native ARCP JNI build, disable Docker cross-build:
+- ARCP `host` mode on supported Linux/Windows hosts now uses Docker by default.
+- If you need host-native ARCP JNI build, disable Docker cross-build:
   - `./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=host -ParcpUseDockerCross=false`
 
 ### 2) Install Rust (`rustup`, `cargo`, `rustc`)
@@ -118,10 +119,16 @@ Native cross-build (without Docker) requires additional linker toolchains:
 
 Windows host note: without Docker cross-build, the Windows JNI target falls back to `x86_64-pc-windows-msvc` and still stages to `native/windows-x86_64/arcp_jni.dll`.
 
-Host-only native build (fast local dev):
+Host-mode build (Docker by default on supported Linux/Windows hosts):
 
 ```bash
 ./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=host
+```
+
+Force host-native build (no Docker):
+
+```bash
+./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=host -ParcpUseDockerCross=false
 ```
 
 ## Blank WPILib Project Setup (Required Gradle Changes)

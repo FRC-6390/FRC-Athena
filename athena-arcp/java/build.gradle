@@ -92,6 +92,11 @@ def knownTargets = [
                 fileName    : 'arcp_jni.dll',
                 artifactPath: { -> new File(rustTargetDir, 'x86_64-pc-windows-gnu/release/arcp_jni.dll') }
         ],
+        'x86_64-pc-windows-msvc'       : [
+                resourceDir : 'windows-x86_64',
+                fileName    : 'arcp_jni.dll',
+                artifactPath: { -> new File(rustTargetDir, 'x86_64-pc-windows-msvc/release/arcp_jni.dll') }
+        ],
 ]
 
 def publishTaskRequested = gradle.startParameter.taskNames.any { name ->
@@ -102,7 +107,13 @@ def nativeMode = ((project.findProperty('arcpNativeMode')
         ?: System.getenv('ARCP_NATIVE_MODE')
         ?: (publishTaskRequested ? 'vendor' : 'host')) as String).trim().toLowerCase(Locale.ROOT)
 def explicitTargetsRaw = (project.findProperty('arcpJniTargets') ?: System.getenv('ARCP_JNI_TARGETS')) as String
-def dockerCrossDefault = (nativeMode == 'vendor' || nativeMode == 'full') ? 'true' : 'false'
+def dockerHostSupported = ((hostOs.isLinux() && hostArch in ['arm32', 'x86_64', 'aarch64'])
+        || (hostOs.isWindows() && hostArch == 'x86_64'))
+def dockerCrossDefault = (nativeMode == 'none')
+        ? 'false'
+        : ((nativeMode == 'host')
+        ? (dockerHostSupported ? 'true' : 'false')
+        : 'true')
 def useDockerCross = ((project.findProperty('arcpUseDockerCross')
         ?: System.getenv('ARCP_USE_DOCKER_CROSS')
         ?: dockerCrossDefault) as String).toBoolean()
@@ -160,6 +171,41 @@ def resolveNativeTargetTriple = { String triple ->
         return 'x86_64-pc-windows-msvc'
     }
     triple
+}
+
+def resolveDockerHostTriple = {
+    if (hostOs.isWindows()) {
+        if (hostArch == 'x86_64') {
+            return 'x86_64-pc-windows-gnu'
+        }
+        return null
+    }
+    if (hostOs.isLinux()) {
+        if (hostArch == 'arm32') {
+            return 'armv7-unknown-linux-gnueabihf'
+        }
+        if (hostArch == 'aarch64') {
+            return 'aarch64-unknown-linux-gnu'
+        }
+        if (hostArch == 'x86_64') {
+            return 'x86_64-unknown-linux-gnu'
+        }
+        return null
+    }
+    null
+}
+
+def resolveBuildTripleForTarget = { String requestedTarget ->
+    if (useDockerCross) {
+        if (requestedTarget == 'host') {
+            return resolveDockerHostTriple()
+        }
+        return requestedTarget
+    }
+    if (requestedTarget == 'host') {
+        return 'host'
+    }
+    resolveNativeTargetTriple(requestedTarget)
 }
 
 def optionalTargetsRaw = (project.findProperty('arcpOptionalTargets')
@@ -294,8 +340,8 @@ def ensureDockerImageReady = {
     dockerImageReady = true
 }
 
-def checkTargetBuildReadiness = { String triple ->
-    if (useDockerCross && triple != 'host') {
+def checkTargetBuildReadiness = { String buildTriple ->
+    if (useDockerCross) {
         def missing = [] as List<String>
         if (!hasExecutable('docker')) {
             missing << 'docker'
@@ -304,17 +350,19 @@ def checkTargetBuildReadiness = { String triple ->
                     ? 'docker-daemon(start Docker Desktop or set -ParcpUseDockerCross=false)'
                     : 'docker-daemon(start Docker Engine or set -ParcpUseDockerCross=false)')
         }
-        if (!dockerSupportedTargets.contains(triple)) {
-            missing << "docker-toolchain(${triple})"
+        if (buildTriple == null) {
+            missing << "docker-host-target(unsupported host OS/arch ${System.getProperty('os.name')} ${hostArch}; use -ParcpUseDockerCross=false)"
+        } else if (!dockerSupportedTargets.contains(buildTriple)) {
+            missing << "docker-toolchain(${buildTriple})"
         }
         return missing
     }
     def missing = [] as List<String>
-    def nativeTriple = resolveNativeTargetTriple(triple)
+    def nativeTriple = buildTriple
     if (!hasExecutable('cargo')) {
         missing << 'cargo'
     }
-    if (triple != 'host' && !hasExecutable('rustup')) {
+    if (nativeTriple != 'host' && !hasExecutable('rustup')) {
         missing << 'rustup'
     }
     def linker = targetLinkers[nativeTriple]
@@ -463,9 +511,9 @@ tasks.register('prepareArcpNativeResources') {
             if (info == null) {
                 throw new GradleException("Unsupported ARCP JNI target '${target}'. Known targets: ${knownTargets.keySet().sort().join(', ')}")
             }
-            def nativeTarget = resolveNativeTargetTriple(target)
+            def buildTriple = resolveBuildTripleForTarget(target)
 
-            def missing = checkTargetBuildReadiness(target)
+            def missing = checkTargetBuildReadiness(buildTriple)
             if (!missing.isEmpty()) {
                 def canSkip = optionalTargets.contains(target) && !requireAllTargets
                 if (canSkip) {
@@ -476,20 +524,28 @@ tasks.register('prepareArcpNativeResources') {
                 throw new GradleException("Cannot build ARCP JNI target '${target}'. Missing toolchain: ${missing.join(', ')}. Install toolchain or mark optional with -ParcpOptionalTargets=${target}")
             }
 
-            if (target != 'host' && !useDockerCross) {
-                if (nativeTarget != target) {
-                    logger.lifecycle("ARCP JNI native Windows fallback: ${target} -> ${nativeTarget}")
+            if (!useDockerCross && buildTriple != 'host') {
+                if (buildTriple != target) {
+                    logger.lifecycle("ARCP JNI native fallback: ${target} -> ${buildTriple}")
                 }
-                ensureRustTargetInstalled(nativeTarget)
+                ensureRustTargetInstalled(buildTriple)
             }
-            if (target != 'host' && useDockerCross) {
-                runCargoBuildDocker(target)
+            if (useDockerCross) {
+                if (buildTriple == 'host' || buildTriple == null) {
+                    throw new GradleException("Internal error: Docker build triple resolution failed for '${target}'.")
+                }
+                if (target == 'host') {
+                    logger.lifecycle("ARCP JNI docker host-target mapping: host -> ${buildTriple}")
+                }
+                runCargoBuildDocker(buildTriple)
             } else {
-                runCargoBuild(nativeTarget)
+                runCargoBuild(buildTriple)
             }
-            File artifact = (target == 'x86_64-pc-windows-gnu' && nativeTarget == 'x86_64-pc-windows-msvc')
-                    ? new File(rustTargetDir, 'x86_64-pc-windows-msvc/release/arcp_jni.dll')
-                    : info.artifactPath()
+            def buildInfo = knownTargets[buildTriple]
+            if (buildInfo == null) {
+                throw new GradleException("No artifact mapping for resolved build triple '${buildTriple}' (requested '${target}').")
+            }
+            File artifact = buildInfo.artifactPath()
             if (!artifact.exists()) {
                 throw new GradleException("Expected ARCP JNI artifact not found for '${target}': ${artifact}")
             }

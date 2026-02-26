@@ -53,7 +53,7 @@ Properties/env:
 
 - `-ParcpNativeMode=<host|vendor|full|none>`
 - `-ParcpJniTargets=triple1,triple2,...` (overrides mode matrix)
-- `-ParcpUseDockerCross=<true|false>` (default `true` for `vendor/full`, `false` for `host`)
+- `-ParcpUseDockerCross=<true|false>` (default `true` for `vendor/full` and for `host` on supported Linux/Windows hosts; unsupported host OS/arch defaults to `false`)
 - `-ParcpDockerImage=<tag>` (default `athena-arcp-cross:latest`)
 - `-ParcpDockerRebuild=<true|false>` (force rebuild of cross image)
 - `-ParcpInstallRustTargets=<true|false>` (auto-run `rustup target add` for missing targets)
@@ -69,6 +69,7 @@ Native-mode cross-linker prerequisites (non-Docker):
 Windows host behavior:
 
 - With `-ParcpUseDockerCross=true`, Docker is detected with native Windows path lookup (`where docker`).
+- With `-ParcpUseDockerCross=true`, `host` builds run in Docker too (`host -> x86_64-pc-windows-gnu`) to avoid native host OpenSSL/toolchain issues.
 - With `-ParcpUseDockerCross=false`, requested `x86_64-pc-windows-gnu` is built as `x86_64-pc-windows-msvc` and still staged to `native/windows-x86_64/arcp_jni.dll`.
 - If Docker reports `failed to connect to Docker API at npipe:////./pipe/...`, Docker Desktop is installed but engine is not running/reachable. Start Docker Desktop, or disable Docker cross-build with `-ParcpUseDockerCross=false`.
 
