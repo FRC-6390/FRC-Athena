@@ -45,7 +45,15 @@ Verify:
 ```bash
 docker --version
 docker run --rm hello-world
+docker info
 ```
+
+Windows troubleshooting:
+
+- If you see `failed to connect to Docker API at npipe:////./pipe/...`, Docker Desktop is installed but the engine is not running/reachable.
+- Start Docker Desktop and wait until it reports "Engine running", then retry.
+- If you only need host-native ARCP JNI build, disable Docker cross-build:
+  - `./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=host -ParcpUseDockerCross=false`
 
 ### 2) Install Rust (`rustup`, `cargo`, `rustc`)
 

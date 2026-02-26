@@ -192,6 +192,50 @@ def hasExecutable = { String executable ->
     }
 }
 
+def dockerDaemonReachable = null
+def dockerDaemonError = null
+
+def checkDockerDaemonReachable = {
+    if (dockerDaemonReachable != null) {
+        return dockerDaemonReachable
+    }
+    def stdout = new ByteArrayOutputStream()
+    def stderr = new ByteArrayOutputStream()
+    try {
+        def probe = exec {
+            workingDir rootProject.projectDir
+            commandLine 'docker', 'info'
+            standardOutput = stdout
+            errorOutput = stderr
+            ignoreExitValue = true
+        }
+        dockerDaemonReachable = (probe.exitValue == 0)
+    } catch (Exception ignored) {
+        dockerDaemonReachable = false
+    }
+    if (!dockerDaemonReachable) {
+        dockerDaemonError = stderr.toString('UTF-8').trim()
+        if (dockerDaemonError == null || dockerDaemonError.isEmpty()) {
+            dockerDaemonError = stdout.toString('UTF-8').trim()
+        }
+    } else {
+        dockerDaemonError = null
+    }
+    dockerDaemonReachable
+}
+
+def ensureDockerDaemonReachable = { String context ->
+    if (!checkDockerDaemonReachable()) {
+        def hostHint = hostOs.isWindows()
+                ? "Start Docker Desktop and wait for \"Engine running\", or disable Docker cross-build with -ParcpUseDockerCross=false."
+                : "Start Docker Engine and ensure your user can access it, or disable Docker cross-build with -ParcpUseDockerCross=false."
+        def detail = (dockerDaemonError != null && !dockerDaemonError.isEmpty())
+                ? "\nDocker CLI output: ${dockerDaemonError}"
+                : ""
+        throw new GradleException("Docker is installed but Docker daemon is not reachable for ${context}. ${hostHint}${detail}")
+    }
+}
+
 def ensureExecutableAvailable = { String executable, String context ->
     if (!hasExecutable(executable)) {
         throw new GradleException("Missing required executable '${executable}' for ${context}. Install the cross toolchain or override targets with -ParcpJniTargets=...")
@@ -217,6 +261,7 @@ def dockerImageReady = false
 
 def ensureDockerImageReady = {
     ensureExecutableAvailable('docker', 'ARCP Docker cross-build')
+    ensureDockerDaemonReachable('ARCP Docker cross-build')
     if (!dockerfilePath.exists()) {
         throw new GradleException("Missing ARCP Dockerfile: ${dockerfilePath}")
     }
@@ -254,6 +299,10 @@ def checkTargetBuildReadiness = { String triple ->
         def missing = [] as List<String>
         if (!hasExecutable('docker')) {
             missing << 'docker'
+        } else if (!checkDockerDaemonReachable()) {
+            missing << (hostOs.isWindows()
+                    ? 'docker-daemon(start Docker Desktop or set -ParcpUseDockerCross=false)'
+                    : 'docker-daemon(start Docker Engine or set -ParcpUseDockerCross=false)')
         }
         if (!dockerSupportedTargets.contains(triple)) {
             missing << "docker-toolchain(${triple})"

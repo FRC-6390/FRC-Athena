@@ -70,6 +70,7 @@ Windows host behavior:
 
 - With `-ParcpUseDockerCross=true`, Docker is detected with native Windows path lookup (`where docker`).
 - With `-ParcpUseDockerCross=false`, requested `x86_64-pc-windows-gnu` is built as `x86_64-pc-windows-msvc` and still staged to `native/windows-x86_64/arcp_jni.dll`.
+- If Docker reports `failed to connect to Docker API at npipe:////./pipe/...`, Docker Desktop is installed but engine is not running/reachable. Start Docker Desktop, or disable Docker cross-build with `-ParcpUseDockerCross=false`.
 
 Vendor matrix targets:
 
