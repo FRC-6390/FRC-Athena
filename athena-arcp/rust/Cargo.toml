@@ -26,3 +26,6 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+[patch.crates-io]
+nt_client = { path = "vendor/nt_client" }
