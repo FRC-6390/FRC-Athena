@@ -8,9 +8,12 @@ Host-side desktop dashboard for ARCP.
 2. `bun install`
 3. `bun run tauri:dev`
 
+Windows note:
+- `tauri` launch scripts are cross-platform; no WSL/Bash is required.
+
 Linux Wayland note:
 - If your compositor/driver stack throws GTK/WebKit protocol errors, the launcher auto-falls back to X11 compatibility.
-- To force native Wayland anyway: `ARCP_TAURI_WAYLAND=1 bun run tauri dev`
+- To force native Wayland anyway: `ARCP_TAURI_WAYLAND=1 bun run tauri:dev`
 
 For realistic runtime numbers, run your ARCP server and dashboard in release where applicable.
 

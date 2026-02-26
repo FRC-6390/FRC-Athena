@@ -108,7 +108,7 @@ features = [
 
 [dependencies.tokio-tungstenite]
 version = "0.23.1"
-features = ["rustls-tls-native-roots"]
+features = ["native-tls"]
 
 [dependencies.tracing]
 version = "0.1.40"

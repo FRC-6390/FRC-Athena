@@ -426,11 +426,19 @@ def runCargoBuildDocker = { String triple ->
             linkerEnv += ['-e', 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc']
             linkerEnv += ['-e', 'CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc']
             linkerEnv += ['-e', 'AR_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar']
+            linkerEnv += ['-e', 'ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR=/usr/lib/arm-linux-gnueabihf']
+            linkerEnv += ['-e', 'ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_INCLUDE_DIR=/usr/include']
             break
         case 'aarch64-unknown-linux-gnu':
             linkerEnv += ['-e', 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc']
             linkerEnv += ['-e', 'CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc']
             linkerEnv += ['-e', 'AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar']
+            linkerEnv += ['-e', 'AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu']
+            linkerEnv += ['-e', 'AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include']
+            break
+        case 'x86_64-unknown-linux-gnu':
+            linkerEnv += ['-e', 'X86_64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu']
+            linkerEnv += ['-e', 'X86_64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include']
             break
         case 'x86_64-pc-windows-gnu':
             linkerEnv += ['-e', 'CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc']
