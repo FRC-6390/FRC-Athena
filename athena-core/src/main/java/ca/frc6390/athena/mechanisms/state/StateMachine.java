@@ -15,6 +15,7 @@ import ca.frc6390.athena.mechanisms.statespec.StateCtx;
 import ca.frc6390.athena.mechanisms.statespec.StateSeed;
 import ca.frc6390.athena.mechanisms.statespec.StateSeedProvider;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -43,6 +44,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
     private final Queue<StateQueueEntry<E>> stateQueue = new LinkedList<>();
     private StateGraph<E> stateGraph;
     private double goalStateEnteredSeconds;
+    private boolean arcpAppendMode;
 
     public StateMachine(E initialState, BooleanSupplier atStateSupplier){
         chooser.setDefaultOption(initialState.name(), initialState);
@@ -53,6 +55,7 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         this.goalStateEnteredSeconds = Timer.getFPGATimestamp();
         this.changeStateSupplier = () -> true;
         this.atGoalDelayedOutput = new DelayedOutput(atStateSupplier, 0);
+        this.arcpAppendMode = false;
         queue(initialState);
     }
 
@@ -314,5 +317,59 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         node.putBoolean("shouldChangeState", shouldChangeState());
         node.putBoolean("atGoalState", atGoal());
         return node;
+    }
+
+    public void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        publisher.writableString(rootPath + "/goalState").onSet(this::applyArcpGoalState);
+        publisher.writableBoolean(rootPath + "/appendMode").onSetBoolean(append -> arcpAppendMode = append);
+        publisher.command(rootPath + "/command/clearQueue").onInvoke(this::resetQueue);
+
+        E goal = getGoalState();
+        E next = getNextState();
+        publisher.put(rootPath + "/currentState", goal != null ? goal.name() : "");
+        publisher.put(rootPath + "/goalState", goal != null ? goal.name() : "");
+        publisher.put(rootPath + "/nextState", next != null ? next.name() : "");
+        publisher.put(rootPath + "/queue", getNextStateQueue());
+        publisher.put(rootPath + "/shouldChangeState", shouldChangeState());
+        publisher.put(rootPath + "/atGoalState", atGoal());
+        publisher.put(rootPath + "/appendMode", arcpAppendMode);
+
+        E[] states = goal != null ? goal.getDeclaringClass().getEnumConstants() : null;
+        if (states != null && states.length > 0) {
+            String[] names = new String[states.length];
+            for (int i = 0; i < states.length; i++) {
+                names[i] = states[i] != null ? states[i].name() : "";
+            }
+            publisher.put(rootPath + "/availableStates", names);
+        } else {
+            publisher.put(rootPath + "/availableStates", new String[0]);
+        }
+    }
+
+    private void applyArcpGoalState(String rawState) {
+        if (rawState == null || rawState.isBlank() || goalState == null) {
+            return;
+        }
+        Class<?> enumClass = goalState.getDeclaringClass();
+        Object[] constants = enumClass.getEnumConstants();
+        if (constants == null || constants.length == 0) {
+            return;
+        }
+        String requested = rawState.trim();
+        for (Object constant : constants) {
+            if (!(constant instanceof Enum<?> value)) {
+                continue;
+            }
+            if (!value.name().equalsIgnoreCase(requested)) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            E typed = (E) value;
+            force(typed, arcpAppendMode);
+            return;
+        }
     }
 }

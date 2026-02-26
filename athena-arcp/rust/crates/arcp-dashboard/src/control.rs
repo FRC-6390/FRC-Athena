@@ -224,6 +224,31 @@ impl ControlClient {
         Ok(names)
     }
 
+    pub fn delete_layout(&mut self, name: &str) -> io::Result<()> {
+        validate_layout_name(name)?;
+        self.write_line(&format!("LAYOUT_DELETE {name}"))?;
+        let response = self.read_line_trimmed()?;
+        if response == "OK LAYOUT_DELETE" {
+            return Ok(());
+        }
+        if response == "ERR LAYOUT_DELETE" {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("layout '{name}' not found"),
+            ));
+        }
+        if response == "ERR UNKNOWN" {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "server does not support LAYOUT_DELETE",
+            ));
+        }
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unexpected LAYOUT_DELETE response: {response}"),
+        ))
+    }
+
     pub fn manifest(&mut self) -> io::Result<Vec<ManifestItem>> {
         self.write_line("MANIFEST")?;
         let begin = self.read_line_trimmed()?;

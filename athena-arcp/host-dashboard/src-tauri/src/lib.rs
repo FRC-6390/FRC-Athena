@@ -460,6 +460,20 @@ fn list_server_layouts(runtime: State<'_, AppRuntime>) -> Result<Vec<String>, St
 }
 
 #[tauri::command]
+fn delete_server_layout(runtime: State<'_, AppRuntime>, layout_name: String) -> Result<(), String> {
+    let session_slot = runtime
+        .session
+        .lock()
+        .map_err(|_| String::from("runtime lock poisoned"))?;
+    let session = session_slot
+        .as_ref()
+        .ok_or_else(|| String::from("not connected"))?;
+    with_control_client(session, "LAYOUT_DELETE", |client| {
+        client.delete_layout(layout_name.trim())
+    })
+}
+
+#[tauri::command]
 fn window_mode_snapshot(
     runtime: State<'_, AppRuntime>,
     window: Window,
@@ -757,6 +771,7 @@ pub fn run() {
             save_server_layout,
             load_server_layout,
             list_server_layouts,
+            delete_server_layout,
             window_mode_snapshot,
             set_presentation_mode,
             set_driverstation_dock_mode,

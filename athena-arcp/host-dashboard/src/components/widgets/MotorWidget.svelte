@@ -52,6 +52,35 @@
     return signalById.get(signalId) ?? null;
   }
 
+  function normalizePathForScope(path: string): string {
+    return path
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/\/+/g, '/')
+      .replace(/^\/+|\/+$/g, '')
+      .toLowerCase();
+  }
+
+  function canonicalPathForScope(path: string): string {
+    return normalizePathForScope(path)
+      .split('/')
+      .map((segment) => segment.replace(/[^a-z0-9]/g, ''))
+      .filter((segment) => segment.length > 0)
+      .join('/');
+  }
+
+  function pathInScope(path: string, scope: string): boolean {
+    if (!scope) return true;
+    const normalizedPath = normalizePathForScope(path);
+    if (normalizedPath === scope || normalizedPath.startsWith(`${scope}/`)) {
+      return true;
+    }
+    const canonicalPath = canonicalPathForScope(path);
+    const canonicalScope = canonicalPathForScope(scope);
+    if (!canonicalScope) return true;
+    return canonicalPath === canonicalScope || canonicalPath.startsWith(`${canonicalScope}/`);
+  }
+
   function numberFor(signalId: number | null): number | null {
     const row = rowFor(signalId);
     if (!row) return null;
@@ -140,6 +169,30 @@
     );
   }
 
+  function findSiblingByTokens(
+    tokens: string[],
+    allowTypes: string[],
+    excludeTokens: string[] = []
+  ): SignalRow | null {
+    const normalizedTokens = tokens.map((entry) => normalizeToken(entry));
+    const normalizedExcludes = excludeTokens.map((entry) => normalizeToken(entry));
+    for (const row of siblingSignals) {
+      if (!allowTypes.includes(row.signal_type)) continue;
+      const token = normalizeToken(leafPath(row.path));
+      if (normalizedExcludes.some((candidate) => token.includes(candidate) || token.endsWith(candidate))) continue;
+      if (normalizedTokens.includes(token)) return row;
+    }
+    for (const row of siblingSignals) {
+      if (!allowTypes.includes(row.signal_type)) continue;
+      const token = normalizeToken(leafPath(row.path));
+      if (normalizedExcludes.some((candidate) => token.includes(candidate) || token.endsWith(candidate))) continue;
+      if (normalizedTokens.some((candidate) => token.includes(candidate) || token.endsWith(candidate))) {
+        return row;
+      }
+    }
+    return null;
+  }
+
   function parseFloatDraft(raw: string): number | null {
     const numeric = Number(raw.trim());
     return Number.isFinite(numeric) ? numeric : null;
@@ -165,30 +218,81 @@
     onSendSet(row.signal_id, valueRaw);
   }
 
-  const motorParentPath = $derived(parentPath(signal.path));
+  const topicPath = $derived(
+    typeof configRaw?.topicPath === 'string' ? configRaw.topicPath.trim() : ''
+  );
+  const motorParentPath = $derived(topicPath || parentPath(signal.path));
+  const normalizedMotorParentPath = $derived(normalizePathForScope(motorParentPath));
+
+  function rowForMotorScoped(signalId: number | null): SignalRow | null {
+    const row = rowFor(signalId);
+    if (!row) return null;
+    if (!normalizedMotorParentPath) return row;
+    return pathInScope(row.path, normalizedMotorParentPath) ? row : null;
+  }
 
   const siblingSignals = $derived.by(() =>
     signals
-      .filter((entry) => parentPath(entry.path) === motorParentPath)
+      .filter((entry) => pathInScope(entry.path, normalizedMotorParentPath))
       .sort((a, b) => a.path.localeCompare(b.path))
   );
 
-  const canIdRow = $derived(rowFor(config.canIdSignalId));
-  const canbusRow = $derived(rowFor(config.canbusSignalId));
-  const typeRow = $derived(rowFor(config.typeSignalId));
-  const connectedRow = $derived(rowFor(config.connectedSignalId));
-  const stalledRow = $derived(rowFor(config.stalledSignalId));
-  const neutralModeRow = $derived(rowFor(config.neutralModeSignalId));
-  const currentLimitRow = $derived(rowFor(config.currentLimitSignalId));
-  const invertedRow = $derived(rowFor(config.invertedSignalId));
-  const brakeModeRow = $derived(rowFor(config.brakeModeSignalId));
-  const outputRow = $derived(rowFor(config.outputSignalId));
-  const velocityRow = $derived(rowFor(config.velocitySignalId));
-  const positionRow = $derived(rowFor(config.positionSignalId));
-  const currentRow = $derived(rowFor(config.currentSignalId));
-  const temperatureRow = $derived(rowFor(config.temperatureSignalId));
-  const voltageRow = $derived(rowFor(config.voltageSignalId));
-  const explicitCommandRow = $derived(rowFor(config.commandSignalId));
+  const canIdRow = $derived(
+    rowForMotorScoped(config.canIdSignalId) ?? findSiblingByTokens(['can_id', 'canid', 'id'], ['f64', 'i64'])
+  );
+  const canbusRow = $derived(
+    rowForMotorScoped(config.canbusSignalId) ?? findSiblingByTokens(['canbus', 'bus'], ['string'])
+  );
+  const typeRow = $derived(
+    rowForMotorScoped(config.typeSignalId) ?? findSiblingByTokens(['type', 'motortype', 'controller'], ['string'])
+  );
+  const connectedRow = $derived(
+    rowForMotorScoped(config.connectedSignalId) ?? findSiblingByTokens(['connected', 'online', 'alive'], ['bool'])
+  );
+  const stalledRow = $derived(
+    rowForMotorScoped(config.stalledSignalId) ?? findSiblingByTokens(['stalled', 'stall'], ['bool'])
+  );
+  const neutralModeRow = $derived(
+    rowForMotorScoped(config.neutralModeSignalId) ?? findSiblingByTokens(['neutral_mode', 'neutralmode'], ['string', 'bool'])
+  );
+  const currentLimitRow = $derived(
+    rowForMotorScoped(config.currentLimitSignalId) ??
+      findSiblingByTokens(['current_limit_a', 'currentlimita', 'current_limit'], ['f64', 'i64'])
+  );
+  const invertedRow = $derived(
+    rowForMotorScoped(config.invertedSignalId) ?? findSiblingByTokens(['inverted', 'invert'], ['bool'])
+  );
+  const brakeModeRow = $derived(
+    rowForMotorScoped(config.brakeModeSignalId) ?? findSiblingByTokens(['brake_mode', 'brakemode'], ['bool', 'string'])
+  );
+  const outputRow = $derived(
+    rowForMotorScoped(config.outputSignalId) ??
+      findSiblingByTokens(['output', 'applied_output', 'duty_cycle', 'percent_output'], ['f64', 'i64'])
+  );
+  const velocityRow = $derived(
+    rowForMotorScoped(config.velocitySignalId) ??
+      findSiblingByTokens(['velocity', 'speed', 'rpm', 'rate'], ['f64', 'i64'], ['command'])
+  );
+  const positionRow = $derived(
+    rowForMotorScoped(config.positionSignalId) ??
+      findSiblingByTokens(['position', 'rotations', 'distance'], ['f64', 'i64'], ['command'])
+  );
+  const currentRow = $derived(
+    rowForMotorScoped(config.currentSignalId) ?? findSiblingByTokens(['current_a', 'current', 'amps'], ['f64', 'i64'])
+  );
+  const temperatureRow = $derived(
+    rowForMotorScoped(config.temperatureSignalId) ?? findSiblingByTokens(['temp_c', 'temperature', 'temp'], ['f64', 'i64'])
+  );
+  const voltageRow = $derived(
+    rowForMotorScoped(config.voltageSignalId) ?? findSiblingByTokens(['voltage', 'bus_voltage'], ['f64', 'i64'])
+  );
+  const explicitCommandRow = $derived(
+    rowForMotorScoped(config.commandSignalId) ??
+      findSiblingByTokens(
+        ['outputcommandpercent', 'outputcommandvoltage', 'outputcommandvelocity', 'outputcommandposition'],
+        ['f64', 'i64']
+      )
+  );
 
   const commandTargets = $derived.by(() => {
     const rows: SignalRow[] = [];
@@ -246,7 +350,23 @@
       config.currentSignalId,
       config.temperatureSignalId,
       config.voltageSignalId,
-      config.commandSignalId
+      config.commandSignalId,
+      canIdRow?.signal_id ?? null,
+      canbusRow?.signal_id ?? null,
+      typeRow?.signal_id ?? null,
+      connectedRow?.signal_id ?? null,
+      stalledRow?.signal_id ?? null,
+      neutralModeRow?.signal_id ?? null,
+      currentLimitRow?.signal_id ?? null,
+      invertedRow?.signal_id ?? null,
+      brakeModeRow?.signal_id ?? null,
+      outputRow?.signal_id ?? null,
+      velocityRow?.signal_id ?? null,
+      positionRow?.signal_id ?? null,
+      currentRow?.signal_id ?? null,
+      temperatureRow?.signal_id ?? null,
+      voltageRow?.signal_id ?? null,
+      explicitCommandRow?.signal_id ?? null
     ];
     const next = new Set<number>();
     for (const id of ids) {
@@ -262,31 +382,31 @@
   );
   const showExtraFieldsSection = $derived(config.showOtherFields && extraSignals.length > 0);
 
-  const canId = $derived(numberFor(config.canIdSignalId));
-  const canbus = $derived(textFor(config.canbusSignalId));
-  const typeText = $derived(textFor(config.typeSignalId));
-  const connected = $derived(boolFor(config.connectedSignalId));
-  const stalled = $derived(boolFor(config.stalledSignalId));
+  const canId = $derived(canIdRow ? numberFor(canIdRow.signal_id) : null);
+  const canbus = $derived(canbusRow ? textFor(canbusRow.signal_id) : null);
+  const typeText = $derived(typeRow ? textFor(typeRow.signal_id) : null);
+  const connected = $derived(connectedRow ? boolFor(connectedRow.signal_id) : null);
+  const stalled = $derived(stalledRow ? boolFor(stalledRow.signal_id) : null);
   const neutralModeText = $derived.by(() => {
-    const direct = textFor(config.neutralModeSignalId);
+    const direct = neutralModeRow ? textFor(neutralModeRow.signal_id) : null;
     if (direct && direct !== '-') return direct;
-    const brake = boolFor(config.brakeModeSignalId);
+    const brake = brakeModeRow ? boolFor(brakeModeRow.signal_id) : null;
     if (brake === null) return null;
     return brake ? 'Brake' : 'Coast';
   });
 
-  const output = $derived(numberFor(config.outputSignalId));
-  const velocity = $derived(numberFor(config.velocitySignalId));
-  const position = $derived(numberFor(config.positionSignalId));
-  const current = $derived(numberFor(config.currentSignalId));
-  const temperature = $derived(numberFor(config.temperatureSignalId));
-  const voltage = $derived(numberFor(config.voltageSignalId));
+  const output = $derived(outputRow ? numberFor(outputRow.signal_id) : null);
+  const velocity = $derived(velocityRow ? numberFor(velocityRow.signal_id) : null);
+  const position = $derived(positionRow ? numberFor(positionRow.signal_id) : null);
+  const current = $derived(currentRow ? numberFor(currentRow.signal_id) : null);
+  const temperature = $derived(temperatureRow ? numberFor(temperatureRow.signal_id) : null);
+  const voltage = $derived(voltageRow ? numberFor(voltageRow.signal_id) : null);
   const canIdWritable = $derived(isWritable(canIdRow));
   const canbusWritable = $derived(isWritable(canbusRow));
   const commandWritable = $derived(isWritable(commandSignal));
-  const currentLimitValue = $derived(numberFor(config.currentLimitSignalId));
+  const currentLimitValue = $derived(currentLimitRow ? numberFor(currentLimitRow.signal_id) : null);
   const currentLimitWritable = $derived(isWritable(currentLimitRow));
-  const invertedValue = $derived(boolFor(config.invertedSignalId));
+  const invertedValue = $derived(invertedRow ? boolFor(invertedRow.signal_id) : null);
   const invertedWritable = $derived(isWritable(invertedRow));
   const neutralModeWritable = $derived(isWritable(neutralModeRow));
   const neutralModeFallbackWritable = $derived(isWritable(brakeModeRow));

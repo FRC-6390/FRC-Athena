@@ -127,6 +127,10 @@ fn handle_control_client(
             handle_layout_list(&layout_store, &mut stream)?;
             continue;
         }
+        if let Some(rest) = command.strip_prefix("LAYOUT_DELETE ") {
+            handle_layout_delete(rest, &layout_store, &mut stream)?;
+            continue;
+        }
 
         stream.write_all(b"ERR UNKNOWN\n")?;
         stream.flush()?;
@@ -424,6 +428,38 @@ fn handle_layout_list(
     names.sort_unstable();
 
     stream.write_all(format!("LAYOUT_LIST {} {}\n", names.len(), names.join(" ")).as_bytes())?;
+    stream.flush()
+}
+
+fn handle_layout_delete(
+    command_data: &str,
+    layout_store: &Arc<Mutex<HashMap<String, String>>>,
+    stream: &mut TcpStream,
+) -> io::Result<()> {
+    let layout_name = command_data.trim();
+    if !is_valid_layout_name(layout_name) {
+        stream.write_all(b"ERR LAYOUT_DELETE\n")?;
+        stream.flush()?;
+        return Ok(());
+    }
+
+    let deleted = {
+        let mut store = match layout_store.lock() {
+            Ok(store) => store,
+            Err(_) => {
+                stream.write_all(b"ERR LAYOUT_DELETE\n")?;
+                stream.flush()?;
+                return Ok(());
+            }
+        };
+        store.remove(layout_name).is_some()
+    };
+
+    if deleted {
+        stream.write_all(b"OK LAYOUT_DELETE\n")?;
+    } else {
+        stream.write_all(b"ERR LAYOUT_DELETE\n")?;
+    }
     stream.flush()
 }
 

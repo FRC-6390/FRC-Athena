@@ -11,11 +11,14 @@ import edu.wpi.first.math.controller.PIDController;
 public class MotorControllerAdapter implements MotorController {
     private static final int CONNECTION_POLL_INTERVAL_CYCLES = 10;
     private static final int TEMPERATURE_POLL_INTERVAL_CYCLES = 25;
+    private static final int TELEMETRY_POLL_INTERVAL_CYCLES = 10;
     private final MotorController raw;
     private final MotorControllerConfig config;
     private Encoder wrappedEncoder;
     private boolean cachedConnected;
     private double cachedTemperatureCelsius;
+    private double cachedCurrentAmps;
+    private double cachedAppliedVoltage;
     private int updateCycles = 0;
 
     public MotorControllerAdapter(MotorController raw, MotorControllerConfig config) {
@@ -28,6 +31,8 @@ public class MotorControllerAdapter implements MotorController {
         }
         this.cachedConnected = true;
         this.cachedTemperatureCelsius = 0.0;
+        this.cachedCurrentAmps = raw.getCurrentAmps();
+        this.cachedAppliedVoltage = raw.getAppliedVoltage();
     }
 
     public static MotorController wrap(MotorController raw, MotorControllerConfig config) {
@@ -126,6 +131,16 @@ public class MotorControllerAdapter implements MotorController {
     }
 
     @Override
+    public double getCurrentAmps() {
+        return cachedCurrentAmps;
+    }
+
+    @Override
+    public double getAppliedVoltage() {
+        return cachedAppliedVoltage;
+    }
+
+    @Override
     public Encoder getEncoder() {
         return wrappedEncoder;
     }
@@ -177,6 +192,10 @@ public class MotorControllerAdapter implements MotorController {
         }
         if (updateCycles == 1 || updateCycles % TEMPERATURE_POLL_INTERVAL_CYCLES == 0) {
             cachedTemperatureCelsius = raw.getTemperatureCelsius();
+        }
+        if (updateCycles == 1 || updateCycles % TELEMETRY_POLL_INTERVAL_CYCLES == 0) {
+            cachedCurrentAmps = raw.getCurrentAmps();
+            cachedAppliedVoltage = raw.getAppliedVoltage();
         }
         if (updateCycles >= 1_000_000) {
             updateCycles = 0;

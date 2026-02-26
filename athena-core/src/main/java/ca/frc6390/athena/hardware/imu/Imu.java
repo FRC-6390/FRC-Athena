@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.imu;
 import edu.wpi.first.math.geometry.Rotation2d;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 import ca.frc6390.athena.core.sections.SectionedAccess;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -570,5 +571,55 @@ public interface Imu extends RobotSendableSystem.RobotSendableDevice {
         }
 
         return node;
+    }
+
+    default void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        // Writable channels so ARCP IMU widgets can tune runtime behavior.
+        publisher.writableBoolean(rootPath + "/inverted").onSetBoolean(this::setInverted);
+        publisher.writableDouble(rootPath + "/yawDeg").onSetDouble(this::setYaw);
+        publisher.writableDouble(rootPath + "/maxSpeedWindowSec").onSetDouble(this::setMaxSpeedWindowSeconds);
+        publisher.command(rootPath + "/command/resetMaxSpeedWindow").onInvoke(this::resetMaxSpeedWindow);
+
+        Rotation2d yaw = getYaw();
+        Rotation2d pitch = getPitch();
+        Rotation2d roll = getRoll();
+        Rotation2d velX = getVelocityX();
+        Rotation2d velY = getVelocityY();
+        Rotation2d velZ = getVelocityZ();
+
+        publisher.put(rootPath + "/yawDeg", yaw != null ? yaw.getDegrees() : 0.0);
+        publisher.put(rootPath + "/pitchDeg", pitch != null ? pitch.getDegrees() : 0.0);
+        publisher.put(rootPath + "/rollDeg", roll != null ? roll.getDegrees() : 0.0);
+        publisher.put(rootPath + "/velXDegPerSec", velX != null ? velX.getDegrees() : 0.0);
+        publisher.put(rootPath + "/velYDegPerSec", velY != null ? velY.getDegrees() : 0.0);
+        publisher.put(rootPath + "/velZDegPerSec", velZ != null ? velZ.getDegrees() : 0.0);
+        publisher.put(rootPath + "/xSpeedRadPerSec", getXSpeedRadiansPerSecond());
+        publisher.put(rootPath + "/ySpeedRadPerSec", getYSpeedRadiansPerSecond());
+        publisher.put(rootPath + "/thetaSpeedRadPerSec", getThetaSpeedRadiansPerSecond());
+        publisher.put(rootPath + "/movementSpeedRadPerSec", getMovementSpeedRadiansPerSecond());
+        publisher.put(rootPath + "/xSpeedMps", getXSpeedMetersPerSecond());
+        publisher.put(rootPath + "/ySpeedMps", getYSpeedMetersPerSecond());
+        publisher.put(rootPath + "/movementSpeedMps", getMovementSpeedMetersPerSecond());
+        publisher.put(rootPath + "/movementSpeedNormalized", getNormalizedMovementSpeed());
+        publisher.put(rootPath + "/normalizedSpeed", getNormalizedSpeed());
+        publisher.put(rootPath + "/accelX", getAccelerationX());
+        publisher.put(rootPath + "/accelY", getAccelerationY());
+        publisher.put(rootPath + "/accelZ", getAccelerationZ());
+        publisher.put(rootPath + "/connected", isConnected());
+        publisher.put(rootPath + "/inverted", isInverted());
+        publisher.put(rootPath + "/maxLinearSpeed", getMaxLinearSpeed());
+        publisher.put(rootPath + "/maxRadialSpeed", getMaxRadialSpeed());
+        publisher.put(rootPath + "/maxSpeedWindowSec", getMaxSpeedWindowSeconds());
+        publisher.put(rootPath + "/angularAccelZDegPerSec2", getAngularAccelerationZDegreesPerSecondSquared());
+
+        ImuConfig cfg = getConfig();
+        if (cfg != null) {
+            publisher.put(rootPath + "/canId", cfg.id());
+            publisher.put(rootPath + "/canbus", cfg.canbus() != null ? cfg.canbus() : "");
+            publisher.put(rootPath + "/type", cfg.type() != null ? cfg.type().getKey() : "unknown");
+        }
     }
 }

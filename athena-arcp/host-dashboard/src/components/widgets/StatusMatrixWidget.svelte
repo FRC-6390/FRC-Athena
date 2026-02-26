@@ -8,18 +8,23 @@
     signals: SignalRow[];
     signalById: Map<number, SignalRow>;
     configRaw?: WidgetConfigRecord;
+    onSendSet: (signalId: number, valueRaw: string) => void;
   };
 
   type ItemRender = {
     signalId: number;
+    toggleSignalId: number | null;
+    valueSignalId: number | null;
     label: string;
     group: string;
     healthyWhen: 'true' | 'false';
-    value: string;
+    boolValue: string;
+    detailValue: string;
+    writableToggle: boolean;
     state: 'ok' | 'bad' | 'unknown';
   };
 
-  let { signal, signals, signalById, configRaw }: Props = $props();
+  let { signal, signals, signalById, configRaw, onSendSet }: Props = $props();
 
   function boolState(raw: string): boolean | null {
     const value = raw.trim().toLowerCase();
@@ -28,17 +33,47 @@
     return null;
   }
 
+  function isWritableBoolSignal(signalId: number | null): boolean {
+    if (signalId === null) return false;
+    const row = signalById.get(signalId);
+    return !!row && row.signal_type === 'bool' && row.access === 'write';
+  }
+
+  function toggleItem(row: ItemRender) {
+    if (!row.writableToggle || row.toggleSignalId === null) return;
+    const current = boolState(row.boolValue);
+    const next = current === true ? 'false' : 'true';
+    onSendSet(row.toggleSignalId, next);
+  }
+
+  const showToggle = $derived.by(() => {
+    const config = readStatusMatrixConfig(configRaw, signal, signals);
+    return config.mode === 'toggle' || config.mode === 'toggle_value';
+  });
+
+  const showValue = $derived.by(() => {
+    const config = readStatusMatrixConfig(configRaw, signal, signals);
+    return config.mode === 'toggle_value';
+  });
+
   const computed = $derived.by(() => {
     const config = readStatusMatrixConfig(configRaw, signal, signals);
     const rows = config.items.map((item): ItemRender => {
       const bound = signalById.get(item.signalId);
-      const value = bound?.value ?? '-';
-      const boolValue = boolState(value);
+      const boolValueRaw = bound?.value ?? '-';
+      const boolValue = boolState(boolValueRaw);
+      const detailRow = item.valueSignalId !== null ? signalById.get(item.valueSignalId) : null;
+      const detailValue = detailRow?.value ?? boolValueRaw;
+      const writableToggle = isWritableBoolSignal(item.toggleSignalId ?? item.signalId);
+      const toggleSignalId = item.toggleSignalId ?? item.signalId;
 
       if (boolValue === null) {
         return {
           ...item,
-          value,
+          toggleSignalId,
+          boolValue: boolValueRaw,
+          detailValue,
+          writableToggle,
           state: 'unknown'
         };
       }
@@ -46,7 +81,10 @@
       const expected = item.healthyWhen === 'true';
       return {
         ...item,
-        value,
+        toggleSignalId,
+        boolValue: boolValueRaw,
+        detailValue,
+        writableToggle,
         state: boolValue === expected ? 'ok' : 'bad'
       };
     });
@@ -79,11 +117,32 @@
 
     <div class="grid" style={`--cols:${computed.config.columns};`}>
       {#each computed.rows as row (`${row.signalId}-${row.label}`)}
-        <article class={`tile ${row.state}`} title={`Signal #${row.signalId}: ${row.value}`}>
-          <strong>{row.label}</strong>
-          <span class="tile-group">{row.group}</span>
-          <span class="tile-value">{row.value}</span>
-        </article>
+        {#if showToggle}
+          <button
+            class={`tile toggle ${row.state}`}
+            onclick={() => toggleItem(row)}
+            disabled={!row.writableToggle}
+            title={`Signal #${row.signalId}: ${row.boolValue}`}
+          >
+            <strong>{row.label}</strong>
+            <span class="tile-group">{row.group}</span>
+            {#if showValue}
+              <span class="tile-value">{row.detailValue}</span>
+            {:else}
+              <span class="tile-value">{row.boolValue}</span>
+            {/if}
+          </button>
+        {:else}
+          <article class={`tile ${row.state}`} title={`Signal #${row.signalId}: ${row.boolValue}`}>
+            <strong>{row.label}</strong>
+            <span class="tile-group">{row.group}</span>
+            {#if showValue}
+              <span class="tile-value">{row.detailValue}</span>
+            {:else}
+              <span class="tile-value">{row.boolValue}</span>
+            {/if}
+          </article>
+        {/if}
       {/each}
     </div>
   </div>
@@ -150,6 +209,18 @@
     padding: 0.22rem 0.28rem;
     display: grid;
     gap: 0.12rem;
+    text-align: left;
+  }
+
+  .tile.toggle {
+    appearance: none;
+    width: 100%;
+    cursor: pointer;
+  }
+
+  .tile.toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.78;
   }
 
   .tile strong {

@@ -20,6 +20,100 @@ External vendordeps required by Athena modules:
 - https://3015rangerrobotics.github.io/pathplannerlib/PathplannerLib.json
 - https://choreo.autos/lib/ChoreoLib2026.json
 
+## First-Time Toolchain Setup (Docker + Rust)
+
+This section is for Athena maintainers and contributors who build/publish ARCP JNI natives (`athena-arcp-java`).
+
+If you only consume released Athena vendordeps in a robot project, you can skip this section.
+
+### 1) Install Docker
+
+Recommended path for cross-target JNI bundles is Dockerized cross-build.
+
+- Linux: install Docker Engine from official docs for your distro: https://docs.docker.com/engine/install/
+- macOS/Windows: install Docker Desktop: https://docs.docker.com/desktop/
+
+Linux post-install (so `docker` runs without `sudo`):
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+Verify:
+
+```bash
+docker --version
+docker run --rm hello-world
+```
+
+### 2) Install Rust (`rustup`, `cargo`, `rustc`)
+
+Install Rust via rustup:
+
+- macOS/Linux:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+- Windows (PowerShell):
+```powershell
+winget install Rustlang.Rustup
+```
+
+Restart terminal, then verify:
+
+```bash
+rustup --version
+rustc --version
+cargo --version
+rustup default stable
+```
+
+### 3) Install Required Rust Targets
+
+ARCP vendor JNI matrix uses these targets:
+
+- `armv7-unknown-linux-gnueabihf`
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu`
+- `x86_64-pc-windows-gnu`
+
+Install all required targets:
+
+```bash
+rustup target add \
+  armv7-unknown-linux-gnueabihf \
+  x86_64-unknown-linux-gnu \
+  aarch64-unknown-linux-gnu \
+  x86_64-pc-windows-gnu
+```
+
+Verify installed targets:
+
+```bash
+rustup target list --installed
+```
+
+### 4) Build Path You Should Use
+
+Recommended (Docker cross-build):
+
+```bash
+./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=vendor -ParcpUseDockerCross=true
+```
+
+Native cross-build (without Docker) requires additional linker toolchains:
+
+- `armv7-unknown-linux-gnueabihf` -> `arm-linux-gnueabihf-gcc`
+- `aarch64-unknown-linux-gnu` -> `aarch64-linux-gnu-gcc`
+- `x86_64-pc-windows-gnu` -> `x86_64-w64-mingw32-gcc`
+
+Host-only native build (fast local dev):
+
+```bash
+./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=host
+```
+
 ## Blank WPILib Project Setup (Required Gradle Changes)
 
 Minimum required for most teams:

@@ -8,12 +8,17 @@
     signals: SignalRow[];
     signalById: Map<number, SignalRow>;
     configRaw?: WidgetConfigRecord;
+    onSendSet: (signalId: number, valueRaw: string) => void;
   };
 
-  let { signal, signals, signalById, configRaw }: Props = $props();
+  let { signal, signals, signalById, configRaw, onSendSet }: Props = $props();
 
   const config = $derived(readSwerveModuleConfig(configRaw, signal, signals));
   const packed = $derived(parseNumericArray(signal.value));
+  let angleDraft = $state('0');
+  let speedDraft = $state('0');
+  let offsetDraft = $state('0');
+  let seededDrafts = $state(false);
 
   function numericSignalValue(signalId: number | null): number | null {
     if (signalId === null) return null;
@@ -65,6 +70,46 @@
     if (Math.abs(speedRatio) < 0.05) return 'idle';
     return speedRatio >= 0 ? 'forward' : 'reverse';
   });
+
+  const invertedValue = $derived.by(() => {
+    const row = config.commandInvertedSignalId !== null ? signalById.get(config.commandInvertedSignalId) : null;
+    if (!row) return false;
+    const normalized = row.value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
+  });
+
+  function sendAngle() {
+    if (config.commandAngleSignalId === null) return;
+    onSendSet(config.commandAngleSignalId, angleDraft);
+  }
+
+  function sendSpeed() {
+    if (config.commandSpeedSignalId === null) return;
+    onSendSet(config.commandSpeedSignalId, speedDraft);
+  }
+
+  function sendOffset() {
+    if (config.commandOffsetSignalId === null) return;
+    onSendSet(config.commandOffsetSignalId, offsetDraft);
+  }
+
+  function toggleInverted() {
+    if (config.commandInvertedSignalId === null) return;
+    onSendSet(config.commandInvertedSignalId, invertedValue ? 'false' : 'true');
+  }
+
+  $effect(() => {
+    if (seededDrafts) return;
+    angleDraft = angleDeg.toFixed(2);
+    speedDraft = speedMps.toFixed(2);
+    if (config.commandOffsetSignalId !== null) {
+      const row = signalById.get(config.commandOffsetSignalId);
+      if (row && row.value.trim().length > 0) {
+        offsetDraft = row.value.trim();
+      }
+    }
+    seededDrafts = true;
+  });
 </script>
 
 <div class="module-root">
@@ -102,6 +147,61 @@
     <span>{angleDeg.toFixed(1)} deg</span>
     <span>{speedMps.toFixed(2)} m/s</span>
   </div>
+
+  {#if config.commandAngleSignalId !== null || config.commandSpeedSignalId !== null || config.commandOffsetSignalId !== null || config.commandInvertedSignalId !== null}
+    <div class="controls">
+      {#if config.commandAngleSignalId !== null}
+        <label>
+          <span>Angle</span>
+          <div class="control-row">
+            <input
+              type="number"
+              value={angleDraft}
+              step="0.1"
+              oninput={(event) => (angleDraft = (event.currentTarget as HTMLInputElement).value)}
+            />
+            <button class="btn btn-primary" onclick={sendAngle}>Set</button>
+          </div>
+        </label>
+      {/if}
+
+      {#if config.commandSpeedSignalId !== null}
+        <label>
+          <span>Speed</span>
+          <div class="control-row">
+            <input
+              type="number"
+              value={speedDraft}
+              step="0.05"
+              oninput={(event) => (speedDraft = (event.currentTarget as HTMLInputElement).value)}
+            />
+            <button class="btn btn-primary" onclick={sendSpeed}>Set</button>
+          </div>
+        </label>
+      {/if}
+
+      {#if config.commandOffsetSignalId !== null}
+        <label>
+          <span>Offset</span>
+          <div class="control-row">
+            <input
+              type="number"
+              value={offsetDraft}
+              step="0.1"
+              oninput={(event) => (offsetDraft = (event.currentTarget as HTMLInputElement).value)}
+            />
+            <button class="btn btn-primary" onclick={sendOffset}>Set</button>
+          </div>
+        </label>
+      {/if}
+
+      {#if config.commandInvertedSignalId !== null}
+        <button class={`btn ${invertedValue ? 'btn-danger' : 'btn-outline'}`} onclick={toggleInverted}>
+          Inverted: {invertedValue ? 'On' : 'Off'}
+        </button>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -109,7 +209,7 @@
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto auto;
     gap: 0.2rem;
   }
 
@@ -175,5 +275,34 @@
     color: var(--text-strong);
     font-family: var(--font-display);
     font-size: 0.64rem;
+  }
+
+  .controls {
+    display: grid;
+    gap: 0.22rem;
+  }
+
+  .controls label {
+    display: grid;
+    gap: 0.1rem;
+  }
+
+  .controls label > span {
+    color: var(--text-soft);
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .control-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.18rem;
+    align-items: center;
+  }
+
+  .control-row input {
+    min-width: 0;
+    width: 100%;
   }
 </style>

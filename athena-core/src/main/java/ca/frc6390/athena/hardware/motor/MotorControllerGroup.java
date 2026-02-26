@@ -6,6 +6,7 @@ import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.math.controller.PIDController;
 
 /**
@@ -82,6 +83,10 @@ public class MotorControllerGroup implements RobotSendableDevice {
 
     public MotorController[] getControllers() {
         return controllers;
+    }
+
+    public String[] getControllerTopicKeys() {
+        return controllerTopicKeys.clone();
     }
 
     public MotorControllerGroup setNeutralMode(MotorNeutralMode mode) {
@@ -190,6 +195,29 @@ public class MotorControllerGroup implements RobotSendableDevice {
         return node;
     }
 
+    public void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        publisher.put(rootPath + "/Summary/allConnected", allMotorsConnected());
+        publisher.put(rootPath + "/Summary/avgTempC", calculateAverageTemperatureCelsius());
+
+        if (encoders != null) {
+            encoders.publishArcp(publisher, rootPath + "/Encoders");
+        }
+
+        for (int i = 0; i < controllers.length; i++) {
+            MotorController motor = controllers[i];
+            if (motor == null) {
+                continue;
+            }
+            String key = controllerTopicKeys != null && i < controllerTopicKeys.length
+                    ? controllerTopicKeys[i]
+                    : "motor";
+            motor.publishArcp(publisher, rootPath + "/Motors/" + key);
+        }
+    }
+
     private void publish(RobotNetworkTables.Node node) {
         RobotNetworkTables nt = node.robot();
         ensurePublishNodes(node);
@@ -247,7 +275,19 @@ public class MotorControllerGroup implements RobotSendableDevice {
         if (raw == null || raw.isBlank()) {
             return fallback;
         }
-        return raw.replace('\\', '_').replace('/', '_');
+        String trimmed = raw.trim();
+        StringBuilder out = new StringBuilder(trimmed.length());
+        for (int i = 0; i < trimmed.length(); i++) {
+            char ch = trimmed.charAt(i);
+            boolean valid = (ch >= 'a' && ch <= 'z')
+                    || (ch >= 'A' && ch <= 'Z')
+                    || (ch >= '0' && ch <= '9')
+                    || ch == '_'
+                    || ch == '-';
+            out.append(valid ? ch : '_');
+        }
+        String sanitized = out.toString();
+        return sanitized.isBlank() ? fallback : sanitized;
     }
 
     private double calculateAverageTemperatureCelsius() {

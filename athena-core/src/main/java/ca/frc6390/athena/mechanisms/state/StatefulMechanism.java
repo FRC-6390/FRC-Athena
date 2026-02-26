@@ -18,6 +18,7 @@ import ca.frc6390.athena.mechanisms.statespec.StateCtx;
 import ca.frc6390.athena.mechanisms.statespec.StateSeed;
 import ca.frc6390.athena.mechanisms.statespec.StateSeedProvider;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 
@@ -57,6 +58,15 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         // Publish state machine topics alongside the mechanism topics.
         stateMachineCore.getStateMachine().networkTables(node.child("Control").child("StateMachine"));
         return super.networkTables(node);
+    }
+
+    @Override
+    public void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        stateMachineCore.getStateMachine().publishArcp(publisher, rootPath + "/Control/StateMachine");
+        super.publishArcp(publisher, rootPath);
     }
 
     public static class StatefulMechanismCore<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {

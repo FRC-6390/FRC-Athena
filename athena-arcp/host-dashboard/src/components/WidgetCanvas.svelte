@@ -28,8 +28,13 @@ import TextAreaWidget from './widgets/TextAreaWidget.svelte';
 import TimerWidget from './widgets/TimerWidget.svelte';
 import ToggleWidget from './widgets/ToggleWidget.svelte';
   import type { SignalRow } from '../lib/arcp';
-  import type { DashboardWidget, LayoutToolKind, WidgetLayout } from '../lib/dashboard';
-  import { readLayoutGridConfig, readLayoutTitleConfig } from '../lib/widget-config';
+  import type {
+    DashboardWidget,
+    LayoutToolKind,
+    WidgetConfigRecord,
+    WidgetLayout
+  } from '../lib/dashboard';
+  import { readLayoutAccordionConfig, readLayoutGridConfig, readLayoutTitleConfig } from '../lib/widget-config';
   import {
     DEFAULT_GRID_COLUMNS,
     clampLayout,
@@ -56,6 +61,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       layout: WidgetLayout,
       parentLayoutId?: string | null
     ) => void;
+    onUpdateWidgetConfig: (widgetId: string, config: WidgetConfigRecord | undefined) => void;
     onRemoveWidget: (widgetId: string) => void;
     onWidgetInput: (widgetId: string, value: string) => void;
     onSendAction: (signalId: number) => void;
@@ -92,6 +98,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     onToggleEditMode,
     onClearWidgets,
     onPatchWidgetLayout,
+    onUpdateWidgetConfig,
     onRemoveWidget,
     onWidgetInput,
     onSendAction,
@@ -148,6 +155,9 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   let dragOverSurface = $state(false);
   let copyToastVisible = $state(false);
   let copyToastTimer: ReturnType<typeof setTimeout> | null = null;
+  let layoutMeasureTick = $state(0);
+
+  const widgetById = $derived.by(() => new Map(widgets.map((widget) => [widget.id, widget])));
 
   const maxWidgetColumn = $derived.by(() => {
     let maxColumn = DEFAULT_GRID_COLUMNS;
@@ -186,28 +196,547 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
 
   const canvasContentHeight = $derived(canvasRows * cellSize + (canvasRows - 1) * GRID_GAP);
 
-  const canvasOverflowX = $derived(canvasContentWidth > gridWidth);
-  const canvasOverflowY = $derived(canvasContentHeight > gridHeight);
-
-  const canvasScrollWidth = $derived(
-    canvasContentWidth + (canvasOverflowY ? SCROLLBAR_SAFETY_GUTTER : 0)
-  );
-  const canvasScrollHeight = $derived(
-    canvasContentHeight + (canvasOverflowX ? SCROLLBAR_SAFETY_GUTTER : 0)
-  );
-
   const widgetsForRender = $derived.by(() => {
-    const ordered = [...widgets];
-    ordered.sort((a, b) => {
+    const siblingCompare = (a: DashboardWidget, b: DashboardWidget): number => {
       const aLayout = isLayoutWidgetKind(a.kind);
       const bLayout = isLayoutWidgetKind(b.kind);
-      if (aLayout !== bLayout) {
-        return aLayout ? -1 : 1;
+      if (aLayout !== bLayout) return aLayout ? -1 : 1;
+      return (
+        a.layout.y - b.layout.y ||
+        a.layout.x - b.layout.x ||
+        a.id.localeCompare(b.id)
+      );
+    };
+
+    const childrenByParent = new Map<string | null, DashboardWidget[]>();
+    for (const widget of widgets) {
+      const parentKey =
+        widget.parentLayoutId && widgetById.has(widget.parentLayoutId) ? widget.parentLayoutId : null;
+      const children = childrenByParent.get(parentKey);
+      if (children) {
+        children.push(widget);
+      } else {
+        childrenByParent.set(parentKey, [widget]);
       }
-      return 0;
-    });
+    }
+
+    for (const children of childrenByParent.values()) {
+      children.sort(siblingCompare);
+    }
+
+    const ordered: DashboardWidget[] = [];
+    const visited = new Set<string>();
+    const visit = (widget: DashboardWidget) => {
+      if (visited.has(widget.id)) return;
+      visited.add(widget.id);
+      ordered.push(widget);
+      const children = childrenByParent.get(widget.id) ?? [];
+      for (const child of children) {
+        visit(child);
+      }
+    };
+
+    for (const root of childrenByParent.get(null) ?? []) {
+      visit(root);
+    }
+
+    if (ordered.length < widgets.length) {
+      const fallback = [...widgets].sort(siblingCompare);
+      for (const widget of fallback) {
+        visit(widget);
+      }
+    }
+
     return ordered;
   });
+
+  const accordionCollapsedById = $derived.by(() => {
+    const map = new Map<string, boolean>();
+    for (const widget of widgets) {
+      if (widget.kind === 'layout_accordion') {
+        map.set(widget.id, readLayoutAccordionConfig(widget.config).collapsed);
+      }
+    }
+    return map;
+  });
+
+  const hiddenByCollapsedAccordionByWidgetId = $derived.by(() => {
+    const hidden = new Map<string, boolean>();
+    for (const widget of widgets) {
+      let isHidden = false;
+      let cursor = widget.parentLayoutId;
+      const seen = new Set<string>();
+      while (cursor) {
+        if (seen.has(cursor)) break;
+        seen.add(cursor);
+        if (accordionCollapsedById.get(cursor)) {
+          isHidden = true;
+          break;
+        }
+        cursor = widgetById.get(cursor)?.parentLayoutId ?? null;
+      }
+      hidden.set(widget.id, isHidden);
+    }
+    return hidden;
+  });
+
+  const resolvedSignalByWidgetId = $derived.by(() => {
+    const map = new Map<string, SignalRow | null>();
+    for (const widget of widgets) {
+      map.set(widget.id, resolveWidgetSignal(widget));
+    }
+    return map;
+  });
+
+  const layoutContentBoundsById = $derived.by(() => {
+    layoutMeasureTick;
+    gridEl;
+    cellSize;
+    gridColumns;
+    const map = new Map<string, WidgetLayout>();
+    for (const widget of widgets) {
+      if (!isLayoutWidgetKind(widget.kind)) continue;
+      map.set(widget.id, resolveLayoutContentBoundsLive(widget));
+    }
+    return map;
+  });
+
+  const draggingWidget = $derived.by(() => (drag ? widgetById.get(drag.widgetId) ?? null : null));
+
+  const childWidgetsByContainerId = $derived.by(() => {
+    drag;
+    const byParent = new Map<string, DashboardWidget[]>();
+    for (const widget of widgets) {
+      const parentId = widget.parentLayoutId;
+      if (!parentId) continue;
+      const parent = widgetById.get(parentId);
+      if (!parent || !isContainerLayoutKind(parent.kind)) continue;
+      const siblings = byParent.get(parentId);
+      if (siblings) {
+        siblings.push(widget);
+      } else {
+        byParent.set(parentId, [widget]);
+      }
+    }
+    for (const siblings of byParent.values()) {
+      siblings.sort((a, b) => {
+        const aLayout =
+          drag && drag.widgetId === a.id ? drag.currentLayout : clampLayout(a.layout, gridColumns);
+        const bLayout =
+          drag && drag.widgetId === b.id ? drag.currentLayout : clampLayout(b.layout, gridColumns);
+        return aLayout.y - bLayout.y || aLayout.x - bLayout.x || a.id.localeCompare(b.id);
+      });
+    }
+    return byParent;
+  });
+
+  const containerNormalizedLayoutByWidgetId = $derived.by(() => {
+    drag;
+    const normalized = new Map<string, WidgetLayout>();
+
+    for (const parent of widgets) {
+      if (!isContainerLayoutKind(parent.kind)) continue;
+      const children = childWidgetsByContainerId.get(parent.id) ?? [];
+      if (children.length === 0) continue;
+      const parentLayout =
+        parent.kind === 'layout_grid'
+          ? (resolveGridLayoutSpec(parent)?.parent ?? resolveLayoutContentBounds(parent))
+          : resolveLayoutContentBounds(parent);
+
+      if (parent.kind === 'layout_accordion') {
+        for (const child of children) {
+          const base =
+            drag && drag.widgetId === child.id ? drag.currentLayout : clampLayout(child.layout, gridColumns);
+          normalized.set(
+            child.id,
+            clampLayout(
+              {
+                ...base,
+                x: parentLayout.x,
+                y: parentLayout.y,
+                w: parentLayout.w,
+                h: parentLayout.h
+              },
+              gridColumns
+            )
+          );
+        }
+        continue;
+      }
+
+      if (parent.kind === 'layout_list') {
+        let cursorY = parentLayout.y;
+        for (const child of children) {
+          const base =
+            drag && drag.widgetId === child.id ? drag.currentLayout : clampLayout(child.layout, gridColumns);
+          const childLayout = clampLayout(
+            {
+              ...base,
+              x: parentLayout.x,
+              y: cursorY,
+              w: parentLayout.w
+            },
+            gridColumns
+          );
+          normalized.set(child.id, childLayout);
+          cursorY = childLayout.y + childLayout.h;
+        }
+        continue;
+      }
+
+      if (parent.kind === 'layout_grid') {
+        for (const child of children) {
+          const base =
+            drag && drag.widgetId === child.id ? drag.currentLayout : clampLayout(child.layout, gridColumns);
+          const cellLayout = gridCellLayoutFromAbsolute(parent, base);
+          if (!cellLayout) {
+            normalized.set(child.id, base);
+            continue;
+          }
+          normalized.set(child.id, absoluteLayoutFromGridCell(parent, cellLayout) ?? base);
+        }
+      }
+    }
+
+    return normalized;
+  });
+
+  const renderedContentBounds = $derived.by(() => {
+    let maxRightPx = 0;
+    let maxBottomPx = 0;
+
+    for (const widget of widgetsForRender) {
+      if (isHiddenByCollapsedAccordion(widget)) continue;
+      if (!isLayoutWidgetKind(widget.kind) && !resolvedSignalByWidgetId.get(widget.id)) continue;
+
+      const layout = resolvedWidgetLayout(widget);
+      const rect = computeWidgetPixelRect(layout, Boolean(widget.parentLayoutId));
+      const right = rect.left + Math.max(1, rect.width);
+      const bottom = rect.top + Math.max(1, rect.height);
+      if (right > maxRightPx) maxRightPx = right;
+      if (bottom > maxBottomPx) maxBottomPx = bottom;
+    }
+
+    return {
+      maxRightPx,
+      maxBottomPx
+    };
+  });
+
+  const canvasEffectiveWidth = $derived(
+    Math.max(canvasContentWidth, Math.ceil(renderedContentBounds.maxRightPx))
+  );
+  const canvasEffectiveHeight = $derived(
+    Math.max(canvasContentHeight, Math.ceil(renderedContentBounds.maxBottomPx))
+  );
+
+  const canvasOverflowX = $derived(canvasEffectiveWidth > gridWidth);
+  const canvasOverflowY = $derived(canvasEffectiveHeight > gridHeight);
+
+  const canvasScrollWidth = $derived(
+    canvasEffectiveWidth + (canvasOverflowY ? SCROLLBAR_SAFETY_GUTTER : 0)
+  );
+  const canvasScrollHeight = $derived(
+    canvasEffectiveHeight + (canvasOverflowX ? SCROLLBAR_SAFETY_GUTTER : 0)
+  );
+
+  function normalizeSignalPathForLookup(rawPath: string): string {
+    return rawPath
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/\/+/g, '/')
+      .replace(/^\/+|\/+$/g, '')
+      .toLowerCase();
+  }
+
+  function canonicalSignalToken(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function canonicalSignalPathForLookup(rawPath: string): string {
+    return rawPath
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/\/+/g, '/')
+      .replace(/^\/+|\/+$/g, '')
+      .split('/')
+      .map((segment) => canonicalSignalToken(segment))
+      .filter((segment) => segment.length > 0)
+      .join('/');
+  }
+
+  function isPlaceholderSignalValue(row: SignalRow): boolean {
+    const value = row.value.trim();
+    return value.length === 0 || value === '-';
+  }
+
+  function resolveSignalFromCanonicalTopic(topicPath: string, preferredLeafPath = ''): SignalRow | null {
+    const canonicalTopic = canonicalSignalPathForLookup(topicPath);
+    if (!canonicalTopic) return null;
+    const preferredLeaf = canonicalSignalToken(
+      preferredLeafPath.slice(preferredLeafPath.lastIndexOf('/') + 1)
+    );
+
+    const candidates: SignalRow[] = [];
+    for (const entry of signals) {
+      const canonicalPath = canonicalSignalPathForLookup(entry.path);
+      if (!canonicalPath) continue;
+      if (
+        canonicalPath === canonicalTopic ||
+        canonicalPath.startsWith(`${canonicalTopic}/`)
+      ) {
+        candidates.push(entry);
+      }
+    }
+    if (candidates.length === 0) return null;
+
+    const scored = candidates
+      .map((entry) => {
+        const canonicalLeaf = canonicalSignalToken(
+          entry.path.slice(entry.path.lastIndexOf('/') + 1)
+        );
+        let score = 0;
+        if (preferredLeaf && canonicalLeaf === preferredLeaf) score += 8;
+        if (!isPlaceholderSignalValue(entry)) score += 4;
+        if (entry.access === 'observe') score += 1;
+        return { entry, score };
+      })
+      .sort((a, b) => b.score - a.score || a.entry.path.localeCompare(b.entry.path));
+
+    return scored[0]?.entry ?? null;
+  }
+
+  const signalByNormalizedPath = $derived.by(() => {
+    const map = new Map<string, SignalRow>();
+    for (const entry of signals) {
+      const normalized = normalizeSignalPathForLookup(entry.path);
+      if (!normalized || map.has(normalized)) continue;
+      map.set(normalized, entry);
+    }
+    return map;
+  });
+
+  function resolveSignalFromPath(rawPath: string, topicPath: string): SignalRow | null {
+    const cleanedRaw = rawPath.trim();
+    if (!cleanedRaw) return null;
+
+    const normalizedTopic = normalizeSignalPathForLookup(topicPath);
+    let candidate = cleanedRaw;
+    if (candidate.startsWith('./')) {
+      candidate = candidate.slice(2);
+    }
+
+    let resolvedPath = '';
+    if (candidate.startsWith('/')) {
+      resolvedPath = normalizeSignalPathForLookup(candidate.slice(1));
+    } else {
+      const normalizedCandidate = normalizeSignalPathForLookup(candidate);
+      if (!normalizedCandidate) return null;
+
+      const hasQualifiedRoot =
+        normalizedCandidate.startsWith('athena/') ||
+        normalizedCandidate.startsWith('robot/');
+      resolvedPath =
+        hasQualifiedRoot || !normalizedTopic
+          ? normalizedCandidate
+          : normalizeSignalPathForLookup(`${normalizedTopic}/${normalizedCandidate}`);
+    }
+
+    if (!resolvedPath) return null;
+    const exact = signalByNormalizedPath.get(resolvedPath);
+    if (exact) return exact;
+
+    const canonicalResolved = canonicalSignalPathForLookup(resolvedPath);
+    if (canonicalResolved) {
+      for (const entry of signals) {
+        if (canonicalSignalPathForLookup(entry.path) === canonicalResolved) {
+          return entry;
+        }
+      }
+    }
+
+    if (!candidate.includes('/')) {
+      const normalizedLeaf = normalizeSignalPathForLookup(candidate);
+      if (!normalizedLeaf) return null;
+      const canonicalTopic = canonicalSignalPathForLookup(normalizedTopic);
+      for (const entry of signals) {
+        const normalizedPath = normalizeSignalPathForLookup(entry.path);
+        if (!normalizedPath) continue;
+        if (normalizedTopic) {
+          const inNormalizedScope =
+            normalizedPath === normalizedTopic ||
+            normalizedPath.startsWith(`${normalizedTopic}/`);
+          const canonicalPath = canonicalSignalPathForLookup(entry.path);
+          const inCanonicalScope =
+            canonicalTopic.length > 0 &&
+            (canonicalPath === canonicalTopic ||
+              canonicalPath.startsWith(`${canonicalTopic}/`));
+          if (!inNormalizedScope && !inCanonicalScope) continue;
+        }
+        const leaf = normalizedPath.slice(normalizedPath.lastIndexOf('/') + 1);
+        if (leaf === normalizedLeaf || leaf.endsWith(normalizedLeaf)) {
+          return entry;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function collectConfiguredSignalIds(value: unknown, out: Set<number>): void {
+    if (value === null || value === undefined) return;
+    if (typeof value === 'number') {
+      if (Number.isFinite(value) && value > 0) {
+        out.add(Math.floor(value));
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        collectConfiguredSignalIds(item, out);
+      }
+      return;
+    }
+    if (typeof value !== 'object') {
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    for (const [key, nested] of Object.entries(record)) {
+      if (key.toLowerCase().endsWith('signalid')) {
+        collectConfiguredSignalIds(nested, out);
+        continue;
+      }
+      if (
+        key === 'series' ||
+        key === 'actions' ||
+        key === 'columns' ||
+        key === 'signals' ||
+        key === 'targets'
+      ) {
+        collectConfiguredSignalIds(nested, out);
+      }
+    }
+  }
+
+  function collectConfiguredSignalPaths(value: unknown, out: Set<string>): void {
+    if (value === null || value === undefined) return;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed) out.add(trimmed);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        collectConfiguredSignalPaths(item, out);
+      }
+      return;
+    }
+    if (typeof value !== 'object') {
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    for (const [key, nested] of Object.entries(record)) {
+      const lower = key.toLowerCase();
+      if (lower.endsWith('signalpath') || key === 'signalPath') {
+        collectConfiguredSignalPaths(nested, out);
+        continue;
+      }
+      if (
+        key === 'series' ||
+        key === 'actions' ||
+        key === 'columns' ||
+        key === 'signals' ||
+        key === 'targets'
+      ) {
+        collectConfiguredSignalPaths(nested, out);
+      }
+    }
+  }
+
+  function resolveWidgetSignal(widget: DashboardWidget): SignalRow | null {
+    const directSignal =
+      Number.isFinite(widget.signalId) && widget.signalId > 0
+        ? signalById.get(widget.signalId) ?? null
+        : null;
+    const config = widget.config;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return directSignal;
+    }
+
+    const topicPath =
+      typeof config.topicPath === 'string' ? config.topicPath.trim() : '';
+    const normalizedTopic = normalizeSignalPathForLookup(topicPath);
+
+    const configuredSignalPath =
+      typeof config.signalPath === 'string' ? config.signalPath.trim() : '';
+    if (configuredSignalPath) {
+      const resolved = resolveSignalFromPath(configuredSignalPath, topicPath);
+      if (resolved) return resolved;
+    }
+
+    if (directSignal) {
+      if (!normalizedTopic) {
+        return directSignal;
+      }
+      const normalizedDirect = normalizeSignalPathForLookup(directSignal.path);
+      if (
+        normalizedDirect === normalizedTopic ||
+        normalizedDirect.startsWith(`${normalizedTopic}/`)
+      ) {
+        if (!isPlaceholderSignalValue(directSignal)) {
+          return directSignal;
+        }
+        const canonicalFallback = resolveSignalFromCanonicalTopic(topicPath, directSignal.path);
+        if (canonicalFallback && canonicalFallback.signal_id !== directSignal.signal_id) {
+          return canonicalFallback;
+        }
+        return directSignal;
+      }
+    }
+
+    const candidateIds = new Set<number>();
+    collectConfiguredSignalIds(config, candidateIds);
+    let bestIdCandidate: SignalRow | null = null;
+    for (const id of candidateIds) {
+      const resolved = signalById.get(id);
+      if (!resolved) continue;
+      if (!bestIdCandidate || !isPlaceholderSignalValue(resolved)) {
+        bestIdCandidate = resolved;
+      }
+      if (!isPlaceholderSignalValue(resolved)) break;
+    }
+    if (bestIdCandidate) return bestIdCandidate;
+
+    const candidatePaths = new Set<string>();
+    collectConfiguredSignalPaths(config, candidatePaths);
+    for (const rawPath of candidatePaths) {
+      const resolved = resolveSignalFromPath(rawPath, topicPath);
+      if (resolved) return resolved;
+    }
+
+    if (normalizedTopic) {
+      const exact = signalByNormalizedPath.get(normalizedTopic);
+      if (exact && !isPlaceholderSignalValue(exact)) return exact;
+      for (const entry of signals) {
+        const normalizedPath = normalizeSignalPathForLookup(entry.path);
+        if (normalizedPath.startsWith(`${normalizedTopic}/`)) {
+          if (!isPlaceholderSignalValue(entry)) return entry;
+          if (!exact) return entry;
+        }
+      }
+      const canonicalFallback = resolveSignalFromCanonicalTopic(
+        topicPath,
+        directSignal?.path ?? ''
+      );
+      if (canonicalFallback) return canonicalFallback;
+      if (exact) return exact;
+    }
+
+    if (directSignal) {
+      return directSignal;
+    }
+    return null;
+  }
 
   function computeWidgetPixelRect(
     layout: WidgetLayout,
@@ -233,26 +762,79 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     let cursor = widget.parentLayoutId;
     while (cursor) {
       if (cursor === ancestorId) return true;
-      const parent = widgets.find((entry) => entry.id === cursor);
+      const parent = widgetById.get(cursor);
       cursor = parent?.parentLayoutId;
     }
     return false;
   }
 
-  function widgetStyle(layout: WidgetLayout, withoutTrailingGap = false): string {
+  function isAccordionCollapsed(widget: DashboardWidget | null | undefined): boolean {
+    if (!widget || widget.kind !== 'layout_accordion') return false;
+    return readLayoutAccordionConfig(widget.config).collapsed;
+  }
+
+  function isHiddenByCollapsedAccordion(widget: DashboardWidget): boolean {
+    return hiddenByCollapsedAccordionByWidgetId.get(widget.id) ?? false;
+  }
+
+  function accordionHasOtherChildren(accordionId: string, ignoreWidgetId?: string): boolean {
+    return widgets.some(
+      (widget) =>
+        widget.parentLayoutId === accordionId &&
+        (ignoreWidgetId === undefined || widget.id !== ignoreWidgetId)
+    );
+  }
+
+  function toggleAccordionCollapsed(widget: DashboardWidget): void {
+    if (widget.kind !== 'layout_accordion') return;
+    const baseConfig =
+      widget.config && typeof widget.config === 'object' && !Array.isArray(widget.config)
+        ? widget.config
+        : {};
+    const nextCollapsed = !readLayoutAccordionConfig(widget.config).collapsed;
+    onUpdateWidgetConfig(widget.id, {
+      ...(baseConfig as WidgetConfigRecord),
+      collapsed: nextCollapsed
+    });
+  }
+
+  function accordionStackLayer(widget: DashboardWidget): number {
+    let layer = 0;
+    let first = true;
+    let cursor: DashboardWidget | null = widget;
+    while (cursor) {
+      if (cursor.kind === 'layout_accordion' && !isAccordionCollapsed(cursor)) {
+        // Accordion shell floats above baseline; descendants render above shell.
+        layer += first ? 2 : 3;
+      }
+      first = false;
+      const parentId = cursor.parentLayoutId;
+      cursor = parentId ? widgetById.get(parentId) ?? null : null;
+    }
+    return layer;
+  }
+
+  function widgetStyle(
+    layout: WidgetLayout,
+    withoutTrailingGap = false,
+    zIndex?: number
+  ): string {
     const box = computeWidgetPixelRect(layout, withoutTrailingGap);
-    return `transform:translate3d(${box.left}px,${box.top}px,0);width:${Math.max(1, box.width)}px;height:${Math.max(1, box.height)}px;`;
+    const z = zIndex !== undefined ? `z-index:${zIndex};` : '';
+    return `transform:translate3d(${box.left}px,${box.top}px,0);width:${Math.max(1, box.width)}px;height:${Math.max(1, box.height)}px;${z}`;
   }
 
   function widgetStyleFor(widget: DashboardWidget, layout: WidgetLayout): string {
     const withoutTrailingGap = Boolean(widget.parentLayoutId);
+    const stackLayer = accordionStackLayer(widget);
+    const stackedZIndex = stackLayer > 0 ? 10 + stackLayer : undefined;
     if (!drag || drag.mode !== 'move') {
-      return widgetStyle(layout, withoutTrailingGap);
+      return widgetStyle(layout, withoutTrailingGap, stackedZIndex);
     }
 
     const pointerDx = drag.pointerX - drag.startX;
     const pointerDy = drag.pointerY - drag.startY;
-    const movingWidget = widgets.find((entry) => entry.id === drag.widgetId);
+    const movingWidget = draggingWidget;
 
     if (widget.id !== drag.widgetId) {
       // When a layout container moves, render its descendants with the same live drag offset.
@@ -267,7 +849,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
         return `transform:translate3d(${left}px,${top}px,0);width:${Math.max(1, box.width)}px;height:${Math.max(1, box.height)}px;z-index:22;`;
       }
 
-      return widgetStyle(layout, withoutTrailingGap);
+      return widgetStyle(layout, withoutTrailingGap, stackedZIndex);
     }
 
     const startBox = computeWidgetPixelRect(drag.startLayout, withoutTrailingGap);
@@ -291,15 +873,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     if (drag && drag.widgetId === widget.id) {
       return drag.currentLayout;
     }
-    const listAdjusted = normalizedListChildLayout(widget, base);
-    if (listAdjusted) {
-      return listAdjusted;
-    }
-    const gridAdjusted = normalizedGridChildLayout(widget, base);
-    if (gridAdjusted) {
-      return gridAdjusted;
-    }
-    return base;
+    return containerNormalizedLayoutByWidgetId.get(widget.id) ?? base;
   }
 
   type GridLayoutSpec = {
@@ -342,6 +916,9 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     }
     if (layoutWidget.kind === 'layout_list') {
       return (rootEl.querySelector('.layout-list') as HTMLElement | null) ?? rootEl;
+    }
+    if (layoutWidget.kind === 'layout_accordion') {
+      return (rootEl.querySelector('.layout-accordion-body') as HTMLElement | null) ?? rootEl;
     }
     return (rootEl.querySelector('.widget-body') as HTMLElement | null) ?? rootEl;
   }
@@ -386,7 +963,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   function resolveLayoutContentBounds(layoutWidget: DashboardWidget): WidgetLayout {
     const frozen = drag?.frozenLayoutBounds.get(layoutWidget.id);
     if (frozen) return frozen;
-    return resolveLayoutContentBoundsLive(layoutWidget);
+    return layoutContentBoundsById.get(layoutWidget.id) ?? resolveLayoutContentBoundsLive(layoutWidget);
   }
 
   function buildGridAxisEdges(start: number, span: number, segments: number): number[] {
@@ -547,16 +1124,36 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     );
   }
 
+  function normalizedAccordionChildLayout(
+    widget: DashboardWidget,
+    fallback: WidgetLayout
+  ): WidgetLayout | null {
+    if (!widget.parentLayoutId) return null;
+
+    const parent = widgetById.get(widget.parentLayoutId);
+    if (!parent || parent.kind !== 'layout_accordion') return null;
+
+    const parentLayout = resolveLayoutContentBounds(parent);
+    return clampLayout(
+      {
+        ...fallback,
+        x: parentLayout.x,
+        y: parentLayout.y,
+        w: parentLayout.w,
+        h: parentLayout.h
+      },
+      gridColumns
+    );
+  }
+
   function normalizedListChildLayout(
     widget: DashboardWidget,
     fallback: WidgetLayout
   ): WidgetLayout | null {
     if (!widget.parentLayoutId) return null;
 
-    const parent = widgets.find(
-      (entry) => entry.id === widget.parentLayoutId && entry.kind === 'layout_list'
-    );
-    if (!parent) return null;
+    const parent = widgetById.get(widget.parentLayoutId);
+    if (!parent || parent.kind !== 'layout_list') return null;
 
     const parentLayout = resolveLayoutContentBounds(parent);
     const siblings = widgets
@@ -604,10 +1201,8 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   ): WidgetLayout | null {
     if (!widget.parentLayoutId) return null;
 
-    const parent = widgets.find(
-      (entry) => entry.id === widget.parentLayoutId && entry.kind === 'layout_grid'
-    );
-    if (!parent) return null;
+    const parent = widgetById.get(widget.parentLayoutId);
+    if (!parent || parent.kind !== 'layout_grid') return null;
 
     const cellLayout = gridCellLayoutFromAbsolute(parent, fallback);
     if (!cellLayout) return fallback;
@@ -615,26 +1210,27 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   }
 
   function hasCollision(widgetId: string, candidate: WidgetLayout): boolean {
-    const movingWidget = widgets.find((widget) => widget.id === widgetId);
-    if (!movingWidget || isLayoutWidgetKind(movingWidget.kind)) {
+    const movingWidget = widgetById.get(widgetId);
+    if (!movingWidget || isLayoutWidgetKind(movingWidget.kind) || isHiddenByCollapsedAccordion(movingWidget)) {
       return false;
     }
 
     return widgets.some((widget) => {
       if (widget.id === widgetId) return false;
+      if (isHiddenByCollapsedAccordion(widget)) return false;
       if (isLayoutWidgetKind(widget.kind)) return false;
       return layoutsOverlap(resolvedWidgetLayout(widget), candidate);
     });
   }
 
   function isContainerLayoutKind(kind: DashboardWidget['kind']): boolean {
-    return kind === 'layout_list' || kind === 'layout_grid';
+    return kind === 'layout_list' || kind === 'layout_grid' || kind === 'layout_accordion';
   }
 
   function findContainerParent(widget: DashboardWidget): DashboardWidget | null {
     const parentId = widget.parentLayoutId;
     if (!parentId) return null;
-    const parent = widgets.find((entry) => entry.id === parentId);
+    const parent = widgetById.get(parentId);
     if (!parent || !isContainerLayoutKind(parent.kind)) return null;
     return parent;
   }
@@ -647,7 +1243,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     let cursor: string | undefined = candidateParentId;
     while (cursor) {
       if (cursor === widgetId) return true;
-      const node = widgets.find((entry) => entry.id === cursor);
+      const node = widgetById.get(cursor);
       cursor = node?.parentLayoutId;
     }
     return false;
@@ -675,6 +1271,19 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     // Let widgets leave a container when their center is dragged outside.
     if (!layoutContainsPoint(parentLayout, candidateCenterX, candidateCenterY)) {
       return candidate;
+    }
+
+    if (parent.kind === 'layout_accordion') {
+      return clampLayout(
+        {
+          ...candidate,
+          x: parentLayout.x,
+          y: parentLayout.y,
+          w: parentLayout.w,
+          h: parentLayout.h
+        },
+        gridColumns
+      );
     }
 
     if (parent.kind === 'layout_list') {
@@ -769,8 +1378,28 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     mode: DragMode
   ): WidgetLayout {
     const parent = findContainerParent(moving);
-    if (parent?.kind !== 'layout_list') return layout;
+    if (parent?.kind !== 'layout_list' && parent?.kind !== 'layout_accordion') return layout;
     const parentLayout = resolveLayoutContentBounds(parent);
+
+    if (parent.kind === 'layout_accordion') {
+      if (mode === 'move') {
+        const centerX = layout.x + layout.w * 0.5;
+        const centerY = layout.y + layout.h * 0.5;
+        if (!layoutContainsPoint(parentLayout, centerX, centerY)) {
+          return layout;
+        }
+      }
+      return clampLayout(
+        {
+          ...layout,
+          x: parentLayout.x,
+          y: parentLayout.y,
+          w: parentLayout.w,
+          h: parentLayout.h
+        },
+        gridColumns
+      );
+    }
 
     if (mode === 'move') {
       const centerX = layout.x + layout.w * 0.5;
@@ -810,13 +1439,32 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     );
   }
 
+  function resolveResizeDragWidget(
+    widget: DashboardWidget,
+    parentContainer: DashboardWidget | null
+  ): DashboardWidget {
+    if (parentContainer?.kind === 'layout_accordion' && !isAccordionCollapsed(parentContainer)) {
+      return parentContainer;
+    }
+    return widget;
+  }
+
   function beginDrag(event: PointerEvent, widget: DashboardWidget, mode: DragMode) {
     if (!editMode) return;
     if (event.button !== 0) return;
 
     closeContextMenu();
 
-    const clampedStart = resolvedWidgetLayout(widget);
+    let dragWidget = widget;
+    if (mode === 'resize') {
+      const parent = findContainerParent(widget);
+      if (parent?.kind === 'layout_accordion' && !isAccordionCollapsed(parent)) {
+        // Resize gestures on accordion contents should resize the accordion shell itself.
+        dragWidget = parent;
+      }
+    }
+
+    const clampedStart = resolvedWidgetLayout(dragWidget);
     const pointerOnCanvas = pointerToCanvasUnits(event.clientX, event.clientY);
     const startGridX = pointerOnCanvas?.x ?? clampedStart.x;
     const startGridY = pointerOnCanvas?.y ?? clampedStart.y;
@@ -826,7 +1474,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     const resizeOffsetY = clampedStart.y + clampedStart.h - startGridY;
 
     drag = {
-      widgetId: widget.id,
+      widgetId: dragWidget.id,
       mode,
       startX: event.clientX,
       startY: event.clientY,
@@ -847,17 +1495,15 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     event.stopPropagation();
   }
 
-  function applyDrag(event: PointerEvent) {
+  function applyDragAt(pointerX: number, pointerY: number) {
     if (!drag) return;
 
-    const moving = widgets.find((widget) => widget.id === drag.widgetId);
+    const moving = widgetById.get(drag.widgetId);
     if (!moving) {
       drag = null;
       return;
     }
 
-    const pointerX = event.clientX;
-    const pointerY = event.clientY;
     const pointerOnCanvas = pointerToCanvasUnits(pointerX, pointerY);
     const baseUnitsPerCell = cellSize + GRID_GAP;
     const pointerGridX =
@@ -869,11 +1515,18 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       x: pointerGridX - drag.anchorOffsetX,
       y: pointerGridY - drag.anchorOffsetY
     };
-    const freeResizeCandidate: WidgetLayout = {
+    let freeResizeCandidate: WidgetLayout = {
       ...drag.startLayout,
       w: Math.max(1e-3, pointerGridX + drag.resizeOffsetX - drag.startLayout.x),
       h: Math.max(1e-3, pointerGridY + drag.resizeOffsetY - drag.startLayout.y)
     };
+    if (drag.mode === 'resize' && moving.kind === 'layout_accordion' && isAccordionCollapsed(moving)) {
+      // Collapsed accordions stay one row tall; resize gestures should affect width.
+      freeResizeCandidate = {
+        ...freeResizeCandidate,
+        h: Math.max(1, Math.round(drag.startLayout.h))
+      };
+    }
 
     let next: WidgetLayout;
     const containerParent = findContainerParent(moving);
@@ -923,6 +1576,37 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
         }
       } else {
         next = drag.mode === 'move' ? freeMoveCandidate : freeResizeCandidate;
+      }
+    } else if (containerParent?.kind === 'layout_accordion') {
+      const parentLayout = resolveLayoutContentBounds(containerParent);
+      if (drag.mode === 'move') {
+        const centerX = freeMoveCandidate.x + freeMoveCandidate.w * 0.5;
+        const centerY = freeMoveCandidate.y + freeMoveCandidate.h * 0.5;
+        if (!layoutContainsPoint(parentLayout, centerX, centerY)) {
+          next = freeMoveCandidate;
+        } else {
+          next = clampLayout(
+            {
+              ...drag.startLayout,
+              x: parentLayout.x,
+              y: parentLayout.y,
+              w: parentLayout.w,
+              h: parentLayout.h
+            },
+            gridColumns
+          );
+        }
+      } else {
+        next = clampLayout(
+          {
+            ...drag.startLayout,
+            x: parentLayout.x,
+            y: parentLayout.y,
+            w: parentLayout.w,
+            h: parentLayout.h
+          },
+          gridColumns
+        );
       }
     } else if (containerParent?.kind === 'layout_list') {
       const parentLayout = resolveLayoutContentBounds(containerParent);
@@ -1002,11 +1686,15 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     };
   }
 
+  function applyDrag(event: PointerEvent) {
+    applyDragAt(event.clientX, event.clientY);
+  }
+
   function endDrag() {
     if (!drag) return;
 
     const { widgetId, startLayout, currentLayout, mode } = drag;
-    const moving = widgets.find((widget) => widget.id === widgetId);
+    const moving = widgetById.get(widgetId);
     if (!moving) {
       drag = null;
       return;
@@ -1021,10 +1709,16 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
           x: finalLayout.x + finalLayout.w * 0.5,
           y: finalLayout.y + finalLayout.h * 0.5
         },
-        widgetId
+        widgetId,
+        isLayoutWidgetKind(moving.kind) ? moving.id : undefined
       );
+      const targetAcceptsDrop =
+        layoutTarget?.kind !== 'layout_accordion' ||
+        !accordionHasOtherChildren(layoutTarget.id, widgetId) ||
+        layoutTarget.id === moving.parentLayoutId;
       if (
         layoutTarget &&
+        targetAcceptsDrop &&
         isContainerLayoutKind(layoutTarget.kind) &&
         !wouldCreateParentCycle(widgetId, layoutTarget.id)
       ) {
@@ -1034,8 +1728,19 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
           { w: finalLayout.w, h: finalLayout.h },
           widgetId
         );
-          const adjustedForLayout =
-            layoutTarget.kind === 'layout_list'
+        const adjustedForLayout =
+          layoutTarget.kind === 'layout_accordion'
+            ? (() => {
+              const targetLayout = resolveLayoutContentBounds(layoutTarget);
+              return {
+                ...finalLayout,
+                x: targetLayout.x,
+                y: targetLayout.y,
+                w: targetLayout.w,
+                h: targetLayout.h
+              };
+            })()
+            : layoutTarget.kind === 'layout_list'
               ? (() => {
                 const targetLayout = resolveLayoutContentBounds(layoutTarget);
                 return {
@@ -1096,7 +1801,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
           finalLayout = snapped;
           parentLayoutId = layoutTarget.id;
         }
-      } else {
+      } else if (!layoutTarget) {
         parentLayoutId = null;
       }
     }
@@ -1104,17 +1809,15 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     // If parent did not change, force a final snap to current parent grid.
     if (parentLayoutId === undefined) {
       const sourceParent = findContainerParent(moving);
-      if (sourceParent?.kind === 'layout_list') {
+      if (sourceParent?.kind === 'layout_list' || sourceParent?.kind === 'layout_accordion') {
         finalLayout = snapLayoutToExistingParentList(moving, finalLayout, startLayout, mode);
       } else if (sourceParent?.kind === 'layout_grid') {
-        finalLayout = clampLayout(finalLayout, gridColumns);
-      } else {
         finalLayout = snapLayoutToExistingParentGrid(moving, finalLayout, startLayout, mode);
       }
     }
     const effectiveParentId = parentLayoutId === undefined ? moving.parentLayoutId ?? null : parentLayoutId;
     const effectiveParent = effectiveParentId
-      ? widgets.find((entry) => entry.id === effectiveParentId) ?? null
+      ? widgetById.get(effectiveParentId) ?? null
       : null;
     if (!effectiveParent) {
       finalLayout = snapLayoutToCanvasCells(finalLayout);
@@ -1204,11 +1907,15 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
 
   function findLayoutWidgetAtCell(
     cell: Pick<WidgetLayout, 'x' | 'y'>,
-    ignoreWidgetId?: string
+    ignoreWidgetId?: string,
+    ignoreDescendantsOfId?: string
   ): DashboardWidget | null {
     const candidates = widgets.filter((widget) => {
       if (widget.id === ignoreWidgetId) return false;
       if (!isLayoutWidgetKind(widget.kind)) return false;
+      if (ignoreDescendantsOfId && isDescendantOf(widget, ignoreDescendantsOfId)) return false;
+      if (isHiddenByCollapsedAccordion(widget)) return false;
+      if (isAccordionCollapsed(widget)) return false;
       const layout = resolvedWidgetLayout(widget);
       const xEnd = layout.x + layout.w;
       const yEnd = layout.y + layout.h;
@@ -1217,13 +1924,34 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
 
     if (candidates.length === 0) return null;
 
+    const byId = new Map(widgets.map((widget) => [widget.id, widget]));
+    const depthCache = new Map<string, number>();
+    const depthVisiting = new Set<string>();
+    const hierarchyDepth = (widgetId: string): number => {
+      const cached = depthCache.get(widgetId);
+      if (cached !== undefined) return cached;
+      if (depthVisiting.has(widgetId)) return 0;
+      depthVisiting.add(widgetId);
+      const widget = byId.get(widgetId);
+      const parentId = widget?.parentLayoutId;
+      let depth = 0;
+      if (parentId && byId.has(parentId)) {
+        depth = hierarchyDepth(parentId) + 1;
+      }
+      depthVisiting.delete(widgetId);
+      depthCache.set(widgetId, depth);
+      return depth;
+    };
+
     candidates.sort((a, b) => {
+      const depthDiff = hierarchyDepth(b.id) - hierarchyDepth(a.id);
+      if (depthDiff !== 0) return depthDiff;
       const layoutA = resolvedWidgetLayout(a);
       const layoutB = resolvedWidgetLayout(b);
       const areaA = layoutA.w * layoutA.h;
       const areaB = layoutB.w * layoutB.h;
       if (areaA !== areaB) return areaA - areaB;
-      return layoutB.y - layoutA.y;
+      return layoutB.y - layoutA.y || layoutB.x - layoutA.x || a.id.localeCompare(b.id);
     });
 
     return candidates[0] ?? null;
@@ -1239,6 +1967,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   ): boolean {
     return widgets.some((widget) => {
       if (widget.id === ignoreWidgetId) return false;
+      if (isHiddenByCollapsedAccordion(widget)) return false;
       if (parentLayoutId !== undefined && widget.parentLayoutId !== parentLayoutId) return false;
       const layout = resolvedWidgetLayout(widget);
       const widgetYEnd = layout.y + layout.h;
@@ -1263,6 +1992,10 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     const dropH = Math.max(1, dropSize.h);
     const fallbackX = Math.max(xStart, Math.min(xEnd - dropW, fallback.x));
     const fallbackY = Math.max(yStart, Math.min(yEnd - dropH, fallback.y));
+
+    if (layoutWidget.kind === 'layout_accordion') {
+      return { x: xStart, y: yStart };
+    }
 
     if (layoutWidget.kind === 'layout_list') {
       const listDropW = xEnd - xStart;
@@ -1440,7 +2173,12 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       x: Math.max(1, Math.round(x)),
       y: Math.max(1, Math.round(y))
     };
-    const layoutDropTarget = findLayoutWidgetAtCell(fallbackPosition);
+    const rawLayoutDropTarget = findLayoutWidgetAtCell(fallbackPosition);
+    const layoutDropTarget =
+      rawLayoutDropTarget?.kind === 'layout_accordion' &&
+      accordionHasOtherChildren(rawLayoutDropTarget.id)
+        ? null
+        : rawLayoutDropTarget;
     const resolvedPosition = layoutDropTarget
       ? resolveLayoutDropPosition(layoutDropTarget, fallbackPosition, DEFAULT_SIGNAL_DROP_SIZE)
       : canvasSnappedPosition;
@@ -1475,9 +2213,33 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       observer.observe(gridEl);
     }
 
-    const onMove = (event: PointerEvent) => applyDrag(event);
+    let moveRaf = 0;
+    let pendingMove: { x: number; y: number } | null = null;
+    const flushMove = () => {
+      moveRaf = 0;
+      if (!pendingMove) return;
+      const { x, y } = pendingMove;
+      pendingMove = null;
+      applyDragAt(x, y);
+    };
+
+    const onMove = (event: PointerEvent) => {
+      if (!drag) return;
+      pendingMove = { x: event.clientX, y: event.clientY };
+      if (moveRaf !== 0) return;
+      moveRaf = window.requestAnimationFrame(flushMove);
+    };
     const onUp = (event: PointerEvent) => {
-      applyDrag(event);
+      if (moveRaf !== 0) {
+        window.cancelAnimationFrame(moveRaf);
+        moveRaf = 0;
+      }
+      if (pendingMove) {
+        const { x, y } = pendingMove;
+        pendingMove = null;
+        applyDragAt(x, y);
+      }
+      applyDragAt(event.clientX, event.clientY);
       endDrag();
     };
     const onPointerDown = (event: PointerEvent) => {
@@ -1515,6 +2277,9 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
 
     return () => {
       observer.disconnect();
+      if (moveRaf !== 0) {
+        window.cancelAnimationFrame(moveRaf);
+      }
       if (copyToastTimer) {
         clearTimeout(copyToastTimer);
         copyToastTimer = null;
@@ -1545,6 +2310,19 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       currentLayout
     };
   });
+
+  $effect(() => {
+    widgets;
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      return;
+    }
+    const raf = window.requestAnimationFrame(() => {
+      layoutMeasureTick += 1;
+    });
+    return () => {
+      window.cancelAnimationFrame(raf);
+    };
+  });
 </script>
 
 <section class="dashboard-canvas panel">
@@ -1558,6 +2336,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   <div
     class="grid-surface"
     class:drag-over={dragOverSurface}
+    class:dragging={Boolean(drag)}
     bind:this={gridEl}
     role="region"
     aria-label="Dashboard canvas grid"
@@ -1578,12 +2357,15 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     {/if}
 
     {#each widgetsForRender as widget (widget.id)}
-      {@const signal = signalById.get(widget.signalId) ?? null}
+      {@const signal = resolvedSignalByWidgetId.get(widget.id) ?? null}
       {@const isLayoutWidget = isLayoutWidgetKind(widget.kind)}
-      {#if isLayoutWidget || signal}
+      {@const accordionConfig = widget.kind === 'layout_accordion' ? readLayoutAccordionConfig(widget.config) : null}
+      {@const accordionOpen = accordionConfig ? !accordionConfig.collapsed : false}
+      {@const hiddenByAccordion = isHiddenByCollapsedAccordion(widget)}
+      {#if !hiddenByAccordion && (isLayoutWidget || signal)}
         {@const layout = resolvedWidgetLayout(widget)}
         <div
-          class={`widget-card ${isLayoutWidget ? 'layout-card' : ''} ${!isLayoutWidget && widget.parentLayoutId ? 'in-layout' : ''} ${selectedWidgetId === widget.id ? 'active' : ''}`}
+          class={`widget-card ${isLayoutWidget ? 'layout-card' : ''} ${accordionOpen ? 'accordion-open' : ''} ${!isLayoutWidget && widget.parentLayoutId ? 'in-layout' : ''} ${selectedWidgetId === widget.id ? 'active' : ''} ${drag?.widgetId === widget.id ? 'dragging-card' : ''}`}
           data-widget-id={widget.id}
           style={widgetStyleFor(widget, layout)}
           role="button"
@@ -1639,6 +2421,39 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
                   {#each Array.from({ length: Math.max(1, Math.min(10, layout.h)) }) as _, index (`list-${widget.id}-${index}`)}
                     <span></span>
                   {/each}
+                </div>
+              {:else if widget.kind === 'layout_accordion' && accordionConfig}
+                <div class={`layout-accordion ${accordionConfig.collapsed ? 'collapsed' : ''}`}>
+                  <button
+                    type="button"
+                    class="layout-accordion-head layout-accordion-toggle"
+                    aria-label={`${accordionConfig.collapsed ? 'Expand' : 'Collapse'} ${widget.title}`}
+                    aria-expanded={!accordionConfig.collapsed}
+                    onclick={() => toggleAccordionCollapsed(widget)}
+                  >
+                    <strong>{widget.title}</strong>
+                    <span class="layout-accordion-chevron">{accordionConfig.collapsed ? '>' : 'v'}</span>
+                  </button>
+                  <div class="layout-accordion-body">
+                    {#if accordionConfig.collapsed}
+                      <button
+                        type="button"
+                        class="layout-accordion-collapsed-fill layout-accordion-toggle"
+                        aria-label={`Expand ${widget.title}`}
+                        aria-expanded="false"
+                        onclick={() => toggleAccordionCollapsed(widget)}
+                      >
+                        <span class="layout-accordion-collapsed-label">{widget.title}</span>
+                        <span class="layout-accordion-chevron">></span>
+                      </button>
+                    {:else}
+                      <div class="layout-list">
+                        {#each Array.from({ length: Math.max(1, Math.min(8, layout.h)) }) as _, index (`accordion-${widget.id}-${index}`)}
+                          <span></span>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
                 </div>
               {:else if widget.kind === 'layout_grid'}
                 {@const layoutSpec = resolveGridLayoutSpec(widget)}
@@ -1752,6 +2567,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
                   {signals}
                   {signalById}
                   configRaw={widget.config}
+                  onSendSet={onSendSet}
                 />
               {:else if widget.kind === 'camera_overlay'}
                 <CameraOverlayWidget
@@ -1822,6 +2638,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
                   {signals}
                   {signalById}
                   configRaw={widget.config}
+                  onSendSet={onSendSet}
                 />
               {:else if widget.kind === 'swerve_drive'}
                 <SwerveDriveWidget
@@ -1992,21 +2809,19 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   .grid-spacer {
     min-width: 100%;
     min-height: 100%;
-    background:
-      repeating-linear-gradient(
-        90deg,
-        rgba(153, 164, 180, 0.1),
-        rgba(153, 164, 180, 0.1) var(--cell),
-        transparent var(--cell),
-        transparent calc(var(--cell) + var(--gap))
+    background-image:
+      linear-gradient(
+        to right,
+        rgba(153, 164, 180, 0.18) 1px,
+        transparent 1px
       ),
-      repeating-linear-gradient(
-        180deg,
-        rgba(153, 164, 180, 0.06),
-        rgba(153, 164, 180, 0.06) var(--cell),
-        transparent var(--cell),
-        transparent calc(var(--cell) + var(--gap))
+      linear-gradient(
+        to bottom,
+        rgba(153, 164, 180, 0.14) 1px,
+        transparent 1px
       );
+    background-size: calc(var(--cell) + var(--gap)) calc(var(--cell) + var(--gap));
+    background-position: 0 0;
     pointer-events: none;
   }
 
@@ -2045,12 +2860,28 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     cursor: pointer;
     overflow: hidden;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+    content-visibility: auto;
+    contain-intrinsic-size: 220px 140px;
+    contain: layout paint;
+  }
+
+  .widget-card.dragging-card {
     will-change: transform;
+  }
+
+  .grid-surface.dragging .widget-card {
+    box-shadow: none;
   }
 
   .widget-card.layout-card {
     border-style: dashed;
     background: rgba(30, 37, 49, 0.86);
+    padding: 0.08rem 0.16rem 0.16rem;
+    grid-template-rows: minmax(0.5rem, calc(var(--cell) * 0.22)) minmax(0, 1fr);
+  }
+
+  .widget-card.layout-card.accordion-open {
+    overflow: visible;
   }
 
   .widget-card.in-layout {
@@ -2130,6 +2961,36 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     overflow: auto;
   }
 
+  .widget-card.layout-card .widget-body {
+    justify-content: stretch;
+  }
+
+  .widget-card.layout-card .widget-head {
+    border-bottom-width: 1px;
+  }
+
+  .widget-card.layout-card .head-left {
+    gap: 0.14rem;
+  }
+
+  .widget-card.layout-card .widget-head strong {
+    font-size: 0.58rem;
+    max-width: max(0px, calc(100% - 2.8rem));
+  }
+
+  .widget-card.layout-card .widget-type-chip {
+    padding: 0.04rem 0.16rem;
+    font-size: 0.5rem;
+  }
+
+  .widget-card.layout-card.accordion-open .widget-body {
+    overflow: visible;
+  }
+
+  .widget-card.layout-card.accordion-open .layout-accordion {
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34);
+  }
+
   .layout-section-body {
     width: 100%;
     height: 100%;
@@ -2164,6 +3025,121 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     border-radius: 2px;
     background: rgba(153, 164, 180, 0.2);
     border: 1px solid rgba(153, 164, 180, 0.2);
+  }
+
+  .layout-accordion {
+    width: 100%;
+    height: 100%;
+    min-height: 1.2rem;
+    border: 1px solid rgba(153, 164, 180, 0.24);
+    border-radius: 5px;
+    background: rgba(28, 35, 47, 0.72);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .layout-accordion-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.18rem 0.28rem;
+    border-bottom: 1px solid rgba(153, 164, 180, 0.24);
+    background: rgba(40, 49, 66, 0.8);
+  }
+
+  .layout-accordion-toggle {
+    width: 100%;
+    border: 0;
+    margin: 0;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .layout-accordion-toggle:focus-visible {
+    outline: 2px solid rgba(138, 183, 255, 0.85);
+    outline-offset: -2px;
+  }
+
+  .layout-accordion-head strong {
+    min-width: 0;
+    margin: 0;
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--text-strong);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .layout-accordion-chevron {
+    font-size: 0.62rem;
+    color: var(--text-soft);
+    line-height: 1;
+  }
+
+  .layout-accordion-body {
+    min-height: 0;
+    padding: 0.14rem;
+    overflow: hidden;
+  }
+
+  .layout-accordion.collapsed .layout-accordion-body {
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0.08rem;
+  }
+
+  .layout-accordion.collapsed {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .layout-accordion.collapsed .layout-accordion-head {
+    display: none;
+  }
+
+  .layout-accordion-collapsed-fill {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.18rem;
+    padding: 0.1rem 0.2rem;
+    width: 100%;
+    height: 100%;
+    min-height: 0.36rem;
+    border: 1px solid rgba(153, 164, 180, 0.28);
+    border-radius: 4px;
+    color: var(--text-soft);
+    background:
+      linear-gradient(180deg, rgba(80, 96, 120, 0.2), rgba(45, 57, 76, 0.3)),
+      repeating-linear-gradient(
+        90deg,
+        rgba(153, 164, 180, 0.14),
+        rgba(153, 164, 180, 0.14) 5px,
+        transparent 5px,
+        transparent 10px
+      );
+  }
+
+  .layout-accordion-collapsed-fill:focus-visible {
+    outline: 2px solid rgba(138, 183, 255, 0.85);
+    outline-offset: -2px;
+  }
+
+  .layout-accordion-collapsed-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.58rem;
+    font-weight: 700;
+    color: var(--text-strong);
   }
 
   .layout-grid {

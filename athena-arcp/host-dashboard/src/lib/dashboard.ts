@@ -23,6 +23,7 @@ export const TYPE_OPTIONS = [
 export const LAYOUT_TOOL_KINDS = [
   'layout_list',
   'layout_grid',
+  'layout_accordion',
   'layout_divider',
   'layout_spacer',
   'layout_section',
@@ -321,6 +322,8 @@ export function widgetKindLabel(kind: WidgetKind): string {
       return 'List';
     case 'layout_grid':
       return 'Grid';
+    case 'layout_accordion':
+      return 'Accordion';
     case 'layout_divider':
       return 'Divider';
     case 'layout_spacer':
@@ -389,19 +392,21 @@ export function defaultLeafWidgetKind(signal: SignalRow): WidgetKind {
 export function defaultLayoutFor(kind: WidgetKind): WidgetLayout {
   switch (kind) {
     case 'state_machine':
-      return { x: 1, y: 1, w: 10, h: 5 };
+      return { x: 1, y: 1, w: 3, h: 4 };
     case 'dio':
       return { x: 1, y: 1, w: 4, h: 2 };
     case 'motor':
-      return { x: 1, y: 1, w: 4, h: 2 };
+      return { x: 1, y: 1, w: 3, h: 5 };
     case 'encoder':
-      return { x: 1, y: 1, w: 4, h: 2 };
+      return { x: 1, y: 1, w: 3, h: 7 };
     case 'imu':
       return { x: 1, y: 1, w: 5, h: 3 };
     case 'layout_list':
       return { x: 1, y: 1, w: 3, h: 2 };
     case 'layout_grid':
       return { x: 1, y: 1, w: 4, h: 2 };
+    case 'layout_accordion':
+      return { x: 1, y: 1, w: 4, h: 3 };
     case 'layout_divider':
       return { x: 1, y: 1, w: 4, h: 1 };
     case 'layout_spacer':
@@ -413,7 +418,7 @@ export function defaultLayoutFor(kind: WidgetKind): WidgetLayout {
     case 'graph':
       return { x: 1, y: 1, w: 6, h: 3 };
     case 'controller':
-      return { x: 1, y: 1, w: 4, h: 3 };
+      return { x: 1, y: 1, w: 2, h: 3 };
     case 'bar':
       return { x: 1, y: 1, w: 2, h: 1 };
     case 'dial':
@@ -517,6 +522,8 @@ export function defaultLayoutTitle(kind: LayoutToolKind): string {
       return 'List Block';
     case 'layout_grid':
       return 'Grid Block';
+    case 'layout_accordion':
+      return 'Accordion Block';
     case 'layout_divider':
       return 'Divider';
     case 'layout_spacer':
@@ -882,7 +889,12 @@ export function makeLayoutWidget(
         return {
           columns: layout.w,
           rows: layout.h,
-          autoSize: false
+          autoSize: true
+        } as WidgetConfigRecord;
+      }
+      if (kind === 'layout_accordion') {
+        return {
+          collapsed: false
         } as WidgetConfigRecord;
       }
       return undefined;

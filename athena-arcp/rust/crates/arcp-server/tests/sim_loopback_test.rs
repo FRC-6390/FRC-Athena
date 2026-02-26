@@ -26,6 +26,8 @@ fn loopback_publish_reaches_udp_subscriber() {
         control_port: 0,
         realtime_port: 0,
         max_signals: 64,
+        nt4_bridge_enabled: false,
+        nt4_unsecure_port: 5810,
     });
     server
         .register_signal(SignalDescriptor::telemetry(

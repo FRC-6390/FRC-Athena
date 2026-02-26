@@ -2,6 +2,7 @@ package ca.frc6390.athena.hardware.encoder;
 
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 import ca.frc6390.athena.core.sections.SectionedAccess;
 import edu.wpi.first.math.MathUtil;
 import java.util.function.Consumer;
@@ -487,5 +488,52 @@ public interface Encoder extends RobotSendableSystem.RobotSendableDevice {
         }
 
         return node;
+    }
+
+    default void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        // Writable channels so ARCP encoder widgets can tune/live-adjust encoder behavior.
+        publisher.writableDouble(rootPath + "/position").onSetDouble(this::setPosition);
+        publisher.writableBoolean(rootPath + "/inverted").onSetBoolean(this::setInverted);
+        publisher.writableDouble(rootPath + "/conversion").onSetDouble(this::setConversion);
+        publisher.writableDouble(rootPath + "/offset").onSetDouble(this::setOffset);
+        publisher.writableDouble(rootPath + "/gearRatio").onSetDouble(this::setGearRatio);
+        publisher.writableDouble(rootPath + "/conversionOffset").onSetDouble(this::setConversionOffset);
+        publisher.writableDouble(rootPath + "/discontinuityPoint").onSetDouble(this::setDiscontinuityPoint);
+        publisher.writableDouble(rootPath + "/discontinuityRange").onSetDouble(this::setDiscontinuityRange);
+
+        publisher.put(rootPath + "/position", getPosition());
+        publisher.put(rootPath + "/velocity", getVelocity());
+        publisher.put(rootPath + "/absolutePosition", getAbsolutePosition());
+        publisher.put(rootPath + "/connected", isConnected());
+        publisher.put(rootPath + "/rate", getRate());
+        publisher.put(rootPath + "/rawAbsolute", getRawAbsoluteValue());
+        publisher.put(rootPath + "/supportsSimulation", supportsSimulation());
+        publisher.put(rootPath + "/gearRatio", getGearRatio());
+        publisher.put(rootPath + "/conversion", getConversion());
+        publisher.put(rootPath + "/conversionOffset", getConversionOffset());
+        publisher.put(rootPath + "/offset", getOffset());
+        publisher.put(rootPath + "/inverted", isInverted());
+        double discontinuityPoint = getDiscontinuityPoint();
+        if (Double.isFinite(discontinuityPoint)) {
+            publisher.put(rootPath + "/discontinuityPoint", discontinuityPoint);
+        }
+        double discontinuityRange = getDiscontinuityRange();
+        if (Double.isFinite(discontinuityRange)) {
+            publisher.put(rootPath + "/discontinuityRange", discontinuityRange);
+        }
+
+        EncoderConfig cfg = getConfig();
+        if (cfg != null) {
+            publisher.put(rootPath + "/canId", cfg.id());
+            publisher.put(rootPath + "/canbus", cfg.canbus() != null ? cfg.canbus() : "");
+            publisher.put(rootPath + "/type", cfg.type() != null ? cfg.type().getKey() : "unknown");
+        } else {
+            publisher.put(rootPath + "/canId", -1.0);
+            publisher.put(rootPath + "/canbus", "");
+            publisher.put(rootPath + "/type", "unknown");
+        }
     }
 }

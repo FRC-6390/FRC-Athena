@@ -87,6 +87,12 @@ export async function listServerLayouts(): Promise<string[]> {
   return invoke('list_server_layouts');
 }
 
+export async function deleteServerLayout(layoutName: string): Promise<void> {
+  return invoke('delete_server_layout', {
+    layoutName
+  });
+}
+
 export async function windowModeSnapshot(): Promise<WindowModeSnapshot> {
   if (isTauriRuntime()) {
     return invoke('window_mode_snapshot');

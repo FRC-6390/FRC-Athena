@@ -3,6 +3,7 @@
 Top-level example groups:
 
 - `commands/examples`
+- `arcp/examples`
 - `core/examples`
 - `controllers/examples`
 - `drivetrains/examples`

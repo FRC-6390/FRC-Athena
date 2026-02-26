@@ -12,6 +12,7 @@
   const layoutToolDescriptions: Record<LayoutToolKind, string> = {
     layout_list: 'Vertical stack scaffold',
     layout_grid: 'Dense tiled scaffold',
+    layout_accordion: 'Collapsible stack scaffold',
     layout_divider: 'Section separator',
     layout_spacer: 'Whitespace spacer',
     layout_section: 'Section title bar',

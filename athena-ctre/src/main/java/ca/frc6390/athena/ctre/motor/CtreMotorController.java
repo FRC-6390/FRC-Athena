@@ -1,5 +1,7 @@
 package ca.frc6390.athena.ctre.motor;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 import com.ctre.phoenix6.CANBus;
@@ -32,6 +34,8 @@ import edu.wpi.first.math.controller.PIDController;
  */
 public class CtreMotorController implements MotorController {
     private static final int TEMPERATURE_REFRESH_INTERVAL_CYCLES = 25;
+    private static final double CONFIG_EPSILON = 1e-6;
+    private static final Map<String, TalonConfigSnapshot> APPLIED_TALON_CONFIGS = new ConcurrentHashMap<>();
     private final TalonFX controller;
     private final MotorControllerConfig config;
     private final Encoder encoder;
@@ -45,8 +49,18 @@ public class CtreMotorController implements MotorController {
     private final StatusSignal<?> deviceTemperatureSignal;
     private final StatusSignal<Boolean> faultStatorCurrentLimitSignal;
     private final StatusSignal<Boolean> faultSupplyCurrentLimitSignal;
+    private final StatusSignal<?> supplyCurrentSignal;
+    private final StatusSignal<?> motorVoltageSignal;
     private double cachedTemperatureCelsius = 0.0;
+    private double cachedCurrentAmps = Double.NaN;
+    private double cachedAppliedVoltage = Double.NaN;
     private boolean cachedConnected = true;
+    private double appliedCurrentLimitAmps = Double.NaN;
+    private boolean appliedInverted = false;
+    private double appliedPidP = Double.NaN;
+    private double appliedPidI = Double.NaN;
+    private double appliedPidD = Double.NaN;
+    private boolean appliedPidConfigured = false;
     private int updateCycles = 0;
 
     public CtreMotorController(TalonFX controller, MotorControllerConfig config, Encoder encoder) {
@@ -76,11 +90,25 @@ public class CtreMotorController implements MotorController {
         };
         this.faultStatorCurrentLimitSignal = controller.getFault_StatorCurrLimit(false).clone();
         this.faultSupplyCurrentLimitSignal = controller.getFault_SupplyCurrLimit(false).clone();
+        this.supplyCurrentSignal = controller.getSupplyCurrent(false).clone();
+        this.motorVoltageSignal = controller.getMotorVoltage(false).clone();
 
         deviceTemperatureSignal.setUpdateFrequency(10.0, 0.0);
         faultStatorCurrentLimitSignal.setUpdateFrequency(10.0, 0.0);
         faultSupplyCurrentLimitSignal.setUpdateFrequency(10.0, 0.0);
+        supplyCurrentSignal.setUpdateFrequency(20.0, 0.0);
+        motorVoltageSignal.setUpdateFrequency(20.0, 0.0);
         controller.optimizeBusUtilization(4.0, 0.0);
+        appliedCurrentLimitAmps = config.currentLimit();
+        appliedInverted = config.inverted();
+        PIDController configuredPid = config.pid();
+        if (configuredPid != null) {
+            appliedPidP = configuredPid.getP();
+            appliedPidI = configuredPid.getI();
+            appliedPidD = configuredPid.getD();
+            appliedPidConfigured = true;
+        }
+        cacheAppliedSnapshot();
     }
 
     public static CtreMotorController fromConfig(MotorControllerConfig config) {
@@ -104,7 +132,13 @@ public class CtreMotorController implements MotorController {
             talonConfig.Slot0.kI = config.pid().getI();
             talonConfig.Slot0.kD = config.pid().getD();
         }
-        talon.getConfigurator().apply(talonConfig, 0.0);
+        String key = deviceKey(config.id(), config.canbus());
+        TalonConfigSnapshot desiredSnapshot = TalonConfigSnapshot.from(config);
+        TalonConfigSnapshot appliedSnapshot = APPLIED_TALON_CONFIGS.get(key);
+        if (appliedSnapshot == null || !appliedSnapshot.semanticallyEquals(desiredSnapshot)) {
+            talon.getConfigurator().apply(talonConfig, 0.0);
+            APPLIED_TALON_CONFIGS.put(key, desiredSnapshot);
+        }
         EncoderConfig encoderCfg = config.encoderConfig();
         if (encoderCfg == null) {
             encoderCfg = EncoderConfig.create()
@@ -168,8 +202,18 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public void setCurrentLimit(double amps) {
+        if (!Double.isFinite(amps) || amps <= 0.0) {
+            return;
+        }
+        if (nearlyEqual(appliedCurrentLimitAmps, amps)) {
+            config.hardware().currentLimit(amps);
+            cacheAppliedSnapshot();
+            return;
+        }
         config.hardware().currentLimit(amps);
         setCurrentLimit.accept(amps);
+        appliedCurrentLimitAmps = amps;
+        cacheAppliedSnapshot();
     }
 
     @Override
@@ -186,12 +230,29 @@ public class CtreMotorController implements MotorController {
     public void setNeutralMode(MotorNeutralMode mode) {
         config.hardware().neutralMode(mode);
         setNeutralMode.accept(mode);
+        cacheAppliedSnapshot();
     }
 
     @Override
     public void setPid(PIDController pid) {
+        if (pid == null) {
+            return;
+        }
+        if (appliedPidConfigured
+                && nearlyEqual(appliedPidP, pid.getP())
+                && nearlyEqual(appliedPidI, pid.getI())
+                && nearlyEqual(appliedPidD, pid.getD())) {
+            config.control().pid(pid);
+            cacheAppliedSnapshot();
+            return;
+        }
         config.control().pid(pid);
         setPid.accept(pid);
+        appliedPidP = pid.getP();
+        appliedPidI = pid.getI();
+        appliedPidD = pid.getD();
+        appliedPidConfigured = true;
+        cacheAppliedSnapshot();
     }
 
     @Override
@@ -222,6 +283,16 @@ public class CtreMotorController implements MotorController {
     }
 
     @Override
+    public double getCurrentAmps() {
+        return cachedCurrentAmps;
+    }
+
+    @Override
+    public double getAppliedVoltage() {
+        return cachedAppliedVoltage;
+    }
+
+    @Override
     public boolean isStalled() {
         faultStatorCurrentLimitSignal.refresh(false);
         faultSupplyCurrentLimitSignal.refresh(false);
@@ -241,13 +312,22 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public void setInverted(boolean inverted) {
+        if (appliedInverted == inverted) {
+            config.hardware().inverted(inverted);
+            cacheAppliedSnapshot();
+            return;
+        }
         config.hardware().inverted(inverted);
         MotorOutputConfigs output = new MotorOutputConfigs();
-        controller.getConfigurator().refresh(output, 0.0);
         output.Inverted = inverted
                 ? InvertedValue.Clockwise_Positive
                 : InvertedValue.CounterClockwise_Positive;
+        output.NeutralMode = config.neutralMode() == MotorNeutralMode.Brake
+                ? NeutralModeValue.Brake
+                : NeutralModeValue.Coast;
         controller.getConfigurator().apply(output, 0.0);
+        appliedInverted = inverted;
+        cacheAppliedSnapshot();
     }
 
     @Override
@@ -285,11 +365,71 @@ public class CtreMotorController implements MotorController {
             deviceTemperatureSignal.refresh(false);
             faultStatorCurrentLimitSignal.refresh(false);
             faultSupplyCurrentLimitSignal.refresh(false);
+            supplyCurrentSignal.refresh(false);
+            motorVoltageSignal.refresh(false);
             cachedTemperatureCelsius = deviceTemperatureSignal.getValueAsDouble();
+            cachedCurrentAmps = supplyCurrentSignal.getValueAsDouble();
+            cachedAppliedVoltage = motorVoltageSignal.getValueAsDouble();
         }
         if (updateCycles >= 1_000_000) {
             updateCycles = 0;
         }
         cachedConnected = controller.isConnected();
+    }
+
+    private static boolean nearlyEqual(double first, double second) {
+        if (Double.doubleToLongBits(first) == Double.doubleToLongBits(second)) {
+            return true;
+        }
+        return Double.isFinite(first) && Double.isFinite(second) && Math.abs(first - second) <= CONFIG_EPSILON;
+    }
+
+    private void cacheAppliedSnapshot() {
+        APPLIED_TALON_CONFIGS.put(deviceKey(config.id(), config.canbus()), TalonConfigSnapshot.from(config));
+    }
+
+    private static String deviceKey(int id, String canbus) {
+        String resolvedCanbus = canbus != null ? canbus : "";
+        return resolvedCanbus + "\\" + id;
+    }
+
+    private record TalonConfigSnapshot(
+            double currentLimitAmps,
+            boolean inverted,
+            MotorNeutralMode neutralMode,
+            boolean hasPid,
+            double pidP,
+            double pidI,
+            double pidD) {
+
+        static TalonConfigSnapshot from(MotorControllerConfig config) {
+            PIDController pid = config != null ? config.pid() : null;
+            return new TalonConfigSnapshot(
+                    config != null ? config.currentLimit() : Double.NaN,
+                    config != null && config.inverted(),
+                    config != null ? config.neutralMode() : MotorNeutralMode.Coast,
+                    pid != null,
+                    pid != null ? pid.getP() : Double.NaN,
+                    pid != null ? pid.getI() : Double.NaN,
+                    pid != null ? pid.getD() : Double.NaN);
+        }
+
+        boolean semanticallyEquals(TalonConfigSnapshot other) {
+            if (other == null) {
+                return false;
+            }
+            if (!nearlyEqual(currentLimitAmps, other.currentLimitAmps)) {
+                return false;
+            }
+            if (inverted != other.inverted || neutralMode != other.neutralMode || hasPid != other.hasPid) {
+                return false;
+            }
+            if (!hasPid) {
+                return true;
+            }
+            return nearlyEqual(pidP, other.pidP)
+                    && nearlyEqual(pidI, other.pidI)
+                    && nearlyEqual(pidD, other.pidD);
+        }
     }
 }

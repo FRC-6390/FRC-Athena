@@ -49,6 +49,8 @@ public class RevMotorController implements MotorController {
     private final Consumer<Boolean> setInverted;
     private final BooleanSupplier getConnected;
     private final java.util.function.DoubleSupplier getTemperature;
+    private final java.util.function.DoubleSupplier getCurrent;
+    private final java.util.function.DoubleSupplier getAppliedVoltage;
     private final BooleanSupplier getInverted;
     private final BooleanSupplier getStalled;
 
@@ -64,6 +66,8 @@ public class RevMotorController implements MotorController {
                               Consumer<Boolean> setInverted,
                               BooleanSupplier getConnected,
                               java.util.function.DoubleSupplier getTemperature,
+                              java.util.function.DoubleSupplier getCurrent,
+                              java.util.function.DoubleSupplier getAppliedVoltage,
                               BooleanSupplier getInverted,
                               BooleanSupplier getStalled) {
         this.config = config;
@@ -78,6 +82,8 @@ public class RevMotorController implements MotorController {
         this.setInverted = setInverted;
         this.getConnected = getConnected;
         this.getTemperature = getTemperature;
+        this.getCurrent = getCurrent;
+        this.getAppliedVoltage = getAppliedVoltage;
         this.getInverted = getInverted;
         this.getStalled = getStalled;
     }
@@ -174,6 +180,8 @@ public class RevMotorController implements MotorController {
                 controller::setInverted,
                 () -> !controller.hasActiveFault(),
                 controller::getMotorTemperature,
+                controller::getOutputCurrent,
+                () -> controller.getBusVoltage() * controller.getAppliedOutput(),
                 controller::getInverted,
                 () -> {
                     SparkBase.Warnings warnings = controller.getWarnings();
@@ -259,6 +267,8 @@ public class RevMotorController implements MotorController {
                 controller::setInverted,
                 () -> !controller.hasActiveFault(),
                 controller::getMotorTemperature,
+                controller::getOutputCurrent,
+                () -> controller.getBusVoltage() * controller.getAppliedOutput(),
                 controller::getInverted,
                 () -> {
                     SparkBase.Warnings warnings = controller.getWarnings();
@@ -327,6 +337,16 @@ public class RevMotorController implements MotorController {
     @Override
     public double getTemperatureCelsius() {
         return getTemperature.getAsDouble();
+    }
+
+    @Override
+    public double getCurrentAmps() {
+        return getCurrent.getAsDouble();
+    }
+
+    @Override
+    public double getAppliedVoltage() {
+        return getAppliedVoltage.getAsDouble();
     }
 
     @Override

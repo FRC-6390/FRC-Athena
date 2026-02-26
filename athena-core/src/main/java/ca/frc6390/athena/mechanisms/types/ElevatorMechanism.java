@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 
@@ -71,6 +72,21 @@ public class ElevatorMechanism extends Mechanism {
         return super.networkTables(node);
     }
 
+    @Override
+    public void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        if (feedforward != null) {
+            String ffRoot = rootPath + "/Feedforward";
+            publisher.put(ffRoot + "/ks", feedforward.getKs());
+            publisher.put(ffRoot + "/kg", feedforward.getKg());
+            publisher.put(ffRoot + "/kv", feedforward.getKv());
+            publisher.put(ffRoot + "/ka", feedforward.getKa());
+        }
+        super.publishArcp(publisher, rootPath);
+    }
+
     public static class StatefulElevatorMechanism<E extends Enum<E> & StateMachine.SetpointProvider<Double>> extends ElevatorMechanism implements StatefulLike<E> {
 
         private final StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateMachineCore;
@@ -102,6 +118,16 @@ public class ElevatorMechanism extends Mechanism {
             }
             stateMachineCore.getStateMachine().networkTables(node.child("StateMachine"));
             return super.networkTables(node);
+        }
+
+        @Override
+        public void publishArcp(ARCP publisher, String rootPath) {
+            if (publisher == null || rootPath == null || rootPath.isBlank()) {
+                return;
+            }
+            stateMachineCore.getStateMachine().publishArcp(publisher, rootPath + "/Control/StateMachine");
+            stateMachineCore.getStateMachine().publishArcp(publisher, rootPath + "/StateMachine");
+            super.publishArcp(publisher, rootPath);
         }
 
     }

@@ -476,7 +476,8 @@ fn start_server_with_fallback() -> ArcpServer {
             let fallback_cfg = ArcpServerConfig {
                 control_port: 0,
                 realtime_port: 0,
-                max_signals: 1024,
+                max_signals: 8192,
+                ..ArcpServerConfig::default()
             };
             let fallback = ArcpServer::new(fallback_cfg);
             register_hardware_signals(&fallback);

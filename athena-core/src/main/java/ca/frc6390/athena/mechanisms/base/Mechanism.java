@@ -5,6 +5,7 @@ import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotCore;
 import ca.frc6390.athena.core.arcp.ArcpDashboardLayout;
 import ca.frc6390.athena.core.arcp.ArcpDeviceWidgets;
+import ca.frc6390.athena.core.arcp.ARCP;
 import ca.frc6390.athena.core.LoopTiming;
 import ca.frc6390.athena.core.RobotCoreHooks;
 import ca.frc6390.athena.core.RobotTime;
@@ -869,20 +870,40 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return appendArcpWidget(ArcpDeviceWidgets.motor(signalId, section));
     }
 
+    public Mechanism arcpMotorWidget(String topicPath, Consumer<ArcpDeviceWidgets.MotorWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.motor(topicPath, section));
+    }
+
     public Mechanism arcpEncoderWidget(int signalId, Consumer<ArcpDeviceWidgets.EncoderWidgetBuilder> section) {
         return appendArcpWidget(ArcpDeviceWidgets.encoder(signalId, section));
+    }
+
+    public Mechanism arcpEncoderWidget(String topicPath, Consumer<ArcpDeviceWidgets.EncoderWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.encoder(topicPath, section));
     }
 
     public Mechanism arcpImuWidget(int signalId, Consumer<ArcpDeviceWidgets.ImuWidgetBuilder> section) {
         return appendArcpWidget(ArcpDeviceWidgets.imu(signalId, section));
     }
 
+    public Mechanism arcpImuWidget(String topicPath, Consumer<ArcpDeviceWidgets.ImuWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.imu(topicPath, section));
+    }
+
     public Mechanism arcpDioWidget(int signalId, Consumer<ArcpDeviceWidgets.DioWidgetBuilder> section) {
         return appendArcpWidget(ArcpDeviceWidgets.dio(signalId, section));
     }
 
+    public Mechanism arcpDioWidget(String topicPath, Consumer<ArcpDeviceWidgets.DioWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.dio(topicPath, section));
+    }
+
     public Mechanism arcpVisionWidget(int signalId, Consumer<ArcpDeviceWidgets.VisionWidgetBuilder> section) {
         return appendArcpWidget(ArcpDeviceWidgets.vision(signalId, section));
+    }
+
+    public Mechanism arcpVisionWidget(String topicPath, Consumer<ArcpDeviceWidgets.VisionWidgetBuilder> section) {
+        return appendArcpWidget(ArcpDeviceWidgets.vision(topicPath, section));
     }
 
     private Mechanism appendArcpWidget(ArcpDashboardLayout.Widget widget) {
@@ -2269,6 +2290,310 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.outputType = outputType;
     }
 
+    private void setOutputTypeFromArcp(String rawType) {
+        if (rawType == null || rawType.isBlank()) {
+            return;
+        }
+        String normalized = rawType.trim().toUpperCase(java.util.Locale.ROOT);
+        if ("PERCENT".equals(normalized)) {
+            setOutputType(OutputType.PERCENT);
+            return;
+        }
+        if ("VOLTAGE".equals(normalized)) {
+            setOutputType(OutputType.VOLTAGE);
+        }
+    }
+
+    private void setNeutralModeFromArcp(String rawMode) {
+        if (rawMode == null || rawMode.isBlank()) {
+            return;
+        }
+        String normalized = rawMode.trim().toUpperCase(java.util.Locale.ROOT);
+        if ("BRAKE".equals(normalized)) {
+            motors.setNeutralMode(MotorNeutralMode.Brake);
+            return;
+        }
+        if ("COAST".equals(normalized)) {
+            motors.setNeutralMode(MotorNeutralMode.Coast);
+        }
+    }
+
+    private void setControlLoopsEnabledFromArcp(boolean enabled) {
+        if (!enabled) {
+            disableAllControlLoopsInternal();
+            return;
+        }
+        if (!controlLoopsEnabled) {
+            controlLoopsEnabled = true;
+            appendDiagnosticLog("INFO", "control-loop", "control loop subsystem enabled");
+        }
+        if (!disabledControlLoops.isEmpty()) {
+            disabledControlLoops.clear();
+        }
+        if (!controlLoopPids.isEmpty() || !controlLoopProfiledPids.isEmpty()) {
+            setPidEnabled(true);
+        }
+        if (!controlLoopFeedforwardProfiles.isEmpty()) {
+            setFeedforwardEnabled(true);
+        }
+        resetControlLoopRunners();
+    }
+
+    private void updateControlLoopPidProfile(
+            String loopName,
+            java.util.function.Function<MechanismConfig.PidProfile, MechanismConfig.PidProfile> updater) {
+        if (loopName == null || updater == null) {
+            return;
+        }
+        MechanismConfig.PidProfile current = controlLoopPidProfilesConfig.get(loopName);
+        if (current == null) {
+            return;
+        }
+        MechanismConfig.PidProfile updated = updater.apply(current);
+        if (updated == null) {
+            return;
+        }
+
+        controlLoopPidProfilesConfig.put(loopName, updated);
+        OutputType output = updated.outputType() != null ? updated.outputType() : OutputType.PERCENT;
+        controlLoopPidOutputTypes.put(loopName, output);
+        controlLoopPidTolerances.put(loopName, sanitizeControlLoopTolerance(updated.tolerance()));
+
+        PIDController pid = controlLoopPids.get(loopName);
+        if (pid != null) {
+            pid.setPID(updated.kP(), updated.kI(), updated.kD());
+            if (Double.isFinite(updated.iZone()) && updated.iZone() > 0.0) {
+                pid.setIZone(updated.iZone());
+            }
+            if (Double.isFinite(updated.tolerance()) && updated.tolerance() > 0.0) {
+                pid.setTolerance(updated.tolerance());
+            }
+        }
+
+        ProfiledPIDController profiled = controlLoopProfiledPids.get(loopName);
+        if (profiled != null) {
+            profiled.setPID(updated.kP(), updated.kI(), updated.kD());
+            if (Double.isFinite(updated.iZone()) && updated.iZone() > 0.0) {
+                profiled.setIZone(updated.iZone());
+            }
+            if (Double.isFinite(updated.tolerance()) && updated.tolerance() > 0.0) {
+                profiled.setTolerance(updated.tolerance());
+            }
+            boolean hasConstraints = Double.isFinite(updated.maxVelocity())
+                    && updated.maxVelocity() > 0.0
+                    && Double.isFinite(updated.maxAcceleration())
+                    && updated.maxAcceleration() > 0.0;
+            if (hasConstraints) {
+                profiled.setConstraints(
+                        new TrapezoidProfile.Constraints(updated.maxVelocity(), updated.maxAcceleration()));
+            }
+        }
+    }
+
+    private void setControlLoopPidKp(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopPidProfile(loopName, profile -> new MechanismConfig.PidProfile(
+                profile.outputType(),
+                value,
+                profile.kI(),
+                profile.kD(),
+                profile.iZone(),
+                profile.tolerance(),
+                profile.maxVelocity(),
+                profile.maxAcceleration(),
+                profile.autotuner()));
+    }
+
+    private void setControlLoopPidKi(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopPidProfile(loopName, profile -> new MechanismConfig.PidProfile(
+                profile.outputType(),
+                profile.kP(),
+                value,
+                profile.kD(),
+                profile.iZone(),
+                profile.tolerance(),
+                profile.maxVelocity(),
+                profile.maxAcceleration(),
+                profile.autotuner()));
+    }
+
+    private void setControlLoopPidKd(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopPidProfile(loopName, profile -> new MechanismConfig.PidProfile(
+                profile.outputType(),
+                profile.kP(),
+                profile.kI(),
+                value,
+                profile.iZone(),
+                profile.tolerance(),
+                profile.maxVelocity(),
+                profile.maxAcceleration(),
+                profile.autotuner()));
+    }
+
+    private void setControlLoopPidIZone(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopPidProfile(loopName, profile -> new MechanismConfig.PidProfile(
+                profile.outputType(),
+                profile.kP(),
+                profile.kI(),
+                profile.kD(),
+                value,
+                profile.tolerance(),
+                profile.maxVelocity(),
+                profile.maxAcceleration(),
+                profile.autotuner()));
+    }
+
+    private void updateControlLoopFeedforwardProfile(
+            String loopName,
+            java.util.function.Function<MechanismConfig.FeedforwardProfile, MechanismConfig.FeedforwardProfile> updater) {
+        if (loopName == null || updater == null) {
+            return;
+        }
+        MechanismConfig.FeedforwardProfile current = controlLoopFeedforwardProfiles.get(loopName);
+        if (current == null) {
+            return;
+        }
+        MechanismConfig.FeedforwardProfile updated = updater.apply(current);
+        if (updated == null) {
+            return;
+        }
+
+        controlLoopFeedforwardProfiles.put(loopName, updated);
+        OutputType output = updated.outputType() != null ? updated.outputType() : OutputType.VOLTAGE;
+        controlLoopFeedforwardOutputTypes.put(loopName, output);
+        controlLoopFeedforwardTolerances.put(loopName, sanitizeControlLoopTolerance(updated.tolerance()));
+
+        if (updated.type() == MechanismConfig.FeedforwardType.SIMPLE) {
+            controlLoopFeedforwards.put(loopName, new SimpleMotorFeedforward(updated.kS(), updated.kV(), updated.kA()));
+        } else {
+            controlLoopFeedforwards.remove(loopName);
+        }
+    }
+
+    private void setControlLoopFeedforwardKs(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismConfig.FeedforwardProfile(
+                profile.outputType(),
+                profile.type(),
+                value,
+                profile.kG(),
+                profile.kV(),
+                profile.kA(),
+                profile.tolerance()));
+    }
+
+    private void setControlLoopFeedforwardKg(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismConfig.FeedforwardProfile(
+                profile.outputType(),
+                profile.type(),
+                profile.kS(),
+                value,
+                profile.kV(),
+                profile.kA(),
+                profile.tolerance()));
+    }
+
+    private void setControlLoopFeedforwardKv(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismConfig.FeedforwardProfile(
+                profile.outputType(),
+                profile.type(),
+                profile.kS(),
+                profile.kG(),
+                value,
+                profile.kA(),
+                profile.tolerance()));
+    }
+
+    private void setControlLoopFeedforwardKa(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismConfig.FeedforwardProfile(
+                profile.outputType(),
+                profile.type(),
+                profile.kS(),
+                profile.kG(),
+                profile.kV(),
+                value,
+                profile.tolerance()));
+    }
+
+    private void updateControlLoopBangBangProfile(
+            String loopName,
+            java.util.function.Function<MechanismConfig.BangBangProfile, MechanismConfig.BangBangProfile> updater) {
+        if (loopName == null || updater == null) {
+            return;
+        }
+        MechanismConfig.BangBangProfile current = controlLoopBangBangs.get(loopName);
+        if (current == null) {
+            return;
+        }
+        MechanismConfig.BangBangProfile updated = updater.apply(current);
+        if (updated == null) {
+            return;
+        }
+        OutputType output = updated.outputType() != null ? updated.outputType() : OutputType.PERCENT;
+        controlLoopBangBangs.put(
+                loopName,
+                new MechanismConfig.BangBangProfile(
+                        output,
+                        sanitizeBangBangLevel(updated.highOutput()),
+                        sanitizeBangBangLevel(updated.lowOutput()),
+                        sanitizeBangBangTolerance(updated.tolerance())));
+    }
+
+    private void setControlLoopBangBangHighOutput(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopBangBangProfile(loopName, profile -> new MechanismConfig.BangBangProfile(
+                profile.outputType(),
+                value,
+                profile.lowOutput(),
+                profile.tolerance()));
+    }
+
+    private void setControlLoopBangBangLowOutput(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopBangBangProfile(loopName, profile -> new MechanismConfig.BangBangProfile(
+                profile.outputType(),
+                profile.highOutput(),
+                value,
+                profile.tolerance()));
+    }
+
+    private void setControlLoopBangBangTolerance(String loopName, double value) {
+        if (!Double.isFinite(value)) {
+            return;
+        }
+        updateControlLoopBangBangProfile(loopName, profile -> new MechanismConfig.BangBangProfile(
+                profile.outputType(),
+                profile.highOutput(),
+                profile.lowOutput(),
+                value));
+    }
+
     protected double percentToOutput(double percent) {
         return OutputConversions.toMechanismOutput(
                 outputType,
@@ -2296,42 +2621,49 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 RobotController.getBatteryVoltage());
     }
 
-    OutputType getControlLoopPidOutputType(String name) {
+    public OutputType getControlLoopPidOutputType(String name) {
         if (name == null) {
             return OutputType.PERCENT;
         }
         return controlLoopPidOutputTypes.getOrDefault(name, OutputType.PERCENT);
     }
 
-    double getControlLoopPidTolerance(String name) {
+    public double getControlLoopPidTolerance(String name) {
         if (name == null) {
             return Double.NaN;
         }
         return controlLoopPidTolerances.getOrDefault(name, Double.NaN);
     }
 
-    MechanismConfig.BangBangProfile getControlLoopBangBangProfile(String name) {
+    public MechanismConfig.PidProfile getControlLoopPidProfile(String name) {
+        if (name == null) {
+            return null;
+        }
+        return controlLoopPidProfilesConfig.get(name);
+    }
+
+    public MechanismConfig.BangBangProfile getControlLoopBangBangProfile(String name) {
         if (name == null) {
             return null;
         }
         return controlLoopBangBangs.get(name);
     }
 
-    OutputType getControlLoopFeedforwardOutputType(String name) {
+    public OutputType getControlLoopFeedforwardOutputType(String name) {
         if (name == null) {
             return OutputType.VOLTAGE;
         }
         return controlLoopFeedforwardOutputTypes.getOrDefault(name, OutputType.VOLTAGE);
     }
 
-    MechanismConfig.FeedforwardProfile getControlLoopFeedforwardProfile(String name) {
+    public MechanismConfig.FeedforwardProfile getControlLoopFeedforwardProfile(String name) {
         if (name == null) {
             return null;
         }
         return controlLoopFeedforwardProfiles.get(name);
     }
 
-    double getControlLoopFeedforwardTolerance(String name) {
+    public double getControlLoopFeedforwardTolerance(String name) {
         if (name == null) {
             return Double.NaN;
         }
@@ -3221,6 +3553,99 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
+    private void publishControlLoopOutputsArcp(ARCP publisher, String outputRoot) {
+        if (publisher == null || outputRoot == null || outputRoot.isBlank()) {
+            return;
+        }
+        for (TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
+            if (runner == null || runner.name() == null || runner.name().isBlank()) {
+                continue;
+            }
+            String loopRoot = outputRoot + "/Loops/" + sanitizeTopicKeyCached(runner.name());
+            publisher.put(loopRoot + "/enabled", isControlLoopRunnerEnabled(runner));
+            publisher.put(loopRoot + "/value", runner.lastOutput());
+            publisher.put(loopRoot + "/periodMs", runner.periodMs());
+        }
+    }
+
+    private void publishControlLoopProfilesArcp(ARCP publisher, String controlRoot) {
+        if (publisher == null || controlRoot == null || controlRoot.isBlank()) {
+            return;
+        }
+        for (String loopName : controlLoopsByName.keySet()) {
+            if (loopName == null || loopName.isBlank()) {
+                continue;
+            }
+            String loopKey = sanitizeTopicKeyCached(loopName);
+            String loopRoot = controlRoot + "/Loops/" + loopKey;
+
+            TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner = controlLoopsByName.get(loopName);
+            if (runner != null) {
+                publisher.writableBoolean(loopRoot + "/enabled").onSetBoolean(value -> setControlLoopEnabled(loopName, value));
+                publisher.put(loopRoot + "/enabled", isControlLoopEnabled(loopName));
+                publisher.put(loopRoot + "/output/value", runner.lastOutput());
+                publisher.put(loopRoot + "/output/periodMs", runner.periodMs());
+            }
+
+            MechanismConfig.PidProfile pid = controlLoopPidProfilesConfig.get(loopName);
+            if (pid != null) {
+                String pidRoot = loopRoot + "/pid";
+                publisher.writableDouble(pidRoot + "/kp").onSetDouble(value -> setControlLoopPidKp(loopName, value));
+                publisher.writableDouble(pidRoot + "/ki").onSetDouble(value -> setControlLoopPidKi(loopName, value));
+                publisher.writableDouble(pidRoot + "/kd").onSetDouble(value -> setControlLoopPidKd(loopName, value));
+                publisher.writableDouble(pidRoot + "/izone").onSetDouble(value -> setControlLoopPidIZone(loopName, value));
+                publisher.put(pidRoot + "/kp", pid.kP());
+                publisher.put(pidRoot + "/ki", pid.kI());
+                publisher.put(pidRoot + "/kd", pid.kD());
+                publisher.put(pidRoot + "/izone", pid.iZone());
+                publisher.put(pidRoot + "/tolerance", pid.tolerance());
+                if (Double.isFinite(pid.maxVelocity())) {
+                    publisher.put(pidRoot + "/maxVelocity", pid.maxVelocity());
+                }
+                if (Double.isFinite(pid.maxAcceleration())) {
+                    publisher.put(pidRoot + "/maxAcceleration", pid.maxAcceleration());
+                }
+                if (pid.outputType() != null) {
+                    publisher.put(pidRoot + "/outputType", pid.outputType().name());
+                }
+            }
+
+            MechanismConfig.FeedforwardProfile ff = controlLoopFeedforwardProfiles.get(loopName);
+            if (ff != null) {
+                String ffRoot = loopRoot + "/ff";
+                publisher.writableDouble(ffRoot + "/ks").onSetDouble(value -> setControlLoopFeedforwardKs(loopName, value));
+                publisher.writableDouble(ffRoot + "/kg").onSetDouble(value -> setControlLoopFeedforwardKg(loopName, value));
+                publisher.writableDouble(ffRoot + "/kv").onSetDouble(value -> setControlLoopFeedforwardKv(loopName, value));
+                publisher.writableDouble(ffRoot + "/ka").onSetDouble(value -> setControlLoopFeedforwardKa(loopName, value));
+                publisher.put(ffRoot + "/ks", ff.kS());
+                publisher.put(ffRoot + "/kg", ff.kG());
+                publisher.put(ffRoot + "/kv", ff.kV());
+                publisher.put(ffRoot + "/ka", ff.kA());
+                publisher.put(ffRoot + "/tolerance", ff.tolerance());
+                if (ff.outputType() != null) {
+                    publisher.put(ffRoot + "/outputType", ff.outputType().name());
+                }
+                if (ff.type() != null) {
+                    publisher.put(ffRoot + "/type", ff.type().name());
+                }
+            }
+
+            MechanismConfig.BangBangProfile bangBang = controlLoopBangBangs.get(loopName);
+            if (bangBang != null) {
+                String bbRoot = loopRoot + "/bangBang";
+                publisher.writableDouble(bbRoot + "/highOutput").onSetDouble(value -> setControlLoopBangBangHighOutput(loopName, value));
+                publisher.writableDouble(bbRoot + "/lowOutput").onSetDouble(value -> setControlLoopBangBangLowOutput(loopName, value));
+                publisher.writableDouble(bbRoot + "/tolerance").onSetDouble(value -> setControlLoopBangBangTolerance(loopName, value));
+                publisher.put(bbRoot + "/highOutput", bangBang.highOutput());
+                publisher.put(bbRoot + "/lowOutput", bangBang.lowOutput());
+                publisher.put(bbRoot + "/tolerance", bangBang.tolerance());
+                if (bangBang.outputType() != null) {
+                    publisher.put(bbRoot + "/outputType", bangBang.outputType().name());
+                }
+            }
+        }
+    }
+
     private boolean hasSimulation() {
         return simulationModel != null;
     }
@@ -3320,15 +3745,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void updateNetworkTablesCache(double nowSeconds) {
-        if (!networkTablesEnabled) {
-            return;
-        }
-        double periodSeconds = getNetworkTablesPeriodSeconds();
-        if (Double.isFinite(periodSeconds) && periodSeconds > 0.0
-                && Double.isFinite(nowSeconds)
-                && !Double.isNaN(lastNetworkTablesCacheUpdateSeconds)
-                && (nowSeconds - lastNetworkTablesCacheUpdateSeconds) < periodSeconds) {
-            return;
+        if (networkTablesEnabled) {
+            double periodSeconds = getNetworkTablesPeriodSeconds();
+            if (Double.isFinite(periodSeconds) && periodSeconds > 0.0
+                    && Double.isFinite(nowSeconds)
+                    && !Double.isNaN(lastNetworkTablesCacheUpdateSeconds)
+                    && (nowSeconds - lastNetworkTablesCacheUpdateSeconds) < periodSeconds) {
+                return;
+            }
         }
         lastNetworkTablesCacheUpdateSeconds = nowSeconds;
         cachedEmergencyStopped = emergencyStopped;
@@ -3813,6 +4237,245 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         lastRobotNetworkTables = nt;
         networkTablesInternal(nt, node);
         return node;
+    }
+
+    public void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        String root = rootPath.startsWith("/") ? rootPath.substring(1) : rootPath;
+
+        String name = getName();
+        String metaRoot = root + "/Meta";
+        publisher.put(metaRoot + "/name", name != null ? name : "");
+        publisher.put(metaRoot + "/type", getNetworkTablesTypeName());
+        publisher.put(metaRoot + "/owner", getNetworkTablesOwnerPath() != null ? getNetworkTablesOwnerPath() : "");
+        publisher.put(metaRoot + "/hint", "Native ARCP telemetry stream for this mechanism.");
+        String jsonUrl = resolveConfigDownloadUrl("json");
+        String tomlUrl = resolveConfigDownloadUrl("toml");
+        String diagnosticsUrl = resolveDiagnosticsLogUrl();
+        publisher.put(metaRoot + "/configUrlJson", jsonUrl != null ? jsonUrl : "");
+        publisher.put(metaRoot + "/configUrlToml", tomlUrl != null ? tomlUrl : "");
+        publisher.put(metaRoot + "/diagnosticsUrl", diagnosticsUrl != null ? diagnosticsUrl : "");
+
+        motors.publishArcp(publisher, root + "/Motors");
+
+        if (encoder != null) {
+            encoder.publishArcp(publisher, root + "/Encoder");
+        }
+
+        String constraintsRoot = root + "/Constraints";
+        double min = getMin();
+        double max = getMax();
+        boolean hasBounds = Double.isFinite(min) && Double.isFinite(max);
+        publisher.put(constraintsRoot + "/hasBounds", hasBounds);
+        if (hasBounds) {
+            publisher.put(constraintsRoot + "/min", min);
+            publisher.put(constraintsRoot + "/max", max);
+        }
+        MotionLimits.AxisLimits limits = resolveMotionLimits();
+        if (limits != null) {
+            publisher.put(constraintsRoot + "/maxVelocity", limits.maxVelocity());
+            publisher.put(constraintsRoot + "/maxAcceleration", limits.maxAcceleration());
+        }
+
+        GenericLimitSwitch[] switches = getLimitSwitches();
+        if (switches != null && switches.length > 0) {
+            String limitRoot = root + "/Sensors/LimitSwitches";
+            for (int i = 0; i < switches.length; i++) {
+                GenericLimitSwitch sw = switches[i];
+                if (sw == null) {
+                    continue;
+                }
+                String swRoot = limitRoot + "/dio-" + sw.getPort();
+                publisher.put(swRoot + "/active", sw.getAsBoolean());
+                publisher.put(swRoot + "/hardstop", sw.isHardstop());
+                publisher.put(swRoot + "/position", sw.getPosition());
+                publisher.put(swRoot + "/port", sw.getPort());
+                publisher.put(swRoot + "/name", "dio-" + sw.getPort());
+                publisher.put(swRoot + "/type", "limit_switch");
+                publisher.put(swRoot + "/inverted", sw.isInverted());
+                publisher.put(swRoot + "/blockDirection", String.valueOf(sw.getBlockDirection()));
+            }
+        }
+
+        String controlRoot = root + "/Control";
+        String statusRoot = controlRoot + "/Status";
+        publisher.writableBoolean(statusRoot + "/override").onSetBoolean(this::setOverride);
+        publisher.writableBoolean(statusRoot + "/pidEnabled").onSetBoolean(this::setPidEnabled);
+        publisher.writableBoolean(statusRoot + "/feedforwardEnabled").onSetBoolean(this::setFeedforwardEnabled);
+        publisher.writableBoolean(statusRoot + "/hooksEnabled").onSetBoolean(this::setHooksEnabled);
+        publisher.writableBoolean(statusRoot + "/controlLoopsEnabled").onSetBoolean(this::setControlLoopsEnabledFromArcp);
+        publisher.writableBoolean(statusRoot + "/emergencyStopped").onSetBoolean(this::setEmergencyStopped);
+        publisher.writableString(statusRoot + "/outputType").onSet(this::setOutputTypeFromArcp);
+        publisher.writableString(statusRoot + "/neutralMode").onSet(this::setNeutralModeFromArcp);
+        publisher.writableDouble(controlRoot + "/Setpoint/value").onSetDouble(this::setSetpoint);
+        publisher.writableDouble(controlRoot + "/Setpoint/nudge").onSetDouble(this::setNudge);
+        publisher.writableDouble(controlRoot + "/Output/value").onSetDouble(this::setOutput);
+        String commandRoot = controlRoot + "/Commands";
+        publisher.command(commandRoot + "/forceEStop").onInvoke(() -> setEmergencyStopped(true));
+        publisher.command(commandRoot + "/releaseEStop").onInvoke(() -> setEmergencyStopped(false));
+        publisher.command(commandRoot + "/setNeutralBrake").onInvoke(() -> motors.setNeutralMode(MotorNeutralMode.Brake));
+        publisher.command(commandRoot + "/setNeutralCoast").onInvoke(() -> motors.setNeutralMode(MotorNeutralMode.Coast));
+        publisher.command(commandRoot + "/stopOutput").onInvoke(() -> setOutput(0.0));
+
+        publisher.put(statusRoot + "/emergencyStopped", cachedEmergencyStopped);
+        publisher.put(statusRoot + "/override", cachedOverride);
+        publisher.put(statusRoot + "/pidEnabled", cachedPidEnabled);
+        publisher.put(statusRoot + "/feedforwardEnabled", cachedFeedforwardEnabled);
+        publisher.put(statusRoot + "/hooksEnabled", cachedHooksEnabled);
+        publisher.put(statusRoot + "/controlLoopsEnabled", cachedControlLoopsEnabled);
+        publisher.put(statusRoot + "/outputType", String.valueOf(getOutputType()));
+        publisher.put(statusRoot + "/position", getPosition());
+        publisher.put(statusRoot + "/velocity", getVelocity());
+        publisher.put(statusRoot + "/output", cachedOutput);
+        publisher.put(statusRoot + "/faultReason", cachedFaultReason != null ? cachedFaultReason : "");
+        publisher.put(statusRoot + "/lastFaultReason", cachedLastFaultReason != null ? cachedLastFaultReason : "");
+        publisher.put(statusRoot + "/diagnosticLogCount", getDiagnosticLogCount());
+        publisher.put(statusRoot + "/hwRefreshPeriodMs", cachedHardwareUpdatePeriodSeconds * 1000.0);
+        publisher.put(statusRoot + "/hwRefreshPhaseMs", cachedHardwareUpdatePhaseSeconds * 1000.0);
+        publisher.put(statusRoot + "/hwRefreshSlot", cachedHardwareUpdateSlot);
+        boolean lastRefreshValid = Double.isFinite(cachedHardwareLastRefreshAgeSeconds);
+        publisher.put(statusRoot + "/hwLastRefreshValid", lastRefreshValid);
+        publisher.put(statusRoot + "/hwLastRefreshAgeMs", lastRefreshValid ? cachedHardwareLastRefreshAgeSeconds * 1000.0 : -1.0);
+        boolean nextRefreshValid = Double.isFinite(cachedHardwareNextRefreshInSeconds);
+        publisher.put(statusRoot + "/hwNextRefreshValid", nextRefreshValid);
+        publisher.put(statusRoot + "/hwNextRefreshInMs", nextRefreshValid ? cachedHardwareNextRefreshInSeconds * 1000.0 : -1.0);
+        publisher.put(statusRoot + "/neutralMode", resolveNeutralMode().name());
+
+        publisher.put(controlRoot + "/Setpoint/value", cachedSetpoint);
+        publisher.put(controlRoot + "/Setpoint/nudge", cachedNudge);
+        String outputRoot = controlRoot + "/Output";
+        publisher.put(outputRoot + "/value", cachedOutput);
+        publishControlLoopOutputsArcp(publisher, outputRoot);
+        publishControlLoopProfilesArcp(publisher, controlRoot);
+
+        String inputsRoot = root + "/Inputs";
+        for (Map.Entry<String, Boolean> e : mutableBoolInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Bool/" + sanitizeTopicKeyCached(e.getKey()), e.getValue());
+        }
+        for (Map.Entry<String, BooleanSupplier> e : controlLoopInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Bool/" + sanitizeTopicKeyCached(e.getKey()), e.getValue().getAsBoolean());
+        }
+        for (Map.Entry<String, Double> e : mutableDoubleInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Double/" + sanitizeTopicKeyCached(e.getKey()), e.getValue());
+        }
+        for (Map.Entry<String, DoubleSupplier> e : controlLoopDoubleInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Double/" + sanitizeTopicKeyCached(e.getKey()), e.getValue().getAsDouble());
+        }
+        for (Map.Entry<String, Integer> e : mutableIntInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Int/" + sanitizeTopicKeyCached(e.getKey()), e.getValue());
+        }
+        for (Map.Entry<String, java.util.function.IntSupplier> e : controlLoopIntInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Int/" + sanitizeTopicKeyCached(e.getKey()), e.getValue().getAsInt());
+        }
+        for (Map.Entry<String, String> e : mutableStringInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/String/" + sanitizeTopicKeyCached(e.getKey()), e.getValue());
+        }
+        for (Map.Entry<String, java.util.function.Supplier<String>> e : controlLoopStringInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/String/" + sanitizeTopicKeyCached(e.getKey()), e.getValue().get());
+        }
+        for (Map.Entry<String, edu.wpi.first.math.geometry.Pose2d> e : mutablePose2dInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            edu.wpi.first.math.geometry.Pose2d pose = e.getValue();
+            String poseRoot = inputsRoot + "/Pose2d/" + sanitizeTopicKeyCached(e.getKey());
+            publisher.put(poseRoot + "/x", pose.getX());
+            publisher.put(poseRoot + "/y", pose.getY());
+            publisher.put(poseRoot + "/deg", pose.getRotation().getDegrees());
+        }
+        for (Map.Entry<String, java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d>> e : controlLoopPose2dInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            edu.wpi.first.math.geometry.Pose2d pose = e.getValue().get();
+            if (pose == null) {
+                continue;
+            }
+            String poseRoot = inputsRoot + "/Pose2d/" + sanitizeTopicKeyCached(e.getKey());
+            publisher.put(poseRoot + "/x", pose.getX());
+            publisher.put(poseRoot + "/y", pose.getY());
+            publisher.put(poseRoot + "/deg", pose.getRotation().getDegrees());
+        }
+        for (Map.Entry<String, edu.wpi.first.math.geometry.Pose3d> e : mutablePose3dInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            edu.wpi.first.math.geometry.Pose3d pose = e.getValue();
+            String poseRoot = inputsRoot + "/Pose3d/" + sanitizeTopicKeyCached(e.getKey());
+            publisher.put(poseRoot + "/x", pose.getX());
+            publisher.put(poseRoot + "/y", pose.getY());
+            publisher.put(poseRoot + "/z", pose.getZ());
+            publisher.put(poseRoot + "/rxDeg", pose.getRotation().getX() * 180.0 / Math.PI);
+            publisher.put(poseRoot + "/ryDeg", pose.getRotation().getY() * 180.0 / Math.PI);
+            publisher.put(poseRoot + "/rzDeg", pose.getRotation().getZ() * 180.0 / Math.PI);
+        }
+        for (Map.Entry<String, java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d>> e : controlLoopPose3dInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            edu.wpi.first.math.geometry.Pose3d pose = e.getValue().get();
+            if (pose == null) {
+                continue;
+            }
+            String poseRoot = inputsRoot + "/Pose3d/" + sanitizeTopicKeyCached(e.getKey());
+            publisher.put(poseRoot + "/x", pose.getX());
+            publisher.put(poseRoot + "/y", pose.getY());
+            publisher.put(poseRoot + "/z", pose.getZ());
+            publisher.put(poseRoot + "/rxDeg", pose.getRotation().getX() * 180.0 / Math.PI);
+            publisher.put(poseRoot + "/ryDeg", pose.getRotation().getY() * 180.0 / Math.PI);
+            publisher.put(poseRoot + "/rzDeg", pose.getRotation().getZ() * 180.0 / Math.PI);
+        }
+
+        if (RobotBase.isSimulation()) {
+            String simRoot = root + "/Sim";
+            publisher.put(simRoot + "/enabled", cachedHasSimulation);
+            publisher.put(simRoot + "/dtSec", cachedSimulationUpdatePeriodSeconds);
+        }
+
+        String sysidRoot = root + "/SysId";
+        String sysidCommandsRoot = sysidRoot + "/Commands";
+        publisher.command(sysidCommandsRoot + "/quasistaticForward")
+                .onInvoke(() -> scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kForward))));
+        publisher.command(sysidCommandsRoot + "/quasistaticReverse")
+                .onInvoke(() -> scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().quasistatic(SysIdRoutine.Direction.kReverse))));
+        publisher.command(sysidCommandsRoot + "/dynamicForward")
+                .onInvoke(() -> scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kForward))));
+        publisher.command(sysidCommandsRoot + "/dynamicReverse")
+                .onInvoke(() -> scheduleSysIdCommand(sysIdCommand(() -> getSysIdRoutine().dynamic(SysIdRoutine.Direction.kReverse))));
+        publisher.command(sysidCommandsRoot + "/cancel").onInvoke(this::cancelActiveSysIdCommand);
+        publisher.command(sysidCommandsRoot + "/requestTestMode")
+                .onInvoke(() -> DriverStation.reportWarning("Switch Driver Station to Test mode for SysId.", false));
+        publisher.put(sysidRoot + "/rampRateVPerSec", cachedSysIdRampRate);
+        publisher.put(sysidRoot + "/stepVoltageV", cachedSysIdStepVoltage);
+        publisher.put(sysidRoot + "/timeoutSec", cachedSysIdTimeoutSeconds);
+        publisher.put(sysidRoot + "/voltageLimitV", cachedSysIdVoltageLimit);
+        publisher.put(sysidRoot + "/active", cachedSysIdActive);
     }
 
     private void recordNetworkTablesRequest(String ownerHint) {

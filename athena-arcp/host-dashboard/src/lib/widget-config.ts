@@ -234,8 +234,13 @@ export type MotorWidgetConfig = {
 export type EncoderWidgetConfig = {
   positionSignalId: number | null;
   velocitySignalId: number | null;
+  rateSignalId: number | null;
   absoluteSignalId: number | null;
   connectedSignalId: number | null;
+  conversionSignalId: number | null;
+  conversionOffsetSignalId: number | null;
+  discontinuityPointSignalId: number | null;
+  discontinuityRangeSignalId: number | null;
   ratioSignalId: number | null;
   offsetSignalId: number | null;
   canIdSignalId: number | null;
@@ -297,6 +302,11 @@ export type LayoutGridConfig = {
   autoSize: boolean;
 };
 
+export type LayoutAccordionConfig = {
+  collapsed: boolean;
+  expandedRows: number | null;
+};
+
 export type Mech2dWidgetConfig = {
   showGrid: boolean;
   lineWidth: number;
@@ -328,6 +338,10 @@ export type Mech2dScene = {
 export type SwerveModuleWidgetConfig = {
   angleSignalId: number | null;
   speedSignalId: number | null;
+  commandAngleSignalId: number | null;
+  commandSpeedSignalId: number | null;
+  commandInvertedSignalId: number | null;
+  commandOffsetSignalId: number | null;
   label: string;
   maxSpeed: number;
 };
@@ -358,18 +372,22 @@ export type FieldPoint = {
 };
 
 export type StatusMatrixHealth = 'true' | 'false';
+export type StatusMatrixMode = 'status' | 'toggle' | 'toggle_value';
 
 export type StatusMatrixItem = {
   signalId: number;
   label: string;
   group: string;
   healthyWhen: StatusMatrixHealth;
+  toggleSignalId: number | null;
+  valueSignalId: number | null;
 };
 
 export type StatusMatrixConfig = {
   items: StatusMatrixItem[];
   columns: number;
   showSummary: boolean;
+  mode: StatusMatrixMode;
 };
 
 export type CameraOverlayConfig = {
@@ -449,6 +467,193 @@ function normalizeSignalId(value: unknown): number | null {
   const parsed = toNumber(value);
   if (parsed === null || parsed <= 0) return null;
   return Math.floor(parsed);
+}
+
+function hasOwn(obj: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function isExplicitSignalDisable(value: unknown): boolean {
+  return value === null || (typeof value === 'string' && value.trim().length === 0);
+}
+
+function resolveSignalIdFromKeys(
+  base: Record<string, unknown>,
+  keys: readonly string[],
+  defaultSignalId: number | null,
+  signals: SignalRow[]
+): number | null {
+  for (const key of keys) {
+    if (!hasOwn(base, key)) continue;
+    const raw = base[key];
+    if (isExplicitSignalDisable(raw)) return null;
+    const parsed = normalizeSignalId(raw);
+    if (parsed !== null && signals.some((signal) => signal.signal_id === parsed)) {
+      return parsed;
+    }
+    return null;
+  }
+
+  if (defaultSignalId !== null && signals.some((signal) => signal.signal_id === defaultSignalId)) {
+    return defaultSignalId;
+  }
+  return null;
+}
+
+function normalizeSignalPath(rawPath: string): string {
+  const trimmed = rawPath.replace(/\\/g, '/').trim();
+  if (!trimmed) return '';
+  const rawSegments = trimmed.split('/');
+  const segments: string[] = [];
+  for (const rawSegment of rawSegments) {
+    const segment = rawSegment.trim();
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.join('/');
+}
+
+function canonicalSignalToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function canonicalSignalPath(rawPath: string): string {
+  const normalized = normalizeSignalPath(rawPath);
+  if (!normalized) return '';
+  return normalized
+    .split('/')
+    .map((segment) => canonicalSignalToken(segment))
+    .filter((segment) => segment.length > 0)
+    .join('/');
+}
+
+function isPathWithinScope(path: string, scope: string): boolean {
+  const normalizedPath = normalizeSignalPath(path);
+  const normalizedScope = normalizeSignalPath(scope);
+  if (!normalizedScope) return true;
+  if (
+    normalizedPath === normalizedScope ||
+    normalizedPath.startsWith(`${normalizedScope}/`)
+  ) {
+    return true;
+  }
+  const canonicalPath = canonicalSignalPath(normalizedPath);
+  const canonicalScope = canonicalSignalPath(normalizedScope);
+  if (!canonicalScope) return true;
+  return (
+    canonicalPath === canonicalScope ||
+    canonicalPath.startsWith(`${canonicalScope}/`)
+  );
+}
+
+function scopedSignals(signals: SignalRow[], anchorParent: string): SignalRow[] {
+  const normalizedAnchorParent = normalizeSignalPath(anchorParent);
+  if (!normalizedAnchorParent) return signals;
+  const scoped = signals.filter((signal) =>
+    isPathWithinScope(parentPath(signal.path), normalizedAnchorParent)
+  );
+  return scoped.length > 0 ? scoped : signals;
+}
+
+function resolveSignalIdFromPath(
+  rawPath: string,
+  topicPath: string,
+  fallbackSignal: SignalRow,
+  signals: SignalRow[]
+): number | null {
+  const cleanedRaw = rawPath.trim();
+  if (!cleanedRaw) return null;
+
+  const normalizedTopic = normalizeSignalPath(topicPath);
+  const fallbackParent = parentPath(fallbackSignal.path);
+
+  let candidate = cleanedRaw;
+  if (candidate.startsWith('./')) {
+    candidate = candidate.slice(2);
+  }
+
+  let resolvedPath = '';
+  if (candidate.startsWith('/')) {
+    resolvedPath = normalizeSignalPath(candidate.slice(1));
+  } else {
+    const normalizedCandidate = normalizeSignalPath(candidate);
+    if (!normalizedCandidate) return null;
+
+    const hasQualifiedRoot =
+      normalizedCandidate.startsWith('Athena/') ||
+      normalizedCandidate.startsWith('athena/') ||
+      normalizedCandidate.startsWith('Robot/') ||
+      normalizedCandidate.startsWith('robot/');
+
+    if (hasQualifiedRoot) {
+      resolvedPath = normalizedCandidate;
+    } else {
+      const base = normalizedTopic || fallbackParent;
+      resolvedPath = base
+        ? normalizeSignalPath(`${base}/${normalizedCandidate}`)
+        : normalizedCandidate;
+    }
+  }
+
+  if (!resolvedPath) return null;
+  const normalizedResolved = resolvedPath.toLowerCase();
+  const exact = signals.find(
+    (signal) => normalizeSignalPath(signal.path).toLowerCase() === normalizedResolved
+  );
+  if (exact) return exact.signal_id;
+
+  const canonicalResolved = canonicalSignalPath(resolvedPath);
+  if (canonicalResolved) {
+    const canonicalMatch = signals.find(
+      (signal) => canonicalSignalPath(signal.path) === canonicalResolved
+    );
+    if (canonicalMatch) return canonicalMatch.signal_id;
+  }
+
+  if (!candidate.includes('/')) {
+    const scopedParent = normalizedTopic || fallbackParent;
+    const byLeaf = findSignalByLeaf(signals, scopedParent, [candidate]);
+    if (byLeaf) return byLeaf.signal_id;
+  }
+
+  return null;
+}
+
+function resolveConfiguredSignalId(
+  base: Record<string, unknown>,
+  idKey: string,
+  pathKey: string,
+  defaultSignalId: number | null,
+  topicPath: string,
+  fallbackSignal: SignalRow,
+  signals: SignalRow[]
+): number | null {
+  if (hasOwn(base, idKey) && isExplicitSignalDisable(base[idKey])) {
+    return null;
+  }
+
+  const rawPath = toString(base[pathKey], '').trim();
+  if (rawPath) {
+    const resolved = resolveSignalIdFromPath(rawPath, topicPath, fallbackSignal, signals);
+    if (resolved !== null) return resolved;
+  }
+
+  if (hasOwn(base, idKey)) {
+    const direct = normalizeSignalId(base[idKey]);
+    if (direct !== null && signals.some((signal) => signal.signal_id === direct)) {
+      return direct;
+    }
+    return null;
+  }
+
+  if (defaultSignalId !== null && signals.some((signal) => signal.signal_id === defaultSignalId)) {
+    return defaultSignalId;
+  }
+  return null;
 }
 
 function looksLikeUrl(value: string): boolean {
@@ -763,28 +968,36 @@ export function readControllerConfig(
     params: parsed.length > 0 ? parsed : buildControllerDefaultParams(fallbackSignal, signals),
     autotune: {
       enabled: toBoolean(source.enabled, defaults.enabled),
-      modeSignalId:
-        normalizeSignalId(source.modeSignalId) ??
-        normalizeSignalId(source.modeId) ??
+      modeSignalId: resolveSignalIdFromKeys(
+        source,
+        ['modeSignalId', 'modeId'],
         defaults.modeSignalId,
-      statusSignalId:
-        normalizeSignalId(source.statusSignalId) ??
-        normalizeSignalId(source.statusId) ??
+        signals
+      ),
+      statusSignalId: resolveSignalIdFromKeys(
+        source,
+        ['statusSignalId', 'statusId'],
         defaults.statusSignalId,
-      resultSignalId:
-        normalizeSignalId(source.resultSignalId) ??
-        normalizeSignalId(source.resultId) ??
+        signals
+      ),
+      resultSignalId: resolveSignalIdFromKeys(
+        source,
+        ['resultSignalId', 'resultId'],
         defaults.resultSignalId,
-      startActionSignalId:
-        normalizeSignalId(source.startActionSignalId) ??
-        normalizeSignalId(source.startSignalId) ??
-        normalizeSignalId(source.startActionId) ??
+        signals
+      ),
+      startActionSignalId: resolveSignalIdFromKeys(
+        source,
+        ['startActionSignalId', 'startSignalId', 'startActionId'],
         defaults.startActionSignalId,
-      stopActionSignalId:
-        normalizeSignalId(source.stopActionSignalId) ??
-        normalizeSignalId(source.stopSignalId) ??
-        normalizeSignalId(source.stopActionId) ??
-        defaults.stopActionSignalId
+        signals
+      ),
+      stopActionSignalId: resolveSignalIdFromKeys(
+        source,
+        ['stopActionSignalId', 'stopSignalId', 'stopActionId'],
+        defaults.stopActionSignalId,
+        signals
+      )
     }
   };
 }
@@ -1042,7 +1255,9 @@ function defaultStatusMatrixItems(anchor: SignalRow, signals: SignalRow[]): Stat
     signalId: signal.signal_id,
     label: leafPath(signal.path),
     group: fallbackGroup,
-    healthyWhen: 'true'
+    healthyWhen: 'true',
+    toggleSignalId: signal.access === 'write' ? signal.signal_id : null,
+    valueSignalId: null
   }));
 }
 
@@ -1058,7 +1273,9 @@ function parseStatusMatrixItem(value: unknown): StatusMatrixItem | null {
     signalId,
     label: toString(value.label, `Signal ${signalId}`).trim() || `Signal ${signalId}`,
     group: toString(value.group, 'status').trim() || 'status',
-    healthyWhen
+    healthyWhen,
+    toggleSignalId: normalizeSignalId(value.toggleSignalId),
+    valueSignalId: normalizeSignalId(value.valueSignalId)
   };
 }
 
@@ -1074,10 +1291,15 @@ export function readStatusMatrixConfig(
         .filter((entry): entry is StatusMatrixItem => entry !== null)
     : [];
 
+  const modeRaw = toString(base.mode, 'status').trim().toLowerCase();
+  const mode: StatusMatrixMode =
+    modeRaw === 'toggle' || modeRaw === 'toggle_value' ? modeRaw : 'status';
+
   return {
     items: items.length > 0 ? items : defaultStatusMatrixItems(fallbackSignal, signals),
     columns: Math.max(1, Math.min(8, Math.floor(toNumber(base.columns) ?? 4))),
-    showSummary: toBoolean(base.showSummary, true)
+    showSummary: toBoolean(base.showSummary, true),
+    mode
   };
 }
 
@@ -1100,7 +1322,9 @@ export function addStatusMatrixSignal(
         signalId: signal.signal_id,
         label: leafPath(signal.path),
         group: parentPath(signal.path) || 'status',
-        healthyWhen: 'true'
+        healthyWhen: 'true',
+        toggleSignalId: signal.access === 'write' ? signal.signal_id : null,
+        valueSignalId: null
       }
     ]
   };
@@ -1166,18 +1390,67 @@ export function readCameraOverlayConfig(
 ): CameraOverlayConfig {
   const defaults = defaultCameraOverlayConfig(fallbackSignal, signals);
   const base = isObject(raw) ? raw : {};
+  const topicPath = toString(base.topicPath, '').trim();
 
   const streamUrlRaw = toString(base.streamUrl, defaults.streamUrl).trim();
   const streamUrl = streamUrlRaw.length > 0 ? streamUrlRaw : defaults.streamUrl;
 
   return {
-    streamSignalId: normalizeSignalId(base.streamSignalId) ?? defaults.streamSignalId,
+    streamSignalId: resolveConfiguredSignalId(
+      base,
+      'streamSignalId',
+      'streamSignalPath',
+      defaults.streamSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
     streamUrl,
-    poseXSignalId: normalizeSignalId(base.poseXSignalId) ?? defaults.poseXSignalId,
-    poseYSignalId: normalizeSignalId(base.poseYSignalId) ?? defaults.poseYSignalId,
-    headingSignalId: normalizeSignalId(base.headingSignalId) ?? defaults.headingSignalId,
-    targetsSignalId: normalizeSignalId(base.targetsSignalId) ?? defaults.targetsSignalId,
-    detectionsSignalId: normalizeSignalId(base.detectionsSignalId) ?? defaults.detectionsSignalId,
+    poseXSignalId: resolveConfiguredSignalId(
+      base,
+      'poseXSignalId',
+      'poseXSignalPath',
+      defaults.poseXSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    poseYSignalId: resolveConfiguredSignalId(
+      base,
+      'poseYSignalId',
+      'poseYSignalPath',
+      defaults.poseYSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    headingSignalId: resolveConfiguredSignalId(
+      base,
+      'headingSignalId',
+      'headingSignalPath',
+      defaults.headingSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    targetsSignalId: resolveConfiguredSignalId(
+      base,
+      'targetsSignalId',
+      'targetsSignalPath',
+      defaults.targetsSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    detectionsSignalId: resolveConfiguredSignalId(
+      base,
+      'detectionsSignalId',
+      'detectionsSignalPath',
+      defaults.detectionsSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
     showPose: toBoolean(base.showPose, defaults.showPose),
     showTargets: toBoolean(base.showTargets, defaults.showTargets),
     showDetections: toBoolean(base.showDetections, defaults.showDetections),
@@ -1284,28 +1557,57 @@ function findSignalByLeaf(
   allowedTypes?: string[]
 ): SignalRow | null {
   const normalizedCandidates = new Set(candidates.map((candidate) => normalizeToken(candidate)));
-  const parentScoped = signals.filter((signal) => parentPath(signal.path) === anchorParent);
-  const fullPool = parentScoped.length > 0 ? parentScoped : signals;
+  const fullPool = scopedSignals(signals, anchorParent);
+  const isPlaceholder = (signal: SignalRow): boolean => {
+    const value = signal.value.trim();
+    return value.length === 0 || value === '-';
+  };
+
+  const matchesCandidate = (signal: SignalRow): boolean => {
+    const token = normalizeToken(leafPath(signal.path));
+    if (!token) return false;
+    return normalizedCandidates.has(token);
+  };
+
+  const matchesSuffix = (signal: SignalRow): boolean => {
+    const token = normalizeToken(leafPath(signal.path));
+    if (!token) return false;
+    for (const candidate of normalizedCandidates) {
+      if (token.endsWith(candidate)) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   for (const signal of fullPool) {
     if (isNtPublishToggleSignal(signal)) continue;
     if (allowedTypes && !allowedTypes.includes(signal.signal_type)) continue;
-    const token = normalizeToken(leafPath(signal.path));
-    if (!token) continue;
-    if (!normalizedCandidates.has(token)) continue;
+    if (!matchesCandidate(signal)) continue;
+    if (isPlaceholder(signal)) continue;
     return signal;
   }
 
   for (const signal of fullPool) {
     if (isNtPublishToggleSignal(signal)) continue;
     if (allowedTypes && !allowedTypes.includes(signal.signal_type)) continue;
-    const token = normalizeToken(leafPath(signal.path));
-    if (!token) continue;
-    for (const candidate of normalizedCandidates) {
-      if (token.endsWith(candidate)) {
-        return signal;
-      }
-    }
+    if (!matchesCandidate(signal)) continue;
+    return signal;
+  }
+
+  for (const signal of fullPool) {
+    if (isNtPublishToggleSignal(signal)) continue;
+    if (allowedTypes && !allowedTypes.includes(signal.signal_type)) continue;
+    if (!matchesSuffix(signal)) continue;
+    if (isPlaceholder(signal)) continue;
+    return signal;
+  }
+
+  for (const signal of fullPool) {
+    if (isNtPublishToggleSignal(signal)) continue;
+    if (allowedTypes && !allowedTypes.includes(signal.signal_type)) continue;
+    if (!matchesSuffix(signal)) continue;
+    return signal;
   }
 
   return null;
@@ -1365,21 +1667,22 @@ export function readFieldConfig(
   const defaults = defaultFieldSignalBinding(fallbackSignal, signals);
   const base = isObject(raw) ? raw : {};
 
-  const xSignalId = toNumber(base.xSignalId);
-  const ySignalId = toNumber(base.ySignalId);
-  const headingSignalId = toNumber(base.headingSignalId);
-  const trajectorySignalId = toNumber(base.trajectorySignalId);
-  const imageSignalId = toNumber(base.imageSignalId);
-
   return {
-    xSignalId: xSignalId !== null && xSignalId > 0 ? xSignalId : defaults.xSignalId,
-    ySignalId: ySignalId !== null && ySignalId > 0 ? ySignalId : defaults.ySignalId,
-    headingSignalId: headingSignalId !== null && headingSignalId > 0 ? headingSignalId : defaults.headingSignalId,
-    trajectorySignalId:
-      trajectorySignalId !== null && trajectorySignalId > 0
-        ? trajectorySignalId
-        : defaults.trajectorySignalId,
-    imageSignalId: imageSignalId !== null && imageSignalId > 0 ? imageSignalId : defaults.imageSignalId,
+    xSignalId: resolveSignalIdFromKeys(base, ['xSignalId'], defaults.xSignalId, signals),
+    ySignalId: resolveSignalIdFromKeys(base, ['ySignalId'], defaults.ySignalId, signals),
+    headingSignalId: resolveSignalIdFromKeys(
+      base,
+      ['headingSignalId'],
+      defaults.headingSignalId,
+      signals
+    ),
+    trajectorySignalId: resolveSignalIdFromKeys(
+      base,
+      ['trajectorySignalId'],
+      defaults.trajectorySignalId,
+      signals
+    ),
+    imageSignalId: resolveSignalIdFromKeys(base, ['imageSignalId'], defaults.imageSignalId, signals),
     imageUrl: toString(base.imageUrl, defaults.imageUrl),
     imageOpacity: clamp(toNumber(base.imageOpacity) ?? defaults.imageOpacity, 0, 1),
     fieldLength: Math.max(1, toNumber(base.fieldLength) ?? defaults.fieldLength),
@@ -1447,9 +1750,9 @@ export function readImu3dConfig(
   const units: Imu3dUnits = unitsRaw === 'rad' ? 'rad' : 'deg';
 
   return {
-    rollSignalId: normalizeSignalId(base.rollSignalId) ?? defaults.rollSignalId,
-    pitchSignalId: normalizeSignalId(base.pitchSignalId) ?? defaults.pitchSignalId,
-    yawSignalId: normalizeSignalId(base.yawSignalId) ?? defaults.yawSignalId,
+    rollSignalId: resolveSignalIdFromKeys(base, ['rollSignalId'], defaults.rollSignalId, signals),
+    pitchSignalId: resolveSignalIdFromKeys(base, ['pitchSignalId'], defaults.pitchSignalId, signals),
+    yawSignalId: resolveSignalIdFromKeys(base, ['yawSignalId'], defaults.yawSignalId, signals),
     units
   };
 }
@@ -1459,15 +1762,37 @@ function findWritableNumericSignalByLeaf(
   anchorParent: string,
   candidates: string[]
 ): SignalRow | null {
-  const scoped = signals.filter((signal) => parentPath(signal.path) === anchorParent);
-  const pool = scoped.length > 0 ? scoped : signals;
+  const pool = scopedSignals(signals, anchorParent);
   const normalizedCandidates = candidates.map((candidate) => normalizeToken(candidate));
+  const isPlaceholder = (signal: SignalRow): boolean => {
+    const value = signal.value.trim();
+    return value.length === 0 || value === '-';
+  };
+
+  for (const signal of pool) {
+    if (isNtPublishToggleSignal(signal)) continue;
+    if (!isNumericSignal(signal) || signal.access !== 'write') continue;
+    const token = normalizeToken(leafPath(signal.path));
+    if (normalizedCandidates.includes(token) && !isPlaceholder(signal)) {
+      return signal;
+    }
+  }
 
   for (const signal of pool) {
     if (isNtPublishToggleSignal(signal)) continue;
     if (!isNumericSignal(signal) || signal.access !== 'write') continue;
     const token = normalizeToken(leafPath(signal.path));
     if (normalizedCandidates.includes(token)) {
+      return signal;
+    }
+  }
+
+  for (const signal of pool) {
+    if (isNtPublishToggleSignal(signal)) continue;
+    if (!isNumericSignal(signal) || signal.access !== 'write') continue;
+    const token = normalizeToken(leafPath(signal.path));
+    if (normalizedCandidates.some((candidate) => token.endsWith(candidate) || token.includes(candidate))) {
+      if (isPlaceholder(signal)) continue;
       return signal;
     }
   }
@@ -1502,8 +1827,7 @@ function findActionSignalByLeaf(
   anchorParent: string,
   candidates: string[]
 ): SignalRow | null {
-  const parentScoped = signals.filter((signal) => parentPath(signal.path) === anchorParent);
-  const pool = parentScoped.length > 0 ? parentScoped : signals;
+  const pool = scopedSignals(signals, anchorParent);
   const actionPool = pool.filter(
     (signal) => signal.access === 'invoke' || signal.kind === 'command'
   );
@@ -1625,30 +1949,50 @@ export function readStateMachineConfig(
   const base = isObject(raw) ? raw : {};
 
   return {
-    currentStateSignalId:
-      normalizeSignalId(base.currentStateSignalId) ??
-      normalizeSignalId(base.currentSignalId) ??
+    currentStateSignalId: resolveSignalIdFromKeys(
+      base,
+      ['currentStateSignalId', 'currentSignalId'],
       defaults.currentStateSignalId,
-    goalStateSignalId:
-      normalizeSignalId(base.goalStateSignalId) ??
-      normalizeSignalId(base.goalSignalId) ??
+      signals
+    ),
+    goalStateSignalId: resolveSignalIdFromKeys(
+      base,
+      ['goalStateSignalId', 'goalSignalId'],
       defaults.goalStateSignalId,
-    nextStateSignalId:
-      normalizeSignalId(base.nextStateSignalId) ??
-      normalizeSignalId(base.nextSignalId) ??
+      signals
+    ),
+    nextStateSignalId: resolveSignalIdFromKeys(
+      base,
+      ['nextStateSignalId', 'nextSignalId'],
       defaults.nextStateSignalId,
-    queueSignalId: normalizeSignalId(base.queueSignalId) ?? defaults.queueSignalId,
-    atGoalSignalId: normalizeSignalId(base.atGoalSignalId) ?? defaults.atGoalSignalId,
-    transitionCountSignalId:
-      normalizeSignalId(base.transitionCountSignalId) ?? defaults.transitionCountSignalId,
-    lastTransitionSignalId:
-      normalizeSignalId(base.lastTransitionSignalId) ?? defaults.lastTransitionSignalId,
-    availableStatesSignalId:
-      normalizeSignalId(base.availableStatesSignalId) ?? defaults.availableStatesSignalId,
-    clearQueueCommandSignalId:
-      normalizeSignalId(base.clearQueueCommandSignalId) ??
-      normalizeSignalId(base.clearQueueSignalId) ??
-      defaults.clearQueueCommandSignalId
+      signals
+    ),
+    queueSignalId: resolveSignalIdFromKeys(base, ['queueSignalId'], defaults.queueSignalId, signals),
+    atGoalSignalId: resolveSignalIdFromKeys(base, ['atGoalSignalId'], defaults.atGoalSignalId, signals),
+    transitionCountSignalId: resolveSignalIdFromKeys(
+      base,
+      ['transitionCountSignalId'],
+      defaults.transitionCountSignalId,
+      signals
+    ),
+    lastTransitionSignalId: resolveSignalIdFromKeys(
+      base,
+      ['lastTransitionSignalId'],
+      defaults.lastTransitionSignalId,
+      signals
+    ),
+    availableStatesSignalId: resolveSignalIdFromKeys(
+      base,
+      ['availableStatesSignalId'],
+      defaults.availableStatesSignalId,
+      signals
+    ),
+    clearQueueCommandSignalId: resolveSignalIdFromKeys(
+      base,
+      ['clearQueueCommandSignalId', 'clearQueueSignalId'],
+      defaults.clearQueueCommandSignalId,
+      signals
+    )
   };
 }
 
@@ -1777,28 +2121,163 @@ export function readMotorConfig(
 ): MotorWidgetConfig {
   const defaults = defaultMotorConfig(fallbackSignal, signals);
   const base = isObject(raw) ? raw : {};
+  const topicPath = toString(base.topicPath, '').trim();
+
+  const configuredNeutralModePath = toString(
+    base.neutralModeSignalPath,
+    toString(base.modeSignalPath, '')
+  ).trim();
+  const neutralModeFromPath = configuredNeutralModePath
+    ? resolveSignalIdFromPath(configuredNeutralModePath, topicPath, fallbackSignal, signals)
+    : null;
+  const configuredNeutralModeSignalId =
+    normalizeSignalId(base.neutralModeSignalId) ?? normalizeSignalId(base.modeSignalId);
+  const neutralModeSignalId =
+    neutralModeFromPath ??
+    (configuredNeutralModeSignalId !== null &&
+    signals.some((entry) => entry.signal_id === configuredNeutralModeSignalId)
+      ? configuredNeutralModeSignalId
+      : null) ??
+    defaults.neutralModeSignalId;
 
   return {
     showOtherFields: toBoolean(base.showOtherFields, defaults.showOtherFields),
-    canIdSignalId: normalizeSignalId(base.canIdSignalId) ?? defaults.canIdSignalId,
-    canbusSignalId: normalizeSignalId(base.canbusSignalId) ?? defaults.canbusSignalId,
-    typeSignalId: normalizeSignalId(base.typeSignalId) ?? defaults.typeSignalId,
-    connectedSignalId: normalizeSignalId(base.connectedSignalId) ?? defaults.connectedSignalId,
-    stalledSignalId: normalizeSignalId(base.stalledSignalId) ?? defaults.stalledSignalId,
-    neutralModeSignalId:
-      normalizeSignalId(base.neutralModeSignalId) ??
-      normalizeSignalId(base.modeSignalId) ??
-      defaults.neutralModeSignalId,
-    currentLimitSignalId: normalizeSignalId(base.currentLimitSignalId) ?? defaults.currentLimitSignalId,
-    invertedSignalId: normalizeSignalId(base.invertedSignalId) ?? defaults.invertedSignalId,
-    brakeModeSignalId: normalizeSignalId(base.brakeModeSignalId) ?? defaults.brakeModeSignalId,
-    outputSignalId: normalizeSignalId(base.outputSignalId) ?? defaults.outputSignalId,
-    velocitySignalId: normalizeSignalId(base.velocitySignalId) ?? defaults.velocitySignalId,
-    positionSignalId: normalizeSignalId(base.positionSignalId) ?? defaults.positionSignalId,
-    currentSignalId: normalizeSignalId(base.currentSignalId) ?? defaults.currentSignalId,
-    temperatureSignalId: normalizeSignalId(base.temperatureSignalId) ?? defaults.temperatureSignalId,
-    voltageSignalId: normalizeSignalId(base.voltageSignalId) ?? defaults.voltageSignalId,
-    commandSignalId: normalizeSignalId(base.commandSignalId) ?? defaults.commandSignalId
+    canIdSignalId: resolveConfiguredSignalId(
+      base,
+      'canIdSignalId',
+      'canIdSignalPath',
+      defaults.canIdSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    canbusSignalId: resolveConfiguredSignalId(
+      base,
+      'canbusSignalId',
+      'canbusSignalPath',
+      defaults.canbusSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    typeSignalId: resolveConfiguredSignalId(
+      base,
+      'typeSignalId',
+      'typeSignalPath',
+      defaults.typeSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    connectedSignalId: resolveConfiguredSignalId(
+      base,
+      'connectedSignalId',
+      'connectedSignalPath',
+      defaults.connectedSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    stalledSignalId: resolveConfiguredSignalId(
+      base,
+      'stalledSignalId',
+      'stalledSignalPath',
+      defaults.stalledSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    neutralModeSignalId,
+    currentLimitSignalId: resolveConfiguredSignalId(
+      base,
+      'currentLimitSignalId',
+      'currentLimitSignalPath',
+      defaults.currentLimitSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    invertedSignalId: resolveConfiguredSignalId(
+      base,
+      'invertedSignalId',
+      'invertedSignalPath',
+      defaults.invertedSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    brakeModeSignalId: resolveConfiguredSignalId(
+      base,
+      'brakeModeSignalId',
+      'brakeModeSignalPath',
+      defaults.brakeModeSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    outputSignalId: resolveConfiguredSignalId(
+      base,
+      'outputSignalId',
+      'outputSignalPath',
+      defaults.outputSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    velocitySignalId: resolveConfiguredSignalId(
+      base,
+      'velocitySignalId',
+      'velocitySignalPath',
+      defaults.velocitySignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    positionSignalId: resolveConfiguredSignalId(
+      base,
+      'positionSignalId',
+      'positionSignalPath',
+      defaults.positionSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    currentSignalId: resolveConfiguredSignalId(
+      base,
+      'currentSignalId',
+      'currentSignalPath',
+      defaults.currentSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    temperatureSignalId: resolveConfiguredSignalId(
+      base,
+      'temperatureSignalId',
+      'temperatureSignalPath',
+      defaults.temperatureSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    voltageSignalId: resolveConfiguredSignalId(
+      base,
+      'voltageSignalId',
+      'voltageSignalPath',
+      defaults.voltageSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    commandSignalId: resolveConfiguredSignalId(
+      base,
+      'commandSignalId',
+      'commandSignalPath',
+      defaults.commandSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    )
   };
 }
 
@@ -1817,6 +2296,12 @@ function defaultEncoderConfig(anchor: SignalRow, signals: SignalRow[]): EncoderW
     ['velocity', 'speed', 'rate', 'rpm'],
     ['f64', 'i64']
   );
+  const rateSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['rate', 'rps'],
+    ['f64', 'i64']
+  );
   const absoluteSignal = findSignalByLeaf(
     signals,
     anchorParent,
@@ -1828,6 +2313,30 @@ function defaultEncoderConfig(anchor: SignalRow, signals: SignalRow[]): EncoderW
     anchorParent,
     ['connected', 'is_connected', 'healthy', 'online'],
     ['bool']
+  );
+  const conversionSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['conversion', 'conversion_ratio', 'conversion_factor', 'rotations_per_unit'],
+    ['f64', 'i64']
+  );
+  const conversionOffsetSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['conversion_offset', 'conversionoffset', 'offset_conversion', 'conversion_zero_offset'],
+    ['f64', 'i64']
+  );
+  const discontinuityPointSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['discontinuity_point', 'discontinuitypoint'],
+    ['f64', 'i64']
+  );
+  const discontinuityRangeSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['discontinuity_range', 'discontinuityrange'],
+    ['f64', 'i64']
   );
   const ratioSignal = findSignalByLeaf(
     signals,
@@ -1889,8 +2398,13 @@ function defaultEncoderConfig(anchor: SignalRow, signals: SignalRow[]): EncoderW
   return {
     positionSignalId: positionSignal?.signal_id ?? fallbackPosition,
     velocitySignalId: velocitySignal?.signal_id ?? null,
+    rateSignalId: rateSignal?.signal_id ?? null,
     absoluteSignalId: absoluteSignal?.signal_id ?? null,
     connectedSignalId: connectedSignal?.signal_id ?? null,
+    conversionSignalId: conversionSignal?.signal_id ?? null,
+    conversionOffsetSignalId: conversionOffsetSignal?.signal_id ?? null,
+    discontinuityPointSignalId: discontinuityPointSignal?.signal_id ?? null,
+    discontinuityRangeSignalId: discontinuityRangeSignal?.signal_id ?? null,
     ratioSignalId: ratioSignal?.signal_id ?? null,
     offsetSignalId: offsetSignal?.signal_id ?? null,
     canIdSignalId: canIdSignal?.signal_id ?? null,
@@ -1905,8 +2419,8 @@ function defaultEncoderConfig(anchor: SignalRow, signals: SignalRow[]): EncoderW
     positionMax: 2.0,
     absoluteMin: 0.0,
     absoluteMax: 1.0,
-    positionUnit: 'rot',
-    absoluteUnit: 'rot'
+    positionUnit: '',
+    absoluteUnit: ''
   };
 }
 
@@ -1917,21 +2431,162 @@ export function readEncoderConfig(
 ): EncoderWidgetConfig {
   const defaults = defaultEncoderConfig(fallbackSignal, signals);
   const base = isObject(raw) ? raw : {};
+  const topicPath = toString(base.topicPath, '').trim();
 
   return {
-    positionSignalId: normalizeSignalId(base.positionSignalId) ?? defaults.positionSignalId,
-    velocitySignalId: normalizeSignalId(base.velocitySignalId) ?? defaults.velocitySignalId,
-    absoluteSignalId: normalizeSignalId(base.absoluteSignalId) ?? defaults.absoluteSignalId,
-    connectedSignalId: normalizeSignalId(base.connectedSignalId) ?? defaults.connectedSignalId,
-    ratioSignalId: normalizeSignalId(base.ratioSignalId) ?? defaults.ratioSignalId,
-    offsetSignalId: normalizeSignalId(base.offsetSignalId) ?? defaults.offsetSignalId,
-    canIdSignalId: normalizeSignalId(base.canIdSignalId) ?? defaults.canIdSignalId,
-    canbusSignalId: normalizeSignalId(base.canbusSignalId) ?? defaults.canbusSignalId,
-    typeSignalId: normalizeSignalId(base.typeSignalId) ?? defaults.typeSignalId,
-    invertedSignalId: normalizeSignalId(base.invertedSignalId) ?? defaults.invertedSignalId,
-    supportsSimulationSignalId:
-      normalizeSignalId(base.supportsSimulationSignalId) ?? defaults.supportsSimulationSignalId,
-    rawAbsoluteSignalId: normalizeSignalId(base.rawAbsoluteSignalId) ?? defaults.rawAbsoluteSignalId,
+    positionSignalId: resolveConfiguredSignalId(
+      base,
+      'positionSignalId',
+      'positionSignalPath',
+      defaults.positionSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    velocitySignalId: resolveConfiguredSignalId(
+      base,
+      'velocitySignalId',
+      'velocitySignalPath',
+      defaults.velocitySignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    rateSignalId: resolveConfiguredSignalId(
+      base,
+      'rateSignalId',
+      'rateSignalPath',
+      defaults.rateSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    absoluteSignalId: resolveConfiguredSignalId(
+      base,
+      'absoluteSignalId',
+      'absoluteSignalPath',
+      defaults.absoluteSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    connectedSignalId: resolveConfiguredSignalId(
+      base,
+      'connectedSignalId',
+      'connectedSignalPath',
+      defaults.connectedSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    conversionSignalId: resolveConfiguredSignalId(
+      base,
+      'conversionSignalId',
+      'conversionSignalPath',
+      defaults.conversionSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    conversionOffsetSignalId: resolveConfiguredSignalId(
+      base,
+      'conversionOffsetSignalId',
+      'conversionOffsetSignalPath',
+      defaults.conversionOffsetSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    discontinuityPointSignalId: resolveConfiguredSignalId(
+      base,
+      'discontinuityPointSignalId',
+      'discontinuityPointSignalPath',
+      defaults.discontinuityPointSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    discontinuityRangeSignalId: resolveConfiguredSignalId(
+      base,
+      'discontinuityRangeSignalId',
+      'discontinuityRangeSignalPath',
+      defaults.discontinuityRangeSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    ratioSignalId: resolveConfiguredSignalId(
+      base,
+      'ratioSignalId',
+      'ratioSignalPath',
+      defaults.ratioSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    offsetSignalId: resolveConfiguredSignalId(
+      base,
+      'offsetSignalId',
+      'offsetSignalPath',
+      defaults.offsetSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    canIdSignalId: resolveConfiguredSignalId(
+      base,
+      'canIdSignalId',
+      'canIdSignalPath',
+      defaults.canIdSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    canbusSignalId: resolveConfiguredSignalId(
+      base,
+      'canbusSignalId',
+      'canbusSignalPath',
+      defaults.canbusSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    typeSignalId: resolveConfiguredSignalId(
+      base,
+      'typeSignalId',
+      'typeSignalPath',
+      defaults.typeSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    invertedSignalId: resolveConfiguredSignalId(
+      base,
+      'invertedSignalId',
+      'invertedSignalPath',
+      defaults.invertedSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    supportsSimulationSignalId: resolveConfiguredSignalId(
+      base,
+      'supportsSimulationSignalId',
+      'supportsSimulationSignalPath',
+      defaults.supportsSimulationSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    rawAbsoluteSignalId: resolveConfiguredSignalId(
+      base,
+      'rawAbsoluteSignalId',
+      'rawAbsoluteSignalPath',
+      defaults.rawAbsoluteSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
     positionViewMode:
       base.positionViewMode === 'zero_to_one' ||
       base.positionViewMode === 'continuous' ||
@@ -2044,22 +2699,119 @@ export function readImuConfig(
 ): ImuWidgetConfig {
   const defaults = defaultImuConfig(fallbackSignal, signals);
   const base = isObject(raw) ? raw : {};
+  const topicPath = toString(base.topicPath, '').trim();
   const unitsRaw = toString(base.units, defaults.units).toLowerCase();
   const units: Imu3dUnits = unitsRaw === 'rad' ? 'rad' : 'deg';
 
   return {
-    rollSignalId: normalizeSignalId(base.rollSignalId) ?? defaults.rollSignalId,
-    pitchSignalId: normalizeSignalId(base.pitchSignalId) ?? defaults.pitchSignalId,
-    yawSignalId: normalizeSignalId(base.yawSignalId) ?? defaults.yawSignalId,
-    headingSignalId: normalizeSignalId(base.headingSignalId) ?? defaults.headingSignalId,
-    connectedSignalId: normalizeSignalId(base.connectedSignalId) ?? defaults.connectedSignalId,
-    accelSignalId: normalizeSignalId(base.accelSignalId) ?? defaults.accelSignalId,
-    gyroSignalId: normalizeSignalId(base.gyroSignalId) ?? defaults.gyroSignalId,
-    magSignalId: normalizeSignalId(base.magSignalId) ?? defaults.magSignalId,
-    canIdSignalId: normalizeSignalId(base.canIdSignalId) ?? defaults.canIdSignalId,
-    canbusSignalId: normalizeSignalId(base.canbusSignalId) ?? defaults.canbusSignalId,
-    typeSignalId: normalizeSignalId(base.typeSignalId) ?? defaults.typeSignalId,
-    invertedSignalId: normalizeSignalId(base.invertedSignalId) ?? defaults.invertedSignalId,
+    rollSignalId: resolveConfiguredSignalId(
+      base,
+      'rollSignalId',
+      'rollSignalPath',
+      defaults.rollSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    pitchSignalId: resolveConfiguredSignalId(
+      base,
+      'pitchSignalId',
+      'pitchSignalPath',
+      defaults.pitchSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    yawSignalId: resolveConfiguredSignalId(
+      base,
+      'yawSignalId',
+      'yawSignalPath',
+      defaults.yawSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    headingSignalId: resolveConfiguredSignalId(
+      base,
+      'headingSignalId',
+      'headingSignalPath',
+      defaults.headingSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    connectedSignalId: resolveConfiguredSignalId(
+      base,
+      'connectedSignalId',
+      'connectedSignalPath',
+      defaults.connectedSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    accelSignalId: resolveConfiguredSignalId(
+      base,
+      'accelSignalId',
+      'accelSignalPath',
+      defaults.accelSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    gyroSignalId: resolveConfiguredSignalId(
+      base,
+      'gyroSignalId',
+      'gyroSignalPath',
+      defaults.gyroSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    magSignalId: resolveConfiguredSignalId(
+      base,
+      'magSignalId',
+      'magSignalPath',
+      defaults.magSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    canIdSignalId: resolveConfiguredSignalId(
+      base,
+      'canIdSignalId',
+      'canIdSignalPath',
+      defaults.canIdSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    canbusSignalId: resolveConfiguredSignalId(
+      base,
+      'canbusSignalId',
+      'canbusSignalPath',
+      defaults.canbusSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    typeSignalId: resolveConfiguredSignalId(
+      base,
+      'typeSignalId',
+      'typeSignalPath',
+      defaults.typeSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    invertedSignalId: resolveConfiguredSignalId(
+      base,
+      'invertedSignalId',
+      'invertedSignalPath',
+      defaults.invertedSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
     orientationViewMode:
       base.orientationViewMode === '1d' ||
       base.orientationViewMode === '2d' ||
@@ -2202,20 +2954,91 @@ export function readDioConfig(
 ): DioWidgetConfig {
   const defaults = defaultDioConfig(fallbackSignal, signals);
   const base = isObject(raw) ? raw : {};
+  const topicPath = toString(base.topicPath, '').trim();
+
+  const configuredChannelPath = toString(
+    base.channelSignalPath,
+    toString(base.dioChannelSignalPath, '')
+  ).trim();
+  const channelSignalFromPath = configuredChannelPath
+    ? resolveSignalIdFromPath(configuredChannelPath, topicPath, fallbackSignal, signals)
+    : null;
+  const configuredChannelSignalId =
+    normalizeSignalId(base.channelSignalId) ?? normalizeSignalId(base.dioChannelSignalId);
+  const channelSignalId =
+    channelSignalFromPath ??
+    (configuredChannelSignalId !== null &&
+    signals.some((entry) => entry.signal_id === configuredChannelSignalId)
+      ? configuredChannelSignalId
+      : null) ??
+    defaults.channelSignalId;
 
   return {
     showOtherFields: toBoolean(base.showOtherFields, defaults.showOtherFields),
-    valueSignalId: normalizeSignalId(base.valueSignalId) ?? defaults.valueSignalId,
-    outputSignalId: normalizeSignalId(base.outputSignalId) ?? defaults.outputSignalId,
-    invertedSignalId: normalizeSignalId(base.invertedSignalId) ?? defaults.invertedSignalId,
-    channelSignalId:
-      normalizeSignalId(base.channelSignalId) ??
-      normalizeSignalId(base.dioChannelSignalId) ??
-      defaults.channelSignalId,
-    portSignalId: normalizeSignalId(base.portSignalId) ?? defaults.portSignalId,
-    modeSignalId: normalizeSignalId(base.modeSignalId) ?? defaults.modeSignalId,
-    nameSignalId: normalizeSignalId(base.nameSignalId) ?? defaults.nameSignalId,
-    typeSignalId: normalizeSignalId(base.typeSignalId) ?? defaults.typeSignalId
+    valueSignalId: resolveConfiguredSignalId(
+      base,
+      'valueSignalId',
+      'valueSignalPath',
+      defaults.valueSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    outputSignalId: resolveConfiguredSignalId(
+      base,
+      'outputSignalId',
+      'outputSignalPath',
+      defaults.outputSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    invertedSignalId: resolveConfiguredSignalId(
+      base,
+      'invertedSignalId',
+      'invertedSignalPath',
+      defaults.invertedSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    channelSignalId,
+    portSignalId: resolveConfiguredSignalId(
+      base,
+      'portSignalId',
+      'portSignalPath',
+      defaults.portSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    modeSignalId: resolveConfiguredSignalId(
+      base,
+      'modeSignalId',
+      'modeSignalPath',
+      defaults.modeSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    nameSignalId: resolveConfiguredSignalId(
+      base,
+      'nameSignalId',
+      'nameSignalPath',
+      defaults.nameSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    ),
+    typeSignalId: resolveConfiguredSignalId(
+      base,
+      'typeSignalId',
+      'typeSignalPath',
+      defaults.typeSignalId,
+      topicPath,
+      fallbackSignal,
+      signals
+    )
   };
 }
 
@@ -2238,8 +3061,21 @@ export function readLayoutGridConfig(
   const base = isObject(raw) ? raw : {};
   const columns = Math.max(1, Math.min(96, Math.floor(toNumber(base.columns) ?? fallbackColumns)));
   const rows = Math.max(1, Math.min(96, Math.floor(toNumber(base.rows) ?? fallbackRows)));
-  const autoSize = toBoolean(base.autoSize, false);
+  const autoSize = toBoolean(base.autoSize, true);
   return { columns, rows, autoSize };
+}
+
+export function readLayoutAccordionConfig(
+  raw: WidgetConfigRecord | undefined
+): LayoutAccordionConfig {
+  const base = isObject(raw) ? raw : {};
+  const collapsed = toBoolean(base.collapsed, false);
+  const expandedRowsRaw = toNumber(base.expandedRows);
+  const expandedRows =
+    expandedRowsRaw === null
+      ? null
+      : Math.max(1, Math.min(96, Math.round(expandedRowsRaw)));
+  return { collapsed, expandedRows };
 }
 
 export function parseNumericArray(raw: string): number[] {
@@ -2352,6 +3188,10 @@ function defaultSwerveModuleConfig(
   return {
     angleSignalId: angleSignal?.signal_id ?? null,
     speedSignalId: speedSignal?.signal_id ?? null,
+    commandAngleSignalId: null,
+    commandSpeedSignalId: null,
+    commandInvertedSignalId: null,
+    commandOffsetSignalId: null,
     label: fallbackLabel,
     maxSpeed: 5
   };
@@ -2366,8 +3206,60 @@ export function readSwerveModuleConfig(
   const base = isObject(raw) ? raw : {};
 
   return {
-    angleSignalId: normalizeSignalId(base.angleSignalId) ?? defaults.angleSignalId,
-    speedSignalId: normalizeSignalId(base.speedSignalId) ?? defaults.speedSignalId,
+    angleSignalId: resolveConfiguredSignalId(
+      base,
+      'angleSignalId',
+      'angleSignalPath',
+      defaults.angleSignalId,
+      '',
+      fallbackSignal,
+      signals
+    ),
+    speedSignalId: resolveConfiguredSignalId(
+      base,
+      'speedSignalId',
+      'speedSignalPath',
+      defaults.speedSignalId,
+      '',
+      fallbackSignal,
+      signals
+    ),
+    commandAngleSignalId: resolveConfiguredSignalId(
+      base,
+      'commandAngleSignalId',
+      'commandAngleSignalPath',
+      defaults.commandAngleSignalId,
+      '',
+      fallbackSignal,
+      signals
+    ),
+    commandSpeedSignalId: resolveConfiguredSignalId(
+      base,
+      'commandSpeedSignalId',
+      'commandSpeedSignalPath',
+      defaults.commandSpeedSignalId,
+      '',
+      fallbackSignal,
+      signals
+    ),
+    commandInvertedSignalId: resolveConfiguredSignalId(
+      base,
+      'commandInvertedSignalId',
+      'commandInvertedSignalPath',
+      defaults.commandInvertedSignalId,
+      '',
+      fallbackSignal,
+      signals
+    ),
+    commandOffsetSignalId: resolveConfiguredSignalId(
+      base,
+      'commandOffsetSignalId',
+      'commandOffsetSignalPath',
+      defaults.commandOffsetSignalId,
+      '',
+      fallbackSignal,
+      signals
+    ),
     label: toString(base.label, defaults.label).trim() || defaults.label,
     maxSpeed: Math.max(0.1, toNumber(base.maxSpeed) ?? defaults.maxSpeed)
   };
@@ -2427,15 +3319,30 @@ export function readSwerveDriveConfig(
       modules[idx] = {
         ...modules[idx],
         label: toString(entry.label, modules[idx].label).trim() || modules[idx].label,
-        angleSignalId: normalizeSignalId(entry.angleSignalId) ?? modules[idx].angleSignalId,
-        speedSignalId: normalizeSignalId(entry.speedSignalId) ?? modules[idx].speedSignalId
+        angleSignalId: resolveSignalIdFromKeys(
+          entry,
+          ['angleSignalId'],
+          modules[idx].angleSignalId,
+          signals
+        ),
+        speedSignalId: resolveSignalIdFromKeys(
+          entry,
+          ['speedSignalId'],
+          modules[idx].speedSignalId,
+          signals
+        )
       };
     }
   }
 
   return {
     modules,
-    headingSignalId: normalizeSignalId(base.headingSignalId) ?? defaults.headingSignalId,
+    headingSignalId: resolveSignalIdFromKeys(
+      base,
+      ['headingSignalId'],
+      defaults.headingSignalId,
+      signals
+    ),
     maxSpeed: Math.max(0.1, toNumber(base.maxSpeed) ?? defaults.maxSpeed)
   };
 }
@@ -2502,9 +3409,24 @@ export function readDifferentialDriveConfig(
   const base = isObject(raw) ? raw : {};
 
   return {
-    leftSpeedSignalId: normalizeSignalId(base.leftSpeedSignalId) ?? defaults.leftSpeedSignalId,
-    rightSpeedSignalId: normalizeSignalId(base.rightSpeedSignalId) ?? defaults.rightSpeedSignalId,
-    headingSignalId: normalizeSignalId(base.headingSignalId) ?? defaults.headingSignalId,
+    leftSpeedSignalId: resolveSignalIdFromKeys(
+      base,
+      ['leftSpeedSignalId'],
+      defaults.leftSpeedSignalId,
+      signals
+    ),
+    rightSpeedSignalId: resolveSignalIdFromKeys(
+      base,
+      ['rightSpeedSignalId'],
+      defaults.rightSpeedSignalId,
+      signals
+    ),
+    headingSignalId: resolveSignalIdFromKeys(
+      base,
+      ['headingSignalId'],
+      defaults.headingSignalId,
+      signals
+    ),
     maxSpeed: Math.max(0.1, toNumber(base.maxSpeed) ?? defaults.maxSpeed)
   };
 }
@@ -2691,6 +3613,8 @@ export function buildDefaultWidgetConfig(
       return readImuConfig(undefined, signal, signals);
     case 'layout_title':
       return readLayoutTitleConfig(undefined, 'Title');
+    case 'layout_accordion':
+      return readLayoutAccordionConfig(undefined);
     case 'graph':
       return readGraphConfig(undefined, signal);
     case 'controller':

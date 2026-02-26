@@ -20,6 +20,7 @@
     readGraphConfig,
     readImu3dConfig,
     readInputConfig,
+    readLayoutAccordionConfig,
     readLayoutGridConfig,
     readLayoutTitleConfig,
     readMotorConfig,
@@ -394,7 +395,7 @@
   }
 </script>
 
-{#if !primarySignal && selectedWidget.kind !== 'layout_list' && selectedWidget.kind !== 'layout_grid' && selectedWidget.kind !== 'layout_divider' && selectedWidget.kind !== 'layout_spacer' && selectedWidget.kind !== 'layout_section' && selectedWidget.kind !== 'layout_title'}
+{#if !primarySignal && selectedWidget.kind !== 'layout_list' && selectedWidget.kind !== 'layout_grid' && selectedWidget.kind !== 'layout_accordion' && selectedWidget.kind !== 'layout_divider' && selectedWidget.kind !== 'layout_spacer' && selectedWidget.kind !== 'layout_section' && selectedWidget.kind !== 'layout_title'}
   <p class="empty">Config unavailable: no signal bound to this widget.</p>
 {:else if selectedWidget.kind === 'graph' && primarySignal}
   {@const graph = readGraphConfig(selectedWidget.config, primarySignal)}
@@ -1329,11 +1330,33 @@
         onChange={(signalId) => setConfig({ ...encoder, absoluteSignalId: signalId } satisfies EncoderWidgetConfig)}
       />
       <SignalMapField
+        label="Rate signal"
+        selectedSignalId={encoder.rateSignalId}
+        candidates={numericSignals}
+        {signalById}
+        onChange={(signalId) => setConfig({ ...encoder, rateSignalId: signalId } satisfies EncoderWidgetConfig)}
+      />
+      <SignalMapField
         label="Connected signal"
         selectedSignalId={encoder.connectedSignalId}
         candidates={boolSignals}
         {signalById}
         onChange={(signalId) => setConfig({ ...encoder, connectedSignalId: signalId } satisfies EncoderWidgetConfig)}
+      />
+      <SignalMapField
+        label="Conversion signal"
+        selectedSignalId={encoder.conversionSignalId}
+        candidates={numericSignals}
+        {signalById}
+        onChange={(signalId) => setConfig({ ...encoder, conversionSignalId: signalId } satisfies EncoderWidgetConfig)}
+      />
+      <SignalMapField
+        label="Conversion offset signal"
+        selectedSignalId={encoder.conversionOffsetSignalId}
+        candidates={numericSignals}
+        {signalById}
+        onChange={(signalId) =>
+          setConfig({ ...encoder, conversionOffsetSignalId: signalId } satisfies EncoderWidgetConfig)}
       />
       <SignalMapField
         label="Ratio signal"
@@ -1348,6 +1371,22 @@
         candidates={numericSignals}
         {signalById}
         onChange={(signalId) => setConfig({ ...encoder, offsetSignalId: signalId } satisfies EncoderWidgetConfig)}
+      />
+      <SignalMapField
+        label="Discontinuity point signal"
+        selectedSignalId={encoder.discontinuityPointSignalId}
+        candidates={numericSignals}
+        {signalById}
+        onChange={(signalId) =>
+          setConfig({ ...encoder, discontinuityPointSignalId: signalId } satisfies EncoderWidgetConfig)}
+      />
+      <SignalMapField
+        label="Discontinuity range signal"
+        selectedSignalId={encoder.discontinuityRangeSignalId}
+        candidates={numericSignals}
+        {signalById}
+        onChange={(signalId) =>
+          setConfig({ ...encoder, discontinuityRangeSignalId: signalId } satisfies EncoderWidgetConfig)}
       />
     </div>
 
@@ -1934,6 +1973,22 @@
             })}
         />
       </label>
+
+      <label>
+        Mode
+        <select
+          value={matrix.mode}
+          onchange={(event) =>
+            setConfig({
+              ...matrix,
+              mode: (event.currentTarget as HTMLSelectElement).value as 'status' | 'toggle' | 'toggle_value'
+            })}
+        >
+          <option value="status">Status only</option>
+          <option value="toggle">Toggle</option>
+          <option value="toggle_value">Toggle + value</option>
+        </select>
+      </label>
     </div>
 
     <label class="row-inline">
@@ -1981,6 +2036,48 @@
                 )
               })}
           />
+          {#if matrix.mode === 'toggle' || matrix.mode === 'toggle_value'}
+            <select
+              value={item.toggleSignalId ?? ''}
+              onchange={(event) => {
+                const raw = (event.currentTarget as HTMLSelectElement).value;
+                setConfig({
+                  ...matrix,
+                  items: matrix.items.map((entry, itemIndex) =>
+                    itemIndex === index
+                      ? { ...entry, toggleSignalId: raw ? Number(raw) : null }
+                      : entry
+                  )
+                });
+              }}
+            >
+              <option value="">No toggle signal</option>
+              {#each boolSignals as option (option.signal_id)}
+                <option value={option.signal_id}>{option.path}</option>
+              {/each}
+            </select>
+          {/if}
+          {#if matrix.mode === 'toggle_value'}
+            <select
+              value={item.valueSignalId ?? ''}
+              onchange={(event) => {
+                const raw = (event.currentTarget as HTMLSelectElement).value;
+                setConfig({
+                  ...matrix,
+                  items: matrix.items.map((entry, itemIndex) =>
+                    itemIndex === index
+                      ? { ...entry, valueSignalId: raw ? Number(raw) : null }
+                      : entry
+                  )
+                });
+              }}
+            >
+              <option value="">No value signal</option>
+              {#each numericSignals as option (option.signal_id)}
+                <option value={option.signal_id}>{option.path}</option>
+              {/each}
+            </select>
+          {/if}
           <button
             class="btn btn-danger"
             onclick={() =>
@@ -2700,6 +2797,70 @@
             setConfig({ ...swerveModule, maxSpeed: Math.max(0.1, Number((event.currentTarget as HTMLInputElement).value) || 5) })}
         />
       </label>
+
+      <label>
+        Command angle signal
+        <select
+          value={swerveModule.commandAngleSignalId ?? ''}
+          onchange={(event) => {
+            const raw = (event.currentTarget as HTMLSelectElement).value;
+            setConfig({ ...swerveModule, commandAngleSignalId: raw ? Number(raw) : null });
+          }}
+        >
+          <option value="">None</option>
+          {#each numericSignals as option (option.signal_id)}
+            <option value={option.signal_id}>{option.path}</option>
+          {/each}
+        </select>
+      </label>
+
+      <label>
+        Command speed signal
+        <select
+          value={swerveModule.commandSpeedSignalId ?? ''}
+          onchange={(event) => {
+            const raw = (event.currentTarget as HTMLSelectElement).value;
+            setConfig({ ...swerveModule, commandSpeedSignalId: raw ? Number(raw) : null });
+          }}
+        >
+          <option value="">None</option>
+          {#each numericSignals as option (option.signal_id)}
+            <option value={option.signal_id}>{option.path}</option>
+          {/each}
+        </select>
+      </label>
+
+      <label>
+        Command offset signal
+        <select
+          value={swerveModule.commandOffsetSignalId ?? ''}
+          onchange={(event) => {
+            const raw = (event.currentTarget as HTMLSelectElement).value;
+            setConfig({ ...swerveModule, commandOffsetSignalId: raw ? Number(raw) : null });
+          }}
+        >
+          <option value="">None</option>
+          {#each numericSignals as option (option.signal_id)}
+            <option value={option.signal_id}>{option.path}</option>
+          {/each}
+        </select>
+      </label>
+
+      <label>
+        Command inverted signal
+        <select
+          value={swerveModule.commandInvertedSignalId ?? ''}
+          onchange={(event) => {
+            const raw = (event.currentTarget as HTMLSelectElement).value;
+            setConfig({ ...swerveModule, commandInvertedSignalId: raw ? Number(raw) : null });
+          }}
+        >
+          <option value="">None</option>
+          {#each boolSignals as option (option.signal_id)}
+            <option value={option.signal_id}>{option.path}</option>
+          {/each}
+        </select>
+      </label>
     </div>
   </section>
 {:else if selectedWidget.kind === 'swerve_drive' && primarySignal}
@@ -2885,6 +3046,24 @@
         />
       </label>
     </div>
+  </section>
+{:else if selectedWidget.kind === 'layout_accordion'}
+  {@const accordionCfg = readLayoutAccordionConfig(selectedWidget.config)}
+  <section class="config-block">
+    <h4>Accordion Layout</h4>
+    <label class="row-inline">
+      <input
+        type="checkbox"
+        checked={accordionCfg.collapsed}
+        oninput={(event) =>
+          setConfig({
+            ...accordionCfg,
+            collapsed: (event.currentTarget as HTMLInputElement).checked
+          })}
+      />
+      Collapse children
+    </label>
+    <p class="hint">Collapsed accordions hide all descendant widgets.</p>
   </section>
 {:else if selectedWidget.kind === 'layout_grid'}
   {@const layoutColumns = Math.max(1, Math.floor(selectedWidget.layout.w))}

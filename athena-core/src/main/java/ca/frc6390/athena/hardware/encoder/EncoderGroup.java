@@ -5,6 +5,7 @@ import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
 
@@ -70,6 +71,10 @@ public class EncoderGroup implements RobotSendableDevice {
 
     public Encoder[] getEncoders() {
         return encoders;
+    }
+
+    public String[] getEncoderTopicKeys() {
+        return encoderTopicKeys.clone();
     }
 
     public double getVelocity() {
@@ -169,6 +174,47 @@ public class EncoderGroup implements RobotSendableDevice {
         return node;
     }
 
+    public void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        double positionSum = 0.0;
+        double velocitySum = 0.0;
+        double rotationsSum = 0.0;
+        double rateSum = 0.0;
+        int count = 0;
+        boolean allConnected = true;
+        for (Encoder encoder : encoders) {
+            if (encoder == null) {
+                continue;
+            }
+            positionSum += encoder.getPosition();
+            velocitySum += encoder.getVelocity();
+            rotationsSum += encoder.getRotations();
+            rateSum += encoder.getRate();
+            allConnected &= encoder.isConnected();
+            count++;
+        }
+        double invCount = count > 0 ? 1.0 / count : 0.0;
+
+        publisher.put(rootPath + "/Summary/avgPosition", positionSum * invCount);
+        publisher.put(rootPath + "/Summary/avgVelocity", velocitySum * invCount);
+        publisher.put(rootPath + "/Summary/avgRotations", rotationsSum * invCount);
+        publisher.put(rootPath + "/Summary/avgRate", rateSum * invCount);
+        publisher.put(rootPath + "/Summary/allConnected", allConnected);
+
+        for (int i = 0; i < encoders.length; i++) {
+            Encoder encoder = encoders[i];
+            if (encoder == null) {
+                continue;
+            }
+            String key = encoderTopicKeys != null && i < encoderTopicKeys.length
+                    ? encoderTopicKeys[i]
+                    : "encoder";
+            encoder.publishArcp(publisher, rootPath + "/Encoders/" + key);
+        }
+    }
+
     private void publish(RobotNetworkTables.Node node) {
         RobotNetworkTables nt = node.robot();
         ensurePublishNodes(node);
@@ -244,7 +290,19 @@ public class EncoderGroup implements RobotSendableDevice {
         if (raw == null || raw.isBlank()) {
             return fallback;
         }
-        return raw.replace('\\', '_').replace('/', '_');
+        String trimmed = raw.trim();
+        StringBuilder out = new StringBuilder(trimmed.length());
+        for (int i = 0; i < trimmed.length(); i++) {
+            char ch = trimmed.charAt(i);
+            boolean valid = (ch >= 'a' && ch <= 'z')
+                    || (ch >= 'A' && ch <= 'Z')
+                    || (ch >= '0' && ch <= '9')
+                    || ch == '_'
+                    || ch == '-';
+            out.append(valid ? ch : '_');
+        }
+        String sanitized = out.toString();
+        return sanitized.isBlank() ? fallback : sanitized;
     }
 
 }

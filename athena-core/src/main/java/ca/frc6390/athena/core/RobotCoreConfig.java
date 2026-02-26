@@ -1032,7 +1032,8 @@ public final class RobotCoreConfig {
             owner.arcpConfig = new RobotCore.ArcpConfig(
                     enabled,
                     current.layoutProfileName(),
-                    current.autoMechanismPages());
+                    current.autoMechanismPages(),
+                    current.legacyNt4MirrorEnabled());
             return this;
         }
 
@@ -1041,7 +1042,8 @@ public final class RobotCoreConfig {
             owner.arcpConfig = new RobotCore.ArcpConfig(
                     current.enabled(),
                     profileName,
-                    current.autoMechanismPages());
+                    current.autoMechanismPages(),
+                    current.legacyNt4MirrorEnabled());
             return this;
         }
 
@@ -1050,6 +1052,17 @@ public final class RobotCoreConfig {
             owner.arcpConfig = new RobotCore.ArcpConfig(
                     current.enabled(),
                     current.layoutProfileName(),
+                    enabled,
+                    current.legacyNt4MirrorEnabled());
+            return this;
+        }
+
+        public ArcpSection legacyNt4MirrorEnabled(boolean enabled) {
+            RobotCore.ArcpConfig current = owner.arcpConfig;
+            owner.arcpConfig = new RobotCore.ArcpConfig(
+                    current.enabled(),
+                    current.layoutProfileName(),
+                    current.autoMechanismPages(),
                     enabled);
             return this;
         }

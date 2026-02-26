@@ -70,6 +70,7 @@ fn run(args: StressArgs) -> Result<(), String> {
         control_port: args.control_port,
         realtime_port: args.realtime_port,
         max_signals: args.signals,
+        ..ArcpServerConfig::default()
     });
 
     let specs = register_signals(&server, &args)?;

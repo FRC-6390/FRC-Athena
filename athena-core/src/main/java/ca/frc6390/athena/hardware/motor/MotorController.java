@@ -4,6 +4,7 @@ import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.sections.SectionedAccess;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.math.controller.PIDController;
 import java.util.function.Consumer;
 
@@ -50,6 +51,20 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
     boolean isConnected();
 
     double getTemperatureCelsius();
+
+    /**
+     * Returns measured motor current in amps when available.
+     */
+    default double getCurrentAmps() {
+        return Double.NaN;
+    }
+
+    /**
+     * Returns measured applied motor voltage when available.
+     */
+    default double getAppliedVoltage() {
+        return Double.NaN;
+    }
 
     /**
      * Returns true when the motor controller is indicating a stall condition.
@@ -226,6 +241,14 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
             return owner.getTemperatureCelsius(poll);
         }
 
+        public double currentAmps() {
+            return owner.getCurrentAmps();
+        }
+
+        public double appliedVoltage() {
+            return owner.getAppliedVoltage();
+        }
+
         public boolean stalled() {
             return owner.isStalled();
         }
@@ -295,6 +318,14 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
             node.putDouble("currentLimitA", getCurrentLimit());
             node.putBoolean("inverted", isInverted());
             node.putBoolean("brakeMode", getNeutralMode() == MotorNeutralMode.Brake);
+            double currentA = getCurrentAmps();
+            if (Double.isFinite(currentA)) {
+                node.putDouble("currentA", currentA);
+            }
+            double voltage = getAppliedVoltage();
+            if (Double.isFinite(voltage)) {
+                node.putDouble("voltage", voltage);
+            }
 
             Encoder encoder = getEncoder();
             if (encoder != null) {
@@ -303,5 +334,54 @@ public interface MotorController extends RobotSendableSystem.RobotSendableDevice
         }
 
         return node;
+    }
+
+    default void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        // Writable channels so ARCP widgets can apply motor tuning/commands directly.
+        publisher.writableDouble(rootPath + "/currentLimitA").onSetDouble(this::setCurrentLimit);
+        publisher.writableBoolean(rootPath + "/inverted").onSetBoolean(this::setInverted);
+        publisher.writableBoolean(
+                rootPath + "/brakeMode").onSetBoolean(brake -> setNeutralMode(brake ? MotorNeutralMode.Brake : MotorNeutralMode.Coast));
+        publisher.writableString(
+                rootPath + "/neutralMode").onSet(mode -> {
+                    if (mode == null || mode.isBlank()) {
+                        return;
+                    }
+                    String normalized = mode.trim().toUpperCase(java.util.Locale.ROOT);
+                    if (normalized.equals("BRAKE")) {
+                        setNeutralMode(MotorNeutralMode.Brake);
+                    } else if (normalized.equals("COAST")) {
+                        setNeutralMode(MotorNeutralMode.Coast);
+                    }
+                });
+        publisher.writableDouble(rootPath + "/outputCommandPercent").onSetDouble(this::setSpeed);
+        publisher.writableDouble(rootPath + "/outputCommandVoltage").onSetDouble(this::setVoltage);
+        publisher.writableDouble(rootPath + "/outputCommandVelocity").onSetDouble(this::setVelocity);
+        publisher.writableDouble(rootPath + "/outputCommandPosition").onSetDouble(this::setPosition);
+
+        MotorControllerType type = getType();
+        publisher.put(rootPath + "/canId", getId());
+        publisher.put(rootPath + "/canbus", getCanbus());
+        publisher.put(rootPath + "/type", type != null ? type.getKey() : "unknown");
+        publisher.put(rootPath + "/connected", isConnected());
+        double tempC = getTemperatureCelsius();
+        publisher.put(rootPath + "/tempC", Double.isFinite(tempC) ? tempC : 0.0);
+        publisher.put(rootPath + "/stalled", isStalled());
+        publisher.put(rootPath + "/neutralMode", getNeutralMode().name());
+        publisher.put(rootPath + "/currentLimitA", getCurrentLimit());
+        double currentA = getCurrentAmps();
+        publisher.put(rootPath + "/currentA", Double.isFinite(currentA) ? currentA : 0.0);
+        double voltage = getAppliedVoltage();
+        publisher.put(rootPath + "/voltage", Double.isFinite(voltage) ? voltage : 0.0);
+        publisher.put(rootPath + "/inverted", isInverted());
+        publisher.put(rootPath + "/brakeMode", getNeutralMode() == MotorNeutralMode.Brake);
+
+        Encoder encoder = getEncoder();
+        if (encoder != null) {
+            encoder.publishArcp(publisher, rootPath + "/Encoder");
+        }
     }
 }

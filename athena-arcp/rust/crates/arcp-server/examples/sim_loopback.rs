@@ -24,6 +24,7 @@ fn main() {
         control_port: 0,
         realtime_port: 0,
         max_signals: 128,
+        ..ArcpServerConfig::default()
     });
     server
         .register_signal(SignalDescriptor::telemetry(

@@ -5,6 +5,7 @@
   import type { DashboardSnapshot, SignalRow } from './lib/arcp';
   import {
     connectArcp,
+    deleteServerLayout,
     disconnectArcp,
     fireAction,
     listServerLayouts,
@@ -49,7 +50,12 @@
     type WidgetKind,
     type WidgetLayout
   } from './lib/dashboard';
-  import { buildDefaultWidgetConfig, cloneWidgetConfig, readLayoutGridConfig } from './lib/widget-config';
+  import {
+    buildDefaultWidgetConfig,
+    cloneWidgetConfig,
+    readLayoutAccordionConfig,
+    readLayoutGridConfig
+  } from './lib/widget-config';
 
   import TopBar from './components/TopBar.svelte';
   import GlobalRail from './components/GlobalRail.svelte';
@@ -66,9 +72,23 @@
   import FloatingDock from './components/FloatingDock.svelte';
   import DashboardContextMenu from './components/DashboardContextMenu.svelte';
 
-  const REFRESH_MS = 75;
+  const REFRESH_MS_DASHBOARDS = 120;
+  const REFRESH_MS_OTHER = 180;
+  const REFRESH_MS_DISCONNECTED = 500;
   const SERVER_LAYOUT_POLL_MS = 2000;
   const HISTORY_LIMIT = 120;
+  const ACCORDION_COLLAPSED_ROWS = 1;
+  const DEFAULT_ACCORDION_EXPANDED_ROWS = 3;
+  const DEFAULT_SERVER_LAYOUT_PROFILE = 'atheana-generated';
+  const MAX_QUEUED_ACTIONS = 256;
+  const CONNECT_RETRY_INTERVAL_MS = 1500;
+  const GRID_PREFERENCES_STORAGE_KEY = 'arcp.host.grid.preferences.v1';
+  const RECORDING_ACCEPT_REQUESTS_STORAGE_KEY = 'arcp.host.recording.accept-requests.v1';
+  const RECORDING_SCHEMA = 'arcp-recording-v1';
+  const RECORDING_CLIENT_HEARTBEAT_INTERVAL_MS = 1_000;
+  const RECORDING_REPLAY_TICK_MS = 33;
+
+  type GridDensity = 'compact' | 'balanced' | 'comfortable';
 
   type RailSection =
     | 'dashboards'
@@ -103,16 +123,174 @@
     noneLabel: string;
     onPick: (signalId: number | null) => void;
   };
+  type RecordedSignalDescriptor = Omit<SignalRow, 'value'> & {
+    initialValue: string;
+  };
+  type RecordingFrame = {
+    offsetMs: number;
+    updates: [number, string][];
+  };
+  type TelemetryRecording = {
+    id: string;
+    name: string;
+    source: string;
+    startedAtEpochMs: number;
+    durationMs: number;
+    signals: RecordedSignalDescriptor[];
+    frames: RecordingFrame[];
+  };
+  type RecordingSummary = {
+    id: string;
+    name: string;
+    source: string;
+    startedAtEpochMs: number;
+    durationMs: number;
+    signalCount: number;
+    frameCount: number;
+  };
+  type RecordingCaptureState = {
+    id: string;
+    name: string;
+    source: string;
+    startedAtEpochMs: number;
+    startedAtPerfMs: number;
+    signalsById: Map<number, RecordedSignalDescriptor>;
+    lastValuesById: Map<number, string>;
+    frames: RecordingFrame[];
+  };
+  type ReplayState = {
+    recordingId: string;
+    startedAtPerfMs: number;
+    cursor: number;
+    valueById: Map<number, string>;
+    timerId: number | null;
+  };
+  type PendingRecordingAck = {
+    sequence: number;
+    status: string;
+  };
+
+  function parseGridDensity(raw: unknown): GridDensity {
+    return raw === 'compact' || raw === 'comfortable' || raw === 'balanced' ? raw : 'balanced';
+  }
+
+  function loadGridPreferences(): { columns: number; density: GridDensity } {
+    if (typeof window === 'undefined') {
+      return { columns: DEFAULT_GRID_COLUMNS, density: 'balanced' };
+    }
+    try {
+      const raw = window.localStorage.getItem(GRID_PREFERENCES_STORAGE_KEY);
+      if (!raw) {
+        return { columns: DEFAULT_GRID_COLUMNS, density: 'balanced' };
+      }
+      const parsed = JSON.parse(raw) as { columns?: unknown; density?: unknown };
+      const columnsRaw = Number(parsed.columns);
+      const columns = Number.isFinite(columnsRaw)
+        ? Math.max(8, Math.min(96, Math.round(columnsRaw)))
+        : DEFAULT_GRID_COLUMNS;
+      return {
+        columns,
+        density: parseGridDensity(parsed.density)
+      };
+    } catch {
+      return { columns: DEFAULT_GRID_COLUMNS, density: 'balanced' };
+    }
+  }
+
+  function saveGridPreferences(columns: number, density: GridDensity) {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        GRID_PREFERENCES_STORAGE_KEY,
+        JSON.stringify({ columns, density })
+      );
+    } catch {
+      // no-op; preferences are best-effort
+    }
+  }
+
+  function loadAcceptRobotRecordingRequests(): boolean {
+    if (typeof window === 'undefined') return true;
+    try {
+      const raw = window.localStorage.getItem(RECORDING_ACCEPT_REQUESTS_STORAGE_KEY);
+      if (raw === null) return true;
+      return raw === 'true';
+    } catch {
+      return true;
+    }
+  }
+
+  function saveAcceptRobotRecordingRequests(enabled: boolean) {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(RECORDING_ACCEPT_REQUESTS_STORAGE_KEY, enabled ? 'true' : 'false');
+    } catch {
+      // best-effort only
+    }
+  }
 
   function isIgnoredPublishSignal(signal: SignalRow): boolean {
     const token = signal.path.toLowerCase().replace(/[^a-z0-9]+/g, '');
     return token.includes('publish');
   }
 
+  function collectConfiguredSignalIds(value: unknown, out: Set<number>): void {
+    if (value === null || value === undefined) return;
+    if (typeof value === 'number') {
+      if (Number.isFinite(value) && value > 0) {
+        out.add(Math.floor(value));
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        collectConfiguredSignalIds(item, out);
+      }
+      return;
+    }
+    if (typeof value !== 'object') {
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    for (const [key, nested] of Object.entries(record)) {
+      if (key.toLowerCase().endsWith('signalid')) {
+        collectConfiguredSignalIds(nested, out);
+        continue;
+      }
+      if (
+        key === 'series' ||
+        key === 'actions' ||
+        key === 'columns' ||
+        key === 'signals' ||
+        key === 'targets'
+      ) {
+        collectConfiguredSignalIds(nested, out);
+      }
+    }
+  }
+
+  function widgetHasResolvableBinding(widget: DashboardWidget, validIds: Set<number>): boolean {
+    const config = widget.config;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return false;
+    }
+    const ids = new Set<number>();
+    collectConfiguredSignalIds(config, ids);
+    for (const id of ids) {
+      if (validIds.has(id)) {
+        return true;
+      }
+    }
+    const topicPath = (config as Record<string, unknown>).topicPath;
+    return typeof topicPath === 'string' && topicPath.trim().length > 0;
+  }
+
   let host = $state('127.0.0.1');
   let controlPort = $state('5805');
-  let serverLayoutName = $state('sim-all-layouts');
+  let serverLayoutName = $state(DEFAULT_SERVER_LAYOUT_PROFILE);
   let availableServerLayouts = $state<string[]>([]);
+  let defaultGridColumns = $state(DEFAULT_GRID_COLUMNS);
+  let defaultGridDensity = $state<GridDensity>('balanced');
   let connected = $state(false);
   let status = $state('ready');
   let lastError = $state('');
@@ -145,16 +323,55 @@
   let copiedWidget = $state<CopiedWidgetSnapshot | null>(null);
   let dashboardMenu = $state<DashboardContextMenuState | null>(null);
   let pendingSignalMapRequest = $state<SignalMapRequest | null>(null);
+  let layoutDirtyWhileStale = $state(false);
+  let queuedSetWrites = $state(new Map<number, string>());
+  let queuedActions = $state<number[]>([]);
+  let reconnectSyncInFlight = false;
+  let connectInFlight = $state(false);
+  let autoReconnectArmed = $state(false);
+  let nextReconnectAttemptAt = $state(0);
+  let needsSessionReconnect = $state(false);
+  let acceptRobotRecordingRequests = $state(loadAcceptRobotRecordingRequests());
+  let recordingActive = $state(false);
+  let replayActive = $state(false);
+  let recordingStatus = $state('idle');
+  let recordings = $state<TelemetryRecording[]>([]);
+  let selectedRecordingId = $state('');
+  let lastRecordingRequestSequence = 0;
+  let lastRecordingHeartbeatSentAt = 0;
+
+  let recordingCaptureState: RecordingCaptureState | null = null;
+  let replayState: ReplayState | null = null;
+  let pendingRecordingAck: PendingRecordingAck | null = null;
+  let lastProcessedUpdateCount = -1;
 
   const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
+  const ntCompatSignalRows = $derived(
+    signalRows.filter((signal) => signal.path.startsWith('Athena/NT4/'))
+  );
+  const arcpSignalRows = $derived(
+    signalRows.filter((signal) => !signal.path.startsWith('Athena/NT4/'))
+  );
   const signalById = $derived(new Map(signalRows.map((signal) => [signal.signal_id, signal])));
-  const filteredSignals = $derived(applyFilters(signalRows, query, roleFilter, typeFilter));
+  const trimmedQuery = $derived(query.trim());
+  const filteredSignals = $derived.by(() => {
+    if (!trimmedQuery && roleFilter === 'all' && typeFilter === 'all') {
+      return arcpSignalRows;
+    }
+    return applyFilters(arcpSignalRows, query, roleFilter, typeFilter);
+  });
+  const filteredNtSignals = $derived.by(() => {
+    if (!trimmedQuery) {
+      return ntCompatSignalRows;
+    }
+    return applyFilters(ntCompatSignalRows, query, 'all', 'all');
+  });
   const explorerSignals = $derived.by(() =>
     pendingSignalMapRequest
       ? applyFilters(pendingSignalMapRequest.candidates, query, 'all', 'all')
       : filteredSignals
   );
-  const actionSignals = $derived(signalRows.filter((signal) => isActionSignal(signal)));
+  const actionSignals = $derived(arcpSignalRows.filter((signal) => isActionSignal(signal)));
 
   const activeTab = $derived(
     layoutState.tabs.find((tab) => tab.id === layoutState.activeTabId) ?? layoutState.tabs[0] ?? null
@@ -179,7 +396,8 @@
   );
 
   const dashboardStates = $derived([
-    { key: 'signals', label: 'signals', value: String(signalRows.length), valueWidthCh: 5 },
+    { key: 'signals', label: 'signals', value: String(arcpSignalRows.length), valueWidthCh: 5 },
+    { key: 'nt4', label: 'nt4', value: String(ntCompatSignalRows.length), valueWidthCh: 5 },
     { key: 'updates', label: 'updates', value: String(snapshot?.update_count ?? 0), valueWidthCh: 7 },
     { key: 'uptime', label: 'uptime', value: snapshot ? formatUptime(snapshot.uptime_ms) : '0m 0s', valueWidthCh: 9 },
     { key: 'server-cpu', label: 'server cpu', value: snapshot ? formatCpu(snapshot.server_cpu_percent) : 'n/a', valueWidthCh: 6 },
@@ -187,6 +405,589 @@
     { key: 'ui-cpu', label: 'ui cpu', value: snapshot ? formatCpu(snapshot.host_cpu_percent) : 'n/a', valueWidthCh: 6 },
     { key: 'ui-rss', label: 'ui rss', value: snapshot ? formatMemory(snapshot.host_rss_bytes) : 'n/a', valueWidthCh: 10 }
   ]);
+  const staleData = $derived(!connected && snapshot !== null);
+  const reconnecting = $derived(!connected && connectInFlight);
+  const recordingSummaries = $derived<RecordingSummary[]>(
+    recordings.map((recording) => ({
+      id: recording.id,
+      name: recording.name,
+      source: recording.source,
+      startedAtEpochMs: recording.startedAtEpochMs,
+      durationMs: recording.durationMs,
+      signalCount: recording.signals.length,
+      frameCount: recording.frames.length
+    }))
+  );
+
+  const historySignalIds = $derived.by(() => {
+    const ids = new Set<number>();
+    for (const widget of widgets) {
+      if (widget.kind === 'trend' && widget.signalId > 0) {
+        ids.add(widget.signalId);
+      }
+      if (widget.kind === 'graph') {
+        if (widget.signalId > 0) {
+          ids.add(widget.signalId);
+        }
+        collectConfiguredSignalIds(widget.config, ids);
+      }
+    }
+    return ids;
+  });
+
+  function isConnectionError(err: unknown): boolean {
+    const token = String(err).toLowerCase();
+    return (
+      token.includes('not connected') ||
+      token.includes('connection refused') ||
+      token.includes('connection reset') ||
+      token.includes('broken pipe') ||
+      token.includes('timed out') ||
+      token.includes('transport') ||
+      token.includes('channel closed') ||
+      token.includes('os error 111') ||
+      token.includes('os error 104')
+    );
+  }
+
+  function queueSetWrite(signalId: number, valueRaw: string) {
+    const next = new Map(queuedSetWrites);
+    next.set(signalId, valueRaw);
+    queuedSetWrites = next;
+  }
+
+  function queueAction(signalId: number) {
+    const next = [...queuedActions, signalId];
+    if (next.length > MAX_QUEUED_ACTIONS) {
+      next.splice(0, next.length - MAX_QUEUED_ACTIONS);
+    }
+    queuedActions = next;
+  }
+
+  function markStaleStatus(message = 'connection lost (stale data)') {
+    connected = false;
+    if (snapshot) {
+      status = message;
+      return;
+    }
+    status = autoReconnectArmed ? 'offline (retrying...)' : 'disconnected';
+  }
+
+  function scheduleReconnect(delayMs = CONNECT_RETRY_INTERVAL_MS) {
+    nextReconnectAttemptAt = Date.now() + Math.max(0, delayMs);
+  }
+
+  function parseControlPort(raw: string): number | null {
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1 || value > 65535) {
+      return null;
+    }
+    return value;
+  }
+
+  function nowPerfMs(): number {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+    return Date.now();
+  }
+
+  function makeRecordingId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `rec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function makeRecordingName(prefix: string): string {
+    const stamp = new Date().toISOString().replace(/[:]/g, '-').replace(/\..+$/, '');
+    return `${prefix}-${stamp}`;
+  }
+
+  function findSignalByPath(signals: SignalRow[], path: string): SignalRow | null {
+    return signals.find((signal) => signal.path === path) ?? null;
+  }
+
+  function parseSignalI64(signal: SignalRow | null): number | null {
+    if (!signal) return null;
+    const parsed = Number(signal.value);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.floor(parsed);
+  }
+
+  function buildRecordedSignalDescriptor(signal: SignalRow): RecordedSignalDescriptor {
+    return {
+      signal_id: signal.signal_id,
+      signal_type: signal.signal_type,
+      kind: signal.kind,
+      access: signal.access,
+      policy: signal.policy,
+      durability: signal.durability,
+      path: signal.path,
+      initialValue: signal.value
+    };
+  }
+
+  function queueRecordingAck(sequence: number, statusValue: string) {
+    pendingRecordingAck = {
+      sequence,
+      status: statusValue
+    };
+  }
+
+  function beginRecording(source: string): boolean {
+    if (recordingActive) {
+      recordingStatus = 'recording already active';
+      return false;
+    }
+    if (replayActive) {
+      recordingStatus = 'stop replay before starting recording';
+      return false;
+    }
+
+    const startedAtEpochMs = Date.now();
+    const startedAtPerfMs = nowPerfMs();
+    const signalsById = new Map<number, RecordedSignalDescriptor>();
+    const lastValuesById = new Map<number, string>();
+    for (const signal of signalRows) {
+      signalsById.set(signal.signal_id, buildRecordedSignalDescriptor(signal));
+      lastValuesById.set(signal.signal_id, signal.value);
+    }
+
+    const safeSource = source.trim() || 'manual';
+    recordingCaptureState = {
+      id: makeRecordingId(),
+      name: makeRecordingName(safeSource),
+      source: safeSource,
+      startedAtEpochMs,
+      startedAtPerfMs,
+      signalsById,
+      lastValuesById,
+      frames: []
+    };
+    recordingActive = true;
+    recordingStatus = `recording (${safeSource})`;
+    return true;
+  }
+
+  function captureRecordingFrame(signals: SignalRow[]) {
+    if (!recordingActive || !recordingCaptureState) return;
+
+    const updates: [number, string][] = [];
+    for (const signal of signals) {
+      if (!recordingCaptureState.signalsById.has(signal.signal_id)) {
+        recordingCaptureState.signalsById.set(signal.signal_id, buildRecordedSignalDescriptor(signal));
+        recordingCaptureState.lastValuesById.set(signal.signal_id, signal.value);
+        continue;
+      }
+      const previous = recordingCaptureState.lastValuesById.get(signal.signal_id);
+      if (previous === signal.value) continue;
+      recordingCaptureState.lastValuesById.set(signal.signal_id, signal.value);
+      updates.push([signal.signal_id, signal.value]);
+    }
+
+    if (updates.length === 0) return;
+    const offsetMs = Math.max(0, Math.round(nowPerfMs() - recordingCaptureState.startedAtPerfMs));
+    recordingCaptureState.frames.push({ offsetMs, updates });
+  }
+
+  function finalizeRecording(completedStatus: string) {
+    if (!recordingCaptureState) return;
+
+    const durationMs = Math.max(0, Math.round(nowPerfMs() - recordingCaptureState.startedAtPerfMs));
+    const recording: TelemetryRecording = {
+      id: recordingCaptureState.id,
+      name: recordingCaptureState.name,
+      source: recordingCaptureState.source,
+      startedAtEpochMs: recordingCaptureState.startedAtEpochMs,
+      durationMs,
+      signals: [...recordingCaptureState.signalsById.values()].sort((a, b) =>
+        a.path.localeCompare(b.path, undefined, { sensitivity: 'base' })
+      ),
+      frames: [...recordingCaptureState.frames]
+    };
+
+    recordings = [recording, ...recordings];
+    selectedRecordingId = recording.id;
+    recordingCaptureState = null;
+    recordingActive = false;
+    recordingStatus = completedStatus;
+  }
+
+  function stopRecording() {
+    if (!recordingActive) return;
+    finalizeRecording('recording stopped');
+  }
+
+  function stopReplay(statusText = 'replay stopped') {
+    if (replayState?.timerId !== null) {
+      window.clearInterval(replayState.timerId);
+    }
+    replayState = null;
+    replayActive = false;
+    recordingStatus = statusText;
+    void refreshSnapshot();
+  }
+
+  function buildReplaySignals(
+    recording: TelemetryRecording,
+    valueById: Map<number, string>
+  ): SignalRow[] {
+    return recording.signals.map((signal) => ({
+      signal_id: signal.signal_id,
+      signal_type: signal.signal_type,
+      kind: signal.kind,
+      access: signal.access,
+      policy: signal.policy,
+      durability: signal.durability,
+      path: signal.path,
+      value: valueById.get(signal.signal_id) ?? signal.initialValue
+    }));
+  }
+
+  function applyReplaySnapshot(
+    recording: TelemetryRecording,
+    valueById: Map<number, string>,
+    elapsedMs: number
+  ) {
+    const signals = buildReplaySignals(recording, valueById);
+    const clampedDuration = Math.max(1, recording.durationMs);
+    const progress = Math.max(0, Math.min(100, Math.round((elapsedMs / clampedDuration) * 100)));
+    const previous = snapshot;
+    snapshot = {
+      connected,
+      status: `replay ${recording.name} (${progress}%)`,
+      signal_count: signals.length,
+      update_count: previous?.update_count ?? 0,
+      uptime_ms: elapsedMs,
+      server_cpu_percent: previous?.server_cpu_percent ?? null,
+      server_rss_bytes: previous?.server_rss_bytes ?? null,
+      host_cpu_percent: previous?.host_cpu_percent ?? null,
+      host_rss_bytes: previous?.host_rss_bytes ?? null,
+      signals
+    };
+  }
+
+  function replayRecording() {
+    const recording = recordings.find((entry) => entry.id === selectedRecordingId);
+    if (!recording) {
+      recordingStatus = 'no recording selected';
+      return;
+    }
+    if (recordingActive) {
+      recordingStatus = 'stop active recording before replay';
+      return;
+    }
+
+    if (replayState?.timerId !== null) {
+      window.clearInterval(replayState.timerId);
+    }
+
+    const valueById = new Map<number, string>();
+    for (const signal of recording.signals) {
+      valueById.set(signal.signal_id, signal.initialValue);
+    }
+
+    replayState = {
+      recordingId: recording.id,
+      startedAtPerfMs: nowPerfMs(),
+      cursor: 0,
+      valueById,
+      timerId: null
+    };
+    replayActive = true;
+    recordingStatus = `replay running (${recording.name})`;
+    applyReplaySnapshot(recording, replayState.valueById, 0);
+
+    const tick = () => {
+      if (!replayState || replayState.recordingId !== recording.id) return;
+      const elapsedMs = Math.max(0, Math.round(nowPerfMs() - replayState.startedAtPerfMs));
+      while (
+        replayState.cursor < recording.frames.length &&
+        recording.frames[replayState.cursor].offsetMs <= elapsedMs
+      ) {
+        const frame = recording.frames[replayState.cursor];
+        for (const [signalId, value] of frame.updates) {
+          replayState.valueById.set(signalId, value);
+        }
+        replayState.cursor += 1;
+      }
+
+      applyReplaySnapshot(recording, replayState.valueById, elapsedMs);
+      if (elapsedMs >= recording.durationMs) {
+        stopReplay(`replay complete (${recording.name})`);
+      }
+    };
+
+    const timerId = window.setInterval(tick, RECORDING_REPLAY_TICK_MS);
+    replayState.timerId = timerId;
+  }
+
+  async function exportSelectedRecording() {
+    const recording = recordings.find((entry) => entry.id === selectedRecordingId);
+    if (!recording) {
+      recordingStatus = 'no recording selected';
+      return;
+    }
+    const payload = {
+      schema: RECORDING_SCHEMA,
+      exportedAtEpochMs: Date.now(),
+      recordings: [recording]
+    };
+    const filename = `${recording.name}.arcp-recording.json`;
+    downloadJsonFile(filename, JSON.stringify(payload, null, 2));
+    recordingStatus = `saved recording file (${recording.name})`;
+  }
+
+  function sanitizeImportedRecording(input: unknown): TelemetryRecording | null {
+    if (!input || typeof input !== 'object') return null;
+    const raw = input as Partial<TelemetryRecording>;
+    if (typeof raw.id !== 'string' || typeof raw.name !== 'string' || typeof raw.source !== 'string') {
+      return null;
+    }
+    if (!Array.isArray(raw.signals) || !Array.isArray(raw.frames)) {
+      return null;
+    }
+
+    const signals: RecordedSignalDescriptor[] = raw.signals
+      .filter((signal): signal is RecordedSignalDescriptor => {
+        if (!signal || typeof signal !== 'object') return false;
+        const candidate = signal as RecordedSignalDescriptor;
+        return (
+          typeof candidate.signal_id === 'number' &&
+          typeof candidate.signal_type === 'string' &&
+          typeof candidate.kind === 'string' &&
+          typeof candidate.access === 'string' &&
+          typeof candidate.policy === 'string' &&
+          typeof candidate.durability === 'string' &&
+          typeof candidate.path === 'string' &&
+          typeof candidate.initialValue === 'string'
+        );
+      })
+      .map((signal) => ({ ...signal }));
+
+    const frames: RecordingFrame[] = raw.frames
+      .filter((frame): frame is RecordingFrame => {
+        if (!frame || typeof frame !== 'object') return false;
+        const candidate = frame as RecordingFrame;
+        return typeof candidate.offsetMs === 'number' && Array.isArray(candidate.updates);
+      })
+      .map((frame) => ({
+        offsetMs: Math.max(0, Math.round(frame.offsetMs)),
+        updates: frame.updates
+          .filter(
+            (update): update is [number, string] =>
+              Array.isArray(update) &&
+              update.length === 2 &&
+              typeof update[0] === 'number' &&
+              typeof update[1] === 'string'
+          )
+          .map((update) => [Math.floor(update[0]), update[1]])
+      }));
+
+    return {
+      id: raw.id,
+      name: raw.name,
+      source: raw.source,
+      startedAtEpochMs: Number.isFinite(raw.startedAtEpochMs) ? Math.floor(raw.startedAtEpochMs) : Date.now(),
+      durationMs: Number.isFinite(raw.durationMs) ? Math.max(0, Math.round(raw.durationMs)) : 0,
+      signals,
+      frames
+    };
+  }
+
+  async function importRecordingFromFile() {
+    try {
+      const raw = await pickJsonFileText();
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+
+      const importedRecordings: TelemetryRecording[] = [];
+      if (Array.isArray(parsed)) {
+        for (const entry of parsed) {
+          const sanitized = sanitizeImportedRecording(entry);
+          if (sanitized) importedRecordings.push(sanitized);
+        }
+      } else if (parsed && typeof parsed === 'object') {
+        const payload = parsed as { schema?: string; recordings?: unknown[] };
+        if (Array.isArray(payload.recordings)) {
+          for (const entry of payload.recordings) {
+            const sanitized = sanitizeImportedRecording(entry);
+            if (sanitized) importedRecordings.push(sanitized);
+          }
+        } else {
+          const single = sanitizeImportedRecording(parsed);
+          if (single) importedRecordings.push(single);
+        }
+      }
+
+      if (importedRecordings.length === 0) {
+        recordingStatus = 'load failed (no recordings found in file)';
+        return;
+      }
+
+      const deduped = new Map<string, TelemetryRecording>();
+      for (const recording of [...importedRecordings, ...recordings]) {
+        deduped.set(recording.id, recording);
+      }
+      recordings = [...deduped.values()];
+      selectedRecordingId = importedRecordings[0].id;
+      recordingStatus = `loaded ${importedRecordings.length} recording(s)`;
+    } catch (err) {
+      recordingStatus = `load failed: ${String(err)}`;
+    }
+  }
+
+  function deleteSelectedRecording() {
+    if (!selectedRecordingId) return;
+    const target = recordings.find((entry) => entry.id === selectedRecordingId);
+    if (!target) return;
+    const confirmed = window.confirm(`Delete recording '${target.name}'?`);
+    if (!confirmed) return;
+
+    const next = recordings.filter((entry) => entry.id !== selectedRecordingId);
+    recordings = next;
+    selectedRecordingId = next[0]?.id ?? '';
+    recordingStatus = `deleted ${target.name}`;
+  }
+
+  function setAcceptRobotRecordingRequests(enabled: boolean) {
+    acceptRobotRecordingRequests = enabled;
+    saveAcceptRobotRecordingRequests(enabled);
+    recordingStatus = enabled ? 'robot recording requests enabled' : 'robot recording requests ignored';
+  }
+
+  function handleRobotRecordingRequests(signals: SignalRow[]) {
+    const sequenceSignal = findSignalByPath(signals, 'Athena/Recording/Request/sequence');
+    const sequence = parseSignalI64(sequenceSignal);
+    if (sequence === null || sequence <= 0) return;
+    if (sequence <= lastRecordingRequestSequence) return;
+
+    lastRecordingRequestSequence = sequence;
+    const mode = findSignalByPath(signals, 'Athena/Recording/Request/mode')?.value ?? 'unknown';
+    const phase = findSignalByPath(signals, 'Athena/Recording/Request/phase')?.value ?? 'unknown';
+    const source = `robot-${mode}-${phase}`;
+
+    if (!acceptRobotRecordingRequests) {
+      queueRecordingAck(sequence, 'ignored_by_client');
+      recordingStatus = `ignored robot record request (${mode}/${phase})`;
+      return;
+    }
+    if (replayActive) {
+      queueRecordingAck(sequence, 'rejected_replay_active');
+      recordingStatus = 'robot record request rejected (replay active)';
+      return;
+    }
+    if (recordingActive) {
+      queueRecordingAck(sequence, 'accepted_already_recording');
+      recordingStatus = 'robot record request accepted (already recording)';
+      return;
+    }
+
+    const started = beginRecording(source);
+    queueRecordingAck(sequence, started ? 'accepted_started' : 'rejected');
+  }
+
+  async function syncRecordingClientSignals(signals: SignalRow[]) {
+    if (!connected) return;
+
+    const heartbeatSignal = findSignalByPath(signals, 'Athena/Recording/Client/heartbeatMs');
+    const ackSequenceSignal = findSignalByPath(signals, 'Athena/Recording/Client/ackSequence');
+    const ackStatusSignal = findSignalByPath(signals, 'Athena/Recording/Client/ackStatus');
+
+    const now = Date.now();
+    try {
+      if (
+        heartbeatSignal &&
+        now - lastRecordingHeartbeatSentAt >= RECORDING_CLIENT_HEARTBEAT_INTERVAL_MS
+      ) {
+        await setSignal(heartbeatSignal.signal_id, String(now));
+        lastRecordingHeartbeatSentAt = now;
+      }
+
+      if (pendingRecordingAck && ackSequenceSignal && ackStatusSignal) {
+        await setSignal(ackSequenceSignal.signal_id, String(pendingRecordingAck.sequence));
+        await setSignal(ackStatusSignal.signal_id, pendingRecordingAck.status);
+        pendingRecordingAck = null;
+      }
+    } catch (err) {
+      if (isConnectionError(err)) {
+        markStaleStatus('connection lost while sending recording client state');
+      } else {
+        lastError = `recording client sync failed: ${String(err)}`;
+      }
+    }
+  }
+
+  async function connectWithCurrentSettings(source: 'manual' | 'auto' | 'badge'): Promise<boolean> {
+    if (connectInFlight) return false;
+
+    const normalizedHost = host.trim();
+    const port = parseControlPort(controlPort);
+    if (!normalizedHost || port === null) {
+      connected = false;
+      needsSessionReconnect = true;
+      if (source === 'auto') {
+        status = 'offline (retrying...)';
+      } else {
+        lastError = 'connection failed: host must be set and port must be 1-65535';
+        status = 'connection failed';
+      }
+      scheduleReconnect();
+      return false;
+    }
+
+    connectInFlight = true;
+    availableServerLayouts = [];
+
+    try {
+      const info = await connectArcp(normalizedHost, port);
+      if (!info.connected) {
+        connected = false;
+        status = 'connection failed';
+        scheduleReconnect();
+        return false;
+      }
+
+      autoReconnectArmed = true;
+      nextReconnectAttemptAt = 0;
+      needsSessionReconnect = false;
+      lastProcessedUpdateCount = -1;
+      lastError = '';
+      lastRecordingHeartbeatSentAt = 0;
+      status = `connected to ${info.host}:${info.control_port} (udp ${info.udp_port})`;
+      await refreshSnapshot();
+      await refreshServerLayoutList();
+      return true;
+    } catch (err) {
+      connected = false;
+      needsSessionReconnect = true;
+      scheduleReconnect();
+      if (source === 'auto') {
+        status = 'offline (retrying...)';
+      } else {
+        status = 'connection failed';
+        lastError = String(err);
+      }
+      return false;
+    } finally {
+      connectInFlight = false;
+    }
+  }
+
+  async function maybeAutoReconnect(force = false) {
+    if (connected || connectInFlight) return;
+    if (!force && !autoReconnectArmed) return;
+    if (!force && !needsSessionReconnect) return;
+    if (!force && Date.now() < nextReconnectAttemptAt) return;
+    await connectWithCurrentSettings(force ? 'badge' : 'auto');
+  }
+
+  function noteLayoutMutation() {
+    if (!connected) {
+      layoutDirtyWhileStale = true;
+    }
+  }
 
   function activateRail(section: RailSection) {
     dashboardMenu = null;
@@ -321,6 +1122,7 @@
     }
 
     layoutState = next;
+    noteLayoutMutation();
     saveLayout(next);
   }
 
@@ -331,6 +1133,7 @@
     undoStack = undoStack.slice(0, undoStack.length - 1);
     redoStack = pushHistorySnapshot(redoStack, layoutState);
     layoutState = cloneLayoutState(previous);
+    noteLayoutMutation();
     saveLayout(layoutState);
 
     if (selectedWidgetId && !layoutHasWidget(layoutState, selectedWidgetId)) {
@@ -347,6 +1150,7 @@
     redoStack = redoStack.slice(0, redoStack.length - 1);
     undoStack = pushHistorySnapshot(undoStack, layoutState);
     layoutState = cloneLayoutState(next);
+    noteLayoutMutation();
     saveLayout(layoutState);
 
     if (selectedWidgetId && !layoutHasWidget(layoutState, selectedWidgetId)) {
@@ -500,22 +1304,91 @@
   function normalizeContainerChildren(nextWidgets: DashboardWidget[]): DashboardWidget[] {
     if (nextWidgets.length === 0) return nextWidgets;
 
-    const byId = new Map(nextWidgets.map((widget) => [widget.id, widget]));
-    const normalized = nextWidgets.map((widget) => ({
-      ...widget,
-      layout: { ...widget.layout }
-    }));
+    const normalizedById = new Map<string, DashboardWidget>();
+    for (const widget of nextWidgets) {
+      normalizedById.set(widget.id, {
+        ...widget,
+        layout: clampLayout(widget.layout, gridColumns)
+      });
+    }
 
-    for (const parent of nextWidgets) {
-      if (parent.kind !== 'layout_list') continue;
-      const parentSnapshot = normalized.find((widget) => widget.id === parent.id) ?? parent;
-      const parentLayout = clampLayout(parentSnapshot.layout, gridColumns);
+    const isContainerKind = (kind: WidgetKind): boolean =>
+      kind === 'layout_list' || kind === 'layout_grid' || kind === 'layout_accordion';
 
-      const children = normalized
-        .filter(
-          (widget) =>
-            widget.parentLayoutId === parent.id
-        )
+    // Drop orphaned/invalid parent references before normalization.
+    for (const [id, widget] of normalizedById) {
+      const parentId = widget.parentLayoutId;
+      if (!parentId) continue;
+      const parent = normalizedById.get(parentId);
+      if (!parent || !isContainerKind(parent.kind) || parentId === id) {
+        normalizedById.set(id, {
+          ...widget,
+          parentLayoutId: undefined
+        });
+      }
+    }
+
+    // Break cycles to avoid unstable ordering/positioning loops.
+    for (const [id, widget] of normalizedById) {
+      if (!widget.parentLayoutId) continue;
+      const seen = new Set<string>([id]);
+      let cursor = widget.parentLayoutId;
+      let cyclic = false;
+      while (cursor) {
+        if (seen.has(cursor)) {
+          cyclic = true;
+          break;
+        }
+        seen.add(cursor);
+        const parent = normalizedById.get(cursor);
+        cursor = parent?.parentLayoutId;
+      }
+      if (cyclic) {
+        normalizedById.set(id, {
+          ...widget,
+          parentLayoutId: undefined
+        });
+      }
+    }
+
+    const depthCache = new Map<string, number>();
+    const depthVisiting = new Set<string>();
+    const hierarchyDepth = (widgetId: string): number => {
+      const cached = depthCache.get(widgetId);
+      if (cached !== undefined) return cached;
+      if (depthVisiting.has(widgetId)) return 0;
+      depthVisiting.add(widgetId);
+      const widget = normalizedById.get(widgetId);
+      const parentId = widget?.parentLayoutId;
+      let depth = 0;
+      if (parentId && normalizedById.has(parentId)) {
+        depth = hierarchyDepth(parentId) + 1;
+      }
+      depthVisiting.delete(widgetId);
+      depthCache.set(widgetId, depth);
+      return depth;
+    };
+
+    const containerIds = nextWidgets
+      .filter(
+        (widget) =>
+          widget.kind === 'layout_list' || widget.kind === 'layout_grid' || widget.kind === 'layout_accordion'
+      )
+      .map((widget) => widget.id)
+      .sort((a, b) => {
+        const depthDiff = hierarchyDepth(a) - hierarchyDepth(b);
+        if (depthDiff !== 0) return depthDiff;
+        const layoutA = normalizedById.get(a)?.layout ?? { x: 1, y: 1, w: 1, h: 1 };
+        const layoutB = normalizedById.get(b)?.layout ?? { x: 1, y: 1, w: 1, h: 1 };
+        return layoutA.y - layoutB.y || layoutA.x - layoutB.x || a.localeCompare(b);
+      });
+
+    for (const containerId of containerIds) {
+      const parent = normalizedById.get(containerId);
+      if (!parent || !isContainerKind(parent.kind)) continue;
+
+      const children = Array.from(normalizedById.values())
+        .filter((widget) => widget.parentLayoutId === parent.id)
         .sort(
           (a, b) =>
             a.layout.y - b.layout.y ||
@@ -523,85 +1396,70 @@
             a.id.localeCompare(b.id)
         );
 
-      let cursorY = parentLayout.y;
-      for (const child of children) {
-        const idx = normalized.findIndex((widget) => widget.id === child.id);
-        if (idx < 0) continue;
-
-        const previous = normalized[idx];
-        const clampedLayout = clampLayout(
-          {
-            ...previous.layout,
-            x: parentLayout.x,
-            y: cursorY,
-            w: parentLayout.w
-          },
-          gridColumns
-        );
-
-        normalized[idx] = {
-          ...previous,
-          parentLayoutId: byId.has(parent.id) ? parent.id : previous.parentLayoutId,
-          layout: clampedLayout
-        };
-        cursorY = clampedLayout.y + clampedLayout.h;
+      if (parent.kind === 'layout_accordion') {
+        const [slotChild, ...overflow] = children;
+        if (slotChild) {
+          normalizedById.set(slotChild.id, {
+            ...slotChild,
+            parentLayoutId: parent.id
+          });
+        }
+        for (const extra of overflow) {
+          normalizedById.set(extra.id, {
+            ...extra,
+            parentLayoutId: undefined
+          });
+        }
+        continue;
       }
 
-      continue;
-    }
-
-    for (const parent of nextWidgets) {
-      if (parent.kind !== 'layout_grid') continue;
-
-      const children = normalized
-        .filter(
-          (widget) =>
-            widget.parentLayoutId === parent.id
-        )
-        .sort(
-          (a, b) =>
-            a.layout.y - b.layout.y ||
-            a.layout.x - b.layout.x ||
-            a.id.localeCompare(b.id)
-        );
-
       for (const child of children) {
-        const idx = normalized.findIndex((widget) => widget.id === child.id);
-        if (idx < 0) continue;
-
-        const previous = normalized[idx];
-        normalized[idx] = {
-          ...previous,
-          parentLayoutId: byId.has(parent.id) ? parent.id : previous.parentLayoutId,
-          layout: clampLayout(previous.layout, gridColumns)
-        };
+        normalizedById.set(child.id, {
+          ...child,
+          parentLayoutId: parent.id
+        });
       }
     }
 
-    return normalized;
+    return nextWidgets.map((widget) => normalizedById.get(widget.id) ?? widget);
   }
 
-  function updateHistory(signals: SignalRow[]) {
-    const next = new Map(historyBySignal);
-    const seen = new Set<number>();
+  function updateHistory(signals: SignalRow[], trackedSignalIds: Set<number>) {
+    if (trackedSignalIds.size === 0) {
+      if (historyBySignal.size > 0) {
+        historyBySignal = new Map();
+      }
+      return;
+    }
 
+    const byId = new Map<number, SignalRow>();
     for (const signal of signals) {
-      seen.add(signal.signal_id);
+      byId.set(signal.signal_id, signal);
+    }
+
+    const next = new Map(historyBySignal);
+
+    for (const signalId of [...next.keys()]) {
+      if (!trackedSignalIds.has(signalId)) {
+        next.delete(signalId);
+      }
+    }
+
+    for (const signalId of trackedSignalIds) {
+      const signal = byId.get(signalId);
+      if (!signal) {
+        next.delete(signalId);
+        continue;
+      }
       const numeric = parseNumericSignal(signal);
       if (numeric === null) continue;
 
-      const values = [...(next.get(signal.signal_id) ?? [])];
+      const values = [...(next.get(signalId) ?? [])];
       values.push(numeric);
       if (values.length > 90) {
         values.splice(0, values.length - 90);
       }
-      next.set(signal.signal_id, values);
-    }
-
-    for (const signalId of next.keys()) {
-      if (!seen.has(signalId)) {
-        next.delete(signalId);
-      }
+      next.set(signalId, values);
     }
 
     historyBySignal = next;
@@ -723,27 +1581,6 @@
       };
     }
 
-    if (parentLayout && parentLayout.kind === 'layout_list') {
-      const parentTop = parentLayout.layout.y;
-      const parentBottom = parentLayout.layout.y + parentLayout.layout.h;
-      const boundedY = Math.max(
-        parentTop,
-        Math.min(parentBottom - nextWidget.layout.h, nextWidget.layout.y)
-      );
-      nextWidget = {
-        ...nextWidget,
-        layout: clampLayout(
-          {
-            ...nextWidget.layout,
-            x: parentLayout.layout.x,
-            y: boundedY,
-            w: parentLayout.layout.w
-          },
-          gridColumns
-        )
-      };
-    }
-
     setActiveWidgets([nextWidget, ...widgets]);
     widgetInputs = {
       ...widgetInputs,
@@ -814,27 +1651,6 @@
             ...nextWidget.layout,
             x: normalizedPreferredPosition.x,
             y: normalizedPreferredPosition.y
-          },
-          gridColumns
-        )
-      };
-    }
-
-    if (parentLayout && parentLayout.kind === 'layout_list') {
-      const parentTop = parentLayout.layout.y;
-      const parentBottom = parentLayout.layout.y + parentLayout.layout.h;
-      const boundedY = Math.max(
-        parentTop,
-        Math.min(parentBottom - nextWidget.layout.h, nextWidget.layout.y)
-      );
-      nextWidget = {
-        ...nextWidget,
-        layout: clampLayout(
-          {
-            ...nextWidget.layout,
-            x: parentLayout.layout.x,
-            y: boundedY,
-            w: parentLayout.layout.w
           },
           gridColumns
         )
@@ -1052,24 +1868,65 @@
     return raw.trim().replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 64);
   }
 
+  function preferredServerLayoutName(layouts: string[]): string {
+    if (layouts.length === 0) return '';
+    const preferred = layouts.find((name) => name === DEFAULT_SERVER_LAYOUT_PROFILE);
+    return preferred ?? layouts[0];
+  }
+
   async function refreshServerLayoutList() {
     if (!connected) {
       availableServerLayouts = [];
+      serverLayoutName = '';
       return;
     }
     if (layoutListRefreshInFlight) return;
     layoutListRefreshInFlight = true;
     try {
       const layouts = await listServerLayouts();
-      availableServerLayouts = [...layouts].sort((a, b) =>
+      const normalizedLayouts = [...layouts].sort((a, b) =>
         a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
       );
+      availableServerLayouts = normalizedLayouts;
+      if (normalizedLayouts.length === 0) {
+        serverLayoutName = DEFAULT_SERVER_LAYOUT_PROFILE;
+      } else if (!normalizedLayouts.includes(serverLayoutName)) {
+        serverLayoutName = preferredServerLayoutName(normalizedLayouts);
+      }
       lastError = '';
     } catch (err) {
       availableServerLayouts = [];
+      serverLayoutName = '';
       lastError = `server layout list failed: ${String(err)}`;
     } finally {
       layoutListRefreshInFlight = false;
+    }
+  }
+
+  async function deleteServerLayoutProfile(layoutName: string) {
+    const profile = normalizeServerLayoutName(layoutName);
+    if (!profile) {
+      lastError = 'delete from server failed: layout name must be [a-zA-Z0-9._-]';
+      return;
+    }
+    if (!connected) {
+      lastError = 'delete from server failed: not connected';
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete server UI profile '${profile}'?`);
+    if (!confirmed) return;
+
+    try {
+      await deleteServerLayout(profile);
+      status = `ui profile '${profile}' deleted from server`;
+      lastError = '';
+      await refreshServerLayoutList();
+      if (serverLayoutName === profile && availableServerLayouts.length > 0) {
+        serverLayoutName = availableServerLayouts[0];
+      }
+    } catch (err) {
+      lastError = `delete from server failed: ${String(err)}`;
     }
   }
 
@@ -1088,6 +1945,7 @@
       const serialized = serializeLayoutExport(layoutState);
       await saveServerLayout(profile, serialized);
       serverLayoutName = profile;
+      layoutDirtyWhileStale = false;
       status = `ui saved to server profile '${profile}'`;
       lastError = '';
       await refreshServerLayoutList();
@@ -1128,6 +1986,21 @@
     } catch (err) {
       lastError = `load from server failed: ${String(err)}`;
     }
+  }
+
+  function updateDefaultGridColumns(value: string) {
+    const columnsRaw = Number(value);
+    if (!Number.isFinite(columnsRaw)) return;
+    const columns = Math.max(8, Math.min(96, Math.round(columnsRaw)));
+    defaultGridColumns = columns;
+    saveGridPreferences(defaultGridColumns, defaultGridDensity);
+    handleGridColumnsChange(columns);
+  }
+
+  function updateDefaultGridDensity(value: string) {
+    const density = parseGridDensity(value);
+    defaultGridDensity = density;
+    saveGridPreferences(defaultGridColumns, defaultGridDensity);
   }
 
   function pasteCopiedWidget(): boolean {
@@ -1261,12 +2134,81 @@
   }
 
   function updateWidgetConfig(widgetId: string, config: WidgetConfigRecord | undefined) {
+    const target = widgets.find((widget) => widget.id === widgetId);
+    if (!target) return;
+
+    const nextConfig = cloneWidgetConfig(config);
+    if (target.kind !== 'layout_accordion') {
+      setActiveWidgets(
+        widgets.map((widget) =>
+          widget.id === widgetId
+            ? {
+                ...widget,
+                config: nextConfig
+              }
+            : widget
+        )
+      );
+      return;
+    }
+
+    const nextConfigRecord =
+      nextConfig && typeof nextConfig === 'object' && !Array.isArray(nextConfig)
+        ? nextConfig
+        : {};
+    const previousAccordion = readLayoutAccordionConfig(target.config);
+    const nextAccordion = readLayoutAccordionConfig(nextConfigRecord);
+    const previousCollapsed = previousAccordion.collapsed;
+    const nextCollapsed = nextAccordion.collapsed;
+    const currentRows = Math.max(1, Math.round(target.layout.h));
+
+    let expandedRows = nextAccordion.expandedRows ?? previousAccordion.expandedRows;
+    if (expandedRows === null) {
+      expandedRows = previousCollapsed
+        ? Math.max(DEFAULT_ACCORDION_EXPANDED_ROWS, currentRows)
+        : currentRows;
+    }
+    expandedRows = Math.max(1, Math.min(96, Math.round(expandedRows)));
+
+    let nextLayout = clampLayout(target.layout, gridColumns);
+    if (!previousCollapsed && nextCollapsed) {
+      expandedRows = Math.max(1, currentRows);
+      nextLayout = clampLayout(
+        {
+          ...nextLayout,
+          h: ACCORDION_COLLAPSED_ROWS
+        },
+        gridColumns
+      );
+    } else if (previousCollapsed && !nextCollapsed) {
+      expandedRows = Math.max(
+        ACCORDION_COLLAPSED_ROWS,
+        Math.min(96, Math.round(nextAccordion.expandedRows ?? previousAccordion.expandedRows ?? DEFAULT_ACCORDION_EXPANDED_ROWS))
+      );
+      nextLayout = clampLayout(
+        {
+          ...nextLayout,
+          h: expandedRows
+        },
+        gridColumns
+      );
+    } else if (!nextCollapsed) {
+      expandedRows = Math.max(ACCORDION_COLLAPSED_ROWS, currentRows);
+    }
+
+    const patchedConfig: WidgetConfigRecord = {
+      ...nextConfigRecord,
+      collapsed: nextCollapsed,
+      expandedRows
+    };
+
     setActiveWidgets(
       widgets.map((widget) =>
         widget.id === widgetId
           ? {
               ...widget,
-              config: cloneWidgetConfig(config)
+              layout: nextLayout,
+              config: patchedConfig
             }
           : widget
       )
@@ -1363,85 +2305,207 @@
     commitLayout({ ...layoutState, tabs: nextTabs });
   }
 
+  async function flushQueuedMutations() {
+    if (!connected || reconnectSyncInFlight) return;
+    if (queuedSetWrites.size === 0 && queuedActions.length === 0 && !layoutDirtyWhileStale) return;
+
+    reconnectSyncInFlight = true;
+    const hadDirtyLayout = layoutDirtyWhileStale;
+    let flushedSetCount = 0;
+    let flushedActionCount = 0;
+
+    try {
+      const pendingSetEntries = [...queuedSetWrites.entries()];
+      const remainingSetEntries = new Map(queuedSetWrites);
+      for (const [signalId, valueRaw] of pendingSetEntries) {
+        await setSignal(signalId, valueRaw);
+        remainingSetEntries.delete(signalId);
+        queuedSetWrites = new Map(remainingSetEntries);
+        flushedSetCount += 1;
+      }
+
+      const pendingActions = [...queuedActions];
+      const remainingActions = [...queuedActions];
+      for (const signalId of pendingActions) {
+        await fireAction(signalId);
+        remainingActions.shift();
+        queuedActions = [...remainingActions];
+        flushedActionCount += 1;
+      }
+
+      if (layoutDirtyWhileStale) {
+        const profile = normalizeServerLayoutName(serverLayoutName);
+        if (!profile) {
+          lastError = 'reconnect sync skipped: layout name must be [a-zA-Z0-9._-]';
+        } else {
+          const serialized = serializeLayoutExport(layoutState);
+          await saveServerLayout(profile, serialized);
+          serverLayoutName = profile;
+          layoutDirtyWhileStale = false;
+        }
+      }
+
+      const layoutSynced = hadDirtyLayout && !layoutDirtyWhileStale;
+      if (flushedSetCount > 0 || flushedActionCount > 0 || layoutSynced) {
+        status = `reconnected: synced ${flushedSetCount} set(s), ${flushedActionCount} action(s)${
+          layoutSynced ? ', layout' : ''
+        }`;
+      }
+    } catch (err) {
+      if (isConnectionError(err)) {
+        markStaleStatus('connection lost during reconnect sync (stale data)');
+        lastError = '';
+      } else {
+        lastError = `reconnect sync failed: ${String(err)}`;
+      }
+    } finally {
+      reconnectSyncInFlight = false;
+    }
+  }
+
   async function refreshSnapshot() {
+    if (replayActive) return;
     if (refreshInFlight) return;
     refreshInFlight = true;
     try {
+      const wasConnected = connected;
       const next = await snapshotArcp();
-      snapshot = next;
+
+      if (!next.connected && next.signals.length === 0 && snapshot) {
+        snapshot = {
+          ...snapshot,
+          connected: false,
+          status: next.status,
+          uptime_ms: next.uptime_ms,
+          server_cpu_percent: next.server_cpu_percent,
+          server_rss_bytes: next.server_rss_bytes,
+          host_cpu_percent: next.host_cpu_percent,
+          host_rss_bytes: next.host_rss_bytes
+        };
+      } else {
+        snapshot = next;
+      }
+
       connected = next.connected;
       status = next.status;
+      needsSessionReconnect = false;
 
-      const filteredSignals = next.signals.filter((signal) => !isIgnoredPublishSignal(signal));
-      updateHistory(filteredSignals);
+      const filteredSignals = (snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal));
+      const updateChanged = next.update_count !== lastProcessedUpdateCount;
+      if (connected) {
+        if (updateChanged) {
+          handleRobotRecordingRequests(filteredSignals);
+          captureRecordingFrame(filteredSignals);
+          updateHistory(filteredSignals, historySignalIds);
 
-      const validIds = new Set(filteredSignals.map((signal) => signal.signal_id));
-      const nextTabs = layoutState.tabs.map((tab) => {
-        const filtered = tab.widgets.filter(
-          (widget) => isLayoutWidgetKind(widget.kind) || validIds.has(widget.signalId)
-        );
-        return filtered.length === tab.widgets.length ? tab : { ...tab, widgets: filtered };
-      });
+          const validIds = new Set(filteredSignals.map((signal) => signal.signal_id));
+          const nextTabs = layoutState.tabs.map((tab) => {
+            const filtered = tab.widgets.filter(
+              (widget) =>
+                isLayoutWidgetKind(widget.kind) ||
+                validIds.has(widget.signalId) ||
+                widgetHasResolvableBinding(widget, validIds)
+            );
+            return filtered.length === tab.widgets.length ? tab : { ...tab, widgets: filtered };
+          });
 
-      const changed = nextTabs.some((tab, index) => tab !== layoutState.tabs[index]);
-      if (changed) {
-        commitLayout({ ...layoutState, tabs: nextTabs }, { recordHistory: false, clearRedo: false });
+          const changed = nextTabs.some((tab, index) => tab !== layoutState.tabs[index]);
+          if (changed) {
+            commitLayout({ ...layoutState, tabs: nextTabs }, { recordHistory: false, clearRedo: false });
+          }
+
+          if (selectedId !== null && !validIds.has(selectedId)) {
+            selectedId = null;
+          }
+
+          if (selectedWidgetId && !nextTabs.some((tab) => tab.widgets.some((widget) => widget.id === selectedWidgetId))) {
+            selectedWidgetId = null;
+          }
+        }
+
+        await syncRecordingClientSignals(filteredSignals);
+        lastProcessedUpdateCount = next.update_count;
+      } else {
+        lastProcessedUpdateCount = -1;
       }
 
-      if (selectedId !== null && !validIds.has(selectedId)) {
-        selectedId = null;
-      }
-
-      if (selectedWidgetId && !nextTabs.some((tab) => tab.widgets.some((widget) => widget.id === selectedWidgetId))) {
-        selectedWidgetId = null;
+      if (!wasConnected && connected) {
+        await flushQueuedMutations();
+        await refreshServerLayoutList();
       }
     } catch (err) {
-      if (!connected) return;
-      lastError = String(err);
-      connected = false;
+      if (isConnectionError(err)) {
+        markStaleStatus();
+        lastError = '';
+        needsSessionReconnect = true;
+        if (autoReconnectArmed) {
+          scheduleReconnect();
+        }
+      } else {
+        lastError = String(err);
+      }
     } finally {
       refreshInFlight = false;
     }
   }
 
   async function connect() {
+    autoReconnectArmed = true;
+    scheduleReconnect(0);
     lastError = '';
-    availableServerLayouts = [];
-    try {
-      const info = await connectArcp(host.trim(), Number(controlPort));
-      connected = info.connected;
-      status = `connected to ${info.host}:${info.control_port} (udp ${info.udp_port})`;
-      await refreshSnapshot();
-      await refreshServerLayoutList();
-    } catch (err) {
-      connected = false;
-      status = 'connection failed';
-      lastError = String(err);
-      availableServerLayouts = [];
-    }
+    await connectWithCurrentSettings('manual');
   }
 
   async function disconnect() {
+    autoReconnectArmed = false;
+    nextReconnectAttemptAt = 0;
+    needsSessionReconnect = false;
+    pendingRecordingAck = null;
+    lastRecordingHeartbeatSentAt = 0;
+    if (recordingActive) {
+      finalizeRecording('recording stopped (disconnect)');
+    }
+    if (replayActive) {
+      stopReplay('replay stopped (disconnect)');
+    }
     try {
       await disconnectArcp();
     } catch (err) {
       lastError = String(err);
     }
     connected = false;
-    status = 'disconnected';
-    snapshot = null;
-    selectedId = null;
-    selectedWidgetId = null;
+    lastProcessedUpdateCount = -1;
+    status = snapshot ? 'disconnected (stale data retained)' : 'disconnected';
     availableServerLayouts = [];
   }
 
+  async function retryConnectionFromStatusBadge() {
+    if (connected) return;
+    autoReconnectArmed = true;
+    scheduleReconnect(0);
+    await maybeAutoReconnect(true);
+  }
+
   async function sendAction(signalId: number) {
+    if (!connected) {
+      queueAction(signalId);
+      status = `queued action ${signalId} (stale)`;
+      lastError = '';
+      return;
+    }
+
     try {
       await fireAction(signalId);
       lastError = '';
       status = `action ${signalId}`;
     } catch (err) {
-      lastError = String(err);
+      if (isConnectionError(err)) {
+        queueAction(signalId);
+        markStaleStatus(`connection lost; queued action ${signalId}`);
+        lastError = '';
+      } else {
+        lastError = String(err);
+      }
     }
   }
 
@@ -1451,12 +2515,25 @@
       return;
     }
 
+    if (!connected) {
+      queueSetWrite(signalId, valueRaw);
+      status = `queued set ${signalId} (stale)`;
+      lastError = '';
+      return;
+    }
+
     try {
       await setSignal(signalId, valueRaw);
       lastError = '';
       status = `set ${signalId}`;
     } catch (err) {
-      lastError = String(err);
+      if (isConnectionError(err)) {
+        queueSetWrite(signalId, valueRaw);
+        markStaleStatus(`connection lost; queued set ${signalId}`);
+        lastError = '';
+      } else {
+        lastError = String(err);
+      }
     }
   }
 
@@ -1588,6 +2665,10 @@
   }
 
   onMount(() => {
+    const gridPreferences = loadGridPreferences();
+    defaultGridColumns = gridPreferences.columns;
+    defaultGridDensity = gridPreferences.density;
+    gridColumns = gridPreferences.columns;
     layoutState = loadLayout();
     undoStack = [];
     redoStack = [];
@@ -1603,19 +2684,38 @@
       if (target?.closest('.dashboard-context-menu')) return;
       closeDashboardMenu();
     };
-    const timer = setInterval(() => {
-      void refreshSnapshot();
-    }, REFRESH_MS);
+    let refreshCancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const refreshDelayMs = () => {
+      if (!connected) return REFRESH_MS_DISCONNECTED;
+      return railSection === 'dashboards' ? REFRESH_MS_DASHBOARDS : REFRESH_MS_OTHER;
+    };
+    const refreshTick = async () => {
+      if (refreshCancelled) return;
+      await refreshSnapshot();
+      await maybeAutoReconnect();
+      if (refreshCancelled) return;
+      refreshTimer = window.setTimeout(() => {
+        void refreshTick();
+      }, refreshDelayMs());
+    };
+    void refreshTick();
     const serverLayoutTimer = setInterval(() => {
-      if (!connected || railSection !== 'settings') return;
+      if (!connected) return;
       void refreshServerLayoutList();
     }, SERVER_LAYOUT_POLL_MS);
     window.addEventListener('keydown', onGlobalKeyDown);
     window.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
-      clearInterval(timer);
+      refreshCancelled = true;
+      if (refreshTimer !== null) {
+        clearTimeout(refreshTimer);
+      }
       clearInterval(serverLayoutTimer);
+      if (replayState?.timerId !== null) {
+        window.clearInterval(replayState.timerId);
+      }
       window.removeEventListener('keydown', onGlobalKeyDown);
       window.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -1629,13 +2729,38 @@
   <section class="work-root">
     <TopBar
       {connected}
+      stale={staleData}
+      connecting={reconnecting}
+      {serverLayoutName}
+      availableServerLayouts={availableServerLayouts}
+      {recordingActive}
+      {replayActive}
+      {recordingStatus}
+      recordings={recordingSummaries}
+      {selectedRecordingId}
       {presentationMode}
       {driverstationDockMode}
       {dashboardStates}
-      onLoadLayout={() => void importLayoutFromFile()}
-      onSaveLayout={() => void exportLayoutToFile()}
+      onLoadLayoutFromHost={() => void importLayoutFromFile()}
+      onLoadLayoutFromServer={() => void loadLayoutFromServerProfile()}
+      onSaveLayoutToHost={() => void exportLayoutToFile()}
+      onSaveLayoutToServer={() => void saveLayoutToServerProfile()}
+      onServerLayoutNameInput={(value) => (serverLayoutName = normalizeServerLayoutName(value))}
+      onToggleRecording={() => {
+        if (recordingActive) {
+          stopRecording();
+          return;
+        }
+        beginRecording('manual');
+      }}
+      onSelectedRecordingIdInput={(recordingId) => (selectedRecordingId = recordingId)}
+      onLoadSelectedRecording={replayRecording}
+      onImportRecording={() => void importRecordingFromFile()}
+      onStopReplay={stopReplay}
+      onRefreshServerLayouts={() => void refreshServerLayoutList()}
       onTogglePresentationMode={() => void togglePresentationMode()}
       onToggleDriverstationDockMode={() => void toggleDriverstationDockMode()}
+      onConnectionBadgeClick={() => void retryConnectionFromStatusBadge()}
     />
 
     <section class="workspace-frame panel">
@@ -1647,6 +2772,7 @@
             layoutState = { ...layoutState, activeTabId: tabId };
             selectedWidgetId = null;
             selectedId = null;
+            noteLayoutMutation();
             saveLayout(layoutState);
           }}
           onAddTab={addTab}
@@ -1663,6 +2789,12 @@
         <SettingsScreen
           {host}
           {controlPort}
+          defaultGridColumns={defaultGridColumns}
+          defaultGridDensity={defaultGridDensity}
+          {acceptRobotRecordingRequests}
+          {recordingStatus}
+          recordings={recordingSummaries}
+          {selectedRecordingId}
           {serverLayoutName}
           availableServerLayouts={availableServerLayouts}
           {connected}
@@ -1670,17 +2802,24 @@
           onHostInput={handleHostInput}
           onPortInput={handlePortInput}
           onServerLayoutNameInput={(value) => (serverLayoutName = normalizeServerLayoutName(value))}
+          onDefaultGridColumnsInput={updateDefaultGridColumns}
+          onDefaultGridDensityInput={updateDefaultGridDensity}
+          onAcceptRobotRecordingRequestsInput={setAcceptRobotRecordingRequests}
+          onSelectedRecordingIdInput={(recordingId) => (selectedRecordingId = recordingId)}
           onConnect={connect}
           onDisconnect={disconnect}
-          onSaveServerLayout={() => void saveLayoutToServerProfile()}
-          onLoadServerLayout={() => void loadLayoutFromServerProfile()}
-          onRefreshServerLayouts={() => void refreshServerLayoutList()}
+          onReplayRecording={replayRecording}
+          onExportRecording={() => void exportSelectedRecording()}
+          onImportRecording={() => void importRecordingFromFile()}
+          onDeleteRecording={deleteSelectedRecording}
+          onDeleteServerLayout={(layoutName) => void deleteServerLayoutProfile(layoutName)}
         />
       {:else if railSection === 'signals'}
         <section class={`signals-stage ${showInspector ? '' : 'no-inspector'}`}>
           <div class="signals-layout">
             <SignalBrowser
               signals={filteredSignals}
+              ntSignals={filteredNtSignals}
               {selectedId}
               {query}
               onQueryInput={(value) => (query = value)}
@@ -1746,7 +2885,7 @@
         </section>
       {:else if railSection === 'mechanisms'}
         <MechanismsScreen
-          signals={signalRows}
+          signals={arcpSignalRows}
           {selectedId}
           onSelectSignal={(signalId) => {
             selectedId = signalId;
@@ -1761,7 +2900,7 @@
           {status}
           {lastError}
           {snapshot}
-          signals={signalRows}
+          signals={arcpSignalRows}
           onSelectSignal={(signalId) => {
             selectedId = signalId;
             selectedWidgetId = null;
@@ -1771,7 +2910,7 @@
         />
       {:else if railSection === 'camera_tuning'}
         <CameraTuningScreen
-          signals={signalRows}
+          signals={arcpSignalRows}
           onSelectSignal={(signalId) => {
             selectedId = signalId;
             selectedWidgetId = null;
@@ -1791,6 +2930,8 @@
               {widgets}
               signals={signalRows}
               {signalById}
+              baseGridColumns={defaultGridColumns}
+              gridDensity={defaultGridDensity}
               {selectedWidgetId}
               {widgetInputs}
               {historyBySignal}
@@ -1803,6 +2944,7 @@
               onToggleEditMode={() => (editMode = !editMode)}
               onClearWidgets={clearWidgets}
               onPatchWidgetLayout={patchWidgetLayout}
+              onUpdateWidgetConfig={updateWidgetConfig}
               onRemoveWidget={removeWidget}
               onWidgetInput={setWidgetInput}
               onSendAction={sendAction}
@@ -1887,6 +3029,7 @@
               {/if}
               <SignalBrowser
                 signals={explorerSignals}
+                ntSignals={pendingSignalMapRequest ? [] : filteredNtSignals}
                 {selectedId}
                 {query}
                 onQueryInput={(value) => (query = value)}

@@ -1,5 +1,8 @@
 package ca.frc6390.athena.ctre.encoder;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
@@ -19,6 +22,8 @@ import edu.wpi.first.wpilibj.RobotBase;
  * CTRE encoder wrapper for the new vendordep system.
  */
 public class CtreEncoder implements Encoder {
+    private static final double CONFIG_EPSILON = 1e-6;
+    private static final Map<String, DiscontinuityConfig> APPLIED_DISCONTINUITY_CONFIGS = new ConcurrentHashMap<>();
     private final EncoderConfig config;
     private final CANcoder cancoder;
     private final TalonFX talonFx;
@@ -91,10 +96,18 @@ public class CtreEncoder implements Encoder {
                         false);
                 return;
             }
+            double discontinuityPoint = MathUtil.clamp(config.discontinuityPoint(), 0.0, 1.0);
+            String key = deviceKey(config);
+            DiscontinuityConfig desired = new DiscontinuityConfig(discontinuityPoint, range);
+            DiscontinuityConfig applied = APPLIED_DISCONTINUITY_CONFIGS.get(key);
+            if (applied != null && nearlyEqual(applied.point(), desired.point())
+                    && nearlyEqual(applied.range(), desired.range())) {
+                return;
+            }
             CANcoderConfiguration cfg = new CANcoderConfiguration();
-            cfg.MagnetSensor.AbsoluteSensorDiscontinuityPoint =
-                    MathUtil.clamp(config.discontinuityPoint(), 0.0, 1.0);
+            cfg.MagnetSensor.AbsoluteSensorDiscontinuityPoint = discontinuityPoint;
             cancoder.getConfigurator().apply(cfg, 0.0);
+            APPLIED_DISCONTINUITY_CONFIGS.put(key, desired);
         }
     }
 
@@ -287,4 +300,22 @@ public class CtreEncoder implements Encoder {
     public EncoderConfig getConfig() {
         return config;
     }
+
+    private static String deviceKey(EncoderConfig config) {
+        if (config == null) {
+            return "unknown\\-1";
+        }
+        String canbus = config.canbus();
+        String resolvedCanbus = canbus != null ? canbus : "";
+        return resolvedCanbus + "\\" + config.id();
+    }
+
+    private static boolean nearlyEqual(double first, double second) {
+        if (Double.doubleToLongBits(first) == Double.doubleToLongBits(second)) {
+            return true;
+        }
+        return Double.isFinite(first) && Double.isFinite(second) && Math.abs(first - second) <= CONFIG_EPSILON;
+    }
+
+    private record DiscontinuityConfig(double point, double range) {}
 }

@@ -17,6 +17,8 @@
   let conversionDraft = $state('1.0');
   let ratioDraft = $state('1.0');
   let offsetDraft = $state('0.0');
+  let discontinuityPointDraft = $state('0.0');
+  let discontinuityRangeDraft = $state('1.0');
   let canIdDraft = $state('0');
   let canbusDraft = $state('');
   let invertedDraft = $state(false);
@@ -24,6 +26,8 @@
   let conversionSeedSignalId = $state<number | null>(null);
   let ratioSeedSignalId = $state<number | null>(null);
   let offsetSeedSignalId = $state<number | null>(null);
+  let discontinuityPointSeedSignalId = $state<number | null>(null);
+  let discontinuityRangeSeedSignalId = $state<number | null>(null);
   let canIdSeedSignalId = $state<number | null>(null);
   let canbusSeedSignalId = $state<number | null>(null);
   let invertedSeedSignalId = $state<number | null>(null);
@@ -50,6 +54,35 @@
   function rowFor(signalId: number | null): SignalRow | null {
     if (signalId === null) return null;
     return signalById.get(signalId) ?? null;
+  }
+
+  function normalizePathForScope(path: string): string {
+    return path
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/\/+/g, '/')
+      .replace(/^\/+|\/+$/g, '')
+      .toLowerCase();
+  }
+
+  function canonicalPathForScope(path: string): string {
+    return normalizePathForScope(path)
+      .split('/')
+      .map((segment) => segment.replace(/[^a-z0-9]/g, ''))
+      .filter((segment) => segment.length > 0)
+      .join('/');
+  }
+
+  function pathInScope(path: string, scope: string): boolean {
+    if (!scope) return true;
+    const normalizedPath = normalizePathForScope(path);
+    if (normalizedPath === scope || normalizedPath.startsWith(`${scope}/`)) {
+      return true;
+    }
+    const canonicalPath = canonicalPathForScope(path);
+    const canonicalScope = canonicalPathForScope(scope);
+    if (!canonicalScope) return true;
+    return canonicalPath === canonicalScope || canonicalPath.startsWith(`${canonicalScope}/`);
   }
 
   function numberFor(signalId: number | null): number | null {
@@ -160,7 +193,7 @@
       return {
         angleDeg: normalized * 360,
         normalized,
-        valueLabel: formatValueLabel(value, unit || 'rot', 3),
+        valueLabel: formatValueLabel(value, unit, 3),
         modeLabel: 'continuous'
       };
     }
@@ -170,7 +203,7 @@
       return {
         angleDeg: normalized * 360,
         normalized,
-        valueLabel: formatValueLabel(value, unit || 'rot', 3),
+        valueLabel: formatValueLabel(value, unit, 3),
         modeLabel: '0..1'
       };
     }
@@ -180,7 +213,7 @@
       return {
         angleDeg: wrap360(value),
         normalized,
-        valueLabel: formatValueLabel(value, unit || 'deg', 1),
+        valueLabel: formatValueLabel(value, unit, 1),
         modeLabel: '-180..180'
       };
     }
@@ -190,7 +223,7 @@
       return {
         angleDeg: wrap360(value),
         normalized,
-        valueLabel: formatValueLabel(value, unit || 'deg', 1),
+        valueLabel: formatValueLabel(value, unit, 1),
         modeLabel: '0..360'
       };
     }
@@ -236,65 +269,94 @@
     return 'text';
   }
 
-  const encoderParentPath = $derived(parentPath(signal.path));
+  const topicPath = $derived(
+    typeof configRaw?.topicPath === 'string' ? configRaw.topicPath.trim() : ''
+  );
+  const encoderParentPath = $derived(topicPath || parentPath(signal.path));
+  const normalizedEncoderParentPath = $derived(normalizePathForScope(encoderParentPath));
+
+  function rowForEncoderScoped(signalId: number | null): SignalRow | null {
+    const row = rowFor(signalId);
+    if (!row) return null;
+    if (!normalizedEncoderParentPath) return row;
+    return pathInScope(row.path, normalizedEncoderParentPath) ? row : null;
+  }
+
   const siblingSignals = $derived.by(() =>
     signals
-      .filter((entry) => parentPath(entry.path) === encoderParentPath)
+      .filter((entry) => pathInScope(entry.path, normalizedEncoderParentPath))
       .sort((a, b) => a.path.localeCompare(b.path))
   );
 
-  const positionRow = $derived(rowFor(config.positionSignalId));
-  const velocityRow = $derived(rowFor(config.velocitySignalId));
-  const absoluteRow = $derived(rowFor(config.absoluteSignalId));
-  const connectedRow = $derived(rowFor(config.connectedSignalId));
+  const positionRow = $derived(rowForEncoderScoped(config.positionSignalId));
+  const velocityRow = $derived(rowForEncoderScoped(config.velocitySignalId));
+  const rateRow = $derived(rowForEncoderScoped(config.rateSignalId));
+  const absoluteRow = $derived(rowForEncoderScoped(config.absoluteSignalId));
+  const connectedRow = $derived(rowForEncoderScoped(config.connectedSignalId));
   const conversionOffsetRow = $derived(
-    findSiblingByTokens(
-      ['conversion_offset', 'conversionoffset', 'offset_conversion', 'conversion_zero_offset'],
-      ['f64', 'i64']
-    )
+    rowForEncoderScoped(config.conversionOffsetSignalId) ??
+      findSiblingByTokens(
+        ['conversion_offset', 'conversionoffset', 'offset_conversion', 'conversion_zero_offset'],
+        ['f64', 'i64']
+      )
   );
   const conversionRow = $derived(
-    findSiblingByTokens(
-      ['conversion', 'conversion_ratio', 'conversion_factor', 'rotations_per_unit'],
-      ['f64', 'i64'],
-      ['conversionoffset', 'offsetconversion']
-    )
+    rowForEncoderScoped(config.conversionSignalId) ??
+      findSiblingByTokens(
+        ['conversion', 'conversion_ratio', 'conversion_factor', 'rotations_per_unit'],
+        ['f64', 'i64'],
+        ['conversionoffset', 'offsetconversion']
+      )
   );
   const ratioRow = $derived(
-    rowFor(config.ratioSignalId) ??
+    rowForEncoderScoped(config.ratioSignalId) ??
       findSiblingByTokens(['gear_ratio', 'ratio'], ['f64', 'i64'], ['conversion'])
   );
   const offsetRow = $derived(
-    rowFor(config.offsetSignalId) ??
+    rowForEncoderScoped(config.offsetSignalId) ??
       findSiblingByTokens(
         ['offset_rot', 'offset', 'zero_offset', 'calibration_offset'],
         ['f64', 'i64'],
         ['conversionoffset', 'offsetconversion']
       )
   );
+  const discontinuityPointRow = $derived(
+    rowForEncoderScoped(config.discontinuityPointSignalId) ??
+      findSiblingByTokens(
+        ['discontinuity_point', 'discontinuitypoint'],
+        ['f64', 'i64']
+      )
+  );
+  const discontinuityRangeRow = $derived(
+    rowForEncoderScoped(config.discontinuityRangeSignalId) ??
+      findSiblingByTokens(
+        ['discontinuity_range', 'discontinuityrange'],
+        ['f64', 'i64']
+      )
+  );
 
   const canIdRow = $derived(
-    rowFor(config.canIdSignalId) ??
+    rowForEncoderScoped(config.canIdSignalId) ??
       findSiblingByTokens(['can_id', 'canid', 'id'], ['i64', 'f64'])
   );
   const canbusRow = $derived(
-    rowFor(config.canbusSignalId) ??
+    rowForEncoderScoped(config.canbusSignalId) ??
       findSiblingByTokens(['canbus', 'bus'], ['string'])
   );
   const typeRow = $derived(
-    rowFor(config.typeSignalId) ??
+    rowForEncoderScoped(config.typeSignalId) ??
       findSiblingByTokens(['type', 'encoder_type', 'sensor_type'], ['string'])
   );
   const invertedRow = $derived(
-    rowFor(config.invertedSignalId) ??
+    rowForEncoderScoped(config.invertedSignalId) ??
       findSiblingByTokens(['inverted', 'invert'], ['bool'])
   );
   const supportsSimRow = $derived(
-    rowFor(config.supportsSimulationSignalId) ??
+    rowForEncoderScoped(config.supportsSimulationSignalId) ??
       findSiblingByTokens(['supports_simulation', 'sim_supported', 'simulation'], ['bool'])
   );
   const rawAbsoluteRow = $derived(
-    rowFor(config.rawAbsoluteSignalId) ??
+    rowForEncoderScoped(config.rawAbsoluteSignalId) ??
       findSiblingByTokens(['raw_absolute_rot', 'raw_absolute', 'raw'], ['f64', 'i64'])
   );
 
@@ -302,12 +364,19 @@
     const ids = [
       config.positionSignalId,
       config.velocitySignalId,
+      config.rateSignalId,
       config.absoluteSignalId,
       config.connectedSignalId,
+      config.conversionOffsetSignalId,
+      config.conversionSignalId,
+      config.discontinuityPointSignalId,
+      config.discontinuityRangeSignalId,
       conversionOffsetRow?.signal_id ?? null,
       conversionRow?.signal_id ?? null,
       ratioRow?.signal_id ?? null,
       offsetRow?.signal_id ?? null,
+      discontinuityPointRow?.signal_id ?? null,
+      discontinuityRangeRow?.signal_id ?? null,
       canIdRow?.signal_id ?? null,
       canbusRow?.signal_id ?? null,
       typeRow?.signal_id ?? null,
@@ -327,10 +396,11 @@
   );
   const showExtraFieldsSection = $derived(extraSignals.length > 0);
 
-  const connected = $derived(boolFor(config.connectedSignalId));
-  const position = $derived(numberFor(config.positionSignalId));
-  const velocity = $derived(numberFor(config.velocitySignalId));
-  const absolute = $derived(numberFor(config.absoluteSignalId));
+  const connected = $derived(connectedRow ? boolFor(connectedRow.signal_id) : null);
+  const position = $derived(positionRow ? numberFor(positionRow.signal_id) : null);
+  const velocity = $derived(velocityRow ? numberFor(velocityRow.signal_id) : null);
+  const rate = $derived(rateRow ? numberFor(rateRow.signal_id) : null);
+  const absolute = $derived(absoluteRow ? numberFor(absoluteRow.signal_id) : null);
   const conversionOffset = $derived(
     conversionOffsetRow ? numberFor(conversionOffsetRow.signal_id) : null
   );
@@ -339,6 +409,12 @@
   );
   const ratio = $derived(ratioRow ? numberFor(ratioRow.signal_id) : null);
   const offset = $derived(offsetRow ? numberFor(offsetRow.signal_id) : null);
+  const discontinuityPoint = $derived(
+    discontinuityPointRow ? numberFor(discontinuityPointRow.signal_id) : null
+  );
+  const discontinuityRange = $derived(
+    discontinuityRangeRow ? numberFor(discontinuityRangeRow.signal_id) : null
+  );
 
   const canId = $derived(canIdRow ? numberFor(canIdRow.signal_id) : null);
   const canbus = $derived(canbusRow ? textFor(canbusRow.signal_id) : null);
@@ -352,11 +428,17 @@
   const conversionWritable = $derived(isWritable(conversionRow));
   const ratioWritable = $derived(isWritable(ratioRow));
   const offsetWritable = $derived(isWritable(offsetRow));
+  const discontinuityPointWritable = $derived(isWritable(discontinuityPointRow));
+  const discontinuityRangeWritable = $derived(isWritable(discontinuityRangeRow));
   const canIdWritable = $derived(isWritable(canIdRow));
   const canbusWritable = $derived(isWritable(canbusRow));
   const invertedWritable = $derived(isWritable(invertedRow));
 
-  const velocityDial = $derived(resolveDialSpec(velocity, 'distance', -120, 120, 'rps'));
+  const velocityUnit = $derived.by(() => {
+    const unit = config.positionUnit.trim();
+    return unit ? `${unit}/s` : '';
+  });
+  const velocityDial = $derived(resolveDialSpec(velocity, 'distance', -120, 120, velocityUnit));
   const velocityGaugeAngle = $derived(-135 + velocityDial.normalized * 270);
   const positionDial = $derived(
     resolveDialSpec(
@@ -415,6 +497,26 @@
     if (offsetSeedSignalId === offsetRow.signal_id) return;
     offsetSeedSignalId = offsetRow.signal_id;
     offsetDraft = String(offset ?? 0.0);
+  });
+
+  $effect(() => {
+    if (!discontinuityPointWritable || !discontinuityPointRow) {
+      discontinuityPointSeedSignalId = null;
+      return;
+    }
+    if (discontinuityPointSeedSignalId === discontinuityPointRow.signal_id) return;
+    discontinuityPointSeedSignalId = discontinuityPointRow.signal_id;
+    discontinuityPointDraft = String(discontinuityPoint ?? 0.0);
+  });
+
+  $effect(() => {
+    if (!discontinuityRangeWritable || !discontinuityRangeRow) {
+      discontinuityRangeSeedSignalId = null;
+      return;
+    }
+    if (discontinuityRangeSeedSignalId === discontinuityRangeRow.signal_id) return;
+    discontinuityRangeSeedSignalId = discontinuityRangeRow.signal_id;
+    discontinuityRangeDraft = String(discontinuityRange ?? 1.0);
   });
 
   $effect(() => {
@@ -499,6 +601,20 @@
     sendRaw(offsetRow, String(parsed));
   }
 
+  function sendDiscontinuityPoint() {
+    if (!discontinuityPointRow || !discontinuityPointWritable) return;
+    const parsed = parseFloatDraft(discontinuityPointDraft);
+    if (parsed === null) return;
+    sendRaw(discontinuityPointRow, String(parsed));
+  }
+
+  function sendDiscontinuityRange() {
+    if (!discontinuityRangeRow || !discontinuityRangeWritable) return;
+    const parsed = parseFloatDraft(discontinuityRangeDraft);
+    if (parsed === null) return;
+    sendRaw(discontinuityRangeRow, String(parsed));
+  }
+
   function sendCanId() {
     if (!canIdRow || !canIdWritable) return;
     const parsed = Number(canIdDraft.trim());
@@ -573,7 +689,7 @@
 
   <section class="metric-grid">
     <article class="metric-card dial-card">
-      <header><span>Position Pose</span><strong>{positionDial.valueLabel}</strong></header>
+      <header><span>Position</span><strong>{positionDial.valueLabel}</strong></header>
       <div class="dial-wrap" aria-label="position pose dial">
         <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
           <circle class="ring" cx="50" cy="50" r="42" />
@@ -593,7 +709,7 @@
       <small>{positionDial.modeLabel}</small>
     </article>
     <article class="metric-card">
-      <header><span>Velocity rps</span><strong>{velocityDial.valueLabel}</strong></header>
+      <header><span>Velocity</span><strong>{velocityDial.valueLabel}</strong></header>
       <div class="gauge-wrap" aria-label="velocity gauge">
         <svg viewBox="0 0 100 74" preserveAspectRatio="xMidYMid meet">
           <path class="gauge-track" d={arcPath(-135, 135)} />
@@ -611,7 +727,7 @@
       <small>{velocityDial.modeLabel}</small>
     </article>
     <article class="metric-card dial-card">
-      <header><span>Absolute Pose</span><strong>{absoluteDial.valueLabel}</strong></header>
+      <header><span>Absolute</span><strong>{absoluteDial.valueLabel}</strong></header>
       <div class="dial-wrap" aria-label="absolute pose dial">
         <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
           <circle class="ring" cx="50" cy="50" r="42" />
@@ -629,6 +745,9 @@
         </svg>
       </div>
       <small>{absoluteDial.modeLabel}</small>
+    </article>
+    <article class="metric-card compact">
+      <header><span>Rate</span><strong>{formatNumber(rate, 3)}</strong></header>
     </article>
     <article class="metric-card compact">
       <header><span>Conversion offset</span><strong>{formatNumber(conversionOffset, 4)}</strong></header>
@@ -683,6 +802,34 @@
             }}
           />
           <button class="btn btn-mini btn-primary" onclick={sendOffset}>Set</button>
+        </div>
+      {/if}
+    </article>
+    <article class="metric-card compact">
+      <header><span>Discontinuity point</span><strong>{formatNumber(discontinuityPoint, 4)}</strong></header>
+      {#if discontinuityPointWritable && discontinuityPointRow}
+        <div class="inline-edit">
+          <input
+            value={discontinuityPointDraft}
+            oninput={(event) => {
+              discontinuityPointDraft = (event.currentTarget as HTMLInputElement).value;
+            }}
+          />
+          <button class="btn btn-mini btn-primary" onclick={sendDiscontinuityPoint}>Set</button>
+        </div>
+      {/if}
+    </article>
+    <article class="metric-card compact">
+      <header><span>Discontinuity range</span><strong>{formatNumber(discontinuityRange, 4)}</strong></header>
+      {#if discontinuityRangeWritable && discontinuityRangeRow}
+        <div class="inline-edit">
+          <input
+            value={discontinuityRangeDraft}
+            oninput={(event) => {
+              discontinuityRangeDraft = (event.currentTarget as HTMLInputElement).value;
+            }}
+          />
+          <button class="btn btn-mini btn-primary" onclick={sendDiscontinuityRange}>Set</button>
         </div>
       {/if}
     </article>

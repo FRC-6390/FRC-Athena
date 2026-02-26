@@ -21,6 +21,7 @@ import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -604,6 +605,81 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
         return node;
     }
 
+    public void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        String root = rootPath.startsWith("/") ? rootPath.substring(1) : rootPath;
+
+        String metaRoot = root + "/Meta";
+        String name = getName();
+        publisher.put(metaRoot + "/name", name != null ? name : "");
+        publisher.put(metaRoot + "/type", "Superstructure");
+        publisher.put(metaRoot + "/owner", "");
+        publisher.put(metaRoot + "/hint", "Native ARCP telemetry stream for this superstructure.");
+
+        stateMachine.publishArcp(publisher, root + "/Control/StateMachine");
+        S state = stateMachine.getGoalState();
+        publisher.put(root + "/Control/Status/state", state != null ? state.name() : "");
+
+        String inputsRoot = root + "/Inputs";
+        for (Map.Entry<String, java.util.function.BooleanSupplier> e : inputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Bool/" + e.getKey(), e.getValue().getAsBoolean());
+        }
+        for (Map.Entry<String, DoubleSupplier> e : doubleInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Double/" + e.getKey(), e.getValue().getAsDouble());
+        }
+        for (Map.Entry<String, IntSupplier> e : intInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/Int/" + e.getKey(), e.getValue().getAsInt());
+        }
+        for (Map.Entry<String, Supplier<String>> e : stringInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            publisher.put(inputsRoot + "/String/" + e.getKey(), e.getValue().get());
+        }
+        for (Map.Entry<String, Supplier<Pose2d>> e : pose2dInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            Pose2d pose = e.getValue().get();
+            if (pose == null) {
+                continue;
+            }
+            String poseRoot = inputsRoot + "/Pose2d/" + e.getKey();
+            publisher.put(poseRoot + "/x", pose.getX());
+            publisher.put(poseRoot + "/y", pose.getY());
+            publisher.put(poseRoot + "/deg", pose.getRotation().getDegrees());
+        }
+        for (Map.Entry<String, Supplier<Pose3d>> e : pose3dInputs.entrySet()) {
+            if (e == null || e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            Pose3d pose = e.getValue().get();
+            if (pose == null) {
+                continue;
+            }
+            String poseRoot = inputsRoot + "/Pose3d/" + e.getKey();
+            publisher.put(poseRoot + "/x", pose.getX());
+            publisher.put(poseRoot + "/y", pose.getY());
+            publisher.put(poseRoot + "/z", pose.getZ());
+            publisher.put(poseRoot + "/rxDeg", pose.getRotation().getX() * 180.0 / Math.PI);
+            publisher.put(poseRoot + "/ryDeg", pose.getRotation().getY() * 180.0 / Math.PI);
+            publisher.put(poseRoot + "/rzDeg", pose.getRotation().getZ() * 180.0 / Math.PI);
+        }
+
+        publishNestedSuperstructuresArcp(publisher, root);
+    }
+
     private void publishNestedSuperstructures(RobotNetworkTables.Node node) {
         for (Child<SP, ?> child : children) {
             if (child == null || child.superstructure == null) {
@@ -615,6 +691,20 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<SP>, S
                 nestedName = nested.getClass().getSimpleName();
             }
             nested.networkTables(node.child(nestedName));
+        }
+    }
+
+    private void publishNestedSuperstructuresArcp(ARCP publisher, String rootPath) {
+        for (Child<SP, ?> child : children) {
+            if (child == null || child.superstructure == null) {
+                continue;
+            }
+            SuperstructureMechanism<?, ?> nested = child.superstructure;
+            String nestedName = nested.getName();
+            if (nestedName == null || nestedName.isBlank()) {
+                nestedName = nested.getClass().getSimpleName();
+            }
+            nested.publishArcp(publisher, rootPath + "/" + nestedName);
         }
     }
 

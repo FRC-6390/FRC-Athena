@@ -5,6 +5,7 @@
 
   type Props = {
     signals: SignalRow[];
+    ntSignals?: SignalRow[];
     selectedId: number | null;
     query: string;
     onQueryInput: (value: string) => void;
@@ -50,6 +51,7 @@
 
   let {
     signals,
+    ntSignals = [],
     selectedId,
     query,
     onQueryInput,
@@ -79,8 +81,22 @@
       : `Athena/${normalized}`;
   }
 
+  function ntDisplayPath(path: string): string {
+    const trimmed = path.trim();
+    if (!trimmed) return '';
+    const normalized = trimmed.replace(/^\/+/, '');
+    if (normalized.startsWith('Athena/NT4/')) {
+      return `Athena/${normalized.slice('Athena/NT4/'.length)}`;
+    }
+    return ntCompatPath(normalized);
+  }
+
+  const activeSignals = $derived(explorerTab === 'nt' ? ntSignals : signals);
+  const arcpCount = $derived(signals.length);
+  const ntCount = $derived(ntSignals.length);
+
   function signalPath(signal: SignalRow): string {
-    return explorerTab === 'nt' ? ntCompatPath(signal.path) : signal.path;
+    return explorerTab === 'nt' ? ntDisplayPath(signal.path) : signal.path;
   }
 
   function splitPath(path: string): string[] {
@@ -157,7 +173,7 @@
     return finalizeTree(root);
   }
 
-  const tree = $derived.by(() => buildTree(signals, signalPath));
+  const tree = $derived.by(() => buildTree(activeSignals, signalPath));
 
   const allGroupKeys = $derived.by(() => {
     const keys: string[] = [];
@@ -343,7 +359,7 @@
 
   $effect(() => {
     if (selectedId === null) return;
-    const selected = signals.find((signal) => signal.signal_id === selectedId);
+    const selected = activeSignals.find((signal) => signal.signal_id === selectedId);
     if (!selected) return;
 
     const ancestors = groupKeysForPath(signalPath(selected));
@@ -376,7 +392,7 @@
         <h2>Data Explorer</h2>
         <p>{explorerTab === 'nt' ? 'Browse NetworkTables compatibility keys' : 'Browse ARCP signal catalog'}</p>
       </div>
-      <span class="count-pill">{signals.length}</span>
+      <span class="count-pill">{activeSignals.length}</span>
     </header>
   {/if}
 
@@ -393,7 +409,8 @@
         openGroups = new Set();
       }}
     >
-      ARCP
+      <span>ARCP</span>
+      <span class="tab-count">{arcpCount}</span>
     </button>
     <button
       type="button"
@@ -407,7 +424,8 @@
         openGroups = new Set();
       }}
     >
-      NetworkTables
+      <span>NetworkTables</span>
+      <span class="tab-count">{ntCount}</span>
     </button>
   </div>
 
@@ -421,7 +439,7 @@
   </div>
 
   <div class="signal-list">
-    {#if signals.length === 0}
+    {#if activeSignals.length === 0}
       <div class="empty">No entries match the current filters.</div>
     {:else}
       {#each treeRows as row (`${row.kind}-${row.kind === 'group' ? row.key : row.signal.signal_id}`)}
@@ -539,6 +557,9 @@
     border-radius: 6px;
     background: transparent;
     color: var(--text-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
     font-size: 0.7rem;
     font-weight: 600;
     letter-spacing: 0.01em;
@@ -550,6 +571,24 @@
     border-color: rgba(180, 35, 45, 0.48);
     background: rgba(180, 35, 45, 0.2);
     color: #ffe7ea;
+  }
+
+  .tab-count {
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: var(--surface-3);
+    color: var(--text-soft);
+    font-size: 0.62rem;
+    line-height: 1;
+    padding: 0.1rem 0.3rem;
+    min-width: 1.25rem;
+    text-align: center;
+  }
+
+  .explorer-tab.active .tab-count {
+    border-color: rgba(255, 180, 188, 0.62);
+    background: rgba(133, 15, 21, 0.38);
+    color: #ffecef;
   }
 
   .search-input {

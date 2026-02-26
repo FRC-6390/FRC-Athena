@@ -31,7 +31,8 @@ import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
 import ca.frc6390.athena.arcp.ArcpRuntime;
 import ca.frc6390.athena.core.arcp.ArcpDashboardLayout;
-import ca.frc6390.athena.core.arcp.ArcpNativePublisher;
+import ca.frc6390.athena.core.arcp.ARCP;
+import ca.frc6390.athena.core.arcp.ArcpDeviceWidgets;
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
@@ -40,6 +41,7 @@ import ca.frc6390.athena.core.auto.HolonomicPidConstants;
 import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.core.localization.PoseConfig;
 import ca.frc6390.athena.core.loop.TimedRunner;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.core.localization.RobotDrivetrainLocalizationFactory;
@@ -48,8 +50,10 @@ import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrain;
 import ca.frc6390.athena.drivetrains.differential.DifferentialDrivetrainConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrainConfig;
+import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.mechanisms.Mechanism;
+import ca.frc6390.athena.mechanisms.MechanismConfig;
 import ca.frc6390.athena.mechanisms.StatefulLike;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanism;
@@ -58,6 +62,7 @@ import ca.frc6390.athena.mechanisms.OutputType;
 import ca.frc6390.athena.networktables.AthenaNT;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 import ca.frc6390.athena.sensors.camera.VisionCameraCapability;
+import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import ca.frc6390.athena.logging.TelemetryRegistry;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
@@ -260,20 +265,21 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
      * @param enabled master runtime toggle for ARCP.
      * @param layoutProfileName default profile name used for mechanism layout publishing.
      * @param autoMechanismPages when enabled, RobotCore writes one dashboard page per mechanism.
+     * @param legacyNt4MirrorEnabled when enabled, keep legacy NT4 auto publishing for streams that
+     *        ARCP also publishes. Default is disabled to reduce duplicate publishing overhead.
      */
     public record ArcpConfig(
             boolean enabled,
             String layoutProfileName,
-            boolean autoMechanismPages) {
+            boolean autoMechanismPages,
+            boolean legacyNt4MirrorEnabled) {
 
         public ArcpConfig {
-            layoutProfileName = (layoutProfileName == null || layoutProfileName.isBlank())
-                    ? "athena-mechanisms"
-                    : layoutProfileName.trim();
+            layoutProfileName = normalizeArcpProfileName(layoutProfileName);
         }
 
         public static ArcpConfig defaults() {
-            return new ArcpConfig(false, "athena-mechanisms", true);
+            return new ArcpConfig(false, "atheana-generated", true, false);
         }
     }
 
@@ -651,11 +657,23 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private AthenaRuntimeServer configServer;
     private volatile boolean configServerEnabled = true;
     private ArcpRuntime arcpRuntime;
-    private ArcpNativePublisher arcpNativePublisher;
+    private ARCP arcp;
     private volatile boolean arcpEnabled = false;
     private volatile boolean arcpAutoMechanismPages = true;
-    private volatile String arcpLayoutProfileName = "athena-mechanisms";
+    private volatile String arcpLayoutProfileName = "atheana-generated";
+    private volatile boolean arcpLegacyNt4MirrorEnabled = false;
+    private volatile boolean arcpInitialLayoutPending = false;
     private boolean arcpPublishFailureReported;
+    private final Set<String> arcpPublishFailureScopes;
+    private long arcpRecordingRequestSequence = 0L;
+    private long arcpRecordingLastRequestTimestampMs = 0L;
+    private String arcpRecordingLastRequestMode = "";
+    private String arcpRecordingLastRequestPhase = "";
+    private String arcpRecordingLastRequestReason = "";
+    private long arcpRecordingLastClientHeartbeatMs = 0L;
+    private long arcpRecordingClientAckSequence = 0L;
+    private String arcpRecordingClientAckStatus = "";
+    private String arcpAutoSelectedRoutineId = "";
     private String configServerBaseUrl;
     private String cachedConfigExportBaseUrl = "";
     private ConfigExportUrls cachedConfigExportUrls = ConfigExportUrls.empty();
@@ -735,6 +753,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final double PERFORMANCE_SLOW_METRICS_PERIOD_SECONDS = 1.0;
     private static final double PERFORMANCE_VERY_SLOW_METRICS_PERIOD_SECONDS = 5.0;
     private static final double ARCP_NATIVE_PUBLISH_PERIOD_SECONDS = 0.02;
+    private static final long ARCP_RECORDING_CLIENT_PRESENCE_WINDOW_MS = 5_000L;
     private static final double COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS = 0.2;
     private static final double STARTUP_LOG_THRESHOLD_SECONDS = 0.05;
     private static final String SYSTEM_WEBSERVER_BINARY_PATH = "/usr/local/natinst/share/NIWebServer/SystemWebServer";
@@ -816,6 +835,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         scheduledCustomPidMechanisms = new HashSet<>();
         publishedMechanismsComp = new HashSet<>();
         publishedSuperstructuresComp = new HashSet<>();
+        arcpPublishFailureScopes = new HashSet<>();
         mechanismPublishKeysBuffer = new ArrayList<>();
         superstructurePublishKeysBuffer = new ArrayList<>();
         runtimeMxBean = ManagementFactory.getRuntimeMXBean();
@@ -836,6 +856,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         arcpEnabled = resolvedArcpConfig.enabled();
         arcpAutoMechanismPages = resolvedArcpConfig.autoMechanismPages();
         arcpLayoutProfileName = resolvedArcpConfig.layoutProfileName();
+        arcpLegacyNt4MirrorEnabled = resolvedArcpConfig.legacyNt4MirrorEnabled();
+        applyArcpNtMirrorPolicy();
         if (RobotBase.isReal()) {
             boolean tweaksOk = systemConfig.tweaksEnabled()
                     ? applySystemTweaks(systemConfig)
@@ -1132,9 +1154,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             ArcpRuntime runtime = ArcpRuntime.create();
             runtime.start();
             arcpRuntime = runtime;
-            arcpNativePublisher = new ArcpNativePublisher(runtime);
+            arcp = new ARCP(runtime);
             lastArcpPublishSeconds = Double.NaN;
             arcpPublishFailureReported = false;
+            arcpPublishFailureScopes.clear();
+            arcpInitialLayoutPending = arcpAutoMechanismPages;
             diagnosticsSection.core().info(
                     "athena",
                     "runtime started (control="
@@ -1143,13 +1167,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                             + runtime.realtimePort()
                             + ")");
             publishAthenaRuntimeNtStatus();
-            if (arcpAutoMechanismPages) {
-                writeArcpMechanismLayoutProfile(arcpLayoutProfileName);
-            }
         } catch (RuntimeException ex) {
             diagnosticsSection.core().error("athena", "failed to start ARCP runtime: " + ex.getMessage());
             arcpRuntime = null;
-            arcpNativePublisher = null;
+            arcp = null;
+            arcpInitialLayoutPending = false;
             publishAthenaRuntimeNtStatus();
         }
     }
@@ -1159,7 +1181,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (runtime == null) {
             return;
         }
-        arcpNativePublisher = null;
+        arcp = null;
         try {
             runtime.close();
         } catch (RuntimeException ex) {
@@ -1168,12 +1190,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             arcpRuntime = null;
             lastArcpPublishSeconds = Double.NaN;
             arcpPublishFailureReported = false;
+            arcpPublishFailureScopes.clear();
+            arcpInitialLayoutPending = false;
             publishAthenaRuntimeNtStatus();
         }
     }
 
     private void setArcpEnabled(boolean enabled) {
         arcpEnabled = enabled;
+        applyArcpNtMirrorPolicy();
         publishAthenaRuntimeNtStatus();
         if (!enabled) {
             stopArcpIfRunning();
@@ -1182,37 +1207,47 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         startArcpIfNeeded();
     }
 
-    private void publishAthenaRuntimeNtStatus() {
-        ArcpRuntime runtime = arcpRuntime;
-        boolean running = runtime != null && runtime.isRunning();
-        int controlPort = runtime != null ? runtime.controlPort() : 0;
-        int realtimePort = runtime != null ? runtime.realtimePort() : 0;
+    private void applyArcpNtMirrorPolicy() {
+        if (!arcpEnabled || arcpLegacyNt4MirrorEnabled) {
+            return;
+        }
+        // ARCP already covers core + mechanism streams; disable mirrored NT4 auto publishing
+        // by default to avoid duplicate CPU/bandwidth usage.
+        robotNetworkTables.disable(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE);
+        robotNetworkTables.disable(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS);
+    }
 
-        AthenaNT.put("Runtime/Athena/Enabled", arcpEnabled);
-        AthenaNT.put("Runtime/Athena/Running", running);
-        AthenaNT.put("Runtime/Athena/ControlPort", controlPort);
-        AthenaNT.put("Runtime/Athena/RealtimePort", realtimePort);
+    private void publishAthenaRuntimeNtStatus() {
+        // ARCP runtime status is published natively in publishArcpSignals().
+        // Keep this method as a no-op so ARCP data never routes through NetworkTables.
     }
 
     private void publishArcpSignals(double nowSeconds) {
         ArcpRuntime runtime = arcpRuntime;
-        ArcpNativePublisher publisher = arcpNativePublisher;
+        ARCP publisher = arcp;
         if (!arcpEnabled || runtime == null || !runtime.isRunning() || publisher == null) {
             return;
         }
-        if (Double.isFinite(nowSeconds) && Double.isFinite(lastArcpPublishSeconds)) {
-            double elapsed = nowSeconds - lastArcpPublishSeconds;
-            if (elapsed >= 0.0 && elapsed < ARCP_NATIVE_PUBLISH_PERIOD_SECONDS) {
-                return;
-            }
-        }
 
         try {
-            publisher.publishBoolean("Athena/Runtime/Enabled", arcpEnabled);
-            publisher.publishBoolean("Athena/Runtime/Running", true);
-            publisher.publishI64("Athena/Runtime/ControlPort", runtime.controlPort());
-            publisher.publishI64("Athena/Runtime/RealtimePort", runtime.realtimePort());
-            publisher.publishString("Athena/Runtime/Mode", runtimeMode.name());
+            // Control writes/invokes must be drained every loop, even when telemetry publish is throttled.
+            publisher.dispatchPendingEvents();
+            if (Double.isFinite(nowSeconds) && Double.isFinite(lastArcpPublishSeconds)) {
+                double elapsed = nowSeconds - lastArcpPublishSeconds;
+                if (elapsed >= 0.0 && elapsed < ARCP_NATIVE_PUBLISH_PERIOD_SECONDS) {
+                    return;
+                }
+            }
+
+            publisher.put("Athena/Runtime/Enabled", arcpEnabled);
+            publisher.put("Athena/Runtime/Running", true);
+            publisher.put("Athena/Runtime/ControlPort", runtime.controlPort());
+            publisher.put("Athena/Runtime/RealtimePort", runtime.realtimePort());
+            publisher.put("Athena/Runtime/Mode", runtimeMode.name());
+            publishArcpAutoSignals(publisher);
+            publishArcpLocalizationSignals(publisher);
+            publishArcpDrivetrainSignals(publisher);
+            publishArcpRecordingSignals(publisher);
 
             for (Map.Entry<String, Mechanism> entry : mechanisms.entrySet()) {
                 if (entry == null || entry.getValue() == null) {
@@ -1221,33 +1256,54 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 String mechanismName = normalizeArcpSignalSegment(entry.getKey());
                 String root = "Athena/Mechanisms/" + mechanismName;
                 Mechanism mechanism = entry.getValue();
-
-                publisher.publishString(root + "/Name", mechanism.getName());
-                publisher.publishBoolean(root + "/AtSetpoint", mechanism.atSetpoint());
-                publisher.publishBoolean(root + "/EmergencyStopped", mechanism.emergencyStopped());
-                publisher.publishDouble(root + "/Position", mechanism.position());
-                publisher.publishDouble(root + "/Velocity", mechanism.velocity());
-                publisher.publishDouble(root + "/Setpoint", mechanism.setpoint());
-                publisher.publishDouble(root + "/Output", mechanism.output());
-                publisher.publishString(root + "/OutputType", String.valueOf(mechanism.outputType()));
-
-                if (mechanism instanceof StatefulLike<?> stateful) {
-                    StatefulLike.StateMachineSection<?> stateSection = stateful.stateMachine();
-                    Enum<?> goal = stateSection.goal();
-                    Enum<?> next = stateSection.next();
-                    String queue = stateSection.queue();
-
-                    publisher.publishString(root + "/State/Goal", goal != null ? goal.name() : "");
-                    publisher.publishString(root + "/State/Next", next != null ? next.name() : "");
-                    publisher.publishString(root + "/State/Queue", queue != null ? queue : "");
-                    publisher.publishBoolean(root + "/State/AtGoal", stateSection.atGoal());
-                    publisher.publishDouble(root + "/State/Setpoint", stateSection.setpoint());
+                String failureScope = "mechanism:" + mechanismName;
+                try {
+                    mechanism.publishArcp(publisher, root);
+                    arcpPublishFailureScopes.remove(failureScope);
+                } catch (RuntimeException ex) {
+                    if (arcpPublishFailureScopes.add(failureScope)) {
+                        diagnosticsSection.core().warn(
+                                "athena",
+                                "ARCP signal publish failed for "
+                                        + failureScope
+                                        + ": "
+                                        + ex.getMessage());
+                    }
+                    arcpPublishFailureReported = true;
                 }
+            }
+            for (Map.Entry<String, SuperstructureMechanism<?, ?>> entry : superstructuresByName.entrySet()) {
+                if (entry == null || entry.getValue() == null) {
+                    continue;
+                }
+                String name = normalizeArcpSignalSegment(entry.getKey());
+                String root = "Athena/Mechanisms/" + name;
+                String failureScope = "superstructure:" + name;
+                try {
+                    entry.getValue().publishArcp(publisher, root);
+                    arcpPublishFailureScopes.remove(failureScope);
+                } catch (RuntimeException ex) {
+                    if (arcpPublishFailureScopes.add(failureScope)) {
+                        diagnosticsSection.core().warn(
+                                "athena",
+                                "ARCP signal publish failed for "
+                                        + failureScope
+                                        + ": "
+                                        + ex.getMessage());
+                    }
+                    arcpPublishFailureReported = true;
+                }
+            }
+            if (arcpInitialLayoutPending && arcpAutoMechanismPages) {
+                writeArcpMechanismLayoutProfile(arcpLayoutProfileName);
+                arcpInitialLayoutPending = false;
             }
             if (Double.isFinite(nowSeconds)) {
                 lastArcpPublishSeconds = nowSeconds;
             }
-            arcpPublishFailureReported = false;
+            if (arcpPublishFailureScopes.isEmpty()) {
+                arcpPublishFailureReported = false;
+            }
         } catch (RuntimeException ex) {
             if (!arcpPublishFailureReported) {
                 diagnosticsSection.core().warn("athena", "ARCP signal publish failed: " + ex.getMessage());
@@ -1260,6 +1316,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (!arcpEnabled || !arcpAutoMechanismPages) {
             return;
         }
+        if (arcpInitialLayoutPending && !Double.isFinite(lastArcpPublishSeconds)) {
+            return;
+        }
         writeArcpMechanismLayoutProfile(arcpLayoutProfileName);
     }
 
@@ -1268,19 +1327,25 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (runtime == null || !runtime.isRunning()) {
             return;
         }
+        ARCP publisher = arcp;
         String resolvedProfileName = normalizeArcpProfileName(profileName);
         List<ArcpDashboardLayout.Page> pages = new ArrayList<>();
         Set<String> usedPageIds = new HashSet<>();
+        appendDefaultArcpCorePages(pages, usedPageIds, publisher);
         synchronized (arcpMechanismPages) {
             for (Map.Entry<String, Mechanism> entry : mechanisms.entrySet()) {
                 if (entry == null) {
                     continue;
                 }
                 String mechanismName = entry.getKey();
+                Mechanism mechanism = entry.getValue();
                 String mechanismKey = normalizeMechanismPageKey(mechanismName);
                 ArcpDashboardLayout.Page page = arcpMechanismPages.get(mechanismKey);
-                if (page == null) {
-                    page = defaultArcpPageForMechanism(mechanismName);
+                if (page == null && mechanism != null) {
+                    page = arcpMechanismPages.get(normalizeMechanismPageKey(mechanism.getName()));
+                }
+                if (page == null || page.widgets().isEmpty()) {
+                    page = defaultArcpPageForMechanism(mechanismName, mechanism, publisher);
                 }
                 if (!usedPageIds.add(page.id())) {
                     continue;
@@ -1289,7 +1354,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
         }
         if (pages.isEmpty()) {
-            pages.add(defaultArcpPageForMechanism("Dashboard"));
+            pages.add(defaultArcpPageForMechanism("Dashboard", null, publisher));
         }
 
         ArcpDashboardLayout.Builder layoutBuilder = ArcpDashboardLayout.builder()
@@ -1301,19 +1366,1724 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         runtime.saveLayout(resolvedProfileName, layoutBuilder.build().toJson());
     }
 
+    private void publishArcpAutoSignals(ARCP publisher) {
+        if (publisher == null) {
+            return;
+        }
+        List<RobotAuto.AutoRoutine> routines = new ArrayList<>(autos.routines().all());
+        routines.sort((left, right) -> {
+            String leftLabel = left != null && left.key() != null && left.key().displayName() != null
+                    ? left.key().displayName()
+                    : "";
+            String rightLabel = right != null && right.key() != null && right.key().displayName() != null
+                    ? right.key().displayName()
+                    : "";
+            return leftLabel.compareToIgnoreCase(rightLabel);
+        });
+        publisher.put("Athena/Auto/Routines/count", routines.size());
+
+        String[] routineIds = routines.stream()
+                .map(routine -> routine != null && routine.key() != null && routine.key().id() != null
+                        ? routine.key().id()
+                        : "")
+                .toArray(String[]::new);
+        String[] routineDisplayNames = routines.stream()
+                .map(routine -> routine != null && routine.key() != null && routine.key().displayName() != null
+                        ? routine.key().displayName()
+                        : "")
+                .toArray(String[]::new);
+        publisher.put("Athena/Auto/Chooser/options", routineIds);
+        publisher.put("Athena/Auto/Chooser/displayNames", routineDisplayNames);
+        publisher.writableString("Athena/Auto/Chooser/selectedId")
+                .onSet(value -> arcpAutoSelectedRoutineId = value != null ? value.trim() : "");
+
+        RobotSpeeds speeds = drivetrain != null ? drivetrain.robotSpeeds() : null;
+        if (speeds != null) {
+            publisher.put("Athena/Auto/Follower/enabled", speeds.isSpeedsSourceActive(RobotSpeeds.AUTO_SOURCE));
+            ChassisSpeeds input = speeds.getInputSpeeds(RobotSpeeds.AUTO_SOURCE);
+            ChassisSpeeds output = speeds.getSpeeds(RobotSpeeds.AUTO_SOURCE);
+            publisher.put("Athena/Auto/Follower/input/vxMps", input.vxMetersPerSecond);
+            publisher.put("Athena/Auto/Follower/input/vyMps", input.vyMetersPerSecond);
+            publisher.put("Athena/Auto/Follower/input/omegaRadPerSec", input.omegaRadiansPerSecond);
+            publisher.put("Athena/Auto/Follower/output/vxMps", output.vxMetersPerSecond);
+            publisher.put("Athena/Auto/Follower/output/vyMps", output.vyMetersPerSecond);
+            publisher.put("Athena/Auto/Follower/output/omegaRadPerSec", output.omegaRadiansPerSecond);
+        }
+
+        RobotAuto.AutoRoutine selectedRoutine = resolveArcpSelectedAutoRoutine(routines);
+        publisher.put(
+                "Athena/Auto/Chooser/selectedId",
+                selectedRoutine != null && selectedRoutine.key() != null && selectedRoutine.key().id() != null
+                        ? selectedRoutine.key().id()
+                        : "");
+        if (selectedRoutine == null) {
+            publisher.put("Athena/Auto/Selected/id", "");
+            publisher.put("Athena/Auto/Selected/displayName", "");
+            publisher.put("Athena/Auto/Selected/source", "");
+            publisher.put("Athena/Auto/Selected/reference", "");
+            publisher.put("Athena/Auto/Selected/hasStartingPose", false);
+            publisher.put("Athena/Auto/Selected/hasTrajectory", false);
+            publisher.put("Athena/Auto/Selected/trajectoryPointCount", 0.0);
+            publisher.put("Athena/Auto/Selected/trajectory", "[]");
+            return;
+        }
+
+        publisher.put("Athena/Auto/Selected/id", selectedRoutine.key().id());
+        publisher.put("Athena/Auto/Selected/displayName", selectedRoutine.key().displayName());
+        publisher.put("Athena/Auto/Selected/source", selectedRoutine.source().name());
+        publisher.put("Athena/Auto/Selected/reference", selectedRoutine.reference());
+        publisher.put("Athena/Auto/Selected/hasStartingPose", selectedRoutine.hasStartingPose());
+
+        RobotAuto.AutoRoutine chooserSelected = autos.selection().selected().orElse(null);
+        boolean usingChooserSelection = chooserSelected != null
+                && chooserSelected.key() != null
+                && selectedRoutine.key() != null
+                && chooserSelected.key().id() != null
+                && chooserSelected.key().id().equals(selectedRoutine.key().id());
+
+        java.util.Optional<java.util.List<Pose2d>> selectedPoses =
+                usingChooserSelection ? autos.selection().selectedPoses() : java.util.Optional.empty();
+        if (selectedPoses.isEmpty()) {
+            selectedPoses = autos.routines().poses(selectedRoutine);
+        }
+        List<Pose2d> poses = selectedPoses.orElse(List.of());
+        int trajectoryPointCount = poses.size();
+        publisher.put("Athena/Auto/Selected/hasTrajectory", trajectoryPointCount > 0);
+        publisher.put("Athena/Auto/Selected/trajectoryPointCount", trajectoryPointCount);
+        publisher.put("Athena/Auto/Selected/trajectory", toArcpFieldTrajectoryJson(poses));
+    }
+
+    private RobotAuto.AutoRoutine resolveArcpSelectedAutoRoutine(List<RobotAuto.AutoRoutine> routines) {
+        if (routines == null || routines.isEmpty()) {
+            arcpAutoSelectedRoutineId = "";
+            return null;
+        }
+
+        String requested = arcpAutoSelectedRoutineId != null ? arcpAutoSelectedRoutineId.trim() : "";
+        if (!requested.isBlank()) {
+            for (RobotAuto.AutoRoutine routine : routines) {
+                if (routine == null || routine.key() == null) {
+                    continue;
+                }
+                String id = routine.key().id() != null ? routine.key().id() : "";
+                String display = routine.key().displayName() != null ? routine.key().displayName() : "";
+                if (id.equalsIgnoreCase(requested) || display.equalsIgnoreCase(requested)) {
+                    arcpAutoSelectedRoutineId = id;
+                    return routine;
+                }
+            }
+        }
+
+        RobotAuto.AutoRoutine selected = autos.selection().selected().orElse(null);
+        if (selected != null && selected.key() != null && selected.key().id() != null) {
+            arcpAutoSelectedRoutineId = selected.key().id();
+            return selected;
+        }
+        return routines.get(0);
+    }
+
+    private static String toArcpFieldTrajectoryJson(List<Pose2d> poses) {
+        if (poses == null || poses.isEmpty()) {
+            return "[]";
+        }
+        StringBuilder out = new StringBuilder(poses.size() * 28 + 2);
+        out.append('[');
+        for (int i = 0; i < poses.size(); i++) {
+            Pose2d pose = poses.get(i);
+            if (pose == null) {
+                continue;
+            }
+            if (out.length() > 1) {
+                out.append(',');
+            }
+            out.append("{\"x\":")
+                    .append(pose.getX())
+                    .append(",\"y\":")
+                    .append(pose.getY())
+                    .append('}');
+        }
+        out.append(']');
+        return out.toString();
+    }
+
+    private void publishArcpLocalizationSignals(ARCP publisher) {
+        if (publisher == null || localization == null) {
+            return;
+        }
+        String updatesSuppressedPath = "Athena/Localization/Status/updatesSuppressed";
+        String visionEnabledPath = "Athena/Localization/Status/visionEnabled";
+        String autoPoseNamePath = "Athena/Localization/Status/autoPoseName";
+
+        publisher.writableBoolean(updatesSuppressedPath).onSetBoolean(localization::setSuppressUpdates);
+        publisher.writableBoolean(visionEnabledPath).onSetBoolean(value -> localization.enableVisionForLocalization(value));
+        publisher.writableString(autoPoseNamePath).onSet(value -> {
+            if (value == null) {
+                return;
+            }
+            String trimmed = value.trim();
+            if (trimmed.isBlank()) {
+                return;
+            }
+            localization.getLocalizationConfig().poses().autoPoseName(trimmed);
+        });
+
+        Pose2d pose = localization.pose();
+        publisher.put("Athena/Localization/Pose/xMeters", pose.getX());
+        publisher.put("Athena/Localization/Pose/yMeters", pose.getY());
+        publisher.put("Athena/Localization/Pose/headingDeg", pose.getRotation().getDegrees());
+
+        Pose3d pose3d = localization.pose3d();
+        publisher.put("Athena/Localization/Pose3d/xMeters", pose3d.getX());
+        publisher.put("Athena/Localization/Pose3d/yMeters", pose3d.getY());
+        publisher.put("Athena/Localization/Pose3d/zMeters", pose3d.getZ());
+        publisher.put("Athena/Localization/Pose3d/rollDeg", pose3d.getRotation().getX() * 180.0 / Math.PI);
+        publisher.put("Athena/Localization/Pose3d/pitchDeg", pose3d.getRotation().getY() * 180.0 / Math.PI);
+        publisher.put("Athena/Localization/Pose3d/yawDeg", pose3d.getRotation().getZ() * 180.0 / Math.PI);
+
+        ChassisSpeeds robotSpeeds = localization.getRobotRelativeSpeeds();
+        publisher.put("Athena/Localization/Speeds/robot/vxMps", robotSpeeds.vxMetersPerSecond);
+        publisher.put("Athena/Localization/Speeds/robot/vyMps", robotSpeeds.vyMetersPerSecond);
+        publisher.put("Athena/Localization/Speeds/robot/omegaRadPerSec", robotSpeeds.omegaRadiansPerSecond);
+
+        ChassisSpeeds fieldSpeeds = localization.getFieldRelativeSpeeds();
+        publisher.put("Athena/Localization/Speeds/field/vxMps", fieldSpeeds.vxMetersPerSecond);
+        publisher.put("Athena/Localization/Speeds/field/vyMps", fieldSpeeds.vyMetersPerSecond);
+        publisher.put("Athena/Localization/Speeds/field/omegaRadPerSec", fieldSpeeds.omegaRadiansPerSecond);
+
+        publisher.put("Athena/Localization/FieldPose/xMeters", pose3d.getX());
+        publisher.put("Athena/Localization/FieldPose/zMeters", pose3d.getZ());
+        publisher.put("Athena/Localization/FieldPose/thetaDeg", pose.getRotation().getDegrees());
+
+        publisher.put("Athena/Localization/Status/normalizedSpeed", localization.getNormalizedMovementSpeed());
+        publisher.put("Athena/Localization/Status/updatesSuppressed", localization.isSuppressUpdates());
+        RobotLocalizationConfig localizationConfig = localization.getLocalizationConfig();
+        String poseName = localizationConfig != null ? localizationConfig.autoPoseName() : "";
+        boolean visionEnabled = localizationConfig != null && localizationConfig.isVisionEnabled();
+        String[] poseOptions = localizationConfig != null
+                ? localizationConfig.poseConfigs().stream()
+                        .filter(cfg -> cfg != null && cfg.name() != null && !cfg.name().isBlank())
+                        .map(PoseConfig::name)
+                        .toArray(String[]::new)
+                : new String[0];
+        publisher.put("Athena/Localization/Status/autoPoseOptions", poseOptions);
+        publisher.put(autoPoseNamePath, poseName != null ? poseName : "");
+        publisher.put("Athena/Localization/Status/visionEnabled", visionEnabled);
+    }
+
+    private void publishArcpDrivetrainSignals(ARCP publisher) {
+        if (publisher == null || drivetrain == null) {
+            return;
+        }
+        publisher.put("Athena/Drivetrain/Limits/maxVelocityMps", drivetrain.speeds().maxVelocity());
+        publisher.put(
+                "Athena/Drivetrain/Limits/maxAngularVelocityRadPerSec",
+                drivetrain.speeds().maxAngularVelocity());
+
+        RobotSpeeds robotSpeeds = drivetrain.robotSpeeds();
+        ChassisSpeeds blendedOutput = robotSpeeds.calculate();
+        publisher.put("Athena/Drivetrain/Output/vxMps", blendedOutput.vxMetersPerSecond);
+        publisher.put("Athena/Drivetrain/Output/vyMps", blendedOutput.vyMetersPerSecond);
+        publisher.put("Athena/Drivetrain/Output/omegaRadPerSec", blendedOutput.omegaRadiansPerSecond);
+
+        Set<String> speedSources = new HashSet<>(drivetrain.speeds().sources());
+        speedSources.add(RobotSpeeds.DRIVE_SOURCE);
+        speedSources.add(RobotSpeeds.AUTO_SOURCE);
+        speedSources.add(RobotSpeeds.FEEDBACK_SOURCE);
+        String[] publishedSourceNames = speedSources.stream()
+                .filter(name -> name != null && !name.isBlank())
+                .sorted()
+                .toArray(String[]::new);
+        publisher.put("Athena/Drivetrain/Sources/list", publishedSourceNames);
+
+        for (String source : publishedSourceNames) {
+            String sourceKey = normalizeArcpSignalSegment(source);
+            String sourceRoot = "Athena/Drivetrain/Sources/" + sourceKey;
+            publisher.writableBoolean(sourceRoot + "/enabled")
+                    .onSetBoolean(value -> drivetrain.speeds().enabled(source, value));
+            publisher.put(sourceRoot + "/name", source);
+            publisher.put(sourceRoot + "/enabled", robotSpeeds.isSpeedsSourceActive(source));
+
+            ChassisSpeeds input = robotSpeeds.getInputSpeeds(source);
+            publisher.put(sourceRoot + "/input/vxMps", input.vxMetersPerSecond);
+            publisher.put(sourceRoot + "/input/vyMps", input.vyMetersPerSecond);
+            publisher.put(sourceRoot + "/input/omegaRadPerSec", input.omegaRadiansPerSecond);
+
+            ChassisSpeeds output = robotSpeeds.getSpeeds(source);
+            publisher.put(sourceRoot + "/output/vxMps", output.vxMetersPerSecond);
+            publisher.put(sourceRoot + "/output/vyMps", output.vyMetersPerSecond);
+            publisher.put(sourceRoot + "/output/omegaRadPerSec", output.omegaRadiansPerSecond);
+            publisher.put(sourceRoot + "/output/magnitudeMps", Math.hypot(output.vxMetersPerSecond, output.vyMetersPerSecond));
+        }
+
+        Imu imuDevice = drivetrain.imu().device();
+        if (imuDevice != null) {
+            imuDevice.publishArcp(publisher, "Athena/Drivetrain/Imu");
+        }
+
+        if (drivetrain instanceof SwerveDrivetrain swerve) {
+            publishArcpSwerveDrivetrainSignals(publisher, swerve);
+            return;
+        }
+        if (drivetrain instanceof DifferentialDrivetrain differential) {
+            publishArcpDifferentialDrivetrainSignals(publisher, differential);
+        }
+    }
+
+    private void publishArcpSwerveDrivetrainSignals(ARCP publisher, SwerveDrivetrain drivetrain) {
+        if (publisher == null || drivetrain == null) {
+            return;
+        }
+        SwerveDrivetrain.ModulesRuntimeSection modulesSection = (SwerveDrivetrain.ModulesRuntimeSection) drivetrain.modules();
+        var modules = modulesSection.all();
+        if (modules == null || modules.length == 0) {
+            return;
+        }
+
+        String[] labels = {"FL", "FR", "BL", "BR"};
+        String[] keys = new String[modules.length];
+        for (int i = 0; i < modules.length; i++) {
+            var module = modules[i];
+            if (module == null) {
+                continue;
+            }
+            String label = i < labels.length ? labels[i] : ("M" + (i + 1));
+            keys[i] = label;
+            String moduleRoot = "Athena/Drivetrain/Swerve/Modules/" + label;
+            var state = module.getState();
+            double angleDeg = state.angle != null ? state.angle.getDegrees() : 0.0;
+            double speedMps = state.speedMetersPerSecond;
+            publisher.put(moduleRoot + "/name", label);
+            publisher.put(moduleRoot + "/angleDeg", angleDeg);
+            publisher.put(moduleRoot + "/speedMps", speedMps);
+            publisher.put(moduleRoot + "/driveCommandPercent", module.getDriveCommandPercent());
+            publisher.put(moduleRoot + "/steerCommandPercent", module.getSteerCommandPercent());
+
+            publisher.writableDouble(moduleRoot + "/command/angleDeg")
+                    .onSetDouble(value -> module.setSteerAngle(Rotation2d.fromDegrees(value)));
+            publisher.writableDouble(moduleRoot + "/command/speedMps")
+                    .onSetDouble(value -> module.setDesiredState(
+                            new edu.wpi.first.math.kinematics.SwerveModuleState(
+                                    value,
+                                    Rotation2d.fromDegrees(module.getState().angle.getDegrees()))));
+            publisher.writableBoolean(moduleRoot + "/command/inverted")
+                    .onSetBoolean(value -> module.getDriveMotorController().setInverted(value));
+            publisher.writableDouble(moduleRoot + "/command/offset")
+                    .onSetDouble(module::setOffset);
+
+            publisher.put(moduleRoot + "/command/inverted", module.getDriveMotorController().isInverted());
+            if (module.getSteerEncoder() != null) {
+                publisher.put(moduleRoot + "/command/offset", module.getSteerEncoder().getOffset());
+                module.getSteerEncoder().publishArcp(publisher, moduleRoot + "/Encoder");
+            }
+            if (module.getDriveMotorController() != null) {
+                module.getDriveMotorController().publishArcp(publisher, moduleRoot + "/Motors/Drive");
+            }
+            if (module.getSteerMotorController() != null) {
+                module.getSteerMotorController().publishArcp(publisher, moduleRoot + "/Motors/Steer");
+            }
+        }
+        publisher.put("Athena/Drivetrain/Swerve/modules", keys);
+    }
+
+    private void publishArcpDifferentialDrivetrainSignals(ARCP publisher, DifferentialDrivetrain drivetrain) {
+        if (publisher == null || drivetrain == null) {
+            return;
+        }
+        DifferentialDrivetrain.ModulesRuntimeSection modulesSection =
+                (DifferentialDrivetrain.ModulesRuntimeSection) drivetrain.modules();
+        MotorControllerGroup left = modulesSection.leftMotors();
+        MotorControllerGroup right = modulesSection.rightMotors();
+        if (left == null || right == null) {
+            return;
+        }
+        String root = "Athena/Drivetrain/Differential";
+        left.publishArcp(publisher, root + "/Left");
+        right.publishArcp(publisher, root + "/Right");
+        double leftSpeed = left.getEncoderGroup() != null ? left.getEncoderGroup().getVelocity() : 0.0;
+        double rightSpeed = right.getEncoderGroup() != null ? right.getEncoderGroup().getVelocity() : 0.0;
+        publisher.put(root + "/leftSpeedMps", leftSpeed);
+        publisher.put(root + "/rightSpeedMps", rightSpeed);
+        Imu imu = drivetrain.imu().device();
+        if (imu != null && imu.getYaw() != null) {
+            publisher.put(root + "/headingDeg", imu.getYaw().getDegrees());
+        }
+        publisher.writableDouble(root + "/command/leftPercent").onSetDouble(left::setSpeed);
+        publisher.writableDouble(root + "/command/rightPercent").onSetDouble(right::setSpeed);
+        publisher.writableDouble(root + "/command/leftVoltage").onSetDouble(left::setVoltage);
+        publisher.writableDouble(root + "/command/rightVoltage").onSetDouble(right::setVoltage);
+        publisher.command(root + "/command/stop").onInvoke(() -> {
+            left.stopMotors();
+            right.stopMotors();
+        });
+    }
+
+    private void publishArcpRecordingSignals(ARCP publisher) {
+        if (publisher == null) {
+            return;
+        }
+        publisher.writableI64(
+                "Athena/Recording/Client/heartbeatMs").onSetI64(value -> arcpRecordingLastClientHeartbeatMs = value);
+        publisher.writableI64(
+                "Athena/Recording/Client/ackSequence").onSetI64(value -> arcpRecordingClientAckSequence = value);
+        publisher.writableString(
+                "Athena/Recording/Client/ackStatus").onSet(value -> arcpRecordingClientAckStatus = value != null ? value : "");
+
+        long nowMs = System.currentTimeMillis();
+        long heartbeatAgeMs = arcpRecordingLastClientHeartbeatMs > 0L
+                ? Math.max(0L, nowMs - arcpRecordingLastClientHeartbeatMs)
+                : -1L;
+        boolean clientPresent = heartbeatAgeMs >= 0L && heartbeatAgeMs <= ARCP_RECORDING_CLIENT_PRESENCE_WINDOW_MS;
+
+        publisher.put("Athena/Recording/Client/present", clientPresent);
+        publisher.put("Athena/Recording/Client/heartbeatAgeMs", heartbeatAgeMs);
+        publisher.put("Athena/Recording/Client/lastAckSequence", arcpRecordingClientAckSequence);
+        publisher.put("Athena/Recording/Client/lastAckStatus", arcpRecordingClientAckStatus);
+
+        publisher.put("Athena/Recording/Request/sequence", arcpRecordingRequestSequence);
+        publisher.put("Athena/Recording/Request/timestampMs", arcpRecordingLastRequestTimestampMs);
+        publisher.put("Athena/Recording/Request/mode", arcpRecordingLastRequestMode);
+        publisher.put("Athena/Recording/Request/phase", arcpRecordingLastRequestPhase);
+        publisher.put("Athena/Recording/Request/reason", arcpRecordingLastRequestReason);
+    }
+
+    private void triggerArcpRecordingRequest(String phase) {
+        String normalizedPhase = phase != null ? phase.trim().toLowerCase() : "";
+        if (normalizedPhase.isEmpty()) {
+            normalizedPhase = "enabled";
+        }
+        arcpRecordingRequestSequence += 1L;
+        arcpRecordingLastRequestTimestampMs = System.currentTimeMillis();
+        arcpRecordingLastRequestMode = DriverStation.isFMSAttached() ? "match" : "practice";
+        arcpRecordingLastRequestPhase = normalizedPhase;
+        arcpRecordingLastRequestReason = arcpRecordingLastRequestMode + "_start";
+    }
+
+    private void appendDefaultArcpCorePages(
+            List<ArcpDashboardLayout.Page> pages,
+            Set<String> usedPageIds,
+            ARCP publisher) {
+        appendPageIfAbsent(pages, usedPageIds, defaultArcpPageForAuto(publisher));
+        appendPageIfAbsent(pages, usedPageIds, defaultArcpPageForLocalization(publisher));
+        appendPageIfAbsent(pages, usedPageIds, defaultArcpPageForDrivetrain(publisher));
+    }
+
+    private static void appendPageIfAbsent(
+            List<ArcpDashboardLayout.Page> pages,
+            Set<String> usedPageIds,
+            ArcpDashboardLayout.Page page) {
+        if (page == null || pages == null || usedPageIds == null) {
+            return;
+        }
+        if (usedPageIds.add(page.id())) {
+            pages.add(page);
+        }
+    }
+
+    private static int firstExistingSignalId(ARCP publisher, String... paths) {
+        if (publisher == null || paths == null || paths.length == 0) {
+            return 0;
+        }
+        for (String path : paths) {
+            if (path == null || path.isBlank()) {
+                continue;
+            }
+            int id = publisher.existingSignalId(path);
+            if (id > 0) {
+                return id;
+            }
+        }
+        return 0;
+    }
+
+    private static Map<String, Object> dropdownOption(String label, String value) {
+        Map<String, Object> option = new LinkedHashMap<>();
+        option.put("label", label != null ? label : "");
+        option.put("value", value != null ? value : "");
+        return option;
+    }
+
+    private List<RobotAuto.AutoRoutine> sortedAutoRoutines() {
+        List<RobotAuto.AutoRoutine> routines = new ArrayList<>(autos.routines().all());
+        routines.sort((left, right) -> {
+            String leftLabel = left != null && left.key() != null && left.key().displayName() != null
+                    ? left.key().displayName()
+                    : "";
+            String rightLabel = right != null && right.key() != null && right.key().displayName() != null
+                    ? right.key().displayName()
+                    : "";
+            return leftLabel.compareToIgnoreCase(rightLabel);
+        });
+        return routines;
+    }
+
+    private List<String> sortedLocalizationPoseNames() {
+        if (localization == null) {
+            return List.of();
+        }
+        RobotLocalizationConfig cfg = localization.getLocalizationConfig();
+        if (cfg == null || cfg.poseConfigs() == null || cfg.poseConfigs().isEmpty()) {
+            return List.of();
+        }
+        List<String> names = new ArrayList<>();
+        for (PoseConfig poseConfig : cfg.poseConfigs()) {
+            if (poseConfig == null || poseConfig.name() == null) {
+                continue;
+            }
+            String trimmed = poseConfig.name().trim();
+            if (!trimmed.isBlank()) {
+                names.add(trimmed);
+            }
+        }
+        names.sort(String::compareToIgnoreCase);
+        return names;
+    }
+
+    private List<String> sortedDrivetrainSourceNames() {
+        Set<String> sourceNames = new HashSet<>();
+        sourceNames.add(RobotSpeeds.DRIVE_SOURCE);
+        sourceNames.add(RobotSpeeds.AUTO_SOURCE);
+        sourceNames.add(RobotSpeeds.FEEDBACK_SOURCE);
+        if (drivetrain != null) {
+            sourceNames.addAll(drivetrain.speeds().sources());
+        }
+        List<String> sorted = new ArrayList<>();
+        for (String source : sourceNames) {
+            if (source == null || source.isBlank()) {
+                continue;
+            }
+            sorted.add(source.trim());
+        }
+        sorted.sort(String::compareToIgnoreCase);
+        return sorted;
+    }
+
+    private ArcpDashboardLayout.Page defaultArcpPageForAuto(ARCP publisher) {
+        ArcpDashboardLayout.Page.Builder page = ArcpDashboardLayout.Page.builder()
+                .id("tab-auto")
+                .name("Auto");
+        if (publisher == null) {
+            return page.build();
+        }
+
+        String chooserPath = "Athena/Auto/Chooser/selectedId";
+        String selectedNamePath = "Athena/Auto/Selected/displayName";
+        int chooserSignalId = publisher.existingSignalId(chooserPath);
+
+        List<Map<String, Object>> chooserOptions = new ArrayList<>();
+        for (RobotAuto.AutoRoutine routine : sortedAutoRoutines()) {
+            if (routine == null || routine.key() == null) {
+                continue;
+            }
+            String id = routine.key().id() != null ? routine.key().id() : "";
+            if (id.isBlank()) {
+                continue;
+            }
+            String display = routine.key().displayName() != null && !routine.key().displayName().isBlank()
+                    ? routine.key().displayName()
+                    : id;
+            chooserOptions.add(dropdownOption(display, id));
+        }
+
+        int trajectorySignalId = publisher.existingSignalId("Athena/Auto/Selected/trajectory");
+        int fieldXSignalId = publisher.existingSignalId("Athena/Localization/Pose/xMeters");
+        int fieldYSignalId = publisher.existingSignalId("Athena/Localization/Pose/yMeters");
+        int fieldHeadingSignalId = publisher.existingSignalId("Athena/Localization/Pose/headingDeg");
+
+        int outputVxId = publisher.existingSignalId("Athena/Auto/Follower/output/vxMps");
+        int outputVyId = publisher.existingSignalId("Athena/Auto/Follower/output/vyMps");
+        int outputOmegaId = publisher.existingSignalId("Athena/Auto/Follower/output/omegaRadPerSec");
+        int inputVxId = publisher.existingSignalId("Athena/Auto/Follower/input/vxMps");
+        int inputVyId = publisher.existingSignalId("Athena/Auto/Follower/input/vyMps");
+        int inputOmegaId = publisher.existingSignalId("Athena/Auto/Follower/input/omegaRadPerSec");
+
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-auto-chooser")
+                .kind("dropdown")
+                .title("Auto Chooser")
+                .signalId(firstExistingSignalId(publisher, chooserPath, selectedNamePath))
+                .layout(0, 0, 10, 1)
+                .config("signalPath", chooserPath)
+                .config("options", chooserOptions)
+                .config("commit", "button")
+                .config("buttonLabel", "Set")
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-auto-field-preview")
+                .kind("field")
+                .title("Auto Field Preview")
+                .signalId(firstExistingSignalId(publisher, "Athena/Auto/Selected/trajectory", chooserPath))
+                .layout(0, 1, 14, 8)
+                .config("trajectorySignalId", trajectorySignalId)
+                .config("xSignalId", fieldXSignalId)
+                .config("ySignalId", fieldYSignalId)
+                .config("headingSignalId", fieldHeadingSignalId)
+                .config("allowPoseSet", false)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-auto-follower-output")
+                .kind("graph")
+                .title("Follower Output")
+                .signalId(firstExistingSignalId(publisher, "Athena/Auto/Follower/output/vxMps", chooserPath))
+                .layout(14, 1, 10, 4)
+                .config("series", List.of(
+                        graphSeries(outputVxId, "vx", "#f87171", "line", "metric"),
+                        graphSeries(outputVyId, "vy", "#22d3ee", "line", "metric"),
+                        graphSeries(outputOmegaId, "omega", "#a78bfa", "line", "metric")))
+                .config("yMin", -10.0)
+                .config("yMax", 10.0)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-auto-follower-input")
+                .kind("graph")
+                .title("Follower Input")
+                .signalId(firstExistingSignalId(publisher, "Athena/Auto/Follower/input/vxMps", chooserPath))
+                .layout(14, 5, 10, 4)
+                .config("series", List.of(
+                        graphSeries(inputVxId, "vx", "#fb7185", "line", "metric"),
+                        graphSeries(inputVyId, "vy", "#67e8f9", "line", "metric"),
+                        graphSeries(inputOmegaId, "omega", "#c4b5fd", "line", "metric")))
+                .config("yMin", -10.0)
+                .config("yMax", 10.0)
+                .build());
+        return page.build();
+    }
+
+    private ArcpDashboardLayout.Page defaultArcpPageForLocalization(ARCP publisher) {
+        ArcpDashboardLayout.Page.Builder page = ArcpDashboardLayout.Page.builder()
+                .id("tab-localization")
+                .name("Localization");
+        if (publisher == null) {
+            return page.build();
+        }
+
+        String headingPath = "Athena/Localization/Pose/headingDeg";
+        String normalizedSpeedPath = "Athena/Localization/Status/normalizedSpeed";
+        String visionEnabledPath = "Athena/Localization/Status/visionEnabled";
+        String updatesSuppressedPath = "Athena/Localization/Status/updatesSuppressed";
+        String autoPoseNamePath = "Athena/Localization/Status/autoPoseName";
+
+        int headingId = publisher.existingSignalId(headingPath);
+        int normalizedSpeedId = publisher.existingSignalId(normalizedSpeedPath);
+        int visionEnabledId = publisher.existingSignalId(visionEnabledPath);
+        int updatesSuppressedId = publisher.existingSignalId(updatesSuppressedPath);
+        int autoPoseNameId = publisher.existingSignalId(autoPoseNamePath);
+
+        int robotVxId = publisher.existingSignalId("Athena/Localization/Speeds/robot/vxMps");
+        int robotVyId = publisher.existingSignalId("Athena/Localization/Speeds/robot/vyMps");
+        int robotOmegaId = publisher.existingSignalId("Athena/Localization/Speeds/robot/omegaRadPerSec");
+        int fieldVxId = publisher.existingSignalId("Athena/Localization/Speeds/field/vxMps");
+        int fieldVyId = publisher.existingSignalId("Athena/Localization/Speeds/field/vyMps");
+        int fieldOmegaId = publisher.existingSignalId("Athena/Localization/Speeds/field/omegaRadPerSec");
+
+        int fieldXId = publisher.existingSignalId("Athena/Localization/FieldPose/xMeters");
+        int fieldZId = publisher.existingSignalId("Athena/Localization/FieldPose/zMeters");
+        int fieldThetaId = publisher.existingSignalId("Athena/Localization/FieldPose/thetaDeg");
+
+        List<Map<String, Object>> autoPoseOptions = new ArrayList<>();
+        for (String poseName : sortedLocalizationPoseNames()) {
+            autoPoseOptions.add(dropdownOption(poseName, poseName));
+        }
+
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-localization-heading-compass")
+                .kind("compass")
+                .title("Heading")
+                .signalId(firstExistingSignalId(publisher, headingPath, normalizedSpeedPath))
+                .layout(0, 0, 5, 4)
+                .config("signalPath", headingPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-localization-robot-speeds")
+                .kind("graph")
+                .title("Robot Relative Speeds")
+                .signalId(firstExistingSignalId(publisher, "Athena/Localization/Speeds/robot/vxMps", headingPath))
+                .layout(5, 0, 9, 4)
+                .config("series", List.of(
+                        graphSeries(robotVxId, "vx", "#f87171", "line", "metric"),
+                        graphSeries(robotVyId, "vy", "#22d3ee", "line", "metric"),
+                        graphSeries(robotOmegaId, "omega", "#a78bfa", "line", "metric")))
+                .config("yMin", -10.0)
+                .config("yMax", 10.0)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-localization-field-speeds")
+                .kind("graph")
+                .title("Field Relative Speeds")
+                .signalId(firstExistingSignalId(publisher, "Athena/Localization/Speeds/field/vxMps", headingPath))
+                .layout(14, 0, 10, 4)
+                .config("series", List.of(
+                        graphSeries(fieldVxId, "vx", "#fb7185", "line", "metric"),
+                        graphSeries(fieldVyId, "vy", "#67e8f9", "line", "metric"),
+                        graphSeries(fieldOmegaId, "omega", "#c4b5fd", "line", "metric")))
+                .config("yMin", -10.0)
+                .config("yMax", 10.0)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-localization-vision")
+                .kind("toggle")
+                .title("Vision")
+                .signalId(visionEnabledId)
+                .layout(0, 4, 4, 1)
+                .config("signalPath", visionEnabledPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-localization-updates")
+                .kind("toggle")
+                .title("Suppress Updates")
+                .signalId(updatesSuppressedId)
+                .layout(4, 4, 5, 1)
+                .config("signalPath", updatesSuppressedPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-localization-auto-pose")
+                .kind("dropdown")
+                .title("Auto Pose Name")
+                .signalId(autoPoseNameId)
+                .layout(9, 4, 11, 1)
+                .config("signalPath", autoPoseNamePath)
+                .config("options", autoPoseOptions)
+                .config("commit", "button")
+                .config("buttonLabel", "Set")
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-localization-speed")
+                .kind("metric")
+                .title("Norm Speed")
+                .signalId(normalizedSpeedId)
+                .layout(20, 4, 4, 1)
+                .config("signalPath", normalizedSpeedPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-localization-field-view")
+                .kind("field")
+                .title("Field Pose (X/Z/Theta)")
+                .signalId(firstExistingSignalId(publisher, "Athena/Localization/FieldPose/xMeters", headingPath))
+                .layout(0, 5, 24, 8)
+                .config("xSignalId", fieldXId)
+                .config("ySignalId", fieldZId)
+                .config("headingSignalId", fieldThetaId)
+                .config("allowPoseSet", false)
+                .config("fieldLength", 16.54)
+                .config("fieldWidth", 4.0)
+                .build());
+        return page.build();
+    }
+
+    private ArcpDashboardLayout.Page defaultArcpPageForDrivetrain(ARCP publisher) {
+        ArcpDashboardLayout.Page.Builder page = ArcpDashboardLayout.Page.builder()
+                .id("tab-drivetrain")
+                .name("Drivetrain");
+        if (publisher == null) {
+            return page.build();
+        }
+
+        String maxVelocityPath = "Athena/Drivetrain/Limits/maxVelocityMps";
+        String maxOmegaPath = "Athena/Drivetrain/Limits/maxAngularVelocityRadPerSec";
+        String outputVxPath = "Athena/Drivetrain/Output/vxMps";
+        String outputVyPath = "Athena/Drivetrain/Output/vyMps";
+        String outputOmegaPath = "Athena/Drivetrain/Output/omegaRadPerSec";
+
+        int maxVelocityId = publisher.existingSignalId(maxVelocityPath);
+        int maxOmegaId = publisher.existingSignalId(maxOmegaPath);
+        int outputVxId = publisher.existingSignalId(outputVxPath);
+        int outputVyId = publisher.existingSignalId(outputVyPath);
+        int outputOmegaId = publisher.existingSignalId(outputOmegaPath);
+        int imuYawId = publisher.existingSignalId("Athena/Drivetrain/Imu/yawDeg");
+        int imuPitchId = publisher.existingSignalId("Athena/Drivetrain/Imu/pitchDeg");
+        int imuRollId = publisher.existingSignalId("Athena/Drivetrain/Imu/rollDeg");
+
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-drivetrain-max-velocity")
+                .kind("metric")
+                .title("Max Velocity (m/s)")
+                .signalId(maxVelocityId)
+                .layout(0, 0, 3, 1)
+                .config("signalPath", maxVelocityPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-drivetrain-max-omega")
+                .kind("metric")
+                .title("Max Omega (rad/s)")
+                .signalId(maxOmegaId)
+                .layout(3, 0, 3, 1)
+                .config("signalPath", maxOmegaPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-drivetrain-blended-output")
+                .kind("graph")
+                .title("Blended Output")
+                .signalId(firstExistingSignalId(publisher, outputVxPath, "Athena/Drivetrain/Output/vyMps"))
+                .layout(0, 1, 10, 4)
+                .config("series", List.of(
+                        graphSeries(outputVxId, "vx", "#f87171", "line", "metric"),
+                        graphSeries(outputVyId, "vy", "#22d3ee", "line", "metric"),
+                        graphSeries(outputOmegaId, "omega", "#a78bfa", "line", "metric")))
+                .config("yMin", -10.0)
+                .config("yMax", 10.0)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-drivetrain-imu-3d")
+                .kind("imu_3d")
+                .title("IMU 3D")
+                .signalId(firstExistingSignalId(publisher, "Athena/Drivetrain/Imu/yawDeg", outputVxPath))
+                .layout(10, 0, 6, 5)
+                .config("yawSignalId", imuYawId)
+                .config("pitchSignalId", imuPitchId)
+                .config("rollSignalId", imuRollId)
+                .build());
+
+        List<String> sourceNames = sortedDrivetrainSourceNames();
+        List<Map<String, Object>> sourceMatrixItems = new ArrayList<>();
+        for (String sourceName : sourceNames) {
+            String key = normalizeArcpSignalSegment(sourceName);
+            int enabledId = publisher.existingSignalId("Athena/Drivetrain/Sources/" + key + "/enabled");
+            int magnitudeId = publisher.existingSignalId("Athena/Drivetrain/Sources/" + key + "/output/magnitudeMps");
+            if (enabledId <= 0) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("signalId", enabledId);
+            item.put("label", sourceName);
+            item.put("group", "Sources");
+            item.put("healthyWhen", "true");
+            item.put("toggleSignalId", enabledId);
+            item.put("valueSignalId", magnitudeId);
+            sourceMatrixItems.add(item);
+        }
+
+        int sourceMatrixSignalId = firstExistingSignalId(
+                publisher,
+                "Athena/Drivetrain/Sources/" + normalizeArcpSignalSegment(RobotSpeeds.DRIVE_SOURCE) + "/enabled",
+                "Athena/Drivetrain/Sources/" + normalizeArcpSignalSegment(RobotSpeeds.AUTO_SOURCE) + "/enabled",
+                "Athena/Drivetrain/Sources/" + normalizeArcpSignalSegment(RobotSpeeds.FEEDBACK_SOURCE) + "/enabled");
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-drivetrain-source-matrix")
+                .kind("status_matrix")
+                .title("Speed Source Status")
+                .signalId(sourceMatrixSignalId)
+                .layout(16, 0, 8, 5)
+                .config("items", sourceMatrixItems)
+                .config("columns", Math.max(1, Math.min(4, sourceMatrixItems.size())))
+                .config("showSummary", true)
+                .config("mode", "toggle_value")
+                .build());
+
+        String sourceListId = "w-drivetrain-source-list";
+        int sourceListRows = Math.max(4, sourceNames.size() + 2);
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id(sourceListId)
+                .kind("layout_list")
+                .title("Speed Sources")
+                .layout(0, 5, 10, sourceListRows)
+                .build());
+        int sourceRow = 0;
+        for (String sourceName : sourceNames) {
+            String key = normalizeArcpSignalSegment(sourceName);
+            int vxId = publisher.existingSignalId("Athena/Drivetrain/Sources/" + key + "/output/vxMps");
+            int vyId = publisher.existingSignalId("Athena/Drivetrain/Sources/" + key + "/output/vyMps");
+            int omegaId = publisher.existingSignalId("Athena/Drivetrain/Sources/" + key + "/output/omegaRadPerSec");
+            if (vxId <= 0 && vyId <= 0 && omegaId <= 0) {
+                continue;
+            }
+            String accordionId = "w-drivetrain-source-accordion-" + key;
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id(accordionId)
+                    .kind("layout_accordion")
+                    .title(sourceName)
+                    .signalId(firstExistingSignalId(
+                            publisher,
+                            "Athena/Drivetrain/Sources/" + key + "/enabled",
+                            "Athena/Drivetrain/Sources/" + key + "/output/vxMps"))
+                    .layout(0, sourceRow, 12, 1)
+                    .parentLayoutId(sourceListId)
+                    .config("collapsed", true)
+                    .config("expandedRows", 3)
+                    .build());
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-drivetrain-source-graph-" + key)
+                    .kind("graph")
+                    .title(sourceName + " Output")
+                    .signalId(firstExistingSignalId(
+                            publisher,
+                            "Athena/Drivetrain/Sources/" + key + "/output/vxMps",
+                            "Athena/Drivetrain/Sources/" + key + "/output/vyMps",
+                            "Athena/Drivetrain/Sources/" + key + "/output/omegaRadPerSec"))
+                    .layout(0, 0, 12, 3)
+                    .parentLayoutId(accordionId)
+                    .config("series", List.of(
+                            graphSeries(vxId, "vx", "#fb7185", "line", "metric"),
+                            graphSeries(vyId, "vy", "#67e8f9", "line", "metric"),
+                            graphSeries(omegaId, "omega", "#c4b5fd", "line", "metric")))
+                    .config("yMin", -10.0)
+                    .config("yMax", 10.0)
+                    .build());
+            sourceRow += 1;
+        }
+
+        if (drivetrain instanceof SwerveDrivetrain) {
+            List<Map<String, Object>> swerveBindings = new ArrayList<>();
+            String[] moduleKeys = {"fl", "fr", "bl", "br"};
+            String[] moduleLabels = {"FL", "FR", "BL", "BR"};
+            for (int i = 0; i < moduleKeys.length; i++) {
+                String moduleRoot = "Athena/Drivetrain/Swerve/Modules/" + moduleLabels[i];
+                int angleId = publisher.existingSignalId(moduleRoot + "/angleDeg");
+                int speedId = publisher.existingSignalId(moduleRoot + "/speedMps");
+                Map<String, Object> binding = new LinkedHashMap<>();
+                binding.put("key", moduleKeys[i]);
+                binding.put("label", moduleLabels[i]);
+                binding.put("angleSignalId", angleId);
+                binding.put("speedSignalId", speedId);
+                swerveBindings.add(binding);
+
+                int moduleSignalId = firstExistingSignalId(
+                        publisher,
+                        moduleRoot + "/angleDeg",
+                        moduleRoot + "/speedMps");
+                int moduleX = 10 + (i % 2) * 7;
+                int moduleY = 5 + (i / 2) * 3;
+                page.widget(ArcpDashboardLayout.Widget.builder()
+                        .id("w-drivetrain-swerve-module-" + moduleKeys[i])
+                        .kind("swerve_module")
+                        .title("Module " + moduleLabels[i])
+                        .signalId(moduleSignalId)
+                        .layout(moduleX, moduleY, 7, 3)
+                        .config("label", moduleLabels[i])
+                        .config("angleSignalId", angleId)
+                        .config("speedSignalId", speedId)
+                        .config("commandAngleSignalId", publisher.existingSignalId(moduleRoot + "/command/angleDeg"))
+                        .config("commandSpeedSignalId", publisher.existingSignalId(moduleRoot + "/command/speedMps"))
+                        .config("commandInvertedSignalId", publisher.existingSignalId(moduleRoot + "/command/inverted"))
+                        .config("commandOffsetSignalId", publisher.existingSignalId(moduleRoot + "/command/offset"))
+                        .build());
+            }
+
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-drivetrain-swerve-drive")
+                    .kind("swerve_drive")
+                    .title("Swerve Drive")
+                    .signalId(firstExistingSignalId(
+                            publisher,
+                            "Athena/Drivetrain/Swerve/Modules/FL/angleDeg",
+                            "Athena/Drivetrain/Swerve/Modules/FR/angleDeg"))
+                    .layout(10, 11, 14, 6)
+                    .config("headingSignalId", imuYawId)
+                    .config("maxSpeed", drivetrain.speeds().maxVelocity())
+                    .config("modules", swerveBindings)
+                    .build());
+
+            int moduleHardwareStartY = 17;
+            for (int i = 0; i < moduleLabels.length; i++) {
+                String moduleLabel = moduleLabels[i];
+                String moduleRoot = "Athena/Drivetrain/Swerve/Modules/" + moduleLabel;
+                int col = (i % 2) * 12;
+                int row = moduleHardwareStartY + (i / 2) * 8;
+                page.widget(ArcpDeviceWidgets.motor(moduleRoot + "/Motors/Drive", widget -> widget
+                        .id("w-drivetrain-module-drive-" + moduleLabel.toLowerCase())
+                        .title(moduleLabel + " Drive Motor")
+                        .layout(col, row, 6, 5)
+                        .showOtherFields(true)));
+                page.widget(ArcpDeviceWidgets.encoder(moduleRoot + "/Encoder", widget -> widget
+                        .id("w-drivetrain-module-encoder-" + moduleLabel.toLowerCase())
+                        .title(moduleLabel + " Encoder")
+                        .layout(col + 6, row, 6, 7)));
+            }
+        } else if (drivetrain instanceof DifferentialDrivetrain) {
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-drivetrain-differential-drive")
+                    .kind("differential_drive")
+                    .title("Differential Drive")
+                    .signalId(firstExistingSignalId(
+                            publisher,
+                            "Athena/Drivetrain/Differential/leftSpeedMps",
+                            "Athena/Drivetrain/Differential/rightSpeedMps"))
+                    .layout(10, 5, 14, 5)
+                    .config("leftSpeedSignalId", publisher.existingSignalId("Athena/Drivetrain/Differential/leftSpeedMps"))
+                    .config("rightSpeedSignalId", publisher.existingSignalId("Athena/Drivetrain/Differential/rightSpeedMps"))
+                    .config("headingSignalId", publisher.existingSignalId("Athena/Drivetrain/Differential/headingDeg"))
+                    .config("maxSpeed", drivetrain.speeds().maxVelocity())
+                    .build());
+            page.widget(ArcpDeviceWidgets.motor("Athena/Drivetrain/Differential/Left", widget -> widget
+                    .id("w-drivetrain-diff-left")
+                    .title("Left Motors")
+                    .layout(10, 10, 7, 5)
+                    .showOtherFields(true)));
+            page.widget(ArcpDeviceWidgets.motor("Athena/Drivetrain/Differential/Right", widget -> widget
+                    .id("w-drivetrain-diff-right")
+                    .title("Right Motors")
+                    .layout(17, 10, 7, 5)
+                    .showOtherFields(true)));
+        }
+        return page.build();
+    }
+
     private static ArcpDashboardLayout.Page defaultArcpPageForMechanism(String mechanismName) {
+        return defaultArcpPageForMechanism(mechanismName, null, null);
+    }
+
+    private static ArcpDashboardLayout.Page defaultArcpPageForMechanism(
+            String mechanismName,
+            Mechanism mechanism,
+            ARCP publisher) {
         String displayName =
                 (mechanismName == null || mechanismName.isBlank()) ? "Mechanism" : mechanismName.trim();
         String slug = normalizeMechanismPageKey(displayName);
-        return ArcpDashboardLayout.Page.builder()
+        ArcpDashboardLayout.Page.Builder page = ArcpDashboardLayout.Page.builder()
                 .id("tab-" + slug)
-                .name(displayName)
-                .build();
+                .name(displayName);
+        if (publisher == null) {
+            return page.build();
+        }
+
+        String root = "Athena/Mechanisms/" + normalizeArcpSignalSegment(displayName);
+        String positionPath = root + "/Control/Status/position";
+        String velocityPath = root + "/Control/Status/velocity";
+        String setpointPath = root + "/Control/Setpoint/value";
+        String outputPath = root + "/Control/Output/value";
+        String outputTypePath = root + "/Control/Status/outputType";
+        String emergencyPath = root + "/Control/Status/emergencyStopped";
+        String faultReasonPath = root + "/Control/Status/faultReason";
+        String diagnosticsUrlPath = root + "/Meta/diagnosticsUrl";
+
+        int positionId = publisher.existingSignalId(positionPath);
+        int velocityId = publisher.existingSignalId(velocityPath);
+        int setpointId = publisher.existingSignalId(setpointPath);
+        int outputId = publisher.existingSignalId(outputPath);
+        int outputTypeId = publisher.existingSignalId(outputTypePath);
+        int emergencyId = publisher.existingSignalId(emergencyPath);
+        int faultReasonId = publisher.existingSignalId(faultReasonPath);
+        int diagnosticsUrlId = publisher.existingSignalId(diagnosticsUrlPath);
+
+        OutputType mechanismOutputType =
+                mechanism != null && mechanism.outputType() != null ? mechanism.outputType() : OutputType.PERCENT;
+        String outputOverlayPath;
+        String outputOverlayLabel;
+        int outputOverlayId;
+        if (mechanismOutputType == OutputType.POSITION) {
+            outputOverlayPath = positionPath;
+            outputOverlayLabel = "position";
+            outputOverlayId = positionId;
+        } else if (mechanismOutputType == OutputType.VELOCITY) {
+            outputOverlayPath = velocityPath;
+            outputOverlayLabel = "velocity";
+            outputOverlayId = velocityId;
+        } else {
+            outputOverlayPath = outputPath;
+            outputOverlayLabel = mechanismOutputType == OutputType.VOLTAGE ? "voltage" : "output";
+            outputOverlayId = outputId;
+        }
+
+        List<Map<String, Object>> setpointSeries = new ArrayList<>();
+        if (setpointId > 0) {
+            setpointSeries.add(graphSeries(setpointId, "setpoint", "#fbbf24", "step", "state"));
+        }
+        if (outputOverlayId > 0) {
+            setpointSeries.add(graphSeries(outputOverlayId, outputOverlayLabel, "#22d3ee", "line", "metric"));
+        }
+
+        List<Map<String, Object>> statusItems = new ArrayList<>();
+        if (emergencyId > 0) {
+            Map<String, Object> emergencyItem = new LinkedHashMap<>();
+            emergencyItem.put("signalId", emergencyId);
+            emergencyItem.put("label", "E-Stop");
+            emergencyItem.put("group", displayName);
+            emergencyItem.put("healthyWhen", "false");
+            emergencyItem.put("toggleSignalId", emergencyId);
+            emergencyItem.put("valueSignalId", null);
+            statusItems.add(emergencyItem);
+        }
+
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-status")
+                .kind("status_matrix")
+                .title("Mechanism Status")
+                .signalId(firstExistingSignalId(publisher, emergencyPath, faultReasonPath))
+                .layout(0, 0, 8, 2)
+                .config("items", statusItems)
+                .config("columns", 1)
+                .config("showSummary", false)
+                .config("mode", "toggle")
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-fault")
+                .kind("text")
+                .title("Fault Reason")
+                .signalId(faultReasonId)
+                .layout(8, 0, 8, 2)
+                .config("signalPath", faultReasonPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-diagnostics")
+                .kind("text")
+                .title("Diagnostics URL")
+                .signalId(diagnosticsUrlId)
+                .layout(16, 0, 8, 1)
+                .config("signalPath", diagnosticsUrlPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-output-type")
+                .kind("text")
+                .title("Output Type")
+                .signalId(outputTypeId)
+                .layout(16, 1, 8, 1)
+                .config("signalPath", outputTypePath)
+                .build());
+
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-position-graph")
+                .kind("graph")
+                .title("Position")
+                .signalId(firstExistingSignalId(publisher, positionPath, velocityPath))
+                .layout(0, 2, 8, 3)
+                .config("signalPath", positionPath)
+                .config(
+                        "series",
+                        positionId > 0
+                                ? List.of(graphSeries(positionId, "position", "#f87171", "line", "metric"))
+                                : List.of())
+                .config("showLegend", false)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-velocity-graph")
+                .kind("graph")
+                .title("Velocity")
+                .signalId(firstExistingSignalId(publisher, velocityPath, positionPath))
+                .layout(8, 2, 8, 3)
+                .config("signalPath", velocityPath)
+                .config(
+                        "series",
+                        velocityId > 0
+                                ? List.of(graphSeries(velocityId, "velocity", "#22d3ee", "line", "metric"))
+                                : List.of())
+                .config("showLegend", false)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-setpoint-graph")
+                .kind("graph")
+                .title("Setpoint vs " + outputOverlayLabel)
+                .signalId(firstExistingSignalId(publisher, setpointPath, outputOverlayPath))
+                .layout(16, 2, 8, 3)
+                .config("signalPath", setpointPath)
+                .config("series", setpointSeries)
+                .config("showLegend", true)
+                .build());
+
+        int leftY = 5;
+        int rightY = 5;
+
+        if (mechanism != null && mechanism.motors().device() != null) {
+            String[] motorKeys = mechanism.motors().device().getControllerTopicKeys();
+            if (motorKeys.length > 0) {
+                String motorsListId = "w-" + slug + "-motors-list";
+                int motorListHeight = Math.max(8, 5 + motorKeys.length + 2);
+                page.widget(ArcpDashboardLayout.Widget.builder()
+                        .id(motorsListId)
+                        .kind("layout_list")
+                        .title("Motors")
+                        .layout(0, leftY, 12, motorListHeight)
+                        .build());
+                appendDefaultArcpMotorWidgets(page, slug, root, mechanism, publisher, motorsListId, 0);
+                leftY += motorListHeight;
+            }
+        }
+
+        if (mechanism != null && mechanism.encoder().device() != null) {
+            int encoderY = leftY;
+            page.widget(ArcpDeviceWidgets.encoder(root + "/Encoder", widget -> widget
+                    .id("w-" + slug + "-encoder-standalone")
+                    .title("Encoder")
+                    .layout(0, encoderY, 12, 7)));
+            leftY += 7;
+        }
+
+        if (mechanism != null) {
+            GenericLimitSwitch[] switches = mechanism.limitSwitches();
+            int switchCount = 0;
+            if (switches != null) {
+                for (GenericLimitSwitch sw : switches) {
+                    if (sw != null) {
+                        switchCount += 1;
+                    }
+                }
+            }
+            if (switchCount > 0) {
+                String dioListId = "w-" + slug + "-dio-list";
+                int dioListHeight = Math.max(4, switchCount + 2);
+                page.widget(ArcpDashboardLayout.Widget.builder()
+                        .id(dioListId)
+                        .kind("layout_list")
+                        .title("Limit Switches")
+                        .layout(0, leftY, 12, dioListHeight)
+                        .build());
+                appendDefaultArcpLimitSwitchWidgets(page, slug, root, mechanism, publisher, dioListId, 0);
+                leftY += dioListHeight;
+            }
+        }
+
+        if (mechanism instanceof StatefulLike<?>) {
+            int currentStateId = publisher.existingSignalId(root + "/Control/StateMachine/currentState");
+            int goalStateId = publisher.existingSignalId(root + "/Control/StateMachine/goalState");
+            int nextStateId = publisher.existingSignalId(root + "/Control/StateMachine/nextState");
+            int queueId = publisher.existingSignalId(root + "/Control/StateMachine/queue");
+            int atGoalId = publisher.existingSignalId(root + "/Control/StateMachine/atGoalState");
+            int availableStatesId = publisher.existingSignalId(root + "/Control/StateMachine/availableStates");
+            int clearQueueId = publisher.existingSignalId(root + "/Control/StateMachine/command/clearQueue");
+
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-" + slug + "-state-machine")
+                    .kind("state_machine")
+                    .title("State Machine")
+                    .signalId(firstExistingSignalId(publisher, root + "/Control/StateMachine/goalState"))
+                    .layout(12, rightY, 12, 4)
+                    .config("topicPath", root + "/Control/StateMachine")
+                    .config("currentStateSignalId", currentStateId)
+                    .config("goalStateSignalId", goalStateId)
+                    .config("nextStateSignalId", nextStateId)
+                    .config("queueSignalId", queueId)
+                    .config("atGoalSignalId", atGoalId)
+                    .config("availableStatesSignalId", availableStatesId)
+                    .config("clearQueueCommandSignalId", clearQueueId)
+                    .build());
+            rightY += 4;
+        }
+
+        if (mechanism != null && !mechanism.loops().names().isEmpty()) {
+            List<String> loopNames = new ArrayList<>();
+            for (String loopName : mechanism.loops().names()) {
+                if (loopName == null || loopName.isBlank()) {
+                    continue;
+                }
+                loopNames.add(loopName);
+            }
+            if (!loopNames.isEmpty()) {
+                String controllerListId = "w-" + slug + "-controller-list";
+                int controllerListHeight = Math.max(8, loopNames.size() + 4);
+                page.widget(ArcpDashboardLayout.Widget.builder()
+                        .id(controllerListId)
+                        .kind("layout_list")
+                        .title("Controllers")
+                        .layout(12, rightY, 12, controllerListHeight)
+                        .build());
+
+                List<Map<String, Object>> controllerMatrixItems = new ArrayList<>();
+                for (String loopName : loopNames) {
+                    String loopKey = normalizeArcpSignalSegment(loopName);
+                    int enabledId = firstExistingSignalId(
+                            publisher,
+                            root + "/Control/Loops/" + loopKey + "/enabled",
+                            root + "/Control/Output/Loops/" + loopKey + "/enabled");
+                    int valueId = firstExistingSignalId(
+                            publisher,
+                            root + "/Control/Output/Loops/" + loopKey + "/value",
+                            root + "/Control/Loops/" + loopKey + "/output/value");
+                    if (enabledId <= 0) {
+                        continue;
+                    }
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("signalId", enabledId);
+                    item.put("label", loopName);
+                    item.put("group", "Control Loops");
+                    item.put("healthyWhen", "true");
+                    item.put("toggleSignalId", enabledId);
+                    item.put("valueSignalId", valueId);
+                    controllerMatrixItems.add(item);
+                }
+                int controllerMatrixAnchorId = controllerMatrixItems.isEmpty()
+                        ? firstExistingSignalId(
+                                publisher,
+                                root + "/Control/Output/value",
+                                root + "/Control/Setpoint/value")
+                        : ((Number) controllerMatrixItems.get(0).get("signalId")).intValue();
+
+                page.widget(ArcpDashboardLayout.Widget.builder()
+                        .id("w-" + slug + "-controller-status")
+                        .kind("status_matrix")
+                        .title("Controller Status")
+                        .signalId(controllerMatrixAnchorId)
+                        .layout(0, 0, 12, 2)
+                        .parentLayoutId(controllerListId)
+                        .config("items", controllerMatrixItems)
+                        .config("columns", Math.max(1, Math.min(3, controllerMatrixItems.size())))
+                        .config("showSummary", true)
+                        .config("mode", "toggle_value")
+                        .build());
+                appendDefaultArcpControllerWidgets(page, slug, root, mechanism, publisher, controllerListId, 2);
+                rightY += controllerListHeight;
+            }
+        }
+
+        int bottomY = Math.max(leftY, rightY);
+
+        String sysidListId = "w-" + slug + "-sysid-list";
+        int sysidListHeight = 8;
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id(sysidListId)
+                .kind("layout_list")
+                .title("SysId")
+                .layout(0, bottomY, 12, sysidListHeight)
+                .build());
+
+        String sysidRoot = root + "/SysId";
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-sysid-active")
+                .kind("state")
+                .title("Active")
+                .signalId(publisher.existingSignalId(sysidRoot + "/active"))
+                .layout(0, 0, 4, 1)
+                .parentLayoutId(sysidListId)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-sysid-request-test")
+                .kind("action")
+                .title("Request Test Mode")
+                .signalId(publisher.existingSignalId(sysidRoot + "/Commands/requestTestMode"))
+                .layout(4, 0, 8, 1)
+                .parentLayoutId(sysidListId)
+                .build());
+
+        String quasiAccordionId = "w-" + slug + "-sysid-quasi-accordion";
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id(quasiAccordionId)
+                .kind("layout_accordion")
+                .title("Quasistatic")
+                .signalId(firstExistingSignalId(publisher, sysidRoot + "/active"))
+                .layout(0, 1, 12, 1)
+                .parentLayoutId(sysidListId)
+                .config("collapsed", true)
+                .config("expandedRows", 2)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-sysid-quasi-forward")
+                .kind("action")
+                .title("Forward")
+                .signalId(publisher.existingSignalId(sysidRoot + "/Commands/quasistaticForward"))
+                .layout(0, 0, 6, 1)
+                .parentLayoutId(quasiAccordionId)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-sysid-quasi-reverse")
+                .kind("action")
+                .title("Reverse")
+                .signalId(publisher.existingSignalId(sysidRoot + "/Commands/quasistaticReverse"))
+                .layout(6, 0, 6, 1)
+                .parentLayoutId(quasiAccordionId)
+                .build());
+
+        String dynamicAccordionId = "w-" + slug + "-sysid-dynamic-accordion";
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id(dynamicAccordionId)
+                .kind("layout_accordion")
+                .title("Dynamic")
+                .signalId(firstExistingSignalId(publisher, sysidRoot + "/active"))
+                .layout(0, 2, 12, 1)
+                .parentLayoutId(sysidListId)
+                .config("collapsed", true)
+                .config("expandedRows", 2)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-sysid-dynamic-forward")
+                .kind("action")
+                .title("Forward")
+                .signalId(publisher.existingSignalId(sysidRoot + "/Commands/dynamicForward"))
+                .layout(0, 0, 6, 1)
+                .parentLayoutId(dynamicAccordionId)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-sysid-dynamic-reverse")
+                .kind("action")
+                .title("Reverse")
+                .signalId(publisher.existingSignalId(sysidRoot + "/Commands/dynamicReverse"))
+                .layout(6, 0, 6, 1)
+                .parentLayoutId(dynamicAccordionId)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-sysid-cancel")
+                .kind("action")
+                .title("Cancel SysId")
+                .signalId(publisher.existingSignalId(sysidRoot + "/Commands/cancel"))
+                .layout(0, 3, 12, 1)
+                .parentLayoutId(sysidListId)
+                .build());
+
+        String commandListId = "w-" + slug + "-commands-list";
+        int commandListHeight = 6;
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id(commandListId)
+                .kind("layout_list")
+                .title("Mechanism Commands")
+                .layout(12, bottomY, 12, commandListHeight)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-cmd-estop-toggle")
+                .kind("toggle")
+                .title("Emergency Stop")
+                .signalId(emergencyId)
+                .layout(0, 0, 12, 1)
+                .parentLayoutId(commandListId)
+                .config("signalPath", emergencyPath)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-cmd-force-estop")
+                .kind("action")
+                .title("Force E-Stop")
+                .signalId(publisher.existingSignalId(root + "/Control/Commands/forceEStop"))
+                .layout(0, 1, 6, 1)
+                .parentLayoutId(commandListId)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-cmd-release-estop")
+                .kind("action")
+                .title("Release E-Stop")
+                .signalId(publisher.existingSignalId(root + "/Control/Commands/releaseEStop"))
+                .layout(6, 1, 6, 1)
+                .parentLayoutId(commandListId)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-cmd-stop-output")
+                .kind("action")
+                .title("Stop Output")
+                .signalId(publisher.existingSignalId(root + "/Control/Commands/stopOutput"))
+                .layout(0, 2, 6, 1)
+                .parentLayoutId(commandListId)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-cmd-neutral-brake")
+                .kind("action")
+                .title("Neutral Brake")
+                .signalId(publisher.existingSignalId(root + "/Control/Commands/setNeutralBrake"))
+                .layout(6, 2, 6, 1)
+                .parentLayoutId(commandListId)
+                .build());
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id("w-" + slug + "-cmd-neutral-coast")
+                .kind("action")
+                .title("Neutral Coast")
+                .signalId(publisher.existingSignalId(root + "/Control/Commands/setNeutralCoast"))
+                .layout(0, 3, 6, 1)
+                .parentLayoutId(commandListId)
+                .build());
+
+        if (mechanism instanceof StatefulLike<?>) {
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-" + slug + "-cmd-clear-queue")
+                    .kind("action")
+                    .title("Clear State Queue")
+                    .signalId(publisher.existingSignalId(root + "/Control/StateMachine/command/clearQueue"))
+                    .layout(6, 3, 6, 1)
+                    .parentLayoutId(commandListId)
+                    .build());
+        }
+
+        return page.build();
+    }
+
+    private static int appendDefaultArcpMotorWidgets(
+            ArcpDashboardLayout.Page.Builder page,
+            String slug,
+            String root,
+            Mechanism mechanism,
+            ARCP publisher,
+            String parentLayoutId,
+            int startRow) {
+        MotorControllerGroup motorGroup = mechanism.motors().device();
+        if (motorGroup == null) {
+            return startRow;
+        }
+        String[] keys = motorGroup.getControllerTopicKeys();
+        if (keys.length == 0) {
+            return startRow;
+        }
+
+        int nextRow = startRow;
+        String motorGroupRoot = root + "/Motors";
+        int groupAnchorId = publisher.existingSignalId(motorGroupRoot + "/Summary/avgTempC");
+        if (groupAnchorId <= 0) {
+            groupAnchorId = publisher.existingSignalId(root + "/Control/Status/output");
+        }
+        final int groupRow = nextRow;
+
+        page.widget(ArcpDeviceWidgets.motor(groupAnchorId, widget -> widget
+                .id("w-" + slug + "-motor-group")
+                .title("Motor Group")
+                .layout(0, groupRow, 12, 5)
+                .parentLayoutId(parentLayoutId)
+                .topicPath(root)
+                .showOtherFields(false)
+                .typeSignalPath(root + "/Control/Status/outputType")
+                .connectedSignalPath(motorGroupRoot + "/Summary/allConnected")
+                .outputSignalPath(root + "/Control/Output/value")
+                .velocitySignalPath(motorGroupRoot + "/Encoders/Summary/avgVelocity")
+                .positionSignalPath(motorGroupRoot + "/Encoders/Summary/avgPosition")
+                .temperatureSignalPath(motorGroupRoot + "/Summary/avgTempC")
+                .commandSignalPath(root + "/Control/Output/value")));
+        nextRow += 5;
+
+        for (int i = 0; i < keys.length; i++) {
+            final int index = i;
+            String displayName = keys[index] != null && !keys[index].isBlank() ? keys[index] : ("Motor " + (index + 1));
+            // Motor topic keys are pre-sanitized by MotorControllerGroup to ARCP-safe segments.
+            String key = keys[index] != null && !keys[index].isBlank() ? keys[index] : ("motor-" + index);
+            String motorRoot = root + "/Motors/Motors/" + key;
+            int anchorId = publisher.existingSignalId(motorRoot + "/tempC");
+            String accordionId = "w-" + slug + "-motor-accordion-" + index;
+
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id(accordionId)
+                    .kind("layout_accordion")
+                    .title(displayName)
+                    .signalId(anchorId)
+                    .layout(0, nextRow, 12, 1)
+                    .parentLayoutId(parentLayoutId)
+                    .config("collapsed", true)
+                    .config("expandedRows", 5)
+                    .build());
+            page.widget(ArcpDeviceWidgets.motor(anchorId, widget -> widget
+                    .id("w-" + slug + "-motor-" + index)
+                    .title(displayName)
+                    .layout(0, 0, 12, 5)
+                    .parentLayoutId(accordionId)
+                    .topicPath(motorRoot)
+                    .showOtherFields(true)
+                    .canIdSignalPath(motorRoot + "/canId")
+                    .canbusSignalPath(motorRoot + "/canbus")
+                    .typeSignalPath(motorRoot + "/type")
+                    .connectedSignalPath(motorRoot + "/connected")
+                    .stalledSignalPath(motorRoot + "/stalled")
+                    .neutralModeSignalPath(motorRoot + "/neutralMode")
+                    .currentLimitSignalPath(motorRoot + "/currentLimitA")
+                    .invertedSignalPath(motorRoot + "/inverted")
+                    .brakeModeSignalPath(motorRoot + "/brakeMode")
+                    .outputSignalPath(root + "/Control/Output/value")
+                    .velocitySignalPath(motorRoot + "/Encoder/velocity")
+                    .positionSignalPath(motorRoot + "/Encoder/position")
+                    .currentSignalPath(motorRoot + "/currentA")
+                    .temperatureSignalPath(motorRoot + "/tempC")
+                    .voltageSignalPath(motorRoot + "/voltage")
+                    .commandSignalPath(motorRoot + "/outputCommandPercent")));
+            nextRow += 1;
+        }
+        return nextRow;
+    }
+
+    private static int appendDefaultArcpEncoderWidget(
+            ArcpDashboardLayout.Page.Builder page,
+            String slug,
+            String root,
+            Mechanism mechanism,
+            ARCP publisher,
+            String parentLayoutId,
+            int startRow) {
+        if (mechanism.encoder().device() == null) {
+            return startRow;
+        }
+        String encoderRoot = root + "/Encoder";
+        int anchorId = publisher.existingSignalId(encoderRoot + "/position");
+        String accordionId = "w-" + slug + "-encoder-accordion";
+
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id(accordionId)
+                .kind("layout_accordion")
+                .title("Encoder")
+                .signalId(anchorId)
+                .layout(0, startRow, 12, 1)
+                .parentLayoutId(parentLayoutId)
+                .config("collapsed", true)
+                .config("expandedRows", 7)
+                .build());
+        page.widget(ArcpDeviceWidgets.encoder(anchorId, widget -> widget
+                .id("w-" + slug + "-encoder")
+                .title("Encoder")
+                .layout(0, 0, 12, 7)
+                .parentLayoutId(accordionId)
+                .topicPath(encoderRoot)
+                .positionSignalPath(encoderRoot + "/position")
+                .velocitySignalPath(encoderRoot + "/velocity")
+                .rateSignalPath(encoderRoot + "/rate")
+                .absoluteSignalPath(encoderRoot + "/absolutePosition")
+                .connectedSignalPath(encoderRoot + "/connected")
+                .conversionSignalPath(encoderRoot + "/conversion")
+                .conversionOffsetSignalPath(encoderRoot + "/conversionOffset")
+                .discontinuityPointSignalPath(encoderRoot + "/discontinuityPoint")
+                .discontinuityRangeSignalPath(encoderRoot + "/discontinuityRange")
+                .ratioSignalPath(encoderRoot + "/gearRatio")
+                .offsetSignalPath(encoderRoot + "/offset")
+                .canIdSignalPath(encoderRoot + "/canId")
+                .canbusSignalPath(encoderRoot + "/canbus")
+                .typeSignalPath(encoderRoot + "/type")
+                .invertedSignalPath(encoderRoot + "/inverted")
+                .supportsSimulationSignalPath(encoderRoot + "/supportsSimulation")
+                .rawAbsoluteSignalPath(encoderRoot + "/rawAbsolute")));
+        return startRow + 1;
+    }
+
+    private static int appendDefaultArcpLimitSwitchWidgets(
+            ArcpDashboardLayout.Page.Builder page,
+            String slug,
+            String root,
+            Mechanism mechanism,
+            ARCP publisher,
+            String parentLayoutId,
+            int startRow) {
+        GenericLimitSwitch[] switches = mechanism.limitSwitches();
+        if (switches == null || switches.length == 0) {
+            return startRow;
+        }
+
+        int nextRow = startRow;
+        for (int i = 0; i < switches.length; i++) {
+            GenericLimitSwitch sw = switches[i];
+            if (sw == null) {
+                continue;
+            }
+            String switchRoot = root + "/Sensors/LimitSwitches/dio-" + sw.getPort();
+            int anchorId = publisher.signalId(switchRoot + "/active");
+            String accordionId = "w-" + slug + "-dio-accordion-" + sw.getPort();
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id(accordionId)
+                    .kind("layout_accordion")
+                    .title("DIO " + sw.getPort())
+                    .signalId(anchorId)
+                    .layout(0, nextRow, 12, 1)
+                    .parentLayoutId(parentLayoutId)
+                    .config("collapsed", true)
+                    .config("expandedRows", 2)
+                    .build());
+            page.widget(ArcpDeviceWidgets.dio(anchorId, widget -> widget
+                    .id("w-" + slug + "-dio-" + sw.getPort())
+                    .title("DIO " + sw.getPort())
+                    .layout(0, 0, 12, 2)
+                    .parentLayoutId(accordionId)
+                    .topicPath(switchRoot)
+                    .showOtherFields(true)
+                    .valueSignal(publisher.signalId(switchRoot + "/active"))
+                    .outputSignal(publisher.signalId(switchRoot + "/hardstop"))
+                    .invertedSignal(publisher.signalId(switchRoot + "/inverted"))
+                    .channelSignal(publisher.signalId(switchRoot + "/port"))
+                    .portSignal(publisher.signalId(switchRoot + "/port"))
+                    .modeSignal(publisher.signalId(switchRoot + "/blockDirection"))
+                    .nameSignal(publisher.signalId(switchRoot + "/name"))
+                    .typeSignal(publisher.signalId(switchRoot + "/type"))));
+            nextRow += 1;
+        }
+        return nextRow;
+    }
+
+    private static int appendDefaultArcpControllerWidgets(
+            ArcpDashboardLayout.Page.Builder page,
+            String slug,
+            String root,
+            Mechanism mechanism,
+            ARCP publisher,
+            String parentLayoutId,
+            int startRow) {
+        if (mechanism == null || mechanism.loops().names().isEmpty()) {
+            return startRow;
+        }
+        int nextRow = startRow;
+        for (String loopName : mechanism.loops().names()) {
+            if (loopName == null || loopName.isBlank()) {
+                continue;
+            }
+            String loopKey = normalizeArcpSignalSegment(loopName);
+            String loopRoot = root + "/Control/Loops/" + loopKey;
+            int anchorId = publisher.signalId(loopRoot + "/output/value");
+            List<Map<String, Object>> params = new ArrayList<>();
+
+            MechanismConfig.PidProfile pidProfile = mechanism.getControlLoopPidProfile(loopName);
+            if (pidProfile != null) {
+                addControllerParam(params, "kp", "kP", publisher.writableDouble(loopRoot + "/pid/kp").signalId());
+                addControllerParam(params, "ki", "kI", publisher.writableDouble(loopRoot + "/pid/ki").signalId());
+                addControllerParam(params, "kd", "kD", publisher.writableDouble(loopRoot + "/pid/kd").signalId());
+                addControllerParam(params, "izone", "I Zone", publisher.writableDouble(loopRoot + "/pid/izone").signalId());
+                addControllerParam(
+                        params,
+                        "setpoint",
+                        "Setpoint",
+                        publisher.writableDouble(root + "/Control/Setpoint/value").signalId());
+            }
+
+            MechanismConfig.FeedforwardProfile ffProfile = mechanism.getControlLoopFeedforwardProfile(loopName);
+            if (ffProfile != null) {
+                addControllerParam(params, "ks", "kS", publisher.writableDouble(loopRoot + "/ff/ks").signalId());
+                addControllerParam(params, "kg", "kG", publisher.writableDouble(loopRoot + "/ff/kg").signalId());
+                addControllerParam(params, "kv", "kV", publisher.writableDouble(loopRoot + "/ff/kv").signalId());
+                addControllerParam(params, "ka", "kA", publisher.writableDouble(loopRoot + "/ff/ka").signalId());
+            }
+
+            MechanismConfig.BangBangProfile bangBangProfile = mechanism.getControlLoopBangBangProfile(loopName);
+            if (bangBangProfile != null) {
+                addControllerParam(
+                        params,
+                        "high_output",
+                        "High Out",
+                        publisher.writableDouble(loopRoot + "/bangBang/highOutput").signalId());
+                addControllerParam(
+                        params,
+                        "low_output",
+                        "Low Out",
+                        publisher.writableDouble(loopRoot + "/bangBang/lowOutput").signalId());
+                addControllerParam(
+                        params,
+                        "tolerance",
+                        "Tolerance",
+                        publisher.writableDouble(loopRoot + "/bangBang/tolerance").signalId());
+            }
+
+            if (params.isEmpty()) {
+                continue;
+            }
+            String accordionId = "w-" + slug + "-controller-accordion-" + loopKey;
+
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id(accordionId)
+                    .kind("layout_accordion")
+                    .title(loopName + " Controller")
+                    .signalId(anchorId)
+                    .layout(0, nextRow, 12, 1)
+                    .parentLayoutId(parentLayoutId)
+                    .config("collapsed", true)
+                    .config("expandedRows", 3)
+                    .build());
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-" + slug + "-controller-" + loopKey)
+                    .kind("controller")
+                    .title(loopName + " Controller")
+                    .signalId(anchorId)
+                    .layout(0, 0, 12, 3)
+                    .parentLayoutId(accordionId)
+                    .config("topicPath", loopRoot)
+                    .config("params", params)
+                    .build());
+            nextRow += 1;
+        }
+        return nextRow;
+    }
+
+    private static void addControllerParam(List<Map<String, Object>> params, String key, String label, int signalId) {
+        Map<String, Object> param = new LinkedHashMap<>();
+        param.put("key", key);
+        param.put("label", label);
+        param.put("signalId", signalId);
+        params.add(param);
+    }
+
+    private static Map<String, Object> graphSeries(
+            int signalId,
+            String label,
+            String color,
+            String style,
+            String role) {
+        Map<String, Object> series = new LinkedHashMap<>();
+        series.put("signalId", signalId);
+        series.put("label", label);
+        series.put("color", color);
+        series.put("style", style);
+        series.put("role", role);
+        return series;
     }
 
     private static String normalizeArcpProfileName(String profileName) {
         if (profileName == null || profileName.isBlank()) {
-            return "athena-mechanisms";
+            return "atheana-generated";
         }
         return profileName.trim();
     }
@@ -1577,6 +3347,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void autonomousInit() {
         diagnosticsSection.core().info("mode", "autonomousInit");
+        triggerArcpRecordingRequest("autonomous");
         prepareDrivetrainForModeTransition(false, true);
         boolean autoPoseReset = resetAutoInitPoseIfConfigured();
         if (autoPoseReset) {
@@ -1615,6 +3386,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void teleopInit() {
         diagnosticsSection.core().info("mode", "teleopInit");
+        triggerArcpRecordingRequest("teleop");
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(true, false);
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_INIT);
@@ -3572,13 +5344,34 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         public ArcpSection autoMechanismPages(boolean enabled) {
             arcpAutoMechanismPages = enabled;
             if (enabled) {
+                ArcpRuntime runtime = arcpRuntime;
+                if (runtime != null && runtime.isRunning() && !Double.isFinite(lastArcpPublishSeconds)) {
+                    arcpInitialLayoutPending = true;
+                }
                 refreshArcpMechanismLayoutIfNeeded();
+            } else {
+                arcpInitialLayoutPending = false;
             }
             return this;
         }
 
         public boolean autoMechanismPages() {
             return arcpAutoMechanismPages;
+        }
+
+        public ArcpSection legacyNt4MirrorEnabled(boolean enabled) {
+            arcpLegacyNt4MirrorEnabled = enabled;
+            if (enabled) {
+                robotNetworkTables.enable(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE);
+                robotNetworkTables.enable(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS);
+            } else {
+                applyArcpNtMirrorPolicy();
+            }
+            return this;
+        }
+
+        public boolean legacyNt4MirrorEnabled() {
+            return arcpLegacyNt4MirrorEnabled;
         }
 
         public ArcpSection layoutProfileName(String profileName) {

@@ -9,6 +9,7 @@ use arcp_core::{encode_event_into, RuntimeEvent, SignalDescriptor, SignalValue};
 
 use crate::config::ArcpServerConfig;
 use crate::control::run_control_loop;
+use crate::nt4_bridge::run_nt4_bridge_loop;
 use crate::realtime::{run_realtime_loop, PublishMessage};
 
 pub struct ArcpServer {
@@ -22,6 +23,7 @@ pub struct ArcpServer {
     event_rx: Mutex<Option<mpsc::Receiver<RuntimeEvent>>>,
     control_thread: Mutex<Option<JoinHandle<()>>>,
     realtime_thread: Mutex<Option<JoinHandle<()>>>,
+    nt4_bridge_thread: Mutex<Option<JoinHandle<()>>>,
     bound_control_port: Arc<Mutex<u16>>,
     bound_realtime_port: Arc<Mutex<u16>>,
 }
@@ -39,6 +41,7 @@ impl ArcpServer {
             event_rx: Mutex::new(None),
             control_thread: Mutex::new(None),
             realtime_thread: Mutex::new(None),
+            nt4_bridge_thread: Mutex::new(None),
             bound_control_port: Arc::new(Mutex::new(0)),
             bound_realtime_port: Arc::new(Mutex::new(0)),
         }
@@ -79,7 +82,7 @@ impl ArcpServer {
         let (publish_tx, publish_rx) = mpsc::channel::<PublishMessage>();
         let (event_tx, event_rx) = mpsc::channel::<RuntimeEvent>();
         if let Ok(mut tx) = self.publish_tx.lock() {
-            *tx = Some(publish_tx);
+            *tx = Some(publish_tx.clone());
         }
         if let Ok(mut tx) = self.event_tx.lock() {
             *tx = Some(event_tx.clone());
@@ -114,11 +117,33 @@ impl ArcpServer {
             );
         });
 
+        let nt4_handle = if self.config.nt4_bridge_enabled {
+            let running_for_nt4 = Arc::clone(&self.running);
+            let descriptors_for_nt4 = Arc::clone(&self.descriptors);
+            let publish_tx_for_nt4 = publish_tx.clone();
+            let max_signals = self.config.max_signals;
+            let nt4_unsecure_port = self.config.nt4_unsecure_port;
+            Some(thread::spawn(move || {
+                run_nt4_bridge_loop(
+                    running_for_nt4,
+                    descriptors_for_nt4,
+                    publish_tx_for_nt4,
+                    max_signals,
+                    nt4_unsecure_port,
+                );
+            }))
+        } else {
+            None
+        };
+
         if let Ok(mut handle) = self.control_thread.lock() {
             *handle = Some(control_handle);
         }
         if let Ok(mut handle) = self.realtime_thread.lock() {
             *handle = Some(realtime_handle);
+        }
+        if let Ok(mut handle) = self.nt4_bridge_thread.lock() {
+            *handle = nt4_handle;
         }
 
         Ok(())
@@ -142,6 +167,11 @@ impl ArcpServer {
             }
         }
         if let Ok(mut handle) = self.realtime_thread.lock() {
+            if let Some(join_handle) = handle.take() {
+                let _ = join_handle.join();
+            }
+        }
+        if let Ok(mut handle) = self.nt4_bridge_thread.lock() {
             if let Some(join_handle) = handle.take() {
                 let _ = join_handle.join();
             }

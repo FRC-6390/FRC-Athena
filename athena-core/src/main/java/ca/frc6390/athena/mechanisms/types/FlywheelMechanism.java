@@ -3,6 +3,7 @@ package ca.frc6390.athena.mechanisms;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 
 /**
  * Simple motor mechanism intended for flywheel shooters and rollers.
@@ -45,6 +46,16 @@ public class FlywheelMechanism extends SimpleMotorMechanism {
             }
             stateMachineCore.getStateMachine().networkTables(node.child("StateMachine"));
             return super.networkTables(node);
+        }
+
+        @Override
+        public void publishArcp(ARCP publisher, String rootPath) {
+            if (publisher == null || rootPath == null || rootPath.isBlank()) {
+                return;
+            }
+            stateMachineCore.getStateMachine().publishArcp(publisher, rootPath + "/Control/StateMachine");
+            stateMachineCore.getStateMachine().publishArcp(publisher, rootPath + "/StateMachine");
+            super.publishArcp(publisher, rootPath);
         }
 
     }

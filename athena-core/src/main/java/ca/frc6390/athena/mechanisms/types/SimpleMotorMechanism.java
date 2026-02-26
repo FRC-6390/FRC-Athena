@@ -4,6 +4,7 @@ import ca.frc6390.athena.controllers.SimpleMotorFeedForwardsSendable;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import ca.frc6390.athena.core.RobotNetworkTables;
+import ca.frc6390.athena.core.arcp.ARCP;
 
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 
@@ -52,6 +53,20 @@ public class SimpleMotorMechanism  extends Mechanism  {
         return super.networkTables(node);
     }
 
+    @Override
+    public void publishArcp(ARCP publisher, String rootPath) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        if (feedforward != null) {
+            String ffRoot = rootPath + "/Feedforward";
+            publisher.put(ffRoot + "/ks", feedforward.getKs());
+            publisher.put(ffRoot + "/kv", feedforward.getKv());
+            publisher.put(ffRoot + "/ka", feedforward.getKa());
+        }
+        super.publishArcp(publisher, rootPath);
+    }
+
     public static class StatefulSimpleMotorMechanism<E extends Enum<E> & SetpointProvider<Double>> extends SimpleMotorMechanism implements StatefulLike<E> {
     
         private final StatefulMechanismCore<StatefulSimpleMotorMechanism<E>, E> stateMachineCore;
@@ -80,6 +95,16 @@ public class SimpleMotorMechanism  extends Mechanism  {
             }
             stateMachineCore.getStateMachine().networkTables(node.child("StateMachine"));
             return super.networkTables(node);
+        }
+
+        @Override
+        public void publishArcp(ARCP publisher, String rootPath) {
+            if (publisher == null || rootPath == null || rootPath.isBlank()) {
+                return;
+            }
+            stateMachineCore.getStateMachine().publishArcp(publisher, rootPath + "/Control/StateMachine");
+            stateMachineCore.getStateMachine().publishArcp(publisher, rootPath + "/StateMachine");
+            super.publishArcp(publisher, rootPath);
         }
 
     }
