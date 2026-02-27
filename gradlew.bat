@@ -52,8 +52,8 @@ echo location of your Java installation.
 goto fail
 
 :findJavaFromJavaHome
-set JAVA_HOME=%JAVA_HOME:"=%
-set JAVA_EXE=%JAVA_HOME%/bin/java.exe
+set "JAVA_HOME=%JAVA_HOME:"=%"
+set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
 
 if exist "%JAVA_EXE%" goto checkJavaCompatibility
 
@@ -71,23 +71,23 @@ if %JAVA_MAJOR% geq 25 goto tryJava21
 goto execute
 
 :tryJava21
-if defined JAVA21_HOME if exist "%JAVA21_HOME%\bin\java.exe" (
-  set JAVA_HOME=%JAVA21_HOME%
-  set JAVA_EXE=%JAVA_HOME%\bin\java.exe
-  call :detectJavaVersion
-  if %JAVA_MAJOR% lss 25 echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
-)
+if not defined JAVA21_HOME goto tryJava17
+set "JAVA_HOME=%JAVA21_HOME:"=%"
+set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+if not exist "%JAVA_EXE%" goto tryJava17
+call :detectJavaVersion
 if %JAVA_MAJOR% geq 25 goto tryJava17
+echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
 goto execute
 
 :tryJava17
-if defined JAVA17_HOME if exist "%JAVA17_HOME%\bin\java.exe" (
-  set JAVA_HOME=%JAVA17_HOME%
-  set JAVA_EXE=%JAVA_HOME%\bin\java.exe
-  call :detectJavaVersion
-  if %JAVA_MAJOR% lss 25 echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
-)
+if not defined JAVA17_HOME goto javaTooNew
+set "JAVA_HOME=%JAVA17_HOME:"=%"
+set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+if not exist "%JAVA_EXE%" goto javaTooNew
+call :detectJavaVersion
 if %JAVA_MAJOR% geq 25 goto javaTooNew
+echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
 goto execute
 
 :javaTooNew
@@ -109,6 +109,8 @@ for /f "tokens=3" %%v in ('"%JAVA_EXE%" -version 2^>^&1 ^| findstr /i " version 
 set JAVA_VERSION=%JAVA_VERSION:"=%
 for /f "tokens=1 delims=." %%m in ("%JAVA_VERSION%") do set JAVA_MAJOR=%%~m
 if "%JAVA_MAJOR%"=="1" for /f "tokens=2 delims=." %%m in ("%JAVA_VERSION%") do set JAVA_MAJOR=%%~m
+for /f "delims=0123456789" %%m in ("%JAVA_MAJOR%") do set JAVA_MAJOR=0
+if "%JAVA_MAJOR%"=="" set JAVA_MAJOR=0
 exit /b 0
 
 :execute
