@@ -19,6 +19,7 @@ public class MotorControllerAdapter implements MotorController {
     private double cachedTemperatureCelsius;
     private double cachedCurrentAmps;
     private double cachedAppliedVoltage;
+    private boolean cachedStalled;
     private int updateCycles = 0;
 
     public MotorControllerAdapter(MotorController raw, MotorControllerConfig config) {
@@ -33,6 +34,7 @@ public class MotorControllerAdapter implements MotorController {
         this.cachedTemperatureCelsius = 0.0;
         this.cachedCurrentAmps = raw.getCurrentAmps();
         this.cachedAppliedVoltage = raw.getAppliedVoltage();
+        this.cachedStalled = raw.isStalled();
     }
 
     public static MotorController wrap(MotorController raw, MotorControllerConfig config) {
@@ -107,6 +109,11 @@ public class MotorControllerAdapter implements MotorController {
     @Override
     public boolean isConnected() {
         return cachedConnected;
+    }
+
+    @Override
+    public boolean isStalled() {
+        return cachedStalled;
     }
 
     @Override
@@ -196,6 +203,7 @@ public class MotorControllerAdapter implements MotorController {
         if (updateCycles == 1 || updateCycles % TELEMETRY_POLL_INTERVAL_CYCLES == 0) {
             cachedCurrentAmps = raw.getCurrentAmps();
             cachedAppliedVoltage = raw.getAppliedVoltage();
+            cachedStalled = raw.isStalled();
         }
         if (updateCycles >= 1_000_000) {
             updateCycles = 0;
