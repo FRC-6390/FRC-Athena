@@ -1495,6 +1495,17 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
+        /**
+         * Registers a hook that runs once when the mechanism exits a stalled condition.
+         *
+         * <p>Semantics: fires on the falling edge (stalled -> not stalled) to avoid repeated callbacks
+         * while the mechanism remains not stalled.</p>
+         */
+        public HooksSection<T> onStallExit(Consumer<T> hook) {
+            owner.periodicHooks.add(stallExitHook(hook));
+            return this;
+        }
+
         public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onInit(MechanismBinding<T, E> binding) {
             owner.addLifecycleBinding(RobotCoreHooks.Phase.ROBOT_INIT, (MechanismBinding<T, ?>) binding, List.of());
             return this;
@@ -1513,6 +1524,16 @@ public class MechanismConfig<T extends Mechanism> {
          */
         public HooksSection<T> onStall(Consumer<T> hook, double periodMs) {
             owner.periodicHookBindings.add(new PeriodicHookBinding<>(stallEdgeHook(hook), periodMs));
+            return this;
+        }
+
+        /**
+         * Registers a stall-exit hook sampled on a fixed cadence.
+         *
+         * <p>Semantics: fires on the falling edge (stalled -> not stalled).</p>
+         */
+        public HooksSection<T> onStallExit(Consumer<T> hook, double periodMs) {
+            owner.periodicHookBindings.add(new PeriodicHookBinding<>(stallExitHook(hook), periodMs));
             return this;
         }
 
@@ -1571,6 +1592,18 @@ public class MechanismConfig<T extends Mechanism> {
             return mechanism -> {
                 boolean stalled = mechanism.motors().device().isStalling();
                 if (stalled && !wasStalled[0]) {
+                    hook.accept(mechanism);
+                }
+                wasStalled[0] = stalled;
+            };
+        }
+
+        private Consumer<T> stallExitHook(Consumer<T> hook) {
+            Objects.requireNonNull(hook, "hook");
+            final boolean[] wasStalled = {false};
+            return mechanism -> {
+                boolean stalled = mechanism.motors().device().isStalling();
+                if (!stalled && wasStalled[0]) {
                     hook.accept(mechanism);
                 }
                 wasStalled[0] = stalled;
