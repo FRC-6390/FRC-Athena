@@ -15,9 +15,10 @@ import groovy.json.JsonSlurper
  * -PathenaRepoDir=/absolute/path/to/FRC-Athena
  *     Force the Athena repo location if auto-detect picks the wrong folder.
  *
- * -PathenaBuildTasks=build,publishToMavenLocal
+ * -PathenaBuildTasks=:athena-core:publishToMavenLocal,:athena-ctre:publishToMavenLocal,...
  *     Comma-separated Athena tasks for athenaBuild.
- *     Example (skip optional Docker/native tasks): -PathenaBuildTasks=:athena-plugin:publishToMavenLocal
+ *     Example: -PathenaBuildTasks=build,publishToMavenLocal
+ *     Athena build is run with -Pversion=<version from FRC6390-Athena-Core.json> so published artifacts match synced vendordeps.
  *
  * -PathenaRobotBuildFile=/absolute/path/to/build.gradle
  *     Override which robot build file gets the plugin version update.
@@ -28,7 +29,18 @@ def athenaSyncConfig = [
         repoDirEnv        : 'ATHENA_REPO_DIR',
         buildTasksProperty: 'athenaBuildTasks',
         robotBuildProperty: 'athenaRobotBuildFile',
-        defaultBuildTasks : ['build', 'publishToMavenLocal']
+        defaultBuildTasks : [
+                ':athena-core:publishToMavenLocal',
+                ':athena-arcp-java:publishToMavenLocal',
+                ':athena-ctre:publishToMavenLocal',
+                ':athena-rev:publishToMavenLocal',
+                ':athena-pathplanner:publishToMavenLocal',
+                ':athena-limelight:publishToMavenLocal',
+                ':athena-photonvision:publishToMavenLocal',
+                ':athena-choreo:publishToMavenLocal',
+                ':athena-studica:publishToMavenLocal',
+                ':athena-plugin:publishToMavenLocal'
+        ]
 ]
 
 def canonicalOrSelf = { File dir ->
@@ -205,6 +217,7 @@ def resolveAthenaBuildTasks = {
 
 def runAthenaBuild = { File athenaRepo ->
     def taskNames = resolveAthenaBuildTasks()
+    def athenaVersion = readAthenaVersion(athenaRepo)
     def command = [] as List<String>
     def javaHomeForChild = new File(System.getProperty('java.home'))
     if (javaHomeForChild.name.equalsIgnoreCase('jre') && javaHomeForChild.parentFile != null) {
@@ -217,9 +230,10 @@ def runAthenaBuild = { File athenaRepo ->
         command.addAll(['bash', './gradlew'])
     }
     command.add('--console=plain')
+    command.add("-Pversion=${athenaVersion}")
     command.addAll(taskNames)
 
-    logger.lifecycle("Running Athena build in ${athenaRepo}: ${command.join(' ')}")
+    logger.lifecycle("Running Athena build in ${athenaRepo} (version ${athenaVersion}): ${command.join(' ')}")
     project.exec {
         workingDir athenaRepo
         commandLine command

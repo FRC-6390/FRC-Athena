@@ -203,8 +203,9 @@ public class MotorControllerAdapter implements MotorController {
         if (updateCycles == 1 || updateCycles % TELEMETRY_POLL_INTERVAL_CYCLES == 0) {
             cachedCurrentAmps = raw.getCurrentAmps();
             cachedAppliedVoltage = raw.getAppliedVoltage();
-            cachedStalled = raw.isStalled();
         }
+        // Stall edges drive mechanism hooks, so keep this fresh on every hardware refresh.
+        cachedStalled = raw.isStalled();
         if (updateCycles >= 1_000_000) {
             updateCycles = 0;
         }
