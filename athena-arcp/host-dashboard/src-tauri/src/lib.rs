@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use arcp_dashboard::{format_signal_value, ControlClient, DashboardState, TelemetrySubscription};
+use arcp_dashboard::{
+    format_signal_value, ControlClient, DashboardState, ManifestItem, TelemetrySubscription,
+};
 use serde::Serialize;
 use tauri::{PhysicalPosition, PhysicalSize, State, Window};
 
@@ -87,6 +89,22 @@ struct DashboardSnapshot {
     server_rss_bytes: Option<u64>,
     host_cpu_percent: Option<f32>,
     host_rss_bytes: Option<u64>,
+    signals: Vec<SignalRow>,
+}
+
+#[derive(Serialize)]
+struct DashboardDelta {
+    connected: bool,
+    status: String,
+    signal_count: usize,
+    update_count: u64,
+    uptime_ms: u64,
+    server_cpu_percent: Option<f32>,
+    server_rss_bytes: Option<u64>,
+    host_cpu_percent: Option<f32>,
+    host_rss_bytes: Option<u64>,
+    manifest_revision: u64,
+    full_snapshot: bool,
     signals: Vec<SignalRow>,
 }
 
@@ -337,20 +355,7 @@ fn dashboard_snapshot(runtime: State<'_, AppRuntime>) -> Result<DashboardSnapsho
             .map_err(|_| String::from("state lock poisoned"))?;
         let mut rows = Vec::with_capacity(guard.descriptors().len());
         for descriptor in guard.descriptors() {
-            let value = guard
-                .value_for(descriptor.signal_id)
-                .map(format_signal_value)
-                .unwrap_or_else(|| String::from("-"));
-            rows.push(SignalRow {
-                signal_id: descriptor.signal_id,
-                signal_type: descriptor.signal_type.as_str().to_string(),
-                kind: descriptor.kind.as_str().to_string(),
-                access: descriptor.access.as_str().to_string(),
-                policy: descriptor.policy.as_str().to_string(),
-                durability: descriptor.durability.as_str().to_string(),
-                path: descriptor.path.clone(),
-                value,
-            });
+            rows.push(build_signal_row(&guard, descriptor));
         }
         (
             guard.descriptors().len(),
@@ -378,6 +383,121 @@ fn dashboard_snapshot(runtime: State<'_, AppRuntime>) -> Result<DashboardSnapsho
         server_rss_bytes,
         host_cpu_percent,
         host_rss_bytes,
+        signals,
+    })
+}
+
+#[tauri::command]
+fn dashboard_delta(
+    runtime: State<'_, AppRuntime>,
+    since_update_count: Option<u64>,
+    known_manifest_revision: Option<u64>,
+) -> Result<DashboardDelta, String> {
+    let session_slot = runtime
+        .session
+        .lock()
+        .map_err(|_| String::from("runtime lock poisoned"))?;
+    let session = session_slot
+        .as_ref()
+        .ok_or_else(|| String::from("not connected"))?;
+
+    let (connected, status, server_cpu_percent, server_rss_bytes) = {
+        let mut control = session
+            .control
+            .lock()
+            .map_err(|_| String::from("control lock poisoned"))?;
+        let mut server_stats = session
+            .server_stats
+            .lock()
+            .map_err(|_| String::from("server stats lock poisoned"))?;
+        server_stats.maybe_refresh(&mut control);
+        let (server_cpu_percent, server_rss_bytes) = server_stats.snapshot();
+        (
+            control.connected,
+            control.status.clone(),
+            server_cpu_percent,
+            server_rss_bytes,
+        )
+    };
+
+    let (signal_count, update_count, uptime_ms, manifest_revision, full_snapshot, signals) = {
+        let guard = session
+            .state
+            .lock()
+            .map_err(|_| String::from("state lock poisoned"))?;
+        let signal_count = guard.descriptors().len();
+        let update_count = guard.update_count();
+        let uptime_ms = guard.uptime_ms();
+        let manifest_revision = guard.manifest_revision();
+
+        let full_snapshot = match since_update_count {
+            Some(since) => {
+                since > update_count || known_manifest_revision != Some(manifest_revision)
+            }
+            None => true,
+        };
+
+        if full_snapshot {
+            let mut rows = Vec::with_capacity(signal_count);
+            for descriptor in guard.descriptors() {
+                rows.push(build_signal_row(&guard, descriptor));
+            }
+            (
+                signal_count,
+                update_count,
+                uptime_ms,
+                manifest_revision,
+                full_snapshot,
+                rows,
+            )
+        } else if let Some(since) = since_update_count {
+            let updated_ids = guard.updated_signal_ids_since(since);
+            let mut rows = Vec::with_capacity(updated_ids.len());
+            for signal_id in updated_ids {
+                if let Some(descriptor) = guard.descriptor_for(signal_id) {
+                    rows.push(build_signal_row(&guard, descriptor));
+                }
+            }
+            (
+                signal_count,
+                update_count,
+                uptime_ms,
+                manifest_revision,
+                full_snapshot,
+                rows,
+            )
+        } else {
+            (
+                signal_count,
+                update_count,
+                uptime_ms,
+                manifest_revision,
+                full_snapshot,
+                Vec::new(),
+            )
+        }
+    };
+
+    let (host_cpu_percent, host_rss_bytes) = {
+        let mut stats = session
+            .local_stats
+            .lock()
+            .map_err(|_| String::from("local stats lock poisoned"))?;
+        stats.sample()
+    };
+
+    Ok(DashboardDelta {
+        connected,
+        status,
+        signal_count,
+        update_count,
+        uptime_ms,
+        server_cpu_percent,
+        server_rss_bytes,
+        host_cpu_percent,
+        host_rss_bytes,
+        manifest_revision,
+        full_snapshot,
         signals,
     })
 }
@@ -520,6 +640,23 @@ fn set_presentation_mode(
         let _ = window.set_focus();
     }
     Ok(())
+}
+
+fn build_signal_row(state: &DashboardState, descriptor: &ManifestItem) -> SignalRow {
+    let value = state
+        .value_for(descriptor.signal_id)
+        .map(format_signal_value)
+        .unwrap_or_else(|| String::from("-"));
+    SignalRow {
+        signal_id: descriptor.signal_id,
+        signal_type: descriptor.signal_type.as_str().to_string(),
+        kind: descriptor.kind.as_str().to_string(),
+        access: descriptor.access.as_str().to_string(),
+        policy: descriptor.policy.as_str().to_string(),
+        durability: descriptor.durability.as_str().to_string(),
+        path: descriptor.path.clone(),
+        value,
+    }
 }
 
 #[tauri::command]
@@ -766,6 +903,7 @@ pub fn run() {
             connect_arcp,
             disconnect_arcp,
             dashboard_snapshot,
+            dashboard_delta,
             set_signal_value,
             trigger_action,
             save_server_layout,

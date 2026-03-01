@@ -24,6 +24,21 @@ export type DashboardSnapshot = {
   signals: SignalRow[];
 };
 
+export type DashboardDelta = {
+  connected: boolean;
+  status: string;
+  signal_count: number;
+  update_count: number;
+  uptime_ms: number;
+  server_cpu_percent: number | null;
+  server_rss_bytes: number | null;
+  host_cpu_percent: number | null;
+  host_rss_bytes: number | null;
+  manifest_revision: number;
+  full_snapshot: boolean;
+  signals: SignalRow[];
+};
+
 export type ConnectionInfo = {
   connected: boolean;
   host: string;
@@ -55,6 +70,16 @@ export async function disconnectArcp(): Promise<void> {
 
 export async function snapshotArcp(): Promise<DashboardSnapshot> {
   return invoke('dashboard_snapshot');
+}
+
+export async function deltaArcp(
+  sinceUpdateCount: number | null,
+  knownManifestRevision: number | null
+): Promise<DashboardDelta> {
+  return invoke('dashboard_delta', {
+    sinceUpdateCount,
+    knownManifestRevision
+  });
 }
 
 export async function setSignal(signalId: number, valueRaw: string): Promise<void> {

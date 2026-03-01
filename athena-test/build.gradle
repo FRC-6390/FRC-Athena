@@ -8,6 +8,7 @@ configurations {
 
 dependencies {
     testImplementation project(':athena-core')
+    testImplementation project(':athena-choreo')
     testImplementation project(':athena-pathplanner')
     testImplementation project(':athena-rev')
     testImplementation project(':athena-examples')

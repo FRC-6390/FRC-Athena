@@ -32,8 +32,10 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
+import java.io.File;
 
 public class PathPlannerAutoBackend implements AutoBackend {
     private volatile boolean choreoMirrorForAlliance = true;
@@ -57,6 +59,15 @@ public class PathPlannerAutoBackend implements AutoBackend {
 
     @Override
     public boolean configureHolonomic(HolonomicDriveBinding binding) {
+        File settingsFile = new File(Filesystem.getDeployDirectory(), "pathplanner/settings.json");
+        if (!settingsFile.isFile()) {
+            DriverStation.reportWarning(
+                    "PathPlanner settings missing at \"" + settingsFile.getAbsolutePath()
+                            + "\"; skipping PATH_PLANNER backend configuration.",
+                    false);
+            return false;
+        }
+
         RobotConfig config;
         try {
             config = RobotConfig.fromGUISettings();
@@ -101,10 +112,7 @@ public class PathPlannerAutoBackend implements AutoBackend {
 
         if (source == RobotAuto.AutoSource.CHOREO) {
             try {
-                ChoreoRef ref = ChoreoRef.parse(reference);
-                PathPlannerPath path = ref.index().isPresent()
-                        ? PathPlannerPath.fromChoreoTrajectory(ref.name(), ref.index().getAsInt())
-                        : PathPlannerPath.fromChoreoTrajectory(ref.name());
+                PathPlannerPath path = loadChoreoPath(reference);
                 return Optional.of(AutoBuilder.followPath(path));
             } catch (FileVersionException | IOException | ParseException ex) {
                 DriverStation.reportError("Could not load Choreo auto \"" + reference + "\"", ex.getStackTrace());
@@ -166,10 +174,7 @@ public class PathPlannerAutoBackend implements AutoBackend {
         }
         if (source == RobotAuto.AutoSource.CHOREO) {
             try {
-                ChoreoRef ref = ChoreoRef.parse(reference);
-                PathPlannerPath path = ref.index().isPresent()
-                        ? PathPlannerPath.fromChoreoTrajectory(ref.name(), ref.index().getAsInt())
-                        : PathPlannerPath.fromChoreoTrajectory(ref.name());
+                PathPlannerPath path = loadChoreoPath(reference);
                 boolean flip = choreoMirrorForAlliance && shouldFlipPathPosesForAlliance();
                 return Optional.of(resolvePathPoses(path, flip));
             } catch (IOException | ParseException | FileVersionException ex) {
@@ -259,10 +264,27 @@ public class PathPlannerAutoBackend implements AutoBackend {
             String maybeIndex = reference.substring(dot + 1);
             try {
                 int idx = Integer.parseInt(maybeIndex);
+                if (idx < 0) {
+                    return new ChoreoRef(reference, OptionalInt.empty());
+                }
                 return new ChoreoRef(reference.substring(0, dot), OptionalInt.of(idx));
             } catch (NumberFormatException ex) {
                 return new ChoreoRef(reference, OptionalInt.empty());
             }
         }
+    }
+
+    private static PathPlannerPath loadChoreoPath(String reference)
+            throws IOException, ParseException, FileVersionException {
+        ChoreoRef ref = ChoreoRef.parse(reference);
+        if (ref.index().isPresent()) {
+            int idx = ref.index().getAsInt();
+            try {
+                return PathPlannerPath.fromChoreoTrajectory(ref.name(), idx);
+            } catch (IOException | ParseException | FileVersionException splitEx) {
+                return PathPlannerPath.fromChoreoTrajectory(reference);
+            }
+        }
+        return PathPlannerPath.fromChoreoTrajectory(ref.name());
     }
 }

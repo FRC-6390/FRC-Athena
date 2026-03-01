@@ -231,8 +231,8 @@ public class RobotAuto {
     /**
      * Shared runtime context available to auto program phases.
      *
-     * <p>This context exposes program-scoped auto metadata. It is shared by
-     * {@link AutoRegisterCtx} and {@link AutoBuildCtx}.</p>
+     * <p>This context exposes program-scoped metadata and can resolve globally registered
+     * autos. It is shared by {@link AutoRegisterCtx} and {@link AutoBuildCtx}.</p>
      */
     public interface AutoRuntimeCtx {
         RobotCore<?> robot();
@@ -450,7 +450,8 @@ public class RobotAuto {
         /**
          * Resolves a registered auto routine id to a deferred command.
          *
-         * <p>If odometry reset is armed, it is applied to this call and then disarmed.</p>
+         * <p>Resolution checks the current program scope first, then globally registered autos.
+         * If odometry reset is armed, it is applied to this call and then disarmed.</p>
          */
         default Command auto(String id) {
             Objects.requireNonNull(id, "id");
@@ -469,7 +470,8 @@ public class RobotAuto {
          * Resolves a specific split of an auto routine to a deferred command.
          *
          * <p>Implementations may resolve either an explicitly registered split ({@code id.index}) or
-         * derive it from a base trajectory reference, depending on backend capabilities.</p>
+         * derive it from a base trajectory reference, depending on backend capabilities. Resolution
+         * checks the current program scope first, then globally registered autos.</p>
          *
          * <p>If odometry reset is armed, it is applied to this call and then disarmed.</p>
          */
@@ -1123,7 +1125,7 @@ public class RobotAuto {
 
         @Override
         public boolean hasAuto(String id) {
-            return id != null && scopedAutos.containsKey(id);
+            return id != null && (scopedAutos.containsKey(id) || autos.hasAuto(id));
         }
 
         @Override
@@ -1212,7 +1214,7 @@ public class RobotAuto {
 
         @Override
         public boolean hasAuto(String id) {
-            return id != null && scopedAutos.containsKey(id);
+            return id != null && (scopedAutos.containsKey(id) || autos.hasAuto(id));
         }
 
         @Override
@@ -1308,7 +1310,7 @@ public class RobotAuto {
 
                 @Override
                 public Optional<Pose2d> startingPose(AutoPlan.StepRef ref) {
-                    return autos.startingPoseForScoped(scopedAutos, ref.key().id(), ref.splitIndex());
+                    return autos.startingPoseFor(scopedAutos, ref.key().id(), ref.splitIndex());
                 }
 
                 @Override
@@ -2117,6 +2119,9 @@ public class RobotAuto {
             }
             String explicitSplitId = id + "." + split;
             AutoRoutine explicitSplit = scopedAutos.get(explicitSplitId);
+            if (explicitSplit == null) {
+                explicitSplit = autoRoutines.get(explicitSplitId);
+            }
             if (explicitSplit != null) {
                 return traceAutoLifecycle(
                         "auto(" + explicitSplitId + ")",
@@ -2126,17 +2131,26 @@ public class RobotAuto {
                         deferredCommand(explicitSplit));
             }
             AutoRoutine resolvedBase = scopedAutos.get(id);
+            boolean resolvedBaseScoped = true;
             if (resolvedBase == null) {
-                throw new IllegalStateException("Auto not registered: " + id + " (or split " + explicitSplitId + ")");
+                resolvedBase = autoRoutines.get(id);
+                resolvedBaseScoped = false;
+            }
+            if (resolvedBase == null) {
+                throw new IllegalStateException(
+                        "Auto not registered in program scope or global registry: "
+                                + id + " (or split " + explicitSplitId + ")");
             }
             if (resolvedBase.source() == AutoSource.CUSTOM) {
                 throw new IllegalStateException("Auto split requested for CUSTOM auto: " + id + "." + split);
             }
             String splitReference = resolvedBase.reference() + "." + split;
             AutoSource splitSource = resolvedBase.source();
-            Command splitCommand = Commands.defer(
-                    () -> buildScopedPathCommand(scopedMarkers, splitSource, splitReference),
-                    Set.of());
+            Command splitCommand = resolvedBaseScoped
+                    ? Commands.defer(
+                            () -> buildScopedPathCommand(scopedMarkers, splitSource, splitReference),
+                            Set.of())
+                    : Commands.defer(() -> buildPathCommand(splitSource, splitReference), Set.of());
             return traceAutoLifecycle(
                     "auto(" + id + "." + split + ")",
                     "derivedFrom=" + id
@@ -2147,7 +2161,11 @@ public class RobotAuto {
 
         AutoRoutine routine = scopedAutos.get(id);
         if (routine == null) {
-            throw new IllegalStateException("Auto not registered: " + id);
+            routine = autoRoutines.get(id);
+        }
+        if (routine == null) {
+            throw new IllegalStateException(
+                    "Auto not registered in program scope or global registry: " + id);
         }
         return traceAutoLifecycle(
                 "auto(" + id + ")",
@@ -2179,32 +2197,6 @@ public class RobotAuto {
             return Optional.empty();
         }
         if (basePose.isEmpty()) {
-            return Optional.empty();
-        }
-        return basePose;
-    }
-
-    private Optional<Pose2d> startingPoseForScoped(
-            Map<String, AutoRoutine> scopedAutos,
-            String id,
-            OptionalInt splitIndex) {
-        Objects.requireNonNull(scopedAutos, "scopedAutos");
-        Objects.requireNonNull(id, "id");
-        AutoRoutine base = scopedAutos.get(id);
-        if (base == null) {
-            return Optional.empty();
-        }
-
-        Optional<Pose2d> basePose = resolvedStartingPose(base);
-        if (splitIndex.isPresent()) {
-            AutoRoutine split = resolveScopedRoutineFor(scopedAutos, id, splitIndex);
-            Optional<Pose2d> splitPose = resolvedStartingPose(split);
-            if (splitPose.isPresent()) {
-                return splitPose;
-            }
-            if (basePose.isPresent()) {
-                return basePose;
-            }
             return Optional.empty();
         }
         return basePose;
@@ -2259,56 +2251,8 @@ public class RobotAuto {
                 null);
     }
 
-    private AutoRoutine resolveScopedRoutineFor(
-            Map<String, AutoRoutine> scopedAutos,
-            String id,
-            OptionalInt splitIndex) {
-        Objects.requireNonNull(scopedAutos, "scopedAutos");
-        Objects.requireNonNull(id, "id");
-        AutoRoutine base = scopedAutos.get(id);
-        if (splitIndex.isEmpty()) {
-            return base;
-        }
-        int split = splitIndex.getAsInt();
-        String splitId = id + "." + split;
-        AutoRoutine explicitSplit = scopedAutos.get(splitId);
-        if (explicitSplit != null) {
-            return explicitSplit;
-        }
-        if (base == null || base.source() == AutoSource.CUSTOM) {
-            return null;
-        }
-        String splitReference = base.reference() + "." + split;
-        AutoSource splitSource = base.source();
-        Supplier<Command> splitFactory = () -> buildPathCommand(splitSource, splitReference);
-        return new AutoRoutine(
-                AutoKey.of(splitId),
-                splitSource,
-                splitReference,
-                splitFactory,
-                new Pose2d(),
-                false,
-                null);
-    }
-
     private Optional<Pose2d> endingPoseFor(Map<String, AutoRoutine> scopedAutos, String id, OptionalInt splitIndex) {
         AutoRoutine routine = resolveRoutineFor(scopedAutos, id, splitIndex);
-        if (routine == null) {
-            return Optional.empty();
-        }
-        Optional<List<Pose2d>> poses = getAutoPoses(routine);
-        if (poses.isEmpty() || poses.get().isEmpty()) {
-            return Optional.empty();
-        }
-        List<Pose2d> path = poses.get();
-        return Optional.ofNullable(path.get(path.size() - 1));
-    }
-
-    private Optional<Pose2d> endingPoseForScoped(
-            Map<String, AutoRoutine> scopedAutos,
-            String id,
-            OptionalInt splitIndex) {
-        AutoRoutine routine = resolveScopedRoutineFor(scopedAutos, id, splitIndex);
         if (routine == null) {
             return Optional.empty();
         }
@@ -2382,8 +2326,8 @@ public class RobotAuto {
 
         Optional<Pose2d> resetPose;
         switch (resolvedTarget) {
-            case PATH_START -> resetPose = startingPoseForScoped(scopedAutos, id, splitIndex);
-            case PATH_END -> resetPose = endingPoseForScoped(scopedAutos, id, splitIndex);
+            case PATH_START -> resetPose = startingPoseFor(scopedAutos, id, splitIndex);
+            case PATH_END -> resetPose = endingPoseFor(scopedAutos, id, splitIndex);
             case POSE -> resetPose = Optional.ofNullable(explicitPose);
             case NONE -> resetPose = Optional.empty();
             default -> resetPose = Optional.empty();

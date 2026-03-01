@@ -407,7 +407,6 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
 
     for (const widget of widgetsForRender) {
       if (isHiddenByCollapsedAccordion(widget)) continue;
-      if (!isLayoutWidgetKind(widget.kind) && !resolvedSignalByWidgetId.get(widget.id)) continue;
 
       const layout = resolvedWidgetLayout(widget);
       const rect = computeWidgetPixelRect(layout, Boolean(widget.parentLayoutId));
@@ -736,6 +735,25 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       return directSignal;
     }
     return null;
+  }
+
+  function unavailableSignalHint(widget: DashboardWidget): string {
+    if (widget.signalId > 0) {
+      return `signal #${widget.signalId}`;
+    }
+    const config = widget.config;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return 'no bound signal';
+    }
+    const topicPath = typeof config.topicPath === 'string' ? config.topicPath.trim() : '';
+    if (topicPath) {
+      return topicPath;
+    }
+    const signalPath = typeof config.signalPath === 'string' ? config.signalPath.trim() : '';
+    if (signalPath) {
+      return signalPath;
+    }
+    return 'no bound signal';
   }
 
   function computeWidgetPixelRect(
@@ -2362,7 +2380,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       {@const accordionConfig = widget.kind === 'layout_accordion' ? readLayoutAccordionConfig(widget.config) : null}
       {@const accordionOpen = accordionConfig ? !accordionConfig.collapsed : false}
       {@const hiddenByAccordion = isHiddenByCollapsedAccordion(widget)}
-      {#if !hiddenByAccordion && (isLayoutWidget || signal)}
+      {#if !hiddenByAccordion}
         {@const layout = resolvedWidgetLayout(widget)}
         <div
           class={`widget-card ${isLayoutWidget ? 'layout-card' : ''} ${accordionOpen ? 'accordion-open' : ''} ${!isLayoutWidget && widget.parentLayoutId ? 'in-layout' : ''} ${selectedWidgetId === widget.id ? 'active' : ''} ${drag?.widgetId === widget.id ? 'dragging-card' : ''}`}
@@ -2679,7 +2697,11 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
                 <pre>{signal.value}</pre>
               {/if}
             {:else}
-              <div class="meta-line">Signal unavailable</div>
+              <div class="signal-unavailable">
+                <strong>Signal unavailable</strong>
+                <span class="signal-unavailable-hint">{unavailableSignalHint(widget)}</span>
+                <small>Reconnect ARCP or remap this widget in Inspector.</small>
+              </div>
             {/if}
           {/snippet}
 
@@ -3215,6 +3237,42 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     line-height: 1.2;
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+
+  .signal-unavailable {
+    display: grid;
+    gap: 0.18rem;
+    border: 1px dashed rgba(153, 164, 180, 0.4);
+    border-radius: 6px;
+    padding: 0.34rem 0.42rem;
+    background:
+      linear-gradient(180deg, rgba(69, 79, 97, 0.3), rgba(36, 43, 56, 0.24)),
+      repeating-linear-gradient(
+        135deg,
+        rgba(153, 164, 180, 0.08),
+        rgba(153, 164, 180, 0.08) 6px,
+        transparent 6px,
+        transparent 12px
+      );
+  }
+
+  .signal-unavailable strong {
+    font-size: 0.7rem;
+    line-height: 1.15;
+    color: var(--text-strong);
+  }
+
+  .signal-unavailable-hint {
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    color: var(--text-soft);
+    overflow-wrap: anywhere;
+  }
+
+  .signal-unavailable small {
+    font-size: 0.62rem;
+    line-height: 1.2;
+    color: color-mix(in srgb, var(--text-soft) 86%, white 14%);
   }
 
   .state-pill {

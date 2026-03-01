@@ -81,7 +81,7 @@ public class ChoreoAutoBackend implements AutoBackend {
                     false);
             return Optional.of(Commands.none());
         }
-        TrajectoryRef ref = TrajectoryRef.parse(reference);
+        TrajectoryRef ref = resolveTrajectoryRef(reference);
         AutoRoutine routine = currentFactory.newRoutine(reference);
         OptionalInt splitIndex = ref.splitIndex();
         AutoTrajectory trajectory = splitIndex.isPresent()
@@ -162,7 +162,7 @@ public class ChoreoAutoBackend implements AutoBackend {
         if (source != RobotAuto.AutoSource.CHOREO || reference == null || reference.isBlank()) {
             return Optional.empty();
         }
-        TrajectoryRef ref = TrajectoryRef.parse(reference);
+        TrajectoryRef ref = resolveTrajectoryRef(reference);
         Optional<? extends Trajectory<?>> trajectoryOpt = Choreo.loadTrajectory(ref.name());
         if (trajectoryOpt.isEmpty()) {
             return Optional.empty();
@@ -266,10 +266,29 @@ public class ChoreoAutoBackend implements AutoBackend {
             String maybeIndex = reference.substring(dot + 1);
             try {
                 int index = Integer.parseInt(maybeIndex);
+                if (index < 0) {
+                    return new TrajectoryRef(reference, OptionalInt.empty());
+                }
                 return new TrajectoryRef(reference.substring(0, dot), OptionalInt.of(index));
             } catch (NumberFormatException ex) {
                 return new TrajectoryRef(reference, OptionalInt.empty());
             }
         }
+    }
+
+    private static TrajectoryRef resolveTrajectoryRef(String reference) {
+        TrajectoryRef parsed = TrajectoryRef.parse(reference);
+        if (parsed.splitIndex().isEmpty()) {
+            return parsed;
+        }
+        int split = parsed.splitIndex().getAsInt();
+        if (split < 0) {
+            return new TrajectoryRef(reference, OptionalInt.empty());
+        }
+        Optional<? extends Trajectory<?>> base = Choreo.loadTrajectory(parsed.name());
+        if (base.isPresent() && base.get().getSplit(split).isPresent()) {
+            return parsed;
+        }
+        return new TrajectoryRef(reference, OptionalInt.empty());
     }
 }

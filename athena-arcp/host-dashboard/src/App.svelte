@@ -5,6 +5,7 @@
   import type { DashboardSnapshot, SignalRow } from './lib/arcp';
   import {
     connectArcp,
+    deltaArcp,
     deleteServerLayout,
     disconnectArcp,
     fireAction,
@@ -14,7 +15,6 @@
     setDriverstationDockMode,
     setPresentationMode,
     setSignal,
-    snapshotArcp,
     windowModeSnapshot
   } from './lib/arcp';
   import {
@@ -344,6 +344,7 @@
   let replayState: ReplayState | null = null;
   let pendingRecordingAck: PendingRecordingAck | null = null;
   let lastProcessedUpdateCount = -1;
+  let lastManifestRevision = -1;
 
   const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
   const ntCompatSignalRows = $derived(
@@ -953,6 +954,7 @@
       nextReconnectAttemptAt = 0;
       needsSessionReconnect = false;
       lastProcessedUpdateCount = -1;
+      lastManifestRevision = -1;
       lastError = '';
       lastRecordingHeartbeatSentAt = 0;
       status = `connected to ${info.host}:${info.control_port} (udp ${info.udp_port})`;
@@ -2369,13 +2371,19 @@
     refreshInFlight = true;
     try {
       const wasConnected = connected;
-      const next = await snapshotArcp();
+      const next = await deltaArcp(
+        lastProcessedUpdateCount >= 0 ? lastProcessedUpdateCount : null,
+        lastManifestRevision >= 0 ? lastManifestRevision : null
+      );
+      const previous = snapshot;
 
-      if (!next.connected && next.signals.length === 0 && snapshot) {
+      if (!next.connected && next.signals.length === 0 && previous && !next.full_snapshot) {
         snapshot = {
-          ...snapshot,
+          ...previous,
           connected: false,
           status: next.status,
+          signal_count: next.signal_count,
+          update_count: next.update_count,
           uptime_ms: next.uptime_ms,
           server_cpu_percent: next.server_cpu_percent,
           server_rss_bytes: next.server_rss_bytes,
@@ -2383,7 +2391,45 @@
           host_rss_bytes: next.host_rss_bytes
         };
       } else {
-        snapshot = next;
+        let nextSignals: SignalRow[];
+        if (next.full_snapshot || !previous) {
+          nextSignals = next.signals;
+        } else if (next.signals.length === 0) {
+          nextSignals = previous.signals;
+        } else {
+          const indexById = new Map<number, number>();
+          previous.signals.forEach((signal, index) => {
+            indexById.set(signal.signal_id, index);
+          });
+          const merged = [...previous.signals];
+          let appended = false;
+          for (const signal of next.signals) {
+            const index = indexById.get(signal.signal_id);
+            if (index === undefined) {
+              merged.push(signal);
+              appended = true;
+            } else {
+              merged[index] = signal;
+            }
+          }
+          if (appended) {
+            merged.sort((left, right) => left.signal_id - right.signal_id);
+          }
+          nextSignals = merged;
+        }
+
+        snapshot = {
+          connected: next.connected,
+          status: next.status,
+          signal_count: next.signal_count,
+          update_count: next.update_count,
+          uptime_ms: next.uptime_ms,
+          server_cpu_percent: next.server_cpu_percent,
+          server_rss_bytes: next.server_rss_bytes,
+          host_cpu_percent: next.host_cpu_percent,
+          host_rss_bytes: next.host_rss_bytes,
+          signals: nextSignals
+        };
       }
 
       connected = next.connected;
@@ -2391,7 +2437,7 @@
       needsSessionReconnect = false;
 
       const filteredSignals = (snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal));
-      const updateChanged = next.update_count !== lastProcessedUpdateCount;
+      const updateChanged = next.full_snapshot || next.update_count !== lastProcessedUpdateCount;
       if (connected) {
         if (updateChanged) {
           handleRobotRecordingRequests(filteredSignals);
@@ -2425,8 +2471,10 @@
 
         await syncRecordingClientSignals(filteredSignals);
         lastProcessedUpdateCount = next.update_count;
+        lastManifestRevision = next.manifest_revision;
       } else {
         lastProcessedUpdateCount = -1;
+        lastManifestRevision = -1;
       }
 
       if (!wasConnected && connected) {
@@ -2475,6 +2523,7 @@
     }
     connected = false;
     lastProcessedUpdateCount = -1;
+    lastManifestRevision = -1;
     status = snapshot ? 'disconnected (stale data retained)' : 'disconnected';
     availableServerLayouts = [];
   }
