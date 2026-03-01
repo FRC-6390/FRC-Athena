@@ -4,7 +4,6 @@ import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainIDs.DrivetrainIDs;
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
 import ca.frc6390.athena.hardware.motor.AthenaMotor;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
-import ca.frc6390.athena.hardware.encoder.EncoderType;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
