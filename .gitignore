@@ -29,3 +29,6 @@ athena-arcp/host-dashboard/.docker-cache/
 
 # ARCP Rust docker build cache
 athena-arcp/rust/.docker-cache/
+
+*.wpilog
+networktables.json

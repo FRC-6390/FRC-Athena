@@ -8,6 +8,7 @@ configurations {
 
 dependencies {
     testImplementation project(':athena-core')
+    testImplementation project(':athena-rev')
     testImplementation project(':athena-examples')
     testImplementation project(':athena-plugin')
     testImplementation gradleApi()
@@ -20,6 +21,7 @@ dependencies {
     testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.ext.wpilibVersion}"
     testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.ext.wpilibVersion}"
     testImplementation "edu.wpi.first.hal:hal-java:${rootProject.ext.wpilibVersion}"
+    testImplementation "com.revrobotics.frc:REVLib-java:${rootProject.ext.athenaVersions.rev}"
     testImplementation "edu.wpi.first.cameraserver:cameraserver-java:${rootProject.ext.wpilibVersion}"
     testImplementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.ext.wpilibVersion}"
     testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.ext.wpilibVersion}"

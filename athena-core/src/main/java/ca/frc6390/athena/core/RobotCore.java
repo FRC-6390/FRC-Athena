@@ -686,7 +686,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final HashMap<String, Mechanism> mechanisms;
     private final List<SuperstructureMechanism<?, ?>> registeredSuperstructures;
     private final HashMap<String, SuperstructureMechanism<?, ?>> superstructuresByName;
-    private final HashMap<Class<? extends Enum<?>>, StateEndpoint> stateEndpointsByEnum;
+    private final HashMap<Class<? extends Enum<?>>, List<StateEndpoint>> stateEndpointsByEnum;
+    private final HashMap<Enum<?>, StateEndpoint> stateEndpointsByDefaultState;
     private final RobotMechanisms mechanismView;
     private final StateSection stateSection;
     private final Set<Mechanism> scheduledCustomPidMechanisms;
@@ -823,6 +824,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         registeredSuperstructures = new ArrayList<>();
         superstructuresByName = new HashMap<>();
         stateEndpointsByEnum = new HashMap<>();
+        stateEndpointsByDefaultState = new HashMap<>();
         mechanismView = new RobotMechanisms(mechanisms, superstructuresByName, registeredSuperstructures);
         stateSection = new StateSection();
         configServerSection = new ConfigServerSection(this);
@@ -4719,7 +4721,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (state == null) {
                 return false;
             }
-            StateEndpoint endpoint = resolveStateEndpoint(state.getDeclaringClass());
+            StateEndpoint endpoint = resolveStateEndpoint(state);
             if (endpoint == null) {
                 return false;
             }
@@ -4731,7 +4733,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (state == null) {
                 return false;
             }
-            StateEndpoint endpoint = resolveStateEndpoint(state.getDeclaringClass());
+            StateEndpoint endpoint = resolveStateEndpoint(state);
             if (endpoint == null) {
                 return false;
             }
@@ -4743,7 +4745,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (state == null) {
                 return false;
             }
-            StateEndpoint endpoint = resolveStateEndpoint(state.getDeclaringClass());
+            StateEndpoint endpoint = resolveStateEndpoint(state);
             return endpoint != null && endpoint.at(state);
         }
 
@@ -4763,20 +4765,40 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
     }
 
-    private StateEndpoint resolveStateEndpoint(Class<? extends Enum<?>> enumType) {
-        if (enumType == null) {
+    private StateEndpoint resolveStateEndpoint(Enum<?> state) {
+        if (state == null) {
             return null;
         }
-        StateEndpoint endpoint = stateEndpointsByEnum.get(enumType);
+        StateEndpoint endpoint = stateEndpointsByDefaultState.get(state);
         if (endpoint != null) {
             return endpoint;
         }
         rebuildStateEndpoints();
-        return stateEndpointsByEnum.get(enumType);
+        endpoint = stateEndpointsByDefaultState.get(state);
+        if (endpoint != null) {
+            return endpoint;
+        }
+        List<StateEndpoint> enumEndpoints = stateEndpointsByEnum.get(state.getDeclaringClass());
+        if (enumEndpoints == null || enumEndpoints.isEmpty()) {
+            return null;
+        }
+        return enumEndpoints.size() == 1 ? enumEndpoints.get(0) : null;
+    }
+
+    private StateEndpoint resolveStateEndpoint(Class<? extends Enum<?>> enumType) {
+        if (enumType == null) {
+            return null;
+        }
+        List<StateEndpoint> enumEndpoints = stateEndpointsByEnum.get(enumType);
+        if (enumEndpoints == null || enumEndpoints.isEmpty()) {
+            return null;
+        }
+        return enumEndpoints.get(0);
     }
 
     private void rebuildStateEndpoints() {
         stateEndpointsByEnum.clear();
+        stateEndpointsByDefaultState.clear();
         for (Mechanism mechanism : mechanisms.values()) {
             indexMechanismStateEndpoint(mechanism);
         }
@@ -4794,10 +4816,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (goal == null) {
             return;
         }
-        Class<? extends Enum<?>> enumType = goal.getDeclaringClass();
         String ownerName = mechanism.getName() != null ? mechanism.getName() : mechanism.getClass().getSimpleName();
         StatefulLike raw = (StatefulLike) stateful;
-        registerStateEndpoint(enumType, ownerName, new StateEndpoint() {
+        registerStateEndpoint(goal, ownerName, new StateEndpoint() {
             @Override
             public void queue(Enum<?> state) {
                 raw.stateMachine().queue(state);
@@ -4829,12 +4850,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (goal == null) {
             return;
         }
-        Class<? extends Enum<?>> enumType = goal.getDeclaringClass();
         String ownerName = superstructure.getName() != null
                 ? superstructure.getName()
                 : superstructure.getClass().getSimpleName();
         SuperstructureMechanism.StateMachineSection raw = superstructure.stateMachine();
-        registerStateEndpoint(enumType, ownerName, new StateEndpoint() {
+        registerStateEndpoint(goal, ownerName, new StateEndpoint() {
             @Override
             public void queue(Enum<?> state) {
                 raw.machine().queue(state);
@@ -4858,19 +4878,26 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private void registerStateEndpoint(
-            Class<? extends Enum<?>> enumType,
+            Enum<?> defaultState,
             String ownerName,
             StateEndpoint endpoint) {
-        if (enumType == null || endpoint == null) {
+        if (endpoint == null || defaultState == null) {
             return;
         }
-        StateEndpoint existing = stateEndpointsByEnum.get(enumType);
-        if (existing != null && existing != endpoint) {
-            throw new IllegalStateException(
-                    "State enum " + enumType.getName() + " is owned by multiple registrations: '"
-                            + existing.ownerName() + "' and '" + ownerName + "'.");
+        Class<? extends Enum<?>> enumType = defaultState.getDeclaringClass();
+        List<StateEndpoint> existing = stateEndpointsByEnum.get(enumType);
+        if (existing == null) {
+            existing = new ArrayList<>();
+            stateEndpointsByEnum.put(enumType, existing);
         }
-        stateEndpointsByEnum.put(enumType, endpoint);
+        StateEndpoint previousDefault = stateEndpointsByDefaultState.put(defaultState, endpoint);
+        if (previousDefault != null && previousDefault != endpoint) {
+            throw new IllegalStateException(
+                    "State enum default state " + enumType.getName() + "." + defaultState.name()
+                            + " is owned by multiple registrations: '" + previousDefault.ownerName() + "' and '"
+                            + ownerName + "'.");
+        }
+        existing.add(endpoint);
     }
 
     private String registerMechanismInternal(Mechanism mech) {
