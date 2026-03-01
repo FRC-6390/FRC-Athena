@@ -13,6 +13,8 @@ use nt_client::{Client, NTAddr, NewClientOptions};
 
 use crate::realtime::PublishMessage;
 
+const NT4_BRIDGE_MAX_MIRRORED_TOPICS: usize = 20;
+
 #[derive(Clone, Copy, Debug)]
 struct Nt4Binding {
     signal_id: u16,
@@ -167,6 +169,9 @@ fn ensure_binding(
 
     let signal_type = map_signal_type(nt_data_type)?;
     let path = to_arcp_nt4_path(nt_topic_name)?;
+    if topic_bindings.len() >= NT4_BRIDGE_MAX_MIRRORED_TOPICS {
+        return None;
+    }
     let mut descriptor_map = descriptors.lock().ok()?;
 
     let signal_id = descriptor_map
@@ -214,9 +219,10 @@ fn to_arcp_nt4_path(nt_topic_path: &str) -> Option<String> {
         return None;
     }
 
-    if normalized.starts_with("Athena/") {
-        normalized = &normalized["Athena/".len()..];
+    if !normalized.starts_with("Athena/") {
+        return None;
     }
+    normalized = &normalized["Athena/".len()..];
     if normalized.is_empty() {
         return None;
     }
@@ -265,10 +271,7 @@ mod tests {
             to_arcp_nt4_path("/Athena/Drivetrain/Speed"),
             Some("Athena/NT4/Drivetrain/Speed".to_string())
         );
-        assert_eq!(
-            to_arcp_nt4_path("/Robot/Status"),
-            Some("Athena/NT4/Robot/Status".to_string())
-        );
+        assert_eq!(to_arcp_nt4_path("/Robot/Status"), None);
         assert_eq!(to_arcp_nt4_path("/Athena/NetworkTableConfig/Details"), None);
         assert_eq!(
             to_arcp_nt4_path("/Athena/Mechanism/NetworkTableConfig"),

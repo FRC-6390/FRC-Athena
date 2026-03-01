@@ -154,6 +154,36 @@ public final class RobotNetworkTables {
         revision.incrementAndGet();
     }
 
+    /**
+     * Disables Athena auto-publish pipelines while keeping manual {@link RobotNetworkTables.Node#put*} writes
+     * functional.
+     */
+    public RobotNetworkTables disableAutoPublishing() {
+        disable(Flag.AUTO_PUBLISH_CORE);
+        disable(Flag.AUTO_PUBLISH_MECHANISMS);
+        return this;
+    }
+
+    /**
+     * Disables every Athena-managed NetworkTables flag (core, mechanisms, and optional widgets).
+     * Manual user-owned writes through {@link RobotNetworkTables.Node#put*} remain unaffected.
+     */
+    public RobotNetworkTables disableAthenaPublishingFlags() {
+        for (Flag flag : Flag.values()) {
+            disable(flag);
+        }
+        return this;
+    }
+
+    /**
+     * Enables Athena auto-publish pipelines.
+     */
+    public RobotNetworkTables enableAutoPublishing() {
+        enable(Flag.AUTO_PUBLISH_CORE);
+        enable(Flag.AUTO_PUBLISH_MECHANISMS);
+        return this;
+    }
+
     public boolean isAsyncPublishingEnabled() {
         return asyncPublishingEnabled;
     }

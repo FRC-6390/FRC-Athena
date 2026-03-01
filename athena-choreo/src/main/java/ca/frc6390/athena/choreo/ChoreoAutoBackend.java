@@ -22,10 +22,12 @@ import choreo.auto.AutoRoutine;
 import choreo.auto.AutoTrajectory;
 import choreo.trajectory.TrajectorySample;
 import choreo.trajectory.Trajectory;
+import choreo.util.ChoreoAllianceFlipUtil;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.Subsystem;
@@ -41,6 +43,7 @@ public class ChoreoAutoBackend implements AutoBackend {
     private volatile Supplier<Pose2d> poseSupplier;
     private volatile BiConsumer<Pose2d, ChassisSpeeds> follower;
     private volatile Subsystem followerSubsystem;
+    private volatile boolean mirrorForAlliance = true;
     private final Map<String, Supplier<Command>> namedCommandSuppliers = new ConcurrentHashMap<>();
 
     @Override
@@ -87,13 +90,14 @@ public class ChoreoAutoBackend implements AutoBackend {
         Command resetRaw = splitIndex.isPresent()
                 ? currentFactory.resetOdometry(ref.name(), splitIndex.getAsInt())
                 : currentFactory.resetOdometry(ref.name());
+        boolean allianceRequiredForReset = mirrorForAlliance;
         Command reset = Commands.either(
                 resetRaw,
                 Commands.runOnce(() -> DriverStation.reportWarning(
                         "Skipping Choreo odometry reset for \"" + reference
-                                + "\" because alliance is unknown.",
+                                + "\" because alliance is unknown while alliance mirroring is enabled.",
                         false)),
-                () -> DriverStation.getAlliance().isPresent());
+                () -> !allianceRequiredForReset || DriverStation.getAlliance().isPresent());
         boolean shouldResetOdometry = splitIndex.isEmpty() || splitIndex.getAsInt() == 0;
         AtomicBoolean trajectoryFinished = new AtomicBoolean(false);
         Command startCommand = shouldResetOdometry
@@ -147,6 +151,7 @@ public class ChoreoAutoBackend implements AutoBackend {
         this.poseSupplier = binding.poseSupplier();
         this.follower = binding.follower();
         this.followerSubsystem = binding.drivetrain();
+        this.mirrorForAlliance = binding.mirrorForAlliance();
         stopFollower = () -> binding.follower().accept(binding.poseSupplier().get(), new ChassisSpeeds());
         bindNamedCommands(autoFactory);
         return Optional.of(createdFactory);
@@ -170,7 +175,21 @@ public class ChoreoAutoBackend implements AutoBackend {
             return Optional.empty();
         }
         Pose2d[] poses = trajectory.getPoses();
-        return poses != null ? Optional.of(Arrays.asList(poses)) : Optional.empty();
+        if (poses == null) {
+            return Optional.empty();
+        }
+        List<Pose2d> poseList = Arrays.asList(poses);
+        if (shouldFlipPosesForAlliance(mirrorForAlliance)) {
+            return Optional.of(poseList.stream().map(ChoreoAllianceFlipUtil::flip).toList());
+        }
+        return Optional.of(List.copyOf(poseList));
+    }
+
+    private static boolean shouldFlipPosesForAlliance(boolean mirrorEnabled) {
+        if (!mirrorEnabled) {
+            return false;
+        }
+        return DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
     }
 
     private void bindNamedCommands(AutoFactory factory) {

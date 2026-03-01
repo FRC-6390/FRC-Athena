@@ -1860,8 +1860,9 @@ public class RobotAuto {
         }
         AutoKey key = selectedRoutine.key();
         String programId = key != null ? key.id() : null;
+        String programCacheKey = programId != null ? allianceScopedPoseCacheKey(programId) : null;
         if (programId != null) {
-            Optional<List<Pose2d>> cached = programPoseCache.get(programId);
+            Optional<List<Pose2d>> cached = programPoseCache.get(programCacheKey);
             if (cached != null) {
                 return cached;
             }
@@ -1884,7 +1885,7 @@ public class RobotAuto {
             }
         }
         if (programId != null) {
-            programPoseCache.put(programId, resolved);
+            programPoseCache.put(programCacheKey, resolved);
         }
         return resolved;
     }
@@ -1915,7 +1916,7 @@ public class RobotAuto {
         if (routine == null || routine.source() == AutoSource.CUSTOM) {
             return Optional.empty();
         }
-        String cacheKey = routine.source().name() + "|" + routine.reference();
+        String cacheKey = allianceScopedPoseCacheKey(routine.source().name() + "|" + routine.reference());
         Optional<List<Pose2d>> cached = autoPoseCache.get(cacheKey);
         if (cached != null) {
             return cached;
@@ -1925,6 +1926,11 @@ public class RobotAuto {
         resolved = resolved.map(List::copyOf);
         autoPoseCache.put(cacheKey, resolved);
         return resolved;
+    }
+
+    private static String allianceScopedPoseCacheKey(String key) {
+        String alliance = DriverStation.getAlliance().map(Enum::name).orElse("UNKNOWN");
+        return key + "|" + alliance;
     }
 
     private Optional<Command> buildSelectedCommand() {

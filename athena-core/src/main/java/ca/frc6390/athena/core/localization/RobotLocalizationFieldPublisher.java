@@ -42,6 +42,7 @@ final class RobotLocalizationFieldPublisher {
     private double lastActualPathTimestamp = Double.NEGATIVE_INFINITY;
     private Pose2d lastActualPathPose = ZERO_POSE;
     private String lastPlannedAutoId;
+    private String lastPlannedAllianceKey;
     private boolean plannedPathEmpty = true;
     private boolean fieldPublished;
 
@@ -156,10 +157,14 @@ final class RobotLocalizationFieldPublisher {
         String selectedId = autos.selection().selected()
                 .map(routine -> routine.key().id())
                 .orElse(null);
-        if (Objects.equals(selectedId, lastPlannedAutoId) && !isPlannedPathEmpty()) {
+        String allianceKey = DriverStation.getAlliance().map(Enum::name).orElse("UNKNOWN");
+        if (Objects.equals(selectedId, lastPlannedAutoId)
+                && Objects.equals(allianceKey, lastPlannedAllianceKey)
+                && !isPlannedPathEmpty()) {
             return;
         }
         lastPlannedAutoId = selectedId;
+        lastPlannedAllianceKey = allianceKey;
         autos.selection().selectedPoses()
                 .filter(list -> !list.isEmpty())
                 .ifPresentOrElse(this::setPlannedPath, this::clearPlannedPath);
@@ -174,7 +179,7 @@ final class RobotLocalizationFieldPublisher {
             plannedPathEmpty = true;
             return;
         }
-        List<Pose2d> resolved = applyAllianceFlip(poses);
+        List<Pose2d> resolved = List.copyOf(poses);
         resolved = downsamplePoses(resolved, plannedPathSpacingMeters);
         if (resolved.isEmpty()) {
             plannedPathObject.setPoses(EMPTY_POSES);

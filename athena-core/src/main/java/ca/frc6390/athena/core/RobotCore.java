@@ -74,6 +74,7 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.networktables.StructArrayPublisher;
@@ -1220,8 +1221,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private void publishAthenaRuntimeNtStatus() {
-        // ARCP runtime status is published natively in publishArcpSignals().
-        // Keep this method as a no-op so ARCP data never routes through NetworkTables.
+        ArcpRuntime runtime = arcpRuntime;
+
+        boolean runtimeRunning = runtime != null && runtime.isRunning();
+        int controlPort = runtimeRunning ? runtime.controlPort() : 0;
+        int realtimePort = runtimeRunning ? runtime.realtimePort() : 0;
+
+        NetworkTable runtimeStatus = NetworkTableInstance.getDefault().getTable("Athena").getSubTable("ArcpRuntimeStatus");
+        runtimeStatus.getEntry("Enabled").setBoolean(arcpEnabled);
+        runtimeStatus.getEntry("Running").setBoolean(runtimeRunning);
+        runtimeStatus.getEntry("ControlPort").setDouble(controlPort);
+        runtimeStatus.getEntry("RealtimePort").setDouble(realtimePort);
+        runtimeStatus.getEntry("Mode").setString(runtimeMode != null ? runtimeMode.name() : "UNKNOWN");
     }
 
     private void publishArcpSignals(double nowSeconds) {
@@ -5049,6 +5060,32 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     /**
+     * Convenience helper to disable only Athena-managed auto NetworkTables publishing while preserving
+     * manually authored NetworkTables writes from your own logic.
+     */
+    public RobotCore<T> disableAutoNetworkTablesPublishing() {
+        robotNetworkTables.disableAutoPublishing();
+        return this;
+    }
+
+    /**
+     * Disable all Athena-defined NetworkTables flags (core/mechanisms/optional widgets), while preserving
+     * manual user-owned NetworkTables writes.
+     */
+    public RobotCore<T> disableAllAthenaAutoNetworkTablesPublishing() {
+        robotNetworkTables.disableAthenaPublishingFlags();
+        return this;
+    }
+
+    /**
+     * Convenience helper to re-enable Athena-managed auto NetworkTables publishing.
+     */
+    public RobotCore<T> enableAutoNetworkTablesPublishing() {
+        robotNetworkTables.enableAutoPublishing();
+        return this;
+    }
+
+    /**
      * Publishes drivetrain/localization/vision topics under {@code Athena/...}.
      */
     public RobotCore<T> publishNetworkTables() {
@@ -6288,9 +6325,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (imu == null) {
             return;
         }
-        Rotation2d heading = localizationRef.getFieldPose().getRotation();
-        imu.setVirtualAxis("field", heading);
-        imu.setVirtualAxis("driver", heading);
-        imu.setVirtualAxis("drift", heading);
+        Rotation2d newFieldHeading = localizationRef.getFieldPose().getRotation();
+        Rotation2d previousField = imu.getVirtualAxis("field");
+        Rotation2d previousDriver = imu.getVirtualAxis("driver");
+        Rotation2d previousDrift = imu.getVirtualAxis("drift");
+        Rotation2d driverOffsetFromField = previousDriver.minus(previousField);
+        Rotation2d driftOffsetFromField = previousDrift.minus(previousField);
+
+        imu.setVirtualAxis("field", newFieldHeading);
+        imu.setVirtualAxis("driver", newFieldHeading.plus(driverOffsetFromField));
+        imu.setVirtualAxis("drift", newFieldHeading.plus(driftOffsetFromField));
     }
 }

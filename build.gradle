@@ -42,7 +42,12 @@ allprojects {
     maven { url 'https://frcmaven.wpi.edu/artifactory/sleipnirgroup-mvn-release/'}
     maven { url 'https://maven.photonvision.org/repository/internal' }
     maven { url 'https://maven.photonvision.org/repository/snapshots' }
-    maven { url 'https://dev.studica.com/maven/release/2026/' }
+    maven {
+      url 'https://dev.studica.com/maven/release/2026/'
+      content {
+        includeGroup 'com.studica.frc'
+      }
+    }
   }
 }
 

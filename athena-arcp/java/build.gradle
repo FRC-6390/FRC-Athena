@@ -12,6 +12,7 @@ java {
 def rustWorkspaceDir = rootProject.file('athena-arcp/rust')
 def rustManifestPath = new File(rustWorkspaceDir, 'Cargo.toml')
 def rustTargetDir = new File(rustWorkspaceDir, 'target')
+def resolveArtifactTargetDir = { -> rustTargetDir }
 def generatedNativeRoot = layout.buildDirectory.dir('generated/arcp-native-resources/main')
 def generatedNativeDir = generatedNativeRoot.map { new File(it.asFile, 'native') }
 
@@ -60,42 +61,42 @@ def knownTargets = [
         host: [
                 resourceDir : hostResourceDir,
                 fileName    : hostLibraryFile,
-                artifactPath: { -> new File(rustTargetDir, "release/${hostLibraryFile}") }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), "release/${hostLibraryFile}") }
         ],
         'armv7-unknown-linux-gnueabihf': [
                 resourceDir : 'linux-arm32',
                 fileName    : 'libarcp_jni.so',
-                artifactPath: { -> new File(rustTargetDir, 'armv7-unknown-linux-gnueabihf/release/libarcp_jni.so') }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'armv7-unknown-linux-gnueabihf/release/libarcp_jni.so') }
         ],
         'x86_64-unknown-linux-gnu'     : [
                 resourceDir : 'linux-x86_64',
                 fileName    : 'libarcp_jni.so',
-                artifactPath: { -> new File(rustTargetDir, 'x86_64-unknown-linux-gnu/release/libarcp_jni.so') }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'x86_64-unknown-linux-gnu/release/libarcp_jni.so') }
         ],
         'aarch64-unknown-linux-gnu'    : [
                 resourceDir : 'linux-aarch64',
                 fileName    : 'libarcp_jni.so',
-                artifactPath: { -> new File(rustTargetDir, 'aarch64-unknown-linux-gnu/release/libarcp_jni.so') }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'aarch64-unknown-linux-gnu/release/libarcp_jni.so') }
         ],
         'x86_64-apple-darwin'          : [
                 resourceDir : 'macos-x86_64',
                 fileName    : 'libarcp_jni.dylib',
-                artifactPath: { -> new File(rustTargetDir, 'x86_64-apple-darwin/release/libarcp_jni.dylib') }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'x86_64-apple-darwin/release/libarcp_jni.dylib') }
         ],
         'aarch64-apple-darwin'         : [
                 resourceDir : 'macos-aarch64',
                 fileName    : 'libarcp_jni.dylib',
-                artifactPath: { -> new File(rustTargetDir, 'aarch64-apple-darwin/release/libarcp_jni.dylib') }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'aarch64-apple-darwin/release/libarcp_jni.dylib') }
         ],
         'x86_64-pc-windows-gnu'        : [
                 resourceDir : 'windows-x86_64',
                 fileName    : 'arcp_jni.dll',
-                artifactPath: { -> new File(rustTargetDir, 'x86_64-pc-windows-gnu/release/arcp_jni.dll') }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'x86_64-pc-windows-gnu/release/arcp_jni.dll') }
         ],
         'x86_64-pc-windows-msvc'       : [
                 resourceDir : 'windows-x86_64',
                 fileName    : 'arcp_jni.dll',
-                artifactPath: { -> new File(rustTargetDir, 'x86_64-pc-windows-msvc/release/arcp_jni.dll') }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'x86_64-pc-windows-msvc/release/arcp_jni.dll') }
         ],
 ]
 
@@ -127,12 +128,14 @@ def dockerfilePath = rootProject.file('athena-arcp/rust/docker/Dockerfile.cross'
 def dockerContextDir = rustWorkspaceDir
 def dockerCacheDir = rootProject.file('athena-arcp/rust/.docker-cache')
 def dockerCargoHomeDir = new File(dockerCacheDir, 'cargo-home')
+def dockerTargetDir = new File(dockerCacheDir, 'target')
 def dockerSupportedTargets = [
         'armv7-unknown-linux-gnueabihf',
         'x86_64-unknown-linux-gnu',
         'aarch64-unknown-linux-gnu',
         'x86_64-pc-windows-gnu',
 ] as Set<String>
+resolveArtifactTargetDir = { -> useDockerCross ? dockerTargetDir : rustTargetDir }
 
 def selectedTargets
 if (explicitTargetsRaw != null && !explicitTargetsRaw.trim().isEmpty()) {
@@ -425,6 +428,9 @@ def runCargoBuildDocker = { String triple ->
     if (!dockerCargoHomeDir.exists() && !dockerCargoHomeDir.mkdirs()) {
         throw new GradleException("Failed to create ARCP Docker cargo cache directory: ${dockerCargoHomeDir}")
     }
+    if (!dockerTargetDir.exists() && !dockerTargetDir.mkdirs()) {
+        throw new GradleException("Failed to create ARCP Docker target cache directory: ${dockerTargetDir}")
+    }
 
     def linkerEnv = [] as List<String>
     switch (triple) {
@@ -469,8 +475,9 @@ def runCargoBuildDocker = { String triple ->
 
     command += [
             '-e', 'CARGO_HOME=/cargo-home',
-            '-e', 'CARGO_TARGET_DIR=/workspace/athena-arcp/rust/target',
+            '-e', 'CARGO_TARGET_DIR=/cargo-target',
             '-v', "${dockerCargoHomeDir.absolutePath}:/cargo-home",
+            '-v', "${dockerTargetDir.absolutePath}:/cargo-target",
             '-v', "${rootProject.projectDir.absolutePath}:/workspace",
             '-w', '/workspace/athena-arcp/rust',
     ]
@@ -529,10 +536,10 @@ tasks.register('prepareArcpNativeResources') {
                 throw new GradleException("Unsupported ARCP JNI target '${target}'. Known targets: ${knownTargets.keySet().sort().join(', ')}")
             }
             def buildTriple = resolveBuildTripleForTarget(target)
+            def canSkip = optionalTargets.contains(target) && !requireAllTargets
 
             def missing = checkTargetBuildReadiness(buildTriple)
             if (!missing.isEmpty()) {
-                def canSkip = optionalTargets.contains(target) && !requireAllTargets
                 if (canSkip) {
                     logger.warn("Skipping ARCP JNI target '${target}' (missing toolchain: ${missing.join(', ')})")
                     skippedTargets << target
@@ -541,37 +548,49 @@ tasks.register('prepareArcpNativeResources') {
                 throw new GradleException("Cannot build ARCP JNI target '${target}'. Missing toolchain: ${missing.join(', ')}. Install toolchain or mark optional with -ParcpOptionalTargets=${target}")
             }
 
-            if (!useDockerCross && buildTriple != 'host') {
-                if (buildTriple != target) {
-                    logger.lifecycle("ARCP JNI native fallback: ${target} -> ${buildTriple}")
+            try {
+                if (!useDockerCross && buildTriple != 'host') {
+                    if (buildTriple != target) {
+                        logger.lifecycle("ARCP JNI native fallback: ${target} -> ${buildTriple}")
+                    }
+                    ensureRustTargetInstalled(buildTriple)
                 }
-                ensureRustTargetInstalled(buildTriple)
-            }
-            if (useDockerCross) {
-                if (buildTriple == 'host' || buildTriple == null) {
-                    throw new GradleException("Internal error: Docker build triple resolution failed for '${target}'.")
+                if (useDockerCross) {
+                    if (buildTriple == 'host' || buildTriple == null) {
+                        throw new GradleException("Internal error: Docker build triple resolution failed for '${target}'.")
+                    }
+                    if (target == 'host') {
+                        logger.lifecycle("ARCP JNI docker host-target mapping: host -> ${buildTriple}")
+                    }
+                    runCargoBuildDocker(buildTriple)
+                } else {
+                    runCargoBuild(buildTriple)
                 }
-                if (target == 'host') {
-                    logger.lifecycle("ARCP JNI docker host-target mapping: host -> ${buildTriple}")
+                def buildInfo = knownTargets[buildTriple]
+                if (buildInfo == null) {
+                    throw new GradleException("No artifact mapping for resolved build triple '${buildTriple}' (requested '${target}').")
                 }
-                runCargoBuildDocker(buildTriple)
-            } else {
-                runCargoBuild(buildTriple)
-            }
-            def buildInfo = knownTargets[buildTriple]
-            if (buildInfo == null) {
-                throw new GradleException("No artifact mapping for resolved build triple '${buildTriple}' (requested '${target}').")
-            }
-            File artifact = buildInfo.artifactPath()
-            if (!artifact.exists()) {
-                throw new GradleException("Expected ARCP JNI artifact not found for '${target}': ${artifact}")
-            }
-            File targetDir = new File(outputDir, info.resourceDir as String)
-            targetDir.mkdirs()
-            copy {
-                from artifact
-                into targetDir
-                rename { info.fileName as String }
+                File artifact = buildInfo.artifactPath()
+                if (!artifact.exists()) {
+                    throw new GradleException("Expected ARCP JNI artifact not found for '${target}': ${artifact}")
+                }
+                File targetDir = new File(outputDir, info.resourceDir as String)
+                targetDir.mkdirs()
+                copy {
+                    from artifact
+                    into targetDir
+                    rename { info.fileName as String }
+                }
+            } catch (Exception ex) {
+                if (canSkip) {
+                    def detail = (ex.message != null && !ex.message.trim().isEmpty())
+                            ? ex.message
+                            : ex.class.simpleName
+                    logger.warn("Skipping ARCP JNI target '${target}' (build failed: ${detail})")
+                    skippedTargets << target
+                    return
+                }
+                throw ex
             }
             builtTargets << target
         }

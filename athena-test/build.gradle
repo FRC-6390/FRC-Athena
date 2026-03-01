@@ -8,6 +8,7 @@ configurations {
 
 dependencies {
     testImplementation project(':athena-core')
+    testImplementation project(':athena-pathplanner')
     testImplementation project(':athena-rev')
     testImplementation project(':athena-examples')
     testImplementation project(':athena-plugin')
@@ -30,6 +31,7 @@ dependencies {
     testImplementation "com.fasterxml.jackson.core:jackson-core:${rootProject.ext.athenaVersions.jackson}"
     testImplementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.athenaVersions.jackson}"
     testImplementation "org.tomlj:tomlj:1.1.1"
+    testImplementation "com.pathplanner.lib:PathplannerLib-java:${rootProject.ext.athenaVersions.pathplanner}"
 
     // WPILib JNI libraries are distributed as native zips and are needed for tests that
     // construct SubsystemBase/CommandScheduler or touch WPILib JNI-backed APIs.

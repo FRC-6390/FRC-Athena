@@ -55,28 +55,27 @@ public class RevEncoder implements Encoder {
 
     @Override
     public double getPosition() {
-        if (RobotBase.isSimulation()) {
-            return simPosition;
-        }
         if (relative != null) {
             return relative.getPosition();
         }
         if (absolute != null) {
             return absolute.getPosition();
         }
+        if (RobotBase.isSimulation()) {
+            return simPosition;
+        }
         return 0.0;
     }
 
     @Override
     public double getVelocity() {
-        if (RobotBase.isSimulation()) {
-            return simVelocity;
-        }
         double rpm;
         if (relative != null) {
             rpm = relative.getVelocity();
         } else if (absolute != null) {
             rpm = absolute.getVelocity();
+        } else if (RobotBase.isSimulation()) {
+            return simVelocity;
         } else {
             return 0.0;
         }
@@ -86,14 +85,14 @@ public class RevEncoder implements Encoder {
 
     @Override
     public double getAbsolutePosition() {
-        if (RobotBase.isSimulation()) {
-            return simPosition;
-        }
         if (absolute != null) {
             return absolute.getPosition();
         }
         if (relative != null) {
             return relative.getPosition();
+        }
+        if (RobotBase.isSimulation()) {
+            return simPosition;
         }
         return 0.0;
     }
@@ -145,14 +144,14 @@ public class RevEncoder implements Encoder {
 
     @Override
     public double getRawAbsoluteValue() {
-        if (RobotBase.isSimulation()) {
-            return simPosition;
-        }
         if (absolute != null) {
             return absolute.getPosition();
         }
         if (relative != null) {
             return relative.getPosition();
+        }
+        if (RobotBase.isSimulation()) {
+            return simPosition;
         }
         return 0.0;
     }

@@ -26,14 +26,17 @@ import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.path.PathPlannerPath;
+import edu.wpi.first.math.geometry.Rotation2d;
 import com.pathplanner.lib.util.FileVersionException;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 
 public class PathPlannerAutoBackend implements AutoBackend {
+    private volatile boolean choreoMirrorForAlliance = true;
 
     @Override
     public boolean supports(RobotAuto.AutoSource source) {
@@ -120,6 +123,7 @@ public class PathPlannerAutoBackend implements AutoBackend {
         }
 
         java.util.function.Consumer<TrajectorySample<?>> consumer = sampleConsumer(binding);
+        this.choreoMirrorForAlliance = binding.mirrorForAlliance();
 
         AutoFactory factory = new AutoFactory(
                 binding.poseSupplier(),
@@ -149,11 +153,11 @@ public class PathPlannerAutoBackend implements AutoBackend {
         if (source == RobotAuto.AutoSource.PATH_PLANNER) {
             try {
                 List<PathPlannerPath> paths = PathPlannerAuto.getPathGroupFromAutoFile(reference);
-                return Optional.of(flattenPathPoses(paths));
+                return Optional.of(flattenPathPoses(paths, shouldFlipPathPosesForAlliance()));
             } catch (IOException | ParseException ex) {
                 try {
                     PathPlannerPath path = PathPlannerPath.fromPathFile(reference);
-                    return Optional.of(path.getPathPoses());
+                    return Optional.of(resolvePathPoses(path, shouldFlipPathPosesForAlliance()));
                 } catch (IOException | ParseException | FileVersionException pathEx) {
                     DriverStation.reportWarning(
                             "Failed to load PathPlanner auto poses for \"" + reference + "\"", pathEx.getStackTrace());
@@ -166,7 +170,8 @@ public class PathPlannerAutoBackend implements AutoBackend {
                 PathPlannerPath path = ref.index().isPresent()
                         ? PathPlannerPath.fromChoreoTrajectory(ref.name(), ref.index().getAsInt())
                         : PathPlannerPath.fromChoreoTrajectory(ref.name());
-                return Optional.of(path.getPathPoses());
+                boolean flip = choreoMirrorForAlliance && shouldFlipPathPosesForAlliance();
+                return Optional.of(resolvePathPoses(path, flip));
             } catch (IOException | ParseException | FileVersionException ex) {
                 DriverStation.reportWarning(
                         "Failed to load Choreo poses for \"" + reference + "\"", ex.getStackTrace());
@@ -186,7 +191,7 @@ public class PathPlannerAutoBackend implements AutoBackend {
         };
     }
 
-    private static List<Pose2d> flattenPathPoses(List<PathPlannerPath> paths) {
+    private static List<Pose2d> flattenPathPoses(List<PathPlannerPath> paths, boolean flipForAlliance) {
         if (paths == null || paths.isEmpty()) {
             return List.of();
         }
@@ -195,7 +200,7 @@ public class PathPlannerAutoBackend implements AutoBackend {
             if (path == null) {
                 continue;
             }
-            List<Pose2d> pathPoses = path.getPathPoses();
+            List<Pose2d> pathPoses = resolvePathPoses(path, flipForAlliance);
             if (pathPoses == null || pathPoses.isEmpty()) {
                 continue;
             }
@@ -206,6 +211,40 @@ public class PathPlannerAutoBackend implements AutoBackend {
             }
         }
         return poses;
+    }
+
+    private static List<Pose2d> resolvePathPoses(PathPlannerPath path, boolean flipForAlliance) {
+        if (path == null) {
+            return List.of();
+        }
+        PathPlannerPath resolvedPath = (flipForAlliance && !path.preventFlipping)
+                ? path.flipPath()
+                : path;
+        List<Pose2d> rawPoses = resolvedPath.getPathPoses();
+        if (rawPoses == null || rawPoses.isEmpty()) {
+            return List.of();
+        }
+        List<Pose2d> poses = new ArrayList<>(rawPoses);
+
+        // PathPlanner path points omit heading (all zero). Inject start/end headings so
+        // auto reset and previews use meaningful orientation.
+        Rotation2d startHeading = resolvedPath.getStartingHolonomicPose()
+                .map(Pose2d::getRotation)
+                .orElseGet(() -> resolvedPath.getStartingDifferentialPose().getRotation());
+        Pose2d first = poses.get(0);
+        poses.set(0, new Pose2d(first.getTranslation(), startHeading));
+
+        if (resolvedPath.getGoalEndState() != null) {
+            Rotation2d endHeading = resolvedPath.getGoalEndState().rotation();
+            Pose2d last = poses.get(poses.size() - 1);
+            poses.set(poses.size() - 1, new Pose2d(last.getTranslation(), endHeading));
+        }
+
+        return List.copyOf(poses);
+    }
+
+    private static boolean shouldFlipPathPosesForAlliance() {
+        return DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
     }
 
     private record ChoreoRef(String name, OptionalInt index) {

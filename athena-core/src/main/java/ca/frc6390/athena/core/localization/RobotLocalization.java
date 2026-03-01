@@ -642,12 +642,6 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     public RobotLocalization<T> configureChoreo(Subsystem drivetrain){
         HolonomicPidConstants rotationConstants = localizationConfig.rotation();
         HolonomicPidConstants translationConstants = localizationConfig.translation();
-        String autoHeadingAxis = localizationConfig.autoPoseName();
-        if (autoHeadingAxis == null || autoHeadingAxis.isBlank()) {
-            autoHeadingAxis = "field";
-        }
-        final String headingAxis = autoHeadingAxis;
-
         PIDController rotationController = new PIDController(rotationConstants.kP(), rotationConstants.kI(), rotationConstants.kD());
         rotationController.setIZone(rotationConstants.iZone());
         rotationController.enableContinuousInput(-Math.PI, Math.PI);
@@ -670,7 +664,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 pose -> resetPose(localizationConfig.autoPoseName(), pose),
                 (desiredPose, desiredSpeeds) -> {
                     Pose2d botpose = getFieldPose();
-                    Rotation2d measuredHeading = getYaw(headingAxis, backendConfig());
+                    // Use the estimator heading so x/y/theta feedback share the same frame.
+                    Rotation2d measuredHeading = botpose.getRotation();
                     double desiredHeadingRadians = desiredPose.getRotation().getRadians();
                     double measuredHeadingRadians = measuredHeading.getRadians();
                     double headingErrorRadians = MathUtil.inputModulus(
@@ -735,7 +730,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         state.pose2d = pose;
         state.pose3d = new Pose3d(pose);
         if (isPrimaryPose(config)) {
-            imu.setVirtualAxis("field", pose.getRotation());
+            syncHeadingAxesOnPrimaryReset(pose.getRotation());
             setPrimaryPose(state);
             resetVelocityTracking(pose);
             resetVisionTracking(state);
@@ -766,7 +761,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         state.pose3d = pose;
         state.pose2d = pose2d;
         if (isPrimaryPose(config)) {
-            imu.setVirtualAxis("field", pose2d.getRotation());
+            syncHeadingAxesOnPrimaryReset(pose2d.getRotation());
             setPrimaryPose(state);
             resetVelocityTracking(pose2d);
             resetVisionTracking(state);
@@ -806,6 +801,27 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
 
     public void setVisionStd(double x, double y, double theta){
         setVisionStd(VecBuilder.fill(x,y,Units.degreesToRadians(theta)));
+    }
+
+    private void syncHeadingAxesOnPrimaryReset(Rotation2d newFieldHeading) {
+        if (imu == null || newFieldHeading == null) {
+            return;
+        }
+        if (restoringPersistentState) {
+            imu.setVirtualAxis("field", newFieldHeading);
+            return;
+        }
+
+        Rotation2d previousField = imu.getVirtualAxis("field");
+        Rotation2d previousDriver = imu.getVirtualAxis("driver");
+        Rotation2d previousDrift = imu.getVirtualAxis("drift");
+
+        Rotation2d driverOffsetFromField = previousDriver.minus(previousField);
+        Rotation2d driftOffsetFromField = previousDrift.minus(previousField);
+
+        imu.setVirtualAxis("field", newFieldHeading);
+        imu.setVirtualAxis("driver", newFieldHeading.plus(driverOffsetFromField));
+        imu.setVirtualAxis("drift", newFieldHeading.plus(driftOffsetFromField));
     }
 
 
