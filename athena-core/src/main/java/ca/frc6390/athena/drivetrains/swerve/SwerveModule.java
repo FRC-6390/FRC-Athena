@@ -38,8 +38,8 @@ public class SwerveModule implements RobotSendableDevice {
     private SimpleMotorFeedforward driveFeedforward;
     private boolean driveFeedforwardEnabled = false;
     private double nominalVoltage = 12.0;
-    private double lastSetpointSpeedMetersPerSecond = 0.0;
-    private boolean hasPreviousSetpoint = false;
+    private double lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
+    private boolean hasPreviousFeedforwardTarget = false;
     private ca.frc6390.athena.drivetrains.swerve.sim.SwerveModuleSimulation simulation;
     private final SwerveModuleState stateView = new SwerveModuleState(0.0, Rotation2d.kZero);
     private final SwerveModulePosition positionView = new SwerveModulePosition(0.0, Rotation2d.kZero);
@@ -782,14 +782,22 @@ public class SwerveModule implements RobotSendableDevice {
     public void setDriveFeedforward(SimpleMotorFeedforward feedforward) {
         this.driveFeedforward = feedforward;
         this.driveFeedforwardEnabled = feedforward != null;
+        lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
+        hasPreviousFeedforwardTarget = false;
     }
 
     public void setDriveFeedforwardEnabled(boolean enabled) {
         if (driveFeedforward == null) {
             driveFeedforwardEnabled = false;
+            lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
+            hasPreviousFeedforwardTarget = false;
             return;
         }
         driveFeedforwardEnabled = enabled;
+        if (!enabled) {
+            lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
+            hasPreviousFeedforwardTarget = false;
+        }
     }
 
     public boolean isDriveFeedforwardEnabled() {
@@ -837,8 +845,8 @@ public class SwerveModule implements RobotSendableDevice {
         rotationMotor.stopMotor();
         lastDriveCommand = 0;
         lastSteerCommand = 0;
-        lastSetpointSpeedMetersPerSecond = 0.0;
-        hasPreviousSetpoint = false;
+        lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
+        hasPreviousFeedforwardTarget = false;
     }
 
     public void setToAngle(double angle) {
@@ -886,11 +894,16 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     private double calculateFeedforwardVolts(double targetSpeedMetersPerSecond) {
-        double currentSpeed = hasPreviousSetpoint
-                ? lastSetpointSpeedMetersPerSecond
-                : targetSpeedMetersPerSecond;
-        hasPreviousSetpoint = true;
-        lastSetpointSpeedMetersPerSecond = targetSpeedMetersPerSecond;
+        // Use measured wheel speed for the current-state term so ka stays stable while modules
+        // continuously optimize angles under mixed translation + rotation commands.
+        double measuredSpeed = getDriveMotorVelocity();
+        double currentSpeed = Double.isFinite(measuredSpeed)
+                ? measuredSpeed
+                : (hasPreviousFeedforwardTarget
+                        ? lastFeedforwardTargetSpeedMetersPerSecond
+                        : targetSpeedMetersPerSecond);
+        hasPreviousFeedforwardTarget = true;
+        lastFeedforwardTargetSpeedMetersPerSecond = targetSpeedMetersPerSecond;
         return driveFeedforward.calculateWithVelocities(currentSpeed, targetSpeedMetersPerSecond);
     }
 
