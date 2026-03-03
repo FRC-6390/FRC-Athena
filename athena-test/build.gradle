@@ -1,9 +1,39 @@
+import org.gradle.internal.os.OperatingSystem
+
 plugins {
     id 'java'
 }
 
 configurations {
     wpilibTestNatives
+}
+
+def hostOs = OperatingSystem.current()
+def normalizedHostArch = ((System.getProperty('os.arch') ?: '').toLowerCase(Locale.ROOT) in ['x86_64', 'amd64'])
+        ? 'x86-64'
+        : (((System.getProperty('os.arch') ?: '').toLowerCase(Locale.ROOT) in ['aarch64', 'arm64']) ? 'arm64' : null)
+
+if (normalizedHostArch == null && !hostOs.isMacOsX()) {
+    throw new GradleException("Unsupported host architecture for WPILib test natives: ${System.getProperty('os.arch')}")
+}
+
+def wpilibNativeClassifier
+def wpilibNativeSharedPath
+def wpilibNativeEnvVar
+if (hostOs.isWindows()) {
+    wpilibNativeClassifier = "windows${normalizedHostArch}"
+    wpilibNativeSharedPath = "windows/${normalizedHostArch}/shared"
+    wpilibNativeEnvVar = 'PATH'
+} else if (hostOs.isLinux()) {
+    wpilibNativeClassifier = "linux${normalizedHostArch}"
+    wpilibNativeSharedPath = "linux/${normalizedHostArch}/shared"
+    wpilibNativeEnvVar = 'LD_LIBRARY_PATH'
+} else if (hostOs.isMacOsX()) {
+    wpilibNativeClassifier = 'osxuniversal'
+    wpilibNativeSharedPath = 'osx/universal/shared'
+    wpilibNativeEnvVar = 'DYLD_LIBRARY_PATH'
+} else {
+    throw new GradleException("Unsupported host OS for WPILib test natives: ${System.getProperty('os.name')}")
 }
 
 dependencies {
@@ -36,13 +66,13 @@ dependencies {
 
     // WPILib JNI libraries are distributed as native zips and are needed for tests that
     // construct SubsystemBase/CommandScheduler or touch WPILib JNI-backed APIs.
-    wpilibTestNatives "edu.wpi.first.hal:hal-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
-    wpilibTestNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
-    wpilibTestNatives "edu.wpi.first.wpinet:wpinet-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
-    wpilibTestNatives "edu.wpi.first.ntcore:ntcore-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
-    wpilibTestNatives "edu.wpi.first.cscore:cscore-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
-    wpilibTestNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
-    wpilibTestNatives "edu.wpi.first.apriltag:apriltag-cpp:${rootProject.ext.wpilibVersion}:linuxx86-64@zip"
+    wpilibTestNatives "edu.wpi.first.hal:hal-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.wpinet:wpinet-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.ntcore:ntcore-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.cscore:cscore-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.apriltag:apriltag-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
 }
 
 def extractedWpilibNativesDir = layout.buildDirectory.dir('wpilib-test-natives')
@@ -51,7 +81,7 @@ tasks.register('extractWpilibTestNatives', Copy) {
     from {
         configurations.wpilibTestNatives.collect { zipTree(it) }
     }
-    include 'linux/x86-64/shared/*.so'
+    include "${wpilibNativeSharedPath}/*"
     into extractedWpilibNativesDir
 }
 
@@ -59,7 +89,8 @@ test {
     dependsOn tasks.named('extractWpilibTestNatives')
     useJUnitPlatform()
     jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED'
-    def nativePath = extractedWpilibNativesDir.get().file('linux/x86-64/shared').asFile.absolutePath
+    def nativePath = extractedWpilibNativesDir.get().file(wpilibNativeSharedPath).asFile.absolutePath
     systemProperty 'java.library.path', nativePath
-    environment 'LD_LIBRARY_PATH', nativePath
+    def existingNativePath = System.getenv(wpilibNativeEnvVar)
+    environment wpilibNativeEnvVar, existingNativePath ? "${nativePath}${File.pathSeparator}${existingNativePath}" : nativePath
 }
