@@ -223,9 +223,10 @@ public final class ArcpDashboardLayout {
             map.put("signalId", signalId);
             map.put("kind", kind);
             map.put("title", title);
+            // Host dashboard grid coordinates are 1-based.
             map.put("layout", Map.of(
-                    "x", layout.x(),
-                    "y", layout.y(),
+                    "x", layout.x() + 1,
+                    "y", layout.y() + 1,
                     "w", layout.w(),
                     "h", layout.h()));
             if (parentLayoutId != null) {

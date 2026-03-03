@@ -2664,13 +2664,25 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .config("collapsed", true)
                 .config("expandedRows", 2)
                 .build());
+        String quasiGridId = "w-" + slug + "-sysid-quasi-grid";
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id(quasiGridId)
+                .kind("layout_grid")
+                .title("Quasistatic Actions")
+                .signalId(firstExistingSignalId(publisher, sysidRoot + "/active"))
+                .layout(0, 0, 12, 2)
+                .parentLayoutId(quasiAccordionId)
+                .config("autoSize", false)
+                .config("columns", 12)
+                .config("rows", 1)
+                .build());
         page.widget(ArcpDashboardLayout.Widget.builder()
                 .id("w-" + slug + "-sysid-quasi-forward")
                 .kind("action")
                 .title("Forward")
                 .signalId(publisher.existingSignalId(sysidRoot + "/Commands/quasistaticForward"))
                 .layout(0, 0, 6, 1)
-                .parentLayoutId(quasiAccordionId)
+                .parentLayoutId(quasiGridId)
                 .build());
         page.widget(ArcpDashboardLayout.Widget.builder()
                 .id("w-" + slug + "-sysid-quasi-reverse")
@@ -2678,7 +2690,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .title("Reverse")
                 .signalId(publisher.existingSignalId(sysidRoot + "/Commands/quasistaticReverse"))
                 .layout(6, 0, 6, 1)
-                .parentLayoutId(quasiAccordionId)
+                .parentLayoutId(quasiGridId)
                 .build());
 
         String dynamicAccordionId = "w-" + slug + "-sysid-dynamic-accordion";
@@ -2692,13 +2704,25 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .config("collapsed", true)
                 .config("expandedRows", 2)
                 .build());
+        String dynamicGridId = "w-" + slug + "-sysid-dynamic-grid";
+        page.widget(ArcpDashboardLayout.Widget.builder()
+                .id(dynamicGridId)
+                .kind("layout_grid")
+                .title("Dynamic Actions")
+                .signalId(firstExistingSignalId(publisher, sysidRoot + "/active"))
+                .layout(0, 0, 12, 2)
+                .parentLayoutId(dynamicAccordionId)
+                .config("autoSize", false)
+                .config("columns", 12)
+                .config("rows", 1)
+                .build());
         page.widget(ArcpDashboardLayout.Widget.builder()
                 .id("w-" + slug + "-sysid-dynamic-forward")
                 .kind("action")
                 .title("Forward")
                 .signalId(publisher.existingSignalId(sysidRoot + "/Commands/dynamicForward"))
                 .layout(0, 0, 6, 1)
-                .parentLayoutId(dynamicAccordionId)
+                .parentLayoutId(dynamicGridId)
                 .build());
         page.widget(ArcpDashboardLayout.Widget.builder()
                 .id("w-" + slug + "-sysid-dynamic-reverse")
@@ -2706,7 +2730,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .title("Reverse")
                 .signalId(publisher.existingSignalId(sysidRoot + "/Commands/dynamicReverse"))
                 .layout(6, 0, 6, 1)
-                .parentLayoutId(dynamicAccordionId)
+                .parentLayoutId(dynamicGridId)
                 .build());
         page.widget(ArcpDashboardLayout.Widget.builder()
                 .id("w-" + slug + "-sysid-cancel")
