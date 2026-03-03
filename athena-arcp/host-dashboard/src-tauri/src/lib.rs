@@ -1,4 +1,6 @@
 use std::io;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -23,6 +25,24 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 const CONTROL_RECONNECT_INTERVAL: Duration = Duration::from_millis(1000);
 const CONTROL_HEALTHCHECK_INTERVAL: Duration = Duration::from_millis(1500);
 const SERVER_STATS_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+const RIO_TCP_PROBE_TIMEOUT: Duration = Duration::from_millis(180);
+const RIO_TCP_PROBE_PORTS: [u16; 2] = [22, 80];
+const DRIVERSTATION_HOST_ALIASES: [&str; 4] = ["ds", "driverstation", "driver-station", "auto"];
+#[cfg(target_os = "windows")]
+const DRIVERSTATION_STORAGE_PATH: &str = r"C:\Users\Public\Documents\FRC\FRC DS Data Storage.ini";
+const SSH_REMOTE_USERS: [&str; 2] = ["lvuser", "admin"];
+const REMOTE_LOG_PREVIEW_BYTES_DEFAULT: usize = 64 * 1024;
+const REMOTE_LOG_PREVIEW_BYTES_MAX: usize = 512 * 1024;
+const REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_DEFAULT: u64 = 20 * 1024 * 1024;
+const REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_MAX: u64 = 64 * 1024 * 1024;
+const REMOTE_LOG_LIST_SCRIPT: &str = r#"{ for dir in /home/lvuser/athena/logs /home/lvuser/logs /u/logs /var/log; do if [ -d "$dir" ]; then find "$dir" -maxdepth 5 -type f 2>/dev/null; fi; done; if [ -f /home/lvuser/FRC_UserProgram.log ]; then echo /home/lvuser/FRC_UserProgram.log; fi; } | while IFS= read -r f; do case "$f" in *.log|*.txt|*.json|*.wpilog|*.gz) size=$(stat -c %s "$f" 2>/dev/null || wc -c < "$f" 2>/dev/null || echo 0); mtime=$(stat -c %Y "$f" 2>/dev/null || date -r "$f" +%s 2>/dev/null || echo 0); printf '%s|%s|%s\n' "$mtime" "$size" "$f";; esac; done | sort -t'|' -k1,1nr | head -n 800"#;
+const REMOTE_LOG_ALLOWED_PREFIXES: [&str; 4] = [
+    "/home/lvuser/athena/logs/",
+    "/home/lvuser/logs/",
+    "/u/logs/",
+    "/var/log/",
+];
+const REMOTE_LOG_ALLOWED_FILES: [&str; 1] = ["/home/lvuser/FRC_UserProgram.log"];
 
 struct AppRuntime {
     session: Mutex<Option<Session>>,
@@ -137,6 +157,41 @@ struct WindowModeSnapshot {
     dock_mode: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteLogEntry {
+    source: String,
+    path: String,
+    name: String,
+    size_bytes: u64,
+    modified_epoch_sec: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteLogList {
+    host: String,
+    entries: Vec<RemoteLogEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteLogPreview {
+    host: String,
+    path: String,
+    content: String,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteLogDownload {
+    host: String,
+    path: String,
+    file_name: String,
+    bytes: Vec<u8>,
+}
+
 #[derive(Default)]
 struct ProcessStatsSampler {
     prev_proc_jiffies: Option<u64>,
@@ -234,16 +289,409 @@ impl ServerStatsCache {
     }
 }
 
+fn parse_team_number(raw: &str) -> Option<u16> {
+    let trimmed = raw.trim().trim_matches('"');
+    if trimmed.is_empty() || !trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+
+    let team = trimmed.parse::<u16>().ok()?;
+    if !(1..=25_599).contains(&team) {
+        return None;
+    }
+    Some(team)
+}
+
+fn team_number_to_roborio_ip(team: u16) -> String {
+    let major = team / 100;
+    let minor = team % 100;
+    format!("10.{major}.{minor}.2")
+}
+
+fn roborio_candidates_for_team(team: u16) -> Vec<String> {
+    vec![
+        team_number_to_roborio_ip(team),
+        String::from("172.22.11.2"),
+        format!("roborio-{team}-frc.local"),
+    ]
+}
+
+fn probe_host_port(host: &str, port: u16) -> bool {
+    let Ok(addrs) = (host, port).to_socket_addrs() else {
+        return false;
+    };
+
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, RIO_TCP_PROBE_TIMEOUT) {
+            Ok(_) => return true,
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::ConnectionRefused
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::PermissionDenied
+                ) =>
+            {
+                // A refusal/reset still proves the target host is reachable.
+                return true;
+            }
+            Err(_) => {}
+        }
+    }
+
+    false
+}
+
+fn is_roborio_host_reachable(host: &str) -> bool {
+    RIO_TCP_PROBE_PORTS
+        .iter()
+        .copied()
+        .any(|port| probe_host_port(host, port))
+}
+
+fn select_roborio_host_for_team(team: u16) -> String {
+    let candidates = roborio_candidates_for_team(team);
+    for candidate in &candidates {
+        if is_roborio_host_reachable(candidate) {
+            return candidate.clone();
+        }
+    }
+    candidates
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| team_number_to_roborio_ip(team))
+}
+
+fn parse_team_alias(raw: &str) -> Option<u16> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(team) = parse_team_number(trimmed) {
+        return Some(team);
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    let rest = lowered
+        .strip_prefix("team:")
+        .or_else(|| lowered.strip_prefix("team="))
+        .or_else(|| lowered.strip_prefix("frc"))?;
+
+    parse_team_number(rest)
+}
+
+fn should_resolve_driverstation_host(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    DRIVERSTATION_HOST_ALIASES
+        .iter()
+        .any(|alias| lowered == *alias)
+}
+
+#[cfg(target_os = "windows")]
+fn read_ini_value(contents: &str, section: &str, key: &str) -> Option<String> {
+    let mut in_section = false;
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if let Some(inner) = trimmed
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+        {
+            in_section = inner.trim().eq_ignore_ascii_case(section);
+            continue;
+        }
+
+        if !in_section {
+            continue;
+        }
+
+        let Some((lhs, rhs)) = trimmed.split_once('=') else {
+            continue;
+        };
+
+        if !lhs.trim().eq_ignore_ascii_case(key) {
+            continue;
+        }
+
+        let mut value = rhs.trim().to_string();
+        if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+            value = value[1..value.len() - 1].to_string();
+        }
+        return Some(value);
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn read_driverstation_team_number() -> Result<u16, String> {
+    let contents = std::fs::read_to_string(DRIVERSTATION_STORAGE_PATH).map_err(|err| {
+        format!("Driver Station config read failed ({DRIVERSTATION_STORAGE_PATH}): {err}")
+    })?;
+
+    let raw_team = read_ini_value(&contents, "Setup", "TeamNumber")
+        .ok_or_else(|| String::from("Driver Station team number is missing"))?;
+    parse_team_number(&raw_team)
+        .ok_or_else(|| format!("Driver Station team number is invalid: {raw_team}"))
+}
+
+fn resolve_control_host(requested_host: &str) -> Result<String, String> {
+    let trimmed = requested_host.trim();
+
+    if let Some(team) = parse_team_alias(trimmed) {
+        return Ok(select_roborio_host_for_team(team));
+    }
+
+    if !should_resolve_driverstation_host(trimmed) {
+        return Ok(trimmed.to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let team = read_driverstation_team_number()?;
+        return Ok(select_roborio_host_for_team(team));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if trimmed.is_empty() {
+            return Err(String::from(
+                "host must not be empty (Driver Station auto host is Windows-only)",
+            ));
+        }
+        return Err(String::from(
+            "Driver Station host resolution is only available on Windows desktop",
+        ));
+    }
+}
+
+fn resolve_remote_target_host(
+    runtime: &AppRuntime,
+    requested_host: &str,
+) -> Result<String, String> {
+    let trimmed = requested_host.trim();
+    if should_resolve_driverstation_host(trimmed) {
+        if let Ok(session_slot) = runtime.session.lock() {
+            if let Some(session) = session_slot.as_ref() {
+                return Ok(session.host.clone());
+            }
+        }
+    }
+    resolve_control_host(trimmed)
+}
+
+fn run_ssh_command(host: &str, remote_command: &str) -> Result<Vec<u8>, String> {
+    let mut last_error = String::new();
+
+    for user in SSH_REMOTE_USERS {
+        let destination = format!("{user}@{host}");
+        let output = Command::new("ssh")
+            .arg("-o")
+            .arg("BatchMode=yes")
+            .arg("-o")
+            .arg("ConnectTimeout=3")
+            .arg("-o")
+            .arg("StrictHostKeyChecking=no")
+            .arg(destination.as_str())
+            .arg(remote_command)
+            .output();
+
+        match output {
+            Ok(result) if result.status.success() => return Ok(result.stdout),
+            Ok(result) => {
+                let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
+                last_error = if !stderr.is_empty() {
+                    format!("{destination}: {stderr}")
+                } else if !stdout.is_empty() {
+                    format!("{destination}: {stdout}")
+                } else {
+                    format!("{destination}: ssh exited with status {}", result.status)
+                };
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Err(String::from(
+                    "OpenSSH client not found on host machine (expected `ssh` in PATH)",
+                ));
+            }
+            Err(err) => {
+                last_error = format!("{destination}: failed to run ssh: {err}");
+            }
+        }
+    }
+
+    Err(format!("remote ssh command failed: {last_error}"))
+}
+
+fn classify_remote_log_source(path: &str) -> &'static str {
+    if path.contains("/athena/") {
+        "athena"
+    } else {
+        "rio"
+    }
+}
+
+fn is_allowed_remote_log_path(path: &str) -> bool {
+    REMOTE_LOG_ALLOWED_FILES.iter().any(|entry| path == *entry)
+        || REMOTE_LOG_ALLOWED_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
+}
+
+fn shell_quote_single(raw: &str) -> String {
+    format!("'{}'", raw.replace('\'', "'\"'\"'"))
+}
+
+fn remote_log_file_size_bytes(host: &str, path: &str) -> Result<u64, String> {
+    let quoted = shell_quote_single(path);
+    let command = format!("wc -c < {quoted}");
+    let output = run_ssh_command(host, &command)?;
+    let raw = String::from_utf8_lossy(&output).trim().to_string();
+    raw.parse::<u64>()
+        .map_err(|_| format!("failed to parse remote file size for {path}: {raw}"))
+}
+
+#[tauri::command]
+fn list_remote_logs(runtime: State<'_, AppRuntime>, host: String) -> Result<RemoteLogList, String> {
+    let resolved_host = resolve_remote_target_host(&runtime, &host)?;
+    let output = run_ssh_command(&resolved_host, REMOTE_LOG_LIST_SCRIPT)?;
+    let mut entries = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for line in String::from_utf8_lossy(&output).lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut parts = trimmed.splitn(3, '|');
+        let modified_epoch_sec = parts
+            .next()
+            .and_then(|raw| raw.parse::<u64>().ok())
+            .unwrap_or(0);
+        let size_bytes = parts
+            .next()
+            .and_then(|raw| raw.parse::<u64>().ok())
+            .unwrap_or(0);
+        let Some(path) = parts.next().map(str::trim) else {
+            continue;
+        };
+        if path.is_empty() || !is_allowed_remote_log_path(path) || !seen.insert(path.to_string()) {
+            continue;
+        }
+
+        let name = path.rsplit('/').next().unwrap_or(path).to_string();
+        entries.push(RemoteLogEntry {
+            source: String::from(classify_remote_log_source(path)),
+            path: path.to_string(),
+            name,
+            size_bytes,
+            modified_epoch_sec,
+        });
+    }
+
+    Ok(RemoteLogList {
+        host: resolved_host,
+        entries,
+    })
+}
+
+#[tauri::command]
+fn read_remote_log_preview(
+    runtime: State<'_, AppRuntime>,
+    host: String,
+    path: String,
+    max_bytes: Option<u32>,
+) -> Result<RemoteLogPreview, String> {
+    let resolved_host = resolve_remote_target_host(&runtime, &host)?;
+    let normalized_path = path.trim();
+    if normalized_path.is_empty() {
+        return Err(String::from("remote log path must not be empty"));
+    }
+    if !is_allowed_remote_log_path(normalized_path) {
+        return Err(String::from(
+            "remote log path is outside allowed log directories",
+        ));
+    }
+
+    let limit = max_bytes
+        .map(|value| value as usize)
+        .unwrap_or(REMOTE_LOG_PREVIEW_BYTES_DEFAULT)
+        .clamp(1024, REMOTE_LOG_PREVIEW_BYTES_MAX);
+    let size_bytes = remote_log_file_size_bytes(&resolved_host, normalized_path)?;
+    let quoted = shell_quote_single(normalized_path);
+    let command = format!("tail -c {limit} -- {quoted} 2>/dev/null || cat -- {quoted} 2>/dev/null");
+    let output = run_ssh_command(&resolved_host, &command)?;
+
+    Ok(RemoteLogPreview {
+        host: resolved_host,
+        path: normalized_path.to_string(),
+        content: String::from_utf8_lossy(&output).to_string(),
+        truncated: size_bytes > (limit as u64),
+    })
+}
+
+#[tauri::command]
+fn download_remote_log(
+    runtime: State<'_, AppRuntime>,
+    host: String,
+    path: String,
+    max_bytes: Option<u64>,
+) -> Result<RemoteLogDownload, String> {
+    let resolved_host = resolve_remote_target_host(&runtime, &host)?;
+    let normalized_path = path.trim();
+    if normalized_path.is_empty() {
+        return Err(String::from("remote log path must not be empty"));
+    }
+    if !is_allowed_remote_log_path(normalized_path) {
+        return Err(String::from(
+            "remote log path is outside allowed log directories",
+        ));
+    }
+
+    let limit = max_bytes
+        .unwrap_or(REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_DEFAULT)
+        .clamp(1024, REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_MAX);
+    let size_bytes = remote_log_file_size_bytes(&resolved_host, normalized_path)?;
+    if size_bytes > limit {
+        return Err(format!(
+            "remote file is {size_bytes} bytes, exceeds current download limit of {limit} bytes"
+        ));
+    }
+
+    let quoted = shell_quote_single(normalized_path);
+    let output = run_ssh_command(&resolved_host, &format!("cat -- {quoted}"))?;
+    let file_name = normalized_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(normalized_path)
+        .to_string();
+
+    Ok(RemoteLogDownload {
+        host: resolved_host,
+        path: normalized_path.to_string(),
+        file_name,
+        bytes: output,
+    })
+}
+
 #[tauri::command]
 fn connect_arcp(
     runtime: State<'_, AppRuntime>,
     host: String,
     control_port: u16,
 ) -> Result<ConnectInfo, String> {
-    let host = host.trim().to_string();
-    if host.is_empty() {
-        return Err(String::from("host must not be empty"));
-    }
+    let host = resolve_control_host(&host)?;
 
     let mut session_slot = runtime
         .session
@@ -255,7 +703,7 @@ fn connect_arcp(
     }
 
     let mut control = ControlClient::connect(&host, control_port)
-        .map_err(|err| format!("connect failed: {err}"))?;
+        .map_err(|err| format!("connect failed ({host}:{control_port}): {err}"))?;
     control
         .ping()
         .map_err(|err| format!("PING failed: {err}"))?;
@@ -1152,6 +1600,9 @@ pub fn run() {
             load_server_layout,
             list_server_layouts,
             delete_server_layout,
+            list_remote_logs,
+            read_remote_log_preview,
+            download_remote_log,
             window_mode_snapshot,
             set_presentation_mode,
             set_driverstation_dock_mode,

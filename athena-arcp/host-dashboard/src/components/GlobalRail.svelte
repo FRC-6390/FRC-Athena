@@ -4,6 +4,7 @@
     faBolt,
     faCamera,
     faChartLine,
+    faFileLines,
     faStethoscope,
     faMicrochip,
     faGear,
@@ -18,6 +19,7 @@
     | 'mechanisms'
     | 'actions'
     | 'diagnostics'
+    | 'logs'
     | 'camera_tuning'
     | 'settings';
 
@@ -32,6 +34,7 @@
     { key: 'mechanisms', label: 'Mechanisms', icon: faMicrochip },
     { key: 'actions', label: 'Actions', icon: faBolt },
     { key: 'diagnostics', label: 'Diagnostics', icon: faStethoscope },
+    { key: 'logs', label: 'Logs', icon: faFileLines },
     { key: 'camera_tuning', label: 'Camera Tuning', icon: faCamera },
     { key: 'settings', label: 'Settings', icon: faGear }
   ];

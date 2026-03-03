@@ -616,14 +616,23 @@ tasks.register('athenaBuild') {
     description = 'Runs Athena build tasks in local FRC-Athena, then syncs vendordep JSON files.'
     doLast {
         def repo = resolveAthenaRepoDir(true)
-        runAthenaBuild(repo)
+        Throwable buildFailure = null
+        try {
+            runAthenaBuild(repo)
+        } catch (Throwable t) {
+            buildFailure = t
+            logger.warn(
+                    "Athena build tasks failed; continuing bootstrap sync/plugin publish before failing this task."
+            )
+        }
+
         syncFromAthenaRepo(repo)
+        String syncedVersion = readAthenaVersionFromRepo(repo)
+        ensureAthenaPluginPublished(repo, syncedVersion)
 
         // If DSL is already enabled in the robot project, keep plugin version aligned
         // with the just-synced Athena vendordep version.
         if (dslConfigured()) {
-            String syncedVersion = readAthenaVersionFromRepo(repo)
-            ensureAthenaPluginPublished(repo, syncedVersion)
             File buildFile = resolveRobotBuildFile()
             File settingsFile = resolveSettingsFile()
             boolean includeBuildChanged = ensureAthenaPluginIncludeBuildInSettings(settingsFile, repo)
@@ -632,6 +641,19 @@ tasks.register('athenaBuild') {
             if (includeBuildChanged) {
                 logger.lifecycle("Updated Athena plugin includeBuild entry in ${settingsFile}")
             }
+        } else {
+            logger.lifecycle(
+                    "Published Athena Gradle plugin ${syncedVersion} to mavenLocal " +
+                            "(DSL plugin id not currently configured in build script)."
+            )
+        }
+
+        if (buildFailure != null) {
+            throw new GradleException(
+                    "Athena build tasks failed before bootstrap completion. " +
+                            "Vendordeps and plugin publish were still attempted; see earlier logs for details.",
+                    buildFailure
+            )
         }
     }
 }

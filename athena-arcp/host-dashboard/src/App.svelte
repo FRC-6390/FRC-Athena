@@ -2,15 +2,18 @@
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import { faMagnifyingGlass, faXmark } from '@fortawesome/free-solid-svg-icons';
   import { onMount } from 'svelte';
-  import type { DashboardSnapshot, SignalRow } from './lib/arcp';
+  import type { DashboardSnapshot, RemoteLogEntry, SignalRow } from './lib/arcp';
   import {
     connectArcp,
+    downloadRemoteLog,
     deltaArcp,
     deleteServerLayout,
     disconnectArcp,
     fireAction,
+    listRemoteLogs,
     listServerLayouts,
     loadServerLayout,
+    readRemoteLogPreview,
     saveServerLayout,
     setDriverstationDockMode,
     setPresentationMode,
@@ -68,6 +71,7 @@
   import ActionsScreen from './components/ActionsScreen.svelte';
   import CameraTuningScreen from './components/CameraTuningScreen.svelte';
   import DiagnosticsScreen from './components/DiagnosticsScreen.svelte';
+  import LogsScreen from './components/LogsScreen.svelte';
   import MechanismsScreen from './components/MechanismsScreen.svelte';
   import FloatingDock from './components/FloatingDock.svelte';
   import DashboardContextMenu from './components/DashboardContextMenu.svelte';
@@ -96,6 +100,7 @@
     | 'mechanisms'
     | 'actions'
     | 'diagnostics'
+    | 'logs'
     | 'camera_tuning'
     | 'settings';
   type CommitLayoutOptions = {
@@ -285,7 +290,7 @@
     return typeof topicPath === 'string' && topicPath.trim().length > 0;
   }
 
-  let host = $state('127.0.0.1');
+  let host = $state('ds');
   let controlPort = $state('5805');
   let serverLayoutName = $state(DEFAULT_SERVER_LAYOUT_PROFILE);
   let availableServerLayouts = $state<string[]>([]);
@@ -345,6 +350,15 @@
   let pendingRecordingAck: PendingRecordingAck | null = null;
   let lastProcessedUpdateCount = -1;
   let lastManifestRevision = -1;
+  let remoteLogs = $state<RemoteLogEntry[]>([]);
+  let remoteLogsResolvedHost = $state('');
+  let remoteLogsRefreshInFlight = $state(false);
+  let remoteLogPreviewInFlight = $state(false);
+  let remoteLogDownloadInFlightPath = $state<string | null>(null);
+  let remoteLogError = $state('');
+  let selectedRemoteLogPath = $state('');
+  let selectedRemoteLogPreview = $state('');
+  let selectedRemoteLogPreviewTruncated = $state(false);
 
   const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
   const ntCompatSignalRows = $derived(
@@ -925,13 +939,13 @@
 
     const normalizedHost = host.trim();
     const port = parseControlPort(controlPort);
-    if (!normalizedHost || port === null) {
+    if (port === null) {
       connected = false;
       needsSessionReconnect = true;
       if (source === 'auto') {
         status = 'offline (retrying...)';
       } else {
-        lastError = 'connection failed: host must be set and port must be 1-65535';
+        lastError = 'connection failed: port must be 1-65535';
         status = 'connection failed';
       }
       scheduleReconnect();
@@ -1027,6 +1041,14 @@
         query = '';
         showInspector = false;
         selectedWidgetId = null;
+        break;
+      case 'logs':
+        roleFilter = 'all';
+        typeFilter = 'all';
+        query = '';
+        showInspector = false;
+        selectedWidgetId = null;
+        void refreshRemoteLogs();
         break;
       case 'camera_tuning':
         roleFilter = 'all';
@@ -1785,6 +1807,19 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  function downloadBinaryFile(filename: string, bytes: Uint8Array) {
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   async function pickJsonFileText(): Promise<string | null> {
     return new Promise((resolve, reject) => {
       const input = document.createElement('input');
@@ -1902,6 +1937,93 @@
       lastError = `server layout list failed: ${String(err)}`;
     } finally {
       layoutListRefreshInFlight = false;
+    }
+  }
+
+  function clearRemoteLogSelection() {
+    selectedRemoteLogPath = '';
+    selectedRemoteLogPreview = '';
+    selectedRemoteLogPreviewTruncated = false;
+    remoteLogDownloadInFlightPath = null;
+    remoteLogPreviewInFlight = false;
+  }
+
+  function clearRemoteLogs() {
+    remoteLogs = [];
+    remoteLogsResolvedHost = '';
+    remoteLogError = '';
+    clearRemoteLogSelection();
+  }
+
+  async function refreshRemoteLogs(force = false) {
+    if (remoteLogsRefreshInFlight) return;
+    if (!force && remoteLogs.length > 0) return;
+
+    remoteLogsRefreshInFlight = true;
+    remoteLogError = '';
+    try {
+      const listing = await listRemoteLogs(host.trim());
+      remoteLogs = listing.entries;
+      remoteLogsResolvedHost = listing.host;
+      const hasSelection = listing.entries.some((entry) => entry.path === selectedRemoteLogPath);
+      if (!hasSelection) {
+        selectedRemoteLogPath = listing.entries[0]?.path ?? '';
+        selectedRemoteLogPreview = '';
+        selectedRemoteLogPreviewTruncated = false;
+      }
+      if (selectedRemoteLogPath) {
+        await loadRemoteLogPreview(selectedRemoteLogPath);
+      }
+      status = `log index refreshed (${listing.entries.length} files)`;
+      lastError = '';
+    } catch (err) {
+      remoteLogError = String(err);
+    } finally {
+      remoteLogsRefreshInFlight = false;
+    }
+  }
+
+  async function loadRemoteLogPreview(path: string) {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      clearRemoteLogSelection();
+      return;
+    }
+
+    selectedRemoteLogPath = normalizedPath;
+    remoteLogPreviewInFlight = true;
+    remoteLogError = '';
+    try {
+      const preview = await readRemoteLogPreview(host.trim(), normalizedPath, 64 * 1024);
+      remoteLogsResolvedHost = preview.host;
+      selectedRemoteLogPreview = preview.content;
+      selectedRemoteLogPreviewTruncated = preview.truncated;
+    } catch (err) {
+      selectedRemoteLogPreview = '';
+      selectedRemoteLogPreviewTruncated = false;
+      remoteLogError = String(err);
+    } finally {
+      remoteLogPreviewInFlight = false;
+    }
+  }
+
+  async function downloadSelectedRemoteLog(path: string) {
+    const normalizedPath = path.trim();
+    if (!normalizedPath || remoteLogDownloadInFlightPath) return;
+
+    remoteLogDownloadInFlightPath = normalizedPath;
+    remoteLogError = '';
+    try {
+      const payload = await downloadRemoteLog(host.trim(), normalizedPath, 20 * 1024 * 1024);
+      remoteLogsResolvedHost = payload.host;
+      const fileName = payload.fileName || 'remote-log.bin';
+      downloadBinaryFile(fileName, new Uint8Array(payload.bytes));
+      status = `downloaded ${fileName}`;
+      lastError = '';
+    } catch (err) {
+      remoteLogError = String(err);
+    } finally {
+      remoteLogDownloadInFlightPath = null;
     }
   }
 
@@ -2589,6 +2711,7 @@
   function handleHostInput(value: string) {
     host = value;
     availableServerLayouts = [];
+    clearRemoteLogs();
   }
 
   function handlePortInput(value: string) {
@@ -2722,7 +2845,7 @@
     undoStack = [];
     redoStack = [];
     void refreshWindowModes();
-    if (host.trim() && Number(controlPort) > 0) {
+    if (Number(controlPort) > 0) {
       void connect();
     }
     const onFullscreenChange = () => {
@@ -2956,6 +3079,24 @@
             railSection = 'signals';
             showInspector = true;
           }}
+        />
+      {:else if railSection === 'logs'}
+        <LogsScreen
+          {connected}
+          {status}
+          requestedHost={host}
+          resolvedHost={remoteLogsResolvedHost}
+          refreshing={remoteLogsRefreshInFlight}
+          previewLoading={remoteLogPreviewInFlight}
+          downloadingPath={remoteLogDownloadInFlightPath}
+          error={remoteLogError}
+          entries={remoteLogs}
+          selectedPath={selectedRemoteLogPath}
+          preview={selectedRemoteLogPreview}
+          previewTruncated={selectedRemoteLogPreviewTruncated}
+          onRefresh={() => void refreshRemoteLogs(true)}
+          onSelectLog={(path) => void loadRemoteLogPreview(path)}
+          onDownloadLog={(path) => void downloadSelectedRemoteLog(path)}
         />
       {:else if railSection === 'camera_tuning'}
         <CameraTuningScreen

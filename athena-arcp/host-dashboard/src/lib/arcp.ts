@@ -52,6 +52,33 @@ export type WindowModeSnapshot = {
   dockMode: boolean;
 };
 
+export type RemoteLogEntry = {
+  source: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  modifiedEpochSec: number;
+};
+
+export type RemoteLogList = {
+  host: string;
+  entries: RemoteLogEntry[];
+};
+
+export type RemoteLogPreview = {
+  host: string;
+  path: string;
+  content: string;
+  truncated: boolean;
+};
+
+export type RemoteLogDownload = {
+  host: string;
+  path: string;
+  fileName: string;
+  bytes: number[];
+};
+
 function isTauriRuntime(): boolean {
   if (typeof window === 'undefined') return false;
   return '__TAURI_INTERNALS__' in window;
@@ -115,6 +142,34 @@ export async function listServerLayouts(): Promise<string[]> {
 export async function deleteServerLayout(layoutName: string): Promise<void> {
   return invoke('delete_server_layout', {
     layoutName
+  });
+}
+
+export async function listRemoteLogs(host: string): Promise<RemoteLogList> {
+  return invoke('list_remote_logs', { host });
+}
+
+export async function readRemoteLogPreview(
+  host: string,
+  path: string,
+  maxBytes = 64 * 1024
+): Promise<RemoteLogPreview> {
+  return invoke('read_remote_log_preview', {
+    host,
+    path,
+    maxBytes
+  });
+}
+
+export async function downloadRemoteLog(
+  host: string,
+  path: string,
+  maxBytes = 20 * 1024 * 1024
+): Promise<RemoteLogDownload> {
+  return invoke('download_remote_log', {
+    host,
+    path,
+    maxBytes
   });
 }
 
