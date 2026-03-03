@@ -1108,37 +1108,57 @@ fn connect_arcp(
         existing.stop();
     }
 
-    let mut control = ControlClient::connect(&host, control_port)
-        .map_err(|err| format!("connect failed ({host}:{control_port}): {err}"))?;
-    control
-        .ping()
-        .map_err(|err| format!("PING failed: {err}"))?;
-    let manifest = control
-        .manifest()
-        .map_err(|err| format!("manifest failed: {err}"))?;
-
+    let running = Arc::new(AtomicBool::new(true));
+    let mut signal_count = 0usize;
     let telemetry =
         TelemetrySubscription::bind_any().map_err(|err| format!("bind UDP failed: {err}"))?;
     let udp_port = telemetry
         .local_port()
         .map_err(|err| format!("read UDP local port failed: {err}"))?;
-    control
-        .subscribe(udp_port)
-        .map_err(|err| format!("subscribe failed: {err}"))?;
 
-    let signal_count = manifest.len();
-    let state = Arc::new(Mutex::new(DashboardState::new(manifest)));
-    let running = Arc::new(AtomicBool::new(true));
+    let control_setup_result: Result<(ControlClient, Vec<ManifestItem>), String> = (|| {
+            let mut control = ControlClient::connect(&host, control_port)
+                .map_err(|err| format!("connect failed ({host}:{control_port}): {err}"))?;
+            control
+                .ping()
+                .map_err(|err| format!("PING failed: {err}"))?;
+            let manifest = control
+                .manifest()
+                .map_err(|err| format!("manifest failed: {err}"))?;
+            control
+                .subscribe(udp_port)
+                .map_err(|err| format!("subscribe failed: {err}"))?;
+            Ok((control, manifest))
+        })();
+
+    let (state, control_runtime) = match control_setup_result {
+        Ok((control, manifest)) => {
+            signal_count = manifest.len();
+
+            let state = Arc::new(Mutex::new(DashboardState::new(manifest)));
+            let control_runtime = Arc::new(Mutex::new(ControlRuntime {
+                client: Some(control),
+                connected: true,
+                status: format!("connected to {host}:{control_port} (udp {udp_port})"),
+            }));
+
+            (state, control_runtime)
+        }
+        Err(control_error) => {
+            let state = Arc::new(Mutex::new(DashboardState::new(Vec::new())));
+            let control_runtime = Arc::new(Mutex::new(ControlRuntime {
+                client: None,
+                connected: false,
+                status: format!(
+                    "control offline ({host}:{control_port}): {control_error}; retrying (nt4 active)"
+                ),
+            }));
+            (state, control_runtime)
+        }
+    };
     let telemetry_handle = telemetry
         .spawn(Arc::clone(&state), Arc::clone(&running))
         .map_err(|err| format!("telemetry worker failed: {err}"))?;
-
-    let control_runtime = Arc::new(Mutex::new(ControlRuntime {
-        client: Some(control),
-        connected: true,
-        status: format!("connected to {host}:{control_port} (udp {udp_port})"),
-    }));
-
     let control_handle = spawn_control_worker(
         Arc::clone(&running),
         Arc::clone(&state),
@@ -1840,16 +1860,33 @@ fn with_control_client<T>(
     let client = guard
         .client
         .as_mut()
-        .ok_or_else(|| String::from("control disconnected; waiting for reconnect"))?;
+        .ok_or_else(|| String::from("not connected: control disconnected; waiting for reconnect"))?;
     match f(client) {
         Ok(v) => Ok(v),
         Err(err) => {
-            guard.client = None;
-            guard.connected = false;
-            guard.status = format!("{context} failed: {err}; reconnecting...");
-            Err(guard.status.clone())
+            if should_reset_control_client(&err) {
+                guard.client = None;
+                guard.connected = false;
+                guard.status = format!("{context} failed: {err}; reconnecting...");
+                return Err(guard.status.clone());
+            }
+
+            Err(format!("{context} failed: {err}"))
         }
     }
+}
+
+fn should_reset_control_client(err: &io::Error) -> bool {
+    matches!(
+        err.kind(),
+        io::ErrorKind::ConnectionRefused
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::NotConnected
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::TimedOut
+    )
 }
 
 fn spawn_control_worker(

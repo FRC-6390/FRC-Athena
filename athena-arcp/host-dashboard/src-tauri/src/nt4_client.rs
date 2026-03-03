@@ -21,6 +21,9 @@ const NT4_UNSECURE_PORT_DEFAULT: u16 = 5810;
 const NT4_MAX_MIRRORED_TOPICS: usize = 2048;
 const NT4_SIGNAL_ID_START: u16 = 65535;
 const NT4_SIGNAL_ID_MIN: u16 = 50000;
+const NT4_DIAG_CONNECTED_ID: u16 = 49999;
+const NT4_DIAG_TOPIC_COUNT_ID: u16 = 49998;
+const NT4_DIAG_LAST_ERROR_ID: u16 = 49997;
 
 #[derive(Clone, Copy, Debug)]
 struct Nt4Binding {
@@ -46,6 +49,8 @@ fn run_nt4_client_loop(
     host: String,
     unsecure_port: u16,
 ) {
+    init_nt4_diagnostics(&state);
+
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
@@ -59,9 +64,16 @@ fn run_nt4_client_loop(
         let mut topic_bindings: HashMap<String, Nt4Binding> = HashMap::new();
         let mut last_values: HashMap<u16, SignalValue> = HashMap::new();
         let mut next_signal_id = NT4_SIGNAL_ID_START;
+        set_nt4_diagnostics(&state, false, 0, "resolving host");
 
         while running.load(Ordering::SeqCst) {
             let Some(addr) = resolve_host_ipv4(&host) else {
+                set_nt4_diagnostics(
+                    &state,
+                    false,
+                    topic_bindings.len(),
+                    "failed to resolve host",
+                );
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 continue;
             };
@@ -86,27 +98,49 @@ fn run_nt4_client_loop(
             let mut subscriber = match topic.subscribe(subscribe_options).await {
                 Ok(subscriber) => subscriber,
                 Err(_) => {
+                    set_nt4_diagnostics(
+                        &state,
+                        false,
+                        topic_bindings.len(),
+                        "subscribe failed",
+                    );
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     continue;
                 }
             };
 
+            set_nt4_diagnostics(&state, true, topic_bindings.len(), "");
             let mut connect = Box::pin(client.connect());
             let mut last_topic_sync = std::time::Instant::now();
             loop {
                 if !running.load(Ordering::SeqCst) {
+                    set_nt4_diagnostics(&state, false, topic_bindings.len(), "stopped");
                     return;
                 }
 
                 tokio::select! {
                     connect_result = &mut connect => {
                         let _ = connect_result;
+                        set_nt4_diagnostics(
+                            &state,
+                            false,
+                            topic_bindings.len(),
+                            "disconnected; retrying",
+                        );
                         break;
                     }
                     recv_result = subscriber.recv() => {
                         let message = match recv_result {
                             Ok(message) => message,
-                            Err(_) => break,
+                            Err(_) => {
+                                set_nt4_diagnostics(
+                                    &state,
+                                    false,
+                                    topic_bindings.len(),
+                                    "receive failed; reconnecting",
+                                );
+                                break;
+                            }
                         };
                         process_received_message(
                             message,
@@ -115,6 +149,7 @@ fn run_nt4_client_loop(
                             &mut last_values,
                             &mut next_signal_id,
                         );
+                        set_nt4_diagnostics(&state, true, topic_bindings.len(), "");
                     }
                     _ = tokio::time::sleep(Duration::from_millis(100)) => {
                         if last_topic_sync.elapsed() >= Duration::from_millis(500) {
@@ -126,6 +161,7 @@ fn run_nt4_client_loop(
                                 &mut next_signal_id,
                             )
                             .await;
+                            set_nt4_diagnostics(&state, true, topic_bindings.len(), "");
                             last_topic_sync = std::time::Instant::now();
                         }
                     }
@@ -137,6 +173,51 @@ fn run_nt4_client_loop(
             }
         }
     });
+}
+
+fn init_nt4_diagnostics(state: &Arc<Mutex<DashboardState>>) {
+    if let Ok(mut guard) = state.lock() {
+        guard.upsert_descriptor(build_manifest_item(
+            NT4_DIAG_CONNECTED_ID,
+            SignalType::Bool,
+            "NT4/__client/connected".to_string(),
+        ));
+        guard.upsert_descriptor(build_manifest_item(
+            NT4_DIAG_TOPIC_COUNT_ID,
+            SignalType::I64,
+            "NT4/__client/topic_count".to_string(),
+        ));
+        guard.upsert_descriptor(build_manifest_item(
+            NT4_DIAG_LAST_ERROR_ID,
+            SignalType::Str,
+            "NT4/__client/last_error".to_string(),
+        ));
+        guard.apply_update(NT4_DIAG_CONNECTED_ID, SignalValue::Bool(false));
+        guard.apply_update(NT4_DIAG_TOPIC_COUNT_ID, SignalValue::I64(0));
+        guard.apply_update(
+            NT4_DIAG_LAST_ERROR_ID,
+            SignalValue::Str("initializing".to_string()),
+        );
+    }
+}
+
+fn set_nt4_diagnostics(
+    state: &Arc<Mutex<DashboardState>>,
+    connected: bool,
+    topic_count: usize,
+    last_error: &str,
+) {
+    if let Ok(mut guard) = state.lock() {
+        guard.apply_update(NT4_DIAG_CONNECTED_ID, SignalValue::Bool(connected));
+        guard.apply_update(
+            NT4_DIAG_TOPIC_COUNT_ID,
+            SignalValue::I64(topic_count as i64),
+        );
+        guard.apply_update(
+            NT4_DIAG_LAST_ERROR_ID,
+            SignalValue::Str(last_error.to_string()),
+        );
+    }
 }
 
 async fn sync_subscriber_topics(
@@ -364,7 +445,9 @@ fn map_signal_type(nt_data_type: DataType) -> Option<SignalType> {
         DataType::DoubleArray | DataType::FloatArray => Some(SignalType::F64Array),
         DataType::IntArray => Some(SignalType::I64Array),
         DataType::StringArray => Some(SignalType::StrArray),
-        DataType::Raw | DataType::Rpc | DataType::Msgpack | DataType::Protobuf => None,
+        DataType::Raw | DataType::Rpc | DataType::Msgpack | DataType::Protobuf => {
+            Some(SignalType::Str)
+        }
     }
 }
 
@@ -381,7 +464,9 @@ fn convert_value(nt_data_type: DataType, value: &rmpv::Value) -> Option<SignalVa
             .map(|values| SignalValue::F64Array(values.into_iter().map(f64::from).collect())),
         DataType::IntArray => Vec::<i64>::from_value(value).map(SignalValue::I64Array),
         DataType::StringArray => Vec::<String>::from_value(value).map(SignalValue::StrArray),
-        DataType::Raw | DataType::Rpc | DataType::Msgpack | DataType::Protobuf => None,
+        DataType::Raw | DataType::Rpc | DataType::Msgpack | DataType::Protobuf => {
+            Some(SignalValue::Str(format!("{value:?}")))
+        }
     }
 }
 
@@ -407,5 +492,20 @@ mod tests {
             to_arcp_nt4_path("/.schema/NetworkTableConfig"),
             None
         );
+    }
+
+    #[test]
+    fn maps_non_primitive_nt_types_as_strings() {
+        use super::{convert_value, map_signal_type};
+        use nt_client::data::r#type::DataType;
+
+        assert_eq!(map_signal_type(DataType::Raw), Some(arcp_core::SignalType::Str));
+        assert_eq!(
+            map_signal_type(DataType::Protobuf),
+            Some(arcp_core::SignalType::Str)
+        );
+        let value = rmpv::Value::Binary(vec![1, 2, 3, 4].into());
+        let converted = convert_value(DataType::Raw, &value);
+        assert!(matches!(converted, Some(arcp_core::SignalValue::Str(_))));
     }
 }

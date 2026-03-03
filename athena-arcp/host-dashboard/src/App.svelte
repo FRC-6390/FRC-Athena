@@ -339,6 +339,7 @@
 
   let widgetInputs = $state<Record<string, string>>({});
   let historyBySignal = $state(new Map<number, number[]>());
+  let historyTimeBySignal = $state(new Map<number, number[]>());
 
   let query = $state('');
   let layoutToolQuery = $state('');
@@ -1504,8 +1505,9 @@
 
   function updateHistory(signals: SignalRow[], trackedSignalIds: Set<number>) {
     if (trackedSignalIds.size === 0) {
-      if (historyBySignal.size > 0) {
+      if (historyBySignal.size > 0 || historyTimeBySignal.size > 0) {
         historyBySignal = new Map();
+        historyTimeBySignal = new Map();
       }
       return;
     }
@@ -1516,10 +1518,16 @@
     }
 
     const next = new Map(historyBySignal);
+    const nextTime = new Map(historyTimeBySignal);
 
     for (const signalId of [...next.keys()]) {
       if (!trackedSignalIds.has(signalId)) {
         next.delete(signalId);
+      }
+    }
+    for (const signalId of [...nextTime.keys()]) {
+      if (!trackedSignalIds.has(signalId)) {
+        nextTime.delete(signalId);
       }
     }
 
@@ -1527,20 +1535,29 @@
       const signal = byId.get(signalId);
       if (!signal) {
         next.delete(signalId);
+        nextTime.delete(signalId);
         continue;
       }
       const numeric = parseNumericSignal(signal);
       if (numeric === null) continue;
 
+      const nowMs = Date.now();
       const values = [...(next.get(signalId) ?? [])];
+      const times = [...(nextTime.get(signalId) ?? [])];
       values.push(numeric);
+      times.push(nowMs);
       if (values.length > 90) {
         values.splice(0, values.length - 90);
       }
+      if (times.length > 90) {
+        times.splice(0, times.length - 90);
+      }
       next.set(signalId, values);
+      nextTime.set(signalId, times);
     }
 
     historyBySignal = next;
+    historyTimeBySignal = nextTime;
   }
 
   const TOPIC_HARDWARE_PRIORITY: WidgetKind[] = [
@@ -3361,6 +3378,7 @@
               {selectedWidgetId}
               {widgetInputs}
               {historyBySignal}
+              {historyTimeBySignal}
               {sparklinePath}
               {editMode}
               onSelectWidget={(widgetId, signalId) => {

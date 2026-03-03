@@ -2306,6 +2306,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         String slipVisionStdDevScalePath = "Athena/Localization/Slip/visionStdDevScale";
         String slipProcessStdDevScalePath = "Athena/Localization/Slip/processStdDevScale";
         String slipScorePath = "Athena/Localization/Slip/score";
+        String selectedTrajectoryPath = "Athena/Auto/Selected/trajectory";
+        String programTrajectoryPath = "Athena/Auto/Program/trajectory";
 
         int headingId = publisher.existingSignalId(headingPath);
         int normalizedSpeedId = publisher.existingSignalId(normalizedSpeedPath);
@@ -2333,6 +2335,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         int poseXId = publisher.existingSignalId("Athena/Localization/Pose/xMeters");
         int poseYId = publisher.existingSignalId("Athena/Localization/Pose/yMeters");
         int poseHeadingId = publisher.existingSignalId("Athena/Localization/Pose/headingDeg");
+        int trajectorySignalId = firstExistingSignalId(publisher, programTrajectoryPath, selectedTrajectoryPath);
 
         List<Map<String, Object>> autoPoseOptions = new ArrayList<>();
         for (String poseName : sortedLocalizationPoseNames()) {
@@ -2496,7 +2499,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .config("xSignalId", poseXId)
                 .config("ySignalId", poseYId)
                 .config("headingSignalId", poseHeadingId)
-                .config("allowPoseSet", true)
+                .config("trajectorySignalId", trajectorySignalId)
+                .config("allowPoseSet", poseXId > 0 && poseYId > 0)
                 .config("fieldLength", 16.54)
                 .config("fieldWidth", 8.02)
                 .build());

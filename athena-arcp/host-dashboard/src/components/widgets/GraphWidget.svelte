@@ -7,6 +7,7 @@
     signal: SignalRow;
     signalById: Map<number, SignalRow>;
     historyBySignal: Map<number, number[]>;
+    historyTimeBySignal: Map<number, number[]>;
     configRaw?: WidgetConfigRecord;
   };
 
@@ -17,10 +18,32 @@
     role: string;
     style: GraphSeriesStyle;
     values: number[];
+    timeMs: number[];
+    dotStartIndex: number;
     latest: number | null;
+    latestTimestampMs: number | null;
   };
 
-  let { signal, signalById, historyBySignal, configRaw }: Props = $props();
+  type TimeTick = {
+    key: string;
+    x: number;
+    label: string;
+  };
+
+  let { signal, signalById, historyBySignal, historyTimeBySignal, configRaw }: Props = $props();
+  let clockNowMs = $state(Date.now());
+  const GRAPH_TIME_WINDOW_MS = 10_000;
+  const STALE_THRESHOLD_MIN_MS = 1200;
+
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const timer = window.setInterval(() => {
+      clockNowMs = Date.now();
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  });
 
   function numericFromSignal(value: string): number | null {
     const parsed = Number(value);
@@ -33,30 +56,48 @@
     return 34 - ratio * 30;
   }
 
-  function xFor(index: number, total: number): number {
-    if (total <= 1) return 50;
-    return (index / (total - 1)) * 100;
+  function xForTime(timeMs: number, windowStartMs: number, windowEndMs: number): number {
+    const span = Math.max(1, windowEndMs - windowStartMs);
+    const ratio = (timeMs - windowStartMs) / span;
+    return Math.max(0, Math.min(1, ratio)) * 100;
   }
 
-  function linePath(values: number[], maxSamples: number, min: number, max: number): string {
-    if (values.length === 0) return 'M 0 18 L 100 18';
-    const offset = Math.max(0, maxSamples - values.length);
+  function formatWindowLabel(ms: number): string {
+    if (ms < 1000) return `${Math.round(ms)}ms window`;
+    if (ms < 10000) return `${(ms / 1000).toFixed(1)}s window`;
+    return `${Math.round(ms / 1000)}s window`;
+  }
+
+  function linePath(
+    values: number[],
+    timeMs: number[],
+    min: number,
+    max: number,
+    windowStartMs: number,
+    windowEndMs: number
+  ): string {
+    if (values.length === 0 || timeMs.length === 0) return 'M 0 18 L 100 18';
     return values
       .map((value, index) => {
-        const x = xFor(offset + index, maxSamples);
+        const x = xForTime(timeMs[index] ?? windowEndMs, windowStartMs, windowEndMs);
         const y = yFor(value, min, max);
         return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
       })
       .join(' ');
   }
 
-  function stepPath(values: number[], maxSamples: number, min: number, max: number): string {
-    if (values.length === 0) return 'M 0 18 L 100 18';
-
-    const offset = Math.max(0, maxSamples - values.length);
+  function stepPath(
+    values: number[],
+    timeMs: number[],
+    min: number,
+    max: number,
+    windowStartMs: number,
+    windowEndMs: number
+  ): string {
+    if (values.length === 0 || timeMs.length === 0) return 'M 0 18 L 100 18';
     const points = values.map((value, index) => {
       return {
-        x: xFor(offset + index, maxSamples),
+        x: xForTime(timeMs[index] ?? windowEndMs, windowStartMs, windowEndMs),
         y: yFor(value, min, max)
       };
     });
@@ -71,19 +112,50 @@
 
   const computed = $derived.by(() => {
     const config = readGraphConfig(configRaw, signal);
+    const nowMs = clockNowMs;
 
     const series = config.series
       .map((entry): SeriesRender | null => {
         const boundSignal = signalById.get(entry.signalId);
-        const samples = [...(historyBySignal.get(entry.signalId) ?? [])];
+        let samples = [...(historyBySignal.get(entry.signalId) ?? [])];
+        let sampleTimes = [...(historyTimeBySignal.get(entry.signalId) ?? [])];
+
+        if (sampleTimes.length > samples.length) {
+          sampleTimes = sampleTimes.slice(sampleTimes.length - samples.length);
+        } else if (samples.length > sampleTimes.length) {
+          if (sampleTimes.length === 0) {
+            const stepMs = 200;
+            sampleTimes = samples.map((_, index) => nowMs - (samples.length - index - 1) * stepMs);
+          } else {
+            const stepMs =
+              sampleTimes.length > 1
+                ? Math.max(
+                    1,
+                    (sampleTimes[sampleTimes.length - 1] - sampleTimes[0]) /
+                      (sampleTimes.length - 1)
+                  )
+                : 200;
+            const missing = samples.length - sampleTimes.length;
+            const first = sampleTimes[0];
+            const prefix = Array.from(
+              { length: missing },
+              (_, index) => Math.max(0, Math.round(first - stepMs * (missing - index)))
+            );
+            sampleTimes = [...prefix, ...sampleTimes];
+          }
+        }
+
         if (samples.length === 0 && boundSignal) {
           const current = numericFromSignal(boundSignal.value);
           if (current !== null) {
             samples.push(current);
+            sampleTimes.push(nowMs);
           }
         }
 
         const latest = samples.length > 0 ? samples[samples.length - 1] ?? null : null;
+        const latestTimestampMs =
+          sampleTimes.length > 0 ? sampleTimes[sampleTimes.length - 1] ?? null : null;
 
         return {
           signalId: entry.signalId,
@@ -92,23 +164,35 @@
           role: entry.role,
           style: entry.style,
           values: samples,
-          latest
+          timeMs: sampleTimes,
+          dotStartIndex: Math.max(0, samples.length - 18),
+          latest,
+          latestTimestampMs
         };
       })
       .filter((entry): entry is SeriesRender => entry !== null);
 
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
-    let maxSamples = 0;
+    let latestSampleMs = Number.NEGATIVE_INFINITY;
+    const intervals: number[] = [];
 
     for (const entry of series) {
-      if (entry.values.length > maxSamples) {
-        maxSamples = entry.values.length;
-      }
-
       for (const value of entry.values) {
         if (value < min) min = value;
         if (value > max) max = value;
+      }
+
+      for (let index = 1; index < entry.timeMs.length; index++) {
+        const delta = entry.timeMs[index] - entry.timeMs[index - 1];
+        if (delta > 0 && delta < 60000) {
+          intervals.push(delta);
+        }
+      }
+
+      if (entry.timeMs.length > 0) {
+        const last = entry.timeMs[entry.timeMs.length - 1];
+        if (last > latestSampleMs) latestSampleMs = last;
       }
     }
 
@@ -119,17 +203,56 @@
       min = 0;
       max = 1;
     }
-
     if (max <= min) {
       max = min + 1;
     }
+
+    intervals.sort((left, right) => left - right);
+    const estimatedIntervalMs =
+      intervals.length > 0
+        ? intervals[Math.floor(intervals.length / 2)]
+        : 200;
+
+    const newestSampleMs = Number.isFinite(latestSampleMs) ? latestSampleMs : null;
+    const windowSpanMs = GRAPH_TIME_WINDOW_MS;
+    const windowEndMs = newestSampleMs ?? nowMs;
+    const windowStartMs = windowEndMs - windowSpanMs;
+
+    const tickCount = 6;
+    const xTicks: TimeTick[] = Array.from({ length: tickCount }, (_, index) => {
+      const ratio = tickCount > 1 ? index / (tickCount - 1) : 0;
+      const ageMs = windowSpanMs * (1 - ratio);
+      return {
+        key: `tick-${index}-${Math.round(ageMs)}`,
+        x: ratio * 100,
+        label: index === tickCount - 1 ? 'now' : `-${Math.round(ageMs / 1000)}s`
+      };
+    });
+
+    const lastSampleAgeMs = newestSampleMs === null ? null : Math.max(0, nowMs - newestSampleMs);
+    const staleThresholdMs = Math.max(STALE_THRESHOLD_MIN_MS, estimatedIntervalMs * 2.5);
+    const streaming = lastSampleAgeMs !== null && lastSampleAgeMs <= staleThresholdMs;
+    const streamLabel =
+      lastSampleAgeMs === null
+        ? 'NO DATA'
+        : streaming
+          ? 'LIVE'
+          : 'STALE';
+    const lastSampleX =
+      newestSampleMs === null ? null : xForTime(newestSampleMs, windowStartMs, windowEndMs);
 
     return {
       config,
       series,
       min,
       max,
-      maxSamples: Math.max(2, maxSamples)
+      windowStartMs,
+      windowEndMs,
+      xTicks,
+      streamLabel,
+      streaming,
+      windowLabel: formatWindowLabel(windowSpanMs),
+      lastSampleX
     };
   });
 </script>
@@ -142,23 +265,44 @@
       <line class="guide" x1="0" y1="4" x2="100" y2="4" />
       <line class="guide" x1="0" y1="18" x2="100" y2="18" />
       <line class="guide" x1="0" y1="32" x2="100" y2="32" />
+      {#each computed.xTicks as tick (tick.key)}
+        <line class="guide x-guide" x1={tick.x} y1="2" x2={tick.x} y2="34" />
+      {/each}
+      {#if computed.lastSampleX !== null}
+        <line class="last-sample" x1={computed.lastSampleX} y1="2" x2={computed.lastSampleX} y2="34" />
+      {/if}
 
       {#each computed.series as series (series.signalId)}
         <path
           d={
             series.style === 'step'
-              ? stepPath(series.values, computed.maxSamples, computed.min, computed.max)
-              : linePath(series.values, computed.maxSamples, computed.min, computed.max)
+              ? stepPath(
+                  series.values,
+                  series.timeMs,
+                  computed.min,
+                  computed.max,
+                  computed.windowStartMs,
+                  computed.windowEndMs
+                )
+              : linePath(
+                  series.values,
+                  series.timeMs,
+                  computed.min,
+                  computed.max,
+                  computed.windowStartMs,
+                  computed.windowEndMs
+                )
           }
           stroke={series.color}
           class={`series ${series.style}`}
         />
 
         {#if series.style === 'dot'}
-          {#each series.values.slice(-18) as value, index (`${series.signalId}-${index}`)}
-            {@const offset = Math.max(0, computed.maxSamples - series.values.length)}
+          {#each series.values.slice(series.dotStartIndex) as value, index (`${series.signalId}-${index}`)}
+            {@const sampleIndex = series.dotStartIndex + index}
+            {@const sampleTime = series.timeMs[sampleIndex] ?? computed.windowEndMs}
             <circle
-              cx={xFor(offset + series.values.length - Math.min(series.values.length, 18) + index, computed.maxSamples)}
+              cx={xForTime(sampleTime, computed.windowStartMs, computed.windowEndMs)}
               cy={yFor(value, computed.min, computed.max)}
               r="0.85"
               fill={series.color}
@@ -168,8 +312,17 @@
       {/each}
     </svg>
 
+    <div class="time-row">
+      {#each computed.xTicks as tick (tick.key)}
+        <span>{tick.label}</span>
+      {/each}
+    </div>
+
     <div class="range-row">
       <span>{computed.min.toFixed(2)}</span>
+      <span class={`stream-state ${computed.streaming ? 'live' : 'stale'}`}>
+        {computed.streamLabel} | {computed.windowLabel}
+      </span>
       <span>{computed.max.toFixed(2)}</span>
     </div>
 
@@ -193,8 +346,8 @@
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto auto;
-    gap: 0.24rem;
+    grid-template-rows: minmax(0, 1fr) auto auto auto;
+    gap: 0.22rem;
   }
 
   .graph-empty {
@@ -216,6 +369,17 @@
     stroke-width: 0.45;
   }
 
+  .x-guide {
+    stroke: rgba(153, 164, 180, 0.12);
+    stroke-dasharray: 1 1.8;
+  }
+
+  .last-sample {
+    stroke: rgba(180, 35, 45, 0.8);
+    stroke-width: 0.5;
+    vector-effect: non-scaling-stroke;
+  }
+
   .series {
     fill: none;
     stroke-width: 1.2;
@@ -227,13 +391,41 @@
     stroke-dasharray: 1 1.5;
   }
 
-  .range-row {
+  .time-row {
     display: flex;
     justify-content: space-between;
+    align-items: center;
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    line-height: 1;
+    user-select: none;
+  }
+
+  .range-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.2rem;
     color: var(--text-soft);
     font-family: var(--font-mono);
     font-size: 0.62rem;
     line-height: 1;
+  }
+
+  .range-row span:nth-child(2) {
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stream-state.live {
+    color: #bbf7d0;
+  }
+
+  .stream-state.stale {
+    color: #fca5a5;
   }
 
   .legend {

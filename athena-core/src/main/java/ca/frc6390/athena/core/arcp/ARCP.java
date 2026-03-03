@@ -1196,6 +1196,40 @@ public final class ARCP {
                                             && signalAccess == ArcpRuntime.SignalAccess.OBSERVE)
                                     || (existing.signalAccess() == ArcpRuntime.SignalAccess.OBSERVE
                                             && signalAccess == ArcpRuntime.SignalAccess.WRITE))) {
+                        ArcpRuntime.SignalAccess upgradedAccess =
+                                (existing.signalAccess() == ArcpRuntime.SignalAccess.WRITE
+                                                || signalAccess == ArcpRuntime.SignalAccess.WRITE)
+                                        ? ArcpRuntime.SignalAccess.WRITE
+                                        : ArcpRuntime.SignalAccess.OBSERVE;
+                        if (upgradedAccess != existing.signalAccess()) {
+                            int existingSignalId = existing.signalId();
+                            runtime.registerSignal(
+                                    existingSignalId,
+                                    existing.signalType(),
+                                    existing.signalKind(),
+                                    upgradedAccess,
+                                    existing.signalPolicy(),
+                                    existing.signalDurability(),
+                                    existing.path());
+                            SignalRegistration upgraded = new SignalRegistration(
+                                    existing.signalId(),
+                                    existing.path(),
+                                    existing.signalType(),
+                                    existing.signalKind(),
+                                    upgradedAccess,
+                                    existing.signalPolicy(),
+                                    existing.signalDurability());
+                            signalIds.replaceAll((ignored, registration) ->
+                                    registration != null && registration.signalId() == existingSignalId
+                                            ? upgraded
+                                            : registration);
+                            canonicalSignalIds.replaceAll((ignored, registration) ->
+                                    registration != null && registration.signalId() == existingSignalId
+                                            ? upgraded
+                                            : registration);
+                            registrationsById.put(existingSignalId, upgraded);
+                            existing = upgraded;
+                        }
                         signalIds.putIfAbsent(key, existing);
                         if (!canonicalPath.isEmpty()) {
                             canonicalSignalIds.putIfAbsent(canonicalKey, existing);
