@@ -109,6 +109,10 @@ def publishTaskRequested = gradle.startParameter.taskNames.any { name ->
     def lower = name.toLowerCase(Locale.ROOT)
     lower.contains('publish') || lower.contains('copytowpilib')
 }
+def wpilibRootDir = new File(System.getenv('PUBLIC') ?: 'C:/Users/Public', 'wpilib/2026/roborio/bin')
+def wpilibArmGcc = new File(wpilibRootDir, hostOs.isWindows() ? 'arm-frc2025-linux-gnueabi-gcc.exe' : 'arm-frc2025-linux-gnueabi-gcc')
+def wpilibArmAr = new File(wpilibRootDir, hostOs.isWindows() ? 'arm-frc2025-linux-gnueabi-ar.exe' : 'arm-frc2025-linux-gnueabi-ar')
+def wpilibArmToolchainAvailable = hostOs.isWindows() && wpilibArmGcc.exists() && wpilibArmAr.exists()
 def configuredNativeModeRaw = (project.findProperty('arcpNativeMode')
         ?: System.getenv('ARCP_NATIVE_MODE')) as String
 def nativeModeExplicitlyConfigured = configuredNativeModeRaw != null && !configuredNativeModeRaw.trim().isEmpty()
@@ -125,7 +129,7 @@ def dockerHostSupported = ((hostOs.isLinux() && hostArch in ['arm32', 'x86_64', 
 def dockerCrossDefault = (nativeMode == 'none')
         ? 'false'
         : ((nativeMode == 'host')
-        ? (dockerHostSupported ? 'true' : 'false')
+        ? ((dockerHostSupported && !(publishTaskRequested && wpilibArmToolchainAvailable)) ? 'true' : 'false')
         : 'true')
 def useDockerCross = ((project.findProperty('arcpUseDockerCross')
         ?: System.getenv('ARCP_USE_DOCKER_CROSS')
@@ -180,10 +184,15 @@ def installRustTargets = ((project.findProperty('arcpInstallRustTargets')
         ?: 'true') as String).toBoolean()
 
 def targetLinkers = [
-        'armv7-unknown-linux-gnueabi' : 'arm-linux-gnueabi-gcc',
-        'armv7-unknown-linux-gnueabihf': 'arm-linux-gnueabi-gcc',
+        'armv7-unknown-linux-gnueabi' : (hostOs.isWindows() ? wpilibArmGcc.absolutePath : 'arm-linux-gnueabi-gcc'),
+        'armv7-unknown-linux-gnueabihf': (hostOs.isWindows() ? wpilibArmGcc.absolutePath : 'arm-linux-gnueabi-gcc'),
         'aarch64-unknown-linux-gnu'    : 'aarch64-linux-gnu-gcc',
         'x86_64-pc-windows-gnu'        : 'x86_64-w64-mingw32-gcc'
+]
+
+def targetArchivers = [
+        'armv7-unknown-linux-gnueabi' : (hostOs.isWindows() ? wpilibArmAr.absolutePath : 'arm-linux-gnueabi-ar'),
+        'armv7-unknown-linux-gnueabihf': (hostOs.isWindows() ? wpilibArmAr.absolutePath : 'arm-linux-gnueabi-ar'),
 ]
 
 def resolveNativeTargetTriple = { String triple ->
@@ -244,6 +253,12 @@ def requireAllTargets = ((project.findProperty('arcpRequireAllTargets')
         ?: 'false') as String).toBoolean()
 
 def hasExecutable = { String executable ->
+    if (executable == null || executable.trim().isEmpty()) {
+        return false
+    }
+    if (executable.contains('/') || executable.contains('\\') || executable.contains(':')) {
+        return new File(executable).exists()
+    }
     def probeCommand = hostOs.isWindows()
             ? ['where', executable]
             : ['sh', '-c', "command -v ${executable} >/dev/null 2>&1"]
@@ -420,8 +435,12 @@ def ensureRustTargetInstalled = { String triple ->
 def runCargoBuild = { String triple ->
     ensureExecutableAvailable('cargo', "ARCP JNI build (${triple})")
     def linker = targetLinkers[triple]
+    def archiver = targetArchivers[triple]
     if (linker != null) {
         ensureExecutableAvailable(linker as String, "ARCP JNI cross-link (${triple})")
+    }
+    if (archiver != null) {
+        ensureExecutableAvailable(archiver as String, "ARCP JNI archiver (${triple})")
     }
     def command = [
             'cargo',
@@ -437,6 +456,13 @@ def runCargoBuild = { String triple ->
     exec {
         workingDir rustWorkspaceDir
         commandLine command
+        if (triple == 'armv7-unknown-linux-gnueabi' || triple == 'armv7-unknown-linux-gnueabihf') {
+            environment 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER', linker as String
+            environment 'CC_armv7_unknown_linux_gnueabi', linker as String
+            if (archiver != null) {
+                environment 'AR_armv7_unknown_linux_gnueabi', archiver as String
+            }
+        }
     }
 }
 

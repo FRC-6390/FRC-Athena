@@ -2,6 +2,14 @@
   import type { RemoteLogEntry } from '../lib/arcp';
 
   type SourceFilter = 'all' | 'rio' | 'athena';
+  type LineSeverity = 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'other';
+  type PreviewSeverityFilter = 'all' | LineSeverity;
+  type LineSearchMatch = {
+    leading: string;
+    match: string;
+    trailing: string;
+    hasMatch: boolean;
+  };
 
   type Props = {
     connected: boolean;
@@ -61,6 +69,8 @@
 
   let query = $state('');
   let sourceFilter = $state<SourceFilter>('all');
+  let previewQuery = $state('');
+  let previewSeverity = $state<PreviewSeverityFilter>('all');
   let lineViewport = $state<HTMLDivElement | null>(null);
 
   function formatBytes(raw: number): string {
@@ -76,13 +86,99 @@
     return new Date(epochSec * 1000).toLocaleString();
   }
 
+  function parseLineSeverity(text: string): LineSeverity {
+    const normalized = text.toLowerCase();
+    if (normalized.trim().length === 0) return 'other';
+    if (/\b(fatal|panic|critical|segfault|uncaught exception|assert(?:ion)? failed)\b/.test(normalized)) {
+      return 'error';
+    }
+    if (/\b(error|exception|fail(?:ed|ure)?|fault)\b/.test(normalized)) {
+      return 'error';
+    }
+    if (/\b(warn(?:ing)?)\b/.test(normalized)) {
+      return 'warn';
+    }
+    if (/\b(info|notice)\b/.test(normalized)) {
+      return 'info';
+    }
+    if (/\b(debug|dbg)\b/.test(normalized)) {
+      return 'debug';
+    }
+    if (/\b(trace|verbose|vtrace)\b/.test(normalized)) {
+      return 'trace';
+    }
+    return 'other';
+  }
+
+  function buildLineSearchMatch(text: string, token: string): LineSearchMatch {
+    if (!token) {
+      return {
+        leading: text,
+        match: '',
+        trailing: '',
+        hasMatch: false
+      };
+    }
+    const index = text.toLowerCase().indexOf(token);
+    if (index < 0) {
+      return {
+        leading: text,
+        match: '',
+        trailing: '',
+        hasMatch: false
+      };
+    }
+    return {
+      leading: text.slice(0, index),
+      match: text.slice(index, index + token.length),
+      trailing: text.slice(index + token.length),
+      hasMatch: true
+    };
+  }
+
   const selectedEntry = $derived(entries.find((entry) => entry.path === selectedPath) ?? null);
+  const showNoArcpWarning = $derived(!connected && !probeLoading && robotReachable && !arcpReachable);
   const renderedPreviewLines = $derived.by(() =>
-    previewLines.map((text, index) => ({
-      lineNumber: index + 1,
-      text: text.length > 0 ? text : ' '
-    }))
+    previewLines.map((text, index) => {
+      const normalized = text.length > 0 ? text : ' ';
+      return {
+        lineNumber: index + 1,
+        text: normalized,
+        normalized: normalized.toLowerCase(),
+        severity: parseLineSeverity(normalized)
+      };
+    })
   );
+  const normalizedPreviewQuery = $derived(previewQuery.trim().toLowerCase());
+  const previewSeverityCounts = $derived.by(() => {
+    const counts: Record<LineSeverity, number> = {
+      error: 0,
+      warn: 0,
+      info: 0,
+      debug: 0,
+      trace: 0,
+      other: 0
+    };
+    for (const line of renderedPreviewLines) {
+      counts[line.severity] += 1;
+    }
+    return counts;
+  });
+  const visiblePreviewLines = $derived.by(() => {
+    const token = normalizedPreviewQuery;
+    return renderedPreviewLines
+      .filter((line) => {
+        if (previewSeverity !== 'all' && line.severity !== previewSeverity) return false;
+        if (!token) return true;
+        return line.normalized.includes(token);
+      })
+      .map((line) => ({
+        lineNumber: line.lineNumber,
+        text: line.text,
+        severity: line.severity,
+        highlight: buildLineSearchMatch(line.text, token)
+      }));
+  });
   const filteredEntries = $derived.by(() => {
     const token = query.trim().toLowerCase();
     return entries.filter((entry) => {
@@ -99,7 +195,7 @@
   $effect(() => {
     const currentPath = selectedPath;
     const loading = previewLoading;
-    const lineCount = renderedPreviewLines.length;
+    const lineCount = visiblePreviewLines.length;
     if (!liveFollow || loading || !currentPath || lineCount === 0) return;
     requestAnimationFrame(() => {
       if (!lineViewport) return;
@@ -152,11 +248,9 @@
     <span><strong>Probe host:</strong> {probeHost || 'n/a'}</span>
   </div>
 
-  {#if !connected && !probeLoading && robotReachable && !arcpReachable}
-    <section class="link-warning panel">
-      Robot is reachable, but no ARCP server was found on port {controlPort > 0 ? controlPort : 'configured'}.
-    </section>
-  {/if}
+  <section class="link-warning panel" data-visible={showNoArcpWarning}>
+    Robot is reachable, but no ARCP server was found on port {controlPort > 0 ? controlPort : 'configured'}.
+  </section>
 
   {#if error}
     <section class="error-banner panel">{error}</section>
@@ -243,16 +337,57 @@
         {#if liveFollow}
           <p class="preview-note">Live follow enabled (streaming).</p>
         {/if}
+        <div class="preview-tools">
+          <input
+            value={previewQuery}
+            placeholder="Search log lines"
+            oninput={(event) => (previewQuery = (event.currentTarget as HTMLInputElement).value)}
+          />
+          <select
+            value={previewSeverity}
+            onchange={(event) =>
+              (previewSeverity = (event.currentTarget as HTMLSelectElement).value as PreviewSeverityFilter)}
+          >
+            <option value="all">All Levels ({renderedPreviewLines.length})</option>
+            <option value="error">Errors ({previewSeverityCounts.error})</option>
+            <option value="warn">Warnings ({previewSeverityCounts.warn})</option>
+            <option value="info">Info ({previewSeverityCounts.info})</option>
+            <option value="debug">Debug ({previewSeverityCounts.debug})</option>
+            <option value="trace">Trace ({previewSeverityCounts.trace})</option>
+            <option value="other">Other ({previewSeverityCounts.other})</option>
+          </select>
+          <button
+            class="btn btn-mini"
+            onclick={() => {
+              previewQuery = '';
+              previewSeverity = 'all';
+            }}
+            disabled={previewQuery.length === 0 && previewSeverity === 'all'}
+          >
+            Clear
+          </button>
+        </div>
+        <p class="preview-note preview-filter-count">
+          Showing {visiblePreviewLines.length} of {renderedPreviewLines.length} lines
+        </p>
         {#if previewLoading}
           <p class="empty">Loading preview...</p>
         {:else if renderedPreviewLines.length === 0}
           <p class="empty">No preview data available (file may be binary or empty).</p>
+        {:else if visiblePreviewLines.length === 0}
+          <p class="empty">No log lines matched the current search/filter.</p>
         {:else}
           <div class="line-viewport" bind:this={lineViewport}>
-            {#each renderedPreviewLines as line (`line-${line.lineNumber}`)}
-              <div class="log-line">
+            {#each visiblePreviewLines as line (`line-${line.lineNumber}`)}
+              <div class={`log-line ${line.severity}`}>
                 <span class="line-no">{line.lineNumber}</span>
-                <span class="line-text">{line.text}</span>
+                <span class="line-text">
+                  {#if line.highlight.hasMatch}
+                    <span>{line.highlight.leading}</span><mark class="line-match">{line.highlight.match}</mark><span>{line.highlight.trailing}</span>
+                  {:else}
+                    {line.text}
+                  {/if}
+                </span>
               </div>
             {/each}
           </div>
@@ -333,6 +468,21 @@
     color: #fecaca;
     font-size: 0.75rem;
     border-radius: 8px;
+    min-height: 2.05rem;
+    display: flex;
+    align-items: center;
+    transition:
+      opacity 0.14s ease,
+      border-color 0.14s ease,
+      background 0.14s ease;
+  }
+
+  .link-warning[data-visible='false'] {
+    opacity: 0;
+    visibility: hidden;
+    border-color: transparent;
+    background: transparent;
+    pointer-events: none;
   }
 
   code {
@@ -477,6 +627,21 @@
     color: var(--text-soft);
   }
 
+  .preview-tools {
+    display: grid;
+    grid-template-columns: minmax(190px, 1fr) auto auto;
+    gap: 0.38rem;
+    align-items: center;
+  }
+
+  .preview-tools select {
+    min-width: 10.5rem;
+  }
+
+  .preview-filter-count {
+    font-size: 0.66rem;
+  }
+
   .empty {
     margin: 0;
     font-size: 0.72rem;
@@ -502,7 +667,9 @@
     grid-template-columns: auto 1fr;
     gap: 0.45rem;
     align-items: start;
-    padding: 0 0.5rem;
+    padding: 0.06rem 0.5rem;
+    border-left: 2px solid transparent;
+    background: transparent;
   }
 
   .line-no {
@@ -516,6 +683,62 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     color: #dce7ff;
+  }
+
+  .line-match {
+    background: rgba(250, 204, 21, 0.4);
+    color: #fffbe6;
+    border-radius: 2px;
+    padding: 0 0.08rem;
+  }
+
+  .log-line.error {
+    border-left-color: rgba(248, 113, 113, 0.9);
+    background: rgba(127, 29, 29, 0.24);
+  }
+
+  .log-line.error .line-text {
+    color: #fecaca;
+  }
+
+  .log-line.warn {
+    border-left-color: rgba(250, 204, 21, 0.9);
+    background: rgba(120, 88, 18, 0.24);
+  }
+
+  .log-line.warn .line-text {
+    color: #fde68a;
+  }
+
+  .log-line.info {
+    border-left-color: rgba(96, 165, 250, 0.9);
+    background: rgba(30, 64, 175, 0.2);
+  }
+
+  .log-line.info .line-text {
+    color: #bfdbfe;
+  }
+
+  .log-line.debug {
+    border-left-color: rgba(110, 231, 183, 0.9);
+    background: rgba(6, 78, 59, 0.2);
+  }
+
+  .log-line.debug .line-text {
+    color: #bbf7d0;
+  }
+
+  .log-line.trace {
+    border-left-color: rgba(148, 163, 184, 0.85);
+    background: rgba(51, 65, 85, 0.22);
+  }
+
+  .log-line.trace .line-text {
+    color: #cbd5e1;
+  }
+
+  .log-line.other {
+    border-left-color: rgba(71, 85, 105, 0.65);
   }
 
   @media (max-width: 1220px) {
