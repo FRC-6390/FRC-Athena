@@ -2,6 +2,7 @@ package ca.frc6390.athena.commands.control;
 
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import java.util.Objects;
 
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
@@ -31,7 +32,7 @@ public class SwerveDriveCommand extends Command {
     this.xInput = xInput;
     this.yInput = yInput;
     this.thetaInput = thetaInput;
-    this.fieldRelativeSupplier = fieldRelativeSupplier;
+    this.fieldRelativeSupplier = Objects.requireNonNull(fieldRelativeSupplier, "fieldRelativeSupplier");
     addRequirements(driveTrain);
     driveTrain.hardware().neutralMode(MotorNeutralMode.Brake);
   }

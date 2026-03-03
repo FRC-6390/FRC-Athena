@@ -1,5 +1,7 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 import ca.frc6390.athena.drivetrains.DrivetrainSpeedSectionBase;
@@ -18,9 +20,14 @@ import ca.frc6390.athena.hardware.imu.VirtualImu;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.drivetrains.swerve.SwerveModule.SwerveModuleConfig;
 import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
+import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import ca.frc6390.athena.hardware.motor.MotorController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotBase;
 
 /**
  * Builder-style configuration object for constructing a {@link SwerveDrivetrain}. It captures module
@@ -900,6 +907,7 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
 
         Imu resolvedImu = imu == null ? null : new VirtualImu(HardwareFactories.imu(imu));
         SwerveDrivetrain dt = new SwerveDrivetrain(resolvedImu, modules);
+        ensureRequiredHardwareConnected(dt, resolvedImu);
 
         if (driveFeedforward != null) {
             dt.driveFeedforward(driveFeedforward);
@@ -956,5 +964,85 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
 
     private static boolean moduleEncoderInverted(SwerveModuleConfig config) {
         return config != null && config.encoder() != null && config.encoder().inverted();
+    }
+
+    private static void ensureRequiredHardwareConnected(SwerveDrivetrain drivetrain, Imu imuDevice) {
+        if (RobotBase.isSimulation()) {
+            return;
+        }
+
+        List<String> missing = new ArrayList<>();
+        if (imuDevice == null) {
+            missing.add("imu missing");
+        } else if (!imuDevice.isConnected(true)) {
+            missing.add(describeImu(imuDevice));
+        }
+
+        SwerveModule[] modules = drivetrain != null ? drivetrain.swerveModules : null;
+        if (modules == null || modules.length == 0) {
+            missing.add("no swerve modules configured");
+        } else {
+            for (int i = 0; i < modules.length; i++) {
+                SwerveModule module = modules[i];
+                if (module == null) {
+                    missing.add("module[" + i + "] missing");
+                    continue;
+                }
+
+                MotorController driveMotor = module.getDriveMotorController();
+                if (driveMotor == null) {
+                    missing.add("module[" + i + "] drive motor missing");
+                } else if (!driveMotor.isConnected(true)) {
+                    missing.add(describeMotor("module[" + i + "] drive", driveMotor));
+                }
+
+                MotorController steerMotor = module.getSteerMotorController();
+                if (steerMotor == null) {
+                    missing.add("module[" + i + "] steer motor missing");
+                } else if (!steerMotor.isConnected(true)) {
+                    missing.add(describeMotor("module[" + i + "] steer", steerMotor));
+                }
+
+                Encoder steerEncoder = module.getSteerEncoder();
+                if (steerEncoder == null) {
+                    missing.add("module[" + i + "] steer encoder missing");
+                } else if (!steerEncoder.isConnected(true)) {
+                    missing.add(describeEncoder("module[" + i + "] steer encoder", steerEncoder));
+                }
+            }
+        }
+
+        if (!missing.isEmpty()) {
+            throwConnectivityError("Swerve", missing);
+        }
+    }
+
+    private static String describeMotor(String label, MotorController motor) {
+        String type = motor.getType() != null ? motor.getType().getKey() : "unknown";
+        return label + " disconnected (type=" + type + ", id=" + motor.getId() + ", canbus=" + motor.getCanbus() + ")";
+    }
+
+    private static String describeEncoder(String label, Encoder encoder) {
+        EncoderConfig cfg = encoder.getConfig();
+        String type = cfg != null && cfg.type() != null ? cfg.type().getKey() : "unknown";
+        int id = cfg != null ? cfg.id() : -1;
+        String bus = cfg != null ? cfg.canbus() : "";
+        return label + " disconnected (type=" + type + ", id=" + id + ", canbus=" + bus + ")";
+    }
+
+    private static String describeImu(Imu imuDevice) {
+        ImuConfig cfg = imuDevice.getConfig();
+        String type = cfg != null && cfg.type() != null ? cfg.type().getKey() : "unknown";
+        int id = cfg != null ? cfg.id() : -1;
+        String bus = cfg != null ? cfg.canbus() : "";
+        return "imu disconnected (type=" + type + ", id=" + id + ", canbus=" + bus + ")";
+    }
+
+    private static void throwConnectivityError(String drivetrainType, List<String> missing) {
+        String message = drivetrainType
+                + " drivetrain required-device connectivity check failed: "
+                + String.join("; ", missing);
+        DriverStation.reportError(message, false);
+        throw new IllegalStateException(message);
     }
 }
