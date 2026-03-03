@@ -87,6 +87,7 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DataLogManager;
 import edu.wpi.first.wpilibj.Filesystem;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SendableBuilderImpl;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -96,6 +97,8 @@ import edu.wpi.first.wpilibj2.command.Commands;
 public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static volatile RobotCore<?> activeInstance;
     private static final String AUTO_PROGRAM_CHOOSER_KEY = "ProgramChooser";
+    private static final String AUTO_FOLLOWER_TRANSLATION_PID_WIDGET_KEY = "Athena/Auto/Follower/Pid/Translation";
+    private static final String AUTO_FOLLOWER_ROTATION_PID_WIDGET_KEY = "Athena/Auto/Follower/Pid/Rotation";
     private static final Pose2d[] EMPTY_POSE2D_ARRAY = new Pose2d[0];
     private static final String EMPTY_AUTO_TRAJECTORY_SIGNATURE = "";
 
@@ -760,6 +763,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private NetworkTableEntry autoInitResetEntry;
     private final StructArrayPublisher<Pose2d> selectedAutoTrajectoryPublisher;
     private NtSendablePublisher autoProgramChooserPublisher;
+    private PIDController autoFollowerTranslationPidWidget;
+    private PIDController autoFollowerRotationPidWidget;
     private final List<Consumer<RobotAuto.RegistrySection>> configuredAutoRegistryBindings;
     private final List<RegisterableMechanism> configuredMechanisms;
     private boolean configuredMechanismsRegistered;
@@ -6219,6 +6224,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 pidNode.putDouble("translationKd", translation.kD());
                 pidNode.putDouble("translationIZone", translation.iZone());
                 pidNode.putBoolean("translationInverted", translation.inverted());
+                autoFollowerTranslationPidWidget = syncAutoFollowerPidWidget(
+                        autoFollowerTranslationPidWidget,
+                        translation,
+                        false,
+                        AUTO_FOLLOWER_TRANSLATION_PID_WIDGET_KEY);
             }
             if (rotation != null) {
                 pidNode.putDouble("rotationKp", rotation.kP());
@@ -6226,6 +6236,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 pidNode.putDouble("rotationKd", rotation.kD());
                 pidNode.putDouble("rotationIZone", rotation.iZone());
                 pidNode.putBoolean("rotationInverted", rotation.inverted());
+                autoFollowerRotationPidWidget = syncAutoFollowerPidWidget(
+                        autoFollowerRotationPidWidget,
+                        rotation,
+                        true,
+                        AUTO_FOLLOWER_ROTATION_PID_WIDGET_KEY);
             }
         }
         RobotNetworkTables.Node selectedNode = autoNode.child("Selected");
@@ -6328,6 +6343,29 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return Double.doubleToLongBits(pose.getX()) + ","
                 + Double.doubleToLongBits(pose.getY()) + ","
                 + Double.doubleToLongBits(pose.getRotation().getRadians());
+    }
+
+    private static PIDController syncAutoFollowerPidWidget(
+            PIDController existing,
+            HolonomicPidConstants constants,
+            boolean continuous,
+            String dashboardKey) {
+        if (constants == null) {
+            return existing;
+        }
+        PIDController controller = existing;
+        if (controller == null) {
+            controller = new PIDController(constants.kP(), constants.kI(), constants.kD());
+            SmartDashboard.putData(dashboardKey, controller);
+        }
+        controller.setPID(constants.kP(), constants.kI(), constants.kD());
+        controller.setIZone(constants.iZone());
+        if (continuous) {
+            controller.enableContinuousInput(-Math.PI, Math.PI);
+        } else {
+            controller.disableContinuousInput();
+        }
+        return controller;
     }
 
     private void updateAutoChooserPublishers() {
