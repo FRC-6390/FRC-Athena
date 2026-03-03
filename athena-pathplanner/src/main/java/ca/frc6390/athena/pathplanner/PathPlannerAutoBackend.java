@@ -24,7 +24,6 @@ import com.pathplanner.lib.commands.FollowPathCommand;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
-import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.path.PathPlannerPath;
 import edu.wpi.first.math.geometry.Rotation2d;
 import com.pathplanner.lib.util.FileVersionException;
@@ -81,9 +80,12 @@ public class PathPlannerAutoBackend implements AutoBackend {
                 binding.poseResetter(),
                 binding.robotRelativeSpeeds(),
                 (speeds, feed) -> binding.output().accept(speeds, HolonomicFeedforward.zero()),
-                new PPHolonomicDriveController(
+                new InvertedFeedbackPPHolonomicDriveController(
                         toPid(binding.translationPid()),
-                        toPid(binding.rotationPid())),
+                        toPid(binding.rotationPid()),
+                        binding.translationPid().inverted(),
+                        binding.translationPid().inverted(),
+                        binding.rotationPid().inverted()),
                 config,
                 () -> binding.isRedAllianceSupplier().get());
 

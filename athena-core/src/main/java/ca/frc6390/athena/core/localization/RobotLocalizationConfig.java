@@ -545,6 +545,7 @@ public class RobotLocalizationConfig {
         private double kI;
         private double kD;
         private double iZone;
+        private boolean inverted;
 
         private PidAxisSection(HolonomicPidConstants initial) {
             HolonomicPidConstants resolved = initial != null
@@ -554,6 +555,7 @@ public class RobotLocalizationConfig {
             this.kI = resolved.kI();
             this.kD = resolved.kD();
             this.iZone = resolved.iZone();
+            this.inverted = resolved.inverted();
         }
 
         public PidAxisSection kp(double kP) {
@@ -576,8 +578,13 @@ public class RobotLocalizationConfig {
             return this;
         }
 
+        public PidAxisSection inverted(boolean inverted) {
+            this.inverted = inverted;
+            return this;
+        }
+
         HolonomicPidConstants toConstants() {
-            return new HolonomicPidConstants(kP, kI, kD, iZone);
+            return new HolonomicPidConstants(kP, kI, kD, iZone, inverted);
         }
     }
 

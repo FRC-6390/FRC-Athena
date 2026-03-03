@@ -121,7 +121,47 @@ final class RobotLocalizationChoreoFollowerSignTest {
                         + " errorDeg=" + wrappedError + " omega=" + output.omegaRadiansPerSecond);
     }
 
+    @Test
+    void followerInvertsRotationFeedbackWhenRotationPidMarkedInverted() throws Exception {
+        TestFixture fixture = newFixture(false, true);
+
+        fixture.localization.resetPose("field", new Pose2d(0.0, 0.0, Rotation2d.fromDegrees(0.0)));
+        fixture.follower.accept(
+                new Pose2d(0.0, 0.0, Rotation2d.fromDegrees(20.0)),
+                new ChassisSpeeds());
+
+        ChassisSpeeds output = fixture.speeds.getInputSpeeds(RobotSpeeds.AUTO_SOURCE);
+        assertTrue(
+                output.omegaRadiansPerSecond < 0.0,
+                "Inverted rotation PID should command negative omega for positive heading error, got "
+                        + output.omegaRadiansPerSecond);
+    }
+
+    @Test
+    void followerInvertsTranslationFeedbackWhenTranslationPidMarkedInverted() throws Exception {
+        TestFixture fixture = newFixture(true, false);
+
+        fixture.localization.resetPose("field", new Pose2d(0.0, 0.0, Rotation2d.fromDegrees(0.0)));
+        fixture.follower.accept(
+                new Pose2d(1.0, 1.0, Rotation2d.fromDegrees(0.0)),
+                new ChassisSpeeds());
+
+        ChassisSpeeds output = fixture.speeds.getInputSpeeds(RobotSpeeds.AUTO_SOURCE);
+        assertTrue(
+                output.vxMetersPerSecond < 0.0,
+                "Inverted translation PID should command negative vx for positive X error, got "
+                        + output.vxMetersPerSecond);
+        assertTrue(
+                output.vyMetersPerSecond < 0.0,
+                "Inverted translation PID should command negative vy for positive Y error, got "
+                        + output.vyMetersPerSecond);
+    }
+
     private static TestFixture newFixture() throws Exception {
+        return newFixture(false, false);
+    }
+
+    private static TestFixture newFixture(boolean invertTranslation, boolean invertRotation) throws Exception {
         TestImu imu = new TestImu();
         imu.setVirtualAxis("field", Rotation2d.fromDegrees(0.0));
         imu.setVirtualAxis("driver", Rotation2d.fromDegrees(0.0));
@@ -129,8 +169,8 @@ final class RobotLocalizationChoreoFollowerSignTest {
 
         RobotLocalizationConfig config = new RobotLocalizationConfig();
         config.config().autoPlannerPid(
-                new HolonomicPidConstants(1.0, 0.0, 0.0),
-                new HolonomicPidConstants(1.0, 0.0, 0.0));
+                new HolonomicPidConstants(1.0, 0.0, 0.0, 0.0, invertTranslation),
+                new HolonomicPidConstants(1.0, 0.0, 0.0, 0.0, invertRotation));
         RobotSpeeds speeds = new RobotSpeeds(4.5, Math.PI);
 
         RobotLocalization<DifferentialDriveWheelPositions> localization = new RobotLocalization<>(

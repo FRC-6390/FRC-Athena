@@ -668,16 +668,19 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                     Rotation2d measuredHeading = botpose.getRotation();
                     double desiredHeadingRadians = desiredPose.getRotation().getRadians();
                     double measuredHeadingRadians = measuredHeading.getRadians();
+                    double translationFeedbackSign = translationConstants.inverted() ? -1.0 : 1.0;
+                    double rotationFeedbackSign = rotationConstants.inverted() ? -1.0 : 1.0;
                     double headingErrorRadians = MathUtil.inputModulus(
                             desiredHeadingRadians - measuredHeadingRadians,
                             -Math.PI,
                             Math.PI);
-                    double xFeedback = xController.calculate(botpose.getX(), desiredPose.getX());
-                    double yFeedback = yController.calculate(botpose.getY(), desiredPose.getY());
+                    double xFeedback = translationFeedbackSign * xController.calculate(botpose.getX(), desiredPose.getX());
+                    double yFeedback = translationFeedbackSign * yController.calculate(botpose.getY(), desiredPose.getY());
                     double thetaFeedback = 0.0;
                     if (Math.abs(desiredSpeeds.omegaRadiansPerSecond) > CHOREO_OMEGA_DEADBAND_RAD_PER_SEC
                             || Math.abs(headingErrorRadians) > CHOREO_HEADING_DEADBAND_RAD) {
-                        thetaFeedback = rotationController.calculate(measuredHeadingRadians, desiredHeadingRadians);
+                        thetaFeedback = rotationFeedbackSign
+                                * rotationController.calculate(measuredHeadingRadians, desiredHeadingRadians);
                     }
                     ChassisSpeeds fieldSpeeds = new ChassisSpeeds(
                             desiredSpeeds.vxMetersPerSecond + xFeedback,

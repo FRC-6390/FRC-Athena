@@ -646,6 +646,22 @@ public final class RobotCoreConfig {
         }
 
         /**
+         * Configures translation PID values through the auto-planner PID axis API.
+         */
+        public AutoSection translation(Consumer<RobotLocalizationConfig.PidAxisSection> section) {
+            config = config.pid(pid -> pid.translation(section));
+            return this;
+        }
+
+        /**
+         * Configures rotation PID values through the auto-planner PID axis API.
+         */
+        public AutoSection rotation(Consumer<RobotLocalizationConfig.PidAxisSection> section) {
+            config = config.pid(pid -> pid.rotation(section));
+            return this;
+        }
+
+        /**
          * Sets the pose key used by auto planner reset behavior.
          */
         public AutoSection pose(String poseName) {

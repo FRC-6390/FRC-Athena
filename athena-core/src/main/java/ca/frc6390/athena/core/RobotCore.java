@@ -190,7 +190,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             if (axis == null || constants == null) {
                 return;
             }
-            axis.kp(constants.kP()).ki(constants.kI()).kd(constants.kD()).iZone(constants.iZone());
+            axis.kp(constants.kP())
+                    .ki(constants.kI())
+                    .kd(constants.kD())
+                    .iZone(constants.iZone())
+                    .inverted(constants.inverted());
         }
     }
 
@@ -564,6 +568,64 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     hooks,
                     systemConfig,
                     arcpConfig);
+        }
+
+        public RobotCoreConfig<T> auto(Consumer<AutoSection> section) {
+            if (section == null) {
+                return this;
+            }
+            AutoSection builder = new AutoSection(autoConfig);
+            section.accept(builder);
+            return auto(builder.config);
+        }
+
+        public static final class AutoSection {
+            private AutoConfig config;
+
+            private AutoSection(AutoConfig config) {
+                this.config = config != null ? config : AutoConfig.defaults();
+            }
+
+            public AutoSection config(AutoConfig config) {
+                this.config = config != null ? config : AutoConfig.defaults();
+                return this;
+            }
+
+            public AutoSection pid(
+                    double tP,
+                    double tI,
+                    double tD,
+                    double rP,
+                    double rI,
+                    double rD) {
+                config = config.pid(tP, tI, tD, rP, rI, rD);
+                return this;
+            }
+
+            public AutoSection pid(Consumer<RobotLocalizationConfig.AutoPlannerPidSection> section) {
+                config = config.pid(section);
+                return this;
+            }
+
+            public AutoSection translation(Consumer<RobotLocalizationConfig.PidAxisSection> section) {
+                config = config.pid(pid -> pid.translation(section));
+                return this;
+            }
+
+            public AutoSection rotation(Consumer<RobotLocalizationConfig.PidAxisSection> section) {
+                config = config.pid(pid -> pid.rotation(section));
+                return this;
+            }
+
+            public AutoSection pose(String poseName) {
+                config = config.pose(poseName);
+                return this;
+            }
+
+            public AutoSection registry(Consumer<RobotAuto.RegistrySection> section) {
+                config = config.registry(section);
+                return this;
+            }
         }
 
         public RobotCoreConfig<T> hooks(java.util.function.Consumer<RobotCoreHooks.HooksSection<T>> section) {
@@ -3989,7 +4051,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (axis == null || constants == null) {
             return;
         }
-        axis.kp(constants.kP()).ki(constants.kI()).kd(constants.kD()).iZone(constants.iZone());
+        axis.kp(constants.kP())
+                .ki(constants.kI())
+                .kd(constants.kD())
+                .iZone(constants.iZone())
+                .inverted(constants.inverted());
     }
 
     private record SystemCommandResult(int exitCode, String output, boolean timedOut) {}
@@ -6152,12 +6218,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 pidNode.putDouble("translationKi", translation.kI());
                 pidNode.putDouble("translationKd", translation.kD());
                 pidNode.putDouble("translationIZone", translation.iZone());
+                pidNode.putBoolean("translationInverted", translation.inverted());
             }
             if (rotation != null) {
                 pidNode.putDouble("rotationKp", rotation.kP());
                 pidNode.putDouble("rotationKi", rotation.kI());
                 pidNode.putDouble("rotationKd", rotation.kD());
                 pidNode.putDouble("rotationIZone", rotation.iZone());
+                pidNode.putBoolean("rotationInverted", rotation.inverted());
             }
         }
         RobotNetworkTables.Node selectedNode = autoNode.child("Selected");

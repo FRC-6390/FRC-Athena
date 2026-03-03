@@ -23,16 +23,15 @@ public final class ExampleRobotCoreConfig {
                 .control(c -> c.fieldRelative(true));
 
         RobotLocalizationConfig localization = RobotLocalizationConfig.vision(0.8, 0.8, 9999)
-                .planner(p -> p.autoPlannerPid(pid -> {
-                    pid.translation().kp(7.0).ki(0.0).kd(0.0);
-                    pid.rotation().kp(2.0).ki(0.0).kd(0.0);
-                    pid.autotunerConfig(a -> a.enabled(true));
-                }))
                 .estimation(e -> e.visionEnabled(true))
                 .poses(p -> p.autoPoseName("field"));
 
         return RobotCore.RobotCoreConfig.<SwerveDrivetrain>swerve(drivetrain)
                 .localization(localization)
+                .auto(a -> a
+                        .translation(p -> p.kp(7.0).ki(0.0).kd(0.0))
+                        .rotation(p -> p.kp(2.0).ki(0.0).kd(0.0))
+                        .pid(pid -> pid.autotunerConfig(cfg -> cfg.enabled(true))))
                 .cameras(cameras)
                 .performanceMode(false)
                 .telemetryEnabled(true);
