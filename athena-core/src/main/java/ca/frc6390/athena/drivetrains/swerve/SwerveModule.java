@@ -24,6 +24,9 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
 public class SwerveModule implements RobotSendableDevice {
+    private static final double FEEDFORWARD_TARGET_DEADBAND_MPS_MIN = 0.02;
+    private static final double FEEDFORWARD_TARGET_DEADBAND_RATIO = 0.01;
+    private static final double FEEDFORWARD_MEASURED_SPEED_FILTER_ALPHA = 0.35;
     
     private final SwerveModuleConfig config;
     private final MotorController driveMotor;
@@ -40,6 +43,10 @@ public class SwerveModule implements RobotSendableDevice {
     private double nominalVoltage = 12.0;
     private double lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
     private boolean hasPreviousFeedforwardTarget = false;
+    private double filteredDriveVelocityMetersPerSecond = 0.0;
+    private boolean hasFilteredDriveVelocity = false;
+    private double lastFeedforwardCurrentSpeedMetersPerSecond = 0.0;
+    private double lastFeedforwardVolts = 0.0;
     private ca.frc6390.athena.drivetrains.swerve.sim.SwerveModuleSimulation simulation;
     private final SwerveModuleState stateView = new SwerveModuleState(0.0, Rotation2d.kZero);
     private final SwerveModulePosition positionView = new SwerveModulePosition(0.0, Rotation2d.kZero);
@@ -782,21 +789,18 @@ public class SwerveModule implements RobotSendableDevice {
     public void setDriveFeedforward(SimpleMotorFeedforward feedforward) {
         this.driveFeedforward = feedforward;
         this.driveFeedforwardEnabled = feedforward != null;
-        lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
-        hasPreviousFeedforwardTarget = false;
+        resetFeedforwardState();
     }
 
     public void setDriveFeedforwardEnabled(boolean enabled) {
         if (driveFeedforward == null) {
             driveFeedforwardEnabled = false;
-            lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
-            hasPreviousFeedforwardTarget = false;
+            resetFeedforwardState();
             return;
         }
         driveFeedforwardEnabled = enabled;
         if (!enabled) {
-            lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
-            hasPreviousFeedforwardTarget = false;
+            resetFeedforwardState();
         }
     }
 
@@ -830,7 +834,11 @@ public class SwerveModule implements RobotSendableDevice {
         optimizedState.speedMetersPerSecond *= optimizedState.angle.minus(currentAngle).getCos();
         if (driveFeedforwardEnabled && driveFeedforward != null) {
             double driveVolts = calculateFeedforwardVolts(optimizedState.speedMetersPerSecond);
-            setDriveMotorVoltage(driveVolts);
+            if (Double.isFinite(driveVolts)) {
+                setDriveMotorVoltage(driveVolts);
+            } else {
+                setDriveMotor(optimizedState.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
+            }
         } else {
             setDriveMotor(optimizedState.speedMetersPerSecond / config.maxSpeedMetersPerSecond());
         }
@@ -845,8 +853,7 @@ public class SwerveModule implements RobotSendableDevice {
         rotationMotor.stopMotor();
         lastDriveCommand = 0;
         lastSteerCommand = 0;
-        lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
-        hasPreviousFeedforwardTarget = false;
+        resetFeedforwardState();
     }
 
     public void setToAngle(double angle) {
@@ -894,17 +901,51 @@ public class SwerveModule implements RobotSendableDevice {
     }
 
     private double calculateFeedforwardVolts(double targetSpeedMetersPerSecond) {
+        double targetDeadband = Math.max(
+                FEEDFORWARD_TARGET_DEADBAND_MPS_MIN,
+                Math.abs(config.maxSpeedMetersPerSecond()) * FEEDFORWARD_TARGET_DEADBAND_RATIO);
+        if (Math.abs(targetSpeedMetersPerSecond) <= targetDeadband) {
+            resetFeedforwardState();
+            return 0.0;
+        }
         // Use measured wheel speed for the current-state term so ka stays stable while modules
         // continuously optimize angles under mixed translation + rotation commands.
         double measuredSpeed = getDriveMotorVelocity();
         double currentSpeed = Double.isFinite(measuredSpeed)
-                ? measuredSpeed
+                ? filterMeasuredDriveSpeed(measuredSpeed)
                 : (hasPreviousFeedforwardTarget
                         ? lastFeedforwardTargetSpeedMetersPerSecond
                         : targetSpeedMetersPerSecond);
         hasPreviousFeedforwardTarget = true;
         lastFeedforwardTargetSpeedMetersPerSecond = targetSpeedMetersPerSecond;
-        return driveFeedforward.calculateWithVelocities(currentSpeed, targetSpeedMetersPerSecond);
+        lastFeedforwardCurrentSpeedMetersPerSecond = currentSpeed;
+        double outputVolts = driveFeedforward.calculateWithVelocities(currentSpeed, targetSpeedMetersPerSecond);
+        if (!Double.isFinite(outputVolts)) {
+            resetFeedforwardState();
+            return 0.0;
+        }
+        lastFeedforwardVolts = outputVolts;
+        return outputVolts;
+    }
+
+    private double filterMeasuredDriveSpeed(double measuredSpeedMetersPerSecond) {
+        if (!hasFilteredDriveVelocity) {
+            filteredDriveVelocityMetersPerSecond = measuredSpeedMetersPerSecond;
+            hasFilteredDriveVelocity = true;
+            return filteredDriveVelocityMetersPerSecond;
+        }
+        filteredDriveVelocityMetersPerSecond += FEEDFORWARD_MEASURED_SPEED_FILTER_ALPHA
+                * (measuredSpeedMetersPerSecond - filteredDriveVelocityMetersPerSecond);
+        return filteredDriveVelocityMetersPerSecond;
+    }
+
+    private void resetFeedforwardState() {
+        lastFeedforwardTargetSpeedMetersPerSecond = 0.0;
+        hasPreviousFeedforwardTarget = false;
+        filteredDriveVelocityMetersPerSecond = 0.0;
+        hasFilteredDriveVelocity = false;
+        lastFeedforwardCurrentSpeedMetersPerSecond = 0.0;
+        lastFeedforwardVolts = 0.0;
     }
 
     @Override
@@ -925,6 +966,15 @@ public class SwerveModule implements RobotSendableDevice {
             rotationMotor.networkTables(node.child("SteerMotor"));
             node.putDouble("offset", encoder != null ? encoder.getOffset() : 0.0);
             node.putDouble("startupOffset", startUpOffset);
+            node.putBoolean("driveFeedforwardEnabled", driveFeedforwardEnabled);
+            node.putDouble("driveFeedforwardTargetMps", lastFeedforwardTargetSpeedMetersPerSecond);
+            node.putDouble("driveFeedforwardCurrentMps", lastFeedforwardCurrentSpeedMetersPerSecond);
+            node.putDouble("driveFeedforwardOutputVolts", lastFeedforwardVolts);
+            if (driveFeedforward != null) {
+                node.putDouble("driveFeedforwardKs", driveFeedforward.getKs());
+                node.putDouble("driveFeedforwardKv", driveFeedforward.getKv());
+                node.putDouble("driveFeedforwardKa", driveFeedforward.getKa());
+            }
         }
 
         return node;
