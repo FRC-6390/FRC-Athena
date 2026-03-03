@@ -292,6 +292,17 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public SwerveSection cosineCompensation(boolean enabled) {
+            config.control().cosineCompensation(enabled);
+            return this;
+        }
+
+        public SwerveSection cosineCompensation(
+                Consumer<SwerveDrivetrainConfig.CosineCompensationSection> section) {
+            config.control().cosineCompensation(section);
+            return this;
+        }
+
         public SwerveSection speedSource(Consumer<SpeedSourceSection> section) {
             Objects.requireNonNull(section, "section");
             DrivetrainSpeedConfigSupport speedSupport = new DrivetrainSpeedConfigSupport();

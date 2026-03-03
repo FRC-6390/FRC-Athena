@@ -68,6 +68,20 @@ final class SwerveModuleConfigDslTest {
     }
 
     @Test
+    void ffRuntimeConsumerAppliesPerModuleRuntimeTuning() {
+        SwerveModule.SwerveModuleConfig cfg = baseConfig()
+                .ffRuntime(r -> r
+                        .targetDeadbandMpsMin(0.05)
+                        .targetDeadbandRatio(0.02)
+                        .measuredSpeedFilterAlpha(0.60));
+
+        assertNotNull(cfg.driveFeedforwardTuning());
+        assertEquals(0.05, cfg.driveFeedforwardTuning().targetDeadbandMpsMin(), 1e-9);
+        assertEquals(0.02, cfg.driveFeedforwardTuning().targetDeadbandRatio(), 1e-9);
+        assertEquals(0.60, cfg.driveFeedforwardTuning().measuredSpeedFilterAlpha(), 1e-9);
+    }
+
+    @Test
     void inversionDslTracksExplicitOverrides() {
         SwerveModule.SwerveModuleConfig cfg = baseConfig()
                 .driveInverted(true)

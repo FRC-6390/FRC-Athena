@@ -99,6 +99,8 @@ public class SwerveDrivetrain extends SubsystemBase
   private double lastMotionLimitTimestampSeconds = Double.NaN;
   private SimpleMotorFeedForwardsSendable driveFeedforward;
   private boolean driveFeedforwardEnabled = false;
+  private boolean cosineCompensationEnabled = true;
+  private double cosineCompensationErrorThresholdDegrees = 0.0;
   private double nominalVoltage = 12.0;
   private SysIdRoutine sysIdRoutine;
   private double sysIdRampRateVoltsPerSecond = 1.0;
@@ -164,6 +166,8 @@ public class SwerveDrivetrain extends SubsystemBase
     imu.addVirtualAxis("drift", imu::getYaw);
     imu.setVirtualAxis("drift", imu.getVirtualAxis("driver"));
     desiredHeading = imu.getVirtualAxis("drift").getRadians();
+    cosineCompensationEnabled(cosineCompensationEnabled);
+    cosineCompensationError(cosineCompensationErrorThresholdDegrees);
     setNominalVoltage(nominalVoltage);
     
   }
@@ -384,6 +388,31 @@ public class SwerveDrivetrain extends SubsystemBase
 
   public boolean driveFeedforwardConfigured() {
     return driveFeedforward != null;
+  }
+
+  public void cosineCompensationEnabled(boolean enabled) {
+    cosineCompensationEnabled = enabled;
+    for (SwerveModule module : swerveModules) {
+      module.setCosineCompensationEnabled(enabled);
+    }
+  }
+
+  public boolean cosineCompensationEnabled() {
+    return cosineCompensationEnabled;
+  }
+
+  public void cosineCompensationError(double errorDegrees) {
+    if (!Double.isFinite(errorDegrees)) {
+      return;
+    }
+    cosineCompensationErrorThresholdDegrees = Math.max(0.0, errorDegrees);
+    for (SwerveModule module : swerveModules) {
+      module.setCosineCompensationErrorThresholdDegrees(cosineCompensationErrorThresholdDegrees);
+    }
+  }
+
+  public double cosineCompensationError() {
+    return cosineCompensationErrorThresholdDegrees;
   }
 
   private double sysIdRampRateVoltsPerSecond() {
