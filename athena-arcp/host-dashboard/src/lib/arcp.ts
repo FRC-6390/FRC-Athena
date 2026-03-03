@@ -180,6 +180,17 @@ export async function downloadRemoteLog(
   });
 }
 
+export async function startRemoteLogStream(host: string, path: string): Promise<void> {
+  return invoke('start_remote_log_stream', {
+    host,
+    path
+  });
+}
+
+export async function stopRemoteLogStream(): Promise<void> {
+  return invoke('stop_remote_log_stream');
+}
+
 export async function probeRobotLink(host: string, controlPort: number): Promise<RobotLinkProbe> {
   return invoke('probe_robot_link', {
     host,

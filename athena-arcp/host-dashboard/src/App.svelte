@@ -1,6 +1,7 @@
 <script lang="ts">
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import { faMagnifyingGlass, faXmark } from '@fortawesome/free-solid-svg-icons';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import type {
     DashboardSnapshot,
@@ -24,6 +25,8 @@
     setDriverstationDockMode,
     setPresentationMode,
     setSignal,
+    startRemoteLogStream,
+    stopRemoteLogStream,
     windowModeSnapshot
   } from './lib/arcp';
   import {
@@ -38,7 +41,6 @@
     formatMemory,
     formatUptime,
     hardwareWidgetKindForPath,
-    isActionSignal,
     isLayoutWidgetKind,
     isWritableSignal,
     leafPath,
@@ -74,8 +76,6 @@
   import WidgetCanvas from './components/WidgetCanvas.svelte';
   import InspectorPanel from './components/InspectorPanel.svelte';
   import SettingsScreen from './components/SettingsScreen.svelte';
-  import ActionsScreen from './components/ActionsScreen.svelte';
-  import CameraTuningScreen from './components/CameraTuningScreen.svelte';
   import DiagnosticsScreen from './components/DiagnosticsScreen.svelte';
   import LogsScreen from './components/LogsScreen.svelte';
   import MechanismsScreen from './components/MechanismsScreen.svelte';
@@ -98,6 +98,7 @@
   const RECORDING_CLIENT_HEARTBEAT_INTERVAL_MS = 1_000;
   const RECORDING_REPLAY_TICK_MS = 33;
   const REMOTE_LOG_LIVE_POLL_MS = 1_000;
+  const REMOTE_LOG_MAX_LINES = 6000;
 
   type GridDensity = 'compact' | 'balanced' | 'comfortable';
 
@@ -105,10 +106,8 @@
     | 'dashboards'
     | 'signals'
     | 'mechanisms'
-    | 'actions'
     | 'diagnostics'
     | 'logs'
-    | 'camera_tuning'
     | 'settings';
   type CommitLayoutOptions = {
     recordHistory?: boolean;
@@ -180,6 +179,17 @@
   type PendingRecordingAck = {
     sequence: number;
     status: string;
+  };
+  type RemoteLogStreamLinePayload = {
+    host: string;
+    path: string;
+    line: string;
+  };
+  type RemoteLogStreamStatusPayload = {
+    host: string;
+    path: string;
+    state: string;
+    message: string;
   };
 
   function parseGridDensity(raw: unknown): GridDensity {
@@ -364,9 +374,12 @@
   let remoteLogDownloadInFlightPath = $state<string | null>(null);
   let remoteLogError = $state('');
   let selectedRemoteLogPath = $state('');
-  let selectedRemoteLogPreview = $state('');
+  let selectedRemoteLogLines = $state<string[]>([]);
   let selectedRemoteLogPreviewTruncated = $state(false);
   let remoteLogLiveFollow = $state(true);
+  let remoteLogStreamConnected = $state(false);
+  let remoteLogStreamState = $state('idle');
+  let remoteLogStreamMessage = $state('');
   let robotLinkProbe = $state<RobotLinkProbe | null>(null);
   let robotLinkProbeInFlight = $state(false);
 
@@ -396,7 +409,6 @@
       ? applyFilters(pendingSignalMapRequest.candidates, query, 'all', 'all')
       : filteredSignals
   );
-  const actionSignals = $derived(arcpSignalRows.filter((signal) => isActionSignal(signal)));
 
   const activeTab = $derived(
     layoutState.tabs.find((tab) => tab.id === layoutState.activeTabId) ?? layoutState.tabs[0] ?? null
@@ -508,6 +520,25 @@
       return null;
     }
     return value;
+  }
+
+  function isTauriRuntime(): boolean {
+    if (typeof window === 'undefined') return false;
+    return '__TAURI_INTERNALS__' in window;
+  }
+
+  function splitLogContent(content: string): string[] {
+    const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+    if (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+    return lines;
+  }
+
+  function trimLogLines(lines: string[]): string[] {
+    if (lines.length <= REMOTE_LOG_MAX_LINES) return lines;
+    return lines.slice(lines.length - REMOTE_LOG_MAX_LINES);
   }
 
   function nowPerfMs(): number {
@@ -1017,6 +1048,9 @@
   }
 
   function activateRail(section: RailSection) {
+    if (railSection === 'logs' && section !== 'logs') {
+      void stopRemoteLogStreaming({ silent: true });
+    }
     dashboardMenu = null;
     railSection = section;
     if (section !== 'dashboards') {
@@ -1032,12 +1066,6 @@
         roleFilter = 'all';
         typeFilter = 'all';
         selectedWidgetId = null;
-        break;
-      case 'actions':
-        roleFilter = 'action';
-        typeFilter = 'all';
-        query = '';
-        showInspector = true;
         break;
       case 'mechanisms':
         roleFilter = 'all';
@@ -1060,14 +1088,7 @@
         showInspector = false;
         selectedWidgetId = null;
         void refreshRobotLinkProbe({ silent: true });
-        void refreshRemoteLogs();
-        break;
-      case 'camera_tuning':
-        roleFilter = 'all';
-        typeFilter = 'all';
-        query = '';
-        showInspector = false;
-        selectedWidgetId = null;
+        void refreshRemoteLogs(true);
         break;
       case 'settings':
         roleFilter = 'all';
@@ -1953,11 +1974,15 @@
   }
 
   function clearRemoteLogSelection() {
+    void stopRemoteLogStreaming({ silent: true });
     selectedRemoteLogPath = '';
-    selectedRemoteLogPreview = '';
+    selectedRemoteLogLines = [];
     selectedRemoteLogPreviewTruncated = false;
     remoteLogDownloadInFlightPath = null;
     remoteLogPreviewInFlight = false;
+    remoteLogStreamConnected = false;
+    remoteLogStreamState = 'idle';
+    remoteLogStreamMessage = '';
   }
 
   function clearRemoteLogs() {
@@ -1969,7 +1994,87 @@
   }
 
   function setRemoteLogLiveFollow(enabled: boolean) {
+    if (remoteLogLiveFollow === enabled) return;
     remoteLogLiveFollow = enabled;
+    if (!enabled) {
+      void stopRemoteLogStreaming({ silent: true });
+      return;
+    }
+
+    if (!selectedRemoteLogPath) return;
+    if (isTauriRuntime()) {
+      void startRemoteLogStreaming(selectedRemoteLogPath, { silent: false });
+    } else {
+      void loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
+    }
+  }
+
+  async function stopRemoteLogStreaming(options?: { silent?: boolean }) {
+    if (!isTauriRuntime()) {
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'idle';
+      remoteLogStreamMessage = '';
+      return;
+    }
+
+    try {
+      await stopRemoteLogStream();
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'stopped';
+      remoteLogStreamMessage = 'stream stopped';
+      if (!options?.silent) {
+        remoteLogError = '';
+      }
+    } catch (err) {
+      if (!options?.silent) {
+        remoteLogError = String(err);
+      }
+    }
+  }
+
+  async function startRemoteLogStreaming(
+    path: string,
+    options?: {
+      silent?: boolean;
+    }
+  ) {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) return;
+    if (!remoteLogLiveFollow) return;
+    if (!isTauriRuntime()) return;
+
+    try {
+      await startRemoteLogStream(host.trim(), normalizedPath);
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'starting';
+      remoteLogStreamMessage = 'starting stream';
+      if (!options?.silent) {
+        remoteLogError = '';
+      }
+    } catch (err) {
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'error';
+      remoteLogStreamMessage = String(err);
+      if (!options?.silent) {
+        remoteLogError = String(err);
+      }
+    }
+  }
+
+  function setRemoteLogPreviewContent(content: string, truncated: boolean) {
+    const lines = trimLogLines(splitLogContent(content));
+    selectedRemoteLogLines = lines;
+    selectedRemoteLogPreviewTruncated = truncated || lines.length >= REMOTE_LOG_MAX_LINES;
+  }
+
+  function appendRemoteLogLine(line: string) {
+    const normalized = line.replace(/\r$/, '');
+    const next = [...selectedRemoteLogLines, normalized];
+    const trimmed = trimLogLines(next);
+    selectedRemoteLogLines = trimmed;
+    if (trimmed.length < next.length) {
+      selectedRemoteLogPreviewTruncated = true;
+    }
   }
 
   async function refreshRobotLinkProbe(
@@ -2017,11 +2122,16 @@
       const hasSelection = listing.entries.some((entry) => entry.path === selectedRemoteLogPath);
       if (!hasSelection) {
         selectedRemoteLogPath = listing.entries[0]?.path ?? '';
-        selectedRemoteLogPreview = '';
+        selectedRemoteLogLines = [];
         selectedRemoteLogPreviewTruncated = false;
       }
       if (selectedRemoteLogPath) {
         await loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
+        if (remoteLogLiveFollow) {
+          await startRemoteLogStreaming(selectedRemoteLogPath, { silent: true });
+        }
+      } else {
+        await stopRemoteLogStreaming({ silent: true });
       }
       status = `log index refreshed (${listing.entries.length} files)`;
       lastError = '';
@@ -2050,13 +2160,12 @@
     try {
       const preview = await readRemoteLogPreview(host.trim(), normalizedPath, 64 * 1024);
       remoteLogsResolvedHost = preview.host;
-      selectedRemoteLogPreview = preview.content;
-      selectedRemoteLogPreviewTruncated = preview.truncated;
+      setRemoteLogPreviewContent(preview.content, preview.truncated);
       if (!options?.silent) {
         lastError = '';
       }
     } catch (err) {
-      selectedRemoteLogPreview = '';
+      selectedRemoteLogLines = [];
       selectedRemoteLogPreviewTruncated = false;
       remoteLogError = String(err);
       if (!options?.silent) {
@@ -2942,12 +3051,34 @@
       if (robotLinkProbeInFlight) return;
       void refreshRobotLinkProbe({ silent: true });
     }, REMOTE_LOG_LIVE_POLL_MS);
-    const remoteLogLiveTimer = setInterval(() => {
-      if (railSection !== 'logs') return;
-      if (!remoteLogLiveFollow) return;
-      if (!selectedRemoteLogPath || remoteLogPreviewInFlight) return;
-      void loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
-    }, REMOTE_LOG_LIVE_POLL_MS);
+    let unlistenRemoteLogLine: UnlistenFn | null = null;
+    let unlistenRemoteLogStatus: UnlistenFn | null = null;
+    if (isTauriRuntime()) {
+      void listen<RemoteLogStreamLinePayload>('remote-log-stream-line', (event) => {
+        const payload = event.payload;
+        if (!payload || payload.path !== selectedRemoteLogPath) return;
+        if (!remoteLogLiveFollow) return;
+        appendRemoteLogLine(payload.line);
+      }).then((unlisten) => {
+        unlistenRemoteLogLine = unlisten;
+      });
+
+      void listen<RemoteLogStreamStatusPayload>('remote-log-stream-status', (event) => {
+        const payload = event.payload;
+        if (!payload || payload.path !== selectedRemoteLogPath) return;
+        remoteLogStreamState = payload.state || 'unknown';
+        remoteLogStreamMessage = payload.message || '';
+        remoteLogStreamConnected = payload.state === 'connected';
+        if (payload.host) {
+          remoteLogsResolvedHost = payload.host;
+        }
+        if (payload.state === 'error') {
+          remoteLogError = payload.message || 'stream error';
+        }
+      }).then((unlisten) => {
+        unlistenRemoteLogStatus = unlisten;
+      });
+    }
     window.addEventListener('keydown', onGlobalKeyDown);
     window.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('fullscreenchange', onFullscreenChange);
@@ -2958,7 +3089,13 @@
       }
       clearInterval(serverLayoutTimer);
       clearInterval(robotLinkProbeTimer);
-      clearInterval(remoteLogLiveTimer);
+      if (unlistenRemoteLogLine) {
+        unlistenRemoteLogLine();
+      }
+      if (unlistenRemoteLogStatus) {
+        unlistenRemoteLogStatus();
+      }
+      void stopRemoteLogStreaming({ silent: true });
       if (replayState?.timerId !== null) {
         window.clearInterval(replayState.timerId);
       }
@@ -3097,38 +3234,6 @@
             {/if}
           </div>
         </section>
-      {:else if railSection === 'actions'}
-        <section class={`actions-stage ${showInspector ? '' : 'no-inspector'}`}>
-          <div class="actions-layout">
-            <ActionsScreen
-              actions={actionSignals}
-              onTriggerAction={sendAction}
-              onSelectSignal={(signalId) => {
-                selectedId = signalId;
-                showInspector = true;
-              }}
-            />
-            {#if showInspector}
-              <InspectorPanel
-                signals={signalRows}
-                {signalById}
-                {selectedSignal}
-                {selectedWidget}
-                widgetKinds={widgetKindsFor(selectedSignal)}
-                {widgetKindLabel}
-                onShowAsKind={showAsWidgetKind}
-                onTriggerAction={sendAction}
-                onSelectTunableWidget={() => {
-                  if (selectedSignal) createWidget(selectedSignal, 'tunable');
-                }}
-                onRemoveWidget={removeWidget}
-                onUpdateWidgetTitle={updateWidgetTitle}
-                onUpdateWidgetConfig={updateWidgetConfig}
-                onRequestSignalMap={requestSignalMapFromExplorer}
-              />
-            {/if}
-          </div>
-        </section>
       {:else if railSection === 'mechanisms'}
         <MechanismsScreen
           signals={arcpSignalRows}
@@ -3171,30 +3276,25 @@
           error={remoteLogError}
           entries={remoteLogs}
           selectedPath={selectedRemoteLogPath}
-          preview={selectedRemoteLogPreview}
+          previewLines={selectedRemoteLogLines}
           previewTruncated={selectedRemoteLogPreviewTruncated}
           liveFollow={remoteLogLiveFollow}
+          streamConnected={remoteLogStreamConnected}
+          streamState={remoteLogStreamState}
+          streamMessage={remoteLogStreamMessage}
           onRefresh={() => {
             void refreshRobotLinkProbe();
             void refreshRemoteLogs(true);
           }}
           onSelectLog={(path) => {
             setRemoteLogLiveFollow(true);
-            void loadRemoteLogPreview(path);
+            void (async () => {
+              await loadRemoteLogPreview(path);
+              await startRemoteLogStreaming(path, { silent: true });
+            })();
           }}
           onDownloadLog={(path) => void downloadSelectedRemoteLog(path)}
           onToggleLiveFollow={(enabled) => setRemoteLogLiveFollow(enabled)}
-        />
-      {:else if railSection === 'camera_tuning'}
-        <CameraTuningScreen
-          signals={arcpSignalRows}
-          onSelectSignal={(signalId) => {
-            selectedId = signalId;
-            selectedWidgetId = null;
-            railSection = 'signals';
-            showInspector = true;
-          }}
-          onSendSet={sendSet}
         />
       {:else}
         <section
@@ -3478,8 +3578,7 @@
     display: block;
   }
 
-  .signals-stage,
-  .actions-stage {
+  .signals-stage {
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
@@ -3487,33 +3586,25 @@
     gap: 0;
   }
 
-  .signals-layout,
-  .actions-layout {
+  .signals-layout {
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(280px, 420px) minmax(320px, 1fr);
     gap: 0.58rem;
   }
 
-  .actions-layout {
-    grid-template-columns: minmax(320px, 1fr) minmax(300px, 420px);
-  }
-
-  .signals-stage.no-inspector .signals-layout,
-  .actions-stage.no-inspector .actions-layout {
+  .signals-stage.no-inspector .signals-layout {
     grid-template-columns: 1fr;
   }
 
   @media (max-width: 1200px) {
-    .signals-layout,
-    .actions-layout {
+    .signals-layout {
       grid-template-columns: 1fr;
     }
   }
 
   @media (max-width: 900px) {
-    .signals-stage,
-    .actions-stage {
+    .signals-stage {
       grid-template-rows: auto 1fr;
     }
   }

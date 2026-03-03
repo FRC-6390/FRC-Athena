@@ -19,9 +19,12 @@
     error: string;
     entries: RemoteLogEntry[];
     selectedPath: string;
-    preview: string;
+    previewLines: string[];
     previewTruncated: boolean;
     liveFollow: boolean;
+    streamConnected: boolean;
+    streamState: string;
+    streamMessage: string;
     onRefresh: () => void;
     onSelectLog: (path: string) => void;
     onDownloadLog: (path: string) => void;
@@ -44,9 +47,12 @@
     error,
     entries,
     selectedPath,
-    preview,
+    previewLines,
     previewTruncated,
     liveFollow,
+    streamConnected,
+    streamState,
+    streamMessage,
     onRefresh,
     onSelectLog,
     onDownloadLog,
@@ -71,17 +77,12 @@
   }
 
   const selectedEntry = $derived(entries.find((entry) => entry.path === selectedPath) ?? null);
-  const previewLines = $derived.by(() => {
-    const normalized = preview.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = normalized.split('\n');
-    if (lines.length > 0 && lines[lines.length - 1] === '') {
-      lines.pop();
-    }
-    return lines.map((text, index) => ({
+  const renderedPreviewLines = $derived.by(() =>
+    previewLines.map((text, index) => ({
       lineNumber: index + 1,
       text: text.length > 0 ? text : ' '
-    }));
-  });
+    }))
+  );
   const filteredEntries = $derived.by(() => {
     const token = query.trim().toLowerCase();
     return entries.filter((entry) => {
@@ -98,7 +99,7 @@
   $effect(() => {
     const currentPath = selectedPath;
     const loading = previewLoading;
-    const lineCount = previewLines.length;
+    const lineCount = renderedPreviewLines.length;
     if (!liveFollow || loading || !currentPath || lineCount === 0) return;
     requestAnimationFrame(() => {
       if (!lineViewport) return;
@@ -230,19 +231,25 @@
           <strong>{selectedEntry.name}</strong>
           {` | ${formatBytes(selectedEntry.sizeBytes)} | ${formatTime(selectedEntry.modifiedEpochSec)}`}
         </p>
+        {#if liveFollow}
+          <p class="preview-note">
+            Stream: {streamConnected ? 'connected' : streamState}
+            {streamMessage ? ` (${streamMessage})` : ''}
+          </p>
+        {/if}
         {#if previewTruncated}
           <p class="preview-note">Showing tail of file (truncated).</p>
         {/if}
         {#if liveFollow}
-          <p class="preview-note">Live follow enabled (1s polling).</p>
+          <p class="preview-note">Live follow enabled (streaming).</p>
         {/if}
         {#if previewLoading}
           <p class="empty">Loading preview...</p>
-        {:else if previewLines.length === 0}
+        {:else if renderedPreviewLines.length === 0}
           <p class="empty">No preview data available (file may be binary or empty).</p>
         {:else}
           <div class="line-viewport" bind:this={lineViewport}>
-            {#each previewLines as line (`line-${line.lineNumber}`)}
+            {#each renderedPreviewLines as line (`line-${line.lineNumber}`)}
               <div class="log-line">
                 <span class="line-no">{line.lineNumber}</span>
                 <span class="line-text">{line.text}</span>

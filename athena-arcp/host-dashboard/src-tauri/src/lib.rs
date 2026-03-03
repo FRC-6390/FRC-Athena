@@ -36,12 +36,12 @@ const REMOTE_LOG_PREVIEW_BYTES_DEFAULT: usize = 64 * 1024;
 const REMOTE_LOG_PREVIEW_BYTES_MAX: usize = 512 * 1024;
 const REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_DEFAULT: u64 = 20 * 1024 * 1024;
 const REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_MAX: u64 = 64 * 1024 * 1024;
-const REMOTE_LOG_LIST_SCRIPT: &str = r#"{ for dir in /home/lvuser/athena/logs /home/lvuser/logs /u/logs /var/log; do if [ -d "$dir" ]; then find "$dir" -maxdepth 5 -type f 2>/dev/null; fi; done; if [ -f /home/lvuser/FRC_UserProgram.log ]; then echo /home/lvuser/FRC_UserProgram.log; fi; } | while IFS= read -r f; do case "$f" in *.log|*.txt|*.json|*.wpilog|*.gz) size=$(stat -c %s "$f" 2>/dev/null || wc -c < "$f" 2>/dev/null || echo 0); mtime=$(stat -c %Y "$f" 2>/dev/null || date -r "$f" +%s 2>/dev/null || echo 0); printf '%s|%s|%s\n' "$mtime" "$size" "$f";; esac; done | sort -t'|' -k1,1nr | head -n 800"#;
+const REMOTE_LOG_LIST_SCRIPT: &str = r#"{ for dir in /home/lvuser/athena/logs /home/lvuser/logs /u/logs /var/local/natinst/log; do if [ -d "$dir" ]; then find "$dir" -maxdepth 6 -type f 2>/dev/null; fi; done; if [ -f /home/lvuser/FRC_UserProgram.log ]; then echo /home/lvuser/FRC_UserProgram.log; fi; } | while IFS= read -r f; do case "$f" in *.log|*.log.*|*.txt|*.json|*.wpilog|*.wpilog.*|*.gz) size=$(stat -c %s "$f" 2>/dev/null || wc -c < "$f" 2>/dev/null || echo 0); mtime=$(stat -c %Y "$f" 2>/dev/null || date -r "$f" +%s 2>/dev/null || echo 0); printf '%s|%s|%s\n' "$mtime" "$size" "$f";; esac; done | sort -t'|' -k1,1nr | head -n 5000"#;
 const REMOTE_LOG_ALLOWED_PREFIXES: [&str; 4] = [
     "/home/lvuser/athena/logs/",
     "/home/lvuser/logs/",
     "/u/logs/",
-    "/var/log/",
+    "/var/local/natinst/log/",
 ];
 const REMOTE_LOG_ALLOWED_FILES: [&str; 1] = ["/home/lvuser/FRC_UserProgram.log"];
 
@@ -78,12 +78,18 @@ struct Session {
 
 struct RemoteLogStreamSession {
     running: Arc<AtomicBool>,
+    child_pid: Arc<Mutex<Option<u32>>>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl RemoteLogStreamSession {
     fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
+        if let Ok(mut slot) = self.child_pid.lock() {
+            if let Some(pid) = slot.take() {
+                kill_process(pid);
+            }
+        }
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
@@ -218,7 +224,7 @@ struct RobotLinkProbe {
     arcp_reachable: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteLogStreamLineEvent {
     host: String,
@@ -226,7 +232,7 @@ struct RemoteLogStreamLineEvent {
     line: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteLogStreamStatusEvent {
     host: String,
@@ -618,7 +624,13 @@ fn remote_log_file_size_bytes(host: &str, path: &str) -> Result<u64, String> {
         .map_err(|_| format!("failed to parse remote file size for {path}: {raw}"))
 }
 
-fn emit_remote_log_stream_status(window: &Window, host: &str, path: &str, state: &str, message: &str) {
+fn emit_remote_log_stream_status(
+    window: &Window,
+    host: &str,
+    path: &str,
+    state: &str,
+    message: &str,
+) {
     let _ = window.emit(
         "remote-log-stream-status",
         RemoteLogStreamStatusEvent {
@@ -630,9 +642,30 @@ fn emit_remote_log_stream_status(window: &Window, host: &str, path: &str, state:
     );
 }
 
+fn kill_process(pid: u32) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .arg("/T")
+            .arg("/F")
+            .status();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .status();
+    }
+}
+
 fn spawn_remote_log_stream_worker(
     window: Window,
     running: Arc<AtomicBool>,
+    child_pid: Arc<Mutex<Option<u32>>>,
     host: String,
     path: String,
 ) -> JoinHandle<()> {
@@ -697,6 +730,9 @@ fn spawn_remote_log_stream_worker(
                     }
                 };
 
+                if let Ok(mut slot) = child_pid.lock() {
+                    *slot = Some(child.id());
+                }
                 connected = true;
                 emit_remote_log_stream_status(
                     &window,
@@ -739,6 +775,9 @@ fn spawn_remote_log_stream_worker(
 
                 let _ = child.kill();
                 let _ = child.wait();
+                if let Ok(mut slot) = child_pid.lock() {
+                    *slot = None;
+                }
                 if !running.load(Ordering::SeqCst) {
                     break;
                 }
@@ -768,6 +807,9 @@ fn spawn_remote_log_stream_worker(
             thread::sleep(Duration::from_millis(700));
         }
 
+        if let Ok(mut slot) = child_pid.lock() {
+            *slot = None;
+        }
         emit_remote_log_stream_status(&window, &host, &path, "stopped", "log stream stopped");
     })
 }
@@ -905,6 +947,53 @@ fn download_remote_log(
         file_name,
         bytes: output,
     })
+}
+
+#[tauri::command]
+fn start_remote_log_stream(
+    runtime: State<'_, AppRuntime>,
+    window: Window,
+    host: String,
+    path: String,
+) -> Result<(), String> {
+    let resolved_host = resolve_remote_target_host(&runtime, &host)?;
+    let normalized_path = path.trim();
+    if normalized_path.is_empty() {
+        return Err(String::from("remote log path must not be empty"));
+    }
+    if !is_allowed_remote_log_path(normalized_path) {
+        return Err(String::from(
+            "remote log path is outside allowed log directories",
+        ));
+    }
+
+    stop_remote_log_stream_internal(&runtime)?;
+
+    let running = Arc::new(AtomicBool::new(true));
+    let child_pid = Arc::new(Mutex::new(None));
+    let handle = spawn_remote_log_stream_worker(
+        window,
+        Arc::clone(&running),
+        Arc::clone(&child_pid),
+        resolved_host,
+        normalized_path.to_string(),
+    );
+
+    let mut stream_slot = runtime
+        .remote_log_stream
+        .lock()
+        .map_err(|_| String::from("remote log stream lock poisoned"))?;
+    *stream_slot = Some(RemoteLogStreamSession {
+        running,
+        child_pid,
+        handle: Some(handle),
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_remote_log_stream(runtime: State<'_, AppRuntime>) -> Result<(), String> {
+    stop_remote_log_stream_internal(&runtime)
 }
 
 #[tauri::command]
@@ -1843,6 +1932,8 @@ pub fn run() {
             list_remote_logs,
             read_remote_log_preview,
             download_remote_log,
+            start_remote_log_stream,
+            stop_remote_log_stream,
             probe_robot_link,
             window_mode_snapshot,
             set_presentation_mode,

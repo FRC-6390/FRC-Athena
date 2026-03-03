@@ -17,14 +17,14 @@ def generatedNativeRoot = layout.buildDirectory.dir('generated/arcp-native-resou
 def generatedNativeDir = generatedNativeRoot.map { new File(it.asFile, 'native') }
 
 def vendorTargetTriples = [
-        'armv7-unknown-linux-gnueabihf',
+        'armv7-unknown-linux-gnueabi',
         'x86_64-unknown-linux-gnu',
         'aarch64-unknown-linux-gnu',
         'x86_64-pc-windows-gnu'
 ]
 
 def fullTargetTriples = [
-        'armv7-unknown-linux-gnueabihf',
+        'armv7-unknown-linux-gnueabi',
         'x86_64-unknown-linux-gnu',
         'aarch64-unknown-linux-gnu',
         'x86_64-apple-darwin',
@@ -63,10 +63,15 @@ def knownTargets = [
                 fileName    : hostLibraryFile,
                 artifactPath: { -> new File(resolveArtifactTargetDir(), "release/${hostLibraryFile}") }
         ],
+        'armv7-unknown-linux-gnueabi': [
+                resourceDir : 'linux-arm32',
+                fileName    : 'libarcp_jni.so',
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'armv7-unknown-linux-gnueabi/release/libarcp_jni.so') }
+        ],
         'armv7-unknown-linux-gnueabihf': [
                 resourceDir : 'linux-arm32',
                 fileName    : 'libarcp_jni.so',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'armv7-unknown-linux-gnueabihf/release/libarcp_jni.so') }
+                artifactPath: { -> new File(resolveArtifactTargetDir(), 'armv7-unknown-linux-gnueabi/release/libarcp_jni.so') }
         ],
         'x86_64-unknown-linux-gnu'     : [
                 resourceDir : 'linux-x86_64',
@@ -111,7 +116,7 @@ def nativeMode = ((nativeModeExplicitlyConfigured ? configuredNativeModeRaw : 'h
         .trim()
         .toLowerCase(Locale.ROOT)
 def publishDefaultTargets = [
-        'armv7-unknown-linux-gnueabihf',
+        'armv7-unknown-linux-gnueabi',
         'host'
 ]
 def explicitTargetsRaw = (project.findProperty('arcpJniTargets') ?: System.getenv('ARCP_JNI_TARGETS')) as String
@@ -137,7 +142,7 @@ def dockerCacheDir = rootProject.file('athena-arcp/rust/.docker-cache')
 def dockerCargoHomeDir = new File(dockerCacheDir, 'cargo-home')
 def dockerTargetDir = new File(dockerCacheDir, 'target')
 def dockerSupportedTargets = [
-        'armv7-unknown-linux-gnueabihf',
+        'armv7-unknown-linux-gnueabi',
         'x86_64-unknown-linux-gnu',
         'aarch64-unknown-linux-gnu',
         'x86_64-pc-windows-gnu',
@@ -175,12 +180,16 @@ def installRustTargets = ((project.findProperty('arcpInstallRustTargets')
         ?: 'true') as String).toBoolean()
 
 def targetLinkers = [
-        'armv7-unknown-linux-gnueabihf': 'arm-linux-gnueabihf-gcc',
+        'armv7-unknown-linux-gnueabi' : 'arm-linux-gnueabi-gcc',
+        'armv7-unknown-linux-gnueabihf': 'arm-linux-gnueabi-gcc',
         'aarch64-unknown-linux-gnu'    : 'aarch64-linux-gnu-gcc',
         'x86_64-pc-windows-gnu'        : 'x86_64-w64-mingw32-gcc'
 ]
 
 def resolveNativeTargetTriple = { String triple ->
+    if (triple == 'armv7-unknown-linux-gnueabihf') {
+        return 'armv7-unknown-linux-gnueabi'
+    }
     if (triple == 'x86_64-pc-windows-gnu' && hostOs.isWindows() && !useDockerCross) {
         return 'x86_64-pc-windows-msvc'
     }
@@ -196,7 +205,7 @@ def resolveDockerHostTriple = {
     }
     if (hostOs.isLinux()) {
         if (hostArch == 'arm32') {
-            return 'armv7-unknown-linux-gnueabihf'
+            return 'armv7-unknown-linux-gnueabi'
         }
         if (hostArch == 'aarch64') {
             return 'aarch64-unknown-linux-gnu'
@@ -224,7 +233,7 @@ def resolveBuildTripleForTarget = { String requestedTarget ->
 
 def optionalTargetsRaw = (project.findProperty('arcpOptionalTargets')
         ?: System.getenv('ARCP_OPTIONAL_TARGETS')
-        ?: 'armv7-unknown-linux-gnueabihf') as String
+        ?: 'armv7-unknown-linux-gnueabi') as String
 def optionalTargets = optionalTargetsRaw
         .split(',')
         .collect { it.trim() }
@@ -443,23 +452,15 @@ def runCargoBuildDocker = { String triple ->
 
     def linkerEnv = [] as List<String>
     switch (triple) {
-        case 'armv7-unknown-linux-gnueabihf':
-            linkerEnv += ['-e', 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc']
-            linkerEnv += ['-e', 'CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc']
-            linkerEnv += ['-e', 'AR_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar']
-            linkerEnv += ['-e', 'ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR=/usr/lib/arm-linux-gnueabihf']
-            linkerEnv += ['-e', 'ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_INCLUDE_DIR=/usr/include']
+        case 'armv7-unknown-linux-gnueabi':
+            linkerEnv += ['-e', 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER=arm-linux-gnueabi-gcc']
+            linkerEnv += ['-e', 'CC_armv7_unknown_linux_gnueabi=arm-linux-gnueabi-gcc']
+            linkerEnv += ['-e', 'AR_armv7_unknown_linux_gnueabi=arm-linux-gnueabi-ar']
             break
         case 'aarch64-unknown-linux-gnu':
             linkerEnv += ['-e', 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc']
             linkerEnv += ['-e', 'CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc']
             linkerEnv += ['-e', 'AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar']
-            linkerEnv += ['-e', 'AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu']
-            linkerEnv += ['-e', 'AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include']
-            break
-        case 'x86_64-unknown-linux-gnu':
-            linkerEnv += ['-e', 'X86_64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu']
-            linkerEnv += ['-e', 'X86_64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include']
             break
         case 'x86_64-pc-windows-gnu':
             linkerEnv += ['-e', 'CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc']
