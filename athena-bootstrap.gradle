@@ -525,6 +525,49 @@ def ensureAthenaRepoInSettings = { File settingsFile ->
     return true
 }
 
+def ensureAthenaPluginIncludeBuildInSettings = { File settingsFile, File athenaRepo ->
+    if (settingsFile == null || !settingsFile.isFile() || athenaRepo == null) {
+        return false
+    }
+
+    def pluginBuildDir = new File(athenaRepo, 'athena-plugin')
+    if (!pluginBuildDir.isDirectory()) {
+        throw new GradleException("Missing Athena plugin project directory: ${pluginBuildDir}")
+    }
+
+    String original = readText(settingsFile)
+    boolean kts = settingsFile.name.toLowerCase(Locale.ROOT).endsWith('.kts')
+    String pluginBuildPath = pluginBuildDir.absolutePath.replace('\\', '/')
+    String includeBuildLine = kts
+            ? "    includeBuild(\"${pluginBuildPath}\")"
+            : "    includeBuild('${pluginBuildPath}')"
+
+    def includeBuildPattern = ~/(?m)^\s*includeBuild\(\s*["'][^"']*athena-plugin["']\s*\)\s*$/
+    def existingMatcher = includeBuildPattern.matcher(original)
+    if (existingMatcher.find()) {
+        String existing = existingMatcher.group()
+        if (existing.trim() == includeBuildLine.trim()) {
+            return false
+        }
+        String updatedExisting = original.replaceFirst(includeBuildPattern, includeBuildLine)
+        settingsFile.write(updatedExisting, 'UTF-8')
+        return true
+    }
+
+    def pluginManagementPattern = ~/(?s)(pluginManagement\s*\{)/
+    def matcher = pluginManagementPattern.matcher(original)
+    if (!matcher.find()) {
+        throw new GradleException(
+                "Could not inject Athena plugin includeBuild into ${settingsFile}. " +
+                        "Please add includeBuild('${pluginBuildPath}') inside pluginManagement { }."
+        )
+    }
+
+    String updated = original.substring(0, matcher.end()) + "\n${includeBuildLine}" + original.substring(matcher.end())
+    settingsFile.write(updated, 'UTF-8')
+    return true
+}
+
 def dslConfigured = {
     File buildFile = resolveRobotBuildFile()
     String body = readText(buildFile)
@@ -582,8 +625,13 @@ tasks.register('athenaBuild') {
             String syncedVersion = readAthenaVersionFromRepo(repo)
             ensureAthenaPluginPublished(repo, syncedVersion)
             File buildFile = resolveRobotBuildFile()
+            File settingsFile = resolveSettingsFile()
+            boolean includeBuildChanged = ensureAthenaPluginIncludeBuildInSettings(settingsFile, repo)
             upsertAthenaPluginInBuildFile(buildFile, syncedVersion)
             logger.lifecycle("Aligned Athena DSL plugin version in ${buildFile} to ${syncedVersion}")
+            if (includeBuildChanged) {
+                logger.lifecycle("Updated Athena plugin includeBuild entry in ${settingsFile}")
+            }
         }
     }
 }
@@ -604,11 +652,17 @@ tasks.register('athenaEnableDsl') {
         }
         File buildFile = resolveRobotBuildFile()
         File settingsFile = resolveSettingsFile()
+        boolean includeBuildChanged = repo != null
+                ? ensureAthenaPluginIncludeBuildInSettings(settingsFile, repo)
+                : false
         boolean settingsChanged = ensureAthenaRepoInSettings(settingsFile)
         upsertAthenaPluginInBuildFile(buildFile, version)
         logger.lifecycle("Enabled Athena DSL plugin in ${buildFile} (version ${version})")
         if (settingsChanged) {
             logger.lifecycle("Added Athena plugin repository to ${settingsFile}")
+        }
+        if (includeBuildChanged) {
+            logger.lifecycle("Configured Athena plugin includeBuild in ${settingsFile}")
         }
     }
 }
