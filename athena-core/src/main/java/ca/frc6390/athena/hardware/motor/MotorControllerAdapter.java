@@ -12,6 +12,7 @@ public class MotorControllerAdapter implements MotorController {
     private static final int CONNECTION_POLL_INTERVAL_CYCLES = 10;
     private static final int TEMPERATURE_POLL_INTERVAL_CYCLES = 25;
     private static final int TELEMETRY_POLL_INTERVAL_CYCLES = 10;
+    private static final int STALL_POLL_INTERVAL_CYCLES = 5;
     private final MotorController raw;
     private final MotorControllerConfig config;
     private Encoder wrappedEncoder;
@@ -204,8 +205,9 @@ public class MotorControllerAdapter implements MotorController {
             cachedCurrentAmps = raw.getCurrentAmps();
             cachedAppliedVoltage = raw.getAppliedVoltage();
         }
-        // Stall edges drive mechanism hooks, so keep this fresh on every hardware refresh.
-        cachedStalled = raw.isStalled();
+        if (updateCycles == 1 || updateCycles % STALL_POLL_INTERVAL_CYCLES == 0) {
+            cachedStalled = raw.isStalled();
+        }
         if (updateCycles >= 1_000_000) {
             updateCycles = 0;
         }

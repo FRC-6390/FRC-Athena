@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -30,6 +31,7 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 
@@ -55,6 +57,7 @@ public class RobotAuto {
     private boolean registrationFinalized;
     private final Set<String> boundPathPlannerNamedCommands;
     private final Set<String> boundChoreoNamedCommands;
+    private final Set<AutoSource> warmedAutoSources;
     private final BoundedEventLog<AutoTraceEvent> autoTraceLog;
     private final int autoTraceLogCapacity;
     private final RegistrySection registrySection = new RegistrySection();
@@ -69,6 +72,8 @@ public class RobotAuto {
     private RobotCore<?> robotCore;
     private boolean autoTraceEnabled;
     private Consumer<String> autoTraceSink;
+    private String prelightSignature;
+    private Command prelightCommand;
 
     public RobotAuto() {
         namedCommandSuppliers = new LinkedHashMap<>();
@@ -87,11 +92,14 @@ public class RobotAuto {
         registrationFinalized = false;
         boundPathPlannerNamedCommands = new HashSet<>();
         boundChoreoNamedCommands = new HashSet<>();
+        warmedAutoSources = EnumSet.noneOf(AutoSource.class);
         autoTraceLogCapacity = DEFAULT_AUTO_TRACE_LOG_CAPACITY;
         autoTraceLog = new BoundedEventLog<>(autoTraceLogCapacity);
         robotCore = null;
         autoTraceEnabled = false;
         autoTraceSink = message -> DriverStation.reportWarning(message, false);
+        prelightSignature = "";
+        prelightCommand = null;
     }
 
     public RobotAuto controllers(Consumer<ControllersSection> section) {
@@ -1949,6 +1957,88 @@ public class RobotAuto {
         });
     }
 
+    private Optional<Command> prelightSelectedCommand() {
+        Optional<AutoRoutine> selectedOpt = getSelectedAuto();
+        if (selectedOpt.isEmpty()) {
+            clearPrelightCache();
+            return Optional.empty();
+        }
+        AutoRoutine selected = selectedOpt.get();
+        String signature = prelightSignature(selected);
+        if (prelightCommand != null && signature.equals(prelightSignature)) {
+            return Optional.of(prelightCommand);
+        }
+
+        getProgramPathPoses(selected);
+        warmupSource(selected.source());
+        prelightProgramPathCommands(selected);
+
+        Command built;
+        try {
+            built = selected.createCommand();
+        } catch (RuntimeException ex) {
+            DriverStation.reportWarning(
+                    "Failed to prelight auto \"" + selected.key().id() + "\": " + ex.getMessage(),
+                    ex.getStackTrace());
+            prelightSignature = signature;
+            prelightCommand = null;
+            return Optional.empty();
+        }
+        if (built == null) {
+            prelightSignature = signature;
+            prelightCommand = null;
+            return Optional.empty();
+        }
+
+        prelightSignature = signature;
+        prelightCommand = built;
+        return Optional.of(built);
+    }
+
+    private String prelightSignature(AutoRoutine routine) {
+        if (routine == null) {
+            return "";
+        }
+        String alliance = DriverStation.getAlliance().map(Enum::name).orElse("UNKNOWN");
+        String id = routine.key() != null && routine.key().id() != null ? routine.key().id() : "";
+        String reference = routine.reference() != null ? routine.reference() : "";
+        return id + "|" + routine.source().name() + "|" + reference + "|" + alliance;
+    }
+
+    private void warmupSource(AutoSource source) {
+        if (source == null || source == AutoSource.CUSTOM) {
+            return;
+        }
+        if (!warmedAutoSources.add(source)) {
+            return;
+        }
+        AutoBackends.forSource(source)
+                .flatMap(backend -> backend.warmupCommand(source))
+                .ifPresent(CommandScheduler.getInstance()::schedule);
+    }
+
+    private void prelightProgramPathCommands(AutoRoutine selectedRoutine) {
+        if (selectedRoutine == null) {
+            return;
+        }
+        List<AutoRoutine> routines = programPathRoutines.get(selectedRoutine.key().id());
+        if (routines == null || routines.isEmpty()) {
+            routines = List.of(selectedRoutine);
+        }
+        for (AutoRoutine routine : routines) {
+            if (routine == null || routine.source() == AutoSource.CUSTOM) {
+                continue;
+            }
+            try {
+                buildPathCommand(routine.source(), routine.reference());
+            } catch (RuntimeException ex) {
+                DriverStation.reportWarning(
+                        "Failed to prelight path \"" + routine.reference() + "\": " + ex.getMessage(),
+                        ex.getStackTrace());
+            }
+        }
+    }
+
     private ProfiledPIDController getXController() {
         return xController;
     }
@@ -2676,6 +2766,19 @@ public class RobotAuto {
         commandChooser = null;
         autoPoseCache.clear();
         programPoseCache.clear();
+        clearPrelightCache();
+    }
+
+    private void clearPrelightCache() {
+        prelightSignature = "";
+        prelightCommand = null;
+    }
+
+    private void invalidateTrajectoryCaches() {
+        autoPoseCache.clear();
+        programPoseCache.clear();
+        warmedAutoSources.clear();
+        clearPrelightCache();
     }
 
     public final class RegistrySection {
@@ -2939,6 +3042,14 @@ public class RobotAuto {
     public final class ExecutionSection {
         public Optional<Command> selectedCommand() {
             return buildSelectedCommand();
+        }
+
+        public Optional<Command> prelightSelectedCommand() {
+            return RobotAuto.this.prelightSelectedCommand();
+        }
+
+        public void invalidateTrajectoryCaches() {
+            RobotAuto.this.invalidateTrajectoryCaches();
         }
 
         public void prepare() {

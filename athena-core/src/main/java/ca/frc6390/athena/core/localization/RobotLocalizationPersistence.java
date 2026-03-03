@@ -1,6 +1,12 @@
 package ca.frc6390.athena.core.localization;
 
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import ca.frc6390.athena.core.RobotTime;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -24,9 +30,12 @@ final class RobotLocalizationPersistence {
     private static final double TRANSLATION_EPSILON_METERS = 0.005;
     private static final double ROTATION_EPSILON_RADIANS = Units.degreesToRadians(0.25);
     private static final double PERSISTENCE_INTERVAL_SECONDS = 1.5;
-    private static final double PREF_WRITE_EPSILON = 1e-6;
+    private static final AtomicInteger PERSIST_THREAD_COUNTER = new AtomicInteger(1);
 
     private final RobotLocalizationConfig.PoseSpace poseSpace;
+    private final ExecutorService persistWorker = Executors.newSingleThreadExecutor(persistThreadFactory());
+    private final AtomicReference<PersistRequest> pendingPersistRequest = new AtomicReference<>();
+    private final AtomicBoolean persistWorkerScheduled = new AtomicBoolean(false);
 
     private Pose2d lastPose2d;
     private Pose3d lastPose3d;
@@ -97,14 +106,15 @@ final class RobotLocalizationPersistence {
         }
         double driverYawDeg = driverYaw.getDegrees();
 
-        setPreferenceDoubleIfChanged(PREF_FIELD_X, fieldX, lastPersistedFieldX);
-        setPreferenceDoubleIfChanged(PREF_FIELD_Y, fieldY, lastPersistedFieldY);
-        setPreferenceDoubleIfChanged(PREF_FIELD_Z, fieldZ, lastPersistedFieldZ);
-        setPreferenceDoubleIfChanged(PREF_FIELD_ROLL_DEG, fieldRollDeg, lastPersistedFieldRollDeg);
-        setPreferenceDoubleIfChanged(PREF_FIELD_PITCH_DEG, fieldPitchDeg, lastPersistedFieldPitchDeg);
-        setPreferenceDoubleIfChanged(PREF_FIELD_YAW_DEG, fieldYawDeg, lastPersistedFieldYawDeg);
-        setPreferenceDoubleIfChanged(PREF_DRIVER_YAW_DEG, driverYawDeg, lastPersistedDriverYawDeg);
-        setPreferenceBooleanIfChanged(PREF_VALID, true, hasPersistedSnapshot, lastPersistedValid);
+        enqueuePersistRequest(new PersistRequest(
+                fieldX,
+                fieldY,
+                fieldZ,
+                fieldRollDeg,
+                fieldPitchDeg,
+                fieldYawDeg,
+                driverYawDeg,
+                true));
 
         lastPersistedFieldX = fieldX;
         lastPersistedFieldY = fieldY;
@@ -167,22 +177,52 @@ final class RobotLocalizationPersistence {
         return Optional.of(new PersistentState(pose2d, pose3d, driverYaw));
     }
 
-    private static void setPreferenceDoubleIfChanged(String key, double value, double previous) {
-        if (Double.isFinite(previous) && Math.abs(previous - value) <= PREF_WRITE_EPSILON) {
+    private void enqueuePersistRequest(PersistRequest request) {
+        if (request == null) {
             return;
         }
-        Preferences.setDouble(key, value);
+        pendingPersistRequest.set(request);
+        if (persistWorkerScheduled.compareAndSet(false, true)) {
+            persistWorker.execute(this::drainPersistRequests);
+        }
     }
 
-    private static void setPreferenceBooleanIfChanged(
-            String key,
-            boolean value,
-            boolean hasPrevious,
-            boolean previous) {
-        if (hasPrevious && previous == value) {
+    private void drainPersistRequests() {
+        while (true) {
+            PersistRequest request = pendingPersistRequest.getAndSet(null);
+            if (request == null) {
+                persistWorkerScheduled.set(false);
+                if (pendingPersistRequest.get() != null && persistWorkerScheduled.compareAndSet(false, true)) {
+                    continue;
+                }
+                return;
+            }
+            writePersistRequest(request);
+        }
+    }
+
+    private static void writePersistRequest(PersistRequest request) {
+        if (request == null) {
             return;
         }
-        Preferences.setBoolean(key, value);
+        Preferences.setDouble(PREF_FIELD_X, request.fieldX());
+        Preferences.setDouble(PREF_FIELD_Y, request.fieldY());
+        Preferences.setDouble(PREF_FIELD_Z, request.fieldZ());
+        Preferences.setDouble(PREF_FIELD_ROLL_DEG, request.fieldRollDeg());
+        Preferences.setDouble(PREF_FIELD_PITCH_DEG, request.fieldPitchDeg());
+        Preferences.setDouble(PREF_FIELD_YAW_DEG, request.fieldYawDeg());
+        Preferences.setDouble(PREF_DRIVER_YAW_DEG, request.driverYawDeg());
+        Preferences.setBoolean(PREF_VALID, request.valid());
+    }
+
+    private static ThreadFactory persistThreadFactory() {
+        return runnable -> {
+            Thread thread = new Thread(
+                    runnable,
+                    "athena-localization-persist-" + PERSIST_THREAD_COUNTER.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
     }
 
     private static double currentTimestampSeconds() {
@@ -218,6 +258,16 @@ final class RobotLocalizationPersistence {
         }
         return Math.abs(previous.minus(current).getRadians()) > ROTATION_EPSILON_RADIANS;
     }
+
+    private record PersistRequest(
+            double fieldX,
+            double fieldY,
+            double fieldZ,
+            double fieldRollDeg,
+            double fieldPitchDeg,
+            double fieldYawDeg,
+            double driverYawDeg,
+            boolean valid) {}
 
     record PersistentState(Pose2d pose2d, Pose3d pose3d, Rotation2d driverYaw) {}
 }

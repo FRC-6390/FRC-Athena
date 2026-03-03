@@ -15,10 +15,15 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,14 +31,15 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.function.IntFunction;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Filesystem;
 
 /**
  * Small HTTP server that exposes data-only mechanism configs from the running robot.
@@ -50,14 +56,29 @@ import edu.wpi.first.wpilibj.DriverStation;
  * - /Athena/diagnostics/{key}.json (also available at /athena/diagnostics/{key}.json)
  * - /Athena/diagnostics/history.json (also available at /athena/diagnostics/history.json)
  * - /Athena/auto/log (also available at /athena/auto/log)
+ * - /Athena/auto/trajectories (also available at /athena/auto/trajectories)
+ * - /Athena/auto/trajectories/{path} (also available at /athena/auto/trajectories/{path})
  * - /Athena/mechanisms/log (also available at /athena/mechanisms/log)
  * - /Athena/mechanisms/log/{name}.json (also available at /athena/mechanisms/log/{name}.json)
  */
 public final class AthenaRuntimeServer {
     private static final ObjectMapper INDEX_MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private static final int MAX_CUSTOM_PAYLOAD_BYTES = 1024 * 1024;
+    private static final int MAX_TRAJECTORY_PAYLOAD_BYTES = 8 * 1024 * 1024;
     private static final int MAX_HISTORY_LIMIT = 16384;
     private static final String MECHANISM_LOG_HTML_RESOURCE = "/ca/frc6390/athena/core/mechanism-log.html";
+    private static final String TRAJECTORY_PATHPLANNER_ROOT = "pathplanner";
+    private static final String TRAJECTORY_CHOREO_ROOT = "choreo";
+    private static final List<String> TRAJECTORY_LIST_ROOTS = List.of(
+            TRAJECTORY_PATHPLANNER_ROOT + "/autos",
+            TRAJECTORY_PATHPLANNER_ROOT + "/paths",
+            TRAJECTORY_PATHPLANNER_ROOT + "/choreo",
+            TRAJECTORY_CHOREO_ROOT);
+    private static final List<String> TRAJECTORY_ALLOWED_KEY_PREFIXES = List.of(
+            TRAJECTORY_PATHPLANNER_ROOT + "/autos/",
+            TRAJECTORY_PATHPLANNER_ROOT + "/paths/",
+            TRAJECTORY_PATHPLANNER_ROOT + "/choreo/",
+            TRAJECTORY_CHOREO_ROOT + "/");
 
     private final RobotCore<?> robot;
     private final HttpServer server;
@@ -103,6 +124,8 @@ public final class AthenaRuntimeServer {
             server.createContext("/Athena/diagnostics", instance::handleDiagnostics);
             server.createContext("/athena/auto/log", instance::handleAutoLog);
             server.createContext("/Athena/auto/log", instance::handleAutoLog);
+            server.createContext("/athena/auto/trajectories", instance::handleAutoTrajectories);
+            server.createContext("/Athena/auto/trajectories", instance::handleAutoTrajectories);
             server.createContext("/athena/mechanisms/log", instance::handleMechanismLogs);
             server.createContext("/Athena/mechanisms/log", instance::handleMechanismLogs);
             server.setExecutor(Executors.newSingleThreadExecutor(r -> {
@@ -248,6 +271,8 @@ public final class AthenaRuntimeServer {
         index.put("diagnosticsBaseUrl", base + prefix + "/diagnostics/");
         index.put("diagnosticsHistoryUrl", base + prefix + "/diagnostics/history.json");
         index.put("autoLogUrl", base + prefix + "/auto/log");
+        index.put("trajectoryFilesUrl", base + prefix + "/auto/trajectories");
+        index.put("trajectoryFilesBaseUrl", base + prefix + "/auto/trajectories/");
         index.put("mechanismLogUrl", base + prefix + "/mechanisms/log");
         index.put("mechanismLogBaseUrl", base + prefix + "/mechanisms/log/");
         index.put("mechanisms", mechanisms);
@@ -280,6 +305,8 @@ public final class AthenaRuntimeServer {
         sb.append("diagnosticsBaseUrl = ").append(tomlQuote(base + prefix + "/diagnostics/")).append("\n");
         sb.append("diagnosticsHistoryUrl = ").append(tomlQuote(base + prefix + "/diagnostics/history.json")).append("\n");
         sb.append("autoLogUrl = ").append(tomlQuote(base + prefix + "/auto/log")).append("\n");
+        sb.append("trajectoryFilesUrl = ").append(tomlQuote(base + prefix + "/auto/trajectories")).append("\n");
+        sb.append("trajectoryFilesBaseUrl = ").append(tomlQuote(base + prefix + "/auto/trajectories/")).append("\n");
         sb.append("mechanismLogUrl = ").append(tomlQuote(base + prefix + "/mechanisms/log")).append("\n");
         sb.append("mechanismLogBaseUrl = ").append(tomlQuote(base + prefix + "/mechanisms/log/")).append("\n");
         sb.append("\n");
@@ -1093,6 +1120,236 @@ public final class AthenaRuntimeServer {
         sendText(ex, 200, json + "\n", "application/json; charset=utf-8");
     }
 
+    private void handleAutoTrajectories(HttpExchange ex) throws IOException {
+        URI uri = ex.getRequestURI();
+        String path = uri != null ? uri.getPath() : "";
+        String prefixLower = "/athena/auto/trajectories";
+        String prefixUpper = "/Athena/auto/trajectories";
+        String prefix;
+        if (path.startsWith(prefixLower)) {
+            prefix = prefixLower;
+        } else if (path.startsWith(prefixUpper)) {
+            prefix = prefixUpper;
+        } else {
+            sendText(ex, 404, "Not Found\n", "text/plain; charset=utf-8");
+            return;
+        }
+
+        String method = ex.getRequestMethod() != null
+                ? ex.getRequestMethod().toUpperCase(Locale.ROOT)
+                : "";
+        String tail = path.substring(prefix.length());
+        if (tail.isEmpty() || "/".equals(tail)) {
+            if (!"GET".equals(method)) {
+                sendText(ex, 405, "Method Not Allowed\n", "text/plain; charset=utf-8");
+                return;
+            }
+            sendTrajectoryIndex(ex, uri);
+            return;
+        }
+        if (tail.startsWith("/")) {
+            tail = tail.substring(1);
+        }
+
+        final String key;
+        try {
+            key = normalizeTrajectoryKey(URLDecoder.decode(tail, StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException err) {
+            sendText(ex, 400, err.getMessage() + "\n", "text/plain; charset=utf-8");
+            return;
+        }
+
+        Path deployRoot = trajectoryDeployRoot();
+        Path filePath;
+        try {
+            filePath = resolveTrajectoryPath(deployRoot, key);
+        } catch (IllegalArgumentException err) {
+            sendText(ex, 400, err.getMessage() + "\n", "text/plain; charset=utf-8");
+            return;
+        }
+
+        if ("GET".equals(method)) {
+            sendTrajectoryFile(ex, filePath, key);
+            return;
+        }
+        if ("POST".equals(method) || "PUT".equals(method)) {
+            byte[] body;
+            try {
+                body = readRequestBody(ex, MAX_TRAJECTORY_PAYLOAD_BYTES);
+            } catch (IllegalArgumentException tooLarge) {
+                sendText(ex, 413, tooLarge.getMessage() + "\n", "text/plain; charset=utf-8");
+                return;
+            }
+            if (Files.exists(filePath) && Files.isDirectory(filePath)) {
+                sendText(ex, 409, "Trajectory target is a directory\n", "text/plain; charset=utf-8");
+                return;
+            }
+            Path parent = filePath.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.write(
+                    filePath,
+                    body,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE);
+            FileTime modified = Files.getLastModifiedTime(filePath);
+            refreshTrajectoryCachesAndPrelight("write " + key);
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("key", key);
+            payload.put("sizeBytes", body.length);
+            payload.put("modifiedAtMillis", modified.toMillis());
+            payload.put("modifiedAtSeconds", modified.toMillis() / 1000.0);
+            payload.put("contentType", trajectoryContentType(filePath, key));
+            payload.put("url", baseUrl() + athenaPathPrefix(uri) + "/auto/trajectories/" + encodeUrlPath(key));
+            sendJson(ex, 200, payload);
+            return;
+        }
+        if ("DELETE".equals(method)) {
+            if (Files.exists(filePath) && Files.isDirectory(filePath)) {
+                sendText(ex, 409, "Trajectory target is a directory\n", "text/plain; charset=utf-8");
+                return;
+            }
+            boolean removed = Files.deleteIfExists(filePath);
+            if (removed) {
+                refreshTrajectoryCachesAndPrelight("delete " + key);
+            }
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("key", key);
+            payload.put("removed", removed);
+            payload.put("url", baseUrl() + athenaPathPrefix(uri) + "/auto/trajectories/" + encodeUrlPath(key));
+            sendJson(ex, 200, payload);
+            return;
+        }
+
+        sendText(ex, 405, "Method Not Allowed\n", "text/plain; charset=utf-8");
+    }
+
+    private void sendTrajectoryIndex(HttpExchange ex, URI uri) throws IOException {
+        String base = baseUrl();
+        String prefix = athenaPathPrefix(uri);
+        Path deployRoot = trajectoryDeployRoot();
+        List<Map<String, Object>> files = listTrajectoryFiles(deployRoot, base, prefix);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("baseUrl", base);
+        payload.put("trajectoryFilesUrl", base + prefix + "/auto/trajectories");
+        payload.put("trajectoryFilesBaseUrl", base + prefix + "/auto/trajectories/");
+        payload.put("deployDirectory", deployRoot.toString());
+        payload.put("allowedRoots", TRAJECTORY_LIST_ROOTS);
+        payload.put("count", files.size());
+        payload.put("items", files);
+        sendJson(ex, 200, payload);
+    }
+
+    private List<Map<String, Object>> listTrajectoryFiles(Path deployRoot, String base, String prefix) {
+        List<Path> files = new ArrayList<>();
+        for (String root : TRAJECTORY_LIST_ROOTS) {
+            Path rootPath = deployRoot.resolve(root).normalize();
+            if (!rootPath.startsWith(deployRoot) || !Files.isDirectory(rootPath)) {
+                continue;
+            }
+            try (Stream<Path> stream = Files.walk(rootPath)) {
+                stream.filter(Files::isRegularFile).forEach(files::add);
+            } catch (IOException ex) {
+                DriverStation.reportWarning(
+                        "Failed to list trajectory files under \"" + rootPath + "\": " + ex.getMessage(),
+                        false);
+            }
+        }
+        files.sort(Comparator.comparing(
+                path -> deployRoot.relativize(path).toString().replace('\\', '/'),
+                String.CASE_INSENSITIVE_ORDER));
+
+        List<Map<String, Object>> items = new ArrayList<>(files.size());
+        for (Path file : files) {
+            String key = deployRoot.relativize(file).toString().replace('\\', '/');
+            long size = 0L;
+            FileTime modified = FileTime.fromMillis(0L);
+            try {
+                size = Files.size(file);
+                modified = Files.getLastModifiedTime(file);
+            } catch (IOException ex) {
+                DriverStation.reportWarning(
+                        "Failed to read trajectory file metadata \"" + file + "\": " + ex.getMessage(),
+                        false);
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("key", key);
+            item.put("sizeBytes", size);
+            item.put("modifiedAtMillis", modified.toMillis());
+            item.put("modifiedAtSeconds", modified.toMillis() / 1000.0);
+            item.put("contentType", trajectoryContentType(file, key));
+            item.put("url", base + prefix + "/auto/trajectories/" + encodeUrlPath(key));
+            items.add(item);
+        }
+        return items;
+    }
+
+    private void sendTrajectoryFile(HttpExchange ex, Path filePath, String key) throws IOException {
+        if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
+            sendText(ex, 404, "Unknown trajectory file '" + key + "'\n", "text/plain; charset=utf-8");
+            return;
+        }
+        byte[] body = Files.readAllBytes(filePath);
+        sendBytes(ex, 200, body, trajectoryContentType(filePath, key));
+    }
+
+    private void refreshTrajectoryCachesAndPrelight(String action) {
+        try {
+            robot.autos().execution().invalidateTrajectoryCaches();
+        } catch (RuntimeException ex) {
+            DriverStation.reportWarning(
+                    "Failed to invalidate auto trajectory caches after " + action + ": " + ex.getMessage(),
+                    false);
+            return;
+        }
+        try {
+            robot.autos().execution().prelightSelectedCommand();
+        } catch (RuntimeException ex) {
+            DriverStation.reportWarning(
+                    "Failed to prelight selected auto after " + action + ": " + ex.getMessage(),
+                    false);
+        }
+    }
+
+    private static Path trajectoryDeployRoot() {
+        return Filesystem.getDeployDirectory().toPath().toAbsolutePath().normalize();
+    }
+
+    private static Path resolveTrajectoryPath(Path deployRoot, String key) {
+        Path resolved = deployRoot.resolve(key).normalize();
+        if (!resolved.startsWith(deployRoot)) {
+            throw new IllegalArgumentException("trajectory path escapes deploy directory");
+        }
+        return resolved;
+    }
+
+    private static String trajectoryContentType(Path filePath, String key) {
+        try {
+            String detected = Files.probeContentType(filePath);
+            if (detected != null && !detected.isBlank()) {
+                return detected;
+            }
+        } catch (IOException ignored) {
+            // Fall back to extension-based type mapping.
+        }
+        String lower = key != null ? key.toLowerCase(Locale.ROOT) : "";
+        if (lower.endsWith(".json")
+                || lower.endsWith(".path")
+                || lower.endsWith(".auto")
+                || lower.endsWith(".traj")) {
+            return "application/json; charset=utf-8";
+        }
+        if (lower.endsWith(".toml")) {
+            return "application/toml; charset=utf-8";
+        }
+        if (lower.endsWith(".txt") || lower.endsWith(".log") || lower.endsWith(".csv")) {
+            return "text/plain; charset=utf-8";
+        }
+        return "application/octet-stream";
+    }
+
     private void handleMechanismLogs(HttpExchange ex) throws IOException {
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
             sendText(ex, 405, "Method Not Allowed\n", "text/plain; charset=utf-8");
@@ -1266,7 +1523,7 @@ public final class AthenaRuntimeServer {
         if (raw == null) {
             return false;
         }
-        String normalized = raw.trim().toLowerCase();
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return "1".equals(normalized)
                 || "true".equals(normalized)
                 || "yes".equals(normalized)
@@ -1349,11 +1606,79 @@ public final class AthenaRuntimeServer {
         return normalized.toString();
     }
 
+    private static String normalizeTrajectoryKey(String rawKey) {
+        if (rawKey == null) {
+            throw new IllegalArgumentException("trajectory key must not be null");
+        }
+        String key = rawKey.trim();
+        while (key.startsWith("/")) {
+            key = key.substring(1);
+        }
+        while (key.endsWith("/")) {
+            key = key.substring(0, key.length() - 1);
+        }
+        if (key.isEmpty()) {
+            throw new IllegalArgumentException("trajectory key must not be blank");
+        }
+        if (key.contains("..")) {
+            throw new IllegalArgumentException("trajectory key must not contain '..'");
+        }
+        if (key.indexOf('\\') >= 0) {
+            throw new IllegalArgumentException("trajectory key must not contain '\\'");
+        }
+        String[] segments = key.split("/");
+        StringBuilder normalized = new StringBuilder(key.length());
+        for (String segment : segments) {
+            String trimmed = segment != null ? segment.trim() : "";
+            if (trimmed.isEmpty()) {
+                throw new IllegalArgumentException("trajectory key must not contain empty path segments");
+            }
+            if (trimmed.indexOf('?') >= 0 || trimmed.indexOf('#') >= 0) {
+                throw new IllegalArgumentException("trajectory key must not contain '?' or '#'");
+            }
+            if (normalized.length() > 0) {
+                normalized.append('/');
+            }
+            normalized.append(trimmed);
+        }
+        String out = normalized.toString();
+        boolean allowed = false;
+        for (String prefix : TRAJECTORY_ALLOWED_KEY_PREFIXES) {
+            if (out.startsWith(prefix)) {
+                allowed = true;
+                break;
+            }
+        }
+        if (!allowed) {
+            throw new IllegalArgumentException(
+                    "trajectory key must be under pathplanner/autos, pathplanner/paths, pathplanner/choreo, or choreo");
+        }
+        return out;
+    }
+
     private static String encodeUrlSegment(String value) {
         if (value == null || value.isEmpty()) {
             return "";
         }
         return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private static String encodeUrlPath(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String[] segments = value.split("/");
+        StringBuilder out = new StringBuilder(value.length() + 8);
+        for (String segment : segments) {
+            if (segment == null || segment.isEmpty()) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append('/');
+            }
+            out.append(encodeUrlSegment(segment));
+        }
+        return out.toString();
     }
 
     private static byte[] readRequestBody(HttpExchange ex, int maxBytes) throws IOException {

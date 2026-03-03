@@ -1,6 +1,14 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
@@ -62,6 +70,10 @@ public class SwerveDrivetrain extends SubsystemBase
   private static final double DRIFT_TURN_DEADBAND_RAD_PER_SEC = 0.05;
   private static final double MODULE_HEADING_EPSILON = 1e-6;
   private static final double MODULE_ANGLE_UPDATE_EPSILON_RAD = 1e-4;
+  private static final String MODULE_BUILD_PARALLELISM_PROPERTY =
+      "athena.drivetrain.swerve.moduleBuildParallelism";
+  private static final int MAX_MODULE_BUILD_THREADS = 8;
+  private static final AtomicInteger MODULE_BUILD_THREAD_COUNTER = new AtomicInteger(1);
   private static final Pose2d ZERO_POSE = new Pose2d();
 
   public SwerveModule[] swerveModules;
@@ -132,14 +144,16 @@ public class SwerveDrivetrain extends SubsystemBase
     driftpid = new PIDController(0, 0,0);
     driftpid.enableContinuousInput(-Math.PI, Math.PI);
 
-    swerveModules = new SwerveModule[modules.length];
-    desiredModuleStates = new SwerveModuleState[modules.length];
-    moduleLocations = new Translation2d[modules.length];
+    int moduleCount = modules != null ? modules.length : 0;
+    swerveModules = new SwerveModule[moduleCount];
+    desiredModuleStates = new SwerveModuleState[moduleCount];
+    moduleLocations = new Translation2d[moduleCount];
     double maxVelocity = 0;
     double minVelocity = Double.POSITIVE_INFINITY;
     double maxModuleRadius = 0;
-    for (int i = 0; i < modules.length; i++) {
-      swerveModules[i] = new SwerveModule(modules[i]);
+    SwerveModule[] builtModules = buildModules(modules);
+    for (int i = 0; i < moduleCount; i++) {
+      swerveModules[i] = builtModules[i];
       desiredModuleStates[i] = new SwerveModuleState(0.0, new Rotation2d());
       double moduleMax = modules[i].maxSpeedMetersPerSecond();
       maxVelocity = Math.max(maxVelocity, moduleMax);
@@ -170,6 +184,90 @@ public class SwerveDrivetrain extends SubsystemBase
     cosineCompensationError(cosineCompensationErrorThresholdDegrees);
     setNominalVoltage(nominalVoltage);
     
+  }
+
+  private static SwerveModule[] buildModules(SwerveModuleConfig[] moduleConfigs) {
+    int moduleCount = moduleConfigs != null ? moduleConfigs.length : 0;
+    if (moduleCount == 0) {
+      return new SwerveModule[0];
+    }
+
+    int parallelism = resolveModuleBuildParallelism(moduleCount);
+    if (parallelism <= 1 || moduleCount == 1) {
+      SwerveModule[] modules = new SwerveModule[moduleCount];
+      for (int i = 0; i < moduleCount; i++) {
+        modules[i] = new SwerveModule(moduleConfigs[i]);
+      }
+      return modules;
+    }
+
+    ExecutorService executor = Executors.newFixedThreadPool(parallelism, moduleBuildThreadFactory());
+    try {
+      List<Future<SwerveModule>> futures = new ArrayList<>(moduleCount);
+      for (int i = 0; i < moduleCount; i++) {
+        final SwerveModuleConfig moduleConfig = moduleConfigs[i];
+        futures.add(executor.submit(() -> new SwerveModule(moduleConfig)));
+      }
+      SwerveModule[] modules = new SwerveModule[moduleCount];
+      for (int i = 0; i < moduleCount; i++) {
+        modules[i] = awaitBuiltModule(futures.get(i), i);
+      }
+      return modules;
+    } finally {
+      executor.shutdown();
+    }
+  }
+
+  private static SwerveModule awaitBuiltModule(Future<SwerveModule> future, int index) {
+    try {
+      return future.get();
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Interrupted while creating swerve module at index " + index, ex);
+    } catch (ExecutionException ex) {
+      Throwable cause = ex.getCause();
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      if (cause instanceof Error error) {
+        throw error;
+      }
+      throw new IllegalStateException("Failed to create swerve module at index " + index, cause);
+    }
+  }
+
+  private static int resolveModuleBuildParallelism(int moduleCount) {
+    Integer configured = parsePositiveIntProperty(MODULE_BUILD_PARALLELISM_PROPERTY);
+    if (configured != null) {
+      return Math.max(1, Math.min(moduleCount, configured));
+    }
+    int cpus = Math.max(1, Runtime.getRuntime().availableProcessors());
+    int defaultThreads = Math.max(2, cpus * 2);
+    int capped = Math.max(1, Math.min(MAX_MODULE_BUILD_THREADS, defaultThreads));
+    return Math.max(1, Math.min(moduleCount, capped));
+  }
+
+  private static Integer parsePositiveIntProperty(String propertyName) {
+    String raw = System.getProperty(propertyName);
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    try {
+      int parsed = Integer.parseInt(raw.trim());
+      return parsed > 0 ? parsed : null;
+    } catch (NumberFormatException ignored) {
+      return null;
+    }
+  }
+
+  private static ThreadFactory moduleBuildThreadFactory() {
+    return runnable -> {
+      Thread thread = new Thread(
+          runnable,
+          "athena-swerve-module-build-" + MODULE_BUILD_THREAD_COUNTER.getAndIncrement());
+      thread.setDaemon(true);
+      return thread;
+    };
   }
 
   @Override

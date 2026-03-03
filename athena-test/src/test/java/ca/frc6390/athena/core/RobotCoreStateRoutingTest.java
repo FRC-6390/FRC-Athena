@@ -2,6 +2,8 @@ package ca.frc6390.athena.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.core.RobotDrivetrain;
@@ -12,10 +14,11 @@ import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.mechanisms.RegisterableMechanism;
+import ca.frc6390.athena.mechanisms.RegisterableMechanismFactory;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism;
 import ca.frc6390.athena.mechanisms.SuperstructureConfig;
-import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.core.MotionLimits;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -26,7 +29,11 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
@@ -182,6 +189,116 @@ final class RobotCoreStateRoutingTest {
         wrist.periodic();
         assertEquals(WristState.DEPLOYED, wrist.stateMachine().goal());
         assertEquals(ArmState.PREP, arm.stateMachine().goal());
+    }
+
+    @Test
+    void mechanismFactoriesBuildInParallelDuringStartupRegistration() {
+        String propertyKey = "athena.mechanism.factoryBuildParallelism";
+        String previous = System.getProperty(propertyKey);
+        System.setProperty(propertyKey, "4");
+        try {
+            int factoryCount = 4;
+            AtomicInteger activeBuilders = new AtomicInteger();
+            AtomicInteger maxConcurrentBuilders = new AtomicInteger();
+            CountDownLatch started = new CountDownLatch(factoryCount);
+
+            RobotCore<FakeDrivetrain> core = new RobotCore<>(
+                    RobotCoreConfig
+                            .create()
+                            .drivetrain(__ -> new FakeDriveConfig())
+                            .mechanisms(mechanisms -> {
+                                for (int i = 0; i < factoryCount; i++) {
+                                    mechanisms.existing(parallelFactory(
+                                            "parallel-" + i,
+                                            started,
+                                            activeBuilders,
+                                            maxConcurrentBuilders));
+                                }
+                            })
+                            .build());
+
+            assertTrue(
+                    maxConcurrentBuilders.get() > 1,
+                    "Expected startup mechanism factories to overlap in execution.");
+            for (int i = 0; i < factoryCount; i++) {
+                assertTrue(core.mechanism("parallel-" + i) != null);
+            }
+        } finally {
+            if (previous == null) {
+                System.clearProperty(propertyKey);
+            } else {
+                System.setProperty(propertyKey, previous);
+            }
+        }
+    }
+
+    @Test
+    void startupCanDeferMechanismRegistrationUntilDisabledPeriodic() {
+        String deferInitKey = "athena.startup.deferNonDriveInit";
+        String deferMechKey = "athena.startup.deferMechanismRegistration";
+        String budgetKey = "athena.startup.deferredInitBudgetMs";
+        String previousDeferInit = System.getProperty(deferInitKey);
+        String previousDeferMech = System.getProperty(deferMechKey);
+        String previousBudget = System.getProperty(budgetKey);
+        System.setProperty(deferInitKey, "true");
+        System.setProperty(deferMechKey, "true");
+        System.setProperty(budgetKey, "100");
+        try {
+            RobotCore<FakeDrivetrain> core = new RobotCore<>(
+                    RobotCoreConfig
+                            .create()
+                            .drivetrain(__ -> new FakeDriveConfig())
+                            .mechanisms(mechanisms -> mechanisms
+                                    .mechanism(MechanismConfig.generic("deferred-startup-mechanism")))
+                            .build());
+
+            assertNull(core.mechanism("deferred-startup-mechanism"));
+            core.robotInit();
+            assertNull(core.mechanism("deferred-startup-mechanism"));
+            core.disabledPeriodic();
+            assertNotNull(core.mechanism("deferred-startup-mechanism"));
+        } finally {
+            restoreProperty(deferInitKey, previousDeferInit);
+            restoreProperty(deferMechKey, previousDeferMech);
+            restoreProperty(budgetKey, previousBudget);
+        }
+    }
+
+    private static RegisterableMechanismFactory parallelFactory(
+            String mechanismName,
+            CountDownLatch started,
+            AtomicInteger activeBuilders,
+            AtomicInteger maxConcurrentBuilders) {
+        return new RegisterableMechanismFactory() {
+            @Override
+            public RegisterableMechanism build() {
+                int active = activeBuilders.incrementAndGet();
+                maxConcurrentBuilders.accumulateAndGet(active, Math::max);
+                started.countDown();
+                try {
+                    started.await(250, TimeUnit.MILLISECONDS);
+                    Thread.sleep(50);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    activeBuilders.decrementAndGet();
+                }
+                return MechanismConfig.generic(mechanismName).build();
+            }
+
+            @Override
+            public List<Mechanism> flattenForRegistration() {
+                return List.of();
+            }
+        };
+    }
+
+    private static void restoreProperty(String key, String value) {
+        if (value == null) {
+            System.clearProperty(key);
+            return;
+        }
+        System.setProperty(key, value);
     }
 
     private static StatefulMechanism<DirectMechanismState> mechanism(DirectMechanismState defaultState) {

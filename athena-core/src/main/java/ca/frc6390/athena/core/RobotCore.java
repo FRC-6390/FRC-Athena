@@ -1,13 +1,19 @@
 package ca.frc6390.athena.core;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.GarbageCollectorMXBean;
@@ -25,7 +31,9 @@ import java.util.function.DoubleSupplier;
 import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
@@ -768,6 +776,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final List<Consumer<RobotAuto.RegistrySection>> configuredAutoRegistryBindings;
     private final List<RegisterableMechanism> configuredMechanisms;
     private boolean configuredMechanismsRegistered;
+    private final boolean deferNonDriveStartupInit;
+    private final boolean deferMechanismRegistration;
+    private final double deferredStartupInitBudgetSeconds;
+    private final double startupDriveLagGuardSeconds;
+    private final Deque<DeferredStartupTask> deferredStartupTasks;
+    private boolean deferredStartupInitComplete;
+    private boolean deferredStartupInitCompleteLogged;
+    private double startupDriveLagGuardUntilSeconds = Double.NaN;
     private final boolean timingDebugEnabled;
     private final boolean telemetryEnabled;
     private boolean mechanismsNetworkTablesPublished;
@@ -825,6 +841,21 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final long ARCP_RECORDING_CLIENT_PRESENCE_WINDOW_MS = 5_000L;
     private static final double COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS = 0.2;
     private static final double STARTUP_LOG_THRESHOLD_SECONDS = 0.05;
+    private static final String STARTUP_DEFER_NON_DRIVE_INIT_PROPERTY =
+            "athena.startup.deferNonDriveInit";
+    private static final String STARTUP_DEFER_MECHANISM_REGISTRATION_PROPERTY =
+            "athena.startup.deferMechanismRegistration";
+    private static final String STARTUP_DEFERRED_INIT_BUDGET_MS_PROPERTY =
+            "athena.startup.deferredInitBudgetMs";
+    private static final String STARTUP_DRIVE_LAG_GUARD_SECONDS_PROPERTY =
+            "athena.startup.driveLagGuardSeconds";
+    private static final double STARTUP_DEFAULT_DEFERRED_INIT_BUDGET_SECONDS = 0.002;
+    private static final double STARTUP_DEFAULT_DRIVE_LAG_GUARD_SECONDS = 1.0;
+    private static final String MECHANISM_FACTORY_BUILD_PARALLELISM_PROPERTY =
+            "athena.mechanism.factoryBuildParallelism";
+    private static final int MAX_MECHANISM_FACTORY_BUILD_THREADS = 8;
+    private static final AtomicInteger MECHANISM_FACTORY_BUILD_THREAD_COUNTER = new AtomicInteger(1);
+    private static final AtomicInteger SYSTEM_TWEAKS_THREAD_COUNTER = new AtomicInteger(1);
     private static final String SYSTEM_WEBSERVER_BINARY_PATH = "/usr/local/natinst/share/NIWebServer/SystemWebServer";
     private static final String SYSTEM_WEBSERVER_PROCESS_NAME = "SystemWebServer";
     private static final String SYSTEM_WEBCONTAINER_PROCESS_NAME = "NIWebServiceContainer";
@@ -849,6 +880,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         void force(Enum<?> state);
         boolean at(Enum<?> state);
         String ownerName();
+    }
+
+    private record DeferredStartupTask(String step, Runnable action) {
     }
 
     private record ConfigExportUrls(
@@ -919,6 +953,17 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         configuredAutoRegistryBindings = autoConfig.registryBindings();
         configuredMechanisms = config.mechanisms() != null ? List.copyOf(config.mechanisms()) : List.of();
         configuredMechanismsRegistered = false;
+        deferNonDriveStartupInit = parseBooleanProperty(STARTUP_DEFER_NON_DRIVE_INIT_PROPERTY, true);
+        deferMechanismRegistration = parseBooleanProperty(STARTUP_DEFER_MECHANISM_REGISTRATION_PROPERTY, false);
+        deferredStartupInitBudgetSeconds = parseNonNegativeDoubleProperty(
+                STARTUP_DEFERRED_INIT_BUDGET_MS_PROPERTY,
+                STARTUP_DEFAULT_DEFERRED_INIT_BUDGET_SECONDS * 1000.0) / 1000.0;
+        startupDriveLagGuardSeconds = parseNonNegativeDoubleProperty(
+                STARTUP_DRIVE_LAG_GUARD_SECONDS_PROPERTY,
+                STARTUP_DEFAULT_DRIVE_LAG_GUARD_SECONDS);
+        deferredStartupTasks = new ArrayDeque<>();
+        deferredStartupInitComplete = true;
+        deferredStartupInitCompleteLogged = false;
         timingDebugEnabled = config.timingDebugEnabled();
         telemetryEnabled = config.telemetryEnabled();
         SystemConfig systemConfig = config.systemConfig() != null ? config.systemConfig() : SystemConfig.defaults();
@@ -929,16 +974,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         arcpLegacyNt4MirrorEnabled = resolvedArcpConfig.legacyNt4MirrorEnabled();
         applyArcpNtMirrorPolicy();
         if (RobotBase.isReal()) {
-            boolean tweaksOk = systemConfig.tweaksEnabled()
-                    ? applySystemTweaks(systemConfig)
-                    : resetSystemTweaksToRioDefaults();
-            if (!tweaksOk) {
-                diagnosticsSection.core().warn(
-                        "system",
-                        systemConfig.tweaksEnabled()
-                                ? "one or more system tweaks failed to apply"
-                                : "one or more system tweaks failed to reset");
-            }
+            startSystemTweaksInitializationAsync(systemConfig);
             // Runtime-only toggles apply regardless of OS tweak mode.
             systemSection.configServerEnabled(systemConfig.configServerEnabled());
             systemSection.telemetryEnabled(systemConfig.telemetryEnabled());
@@ -1056,8 +1092,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         // Make declared mechanisms available immediately after RobotCore construction (before subclass
-        // constructors run). robotInit() still calls this, but it is guarded to prevent duplicates.
-        timedStartupStep("constructor.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
+        // constructors run). This can be deferred via startup property when drive-first bring-up is
+        // preferred over immediate mechanism availability.
+        if (deferMechanismRegistration) {
+            diagnosticsSection.core().info(
+                    "startup",
+                    "deferring mechanism registration from constructor to robotInit/disabled cycles");
+        } else {
+            timedStartupStep("constructor.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
+        }
         logStartupDuration("constructor.total", Timer.getFPGATimestamp() - constructorStart);
     }
 
@@ -1065,29 +1108,41 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void robotInit() {
         diagnosticsSection.core().info("lifecycle", "robotInit");
         double robotInitStart = Timer.getFPGATimestamp();
-        timedStartupStep("robotInit.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
-        timedStartupStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded);
-        timedStartupStep("robotInit.startArcpIfNeeded", this::startArcpIfNeeded);
+        runRobotInitStep(
+                "robotInit.registerConfiguredMechanisms",
+                this::registerConfiguredMechanisms,
+                deferMechanismRegistration);
+        runRobotInitStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded, true);
+        runRobotInitStep("robotInit.startArcpIfNeeded", this::startArcpIfNeeded, true);
         timedStartupStep("robotInit.configureAutoRegistry", this::configureAutoRegistry);
         timedStartupStep("robotInit.configureAutos", () -> configureAutos(autos));
         timedStartupStep("robotInit.autos.finalizeRegistration", () -> autos.execution().prepare());
         timedStartupStep("robotInit.ensureAutoChooserPublished", this::ensureAutoChooserPublished);
-        timedStartupStep("robotInit.publishConfig", robotNetworkTables::publishConfig);
+        runRobotInitStep("robotInit.publishConfig", robotNetworkTables::publishConfig, true);
         if (robotNetworkTables.isPublishingEnabled() && robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
-            timedStartupStep("robotInit.publishNetworkTables", () -> {
+            runRobotInitStep("robotInit.publishNetworkTables", () -> {
                 publishNetworkTables();
-            });
+            }, true);
         }
         if (robotNetworkTables.isPublishingEnabled() && robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
-            timedStartupStep("robotInit.publishNetworkTablesMechanisms", () -> {
+            runRobotInitStep("robotInit.publishNetworkTablesMechanisms", () -> {
                 publishNetworkTablesMechanisms();
-            });
+            }, true);
         }
-        timedStartupStep("robotInit.runInitHooks", this::runInitHooks);
+        runRobotInitStep("robotInit.runInitHooks", this::runInitHooks, deferMechanismRegistration);
         timedStartupStep("robotInit.runCorePhaseBindings",
                 () -> runCorePhaseBindings(RobotCoreHooks.Phase.ROBOT_INIT, coreHooks.initBindings()));
         timedStartupStep("robotInit.onRobotInit", this::onRobotInit);
-        timedStartupStep("robotInit.registerPIDCycles", this::registerPIDCycles);
+        runRobotInitStep("robotInit.registerPIDCycles", this::registerPIDCycles, deferMechanismRegistration);
+        if (!deferredStartupTasks.isEmpty()) {
+            deferredStartupInitComplete = false;
+            diagnosticsSection.core().info(
+                    "startup",
+                    "deferred " + deferredStartupTasks.size()
+                            + " non-drive startup steps; processing during disabled loops");
+        } else {
+            deferredStartupInitComplete = true;
+        }
         logStartupDuration("robotInit.total", Timer.getFPGATimestamp() - robotInitStart);
     }
 
@@ -3282,16 +3337,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         LoopTiming.beginCycle();
         updateRuntimeModeCache();
         maybeApplyCompetitionStreamShedding();
+        prelightSelectedAutoIfDisabled();
 
         double cycleStartSeconds = nowSeconds();
+        boolean startupDriveLagGuardActive = isStartupDriveLagGuardActive(cycleStartSeconds);
 
         long t0Ns = System.nanoTime();
         CommandScheduler.getInstance().run();
         long t1Ns = System.nanoTime();
-        telemetry.tick();
-        AthenaNT.tick();
+        if (!startupDriveLagGuardActive) {
+            telemetry.tick();
+            AthenaNT.tick();
+        }
         long t2Ns = System.nanoTime();
-        if (localization != null) {
+        if (!startupDriveLagGuardActive && localization != null) {
             localization.updateAutoVisualization(autos);
         }
         long t3Ns = System.nanoTime();
@@ -3304,30 +3363,32 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     periodicHookRunners);
         }
         onRobotPeriodic();
-        robotNetworkTables.refresh();
-        robotNetworkTables.beginPublishCycle();
-        updateAutoChooserPublishers();
+        if (!startupDriveLagGuardActive) {
+            robotNetworkTables.refresh();
+            robotNetworkTables.beginPublishCycle();
+            updateAutoChooserPublishers();
 
-        // Keep control-loop work ahead of NT publishing to reduce input lag under I/O stalls.
-        if (robotNetworkTables.isPublishingEnabled()) {
-            double now = nowSeconds();
-            if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
-                double period = robotNetworkTables.getDefaultPeriodSeconds();
-                boolean due = !Double.isFinite(lastCoreNetworkTablesPublishSeconds)
-                        || !Double.isFinite(now)
-                        || (now - lastCoreNetworkTablesPublishSeconds) >= period
-                        || robotNetworkTables.revision() != lastCoreNetworkTablesConfigRevision;
-                if (due) {
-                    publishNetworkTables();
-                    lastCoreNetworkTablesPublishSeconds = now;
-                    lastCoreNetworkTablesConfigRevision = robotNetworkTables.revision();
+            // Keep control-loop work ahead of NT publishing to reduce input lag under I/O stalls.
+            if (robotNetworkTables.isPublishingEnabled()) {
+                double now = nowSeconds();
+                if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
+                    double period = robotNetworkTables.getDefaultPeriodSeconds();
+                    boolean due = !Double.isFinite(lastCoreNetworkTablesPublishSeconds)
+                            || !Double.isFinite(now)
+                            || (now - lastCoreNetworkTablesPublishSeconds) >= period
+                            || robotNetworkTables.revision() != lastCoreNetworkTablesConfigRevision;
+                    if (due) {
+                        publishNetworkTables();
+                        lastCoreNetworkTablesPublishSeconds = now;
+                        lastCoreNetworkTablesConfigRevision = robotNetworkTables.revision();
+                    }
+                }
+                if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
+                    autoPublishMechanismsIncremental(now);
                 }
             }
-            if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
-                autoPublishMechanismsIncremental(now);
-            }
+            publishArcpSignals(cycleStartSeconds);
         }
-        publishArcpSignals(cycleStartSeconds);
         long t4Ns = System.nanoTime();
 
         double schedulerSeconds = (t1Ns - t0Ns) * 1e-9;
@@ -3452,6 +3513,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void autonomousInit() {
         diagnosticsSection.core().info("mode", "autonomousInit");
         triggerArcpRecordingRequest("autonomous");
+        armStartupDriveLagGuardWindow();
         prepareDrivetrainForModeTransition(false, true);
         boolean autoPoseReset = resetAutoInitPoseIfConfigured();
         if (autoPoseReset) {
@@ -3468,6 +3530,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void autonomousExit() {
         diagnosticsSection.core().info("mode", "autonomousExit");
         prepareDrivetrainForModeTransition(false, false);
+        resetDriverAxesToAllianceForward();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.AUTONOMOUS_EXIT, coreHooks.autonomousExitBindings());
         onAutonomousExit();
@@ -3491,8 +3554,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void teleopInit() {
         diagnosticsSection.core().info("mode", "teleopInit");
         triggerArcpRecordingRequest("teleop");
+        armStartupDriveLagGuardWindow();
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(true, false);
+        resetDriverAxesToAllianceForward();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_INIT);
         resetPeriodicRunners(teleopPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.TELEOP_INIT, coreHooks.teleopInitBindings());
@@ -3520,8 +3585,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void disabledInit() {
         diagnosticsSection.core().info("mode", "disabledInit");
+        startupDriveLagGuardUntilSeconds = Double.NaN;
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(true, false);
+        resetDriverAxesToAllianceForward();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_INIT);
         resetPeriodicRunners(disabledPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.DISABLED_INIT, coreHooks.disabledInitBindings());
@@ -3538,6 +3605,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void disabledPeriodic() {
+        processDeferredStartupSteps();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_PERIODIC);
         runCorePeriodicBindings(
                 RobotCoreHooks.Phase.DISABLED_PERIODIC,
@@ -3549,6 +3617,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void testInit() {
         diagnosticsSection.core().info("mode", "testInit");
+        startupDriveLagGuardUntilSeconds = Double.NaN;
         CommandScheduler.getInstance().cancelAll();
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(false, false);
@@ -3740,6 +3809,71 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         R result = action.get();
         logStartupDuration(step, Timer.getFPGATimestamp() - start);
         return result;
+    }
+
+    private void runRobotInitStep(String step, Runnable action, boolean allowDeferred) {
+        if (action == null) {
+            return;
+        }
+        if (!deferNonDriveStartupInit || !allowDeferred) {
+            timedStartupStep(step, action);
+            return;
+        }
+        deferredStartupTasks.addLast(new DeferredStartupTask(step, action));
+        deferredStartupInitComplete = false;
+        deferredStartupInitCompleteLogged = false;
+    }
+
+    private void processDeferredStartupSteps() {
+        if (!deferNonDriveStartupInit || deferredStartupTasks.isEmpty()) {
+            if (deferredStartupTasks.isEmpty()) {
+                deferredStartupInitComplete = true;
+            }
+            return;
+        }
+        double cycleStart = nowSeconds();
+        boolean hasCycleStart = Double.isFinite(cycleStart);
+        while (!deferredStartupTasks.isEmpty()) {
+            DeferredStartupTask task = deferredStartupTasks.pollFirst();
+            if (task == null || task.action() == null) {
+                continue;
+            }
+            timedStartupStep("deferred." + task.step(), task.action());
+            if (deferredStartupInitBudgetSeconds <= 0.0 || !hasCycleStart) {
+                continue;
+            }
+            double now = nowSeconds();
+            if (Double.isFinite(now) && (now - cycleStart) >= deferredStartupInitBudgetSeconds) {
+                break;
+            }
+        }
+        if (deferredStartupTasks.isEmpty()) {
+            deferredStartupInitComplete = true;
+            if (!deferredStartupInitCompleteLogged) {
+                deferredStartupInitCompleteLogged = true;
+                diagnosticsSection.core().info("startup", "deferred startup initialization complete");
+            }
+        }
+    }
+
+    private void armStartupDriveLagGuardWindow() {
+        if (!Double.isFinite(startupDriveLagGuardSeconds) || startupDriveLagGuardSeconds <= 0.0) {
+            startupDriveLagGuardUntilSeconds = Double.NaN;
+            return;
+        }
+        double now = nowSeconds();
+        if (!Double.isFinite(now)) {
+            startupDriveLagGuardUntilSeconds = Double.NaN;
+            return;
+        }
+        startupDriveLagGuardUntilSeconds = now + startupDriveLagGuardSeconds;
+    }
+
+    private boolean isStartupDriveLagGuardActive(double nowSeconds) {
+        if (!Double.isFinite(startupDriveLagGuardUntilSeconds) || !Double.isFinite(nowSeconds)) {
+            return false;
+        }
+        return nowSeconds < startupDriveLagGuardUntilSeconds;
     }
 
     private boolean hookInput(String key) {
@@ -4016,7 +4150,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     protected Command createAutonomousCommand() {
-        return autos.execution().selectedCommand().orElse(null);
+        return autos.execution().prelightSelectedCommand()
+                .or(autos.execution()::selectedCommand)
+                .orElse(null);
     }
 
     private static RobotLocalizationConfig applyAutoConfigToLocalization(
@@ -4226,6 +4362,49 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         ok = systemSection.setLoopSwapEnabled(false, defaults.loopSwapSizeMiB()) && ok;
         ok = systemSection.setSystemWebServerEnabled(defaults.systemWebServerEnabled()) && ok;
         return ok;
+    }
+
+    private void startSystemTweaksInitializationAsync(SystemConfig config) {
+        if (!RobotBase.isReal()) {
+            return;
+        }
+        final SystemConfig resolvedConfig = config != null ? config : SystemConfig.defaults();
+        final boolean tweaksEnabled = resolvedConfig.tweaksEnabled();
+        diagnosticsSection.core().info(
+                "startup",
+                tweaksEnabled
+                        ? "scheduling system tweaks in background"
+                        : "scheduling system tweak reset in background");
+        Thread thread = new Thread(
+                () -> {
+                    double start = Timer.getFPGATimestamp();
+                    boolean tweaksOk;
+                    try {
+                        tweaksOk = tweaksEnabled
+                                ? applySystemTweaks(resolvedConfig)
+                                : resetSystemTweaksToRioDefaults();
+                    } catch (Throwable ex) {
+                        String message = "system tweak startup task crashed: "
+                                + ex.getClass().getSimpleName()
+                                + (ex.getMessage() != null && !ex.getMessage().isBlank()
+                                        ? " - " + ex.getMessage()
+                                        : "");
+                        DriverStation.reportWarning("[Athena][System] " + message, false);
+                        diagnosticsSection.core().warn("system", message);
+                        return;
+                    }
+                    logStartupDuration("background.systemTweaks", Timer.getFPGATimestamp() - start);
+                    if (!tweaksOk) {
+                        diagnosticsSection.core().warn(
+                                "system",
+                                tweaksEnabled
+                                        ? "one or more system tweaks failed to apply"
+                                        : "one or more system tweaks failed to reset");
+                    }
+                },
+                "athena-system-tweaks-" + SYSTEM_TWEAKS_THREAD_COUNTER.getAndIncrement());
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private boolean setVmSysctl(String key, int value) {
@@ -4735,35 +4914,164 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (entries == null || entries.length == 0) {
             return this;
         }
+        int factoryCount = 0;
         for (RegisterableMechanism entry : entries) {
-            if (entry == null) {
-                continue;
+            if (entry instanceof RegisterableMechanismFactory) {
+                factoryCount++;
             }
-            if (entry instanceof RegisterableMechanismFactory factory) {
-                RegisterableMechanism built = factory.build();
-                if (built == null) {
+        }
+        @SuppressWarnings("unchecked")
+        Future<RegisterableMechanism>[] builtFactories = factoryCount > 1
+                ? new Future[entries.length]
+                : null;
+        ExecutorService factoryBuildExecutor = null;
+        if (builtFactories != null) {
+            int parallelism = resolveMechanismFactoryBuildParallelism(factoryCount);
+            if (parallelism > 1) {
+                factoryBuildExecutor = Executors.newFixedThreadPool(parallelism, mechanismFactoryBuildThreadFactory());
+                for (int i = 0; i < entries.length; i++) {
+                    RegisterableMechanism entry = entries[i];
+                    if (!(entry instanceof RegisterableMechanismFactory factory)) {
+                        continue;
+                    }
+                    builtFactories[i] = factoryBuildExecutor.submit(() -> buildRegisterableMechanism(factory));
+                }
+            } else {
+                builtFactories = null;
+            }
+        }
+        try {
+            for (int i = 0; i < entries.length; i++) {
+                RegisterableMechanism entry = entries[i];
+                if (entry == null) {
                     continue;
                 }
-                if (built == entry) {
-                    throw new IllegalStateException("RegisterableMechanismFactory returned itself.");
+                if (entry instanceof RegisterableMechanismFactory factory) {
+                    RegisterableMechanism built = builtFactories != null && builtFactories[i] != null
+                            ? awaitRegisterableMechanismBuild(builtFactories[i], factory)
+                            : buildRegisterableMechanism(factory);
+                    if (built == null) {
+                        continue;
+                    }
+                    registerMechanism(built);
+                    continue;
                 }
-                registerMechanism(built);
-                continue;
+                if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
+                    registerSuperstructureInternal(superstructure);
+                    RobotNetworkTables.Node superNode = mechanismsRootNode.child(
+                            superstructure.getName() != null ? superstructure.getName() : "Superstructure");
+                    robotNetworkTables.superstructureConfig(superNode);
+                    superstructure.setRobotCore(this);
+                    superstructure.diagnostics().info("lifecycle", "superstructure registered");
+                    registerSuperstructureDiagnosticsProviderIfReady(superstructure);
+                    indexSuperstructureStateEndpoint(superstructure);
+                    superstructure.networkTables().ownerPath(superstructure.getName());
+                }
+                registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
             }
-            if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
-                registerSuperstructureInternal(superstructure);
-                RobotNetworkTables.Node superNode =
-                        mechanismsRootNode.child(superstructure.getName() != null ? superstructure.getName() : "Superstructure");
-                robotNetworkTables.superstructureConfig(superNode);
-                superstructure.setRobotCore(this);
-                superstructure.diagnostics().info("lifecycle", "superstructure registered");
-                registerSuperstructureDiagnosticsProviderIfReady(superstructure);
-                indexSuperstructureStateEndpoint(superstructure);
-                superstructure.networkTables().ownerPath(superstructure.getName());
+        } finally {
+            if (factoryBuildExecutor != null) {
+                factoryBuildExecutor.shutdown();
             }
-            registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
         }
         return this;
+    }
+
+    private static RegisterableMechanism buildRegisterableMechanism(RegisterableMechanismFactory factory) {
+        RegisterableMechanism built = factory.build();
+        if (built == factory) {
+            throw new IllegalStateException("RegisterableMechanismFactory returned itself.");
+        }
+        return built;
+    }
+
+    private static RegisterableMechanism awaitRegisterableMechanismBuild(
+            Future<RegisterableMechanism> future,
+            RegisterableMechanismFactory factory) {
+        try {
+            RegisterableMechanism built = future.get();
+            if (built == factory) {
+                throw new IllegalStateException("RegisterableMechanismFactory returned itself.");
+            }
+            return built;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while building registerable mechanism factory", ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("Failed to build registerable mechanism factory", cause);
+        }
+    }
+
+    private static int resolveMechanismFactoryBuildParallelism(int factoryCount) {
+        Integer configured = parsePositiveIntProperty(MECHANISM_FACTORY_BUILD_PARALLELISM_PROPERTY);
+        if (configured != null) {
+            return Math.max(1, Math.min(factoryCount, configured));
+        }
+        int cpus = Math.max(1, Runtime.getRuntime().availableProcessors());
+        int defaultThreads = Math.max(2, cpus * 2);
+        int capped = Math.max(1, Math.min(MAX_MECHANISM_FACTORY_BUILD_THREADS, defaultThreads));
+        return Math.max(1, Math.min(factoryCount, capped));
+    }
+
+    private static Integer parsePositiveIntProperty(String propertyName) {
+        String raw = System.getProperty(propertyName);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean parseBooleanProperty(String propertyName, boolean fallback) {
+        String raw = System.getProperty(propertyName);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        String normalized = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized)) {
+            return true;
+        }
+        if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized)) {
+            return false;
+        }
+        return fallback;
+    }
+
+    private static double parseNonNegativeDoubleProperty(String propertyName, double fallback) {
+        String raw = System.getProperty(propertyName);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            double parsed = Double.parseDouble(raw.trim());
+            if (!Double.isFinite(parsed) || parsed < 0.0) {
+                return fallback;
+            }
+            return parsed;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static ThreadFactory mechanismFactoryBuildThreadFactory() {
+        return runnable -> {
+            Thread thread = new Thread(
+                    runnable,
+                    "athena-mechanism-factory-build-" + MECHANISM_FACTORY_BUILD_THREAD_COUNTER.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
     }
 
     private void registerConfiguredMechanisms() {
@@ -6330,19 +6638,24 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (count <= 0) {
             return routineId + "|" + routineSource + "|" + routineReference + "|0";
         }
-        Pose2d first = poses.get(0);
-        Pose2d last = poses.get(count - 1);
+        long hash = 0xcbf29ce484222325L;
+        for (int i = 0; i < poses.size(); i++) {
+            Pose2d pose = poses.get(i);
+            if (pose == null) {
+                hash = mixTrajectoryHash(hash, i + 1L);
+                continue;
+            }
+            hash = mixTrajectoryHash(hash, Double.doubleToLongBits(pose.getX()));
+            hash = mixTrajectoryHash(hash, Double.doubleToLongBits(pose.getY()));
+            hash = mixTrajectoryHash(hash, Double.doubleToLongBits(pose.getRotation().getRadians()));
+        }
         return routineId + "|" + routineSource + "|" + routineReference + "|" + count + "|"
-                + poseSignature(first) + "|" + poseSignature(last);
+                + Long.toUnsignedString(hash, 16);
     }
 
-    private static String poseSignature(Pose2d pose) {
-        if (pose == null) {
-            return "null";
-        }
-        return Double.doubleToLongBits(pose.getX()) + ","
-                + Double.doubleToLongBits(pose.getY()) + ","
-                + Double.doubleToLongBits(pose.getRotation().getRadians());
+    private static long mixTrajectoryHash(long hash, long value) {
+        hash ^= value;
+        return hash * 0x100000001b3L;
     }
 
     private static PIDController syncAutoFollowerPidWidget(
@@ -6465,5 +6778,29 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         imu.setVirtualAxis("field", newFieldHeading);
         imu.setVirtualAxis("driver", newFieldHeading.plus(driverOffsetFromField));
         imu.setVirtualAxis("drift", newFieldHeading.plus(driftOffsetFromField));
+    }
+
+    private void resetDriverAxesToAllianceForward() {
+        RobotDrivetrain<?> drivetrainRef = drivetrain;
+        if (drivetrainRef == null) {
+            return;
+        }
+        Imu imu = drivetrainRef.imu().device();
+        if (imu == null) {
+            return;
+        }
+        Rotation2d driverHeading = DriverStation.getAlliance()
+                .filter(alliance -> alliance == DriverStation.Alliance.Red)
+                .map(alliance -> Rotation2d.fromDegrees(180.0))
+                .orElse(Rotation2d.kZero);
+        imu.setVirtualAxis("driver", driverHeading);
+        imu.setVirtualAxis("drift", driverHeading);
+    }
+
+    private void prelightSelectedAutoIfDisabled() {
+        if (runtimeMode != RuntimeMode.DISABLED) {
+            return;
+        }
+        autos.execution().prelightSelectedCommand();
     }
 }
