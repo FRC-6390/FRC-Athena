@@ -546,7 +546,7 @@ public class SwerveDrivetrain extends SubsystemBase
   }
 
   private Command driveCommand(DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput){
-    return new SwerveDriveCommand(this, xInput, yInput, thetaInput, fieldRelative);
+    return new SwerveDriveCommand(this, xInput, yInput, thetaInput, () -> fieldRelative);
   }
 
   private void ensureNetworkTableNodes(RobotNetworkTables.Node node) {

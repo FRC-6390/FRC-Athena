@@ -1,6 +1,8 @@
 package ca.frc6390.athena.drivetrains.differential;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
@@ -21,10 +23,14 @@ import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
+import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.imu.VirtualImu;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotBase;
 
 /**
  * Builder for {@link DifferentialDrivetrain} instances. Captures the motor/encoder layout, CAN IDs,
@@ -738,6 +744,7 @@ public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<Diff
         }
 
         Imu resolvedImu = imu == null ? null : new VirtualImu(HardwareFactories.imu(imu));
+        ensureRequiredHardwareConnected(lm, rm, lm.getEncoderGroup(), rm.getEncoderGroup(), resolvedImu);
         DifferentialDrivetrain dt = new DifferentialDrivetrain(resolvedImu, maxVelocity, trackWidth, lm, rm);
 
         if (driveFeedforward != null) {
@@ -760,5 +767,104 @@ public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<Diff
 
         speedConfig.apply(dt.robotSpeeds());
         return dt;
+    }
+
+    private static void ensureRequiredHardwareConnected(
+            MotorControllerGroup leftMotors,
+            MotorControllerGroup rightMotors,
+            EncoderGroup leftEncoders,
+            EncoderGroup rightEncoders,
+            Imu imuDevice) {
+        if (RobotBase.isSimulation()) {
+            return;
+        }
+
+        List<String> missing = new ArrayList<>();
+        collectDisconnectedMotors("left", leftMotors, missing);
+        collectDisconnectedMotors("right", rightMotors, missing);
+        collectDisconnectedEncoders("left", leftEncoders, missing);
+        collectDisconnectedEncoders("right", rightEncoders, missing);
+
+        if (imuDevice != null && !imuDevice.isConnected(true)) {
+            missing.add(describeImu(imuDevice));
+        }
+
+        if (!missing.isEmpty()) {
+            throwConnectivityError("Differential", missing);
+        }
+    }
+
+    private static void collectDisconnectedMotors(String side, MotorControllerGroup group, List<String> missing) {
+        if (group == null) {
+            missing.add(side + " motor group missing");
+            return;
+        }
+
+        MotorController[] controllers = group.getControllers();
+        if (controllers == null || controllers.length == 0) {
+            missing.add(side + " motor group has no controllers");
+            return;
+        }
+
+        for (int i = 0; i < controllers.length; i++) {
+            MotorController motor = controllers[i];
+            if (motor == null) {
+                missing.add(side + " motor[" + i + "] missing");
+                continue;
+            }
+            if (!motor.isConnected(true)) {
+                missing.add(describeMotor(side + " motor[" + i + "]", motor));
+            }
+        }
+    }
+
+    private static void collectDisconnectedEncoders(String side, EncoderGroup group, List<String> missing) {
+        if (group == null) {
+            return;
+        }
+
+        Encoder[] encoders = group.getEncoders();
+        if (encoders == null || encoders.length == 0) {
+            return;
+        }
+
+        for (int i = 0; i < encoders.length; i++) {
+            Encoder encoder = encoders[i];
+            if (encoder == null) {
+                continue;
+            }
+            if (!encoder.isConnected(true)) {
+                missing.add(describeEncoder(side + " encoder[" + i + "]", encoder));
+            }
+        }
+    }
+
+    private static String describeMotor(String label, MotorController motor) {
+        String type = motor.getType() != null ? motor.getType().getKey() : "unknown";
+        return label + " disconnected (type=" + type + ", id=" + motor.getId() + ", canbus=" + motor.getCanbus() + ")";
+    }
+
+    private static String describeEncoder(String label, Encoder encoder) {
+        EncoderConfig cfg = encoder.getConfig();
+        String type = cfg != null && cfg.type() != null ? cfg.type().getKey() : "unknown";
+        int id = cfg != null ? cfg.id() : -1;
+        String bus = cfg != null ? cfg.canbus() : "";
+        return label + " disconnected (type=" + type + ", id=" + id + ", canbus=" + bus + ")";
+    }
+
+    private static String describeImu(Imu imuDevice) {
+        ImuConfig cfg = imuDevice.getConfig();
+        String type = cfg != null && cfg.type() != null ? cfg.type().getKey() : "unknown";
+        int id = cfg != null ? cfg.id() : -1;
+        String bus = cfg != null ? cfg.canbus() : "";
+        return "imu disconnected (type=" + type + ", id=" + id + ", canbus=" + bus + ")";
+    }
+
+    private static void throwConnectivityError(String drivetrainType, List<String> missing) {
+        String message = drivetrainType
+                + " drivetrain required-device connectivity check failed: "
+                + String.join("; ", missing);
+        DriverStation.reportError(message, false);
+        throw new IllegalStateException(message);
     }
 }
