@@ -275,10 +275,12 @@ def resolveAthenaBuildTasks = {
     return taskNames
 }
 
-def runAthenaBuild = { File athenaRepo ->
-    def taskNames = resolveAthenaBuildTasks()
-    def command = [] as List<String>
+def runAthenaGradleCommand = { File athenaRepo, List<String> taskNames, List<String> extraArgs ->
+    if (taskNames == null || taskNames.isEmpty()) {
+        throw new GradleException("No Athena command tasks provided.")
+    }
 
+    def command = [] as List<String>
     if (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('win')) {
         command.addAll(['cmd', '/c', 'gradlew.bat'])
     } else {
@@ -286,12 +288,32 @@ def runAthenaBuild = { File athenaRepo ->
     }
     command.add('--console=plain')
     command.addAll(taskNames)
+    if (extraArgs != null) {
+        command.addAll(extraArgs.findAll { it != null && !it.toString().trim().isEmpty() })
+    }
 
     logger.lifecycle("Running Athena build in ${athenaRepo}: ${command.join(' ')}")
     project.exec {
         workingDir athenaRepo
         commandLine command
     }
+}
+
+def runAthenaBuild = { File athenaRepo ->
+    def taskNames = resolveAthenaBuildTasks()
+    runAthenaGradleCommand(athenaRepo, taskNames, [])
+}
+
+def ensureAthenaPluginPublished = { File athenaRepo, String pluginVersion ->
+    if (pluginVersion == null || pluginVersion.trim().isEmpty()) {
+        throw new GradleException("Cannot publish Athena plugin without a resolved version.")
+    }
+    logger.lifecycle("Ensuring Athena Gradle plugin ${pluginVersion} is published to mavenLocal.")
+    runAthenaGradleCommand(
+            athenaRepo,
+            [':athena-plugin:publishToMavenLocal'],
+            ["-Pversion=${pluginVersion.trim()}"]
+    )
 }
 
 def syncFromAthenaRepo = { File athenaRepo ->
@@ -553,6 +575,16 @@ tasks.register('athenaBuild') {
         def repo = resolveAthenaRepoDir(true)
         runAthenaBuild(repo)
         syncFromAthenaRepo(repo)
+
+        // If DSL is already enabled in the robot project, keep plugin version aligned
+        // with the just-synced Athena vendordep version.
+        if (dslConfigured()) {
+            String syncedVersion = readAthenaVersionFromRepo(repo)
+            ensureAthenaPluginPublished(repo, syncedVersion)
+            File buildFile = resolveRobotBuildFile()
+            upsertAthenaPluginInBuildFile(buildFile, syncedVersion)
+            logger.lifecycle("Aligned Athena DSL plugin version in ${buildFile} to ${syncedVersion}")
+        }
     }
 }
 
@@ -560,7 +592,16 @@ tasks.register('athenaEnableDsl') {
     group = 'Athena'
     description = 'Patches settings/build scripts to enable Athena DSL plugin through plugins { }.'
     doLast {
+        File repo = resolveAthenaRepoDir(false)
         String version = resolveAthenaPluginVersion()
+        if (repo != null) {
+            ensureAthenaPluginPublished(repo, version)
+        } else {
+            logger.lifecycle(
+                    "Local FRC-Athena repo not found; continuing without local plugin publish " +
+                            "(expecting plugin ${version} from configured repositories)."
+            )
+        }
         File buildFile = resolveRobotBuildFile()
         File settingsFile = resolveSettingsFile()
         boolean settingsChanged = ensureAthenaRepoInSettings(settingsFile)

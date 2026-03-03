@@ -20,3 +20,10 @@ tauri-build = { version = "2.5.5", features = [] }
 arcp-dashboard = { path = "../../rust/crates/arcp-dashboard" }
 serde = { version = "1.0.228", features = ["derive"] }
 tauri = { version = "2.10.2", features = [] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59.0", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+] }
