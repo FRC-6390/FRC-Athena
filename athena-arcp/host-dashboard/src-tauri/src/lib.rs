@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,7 +10,7 @@ use arcp_dashboard::{
     format_signal_value, ControlClient, DashboardState, ManifestItem, ServerStats,
     TelemetrySubscription,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Emitter, PhysicalPosition, PhysicalSize, State, Window};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
@@ -42,6 +42,10 @@ const REMOTE_LOG_PREVIEW_BYTES_DEFAULT: usize = 64 * 1024;
 const REMOTE_LOG_PREVIEW_BYTES_MAX: usize = 512 * 1024;
 const REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_DEFAULT: u64 = 20 * 1024 * 1024;
 const REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_MAX: u64 = 64 * 1024 * 1024;
+const ATHENA_RUNTIME_HTTP_PORT: u16 = 5806;
+const ATHENA_HTTP_TIMEOUT: Duration = Duration::from_millis(1200);
+const ATHENA_MECHANISM_LOG_INDEX_PATH: &str = "/Athena/mechanisms/log?json=1";
+const ATHENA_MECHANISM_LOG_PATH_PREFIX: &str = "athena://mechanisms/log/";
 const REMOTE_LOG_LIST_SCRIPT: &str = r#"{ for dir in /home/lvuser/athena/logs /home/lvuser/logs /u/logs /var/local/natinst/log; do if [ -d "$dir" ]; then find "$dir" -maxdepth 6 -type f 2>/dev/null; fi; done; if [ -f /home/lvuser/FRC_UserProgram.log ]; then echo /home/lvuser/FRC_UserProgram.log; fi; } | while IFS= read -r f; do case "$f" in *.log|*.log.*|*.txt|*.json|*.wpilog|*.wpilog.*|*.gz) size=$(stat -c %s "$f" 2>/dev/null || wc -c < "$f" 2>/dev/null || echo 0); mtime=$(stat -c %Y "$f" 2>/dev/null || date -r "$f" +%s 2>/dev/null || echo 0); printf '%s|%s|%s\n' "$mtime" "$size" "$f";; esac; done | sort -t'|' -k1,1nr | head -n 5000"#;
 const REMOTE_LOG_ALLOWED_PREFIXES: [&str; 4] = [
     "/home/lvuser/athena/logs/",
@@ -242,6 +246,18 @@ struct RobotLinkProbe {
     control_port: u16,
     robot_reachable: bool,
     arcp_reachable: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AthenaMechanismLogIndex {
+    mechanisms: Vec<AthenaMechanismLogEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AthenaMechanismLogEntry {
+    name: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -673,8 +689,182 @@ fn run_ssh_command(host: &str, remote_command: &str) -> Result<Vec<u8>, String> 
     Err(format!("remote ssh command failed: {last_error}"))
 }
 
+fn http_get_text(host: &str, port: u16, path_and_query: &str) -> Result<String, String> {
+    let request_path = if path_and_query.starts_with('/') {
+        path_and_query.to_string()
+    } else {
+        format!("/{path_and_query}")
+    };
+
+    let mut last_error = String::new();
+    let addrs = (host, port)
+        .to_socket_addrs()
+        .map_err(|err| format!("resolve {host}:{port} failed: {err}"))?;
+    for addr in addrs {
+        let mut stream = match TcpStream::connect_timeout(&addr, ATHENA_HTTP_TIMEOUT) {
+            Ok(stream) => stream,
+            Err(err) => {
+                last_error = err.to_string();
+                continue;
+            }
+        };
+        if let Err(err) = stream.set_read_timeout(Some(ATHENA_HTTP_TIMEOUT)) {
+            last_error = err.to_string();
+            continue;
+        }
+        if let Err(err) = stream.set_write_timeout(Some(ATHENA_HTTP_TIMEOUT)) {
+            last_error = err.to_string();
+            continue;
+        }
+
+        let request = format!(
+            "GET {request_path} HTTP/1.1\r\nHost: {host}:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+        );
+        if let Err(err) = stream.write_all(request.as_bytes()) {
+            last_error = err.to_string();
+            continue;
+        }
+        if let Err(err) = stream.flush() {
+            last_error = err.to_string();
+            continue;
+        }
+
+        let mut response = Vec::new();
+        if let Err(err) = stream.read_to_end(&mut response) {
+            last_error = err.to_string();
+            continue;
+        }
+        return parse_http_text_response(&response);
+    }
+
+    Err(format!("http GET {host}:{port}{request_path} failed: {last_error}"))
+}
+
+fn parse_http_text_response(raw: &[u8]) -> Result<String, String> {
+    if raw.is_empty() {
+        return Err(String::from("empty HTTP response"));
+    }
+
+    let header_end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| String::from("invalid HTTP response"))?;
+    let header_bytes = &raw[..header_end];
+    let body_bytes = &raw[header_end + 4..];
+    let header_text = String::from_utf8_lossy(header_bytes);
+    let mut lines = header_text.lines();
+    let status_line = lines
+        .next()
+        .ok_or_else(|| String::from("missing HTTP status line"))?;
+    let status_code = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|raw| raw.parse::<u16>().ok())
+        .ok_or_else(|| format!("invalid HTTP status line: {status_line}"))?;
+    let body = String::from_utf8_lossy(body_bytes).to_string();
+    if !(200..300).contains(&status_code) {
+        let detail = body.trim();
+        if detail.is_empty() {
+            return Err(format!("HTTP request failed with status {status_code}"));
+        }
+        return Err(format!("HTTP request failed with status {status_code}: {detail}"));
+    }
+    Ok(body)
+}
+
+fn percent_encode_url_component(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for &byte in raw.as_bytes() {
+        let is_unreserved = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~');
+        if is_unreserved {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push_str(&format!("{byte:02X}"));
+        }
+    }
+    out
+}
+
+fn is_athena_mechanism_log_path(path: &str) -> bool {
+    path.starts_with(ATHENA_MECHANISM_LOG_PATH_PREFIX)
+        && path.trim().len() > ATHENA_MECHANISM_LOG_PATH_PREFIX.len()
+}
+
+fn athena_mechanism_name_from_path(path: &str) -> Option<String> {
+    let raw = path.strip_prefix(ATHENA_MECHANISM_LOG_PATH_PREFIX)?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn safe_mechanism_log_file_name(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    let mut last_dash = false;
+    for ch in name.chars() {
+        let normalized = ch.to_ascii_lowercase();
+        if normalized.is_ascii_alphanumeric() {
+            slug.push(normalized);
+            last_dash = false;
+            continue;
+        }
+        if !last_dash {
+            slug.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = slug.trim_matches('-');
+    if trimmed.is_empty() {
+        String::from("mechanism-log.json")
+    } else {
+        format!("mechanism-{trimmed}.json")
+    }
+}
+
+fn truncate_log_preview_by_bytes(content: String, limit_bytes: usize) -> (String, bool) {
+    if content.len() <= limit_bytes {
+        return (content, false);
+    }
+    let bytes = content.as_bytes();
+    let start = bytes.len().saturating_sub(limit_bytes);
+    (String::from_utf8_lossy(&bytes[start..]).to_string(), true)
+}
+
+fn fetch_athena_mechanism_log_entries(host: &str) -> Result<Vec<RemoteLogEntry>, String> {
+    let body = http_get_text(host, ATHENA_RUNTIME_HTTP_PORT, ATHENA_MECHANISM_LOG_INDEX_PATH)?;
+    let index: AthenaMechanismLogIndex = serde_json::from_str(&body)
+        .map_err(|err| format!("failed to parse mechanism log index: {err}"))?;
+    let mut entries = Vec::new();
+    for item in index.mechanisms {
+        let name = item.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        entries.push(RemoteLogEntry {
+            source: String::from("athena"),
+            path: format!("{ATHENA_MECHANISM_LOG_PATH_PREFIX}{name}"),
+            name: format!("mechanism-{name}.json"),
+            size_bytes: 0,
+            modified_epoch_sec: 0,
+        });
+    }
+    Ok(entries)
+}
+
+fn fetch_athena_mechanism_log_json(
+    host: &str,
+    mechanism_name: &str,
+    limit_events: usize,
+) -> Result<String, String> {
+    let encoded = percent_encode_url_component(mechanism_name);
+    let path = format!("/Athena/mechanisms/log/{encoded}.json?limit={limit_events}");
+    http_get_text(host, ATHENA_RUNTIME_HTTP_PORT, &path)
+}
+
 fn classify_remote_log_source(path: &str) -> &'static str {
-    if path.contains("/athena/") {
+    if is_athena_mechanism_log_path(path) || path.contains("/athena/") {
         "athena"
     } else {
         "rio"
@@ -682,6 +872,9 @@ fn classify_remote_log_source(path: &str) -> &'static str {
 }
 
 fn is_allowed_remote_log_path(path: &str) -> bool {
+    if is_athena_mechanism_log_path(path) {
+        return true;
+    }
     REMOTE_LOG_ALLOWED_FILES.iter().any(|entry| path == *entry)
         || REMOTE_LOG_ALLOWED_PREFIXES
             .iter()
@@ -905,40 +1098,78 @@ fn stop_remote_log_stream_internal(runtime: &AppRuntime) -> Result<(), String> {
 #[tauri::command]
 fn list_remote_logs(runtime: State<'_, AppRuntime>, host: String) -> Result<RemoteLogList, String> {
     let resolved_host = resolve_remote_target_host(&runtime, &host)?;
-    let output = run_ssh_command(&resolved_host, REMOTE_LOG_LIST_SCRIPT)?;
     let mut entries = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let mut ssh_error: Option<String> = None;
 
-    for line in String::from_utf8_lossy(&output).lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+    match run_ssh_command(&resolved_host, REMOTE_LOG_LIST_SCRIPT) {
+        Ok(output) => {
+            for line in String::from_utf8_lossy(&output).lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                let mut parts = trimmed.splitn(3, '|');
+                let modified_epoch_sec = parts
+                    .next()
+                    .and_then(|raw| raw.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let size_bytes = parts
+                    .next()
+                    .and_then(|raw| raw.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let Some(path) = parts.next().map(str::trim) else {
+                    continue;
+                };
+                if path.is_empty()
+                    || !is_allowed_remote_log_path(path)
+                    || !seen.insert(path.to_string())
+                {
+                    continue;
+                }
+
+                let name = path.rsplit('/').next().unwrap_or(path).to_string();
+                entries.push(RemoteLogEntry {
+                    source: String::from(classify_remote_log_source(path)),
+                    path: path.to_string(),
+                    name,
+                    size_bytes,
+                    modified_epoch_sec,
+                });
+            }
         }
-
-        let mut parts = trimmed.splitn(3, '|');
-        let modified_epoch_sec = parts
-            .next()
-            .and_then(|raw| raw.parse::<u64>().ok())
-            .unwrap_or(0);
-        let size_bytes = parts
-            .next()
-            .and_then(|raw| raw.parse::<u64>().ok())
-            .unwrap_or(0);
-        let Some(path) = parts.next().map(str::trim) else {
-            continue;
-        };
-        if path.is_empty() || !is_allowed_remote_log_path(path) || !seen.insert(path.to_string()) {
-            continue;
+        Err(err) => {
+            ssh_error = Some(err);
         }
+    }
 
-        let name = path.rsplit('/').next().unwrap_or(path).to_string();
-        entries.push(RemoteLogEntry {
-            source: String::from(classify_remote_log_source(path)),
-            path: path.to_string(),
-            name,
-            size_bytes,
-            modified_epoch_sec,
+    if let Ok(mechanism_entries) = fetch_athena_mechanism_log_entries(&resolved_host) {
+        for entry in mechanism_entries {
+            if seen.insert(entry.path.clone()) {
+                entries.push(entry);
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        if let Some(err) = ssh_error {
+            return Err(err);
+        }
+    } else {
+        entries.sort_by(|left, right| {
+            right
+                .modified_epoch_sec
+                .cmp(&left.modified_epoch_sec)
+                .then_with(|| left.name.cmp(&right.name))
         });
+    }
+
+    if let Some(err) = ssh_error {
+        if !entries.iter().any(|entry| entry.source == "rio") {
+            // Keep this as a soft failure when we still have mechanism logs to show.
+            eprintln!("remote SSH log listing failed while mechanism logs were available: {err}");
+        }
     }
 
     Ok(RemoteLogList {
@@ -959,6 +1190,24 @@ fn read_remote_log_preview(
     if normalized_path.is_empty() {
         return Err(String::from("remote log path must not be empty"));
     }
+
+    if is_athena_mechanism_log_path(normalized_path) {
+        let mechanism_name = athena_mechanism_name_from_path(normalized_path)
+            .ok_or_else(|| String::from("invalid mechanism log path"))?;
+        let limit = max_bytes
+            .map(|value| value as usize)
+            .unwrap_or(REMOTE_LOG_PREVIEW_BYTES_DEFAULT)
+            .clamp(1024, REMOTE_LOG_PREVIEW_BYTES_MAX);
+        let full = fetch_athena_mechanism_log_json(&resolved_host, &mechanism_name, 240)?;
+        let (content, truncated) = truncate_log_preview_by_bytes(full, limit);
+        return Ok(RemoteLogPreview {
+            host: resolved_host,
+            path: normalized_path.to_string(),
+            content,
+            truncated,
+        });
+    }
+
     if !is_allowed_remote_log_path(normalized_path) {
         return Err(String::from(
             "remote log path is outside allowed log directories",
@@ -994,6 +1243,30 @@ fn download_remote_log(
     if normalized_path.is_empty() {
         return Err(String::from("remote log path must not be empty"));
     }
+
+    if is_athena_mechanism_log_path(normalized_path) {
+        let mechanism_name = athena_mechanism_name_from_path(normalized_path)
+            .ok_or_else(|| String::from("invalid mechanism log path"))?;
+        let limit = max_bytes
+            .unwrap_or(REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_DEFAULT)
+            .clamp(1024, REMOTE_LOG_DOWNLOAD_BYTES_LIMIT_MAX);
+        let payload = fetch_athena_mechanism_log_json(&resolved_host, &mechanism_name, 512)?;
+        let bytes = payload.into_bytes();
+        let size_bytes = bytes.len() as u64;
+        if size_bytes > limit {
+            return Err(format!(
+                "mechanism log payload is {size_bytes} bytes, exceeds current download limit of {limit} bytes"
+            ));
+        }
+        let file_name = safe_mechanism_log_file_name(&mechanism_name);
+        return Ok(RemoteLogDownload {
+            host: resolved_host,
+            path: normalized_path.to_string(),
+            file_name,
+            bytes,
+        });
+    }
+
     if !is_allowed_remote_log_path(normalized_path) {
         return Err(String::from(
             "remote log path is outside allowed log directories",
@@ -1037,6 +1310,11 @@ fn start_remote_log_stream(
     let normalized_path = path.trim();
     if normalized_path.is_empty() {
         return Err(String::from("remote log path must not be empty"));
+    }
+    if is_athena_mechanism_log_path(normalized_path) {
+        return Err(String::from(
+            "live stream is not available for Athena mechanism log endpoints",
+        ));
     }
     if !is_allowed_remote_log_path(normalized_path) {
         return Err(String::from(

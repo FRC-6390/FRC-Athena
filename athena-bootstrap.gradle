@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonParserType
 import groovy.json.JsonSlurper
 import java.util.Locale
 
@@ -13,6 +15,7 @@ import java.util.Locale
  *   athenaBuild     - run Athena build tasks, then sync vendordeps
  *   athenaUpload    - deploy only src/main/deploy files to the roboRIO
  *   athenaDoctor    - print bootstrap health checks
+ *   athenaConfigureVscode - apply VS Code settings needed for Athena DSL IntelliSense
  *
  * Optional properties:
  *   -PathenaRepoDir=/abs/path/to/FRC-Athena
@@ -585,6 +588,110 @@ def dslConfigured = {
     return body.contains('ca.frc6390.athena.plugin')
 }
 
+def athenaDslJdtExports = [
+        '--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED'
+]
+
+def readJsonObjectLax = { File source ->
+    if (source == null || !source.isFile()) {
+        return [:]
+    }
+    String raw = readText(source)
+    if (raw == null || raw.trim().isEmpty()) {
+        return [:]
+    }
+
+    try {
+        def parser = new JsonSlurper(type: JsonParserType.LAX)
+        def parsed = parser.parseText(raw)
+        if (parsed instanceof Map) {
+            return new LinkedHashMap<>(parsed as Map)
+        }
+        throw new GradleException(
+                "Expected a top-level JSON object in ${source}, but got ${parsed?.getClass()?.simpleName ?: 'null'}"
+        )
+    } catch (Throwable t) {
+        throw new GradleException(
+                "Could not parse VS Code settings file ${source}. " +
+                        "Please ensure it contains valid JSON/JSONC.",
+                t
+        )
+    }
+}
+
+def mergeJvmArgs = { String existing, List<String> required ->
+    String merged = existing?.trim() ?: ''
+    required.each { arg ->
+        if (!merged.contains(arg)) {
+            merged = merged.isEmpty() ? arg : "${merged} ${arg}"
+        }
+    }
+    return merged
+}
+
+def ensureAthenaDslVscodeSettings = {
+    File settingsFile = file("$rootDir/.vscode/settings.json")
+    Map<String, Object> settings = readJsonObjectLax(settingsFile)
+    boolean changed = false
+
+    def putIfChanged = { String key, Object value ->
+        if (!settings.containsKey(key) || settings[key] != value) {
+            settings[key] = value
+            changed = true
+        }
+    }
+
+    putIfChanged('java.configuration.updateBuildConfiguration', 'automatic')
+    putIfChanged('java.import.gradle.annotationProcessing.enabled', true)
+    putIfChanged('java.jdt.ls.javac.enabled', 'on')
+    putIfChanged('java.completion.engine', 'dom')
+
+    String currentVmArgs = settings['java.jdt.ls.vmargs']?.toString() ?: ''
+    String mergedVmArgs = mergeJvmArgs(currentVmArgs, athenaDslJdtExports)
+    if (currentVmArgs != mergedVmArgs) {
+        settings['java.jdt.ls.vmargs'] = mergedVmArgs
+        changed = true
+    }
+
+    if (changed || !settingsFile.isFile()) {
+        settingsFile.parentFile?.mkdirs()
+        settingsFile.write(
+                JsonOutput.prettyPrint(JsonOutput.toJson(settings)) + System.lineSeparator(),
+                'UTF-8'
+        )
+    }
+
+    return [changed: changed, file: settingsFile]
+}
+
+def athenaDslVscodeConfigured = {
+    File settingsFile = file("$rootDir/.vscode/settings.json")
+    if (!settingsFile.isFile()) {
+        return false
+    }
+
+    Map<String, Object> settings
+    try {
+        settings = readJsonObjectLax(settingsFile)
+    } catch (Throwable ignored) {
+        return false
+    }
+
+    String vmArgs = settings['java.jdt.ls.vmargs']?.toString() ?: ''
+    boolean hasExports = athenaDslJdtExports.every { vmArgs.contains(it) }
+    boolean javacEnabled = 'on'.equalsIgnoreCase(settings['java.jdt.ls.javac.enabled']?.toString())
+    boolean domCompletion = 'dom'.equalsIgnoreCase(settings['java.completion.engine']?.toString())
+    boolean annotationProcessing = parseBooleanOrDefault(
+            settings['java.import.gradle.annotationProcessing.enabled'],
+            false
+    )
+
+    return javacEnabled && domCompletion && annotationProcessing && hasExports
+}
+
 def resolveStaticDeployTaskNames = {
     def allStaticTasks = tasks.matching { task ->
         def lower = task.name.toLowerCase(Locale.ROOT)
@@ -648,9 +755,13 @@ tasks.register('athenaBuild') {
             File settingsFile = resolveSettingsFile()
             boolean includeBuildChanged = ensureAthenaPluginIncludeBuildInSettings(settingsFile, repo)
             upsertAthenaPluginInBuildFile(buildFile, syncedVersion)
+            def vscodeResult = ensureAthenaDslVscodeSettings()
             logger.lifecycle("Aligned Athena DSL plugin version in ${buildFile} to ${syncedVersion}")
             if (includeBuildChanged) {
                 logger.lifecycle("Updated Athena plugin includeBuild entry in ${settingsFile}")
+            }
+            if (vscodeResult.changed) {
+                logger.lifecycle("Updated VS Code DSL IntelliSense settings in ${vscodeResult.file}")
             }
         } else {
             logger.lifecycle(
@@ -690,12 +801,29 @@ tasks.register('athenaEnableDsl') {
                 : false
         boolean settingsChanged = ensureAthenaRepoInSettings(settingsFile)
         upsertAthenaPluginInBuildFile(buildFile, version)
+        def vscodeResult = ensureAthenaDslVscodeSettings()
         logger.lifecycle("Enabled Athena DSL plugin in ${buildFile} (version ${version})")
         if (settingsChanged) {
             logger.lifecycle("Added Athena plugin repository to ${settingsFile}")
         }
         if (includeBuildChanged) {
             logger.lifecycle("Configured Athena plugin includeBuild in ${settingsFile}")
+        }
+        if (vscodeResult.changed) {
+            logger.lifecycle("Updated VS Code DSL IntelliSense settings in ${vscodeResult.file}")
+        }
+    }
+}
+
+tasks.register('athenaConfigureVscode') {
+    group = 'Athena'
+    description = 'Applies VS Code settings needed for Athena DSL IntelliSense compatibility.'
+    doLast {
+        def result = ensureAthenaDslVscodeSettings()
+        if (result.changed) {
+            logger.lifecycle("Updated VS Code DSL IntelliSense settings in ${result.file}")
+        } else {
+            logger.lifecycle("VS Code DSL IntelliSense settings already configured in ${result.file}")
         }
     }
 }
@@ -744,6 +872,7 @@ tasks.register('athenaDoctor') {
         }
 
         logger.lifecycle("Athena DSL plugin configured in build file: ${dslConfigured()}")
+        logger.lifecycle("Athena VS Code DSL settings configured: ${athenaDslVscodeConfigured()}")
         logger.lifecycle(
                 "Athena DSL requested by property now: ${athenaDslRequested} " +
                         "(requires athenaEnableDsl + rerun)"

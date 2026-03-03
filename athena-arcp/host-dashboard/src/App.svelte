@@ -100,6 +100,7 @@
   const RECORDING_REPLAY_TICK_MS = 33;
   const REMOTE_LOG_LIVE_POLL_MS = 1_000;
   const REMOTE_LOG_MAX_LINES = 6000;
+  const ATHENA_MECHANISM_LOG_PATH_PREFIX = 'athena://mechanisms/log/';
 
   type GridDensity = 'compact' | 'balanced' | 'comfortable';
 
@@ -546,6 +547,10 @@
   function trimLogLines(lines: string[]): string[] {
     if (lines.length <= REMOTE_LOG_MAX_LINES) return lines;
     return lines.slice(lines.length - REMOTE_LOG_MAX_LINES);
+  }
+
+  function isStreamableRemoteLogPath(path: string): boolean {
+    return !path.trim().startsWith(ATHENA_MECHANISM_LOG_PATH_PREFIX);
   }
 
   function nowPerfMs(): number {
@@ -2044,7 +2049,11 @@
 
     if (!selectedRemoteLogPath) return;
     if (isTauriRuntime()) {
-      void startRemoteLogStreaming(selectedRemoteLogPath, { silent: false });
+      if (isStreamableRemoteLogPath(selectedRemoteLogPath)) {
+        void startRemoteLogStreaming(selectedRemoteLogPath, { silent: false });
+      } else {
+        void stopRemoteLogStreaming({ silent: true });
+      }
     } else {
       void loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
     }
@@ -2083,6 +2092,12 @@
     if (!normalizedPath) return;
     if (!remoteLogLiveFollow) return;
     if (!isTauriRuntime()) return;
+    if (!isStreamableRemoteLogPath(normalizedPath)) {
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'unsupported';
+      remoteLogStreamMessage = 'live stream not supported for Athena mechanism logs';
+      return;
+    }
 
     try {
       await startRemoteLogStream(host.trim(), normalizedPath);
@@ -2168,8 +2183,10 @@
       }
       if (selectedRemoteLogPath) {
         await loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
-        if (remoteLogLiveFollow) {
+        if (remoteLogLiveFollow && isStreamableRemoteLogPath(selectedRemoteLogPath)) {
           await startRemoteLogStreaming(selectedRemoteLogPath, { silent: true });
+        } else {
+          await stopRemoteLogStreaming({ silent: true });
         }
       } else {
         await stopRemoteLogStreaming({ silent: true });
@@ -3356,7 +3373,11 @@
             setRemoteLogLiveFollow(true);
             void (async () => {
               await loadRemoteLogPreview(path);
-              await startRemoteLogStreaming(path, { silent: true });
+              if (isStreamableRemoteLogPath(path)) {
+                await startRemoteLogStreaming(path, { silent: true });
+              } else {
+                await stopRemoteLogStreaming({ silent: true });
+              }
             })();
           }}
           onDownloadLog={(path) => void downloadSelectedRemoteLog(path)}
