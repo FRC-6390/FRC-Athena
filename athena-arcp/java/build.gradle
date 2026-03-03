@@ -104,9 +104,16 @@ def publishTaskRequested = gradle.startParameter.taskNames.any { name ->
     def lower = name.toLowerCase(Locale.ROOT)
     lower.contains('publish') || lower.contains('copytowpilib')
 }
-def nativeMode = ((project.findProperty('arcpNativeMode')
-        ?: System.getenv('ARCP_NATIVE_MODE')
-        ?: (publishTaskRequested ? 'vendor' : 'host')) as String).trim().toLowerCase(Locale.ROOT)
+def configuredNativeModeRaw = (project.findProperty('arcpNativeMode')
+        ?: System.getenv('ARCP_NATIVE_MODE')) as String
+def nativeModeExplicitlyConfigured = configuredNativeModeRaw != null && !configuredNativeModeRaw.trim().isEmpty()
+def nativeMode = ((nativeModeExplicitlyConfigured ? configuredNativeModeRaw : 'host') as String)
+        .trim()
+        .toLowerCase(Locale.ROOT)
+def publishDefaultTargets = [
+        'armv7-unknown-linux-gnueabihf',
+        'host'
+]
 def explicitTargetsRaw = (project.findProperty('arcpJniTargets') ?: System.getenv('ARCP_JNI_TARGETS')) as String
 def dockerHostSupported = ((hostOs.isLinux() && hostArch in ['arm32', 'x86_64', 'aarch64'])
         || (hostOs.isWindows() && hostArch == 'x86_64'))
@@ -143,6 +150,8 @@ if (explicitTargetsRaw != null && !explicitTargetsRaw.trim().isEmpty()) {
             .split(',')
             .collect { it.trim() }
             .findAll { !it.isEmpty() }
+} else if (publishTaskRequested && !nativeModeExplicitlyConfigured) {
+    selectedTargets = publishDefaultTargets
 } else {
     switch (nativeMode) {
         case 'none':
