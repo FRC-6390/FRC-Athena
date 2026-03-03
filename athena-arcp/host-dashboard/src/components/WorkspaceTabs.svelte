@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-  import { faPenToSquare, faPlus, faXmark } from '@fortawesome/free-solid-svg-icons';
+  import { faPlus, faXmark } from '@fortawesome/free-solid-svg-icons';
   import { tick } from 'svelte';
 
   type TabSummary = {
@@ -68,15 +68,14 @@
             role="tab"
             aria-selected={tab.id === activeTabId}
             onclick={() => onSelectTab(tab.id)}
+            ondblclick={() => beginRename(tab.id, tab.name)}
+            title="Double-click to rename"
           >
             {tab.name}
           </button>
         {/if}
 
         <span class="count">{tab.widgetCount}</span>
-        <button class="tab-icon" title="Rename tab" aria-label="Rename tab" onclick={() => beginRename(tab.id, tab.name)}>
-          <FontAwesomeIcon icon={faPenToSquare} class="tab-icon-glyph" />
-        </button>
         <button
           class="tab-icon"
           title="Remove tab"

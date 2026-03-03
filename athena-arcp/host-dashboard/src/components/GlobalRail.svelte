@@ -5,6 +5,7 @@
     faFileLines,
     faStethoscope,
     faMicrochip,
+    faSliders,
     faGear,
     faTableCellsLarge,
     type IconDefinition
@@ -15,6 +16,7 @@
     | 'dashboards'
     | 'signals'
     | 'mechanisms'
+    | 'control_tuner'
     | 'diagnostics'
     | 'logs'
     | 'settings';
@@ -28,6 +30,7 @@
     { key: 'dashboards', label: 'Dashboards', icon: faTableCellsLarge },
     { key: 'signals', label: 'Signals', icon: faChartLine },
     { key: 'mechanisms', label: 'Mechanisms', icon: faMicrochip },
+    { key: 'control_tuner', label: 'Control Tuner', icon: faSliders },
     { key: 'diagnostics', label: 'Diagnostics', icon: faStethoscope },
     { key: 'logs', label: 'Logs', icon: faFileLines }
   ];

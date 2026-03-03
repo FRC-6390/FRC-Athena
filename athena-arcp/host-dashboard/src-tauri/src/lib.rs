@@ -22,9 +22,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsIconic, IsWindowVisible,
 };
 
+mod nt4_client;
+
+use nt4_client::spawn_nt4_client_worker;
+
 const CONTROL_RECONNECT_INTERVAL: Duration = Duration::from_millis(1000);
 const CONTROL_HEALTHCHECK_INTERVAL: Duration = Duration::from_millis(1500);
 const SERVER_STATS_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+const NT4_UNSECURE_PORT: u16 = 5810;
 const RIO_TCP_PROBE_TIMEOUT: Duration = Duration::from_millis(180);
 const RIO_TCP_PROBE_PORTS: [u16; 2] = [22, 80];
 const ARCP_TCP_PROBE_TIMEOUT: Duration = Duration::from_millis(220);
@@ -74,6 +79,7 @@ struct Session {
     server_stats: Mutex<ServerStatsCache>,
     telemetry_handle: Option<JoinHandle<()>>,
     control_handle: Option<JoinHandle<()>>,
+    nt4_handle: Option<JoinHandle<()>>,
 }
 
 struct RemoteLogStreamSession {
@@ -111,6 +117,9 @@ impl Session {
             let _ = handle.join();
         }
         if let Some(handle) = self.control_handle.take() {
+            let _ = handle.join();
+        }
+        if let Some(handle) = self.nt4_handle.take() {
             let _ = handle.join();
         }
     }
@@ -1071,6 +1080,13 @@ fn connect_arcp(
         udp_port,
     )
     .map_err(|err| format!("control worker failed: {err}"))?;
+    let nt4_handle = spawn_nt4_client_worker(
+        Arc::clone(&running),
+        Arc::clone(&state),
+        host.clone(),
+        Some(NT4_UNSECURE_PORT),
+    )
+    .map_err(|err| format!("nt4 client worker failed: {err}"))?;
 
     *session_slot = Some(Session {
         host: host.clone(),
@@ -1083,6 +1099,7 @@ fn connect_arcp(
         server_stats: Mutex::new(ServerStatsCache::new()),
         telemetry_handle: Some(telemetry_handle),
         control_handle: Some(control_handle),
+        nt4_handle: Some(nt4_handle),
     });
 
     Ok(ConnectInfo {

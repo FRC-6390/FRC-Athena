@@ -18,8 +18,12 @@ tauri-build = { version = "2.5.5", features = [] }
 
 [dependencies]
 arcp-dashboard = { path = "../../rust/crates/arcp-dashboard" }
+arcp-core = { path = "../../rust/crates/arcp-core" }
+nt_client = { path = "../../rust/vendor/nt_client" }
+rmpv = "1.3.0"
 serde = { version = "1.0.228", features = ["derive"] }
 tauri = { version = "2.10.2", features = [] }
+tokio = { version = "1.49.0", default-features = false, features = ["rt", "time", "net"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59.0", features = [

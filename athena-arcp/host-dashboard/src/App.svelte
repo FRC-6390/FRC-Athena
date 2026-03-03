@@ -79,6 +79,7 @@
   import DiagnosticsScreen from './components/DiagnosticsScreen.svelte';
   import LogsScreen from './components/LogsScreen.svelte';
   import MechanismsScreen from './components/MechanismsScreen.svelte';
+  import ControlTunerScreen from './components/ControlTunerScreen.svelte';
   import FloatingDock from './components/FloatingDock.svelte';
   import DashboardContextMenu from './components/DashboardContextMenu.svelte';
 
@@ -106,6 +107,7 @@
     | 'dashboards'
     | 'signals'
     | 'mechanisms'
+    | 'control_tuner'
     | 'diagnostics'
     | 'logs'
     | 'settings';
@@ -382,6 +384,7 @@
   let remoteLogStreamMessage = $state('');
   let robotLinkProbe = $state<RobotLinkProbe | null>(null);
   let robotLinkProbeInFlight = $state(false);
+  let controlTunerTrackedSignalIds = $state<number[]>([]);
 
   const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
   const ntCompatSignalRows = $derived(
@@ -467,6 +470,11 @@
           ids.add(widget.signalId);
         }
         collectConfiguredSignalIds(widget.config, ids);
+      }
+    }
+    for (const signalId of controlTunerTrackedSignalIds) {
+      if (signalId > 0) {
+        ids.add(signalId);
       }
     }
     return ids;
@@ -1051,6 +1059,9 @@
     if (railSection === 'logs' && section !== 'logs') {
       void stopRemoteLogStreaming({ silent: true });
     }
+    if (section !== 'control_tuner') {
+      controlTunerTrackedSignalIds = [];
+    }
     dashboardMenu = null;
     railSection = section;
     if (section !== 'dashboards') {
@@ -1068,6 +1079,13 @@
         selectedWidgetId = null;
         break;
       case 'mechanisms':
+        roleFilter = 'all';
+        typeFilter = 'all';
+        query = '';
+        showInspector = false;
+        selectedWidgetId = null;
+        break;
+      case 'control_tuner':
         roleFilter = 'all';
         typeFilter = 'all';
         query = '';
@@ -3244,6 +3262,21 @@
           }}
           onTriggerAction={sendAction}
           onSendSet={sendSet}
+        />
+      {:else if railSection === 'control_tuner'}
+        <ControlTunerScreen
+          signals={arcpSignalRows}
+          {historyBySignal}
+          {selectedId}
+          onSelectSignal={(signalId) => {
+            selectedId = signalId;
+            selectedWidgetId = null;
+          }}
+          onSendSet={sendSet}
+          onTriggerAction={sendAction}
+          onTrackSignalIds={(signalIds) => {
+            controlTunerTrackedSignalIds = signalIds;
+          }}
         />
       {:else if railSection === 'diagnostics'}
         <DiagnosticsScreen

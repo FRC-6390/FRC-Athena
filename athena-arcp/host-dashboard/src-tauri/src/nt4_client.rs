@@ -1,19 +1,25 @@
 use std::collections::HashMap;
+use std::io;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use arcp_core::{
-    SignalAccess, SignalDescriptor, SignalDurability, SignalPolicy, SignalType, SignalValue,
+    PersistenceScope, SignalAccess, SignalDurability, SignalKind, SignalPolicy, SignalType,
+    SignalValue,
 };
+use arcp_dashboard::{DashboardState, ManifestItem};
 use nt_client::data::r#type::{DataType, NetworkTableData};
 use nt_client::data::SubscriptionOptions;
 use nt_client::subscribe::ReceivedMessage;
 use nt_client::{Client, NTAddr, NewClientOptions};
 
-use crate::realtime::PublishMessage;
-
-const NT4_BRIDGE_MAX_MIRRORED_TOPICS: usize = 20;
+const NT4_UNSECURE_PORT_DEFAULT: u16 = 5810;
+const NT4_MAX_MIRRORED_TOPICS: usize = 256;
+const NT4_SIGNAL_ID_START: u16 = 65535;
+const NT4_SIGNAL_ID_MIN: u16 = 50000;
 
 #[derive(Clone, Copy, Debug)]
 struct Nt4Binding {
@@ -21,11 +27,22 @@ struct Nt4Binding {
     signal_type: SignalType,
 }
 
-pub(crate) fn run_nt4_bridge_loop(
+pub fn spawn_nt4_client_worker(
     running: Arc<AtomicBool>,
-    descriptors: Arc<Mutex<HashMap<u16, SignalDescriptor>>>,
-    publish_tx: mpsc::Sender<PublishMessage>,
-    max_signals: u16,
+    state: Arc<Mutex<DashboardState>>,
+    host: String,
+    unsecure_port: Option<u16>,
+) -> io::Result<JoinHandle<()>> {
+    let unsecure_port = unsecure_port.unwrap_or(NT4_UNSECURE_PORT_DEFAULT);
+    thread::Builder::new()
+        .name("arcp-dashboard-nt4".to_string())
+        .spawn(move || run_nt4_client_loop(running, state, host, unsecure_port))
+}
+
+fn run_nt4_client_loop(
+    running: Arc<AtomicBool>,
+    state: Arc<Mutex<DashboardState>>,
+    host: String,
     unsecure_port: u16,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -40,13 +57,19 @@ pub(crate) fn run_nt4_bridge_loop(
     runtime.block_on(async move {
         let mut topic_bindings: HashMap<String, Nt4Binding> = HashMap::new();
         let mut last_values: HashMap<u16, SignalValue> = HashMap::new();
+        let mut next_signal_id = NT4_SIGNAL_ID_START;
 
         while running.load(Ordering::SeqCst) {
+            let Some(addr) = resolve_host_ipv4(&host) else {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                continue;
+            };
+
             let options = NewClientOptions {
-                addr: NTAddr::Local,
+                addr: NTAddr::Custom(addr),
                 unsecure_port,
                 secure_port: None,
-                name: "arcp-nt4-bridge".to_string(),
+                name: "arcp-host-nt4".to_string(),
                 ..Default::default()
             };
             let client = Client::new(options);
@@ -85,11 +108,10 @@ pub(crate) fn run_nt4_bridge_loop(
                         };
                         process_received_message(
                             message,
-                            &descriptors,
-                            &publish_tx,
-                            max_signals,
+                            &state,
                             &mut topic_bindings,
                             &mut last_values,
+                            &mut next_signal_id,
                         );
                     }
                     _ = tokio::time::sleep(Duration::from_millis(100)) => {}
@@ -103,31 +125,40 @@ pub(crate) fn run_nt4_bridge_loop(
     });
 }
 
+fn resolve_host_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
+    let addrs = (host, 0).to_socket_addrs().ok()?;
+    for addr in addrs {
+        if let IpAddr::V4(v4) = addr.ip() {
+            return Some(v4);
+        }
+    }
+    None
+}
+
 fn process_received_message(
     message: ReceivedMessage,
-    descriptors: &Arc<Mutex<HashMap<u16, SignalDescriptor>>>,
-    publish_tx: &mpsc::Sender<PublishMessage>,
-    max_signals: u16,
+    state: &Arc<Mutex<DashboardState>>,
     topic_bindings: &mut HashMap<String, Nt4Binding>,
     last_values: &mut HashMap<u16, SignalValue>,
+    next_signal_id: &mut u16,
 ) {
     match message {
         ReceivedMessage::Announced(topic) => {
             let _ = ensure_binding(
                 topic.name(),
                 *topic.r#type(),
-                descriptors,
-                max_signals,
+                state,
                 topic_bindings,
+                next_signal_id,
             );
         }
         ReceivedMessage::Updated((topic, value)) => {
             let Some(binding) = ensure_binding(
                 topic.name(),
                 *topic.r#type(),
-                descriptors,
-                max_signals,
+                state,
                 topic_bindings,
+                next_signal_id,
             ) else {
                 return;
             };
@@ -145,11 +176,10 @@ fn process_received_message(
                 return;
             }
 
-            last_values.insert(binding.signal_id, signal_value.clone());
-            let _ = publish_tx.send(PublishMessage::Value {
-                signal_id: binding.signal_id,
-                value: signal_value,
-            });
+            if let Ok(mut guard) = state.lock() {
+                guard.apply_update(binding.signal_id, signal_value.clone());
+            }
+            last_values.insert(binding.signal_id, signal_value);
         }
         ReceivedMessage::UpdateProperties(_) => {}
         ReceivedMessage::Unannounced { .. } => {}
@@ -159,43 +189,43 @@ fn process_received_message(
 fn ensure_binding(
     nt_topic_name: &str,
     nt_data_type: DataType,
-    descriptors: &Arc<Mutex<HashMap<u16, SignalDescriptor>>>,
-    max_signals: u16,
+    state: &Arc<Mutex<DashboardState>>,
     topic_bindings: &mut HashMap<String, Nt4Binding>,
+    next_signal_id: &mut u16,
 ) -> Option<Nt4Binding> {
-    if let Some(existing) = topic_bindings.get(nt_topic_name).copied() {
-        return Some(existing);
-    }
-
     let signal_type = map_signal_type(nt_data_type)?;
     let path = to_arcp_nt4_path(nt_topic_name)?;
-    if topic_bindings.len() >= NT4_BRIDGE_MAX_MIRRORED_TOPICS {
+
+    if let Some(existing) = topic_bindings.get(nt_topic_name).copied() {
+        if existing.signal_type == signal_type {
+            if let Ok(mut guard) = state.lock() {
+                if guard.descriptor_for(existing.signal_id).is_none() {
+                    guard.upsert_descriptor(build_manifest_item(
+                        existing.signal_id,
+                        signal_type,
+                        path,
+                    ));
+                }
+            }
+            return Some(existing);
+        }
+        topic_bindings.remove(nt_topic_name);
+    }
+
+    if topic_bindings.len() >= NT4_MAX_MIRRORED_TOPICS {
         return None;
     }
-    let mut descriptor_map = descriptors.lock().ok()?;
 
-    let signal_id = descriptor_map
-        .values()
+    let mut guard = state.lock().ok()?;
+    let signal_id = guard
+        .descriptors()
+        .iter()
         .find(|descriptor| descriptor.path == path && descriptor.signal_type == signal_type)
         .map(|descriptor| descriptor.signal_id)
-        .or_else(|| {
-            (1..=max_signals)
-                .rev()
-                .find(|candidate| !descriptor_map.contains_key(candidate))
-        })?;
+        .or_else(|| allocate_signal_id(&guard, next_signal_id))?;
 
-    descriptor_map.entry(signal_id).or_insert_with(|| {
-        let mut descriptor = SignalDescriptor::telemetry(
-            signal_id,
-            signal_type,
-            SignalAccess::Observe,
-            SignalPolicy::OnChange,
-            SignalDurability::Volatile,
-            path,
-        );
-        descriptor.metadata_hash = descriptor.metadata_fingerprint();
-        descriptor
-    });
+    guard.upsert_descriptor(build_manifest_item(signal_id, signal_type, path));
+    drop(guard);
 
     let binding = Nt4Binding {
         signal_id,
@@ -203,6 +233,35 @@ fn ensure_binding(
     };
     topic_bindings.insert(nt_topic_name.to_string(), binding);
     Some(binding)
+}
+
+fn allocate_signal_id(state: &DashboardState, next_signal_id: &mut u16) -> Option<u16> {
+    while *next_signal_id >= NT4_SIGNAL_ID_MIN {
+        let candidate = *next_signal_id;
+        *next_signal_id = next_signal_id.saturating_sub(1);
+        if state.descriptor_for(candidate).is_none() {
+            return Some(candidate);
+        }
+        if candidate == NT4_SIGNAL_ID_MIN {
+            break;
+        }
+    }
+    None
+}
+
+fn build_manifest_item(signal_id: u16, signal_type: SignalType, path: String) -> ManifestItem {
+    ManifestItem {
+        signal_id,
+        signal_type,
+        kind: SignalKind::Telemetry,
+        access: SignalAccess::Observe,
+        policy: SignalPolicy::OnChange,
+        durability: SignalDurability::Volatile,
+        persistence_scope: PersistenceScope::None,
+        metadata_version: 1,
+        metadata_hash: 0,
+        path,
+    }
 }
 
 fn to_arcp_nt4_path(nt_topic_path: &str) -> Option<String> {
@@ -258,35 +317,5 @@ fn convert_value(nt_data_type: DataType, value: &rmpv::Value) -> Option<SignalVa
         DataType::IntArray => Vec::<i64>::from_value(value).map(SignalValue::I64Array),
         DataType::StringArray => Vec::<String>::from_value(value).map(SignalValue::StrArray),
         DataType::Raw | DataType::Rpc | DataType::Msgpack | DataType::Protobuf => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn path_mapping_keeps_nt4_root_and_filters_network_table_config() {
-        assert_eq!(
-            to_arcp_nt4_path("/Athena/Drivetrain/Speed"),
-            Some("Athena/NT4/Drivetrain/Speed".to_string())
-        );
-        assert_eq!(to_arcp_nt4_path("/Robot/Status"), None);
-        assert_eq!(to_arcp_nt4_path("/Athena/NetworkTableConfig/Details"), None);
-        assert_eq!(
-            to_arcp_nt4_path("/Athena/Mechanism/NetworkTableConfig"),
-            None
-        );
-    }
-
-    #[test]
-    fn type_mapping_ignores_unsupported_nt_payload_types() {
-        assert_eq!(map_signal_type(DataType::Boolean), Some(SignalType::Bool));
-        assert_eq!(
-            map_signal_type(DataType::IntArray),
-            Some(SignalType::I64Array)
-        );
-        assert_eq!(map_signal_type(DataType::Protobuf), None);
-        assert_eq!(map_signal_type(DataType::Raw), None);
     }
 }

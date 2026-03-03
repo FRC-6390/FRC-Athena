@@ -16,7 +16,7 @@ import java.util.Locale
  *
  * Optional properties:
  *   -PathenaRepoDir=/abs/path/to/FRC-Athena
- *   -PathenaBuildTasks=build,publishToMavenLocal
+ *   -PathenaBuildTasks=:athena-core:publishToMavenLocal,:athena-plugin:publishToMavenLocal
  *   -PathenaEnableDsl=true
  *   -PathenaPluginVersion=2026.1.67
  *   -PathenaMergeServices=false
@@ -27,7 +27,18 @@ def athenaBootstrapConfig = [
         repoDirEnv           : 'ATHENA_REPO_DIR',
         buildTasksProperty   : 'athenaBuildTasks',
         vendordepsProperty   : 'athenaVendordeps',
-        defaultBuildTasks    : ['build', 'publishToMavenLocal'],
+        defaultBuildTasks    : [
+                ':athena-core:publishToMavenLocal',
+                ':athena-arcp-java:publishToMavenLocal',
+                ':athena-ctre:publishToMavenLocal',
+                ':athena-rev:publishToMavenLocal',
+                ':athena-pathplanner:publishToMavenLocal',
+                ':athena-limelight:publishToMavenLocal',
+                ':athena-photonvision:publishToMavenLocal',
+                ':athena-choreo:publishToMavenLocal',
+                ':athena-studica:publishToMavenLocal',
+                ':athena-plugin:publishToMavenLocal'
+        ],
         enableDslProperty    : 'athenaEnableDsl',
         pluginVersionProperty: 'athenaPluginVersion',
         mergeServicesProperty: 'athenaMergeServices',

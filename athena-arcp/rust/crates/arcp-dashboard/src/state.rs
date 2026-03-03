@@ -46,6 +46,22 @@ impl DashboardState {
         self.manifest_revision = self.manifest_revision.saturating_add(1);
     }
 
+    pub fn upsert_descriptor(&mut self, descriptor: ManifestItem) {
+        match self
+            .descriptors
+            .binary_search_by_key(&descriptor.signal_id, |item| item.signal_id)
+        {
+            Ok(index) => {
+                self.descriptors[index] = descriptor;
+            }
+            Err(index) => {
+                self.descriptors.insert(index, descriptor);
+            }
+        }
+        self.revision = self.revision.saturating_add(1);
+        self.manifest_revision = self.manifest_revision.saturating_add(1);
+    }
+
     pub fn descriptors(&self) -> &[ManifestItem] {
         &self.descriptors
     }
