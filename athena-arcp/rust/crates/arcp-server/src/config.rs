@@ -13,7 +13,7 @@ impl Default for ArcpServerConfig {
             control_port: 5805,
             realtime_port: 5806,
             max_signals: 8192,
-            nt4_bridge_enabled: true,
+            nt4_bridge_enabled: false,
             nt4_unsecure_port: 5810,
         }
     }

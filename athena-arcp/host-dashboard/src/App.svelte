@@ -2,7 +2,12 @@
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import { faMagnifyingGlass, faXmark } from '@fortawesome/free-solid-svg-icons';
   import { onMount } from 'svelte';
-  import type { DashboardSnapshot, RemoteLogEntry, SignalRow } from './lib/arcp';
+  import type {
+    DashboardSnapshot,
+    RemoteLogEntry,
+    RobotLinkProbe,
+    SignalRow
+  } from './lib/arcp';
   import {
     connectArcp,
     downloadRemoteLog,
@@ -13,6 +18,7 @@
     listRemoteLogs,
     listServerLayouts,
     loadServerLayout,
+    probeRobotLink,
     readRemoteLogPreview,
     saveServerLayout,
     setDriverstationDockMode,
@@ -91,6 +97,7 @@
   const RECORDING_SCHEMA = 'arcp-recording-v1';
   const RECORDING_CLIENT_HEARTBEAT_INTERVAL_MS = 1_000;
   const RECORDING_REPLAY_TICK_MS = 33;
+  const REMOTE_LOG_LIVE_POLL_MS = 1_000;
 
   type GridDensity = 'compact' | 'balanced' | 'comfortable';
 
@@ -359,6 +366,9 @@
   let selectedRemoteLogPath = $state('');
   let selectedRemoteLogPreview = $state('');
   let selectedRemoteLogPreviewTruncated = $state(false);
+  let remoteLogLiveFollow = $state(true);
+  let robotLinkProbe = $state<RobotLinkProbe | null>(null);
+  let robotLinkProbeInFlight = $state(false);
 
   const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
   const ntCompatSignalRows = $derived(
@@ -979,6 +989,7 @@
       connected = false;
       needsSessionReconnect = true;
       scheduleReconnect();
+      void refreshRobotLinkProbe({ silent: true });
       if (source === 'auto') {
         status = 'offline (retrying...)';
       } else {
@@ -1048,6 +1059,7 @@
         query = '';
         showInspector = false;
         selectedWidgetId = null;
+        void refreshRobotLinkProbe({ silent: true });
         void refreshRemoteLogs();
         break;
       case 'camera_tuning':
@@ -1952,7 +1964,43 @@
     remoteLogs = [];
     remoteLogsResolvedHost = '';
     remoteLogError = '';
+    robotLinkProbe = null;
     clearRemoteLogSelection();
+  }
+
+  function setRemoteLogLiveFollow(enabled: boolean) {
+    remoteLogLiveFollow = enabled;
+  }
+
+  async function refreshRobotLinkProbe(
+    options?: {
+      silent?: boolean;
+    }
+  ) {
+    const port = parseControlPort(controlPort);
+    if (port === null) {
+      robotLinkProbe = null;
+      return;
+    }
+    if (robotLinkProbeInFlight) return;
+
+    robotLinkProbeInFlight = true;
+    try {
+      const probe = await probeRobotLink(host.trim(), port);
+      robotLinkProbe = probe;
+      if (!remoteLogsResolvedHost && probe.host) {
+        remoteLogsResolvedHost = probe.host;
+      }
+      if (!options?.silent) {
+        remoteLogError = '';
+      }
+    } catch (err) {
+      if (!options?.silent) {
+        remoteLogError = String(err);
+      }
+    } finally {
+      robotLinkProbeInFlight = false;
+    }
   }
 
   async function refreshRemoteLogs(force = false) {
@@ -1962,6 +2010,7 @@
     remoteLogsRefreshInFlight = true;
     remoteLogError = '';
     try {
+      await refreshRobotLinkProbe({ silent: true });
       const listing = await listRemoteLogs(host.trim());
       remoteLogs = listing.entries;
       remoteLogsResolvedHost = listing.host;
@@ -1972,7 +2021,7 @@
         selectedRemoteLogPreviewTruncated = false;
       }
       if (selectedRemoteLogPath) {
-        await loadRemoteLogPreview(selectedRemoteLogPath);
+        await loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
       }
       status = `log index refreshed (${listing.entries.length} files)`;
       lastError = '';
@@ -1983,7 +2032,12 @@
     }
   }
 
-  async function loadRemoteLogPreview(path: string) {
+  async function loadRemoteLogPreview(
+    path: string,
+    options?: {
+      silent?: boolean;
+    }
+  ) {
     const normalizedPath = path.trim();
     if (!normalizedPath) {
       clearRemoteLogSelection();
@@ -1998,10 +2052,16 @@
       remoteLogsResolvedHost = preview.host;
       selectedRemoteLogPreview = preview.content;
       selectedRemoteLogPreviewTruncated = preview.truncated;
+      if (!options?.silent) {
+        lastError = '';
+      }
     } catch (err) {
       selectedRemoteLogPreview = '';
       selectedRemoteLogPreviewTruncated = false;
       remoteLogError = String(err);
+      if (!options?.silent) {
+        lastError = String(err);
+      }
     } finally {
       remoteLogPreviewInFlight = false;
     }
@@ -2717,6 +2777,7 @@
   function handlePortInput(value: string) {
     controlPort = value;
     availableServerLayouts = [];
+    robotLinkProbe = null;
   }
 
   function openInspectorForSelection() {
@@ -2876,6 +2937,17 @@
       if (!connected) return;
       void refreshServerLayoutList();
     }, SERVER_LAYOUT_POLL_MS);
+    const robotLinkProbeTimer = setInterval(() => {
+      if (railSection !== 'logs') return;
+      if (robotLinkProbeInFlight) return;
+      void refreshRobotLinkProbe({ silent: true });
+    }, REMOTE_LOG_LIVE_POLL_MS);
+    const remoteLogLiveTimer = setInterval(() => {
+      if (railSection !== 'logs') return;
+      if (!remoteLogLiveFollow) return;
+      if (!selectedRemoteLogPath || remoteLogPreviewInFlight) return;
+      void loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
+    }, REMOTE_LOG_LIVE_POLL_MS);
     window.addEventListener('keydown', onGlobalKeyDown);
     window.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('fullscreenchange', onFullscreenChange);
@@ -2885,6 +2957,8 @@
         clearTimeout(refreshTimer);
       }
       clearInterval(serverLayoutTimer);
+      clearInterval(robotLinkProbeTimer);
+      clearInterval(remoteLogLiveTimer);
       if (replayState?.timerId !== null) {
         window.clearInterval(replayState.timerId);
       }
@@ -3086,6 +3160,11 @@
           {status}
           requestedHost={host}
           resolvedHost={remoteLogsResolvedHost}
+          probeHost={robotLinkProbe?.host ?? ''}
+          controlPort={robotLinkProbe?.controlPort ?? parseControlPort(controlPort) ?? 0}
+          robotReachable={robotLinkProbe?.robotReachable ?? false}
+          arcpReachable={robotLinkProbe?.arcpReachable ?? false}
+          probeLoading={robotLinkProbeInFlight}
           refreshing={remoteLogsRefreshInFlight}
           previewLoading={remoteLogPreviewInFlight}
           downloadingPath={remoteLogDownloadInFlightPath}
@@ -3094,9 +3173,17 @@
           selectedPath={selectedRemoteLogPath}
           preview={selectedRemoteLogPreview}
           previewTruncated={selectedRemoteLogPreviewTruncated}
-          onRefresh={() => void refreshRemoteLogs(true)}
-          onSelectLog={(path) => void loadRemoteLogPreview(path)}
+          liveFollow={remoteLogLiveFollow}
+          onRefresh={() => {
+            void refreshRobotLinkProbe();
+            void refreshRemoteLogs(true);
+          }}
+          onSelectLog={(path) => {
+            setRemoteLogLiveFollow(true);
+            void loadRemoteLogPreview(path);
+          }}
           onDownloadLog={(path) => void downloadSelectedRemoteLog(path)}
+          onToggleLiveFollow={(enabled) => setRemoteLogLiveFollow(enabled)}
         />
       {:else if railSection === 'camera_tuning'}
         <CameraTuningScreen

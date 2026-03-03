@@ -8,6 +8,11 @@
     status: string;
     requestedHost: string;
     resolvedHost: string;
+    probeHost: string;
+    controlPort: number;
+    robotReachable: boolean;
+    arcpReachable: boolean;
+    probeLoading: boolean;
     refreshing: boolean;
     previewLoading: boolean;
     downloadingPath: string | null;
@@ -16,9 +21,11 @@
     selectedPath: string;
     preview: string;
     previewTruncated: boolean;
+    liveFollow: boolean;
     onRefresh: () => void;
     onSelectLog: (path: string) => void;
     onDownloadLog: (path: string) => void;
+    onToggleLiveFollow: (enabled: boolean) => void;
   };
 
   let {
@@ -26,6 +33,11 @@
     status,
     requestedHost,
     resolvedHost,
+    probeHost,
+    controlPort,
+    robotReachable,
+    arcpReachable,
+    probeLoading,
     refreshing,
     previewLoading,
     downloadingPath,
@@ -34,13 +46,16 @@
     selectedPath,
     preview,
     previewTruncated,
+    liveFollow,
     onRefresh,
     onSelectLog,
-    onDownloadLog
+    onDownloadLog,
+    onToggleLiveFollow
   }: Props = $props();
 
   let query = $state('');
   let sourceFilter = $state<SourceFilter>('all');
+  let lineViewport = $state<HTMLDivElement | null>(null);
 
   function formatBytes(raw: number): string {
     if (!Number.isFinite(raw) || raw < 0) return 'n/a';
@@ -56,6 +71,17 @@
   }
 
   const selectedEntry = $derived(entries.find((entry) => entry.path === selectedPath) ?? null);
+  const previewLines = $derived.by(() => {
+    const normalized = preview.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+    if (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+    return lines.map((text, index) => ({
+      lineNumber: index + 1,
+      text: text.length > 0 ? text : ' '
+    }));
+  });
   const filteredEntries = $derived.by(() => {
     const token = query.trim().toLowerCase();
     return entries.filter((entry) => {
@@ -66,6 +92,17 @@
         entry.name.toLowerCase().includes(token) ||
         entry.source.toLowerCase().includes(token)
       );
+    });
+  });
+
+  $effect(() => {
+    const currentPath = selectedPath;
+    const loading = previewLoading;
+    const lineCount = previewLines.length;
+    if (!liveFollow || loading || !currentPath || lineCount === 0) return;
+    requestAnimationFrame(() => {
+      if (!lineViewport) return;
+      lineViewport.scrollTop = lineViewport.scrollHeight;
     });
   });
 </script>
@@ -89,6 +126,36 @@
       {refreshing ? 'Refreshing...' : 'Refresh Logs'}
     </button>
   </div>
+
+  <div class="probe-row panel">
+    <span>
+      <strong>Robot Link:</strong>
+      {#if probeLoading}
+        probing...
+      {:else if robotReachable}
+        reachable
+      {:else}
+        not reachable
+      {/if}
+    </span>
+    <span>
+      <strong>ARCP {controlPort > 0 ? `:${controlPort}` : ''}:</strong>
+      {#if probeLoading}
+        probing...
+      {:else if arcpReachable}
+        reachable
+      {:else}
+        not found
+      {/if}
+    </span>
+    <span><strong>Probe host:</strong> {probeHost || 'n/a'}</span>
+  </div>
+
+  {#if !connected && !probeLoading && robotReachable && !arcpReachable}
+    <section class="link-warning panel">
+      Robot is reachable, but no ARCP server was found on port {controlPort > 0 ? controlPort : 'configured'}.
+    </section>
+  {/if}
 
   {#if error}
     <section class="error-banner panel">{error}</section>
@@ -138,17 +205,22 @@
     <section class="preview panel">
       <div class="preview-head">
         <h3>Log Preview</h3>
-        <button
-          class="btn"
-          onclick={() => selectedPath && onDownloadLog(selectedPath)}
-          disabled={!selectedPath || !!downloadingPath}
-        >
-          {#if downloadingPath === selectedPath}
-            Downloading...
-          {:else}
-            Download File
-          {/if}
-        </button>
+        <div class="preview-actions">
+          <button class={`btn ${liveFollow ? 'btn-primary' : ''}`} onclick={() => onToggleLiveFollow(!liveFollow)}>
+            {liveFollow ? 'Live ON' : 'Live OFF'}
+          </button>
+          <button
+            class="btn"
+            onclick={() => selectedPath && onDownloadLog(selectedPath)}
+            disabled={!selectedPath || !!downloadingPath}
+          >
+            {#if downloadingPath === selectedPath}
+              Downloading...
+            {:else}
+              Download File
+            {/if}
+          </button>
+        </div>
       </div>
 
       {#if !selectedEntry}
@@ -161,12 +233,22 @@
         {#if previewTruncated}
           <p class="preview-note">Showing tail of file (truncated).</p>
         {/if}
+        {#if liveFollow}
+          <p class="preview-note">Live follow enabled (1s polling).</p>
+        {/if}
         {#if previewLoading}
           <p class="empty">Loading preview...</p>
-        {:else if !preview.trim()}
+        {:else if previewLines.length === 0}
           <p class="empty">No preview data available (file may be binary or empty).</p>
         {:else}
-          <pre>{preview}</pre>
+          <div class="line-viewport" bind:this={lineViewport}>
+            {#each previewLines as line (`line-${line.lineNumber}`)}
+              <div class="log-line">
+                <span class="line-no">{line.lineNumber}</span>
+                <span class="line-text">{line.text}</span>
+              </div>
+            {/each}
+          </div>
         {/if}
       {/if}
     </section>
@@ -221,6 +303,29 @@
 
   .meta-row strong {
     color: var(--text);
+  }
+
+  .probe-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.58rem 0.66rem;
+    font-size: 0.74rem;
+    color: var(--text-soft);
+  }
+
+  .probe-row strong {
+    color: var(--text);
+  }
+
+  .link-warning {
+    padding: 0.54rem 0.66rem;
+    border: 1px solid rgba(248, 113, 113, 0.5);
+    background: rgba(127, 29, 29, 0.2);
+    color: #fecaca;
+    font-size: 0.75rem;
+    border-radius: 8px;
   }
 
   code {
@@ -346,6 +451,12 @@
     align-items: center;
   }
 
+  .preview-actions {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+  }
+
   .preview-head h3 {
     margin: 0;
     font-size: 0.8rem;
@@ -365,7 +476,7 @@
     color: var(--text-soft);
   }
 
-  pre {
+  .line-viewport {
     margin: 0;
     min-height: 0;
     overflow: auto;
@@ -375,10 +486,29 @@
     color: #dce7ff;
     font-family: var(--font-mono);
     font-size: 0.68rem;
-    line-height: 1.4;
-    padding: 0.55rem;
+    line-height: 1.34;
+    padding: 0.3rem 0;
+  }
+
+  .log-line {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.45rem;
+    align-items: start;
+    padding: 0 0.5rem;
+  }
+
+  .line-no {
+    color: #7f8ea6;
+    text-align: right;
+    min-width: 3.2ch;
+    user-select: none;
+  }
+
+  .line-text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    color: #dce7ff;
   }
 
   @media (max-width: 1220px) {

@@ -79,6 +79,13 @@ export type RemoteLogDownload = {
   bytes: number[];
 };
 
+export type RobotLinkProbe = {
+  host: string;
+  controlPort: number;
+  robotReachable: boolean;
+  arcpReachable: boolean;
+};
+
 function isTauriRuntime(): boolean {
   if (typeof window === 'undefined') return false;
   return '__TAURI_INTERNALS__' in window;
@@ -170,6 +177,13 @@ export async function downloadRemoteLog(
     host,
     path,
     maxBytes
+  });
+}
+
+export async function probeRobotLink(host: string, controlPort: number): Promise<RobotLinkProbe> {
+  return invoke('probe_robot_link', {
+    host,
+    controlPort
   });
 }
 

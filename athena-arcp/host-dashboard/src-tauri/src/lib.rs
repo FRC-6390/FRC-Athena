@@ -1,6 +1,6 @@
 use std::io;
 use std::net::{TcpStream, ToSocketAddrs};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -10,7 +10,7 @@ use arcp_dashboard::{
     format_signal_value, ControlClient, DashboardState, ManifestItem, TelemetrySubscription,
 };
 use serde::Serialize;
-use tauri::{PhysicalPosition, PhysicalSize, State, Window};
+use tauri::{Emitter, PhysicalPosition, PhysicalSize, State, Window};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 #[cfg(target_os = "windows")]
@@ -27,6 +27,7 @@ const CONTROL_HEALTHCHECK_INTERVAL: Duration = Duration::from_millis(1500);
 const SERVER_STATS_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const RIO_TCP_PROBE_TIMEOUT: Duration = Duration::from_millis(180);
 const RIO_TCP_PROBE_PORTS: [u16; 2] = [22, 80];
+const ARCP_TCP_PROBE_TIMEOUT: Duration = Duration::from_millis(220);
 const DRIVERSTATION_HOST_ALIASES: [&str; 4] = ["ds", "driverstation", "driver-station", "auto"];
 #[cfg(target_os = "windows")]
 const DRIVERSTATION_STORAGE_PATH: &str = r"C:\Users\Public\Documents\FRC\FRC DS Data Storage.ini";
@@ -46,6 +47,7 @@ const REMOTE_LOG_ALLOWED_FILES: [&str; 1] = ["/home/lvuser/FRC_UserProgram.log"]
 
 struct AppRuntime {
     session: Mutex<Option<Session>>,
+    remote_log_stream: Mutex<Option<RemoteLogStreamSession>>,
     presentation_mode: AtomicBool,
     dock_mode: AtomicBool,
 }
@@ -54,6 +56,7 @@ impl Default for AppRuntime {
     fn default() -> Self {
         Self {
             session: Mutex::new(None),
+            remote_log_stream: Mutex::new(None),
             presentation_mode: AtomicBool::new(false),
             dock_mode: AtomicBool::new(false),
         }
@@ -71,6 +74,20 @@ struct Session {
     server_stats: Mutex<ServerStatsCache>,
     telemetry_handle: Option<JoinHandle<()>>,
     control_handle: Option<JoinHandle<()>>,
+}
+
+struct RemoteLogStreamSession {
+    running: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl RemoteLogStreamSession {
+    fn stop(&mut self) {
+        self.running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl Session {
@@ -190,6 +207,32 @@ struct RemoteLogDownload {
     path: String,
     file_name: String,
     bytes: Vec<u8>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RobotLinkProbe {
+    host: String,
+    control_port: u16,
+    robot_reachable: bool,
+    arcp_reachable: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteLogStreamLineEvent {
+    host: String,
+    path: String,
+    line: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteLogStreamStatusEvent {
+    host: String,
+    path: String,
+    state: String,
+    message: String,
 }
 
 #[derive(Default)]
@@ -347,6 +390,20 @@ fn is_roborio_host_reachable(host: &str) -> bool {
         .iter()
         .copied()
         .any(|port| probe_host_port(host, port))
+}
+
+fn is_tcp_port_open(host: &str, port: u16, timeout: Duration) -> bool {
+    let Ok(addrs) = (host, port).to_socket_addrs() else {
+        return false;
+    };
+
+    for addr in addrs {
+        if TcpStream::connect_timeout(&addr, timeout).is_ok() {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn select_roborio_host_for_team(team: u16) -> String {
@@ -561,6 +618,171 @@ fn remote_log_file_size_bytes(host: &str, path: &str) -> Result<u64, String> {
         .map_err(|_| format!("failed to parse remote file size for {path}: {raw}"))
 }
 
+fn emit_remote_log_stream_status(window: &Window, host: &str, path: &str, state: &str, message: &str) {
+    let _ = window.emit(
+        "remote-log-stream-status",
+        RemoteLogStreamStatusEvent {
+            host: host.to_string(),
+            path: path.to_string(),
+            state: state.to_string(),
+            message: message.to_string(),
+        },
+    );
+}
+
+fn spawn_remote_log_stream_worker(
+    window: Window,
+    running: Arc<AtomicBool>,
+    host: String,
+    path: String,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let quoted_path = shell_quote_single(&path);
+        let remote_command = format!("tail -n 200 -F -- {quoted_path}");
+
+        emit_remote_log_stream_status(
+            &window,
+            &host,
+            &path,
+            "starting",
+            "starting remote log stream",
+        );
+
+        while running.load(Ordering::SeqCst) {
+            let mut attempted_user = false;
+            let mut connected = false;
+
+            for user in SSH_REMOTE_USERS {
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+                attempted_user = true;
+                let destination = format!("{user}@{host}");
+                let child = Command::new("ssh")
+                    .arg("-o")
+                    .arg("BatchMode=yes")
+                    .arg("-o")
+                    .arg("ConnectTimeout=3")
+                    .arg("-o")
+                    .arg("StrictHostKeyChecking=no")
+                    .arg("-o")
+                    .arg("LogLevel=ERROR")
+                    .arg(destination.as_str())
+                    .arg(remote_command.as_str())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn();
+
+                let mut child = match child {
+                    Ok(child) => child,
+                    Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                        emit_remote_log_stream_status(
+                            &window,
+                            &host,
+                            &path,
+                            "error",
+                            "OpenSSH client not found on host machine",
+                        );
+                        return;
+                    }
+                    Err(err) => {
+                        emit_remote_log_stream_status(
+                            &window,
+                            &host,
+                            &path,
+                            "error",
+                            &format!("stream launch failed for {destination}: {err}"),
+                        );
+                        continue;
+                    }
+                };
+
+                connected = true;
+                emit_remote_log_stream_status(
+                    &window,
+                    &host,
+                    &path,
+                    "connected",
+                    &format!("stream connected via {destination}"),
+                );
+
+                if let Some(stdout) = child.stdout.take() {
+                    let reader = io::BufReader::new(stdout);
+                    for raw_line in io::BufRead::lines(reader) {
+                        if !running.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        match raw_line {
+                            Ok(line) => {
+                                let _ = window.emit(
+                                    "remote-log-stream-line",
+                                    RemoteLogStreamLineEvent {
+                                        host: host.clone(),
+                                        path: path.clone(),
+                                        line,
+                                    },
+                                );
+                            }
+                            Err(err) => {
+                                emit_remote_log_stream_status(
+                                    &window,
+                                    &host,
+                                    &path,
+                                    "error",
+                                    &format!("stream read failed: {err}"),
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                let _ = child.kill();
+                let _ = child.wait();
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
+
+            if !running.load(Ordering::SeqCst) {
+                break;
+            }
+
+            if !attempted_user {
+                emit_remote_log_stream_status(
+                    &window,
+                    &host,
+                    &path,
+                    "error",
+                    "no SSH user candidates configured",
+                );
+                break;
+            }
+
+            let reconnect_message = if connected {
+                "log stream disconnected; reconnecting"
+            } else {
+                "unable to establish remote log stream; retrying"
+            };
+            emit_remote_log_stream_status(&window, &host, &path, "reconnecting", reconnect_message);
+            thread::sleep(Duration::from_millis(700));
+        }
+
+        emit_remote_log_stream_status(&window, &host, &path, "stopped", "log stream stopped");
+    })
+}
+
+fn stop_remote_log_stream_internal(runtime: &AppRuntime) -> Result<(), String> {
+    let mut stream_slot = runtime
+        .remote_log_stream
+        .lock()
+        .map_err(|_| String::from("remote log stream lock poisoned"))?;
+    if let Some(mut stream) = stream_slot.take() {
+        stream.stop();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn list_remote_logs(runtime: State<'_, AppRuntime>, host: String) -> Result<RemoteLogList, String> {
     let resolved_host = resolve_remote_target_host(&runtime, &host)?;
@@ -682,6 +904,24 @@ fn download_remote_log(
         path: normalized_path.to_string(),
         file_name,
         bytes: output,
+    })
+}
+
+#[tauri::command]
+fn probe_robot_link(
+    runtime: State<'_, AppRuntime>,
+    host: String,
+    control_port: u16,
+) -> Result<RobotLinkProbe, String> {
+    let resolved_host = resolve_remote_target_host(&runtime, &host)?;
+    let robot_reachable = is_roborio_host_reachable(&resolved_host);
+    let arcp_reachable = is_tcp_port_open(&resolved_host, control_port, ARCP_TCP_PROBE_TIMEOUT);
+
+    Ok(RobotLinkProbe {
+        host: resolved_host,
+        control_port,
+        robot_reachable,
+        arcp_reachable,
     })
 }
 
@@ -1603,6 +1843,7 @@ pub fn run() {
             list_remote_logs,
             read_remote_log_preview,
             download_remote_log,
+            probe_robot_link,
             window_mode_snapshot,
             set_presentation_mode,
             set_driverstation_dock_mode,
