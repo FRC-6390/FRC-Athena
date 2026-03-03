@@ -1,5 +1,4 @@
 import groovy.json.JsonOutput
-import groovy.json.JsonParserType
 import groovy.json.JsonSlurper
 import java.util.Locale
 
@@ -595,6 +594,123 @@ def athenaDslJdtExports = [
         '--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED'
 ]
 
+def stripJsoncComments = { String raw ->
+    if (raw == null || raw.isEmpty()) {
+        return ''
+    }
+
+    String text = raw.replace('\uFEFF', '')
+    StringBuilder out = new StringBuilder(text.length())
+    boolean inString = false
+    boolean escaped = false
+    boolean inLineComment = false
+    boolean inBlockComment = false
+
+    for (int i = 0; i < text.length(); i++) {
+        char c = text.charAt(i)
+        char next = (i + 1 < text.length()) ? text.charAt(i + 1) : '\u0000'
+
+        if (inLineComment) {
+            if (c == '\n' || c == '\r') {
+                inLineComment = false
+                out.append(c)
+            }
+            continue
+        }
+
+        if (inBlockComment) {
+            if (c == '*' && next == '/') {
+                inBlockComment = false
+                i++
+            }
+            continue
+        }
+
+        if (inString) {
+            out.append(c)
+            if (escaped) {
+                escaped = false
+            } else if (c == '\\') {
+                escaped = true
+            } else if (c == '"') {
+                inString = false
+            }
+            continue
+        }
+
+        if (c == '"') {
+            inString = true
+            out.append(c)
+            continue
+        }
+
+        if (c == '/' && next == '/') {
+            inLineComment = true
+            i++
+            continue
+        }
+
+        if (c == '/' && next == '*') {
+            inBlockComment = true
+            i++
+            continue
+        }
+
+        out.append(c)
+    }
+
+    return out.toString()
+}
+
+def stripJsonTrailingCommas = { String raw ->
+    if (raw == null || raw.isEmpty()) {
+        return ''
+    }
+
+    StringBuilder out = new StringBuilder(raw.length())
+    boolean inString = false
+    boolean escaped = false
+
+    for (int i = 0; i < raw.length(); i++) {
+        char c = raw.charAt(i)
+
+        if (inString) {
+            out.append(c)
+            if (escaped) {
+                escaped = false
+            } else if (c == '\\') {
+                escaped = true
+            } else if (c == '"') {
+                inString = false
+            }
+            continue
+        }
+
+        if (c == '"') {
+            inString = true
+            out.append(c)
+            continue
+        }
+
+        if (c == ',') {
+            int j = i + 1
+            while (j < raw.length() && Character.isWhitespace(raw.charAt(j))) {
+                j++
+            }
+            if (j < raw.length()) {
+                char next = raw.charAt(j)
+                if (next == ']' || next == '}') {
+                    continue
+                }
+            }
+        }
+
+        out.append(c)
+    }
+
+    return out.toString()
+}
+
 def readJsonObjectLax = { File source ->
     if (source == null || !source.isFile()) {
         return [:]
@@ -605,8 +721,8 @@ def readJsonObjectLax = { File source ->
     }
 
     try {
-        def parser = new JsonSlurper(type: JsonParserType.LAX)
-        def parsed = parser.parseText(raw)
+        String normalized = stripJsonTrailingCommas(stripJsoncComments(raw))
+        def parsed = new JsonSlurper().parseText(normalized)
         if (parsed instanceof Map) {
             return new LinkedHashMap<>(parsed as Map)
         }
