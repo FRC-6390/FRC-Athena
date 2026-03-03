@@ -7,7 +7,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use arcp_dashboard::{
-    format_signal_value, ControlClient, DashboardState, ManifestItem, TelemetrySubscription,
+    format_signal_value, ControlClient, DashboardState, ManifestItem, ServerStats,
+    TelemetrySubscription,
 };
 use serde::Serialize;
 use tauri::{Emitter, PhysicalPosition, PhysicalSize, State, Window};
@@ -148,7 +149,12 @@ struct DashboardSnapshot {
     update_count: u64,
     uptime_ms: u64,
     server_cpu_percent: Option<f32>,
+    server_cpu_cores: Option<u32>,
     server_rss_bytes: Option<u64>,
+    server_ram_total_bytes: Option<u64>,
+    server_ram_available_bytes: Option<u64>,
+    server_disk_total_bytes: Option<u64>,
+    server_disk_available_bytes: Option<u64>,
     host_cpu_percent: Option<f32>,
     host_rss_bytes: Option<u64>,
     signals: Vec<SignalRow>,
@@ -162,7 +168,12 @@ struct DashboardDelta {
     update_count: u64,
     uptime_ms: u64,
     server_cpu_percent: Option<f32>,
+    server_cpu_cores: Option<u32>,
     server_rss_bytes: Option<u64>,
+    server_ram_total_bytes: Option<u64>,
+    server_ram_available_bytes: Option<u64>,
+    server_disk_total_bytes: Option<u64>,
+    server_disk_available_bytes: Option<u64>,
     host_cpu_percent: Option<f32>,
     host_rss_bytes: Option<u64>,
     manifest_revision: u64,
@@ -293,11 +304,27 @@ impl ProcessStatsSampler {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct ServerHealthSnapshot {
+    cpu_percent: Option<f32>,
+    cpu_cores: Option<u32>,
+    rss_bytes: Option<u64>,
+    ram_total_bytes: Option<u64>,
+    ram_available_bytes: Option<u64>,
+    disk_total_bytes: Option<u64>,
+    disk_available_bytes: Option<u64>,
+}
+
 struct ServerStatsCache {
     last_refresh: Instant,
     unsupported: bool,
     cpu_percent: Option<f32>,
+    cpu_cores: Option<u32>,
     rss_bytes: Option<u64>,
+    ram_total_bytes: Option<u64>,
+    ram_available_bytes: Option<u64>,
+    disk_total_bytes: Option<u64>,
+    disk_available_bytes: Option<u64>,
 }
 
 impl ServerStatsCache {
@@ -306,7 +333,12 @@ impl ServerStatsCache {
             last_refresh: Instant::now() - SERVER_STATS_REFRESH_INTERVAL,
             unsupported: false,
             cpu_percent: None,
+            cpu_cores: None,
             rss_bytes: None,
+            ram_total_bytes: None,
+            ram_available_bytes: None,
+            disk_total_bytes: None,
+            disk_available_bytes: None,
         }
     }
 
@@ -318,32 +350,68 @@ impl ServerStatsCache {
 
         let Some(client) = control.client.as_mut() else {
             self.cpu_percent = None;
+            self.cpu_cores = None;
             self.rss_bytes = None;
+            self.ram_total_bytes = None;
+            self.ram_available_bytes = None;
+            self.disk_total_bytes = None;
+            self.disk_available_bytes = None;
             return;
         };
 
-        match client.server_stats() {
-            Ok((cpu_percent, rss_bytes)) => {
+        match client.server_health() {
+            Ok(ServerStats {
+                cpu_percent,
+                rss_bytes,
+                cpu_cores,
+                ram_total_bytes,
+                ram_available_bytes,
+                disk_total_bytes,
+                disk_available_bytes,
+            }) => {
                 self.cpu_percent = cpu_percent;
+                self.cpu_cores = cpu_cores;
                 self.rss_bytes = rss_bytes;
+                self.ram_total_bytes = ram_total_bytes;
+                self.ram_available_bytes = ram_available_bytes;
+                self.disk_total_bytes = disk_total_bytes;
+                self.disk_available_bytes = disk_available_bytes;
             }
             Err(err) if err.kind() == io::ErrorKind::Unsupported => {
                 self.unsupported = true;
                 self.cpu_percent = None;
+                self.cpu_cores = None;
                 self.rss_bytes = None;
+                self.ram_total_bytes = None;
+                self.ram_available_bytes = None;
+                self.disk_total_bytes = None;
+                self.disk_available_bytes = None;
             }
             Err(err) => {
                 control.client = None;
                 control.connected = false;
                 control.status = format!("STATS failed: {err}; reconnecting...");
                 self.cpu_percent = None;
+                self.cpu_cores = None;
                 self.rss_bytes = None;
+                self.ram_total_bytes = None;
+                self.ram_available_bytes = None;
+                self.disk_total_bytes = None;
+                self.disk_available_bytes = None;
             }
         }
     }
 
-    fn snapshot(&self) -> (Option<f32>, Option<u64>) {
-        (self.cpu_percent, self.rss_bytes)
+    fn snapshot(&self) -> ServerHealthSnapshot {
+        ServerHealthSnapshot {
+            cpu_percent: self.cpu_percent,
+            cpu_cores: self.cpu_cores,
+            rss_bytes: self.rss_bytes,
+            ram_total_bytes: self.ram_total_bytes,
+            ram_available_bytes: self.ram_available_bytes,
+            disk_total_bytes: self.disk_total_bytes,
+            disk_available_bytes: self.disk_available_bytes,
+        }
     }
 }
 
@@ -1133,7 +1201,7 @@ fn dashboard_snapshot(runtime: State<'_, AppRuntime>) -> Result<DashboardSnapsho
         .as_ref()
         .ok_or_else(|| String::from("not connected"))?;
 
-    let (connected, status, server_cpu_percent, server_rss_bytes) = {
+    let (connected, status, server_health) = {
         let mut control = session
             .control
             .lock()
@@ -1143,13 +1211,7 @@ fn dashboard_snapshot(runtime: State<'_, AppRuntime>) -> Result<DashboardSnapsho
             .lock()
             .map_err(|_| String::from("server stats lock poisoned"))?;
         server_stats.maybe_refresh(&mut control);
-        let (server_cpu_percent, server_rss_bytes) = server_stats.snapshot();
-        (
-            control.connected,
-            control.status.clone(),
-            server_cpu_percent,
-            server_rss_bytes,
-        )
+        (control.connected, control.status.clone(), server_stats.snapshot())
     };
 
     let (signal_count, update_count, uptime_ms, signals) = {
@@ -1183,8 +1245,13 @@ fn dashboard_snapshot(runtime: State<'_, AppRuntime>) -> Result<DashboardSnapsho
         signal_count,
         update_count,
         uptime_ms,
-        server_cpu_percent,
-        server_rss_bytes,
+        server_cpu_percent: server_health.cpu_percent,
+        server_cpu_cores: server_health.cpu_cores,
+        server_rss_bytes: server_health.rss_bytes,
+        server_ram_total_bytes: server_health.ram_total_bytes,
+        server_ram_available_bytes: server_health.ram_available_bytes,
+        server_disk_total_bytes: server_health.disk_total_bytes,
+        server_disk_available_bytes: server_health.disk_available_bytes,
         host_cpu_percent,
         host_rss_bytes,
         signals,
@@ -1205,7 +1272,7 @@ fn dashboard_delta(
         .as_ref()
         .ok_or_else(|| String::from("not connected"))?;
 
-    let (connected, status, server_cpu_percent, server_rss_bytes) = {
+    let (connected, status, server_health) = {
         let mut control = session
             .control
             .lock()
@@ -1215,13 +1282,7 @@ fn dashboard_delta(
             .lock()
             .map_err(|_| String::from("server stats lock poisoned"))?;
         server_stats.maybe_refresh(&mut control);
-        let (server_cpu_percent, server_rss_bytes) = server_stats.snapshot();
-        (
-            control.connected,
-            control.status.clone(),
-            server_cpu_percent,
-            server_rss_bytes,
-        )
+        (control.connected, control.status.clone(), server_stats.snapshot())
     };
 
     let (signal_count, update_count, uptime_ms, manifest_revision, full_snapshot, signals) = {
@@ -1296,8 +1357,13 @@ fn dashboard_delta(
         signal_count,
         update_count,
         uptime_ms,
-        server_cpu_percent,
-        server_rss_bytes,
+        server_cpu_percent: server_health.cpu_percent,
+        server_cpu_cores: server_health.cpu_cores,
+        server_rss_bytes: server_health.rss_bytes,
+        server_ram_total_bytes: server_health.ram_total_bytes,
+        server_ram_available_bytes: server_health.ram_available_bytes,
+        server_disk_total_bytes: server_health.disk_total_bytes,
+        server_disk_available_bytes: server_health.disk_available_bytes,
         host_cpu_percent,
         host_rss_bytes,
         manifest_revision,

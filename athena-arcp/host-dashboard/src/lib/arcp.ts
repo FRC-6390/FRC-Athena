@@ -18,7 +18,12 @@ export type DashboardSnapshot = {
   update_count: number;
   uptime_ms: number;
   server_cpu_percent: number | null;
+  server_cpu_cores: number | null;
   server_rss_bytes: number | null;
+  server_ram_total_bytes: number | null;
+  server_ram_available_bytes: number | null;
+  server_disk_total_bytes: number | null;
+  server_disk_available_bytes: number | null;
   host_cpu_percent: number | null;
   host_rss_bytes: number | null;
   signals: SignalRow[];
@@ -31,7 +36,12 @@ export type DashboardDelta = {
   update_count: number;
   uptime_ms: number;
   server_cpu_percent: number | null;
+  server_cpu_cores: number | null;
   server_rss_bytes: number | null;
+  server_ram_total_bytes: number | null;
+  server_ram_available_bytes: number | null;
+  server_disk_total_bytes: number | null;
+  server_disk_available_bytes: number | null;
   host_cpu_percent: number | null;
   host_rss_bytes: number | null;
   manifest_revision: number;

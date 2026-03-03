@@ -31,6 +31,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -109,6 +110,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final String AUTO_FOLLOWER_ROTATION_PID_WIDGET_KEY = "Athena/Auto/Follower/Pid/Rotation";
     private static final Pose2d[] EMPTY_POSE2D_ARRAY = new Pose2d[0];
     private static final String EMPTY_AUTO_TRAJECTORY_SIGNATURE = "";
+    private static final int ARCP_AUTO_TRAJECTORY_MAX_POINTS = 400;
 
     public enum RuntimeMode {
         AUTO,
@@ -1544,6 +1546,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             publisher.put("Athena/Auto/Follower/output/vyMps", output.vyMetersPerSecond);
             publisher.put("Athena/Auto/Follower/output/omegaRadPerSec", output.omegaRadiansPerSecond);
         }
+        RobotLocalization<?> localizationRef = localization;
+        if (localizationRef != null) {
+            RobotLocalizationConfig cfg = localizationRef.getLocalizationConfig();
+            if (cfg != null) {
+                publishArcpAutoFollowerPidSignals(
+                        publisher,
+                        "Athena/Auto/Follower/Pid/translation",
+                        cfg.translation());
+                publishArcpAutoFollowerPidSignals(
+                        publisher,
+                        "Athena/Auto/Follower/Pid/rotation",
+                        cfg.rotation());
+            }
+        }
 
         RobotAuto.AutoRoutine selectedRoutine = resolveArcpSelectedAutoRoutine(routines);
         publisher.put(
@@ -1558,8 +1574,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             publisher.put("Athena/Auto/Selected/reference", "");
             publisher.put("Athena/Auto/Selected/hasStartingPose", false);
             publisher.put("Athena/Auto/Selected/hasTrajectory", false);
-            publisher.put("Athena/Auto/Selected/trajectoryPointCount", 0.0);
+            publisher.put("Athena/Auto/Selected/trajectoryPointCount", 0L);
+            publisher.put("Athena/Auto/Selected/trajectoryRenderPointCount", 0L);
             publisher.put("Athena/Auto/Selected/trajectory", "[]");
+            publisher.put("Athena/Auto/Program/id", "");
+            publisher.put("Athena/Auto/Program/displayName", "");
+            publisher.put("Athena/Auto/Program/source", "");
+            publisher.put("Athena/Auto/Program/reference", "");
+            publisher.put("Athena/Auto/Program/hasStartingPose", false);
+            publisher.put("Athena/Auto/Program/hasTrajectory", false);
+            publisher.put("Athena/Auto/Program/trajectoryPointCount", 0L);
+            publisher.put("Athena/Auto/Program/trajectoryRenderPointCount", 0L);
+            publisher.put("Athena/Auto/Program/trajectory", "[]");
             return;
         }
 
@@ -1568,6 +1594,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         publisher.put("Athena/Auto/Selected/source", selectedRoutine.source().name());
         publisher.put("Athena/Auto/Selected/reference", selectedRoutine.reference());
         publisher.put("Athena/Auto/Selected/hasStartingPose", selectedRoutine.hasStartingPose());
+        publisher.put("Athena/Auto/Program/id", selectedRoutine.key().id());
+        publisher.put("Athena/Auto/Program/displayName", selectedRoutine.key().displayName());
+        publisher.put("Athena/Auto/Program/source", selectedRoutine.source().name());
+        publisher.put("Athena/Auto/Program/reference", selectedRoutine.reference());
+        publisher.put("Athena/Auto/Program/hasStartingPose", selectedRoutine.hasStartingPose());
 
         RobotAuto.AutoRoutine chooserSelected = autos.selection().selected().orElse(null);
         boolean usingChooserSelection = chooserSelected != null
@@ -1583,9 +1614,36 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         List<Pose2d> poses = selectedPoses.orElse(List.of());
         int trajectoryPointCount = poses.size();
+        List<Pose2d> renderPoses = sampleArcpTrajectory(poses, ARCP_AUTO_TRAJECTORY_MAX_POINTS);
+        String trajectoryJson = toArcpFieldTrajectoryJson(renderPoses);
+        int renderPointCount = renderPoses.size();
         publisher.put("Athena/Auto/Selected/hasTrajectory", trajectoryPointCount > 0);
-        publisher.put("Athena/Auto/Selected/trajectoryPointCount", trajectoryPointCount);
-        publisher.put("Athena/Auto/Selected/trajectory", toArcpFieldTrajectoryJson(poses));
+        publisher.put("Athena/Auto/Selected/trajectoryPointCount", (long) trajectoryPointCount);
+        publisher.put("Athena/Auto/Selected/trajectoryRenderPointCount", (long) renderPointCount);
+        publisher.put("Athena/Auto/Selected/trajectory", trajectoryJson);
+        publisher.put("Athena/Auto/Program/hasTrajectory", trajectoryPointCount > 0);
+        publisher.put("Athena/Auto/Program/trajectoryPointCount", (long) trajectoryPointCount);
+        publisher.put("Athena/Auto/Program/trajectoryRenderPointCount", (long) renderPointCount);
+        publisher.put("Athena/Auto/Program/trajectory", trajectoryJson);
+    }
+
+    private static void publishArcpAutoFollowerPidSignals(
+            ARCP publisher,
+            String rootPath,
+            HolonomicPidConstants constants) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        boolean available = constants != null;
+        publisher.put(rootPath + "/available", available);
+        if (!available) {
+            return;
+        }
+        publisher.put(rootPath + "/kP", constants.kP());
+        publisher.put(rootPath + "/kI", constants.kI());
+        publisher.put(rootPath + "/kD", constants.kD());
+        publisher.put(rootPath + "/iZone", constants.iZone());
+        publisher.put(rootPath + "/inverted", constants.inverted());
     }
 
     private RobotAuto.AutoRoutine resolveArcpSelectedAutoRoutine(List<RobotAuto.AutoRoutine> routines) {
@@ -1641,16 +1699,58 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return out.toString();
     }
 
+    private static List<Pose2d> sampleArcpTrajectory(List<Pose2d> poses, int maxPoints) {
+        if (poses == null || poses.isEmpty()) {
+            return List.of();
+        }
+        int resolvedMaxPoints = Math.max(2, maxPoints);
+        List<Pose2d> filtered = new ArrayList<>(poses.size());
+        for (Pose2d pose : poses) {
+            if (pose != null) {
+                filtered.add(pose);
+            }
+        }
+        if (filtered.isEmpty() || filtered.size() <= resolvedMaxPoints) {
+            return filtered;
+        }
+        int lastIndex = filtered.size() - 1;
+        int denominator = resolvedMaxPoints - 1;
+        List<Pose2d> sampled = new ArrayList<>(resolvedMaxPoints);
+        for (int i = 0; i < resolvedMaxPoints; i++) {
+            int index = (int) (((long) i * lastIndex) / denominator);
+            sampled.add(filtered.get(index));
+        }
+        return sampled;
+    }
+
     private void publishArcpLocalizationSignals(ARCP publisher) {
         if (publisher == null || localization == null) {
             return;
         }
+        String poseXPath = "Athena/Localization/Pose/xMeters";
+        String poseYPath = "Athena/Localization/Pose/yMeters";
+        String poseHeadingPath = "Athena/Localization/Pose/headingDeg";
         String updatesSuppressedPath = "Athena/Localization/Status/updatesSuppressed";
         String visionEnabledPath = "Athena/Localization/Status/visionEnabled";
         String autoPoseNamePath = "Athena/Localization/Status/autoPoseName";
+        String slipOverrideEnabledPath = "Athena/Localization/Slip/overrideEnabled";
+        String slipEnabledPath = "Athena/Localization/Slip/enabled";
+        String slipYawRateThresholdPath = "Athena/Localization/Slip/yawRateThresholdRadPerSec";
+        String slipYawRateDisagreementPath = "Athena/Localization/Slip/yawRateDisagreementRadPerSec";
+        String slipAccelThresholdPath = "Athena/Localization/Slip/accelThresholdMps2";
+        String slipAccelDisagreementPath = "Athena/Localization/Slip/accelDisagreementMps2";
+        String slipHoldSecondsPath = "Athena/Localization/Slip/holdSeconds";
+        String slipVisionStdDevScalePath = "Athena/Localization/Slip/visionStdDevScale";
+        String slipProcessStdDevScalePath = "Athena/Localization/Slip/processStdDevScale";
 
         publisher.writableBoolean(updatesSuppressedPath).onSetBoolean(localization::setSuppressUpdates);
         publisher.writableBoolean(visionEnabledPath).onSetBoolean(value -> localization.enableVisionForLocalization(value));
+        publisher.writableDouble(poseXPath).onSetDouble(value ->
+                applyLocalizationPoseSetpoint(localization, value, null, null));
+        publisher.writableDouble(poseYPath).onSetDouble(value ->
+                applyLocalizationPoseSetpoint(localization, null, value, null));
+        publisher.writableDouble(poseHeadingPath).onSetDouble(value ->
+                applyLocalizationPoseSetpoint(localization, null, null, value));
         publisher.writableString(autoPoseNamePath).onSet(value -> {
             if (value == null) {
                 return;
@@ -1661,11 +1761,44 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             localization.getLocalizationConfig().poses().autoPoseName(trimmed);
         });
+        publisher.writableBoolean(slipOverrideEnabledPath).onSetBoolean(localization::setBackendOverrideEnabled);
+        publisher.writableBoolean(slipEnabledPath).onSetBoolean(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipDetectionEnabled(value),
+                true));
+        publisher.writableDouble(slipYawRateThresholdPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipYawRateThreshold(value),
+                true));
+        publisher.writableDouble(slipYawRateDisagreementPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipYawRateDisagreement(value),
+                true));
+        publisher.writableDouble(slipAccelThresholdPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipAccelThreshold(value),
+                true));
+        publisher.writableDouble(slipAccelDisagreementPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipAccelDisagreement(value),
+                true));
+        publisher.writableDouble(slipHoldSecondsPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipHoldSeconds(value),
+                true));
+        publisher.writableDouble(slipVisionStdDevScalePath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipVisionStdDevScale(value),
+                true));
+        publisher.writableDouble(slipProcessStdDevScalePath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipProcessStdDevScale(value),
+                true));
 
         Pose2d pose = localization.pose();
-        publisher.put("Athena/Localization/Pose/xMeters", pose.getX());
-        publisher.put("Athena/Localization/Pose/yMeters", pose.getY());
-        publisher.put("Athena/Localization/Pose/headingDeg", pose.getRotation().getDegrees());
+        publisher.put(poseXPath, pose.getX());
+        publisher.put(poseYPath, pose.getY());
+        publisher.put(poseHeadingPath, pose.getRotation().getDegrees());
 
         Pose3d pose3d = localization.pose3d();
         publisher.put("Athena/Localization/Pose3d/xMeters", pose3d.getX());
@@ -1703,6 +1836,71 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         publisher.put("Athena/Localization/Status/autoPoseOptions", poseOptions);
         publisher.put(autoPoseNamePath, poseName != null ? poseName : "");
         publisher.put("Athena/Localization/Status/visionEnabled", visionEnabled);
+
+        RobotLocalizationConfig.BackendConfig slipOverrideConfig = localization.getBackendOverrideConfig();
+        publisher.put(slipOverrideEnabledPath, localization.isBackendOverrideEnabled());
+        publisher.put(slipEnabledPath, slipOverrideConfig.slipDetectionEnabled());
+        publisher.put(slipYawRateThresholdPath, slipOverrideConfig.slipYawRateThreshold());
+        publisher.put(slipYawRateDisagreementPath, slipOverrideConfig.slipYawRateDisagreement());
+        publisher.put(slipAccelThresholdPath, slipOverrideConfig.slipAccelThreshold());
+        publisher.put(slipAccelDisagreementPath, slipOverrideConfig.slipAccelDisagreement());
+        publisher.put(slipHoldSecondsPath, slipOverrideConfig.slipHoldSeconds());
+        publisher.put(slipVisionStdDevScalePath, slipOverrideConfig.slipVisionStdDevScale());
+        publisher.put(slipProcessStdDevScalePath, slipOverrideConfig.slipProcessStdDevScale());
+
+        Map<String, Object> localizationSummary = localization.getDiagnosticsSummary();
+        Object slipActiveValue = localizationSummary.get("slipActive");
+        boolean slipActive = slipActiveValue instanceof Boolean bool && bool;
+        Object slipModeValue = localizationSummary.get("slipMode");
+        String slipMode = slipModeValue != null ? slipModeValue.toString() : "";
+        Object slipCauseValue = localizationSummary.get("slipCause");
+        String slipCause = slipCauseValue != null ? slipCauseValue.toString() : "";
+        Object slipScoreValue = localizationSummary.get("slipScore");
+        double slipScore = slipScoreValue instanceof Number number ? number.doubleValue() : 0.0;
+        publisher.put("Athena/Localization/Slip/active", slipActive);
+        publisher.put("Athena/Localization/Slip/mode", slipMode);
+        publisher.put("Athena/Localization/Slip/cause", slipCause);
+        publisher.put("Athena/Localization/Slip/score", slipScore);
+    }
+
+    private static void applyLocalizationBackendOverride(
+            RobotLocalization<?> localization,
+            UnaryOperator<RobotLocalizationConfig.BackendConfig> updater,
+            boolean enableOverride) {
+        if (localization == null || updater == null) {
+            return;
+        }
+        RobotLocalizationConfig.BackendConfig current = localization.getBackendOverrideConfig();
+        RobotLocalizationConfig.BackendConfig updated = updater.apply(current);
+        localization.setBackendOverrideConfig(updated != null ? updated : current);
+        if (enableOverride) {
+            localization.setBackendOverrideEnabled(true);
+        }
+    }
+
+    private static void applyLocalizationPoseSetpoint(
+            RobotLocalization<?> localization,
+            Double xMeters,
+            Double yMeters,
+            Double headingDeg) {
+        if (localization == null) {
+            return;
+        }
+        Pose2d currentPose = localization.pose();
+        if (currentPose == null) {
+            currentPose = new Pose2d();
+        }
+        double resolvedX = xMeters != null && Double.isFinite(xMeters) ? xMeters : currentPose.getX();
+        double resolvedY = yMeters != null && Double.isFinite(yMeters) ? yMeters : currentPose.getY();
+        double resolvedHeadingDeg = headingDeg != null && Double.isFinite(headingDeg)
+                ? headingDeg
+                : currentPose.getRotation().getDegrees();
+
+        RobotLocalizationConfig cfg = localization.getLocalizationConfig();
+        String poseName = cfg != null && cfg.autoPoseName() != null && !cfg.autoPoseName().isBlank()
+                ? cfg.autoPoseName().trim()
+                : "field";
+        localization.resetPose(poseName, new Pose2d(resolvedX, resolvedY, Rotation2d.fromDegrees(resolvedHeadingDeg)));
     }
 
     private void publishArcpDrivetrainSignals(ARCP publisher) {
@@ -2002,6 +2200,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
         String chooserPath = "Athena/Auto/Chooser/selectedId";
         String selectedNamePath = "Athena/Auto/Selected/displayName";
+        String selectedTrajectoryPath = "Athena/Auto/Selected/trajectory";
+        String programTrajectoryPath = "Athena/Auto/Program/trajectory";
         int chooserSignalId = publisher.existingSignalId(chooserPath);
 
         List<Map<String, Object>> chooserOptions = new ArrayList<>();
@@ -2019,7 +2219,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             chooserOptions.add(dropdownOption(display, id));
         }
 
-        int trajectorySignalId = publisher.existingSignalId("Athena/Auto/Selected/trajectory");
+        int trajectorySignalId = firstExistingSignalId(publisher, programTrajectoryPath, selectedTrajectoryPath);
         int fieldXSignalId = publisher.existingSignalId("Athena/Localization/Pose/xMeters");
         int fieldYSignalId = publisher.existingSignalId("Athena/Localization/Pose/yMeters");
         int fieldHeadingSignalId = publisher.existingSignalId("Athena/Localization/Pose/headingDeg");
@@ -2046,7 +2246,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .id("w-auto-field-preview")
                 .kind("field")
                 .title("Auto Field Preview")
-                .signalId(firstExistingSignalId(publisher, "Athena/Auto/Selected/trajectory", chooserPath))
+                .signalId(firstExistingSignalId(publisher, programTrajectoryPath, selectedTrajectoryPath, chooserPath))
                 .layout(0, 1, 14, 8)
                 .config("trajectorySignalId", trajectorySignalId)
                 .config("xSignalId", fieldXSignalId)
@@ -2096,12 +2296,32 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         String visionEnabledPath = "Athena/Localization/Status/visionEnabled";
         String updatesSuppressedPath = "Athena/Localization/Status/updatesSuppressed";
         String autoPoseNamePath = "Athena/Localization/Status/autoPoseName";
+        String slipOverrideEnabledPath = "Athena/Localization/Slip/overrideEnabled";
+        String slipEnabledPath = "Athena/Localization/Slip/enabled";
+        String slipYawRateThresholdPath = "Athena/Localization/Slip/yawRateThresholdRadPerSec";
+        String slipYawRateDisagreementPath = "Athena/Localization/Slip/yawRateDisagreementRadPerSec";
+        String slipAccelThresholdPath = "Athena/Localization/Slip/accelThresholdMps2";
+        String slipAccelDisagreementPath = "Athena/Localization/Slip/accelDisagreementMps2";
+        String slipHoldSecondsPath = "Athena/Localization/Slip/holdSeconds";
+        String slipVisionStdDevScalePath = "Athena/Localization/Slip/visionStdDevScale";
+        String slipProcessStdDevScalePath = "Athena/Localization/Slip/processStdDevScale";
+        String slipScorePath = "Athena/Localization/Slip/score";
 
         int headingId = publisher.existingSignalId(headingPath);
         int normalizedSpeedId = publisher.existingSignalId(normalizedSpeedPath);
         int visionEnabledId = publisher.existingSignalId(visionEnabledPath);
         int updatesSuppressedId = publisher.existingSignalId(updatesSuppressedPath);
         int autoPoseNameId = publisher.existingSignalId(autoPoseNamePath);
+        int slipOverrideEnabledId = publisher.existingSignalId(slipOverrideEnabledPath);
+        int slipEnabledId = publisher.existingSignalId(slipEnabledPath);
+        int slipScoreId = publisher.existingSignalId(slipScorePath);
+        int slipYawRateThresholdId = publisher.existingSignalId(slipYawRateThresholdPath);
+        int slipYawRateDisagreementId = publisher.existingSignalId(slipYawRateDisagreementPath);
+        int slipAccelThresholdId = publisher.existingSignalId(slipAccelThresholdPath);
+        int slipAccelDisagreementId = publisher.existingSignalId(slipAccelDisagreementPath);
+        int slipHoldSecondsId = publisher.existingSignalId(slipHoldSecondsPath);
+        int slipVisionStdDevScaleId = publisher.existingSignalId(slipVisionStdDevScalePath);
+        int slipProcessStdDevScaleId = publisher.existingSignalId(slipProcessStdDevScalePath);
 
         int robotVxId = publisher.existingSignalId("Athena/Localization/Speeds/robot/vxMps");
         int robotVyId = publisher.existingSignalId("Athena/Localization/Speeds/robot/vyMps");
@@ -2110,13 +2330,35 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         int fieldVyId = publisher.existingSignalId("Athena/Localization/Speeds/field/vyMps");
         int fieldOmegaId = publisher.existingSignalId("Athena/Localization/Speeds/field/omegaRadPerSec");
 
-        int fieldXId = publisher.existingSignalId("Athena/Localization/FieldPose/xMeters");
-        int fieldZId = publisher.existingSignalId("Athena/Localization/FieldPose/zMeters");
-        int fieldThetaId = publisher.existingSignalId("Athena/Localization/FieldPose/thetaDeg");
+        int poseXId = publisher.existingSignalId("Athena/Localization/Pose/xMeters");
+        int poseYId = publisher.existingSignalId("Athena/Localization/Pose/yMeters");
+        int poseHeadingId = publisher.existingSignalId("Athena/Localization/Pose/headingDeg");
 
         List<Map<String, Object>> autoPoseOptions = new ArrayList<>();
         for (String poseName : sortedLocalizationPoseNames()) {
             autoPoseOptions.add(dropdownOption(poseName, poseName));
+        }
+        List<Map<String, Object>> slipParams = new ArrayList<>();
+        if (slipYawRateThresholdId > 0) {
+            addControllerParam(slipParams, "yaw_rate_threshold", "Yaw Rate Threshold", slipYawRateThresholdId);
+        }
+        if (slipYawRateDisagreementId > 0) {
+            addControllerParam(slipParams, "yaw_rate_disagreement", "Yaw Rate Disagree", slipYawRateDisagreementId);
+        }
+        if (slipAccelThresholdId > 0) {
+            addControllerParam(slipParams, "accel_threshold", "Accel Threshold", slipAccelThresholdId);
+        }
+        if (slipAccelDisagreementId > 0) {
+            addControllerParam(slipParams, "accel_disagreement", "Accel Disagree", slipAccelDisagreementId);
+        }
+        if (slipHoldSecondsId > 0) {
+            addControllerParam(slipParams, "hold_seconds", "Hold Seconds", slipHoldSecondsId);
+        }
+        if (slipVisionStdDevScaleId > 0) {
+            addControllerParam(slipParams, "vision_std_scale", "Vision Std Scale", slipVisionStdDevScaleId);
+        }
+        if (slipProcessStdDevScaleId > 0) {
+            addControllerParam(slipParams, "process_std_scale", "Process Std Scale", slipProcessStdDevScaleId);
         }
 
         page.widget(ArcpDashboardLayout.Widget.builder()
@@ -2188,18 +2430,75 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .layout(20, 4, 4, 1)
                 .config("signalPath", normalizedSpeedPath)
                 .build());
+        if (slipOverrideEnabledId > 0) {
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-localization-slip-override")
+                    .kind("toggle")
+                    .title("Slip Override")
+                    .signalId(slipOverrideEnabledId)
+                    .layout(0, 5, 4, 1)
+                    .config("signalPath", slipOverrideEnabledPath)
+                    .build());
+        }
+        if (slipEnabledId > 0) {
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-localization-slip-enabled")
+                    .kind("toggle")
+                    .title("Slip Detect")
+                    .signalId(slipEnabledId)
+                    .layout(4, 5, 4, 1)
+                    .config("signalPath", slipEnabledPath)
+                    .build());
+        }
+        if (slipScoreId > 0) {
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-localization-slip-score")
+                    .kind("metric")
+                    .title("Slip Score")
+                    .signalId(slipScoreId)
+                    .layout(8, 5, 4, 1)
+                    .config("signalPath", slipScorePath)
+                    .build());
+        }
+        if (!slipParams.isEmpty()) {
+            int slipControllerSignalId = firstExistingSignalId(
+                    publisher,
+                    slipYawRateThresholdPath,
+                    slipEnabledPath,
+                    headingPath);
+            String slipAccordionId = "w-localization-slip-tuner-accordion";
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id(slipAccordionId)
+                    .kind("layout_accordion")
+                    .title("Slip Profile Tuner")
+                    .signalId(slipControllerSignalId)
+                    .layout(12, 5, 12, 1)
+                    .config("collapsed", true)
+                    .config("expandedRows", 3)
+                    .build());
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-localization-slip-tuner")
+                    .kind("controller")
+                    .title("Slip Profile Tuner")
+                    .signalId(slipControllerSignalId)
+                    .layout(0, 0, 12, 3)
+                    .parentLayoutId(slipAccordionId)
+                    .config("topicPath", "Athena/Localization/Slip")
+                    .config("params", slipParams)
+                    .build());
+        }
         page.widget(ArcpDashboardLayout.Widget.builder()
                 .id("w-localization-field-view")
                 .kind("field")
-                .title("Field Pose (X/Z/Theta)")
-                .signalId(firstExistingSignalId(publisher, "Athena/Localization/FieldPose/xMeters", headingPath))
-                .layout(0, 5, 24, 8)
-                .config("xSignalId", fieldXId)
-                .config("ySignalId", fieldZId)
-                .config("headingSignalId", fieldThetaId)
-                .config("allowPoseSet", false)
+                .title("Field Pose (Click To Set)")
+                .signalId(firstExistingSignalId(publisher, "Athena/Localization/Pose/xMeters", headingPath))
+                .layout(0, 6, 24, 7)
+                .config("xSignalId", poseXId)
+                .config("ySignalId", poseYId)
+                .config("headingSignalId", poseHeadingId)
+                .config("allowPoseSet", true)
                 .config("fieldLength", 16.54)
-                .config("fieldWidth", 4.0)
+                .config("fieldWidth", 8.02)
                 .build());
         return page.build();
     }

@@ -140,6 +140,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private NetworkTableEntry backendOverrideEnabledEntry;
     private NetworkTableEntry backendImuStrategyEntry;
     private NetworkTableEntry backendVisionStrategyEntry;
+    private NetworkTableEntry backendSlipDetectionEnabledEntry;
+    private NetworkTableEntry backendSlipYawRateThresholdEntry;
+    private NetworkTableEntry backendSlipYawRateDisagreementEntry;
+    private NetworkTableEntry backendSlipAccelThresholdEntry;
+    private NetworkTableEntry backendSlipAccelDisagreementEntry;
+    private NetworkTableEntry backendSlipHoldSecondsEntry;
+    private NetworkTableEntry backendSlipVisionStdDevScaleEntry;
+    private NetworkTableEntry backendSlipProcessStdDevScaleEntry;
 
     private double visionMaxLatencySeconds = 0.9;
     private double visionOutlierTranslationMeters = 2.5;
@@ -505,24 +513,134 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         backendOverrideEnabledEntry = backendTable.getEntry("EnableOverride");
         backendImuStrategyEntry = backendTable.getEntry("ImuStrategy");
         backendVisionStrategyEntry = backendTable.getEntry("VisionStrategy");
+        backendSlipDetectionEnabledEntry = backendTable.getEntry("SlipDetectionEnabled");
+        backendSlipYawRateThresholdEntry = backendTable.getEntry("SlipYawRateThreshold");
+        backendSlipYawRateDisagreementEntry = backendTable.getEntry("SlipYawRateDisagreement");
+        backendSlipAccelThresholdEntry = backendTable.getEntry("SlipAccelThreshold");
+        backendSlipAccelDisagreementEntry = backendTable.getEntry("SlipAccelDisagreement");
+        backendSlipHoldSecondsEntry = backendTable.getEntry("SlipHoldSeconds");
+        backendSlipVisionStdDevScaleEntry = backendTable.getEntry("SlipVisionStdDevScale");
+        backendSlipProcessStdDevScaleEntry = backendTable.getEntry("SlipProcessStdDevScale");
 
         backendOverrideEnabledEntry.setBoolean(false);
         RobotLocalizationConfig.BackendConfig base = backendConfig();
         backendImuStrategyEntry.setString(base.imuStrategy().name());
         backendVisionStrategyEntry.setString(base.visionStrategy().name());
+        backendSlipDetectionEnabledEntry.setBoolean(base.slipDetectionEnabled());
+        backendSlipYawRateThresholdEntry.setDouble(base.slipYawRateThreshold());
+        backendSlipYawRateDisagreementEntry.setDouble(base.slipYawRateDisagreement());
+        backendSlipAccelThresholdEntry.setDouble(base.slipAccelThreshold());
+        backendSlipAccelDisagreementEntry.setDouble(base.slipAccelDisagreement());
+        backendSlipHoldSecondsEntry.setDouble(base.slipHoldSeconds());
+        backendSlipVisionStdDevScaleEntry.setDouble(base.slipVisionStdDevScale());
+        backendSlipProcessStdDevScaleEntry.setDouble(base.slipProcessStdDevScale());
     }
 
     // Backend override values are edited directly via NetworkTables under Athena/Localization/Backend.
 
     private RobotLocalizationConfig.BackendConfig applyBackendOverride(RobotLocalizationConfig.BackendConfig base) {
+        if (base == null) {
+            base = RobotLocalizationConfig.BackendConfig.defaults();
+        }
         RobotLocalizationConfig.BackendConfig.ImuStrategy imuStrategy =
-                parseEnum(backendImuStrategyEntry.getString(base.imuStrategy().name()), base.imuStrategy());
+                backendImuStrategyEntry != null
+                        ? parseEnum(backendImuStrategyEntry.getString(base.imuStrategy().name()), base.imuStrategy())
+                        : base.imuStrategy();
         RobotLocalizationConfig.BackendConfig.VisionStrategy visionStrategy =
-                parseEnum(backendVisionStrategyEntry.getString(base.visionStrategy().name()), base.visionStrategy());
+                backendVisionStrategyEntry != null
+                        ? parseEnum(backendVisionStrategyEntry.getString(base.visionStrategy().name()), base.visionStrategy())
+                        : base.visionStrategy();
+        boolean slipDetectionEnabled = backendSlipDetectionEnabledEntry != null
+                ? backendSlipDetectionEnabledEntry.getBoolean(base.slipDetectionEnabled())
+                : base.slipDetectionEnabled();
+        double slipYawRateThreshold = backendSlipYawRateThresholdEntry != null
+                ? backendSlipYawRateThresholdEntry.getDouble(base.slipYawRateThreshold())
+                : base.slipYawRateThreshold();
+        double slipYawRateDisagreement = backendSlipYawRateDisagreementEntry != null
+                ? backendSlipYawRateDisagreementEntry.getDouble(base.slipYawRateDisagreement())
+                : base.slipYawRateDisagreement();
+        double slipAccelThreshold = backendSlipAccelThresholdEntry != null
+                ? backendSlipAccelThresholdEntry.getDouble(base.slipAccelThreshold())
+                : base.slipAccelThreshold();
+        double slipAccelDisagreement = backendSlipAccelDisagreementEntry != null
+                ? backendSlipAccelDisagreementEntry.getDouble(base.slipAccelDisagreement())
+                : base.slipAccelDisagreement();
+        double slipHoldSeconds = backendSlipHoldSecondsEntry != null
+                ? backendSlipHoldSecondsEntry.getDouble(base.slipHoldSeconds())
+                : base.slipHoldSeconds();
+        double slipVisionStdDevScale = backendSlipVisionStdDevScaleEntry != null
+                ? backendSlipVisionStdDevScaleEntry.getDouble(base.slipVisionStdDevScale())
+                : base.slipVisionStdDevScale();
+        double slipProcessStdDevScale = backendSlipProcessStdDevScaleEntry != null
+                ? backendSlipProcessStdDevScaleEntry.getDouble(base.slipProcessStdDevScale())
+                : base.slipProcessStdDevScale();
 
         return base
                 .withImuStrategy(imuStrategy)
-                .withVisionStrategy(visionStrategy);
+                .withVisionStrategy(visionStrategy)
+                .withSlipDetectionEnabled(slipDetectionEnabled)
+                .withSlipYawRateThreshold(slipYawRateThreshold)
+                .withSlipYawRateDisagreement(slipYawRateDisagreement)
+                .withSlipAccelThreshold(slipAccelThreshold)
+                .withSlipAccelDisagreement(slipAccelDisagreement)
+                .withSlipHoldSeconds(slipHoldSeconds)
+                .withSlipVisionStdDevScale(slipVisionStdDevScale)
+                .withSlipProcessStdDevScale(slipProcessStdDevScale);
+    }
+
+    public boolean isBackendOverrideEnabled() {
+        return backendOverrideEnabledEntry != null && backendOverrideEnabledEntry.getBoolean(false);
+    }
+
+    public void setBackendOverrideEnabled(boolean enabled) {
+        if (backendOverrideEnabledEntry != null) {
+            backendOverrideEnabledEntry.setBoolean(enabled);
+        }
+    }
+
+    public RobotLocalizationConfig.BackendConfig getBackendOverrideConfig() {
+        RobotLocalizationConfig.BackendConfig base =
+                localizationConfig != null ? localizationConfig.backend() : RobotLocalizationConfig.BackendConfig.defaults();
+        return applyBackendOverride(base);
+    }
+
+    public RobotLocalizationConfig.BackendConfig getActiveBackendConfig() {
+        return backendConfig();
+    }
+
+    public void setBackendOverrideConfig(RobotLocalizationConfig.BackendConfig config) {
+        RobotLocalizationConfig.BackendConfig resolved =
+                config != null ? config : RobotLocalizationConfig.BackendConfig.defaults();
+        if (backendImuStrategyEntry != null) {
+            backendImuStrategyEntry.setString(resolved.imuStrategy().name());
+        }
+        if (backendVisionStrategyEntry != null) {
+            backendVisionStrategyEntry.setString(resolved.visionStrategy().name());
+        }
+        if (backendSlipDetectionEnabledEntry != null) {
+            backendSlipDetectionEnabledEntry.setBoolean(resolved.slipDetectionEnabled());
+        }
+        if (backendSlipYawRateThresholdEntry != null) {
+            backendSlipYawRateThresholdEntry.setDouble(resolved.slipYawRateThreshold());
+        }
+        if (backendSlipYawRateDisagreementEntry != null) {
+            backendSlipYawRateDisagreementEntry.setDouble(resolved.slipYawRateDisagreement());
+        }
+        if (backendSlipAccelThresholdEntry != null) {
+            backendSlipAccelThresholdEntry.setDouble(resolved.slipAccelThreshold());
+        }
+        if (backendSlipAccelDisagreementEntry != null) {
+            backendSlipAccelDisagreementEntry.setDouble(resolved.slipAccelDisagreement());
+        }
+        if (backendSlipHoldSecondsEntry != null) {
+            backendSlipHoldSecondsEntry.setDouble(resolved.slipHoldSeconds());
+        }
+        if (backendSlipVisionStdDevScaleEntry != null) {
+            backendSlipVisionStdDevScaleEntry.setDouble(resolved.slipVisionStdDevScale());
+        }
+        if (backendSlipProcessStdDevScaleEntry != null) {
+            backendSlipProcessStdDevScaleEntry.setDouble(resolved.slipProcessStdDevScale());
+        }
     }
 
     private static <E extends Enum<E>> E parseEnum(String value, E fallback) {

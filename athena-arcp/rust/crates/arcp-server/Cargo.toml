@@ -11,3 +11,6 @@ path = "src/lib.rs"
 
 [dependencies]
 arcp-core = { path = "../arcp-core" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

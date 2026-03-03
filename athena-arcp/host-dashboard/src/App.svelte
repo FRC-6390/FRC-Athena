@@ -258,6 +258,10 @@
     return token.includes('publish');
   }
 
+  function isNtCompatPath(path: string): boolean {
+    return path.startsWith('Athena/NT4/') || path.startsWith('NT4/');
+  }
+
   function collectConfiguredSignalIds(value: unknown, out: Set<number>): void {
     if (value === null || value === undefined) return;
     if (typeof value === 'number') {
@@ -387,12 +391,8 @@
   let controlTunerTrackedSignalIds = $state<number[]>([]);
 
   const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
-  const ntCompatSignalRows = $derived(
-    signalRows.filter((signal) => signal.path.startsWith('Athena/NT4/'))
-  );
-  const arcpSignalRows = $derived(
-    signalRows.filter((signal) => !signal.path.startsWith('Athena/NT4/'))
-  );
+  const ntCompatSignalRows = $derived(signalRows.filter((signal) => isNtCompatPath(signal.path)));
+  const arcpSignalRows = $derived(signalRows.filter((signal) => !isNtCompatPath(signal.path)));
   const signalById = $derived(new Map(signalRows.map((signal) => [signal.signal_id, signal])));
   const trimmedQuery = $derived(query.trim());
   const filteredSignals = $derived.by(() => {
@@ -441,9 +441,7 @@
     { key: 'updates', label: 'updates', value: String(snapshot?.update_count ?? 0), valueWidthCh: 7 },
     { key: 'uptime', label: 'uptime', value: snapshot ? formatUptime(snapshot.uptime_ms) : '0m 0s', valueWidthCh: 9 },
     { key: 'server-cpu', label: 'server cpu', value: snapshot ? formatCpu(snapshot.server_cpu_percent) : 'n/a', valueWidthCh: 6 },
-    { key: 'server-rss', label: 'server rss', value: snapshot ? formatMemory(snapshot.server_rss_bytes) : 'n/a', valueWidthCh: 10 },
-    { key: 'ui-cpu', label: 'ui cpu', value: snapshot ? formatCpu(snapshot.host_cpu_percent) : 'n/a', valueWidthCh: 6 },
-    { key: 'ui-rss', label: 'ui rss', value: snapshot ? formatMemory(snapshot.host_rss_bytes) : 'n/a', valueWidthCh: 10 }
+    { key: 'server-rss', label: 'server rss', value: snapshot ? formatMemory(snapshot.server_rss_bytes) : 'n/a', valueWidthCh: 10 }
   ]);
   const staleData = $derived(!connected && snapshot !== null);
   const reconnecting = $derived(!connected && connectInFlight);
@@ -725,7 +723,12 @@
       update_count: previous?.update_count ?? 0,
       uptime_ms: elapsedMs,
       server_cpu_percent: previous?.server_cpu_percent ?? null,
+      server_cpu_cores: previous?.server_cpu_cores ?? null,
       server_rss_bytes: previous?.server_rss_bytes ?? null,
+      server_ram_total_bytes: previous?.server_ram_total_bytes ?? null,
+      server_ram_available_bytes: previous?.server_ram_available_bytes ?? null,
+      server_disk_total_bytes: previous?.server_disk_total_bytes ?? null,
+      server_disk_available_bytes: previous?.server_disk_available_bytes ?? null,
       host_cpu_percent: previous?.host_cpu_percent ?? null,
       host_rss_bytes: previous?.host_rss_bytes ?? null,
       signals
@@ -1551,8 +1554,11 @@
   function normalizeTopicPath(path: string): string {
     const trimmed = path.trim();
     if (!trimmed) return '';
-    const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
-    const withoutAthenaRoot = withoutLeadingSlash.replace(/^athena\/?/i, '');
+    const withoutLeadingSlash = trimmed.replace(/^\/+/, '').replace(/\\/g, '/');
+    const withoutNtCompatRoot = withoutLeadingSlash
+      .replace(/^athena\/nt4\/?/i, '')
+      .replace(/^nt4\/?/i, '');
+    const withoutAthenaRoot = withoutNtCompatRoot.replace(/^athena\/?/i, '');
     const withoutTrailingSlash = withoutAthenaRoot.replace(/\/+$/, '');
     return withoutTrailingSlash ? `/${withoutTrailingSlash}` : '';
   }
@@ -2695,7 +2701,12 @@
           update_count: next.update_count,
           uptime_ms: next.uptime_ms,
           server_cpu_percent: next.server_cpu_percent,
+          server_cpu_cores: next.server_cpu_cores,
           server_rss_bytes: next.server_rss_bytes,
+          server_ram_total_bytes: next.server_ram_total_bytes,
+          server_ram_available_bytes: next.server_ram_available_bytes,
+          server_disk_total_bytes: next.server_disk_total_bytes,
+          server_disk_available_bytes: next.server_disk_available_bytes,
           host_cpu_percent: next.host_cpu_percent,
           host_rss_bytes: next.host_rss_bytes
         };
@@ -2734,7 +2745,12 @@
           update_count: next.update_count,
           uptime_ms: next.uptime_ms,
           server_cpu_percent: next.server_cpu_percent,
+          server_cpu_cores: next.server_cpu_cores,
           server_rss_bytes: next.server_rss_bytes,
+          server_ram_total_bytes: next.server_ram_total_bytes,
+          server_ram_available_bytes: next.server_ram_available_bytes,
+          server_disk_total_bytes: next.server_disk_total_bytes,
+          server_disk_available_bytes: next.server_disk_available_bytes,
           host_cpu_percent: next.host_cpu_percent,
           host_rss_bytes: next.host_rss_bytes,
           signals: nextSignals

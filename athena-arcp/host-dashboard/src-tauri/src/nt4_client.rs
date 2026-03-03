@@ -14,10 +14,11 @@ use arcp_dashboard::{DashboardState, ManifestItem};
 use nt_client::data::r#type::{DataType, NetworkTableData};
 use nt_client::data::SubscriptionOptions;
 use nt_client::subscribe::ReceivedMessage;
+use nt_client::topic::AnnouncedTopic;
 use nt_client::{Client, NTAddr, NewClientOptions};
 
 const NT4_UNSECURE_PORT_DEFAULT: u16 = 5810;
-const NT4_MAX_MIRRORED_TOPICS: usize = 256;
+const NT4_MAX_MIRRORED_TOPICS: usize = 2048;
 const NT4_SIGNAL_ID_START: u16 = 65535;
 const NT4_SIGNAL_ID_MIN: u16 = 50000;
 
@@ -91,6 +92,7 @@ fn run_nt4_client_loop(
             };
 
             let mut connect = Box::pin(client.connect());
+            let mut last_topic_sync = std::time::Instant::now();
             loop {
                 if !running.load(Ordering::SeqCst) {
                     return;
@@ -114,7 +116,19 @@ fn run_nt4_client_loop(
                             &mut next_signal_id,
                         );
                     }
-                    _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                        if last_topic_sync.elapsed() >= Duration::from_millis(500) {
+                            sync_subscriber_topics(
+                                &subscriber,
+                                &state,
+                                &mut topic_bindings,
+                                &mut last_values,
+                                &mut next_signal_id,
+                            )
+                            .await;
+                            last_topic_sync = std::time::Instant::now();
+                        }
+                    }
                 }
             }
 
@@ -123,6 +137,28 @@ fn run_nt4_client_loop(
             }
         }
     });
+}
+
+async fn sync_subscriber_topics(
+    subscriber: &nt_client::subscribe::Subscriber,
+    state: &Arc<Mutex<DashboardState>>,
+    topic_bindings: &mut HashMap<String, Nt4Binding>,
+    last_values: &mut HashMap<u16, SignalValue>,
+    next_signal_id: &mut u16,
+) {
+    let announced = subscriber.topics().await;
+    for topic in announced.values() {
+        let Some(binding) = ensure_binding(
+            topic.name(),
+            *topic.r#type(),
+            state,
+            topic_bindings,
+            next_signal_id,
+        ) else {
+            continue;
+        };
+        apply_cached_topic_value(topic, binding, state, last_values);
+    }
 }
 
 fn resolve_host_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
@@ -144,13 +180,16 @@ fn process_received_message(
 ) {
     match message {
         ReceivedMessage::Announced(topic) => {
-            let _ = ensure_binding(
+            let binding = ensure_binding(
                 topic.name(),
                 *topic.r#type(),
                 state,
                 topic_bindings,
                 next_signal_id,
             );
+            if let Some(binding) = binding {
+                apply_cached_topic_value(&topic, binding, state, last_values);
+            }
         }
         ReceivedMessage::Updated((topic, value)) => {
             let Some(binding) = ensure_binding(
@@ -184,6 +223,33 @@ fn process_received_message(
         ReceivedMessage::UpdateProperties(_) => {}
         ReceivedMessage::Unannounced { .. } => {}
     }
+}
+
+fn apply_cached_topic_value(
+    topic: &AnnouncedTopic,
+    binding: Nt4Binding,
+    state: &Arc<Mutex<DashboardState>>,
+    last_values: &mut HashMap<u16, SignalValue>,
+) {
+    let Some(value) = topic.value() else {
+        return;
+    };
+    let Some(signal_value) = convert_value(*topic.r#type(), value) else {
+        return;
+    };
+    if signal_value.signal_type() != binding.signal_type {
+        return;
+    }
+    if last_values
+        .get(&binding.signal_id)
+        .is_some_and(|previous| previous == &signal_value)
+    {
+        return;
+    }
+    if let Ok(mut guard) = state.lock() {
+        guard.apply_update(binding.signal_id, signal_value.clone());
+    }
+    last_values.insert(binding.signal_id, signal_value);
 }
 
 fn ensure_binding(
@@ -278,15 +344,14 @@ fn to_arcp_nt4_path(nt_topic_path: &str) -> Option<String> {
         return None;
     }
 
-    if !normalized.starts_with("Athena/") {
-        return None;
+    if normalized.starts_with("Athena/") {
+        normalized = &normalized["Athena/".len()..];
+        if normalized.is_empty() {
+            return None;
+        }
+        return Some(format!("Athena/NT4/{normalized}"));
     }
-    normalized = &normalized["Athena/".len()..];
-    if normalized.is_empty() {
-        return None;
-    }
-
-    Some(format!("Athena/NT4/{normalized}"))
+    Some(format!("NT4/{normalized}"))
 }
 
 fn map_signal_type(nt_data_type: DataType) -> Option<SignalType> {
@@ -317,5 +382,30 @@ fn convert_value(nt_data_type: DataType, value: &rmpv::Value) -> Option<SignalVa
         DataType::IntArray => Vec::<i64>::from_value(value).map(SignalValue::I64Array),
         DataType::StringArray => Vec::<String>::from_value(value).map(SignalValue::StrArray),
         DataType::Raw | DataType::Rpc | DataType::Msgpack | DataType::Protobuf => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_arcp_nt4_path;
+
+    #[test]
+    fn maps_athena_topics_to_legacy_nt4_namespace() {
+        let mapped = to_arcp_nt4_path("/Athena/Drivetrain/Speed");
+        assert_eq!(mapped.as_deref(), Some("Athena/NT4/Drivetrain/Speed"));
+    }
+
+    #[test]
+    fn maps_non_athena_topics_to_nt4_namespace() {
+        let mapped = to_arcp_nt4_path("/SmartDashboard/LoopTimeMs");
+        assert_eq!(mapped.as_deref(), Some("NT4/SmartDashboard/LoopTimeMs"));
+    }
+
+    #[test]
+    fn excludes_network_table_config_topics() {
+        assert_eq!(
+            to_arcp_nt4_path("/.schema/NetworkTableConfig"),
+            None
+        );
     }
 }

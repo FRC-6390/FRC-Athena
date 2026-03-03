@@ -54,6 +54,38 @@
     ff: ['ff', 'kff', 'feedforward'],
     izone: ['izone', 'integralzone', 'iz']
   };
+  const CONTROLLER_ROOT_KEYWORDS = [
+    'pid',
+    'pidf',
+    'controller',
+    'control',
+    'loop',
+    'closedloop',
+    'feedforward',
+    'ff',
+    'bangbang',
+    'motionmagic',
+    'profiledpid',
+    'profiledcontroller'
+  ];
+  const EXTRA_WRITE_HINTS = [
+    'setpoint',
+    'target',
+    'goal',
+    'reference',
+    'mode',
+    'enable',
+    'enabled',
+    'tolerance',
+    'tol',
+    'deadband',
+    'threshold',
+    'hysteresis',
+    'minoutput',
+    'maxoutput',
+    'maxvel',
+    'maxaccel'
+  ];
 
   let {
     signals,
@@ -120,27 +152,38 @@
     return Math.abs(value) >= 100 ? value.toFixed(2) : value.toFixed(3);
   }
 
-  function rootFor(path: string): string {
-    const parentPath = parent(path);
-    if (!parentPath) return path;
-    const p = token(leaf(parentPath));
-    if (p === 'pid' || p === 'controller' || p === 'control' || p === 'loop' || p === 'closedloop') {
-      return parent(parentPath) || parentPath;
-    }
-    return parentPath;
+  function hasControllerKeyword(raw: string): boolean {
+    const t = token(raw);
+    return CONTROLLER_ROOT_KEYWORDS.some((keyword) => t.includes(keyword));
   }
 
-  function looksRelated(signal: SignalRow): boolean {
-    if (signal.path.startsWith('Athena/NT4/')) return false;
-    const t = token(signal.path);
-    if (!t) return false;
-    if (t.includes('pid') || t.includes('feedforward') || t.includes('setpoint') || t.includes('target')) return true;
-    if (t.includes('measurement') || t.includes('feedback') || t.includes('output') || t.includes('error')) return true;
-    if (t.includes('autotune') || t.includes('sysid')) return true;
-    for (const aliases of Object.values(PARAM_ALIASES)) {
-      if (aliases.some((alias) => t.includes(alias))) return true;
+  function isNtCompatSignal(signal: SignalRow): boolean {
+    return signal.path.startsWith('Athena/NT4/') || signal.path.startsWith('NT4/');
+  }
+
+  function rootForSignal(signal: SignalRow): string | null {
+    if (isNtCompatSignal(signal)) return null;
+    const parts = split(signal.path);
+    if (parts.length === 0) return null;
+
+    for (let index = parts.length - 1; index >= 0; index--) {
+      if (hasControllerKeyword(parts[index])) {
+        return parts.slice(0, index + 1).join('/');
+      }
     }
-    return signal.access === 'invoke' && (t.includes('start') || t.includes('stop'));
+
+    if (paramKey(signal) !== null) {
+      const parentPath = parent(signal.path);
+      return parentPath || signal.path;
+    }
+
+    return null;
+  }
+
+  function isAssociatedExtra(signal: SignalRow): boolean {
+    if (signal.access !== 'write') return false;
+    const t = token(leaf(signal.path));
+    return EXTRA_WRITE_HINTS.some((hint) => t.includes(hint));
   }
 
   function paramKey(signal: SignalRow): LoopParamKey | null {
@@ -232,11 +275,12 @@
   const loops = $derived.by(() => {
     const roots = new Set<string>();
     for (const signal of signals) {
-      if (!looksRelated(signal)) continue;
-      roots.add(rootFor(signal.path));
+      const root = rootForSignal(signal);
+      if (!root) continue;
+      roots.add(root);
     }
 
-    const all = signals.filter((signal) => !signal.path.startsWith('Athena/NT4/'));
+    const all = signals.filter((signal) => !isNtCompatSignal(signal));
     const parsed: ControlLoop[] = [];
 
     for (const root of roots) {
@@ -289,9 +333,22 @@
         stopAction?.signal_id ?? -1
       ]);
 
-      const extra = scoped.filter((signal) => signal.access === 'write' && !reserved.has(signal.signal_id));
-      const strength = params.length + (setpoint ? 1 : 0) + (measurement ? 1 : 0) + (output ? 1 : 0) + (error ? 1 : 0);
-      if (strength < 2) continue;
+      const extra = scoped.filter((signal) => !reserved.has(signal.signal_id) && isAssociatedExtra(signal));
+      const hasControllerMarker =
+        hasControllerKeyword(root) || scoped.some((signal) => hasControllerKeyword(signal.path));
+      const hasBangBang = token(root).includes('bangbang') || scoped.some((signal) => token(signal.path).includes('bangbang'));
+      const ioCount =
+        Number(setpoint !== null) +
+        Number(measurement !== null) +
+        Number(output !== null) +
+        Number(error !== null);
+      const evidenceScore =
+        (hasControllerMarker ? 2 : 0) +
+        (params.length > 0 ? 2 : 0) +
+        (hasBangBang ? 2 : 0) +
+        (ioCount >= 2 ? 1 : 0) +
+        (startAction !== null || stopAction !== null ? 1 : 0);
+      if (evidenceScore < 4) continue;
 
       parsed.push({
         key: root,
@@ -499,7 +556,7 @@
         {#each visibleLoops as loop (loop.key)}
           <button class={`loop-item ${selectedLoopKey === loop.key ? 'active' : ''}`} onclick={() => (selectedLoopKey = loop.key)}>
             <strong>{loop.label}</strong>
-            <small>{loop.params.length} params · {loop.signals.length} signals</small>
+            <small>{loop.params.length} params - {loop.signals.length} signals</small>
             <code>{loop.root}</code>
           </button>
         {/each}

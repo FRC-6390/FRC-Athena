@@ -36,6 +36,7 @@ name = "arcp-server"
 version = "0.1.0"
 dependencies = [
  "arcp-core",
+ "libc",
 ]
 
 [[package]]
