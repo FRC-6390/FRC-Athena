@@ -7,8 +7,8 @@ import java.util.Objects;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 
 public class SwerveDriveCommand extends Command {
@@ -18,7 +18,6 @@ public class SwerveDriveCommand extends Command {
   private final BooleanSupplier fieldRelativeSupplier;
   //Double suppliers are outputted by the joystick
   private final DoubleSupplier xInput, yInput, thetaInput;
-  private double lastTime;
 
   public SwerveDriveCommand(SwerveDrivetrain driveTrain, DoubleSupplier xInput, DoubleSupplier yInput, DoubleSupplier thetaInput, boolean fieldRelative) {
     this(driveTrain, xInput, yInput, thetaInput, () -> fieldRelative);
@@ -37,8 +36,6 @@ public class SwerveDriveCommand extends Command {
     this.fieldRelativeSupplier = Objects.requireNonNull(fieldRelativeSupplier, "fieldRelativeSupplier");
     addRequirements(driveTrain);
     driveTrain.hardware().neutralMode(MotorNeutralMode.Brake);
-    SmartDashboard.putNumber("FudgeFactor", 1.3);
-    lastTime = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
   }
   
   @Override
@@ -55,28 +52,33 @@ public class SwerveDriveCommand extends Command {
     double ySpeed = yInput.getAsDouble() * driveTrain.speeds().maxVelocity();
     double thetaSpeed = thetaInput.getAsDouble() * driveTrain.speeds().maxAngularVelocity();
 
-    double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
-    double dt = now - lastTime;
-    lastTime = now;
-
-    double fudge = SmartDashboard.getNumber("FudgeFactor", 1.3);
-    double alpha = fudge * thetaSpeed * dt / 2.0;
-
-    SmartDashboard.putNumber("Loop Time", dt);
-
-
-    double cosA = Math.cos(alpha);
-    double sinA = Math.sin(alpha);
-
-    double x = xSpeed * cosA - ySpeed * sinA;
-    double y = xSpeed * sinA + ySpeed * cosA;
-
-
-    ChassisSpeeds chassisSpeeds = fieldRelativeSupplier.getAsBoolean()
-        ? ChassisSpeeds.fromFieldRelativeSpeeds(x, y, thetaSpeed, driveTrain.imu().device().getVirtualAxis("driver"))
-        : new ChassisSpeeds(x, y, thetaSpeed);
+    // Keep command-space shaping linear. Skew correction is handled once in drivetrain update()
+    // via ChassisSpeeds.discretize() immediately before kinematics.
+    ChassisSpeeds chassisSpeeds = computeChassisSpeeds(
+        xSpeed,
+        ySpeed,
+        thetaSpeed,
+        fieldRelativeSupplier.getAsBoolean(),
+        driveTrain.imu().device().getVirtualAxis("driver"));
 
     driveTrain.speeds().set(RobotSpeeds.DRIVE_SOURCE, chassisSpeeds);
+  }
+
+  static ChassisSpeeds computeChassisSpeeds(
+      double xSpeed,
+      double ySpeed,
+      double thetaSpeed,
+      boolean fieldRelative,
+      Rotation2d driverHeading) {
+    if (fieldRelative) {
+      Rotation2d resolvedHeading = driverHeading != null ? driverHeading : Rotation2d.kZero;
+      return ChassisSpeeds.fromFieldRelativeSpeeds(
+          xSpeed,
+          ySpeed,
+          thetaSpeed,
+          resolvedHeading);
+    }
+    return new ChassisSpeeds(xSpeed, ySpeed, thetaSpeed);
   }
 
   @Override
