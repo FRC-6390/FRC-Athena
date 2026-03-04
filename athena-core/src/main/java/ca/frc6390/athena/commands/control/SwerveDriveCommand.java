@@ -7,7 +7,6 @@ import java.util.Objects;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
 
 public class SwerveDriveCommand extends Command {
@@ -39,24 +38,18 @@ public class SwerveDriveCommand extends Command {
   
   @Override
   public void initialize() {
+    driveTrain.bindDriveCommandInputs(xInput, yInput, thetaInput, fieldRelativeSupplier);
+    driveTrain.applyBoundDriveCommandInputs();
   }
 
   @Override
   public void execute() {
-
-    double xSpeed = xInput.getAsDouble() * driveTrain.speeds().maxVelocity();
-    double ySpeed = yInput.getAsDouble() * driveTrain.speeds().maxVelocity();
-    double thetaSpeed = thetaInput.getAsDouble() * driveTrain.speeds().maxAngularVelocity();
-
-    ChassisSpeeds chassisSpeeds = fieldRelativeSupplier.getAsBoolean()
-        ? ChassisSpeeds.fromFieldRelativeSpeeds(xSpeed, ySpeed, thetaSpeed, driveTrain.imu().device().getVirtualAxis("driver"))
-        : new ChassisSpeeds(xSpeed, ySpeed, thetaSpeed);
-
-    driveTrain.speeds().set(RobotSpeeds.DRIVE_SOURCE, chassisSpeeds);
+    driveTrain.applyBoundDriveCommandInputs();
   }
 
   @Override
   public void end(boolean interrupted) {
+    driveTrain.clearDriveCommandInputs();
     driveTrain.speeds().stop(RobotSpeeds.DRIVE_SOURCE);
   }
 

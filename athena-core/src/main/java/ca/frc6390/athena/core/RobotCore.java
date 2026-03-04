@@ -913,6 +913,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         RobotLocalizationConfig resolvedLocalizationConfig =
                 applyAutoConfigToLocalization(config.localizationConfig(), autoConfig);
         drivetrain = timedStartupStep("constructor.driveTrain.build", () -> config.driveTrain.build());
+        configureDrivetrainUpdateLoop(drivetrain);
         localization = timedStartupStep(
                 "constructor.localization.create",
                 () -> createLocalizationForDrivetrain(drivetrain, resolvedLocalizationConfig));
@@ -5159,6 +5160,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             period = 0.02;
         }
         addPeriodic(mechanism::updatePID, period);
+    }
+
+    private void configureDrivetrainUpdateLoop(T drivetrain) {
+        if (!(drivetrain instanceof SwerveDrivetrain swerve)) {
+            return;
+        }
+        double period = swerve.updatePeriodSeconds();
+        double basePeriod = getPeriod();
+        if (!Double.isFinite(period) || period <= 0.0 || period >= basePeriod) {
+            swerve.externalUpdateLoopEnabled(false);
+            return;
+        }
+        swerve.externalUpdateLoopEnabled(true);
+        addPeriodic(swerve::update, period);
     }
 
     public RobotCore<T> registerMechanism(Mechanism... mechs) {

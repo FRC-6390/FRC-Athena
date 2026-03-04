@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.reflect.Field;
+
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import edu.wpi.first.math.controller.PIDController;
@@ -109,5 +111,32 @@ final class SwerveDrivetrainConfigInversionTest {
         assertFalse(base.driveMotor().inverted());
         assertFalse(base.rotationMotor().inverted());
         assertFalse(base.encoder().inverted());
+    }
+
+    @Test
+    void updatePeriodDefaultsToFiveMilliseconds() throws Exception {
+        SwerveDrivetrainConfig config = SwerveDrivetrainConfig.create();
+        assertEquals(0.005, readUpdatePeriodSeconds(config), 1e-9);
+    }
+
+    @Test
+    void updatePeriodCanBeConfiguredThroughControlAndConfigSections() throws Exception {
+        SwerveDrivetrainConfig config = SwerveDrivetrainConfig.create();
+
+        config.control(c -> c.updatePeriodMs(7.5));
+        assertEquals(0.0075, readUpdatePeriodSeconds(config), 1e-9);
+
+        config.config(c -> c.updatePeriodSeconds(0.012));
+        assertEquals(0.012, readUpdatePeriodSeconds(config), 1e-9);
+
+        // Invalid values are ignored and preserve the last valid period.
+        config.control(c -> c.updatePeriodSeconds(-1.0));
+        assertEquals(0.012, readUpdatePeriodSeconds(config), 1e-9);
+    }
+
+    private static double readUpdatePeriodSeconds(SwerveDrivetrainConfig config) throws Exception {
+        Field field = SwerveDrivetrainConfig.class.getDeclaredField("updatePeriodSeconds");
+        field.setAccessible(true);
+        return field.getDouble(config);
     }
 }

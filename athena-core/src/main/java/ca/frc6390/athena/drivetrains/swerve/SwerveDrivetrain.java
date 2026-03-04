@@ -9,9 +9,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
+import java.util.Objects;
 
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotSpeeds;
@@ -75,6 +77,8 @@ public class SwerveDrivetrain extends SubsystemBase
   private static final int MAX_MODULE_BUILD_THREADS = 8;
   private static final AtomicInteger MODULE_BUILD_THREAD_COUNTER = new AtomicInteger(1);
   private static final Pose2d ZERO_POSE = new Pose2d();
+  private static final double DEFAULT_UPDATE_PERIOD_SECONDS = 0.005;
+  private static final double MAX_DISCRETIZE_DT_SECONDS = 0.25;
 
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
@@ -102,6 +106,7 @@ public class SwerveDrivetrain extends SubsystemBase
   private double lastSimulationTimestamp = -1;
   private final ChassisSpeeds lastCommandedSpeeds = new ChassisSpeeds();
   private final ChassisSpeeds calculatedSpeeds = new ChassisSpeeds();
+  private final ChassisSpeeds discretizedSpeeds = new ChassisSpeeds();
   private final ChassisSpeeds lastLimitedSpeeds = new ChassisSpeeds();
   private final ChassisSpeeds velocityLimitedSpeeds = new ChassisSpeeds();
   private final ChassisSpeeds accelerationLimitedSpeeds = new ChassisSpeeds();
@@ -109,6 +114,7 @@ public class SwerveDrivetrain extends SubsystemBase
   private final Translation2d[] moduleLocations;
   private final double maxDriveVelocityMetersPerSecond;
   private double lastMotionLimitTimestampSeconds = Double.NaN;
+  private double lastDiscretizeTimestampSeconds = Double.NaN;
   private SimpleMotorFeedForwardsSendable driveFeedforward;
   private boolean driveFeedforwardEnabled = false;
   private boolean cosineCompensationEnabled = true;
@@ -135,6 +141,9 @@ public class SwerveDrivetrain extends SubsystemBase
   private NtCommandButton ntSysIdDynamicReverseButton;
   private NtCommandButton ntSysIdCancelButton;
   private Command activeSysIdCommand;
+  private volatile double updatePeriodSeconds = DEFAULT_UPDATE_PERIOD_SECONDS;
+  private volatile boolean externalUpdateLoopEnabled = false;
+  private volatile DriveCommandInputs driveCommandInputs;
   
   public SwerveDrivetrain(Imu imu, SwerveModuleConfig... modules) {
 
@@ -184,6 +193,13 @@ public class SwerveDrivetrain extends SubsystemBase
     cosineCompensationError(cosineCompensationErrorThresholdDegrees);
     setNominalVoltage(nominalVoltage);
     
+  }
+
+  private record DriveCommandInputs(
+      DoubleSupplier xInput,
+      DoubleSupplier yInput,
+      DoubleSupplier thetaInput,
+      BooleanSupplier fieldRelativeSupplier) {
   }
 
   private static SwerveModule[] buildModules(SwerveModuleConfig[] moduleConfigs) {
@@ -594,12 +610,77 @@ public class SwerveDrivetrain extends SubsystemBase
   private void resetControlState() {
     robotSpeeds.stop();
     setChassisSpeeds(lastCommandedSpeeds, 0.0, 0.0, 0.0);
+    setChassisSpeeds(discretizedSpeeds, 0.0, 0.0, 0.0);
     setChassisSpeeds(lastLimitedSpeeds, 0.0, 0.0, 0.0);
     lastMotionLimitTimestampSeconds = Double.NaN;
+    lastDiscretizeTimestampSeconds = Double.NaN;
     desiredHeading = imu.getVirtualAxis("drift").getRadians();
     for (SwerveModule module : swerveModules) {
       module.stop();
     }
+  }
+
+  public double updatePeriodSeconds() {
+    return updatePeriodSeconds;
+  }
+
+  public void updatePeriodSeconds(double periodSeconds) {
+    if (Double.isFinite(periodSeconds) && periodSeconds > 0.0) {
+      updatePeriodSeconds = periodSeconds;
+    }
+  }
+
+  public double updatePeriodMs() {
+    return updatePeriodSeconds * 1000.0;
+  }
+
+  public void updatePeriodMs(double periodMs) {
+    updatePeriodSeconds(periodMs / 1000.0);
+  }
+
+  public boolean externalUpdateLoopEnabled() {
+    return externalUpdateLoopEnabled;
+  }
+
+  public void externalUpdateLoopEnabled(boolean enabled) {
+    externalUpdateLoopEnabled = enabled;
+  }
+
+  public void bindDriveCommandInputs(
+      DoubleSupplier xInput,
+      DoubleSupplier yInput,
+      DoubleSupplier thetaInput,
+      BooleanSupplier fieldRelativeSupplier) {
+    driveCommandInputs = new DriveCommandInputs(
+        Objects.requireNonNull(xInput, "xInput"),
+        Objects.requireNonNull(yInput, "yInput"),
+        Objects.requireNonNull(thetaInput, "thetaInput"),
+        Objects.requireNonNull(fieldRelativeSupplier, "fieldRelativeSupplier"));
+  }
+
+  public void clearDriveCommandInputs() {
+    driveCommandInputs = null;
+  }
+
+  public void applyBoundDriveCommandInputs() {
+    applyDriveCommandInputs(driveCommandInputs);
+  }
+
+  private void applyDriveCommandInputs(DriveCommandInputs inputs) {
+    if (inputs == null) {
+      return;
+    }
+    double xSpeed = inputs.xInput().getAsDouble() * robotSpeeds.getMaxVelocity();
+    double ySpeed = inputs.yInput().getAsDouble() * robotSpeeds.getMaxVelocity();
+    double thetaSpeed = inputs.thetaInput().getAsDouble() * robotSpeeds.getMaxAngularVelocity();
+    ChassisSpeeds chassisSpeeds = inputs.fieldRelativeSupplier().getAsBoolean()
+        ? ChassisSpeeds.fromFieldRelativeSpeeds(
+            xSpeed,
+            ySpeed,
+            thetaSpeed,
+            imu.getVirtualAxis("driver"))
+        : new ChassisSpeeds(xSpeed, ySpeed, thetaSpeed);
+    robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, chassisSpeeds);
   }
 
   @Override
@@ -613,6 +694,7 @@ public class SwerveDrivetrain extends SubsystemBase
       return;
     }
 
+    applyBoundDriveCommandInputs();
     robotSpeeds.calculate(calculatedSpeeds);
     ChassisSpeeds speed = calculatedSpeeds;
     double nowSeconds = nowSeconds();
@@ -626,6 +708,7 @@ public class SwerveDrivetrain extends SubsystemBase
       desiredHeading = imu.getVirtualAxis("drift").getRadians();
     }
     speed = applyMotionLimits(speed, nowSeconds);
+    speed = discretizeSpeedsForKinematics(speed, nowSeconds);
 
     calculateModuleStates(speed, desiredModuleStates);
 
@@ -734,7 +817,9 @@ public class SwerveDrivetrain extends SubsystemBase
 
   @Override
   public void periodic() {
-      update();
+      if (!externalUpdateLoopEnabled) {
+        update();
+      }
   }
 
   @Override
@@ -1040,6 +1125,44 @@ public class SwerveDrivetrain extends SubsystemBase
         limited.vyMetersPerSecond,
         limited.omegaRadiansPerSecond);
     return limited;
+  }
+
+  private ChassisSpeeds discretizeSpeedsForKinematics(ChassisSpeeds speeds, double nowSeconds) {
+    double dtSeconds = updatePeriodSeconds;
+    if (Double.isFinite(lastDiscretizeTimestampSeconds)) {
+      double elapsedSeconds = nowSeconds - lastDiscretizeTimestampSeconds;
+      if (Double.isFinite(elapsedSeconds)
+          && elapsedSeconds > 1e-6
+          && elapsedSeconds <= MAX_DISCRETIZE_DT_SECONDS) {
+        dtSeconds = elapsedSeconds;
+      }
+    }
+    lastDiscretizeTimestampSeconds = nowSeconds;
+
+    if (!Double.isFinite(dtSeconds) || dtSeconds <= 0.0 || dtSeconds > MAX_DISCRETIZE_DT_SECONDS) {
+      dtSeconds = DEFAULT_UPDATE_PERIOD_SECONDS;
+    }
+
+    ChassisSpeeds discretized = discretizeChassisSpeeds(speeds, dtSeconds);
+    setChassisSpeeds(
+        discretizedSpeeds,
+        discretized.vxMetersPerSecond,
+        discretized.vyMetersPerSecond,
+        discretized.omegaRadiansPerSecond);
+    return discretizedSpeeds;
+  }
+
+  static ChassisSpeeds discretizeChassisSpeeds(ChassisSpeeds speeds, double dtSeconds) {
+    if (speeds == null) {
+      return new ChassisSpeeds();
+    }
+    if (!Double.isFinite(dtSeconds) || dtSeconds <= 0.0) {
+      return new ChassisSpeeds(
+          speeds.vxMetersPerSecond,
+          speeds.vyMetersPerSecond,
+          speeds.omegaRadiansPerSecond);
+    }
+    return ChassisSpeeds.discretize(speeds, dtSeconds);
   }
 
   private void publishSwerveStatesIfDue(SwerveModuleState[] states, double nowSeconds) {
