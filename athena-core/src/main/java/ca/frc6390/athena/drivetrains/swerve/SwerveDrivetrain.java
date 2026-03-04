@@ -685,7 +685,12 @@ public class SwerveDrivetrain extends SubsystemBase
 
     publishSwerveStatesIfDue(desiredModuleStates, nowSeconds);
 
-    SwerveDriveKinematics.desaturateWheelSpeeds(desiredModuleStates, maxDriveVelocityMetersPerSecond);
+    SwerveDriveKinematics.desaturateWheelSpeeds(
+        desiredModuleStates,
+        speed,
+        maxDriveVelocityMetersPerSecond,
+        robotSpeeds.getMaxVelocity(),
+        robotSpeeds.getMaxAngularVelocity());
 
     setModuleStates(desiredModuleStates);   
 
