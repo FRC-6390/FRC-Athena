@@ -47,11 +47,6 @@ public class SwerveModule implements RobotSendableDevice {
     private boolean hasFilteredDriveVelocity = false;
     private double lastFeedforwardCurrentSpeedMetersPerSecond = 0.0;
     private double lastFeedforwardVolts = 0.0;
-    private double feedforwardTargetDeadbandMpsMin = FEEDFORWARD_TARGET_DEADBAND_MPS_MIN;
-    private double feedforwardTargetDeadbandRatio = FEEDFORWARD_TARGET_DEADBAND_RATIO;
-    private double feedforwardMeasuredSpeedFilterAlpha = FEEDFORWARD_MEASURED_SPEED_FILTER_ALPHA;
-    private boolean cosineCompensationEnabled = true;
-    private double cosineCompensationErrorThresholdRadians = 0.0;
     private ca.frc6390.athena.drivetrains.swerve.sim.SwerveModuleSimulation simulation;
     private final SwerveModuleState stateView = new SwerveModuleState(0.0, Rotation2d.kZero);
     private final SwerveModulePosition positionView = new SwerveModulePosition(0.0, Rotation2d.kZero);
@@ -69,15 +64,11 @@ public class SwerveModule implements RobotSendableDevice {
             boolean driveFeedforwardEnabled,
             boolean driveInvertedExplicit,
             boolean steerInvertedExplicit,
-            boolean encoderInvertedExplicit,
-            DriveFeedforwardTuning driveFeedforwardTuning) {
+            boolean encoderInvertedExplicit) {
         public SwerveModuleConfig {
             if (driveFeedforward == null) {
                 driveFeedforwardEnabled = false;
             }
-            driveFeedforwardTuning = driveFeedforwardTuning != null
-                    ? driveFeedforwardTuning
-                    : DriveFeedforwardTuning.defaults();
         }
 
         public SwerveModuleConfig(
@@ -102,8 +93,7 @@ public class SwerveModule implements RobotSendableDevice {
                     false,
                     false,
                     false,
-                    false,
-                    DriveFeedforwardTuning.defaults());
+                    false);
         }
 
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID, EncoderConfig encoder) {
@@ -120,8 +110,7 @@ public class SwerveModule implements RobotSendableDevice {
                     false,
                     false,
                     false,
-                    false,
-                    DriveFeedforwardTuning.defaults());
+                    false);
         }
 
         public SwerveModuleConfig(Translation2d module_location, double wheelDiameter, double maxSpeedMetersPerSecond, MotorControllerConfig driveMotor, MotorControllerConfig rotationMotor, PIDController rotationPID) {
@@ -138,8 +127,7 @@ public class SwerveModule implements RobotSendableDevice {
                     false,
                     false,
                     false,
-                    false,
-                    DriveFeedforwardTuning.defaults());
+                    false);
         }
 
         //cloning
@@ -157,33 +145,8 @@ public class SwerveModule implements RobotSendableDevice {
                 other.driveFeedforwardEnabled(),
                 other.driveInvertedExplicit(),
                 other.steerInvertedExplicit(),
-                other.encoderInvertedExplicit(),
-                other.driveFeedforwardTuning()
+                other.encoderInvertedExplicit()
             );
-        }
-
-        public record DriveFeedforwardTuning(
-                double targetDeadbandMpsMin,
-                double targetDeadbandRatio,
-                double measuredSpeedFilterAlpha) {
-            public DriveFeedforwardTuning {
-                targetDeadbandMpsMin = Double.isFinite(targetDeadbandMpsMin) && targetDeadbandMpsMin >= 0.0
-                        ? targetDeadbandMpsMin
-                        : FEEDFORWARD_TARGET_DEADBAND_MPS_MIN;
-                targetDeadbandRatio = Double.isFinite(targetDeadbandRatio) && targetDeadbandRatio >= 0.0
-                        ? targetDeadbandRatio
-                        : FEEDFORWARD_TARGET_DEADBAND_RATIO;
-                measuredSpeedFilterAlpha = Double.isFinite(measuredSpeedFilterAlpha)
-                        ? MathUtil.clamp(measuredSpeedFilterAlpha, 0.0, 1.0)
-                        : FEEDFORWARD_MEASURED_SPEED_FILTER_ALPHA;
-            }
-
-            public static DriveFeedforwardTuning defaults() {
-                return new DriveFeedforwardTuning(
-                        FEEDFORWARD_TARGET_DEADBAND_MPS_MIN,
-                        FEEDFORWARD_TARGET_DEADBAND_RATIO,
-                        FEEDFORWARD_MEASURED_SPEED_FILTER_ALPHA);
-            }
         }
 
         private static PIDController clonePid(PIDController source) {
@@ -259,8 +222,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig pid(Consumer<PidSection> section) {
@@ -285,8 +247,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig ff(Consumer<FeedforwardSection> section) {
@@ -299,28 +260,6 @@ public class SwerveModule implements RobotSendableDevice {
 
         public SwerveModuleConfig ffEnabled(boolean enabled) {
             return ff(driveFeedforward, enabled);
-        }
-
-        public SwerveModuleConfig ffRuntime(Consumer<FeedforwardRuntimeSection> section) {
-            FeedforwardRuntimeSection resolved = FeedforwardRuntimeSection.from(driveFeedforwardTuning);
-            if (section != null) {
-                section.accept(resolved);
-            }
-            return new SwerveModuleConfig(
-                    module_location,
-                    wheelDiameter,
-                    maxSpeedMetersPerSecond,
-                    driveMotor,
-                    rotationMotor,
-                    rotationPID,
-                    encoder,
-                    sim,
-                    driveFeedforward,
-                    driveFeedforwardEnabled,
-                    driveInvertedExplicit,
-                    steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    resolved.build());
         }
 
         private SwerveModuleConfig ff(SimpleMotorFeedforward feedforward, boolean enabled) {
@@ -337,8 +276,7 @@ public class SwerveModule implements RobotSendableDevice {
                     feedforward != null && enabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig encoder(EncoderConfig encoder){
@@ -355,8 +293,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig encoder(EncoderType encoder){
@@ -375,8 +312,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig offset(double offset){
@@ -396,8 +332,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig location(Translation2d module_location){
@@ -414,8 +349,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig driveId(int id){
@@ -433,8 +367,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning); 
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig steerId(int id){
@@ -452,8 +385,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning); 
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig encoderId(int id){
@@ -473,8 +405,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning); 
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig driveInverted(boolean inverted){
@@ -492,8 +423,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     true,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning); 
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig steerInverted(boolean inverted){
@@ -511,8 +441,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     true,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning); 
+                    encoderInvertedExplicit); 
         }
 
         public SwerveModuleConfig encoderInverted(boolean inverted){
@@ -532,8 +461,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    true,
-                    driveFeedforwardTuning); 
+                    true); 
         }
 
         public SwerveModuleConfig currentLimit(double currentLimit) {
@@ -555,8 +483,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public SwerveModuleConfig steerCurrentLimit(double currentLimit) {
@@ -574,8 +501,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public static Translation2d[] generateModuleLocations(double trackwidth, double wheelbase) {
@@ -601,8 +527,7 @@ public class SwerveModule implements RobotSendableDevice {
                     driveFeedforwardEnabled,
                     driveInvertedExplicit,
                     steerInvertedExplicit,
-                    encoderInvertedExplicit,
-                    driveFeedforwardTuning);
+                    encoderInvertedExplicit);
         }
 
         public static final class PidSection {
@@ -706,45 +631,6 @@ public class SwerveModule implements RobotSendableDevice {
                 return enabled;
             }
         }
-
-        public static final class FeedforwardRuntimeSection {
-            private double targetDeadbandMpsMin;
-            private double targetDeadbandRatio;
-            private double measuredSpeedFilterAlpha;
-
-            private FeedforwardRuntimeSection(DriveFeedforwardTuning current) {
-                DriveFeedforwardTuning seed = current != null ? current : DriveFeedforwardTuning.defaults();
-                targetDeadbandMpsMin = seed.targetDeadbandMpsMin();
-                targetDeadbandRatio = seed.targetDeadbandRatio();
-                measuredSpeedFilterAlpha = seed.measuredSpeedFilterAlpha();
-            }
-
-            static FeedforwardRuntimeSection from(DriveFeedforwardTuning current) {
-                return new FeedforwardRuntimeSection(current);
-            }
-
-            public FeedforwardRuntimeSection targetDeadbandMpsMin(double value) {
-                targetDeadbandMpsMin = value;
-                return this;
-            }
-
-            public FeedforwardRuntimeSection targetDeadbandRatio(double value) {
-                targetDeadbandRatio = value;
-                return this;
-            }
-
-            public FeedforwardRuntimeSection measuredSpeedFilterAlpha(double value) {
-                measuredSpeedFilterAlpha = value;
-                return this;
-            }
-
-            private DriveFeedforwardTuning build() {
-                return new DriveFeedforwardTuning(
-                        targetDeadbandMpsMin,
-                        targetDeadbandRatio,
-                        measuredSpeedFilterAlpha);
-            }
-        }
     }
 
     public record SwerveModuleSimConfig(MotorSimType driveMotorType, MotorSimType steerMotorType, double driveMomentOfInertia, double steerMomentOfInertia) {
@@ -776,10 +662,6 @@ public class SwerveModule implements RobotSendableDevice {
 
     public SwerveModule(SwerveModuleConfig config) {
         this.config = config;
-        SwerveModuleConfig.DriveFeedforwardTuning tuning = config.driveFeedforwardTuning();
-        feedforwardTargetDeadbandMpsMin = tuning.targetDeadbandMpsMin();
-        feedforwardTargetDeadbandRatio = tuning.targetDeadbandRatio();
-        feedforwardMeasuredSpeedFilterAlpha = tuning.measuredSpeedFilterAlpha();
         // MODULE ROTATION PID
         rotationPidController = config.rotationPID();
 
@@ -930,25 +812,6 @@ public class SwerveModule implements RobotSendableDevice {
         return driveFeedforward != null;
     }
 
-    public void setCosineCompensationEnabled(boolean enabled) {
-        cosineCompensationEnabled = enabled;
-    }
-
-    public boolean isCosineCompensationEnabled() {
-        return cosineCompensationEnabled;
-    }
-
-    public void setCosineCompensationErrorThresholdDegrees(double errorDegrees) {
-        if (!Double.isFinite(errorDegrees)) {
-            return;
-        }
-        cosineCompensationErrorThresholdRadians = Math.toRadians(Math.max(0.0, errorDegrees));
-    }
-
-    public double getCosineCompensationErrorThresholdDegrees() {
-        return Math.toDegrees(cosineCompensationErrorThresholdRadians);
-    }
-
     public void setNominalVoltage(double nominalVoltage) {
         if (Double.isFinite(nominalVoltage) && nominalVoltage > 1e-3) {
             this.nominalVoltage = nominalVoltage;
@@ -968,11 +831,7 @@ public class SwerveModule implements RobotSendableDevice {
                 new SwerveModuleState(state.speedMetersPerSecond, state.angle);
         Rotation2d currentAngle = getEncoderPosition();
         optimizedState.optimize(currentAngle);
-        Rotation2d angleError = optimizedState.angle.minus(currentAngle);
-        double absoluteErrorRadians = Math.abs(MathUtil.angleModulus(angleError.getRadians()));
-        if (cosineCompensationEnabled && absoluteErrorRadians >= cosineCompensationErrorThresholdRadians) {
-            optimizedState.speedMetersPerSecond *= angleError.getCos();
-        }
+        optimizedState.speedMetersPerSecond *= optimizedState.angle.minus(currentAngle).getCos();
         if (driveFeedforwardEnabled && driveFeedforward != null) {
             double driveVolts = calculateFeedforwardVolts(optimizedState.speedMetersPerSecond);
             if (Double.isFinite(driveVolts)) {
@@ -1043,8 +902,8 @@ public class SwerveModule implements RobotSendableDevice {
 
     private double calculateFeedforwardVolts(double targetSpeedMetersPerSecond) {
         double targetDeadband = Math.max(
-                feedforwardTargetDeadbandMpsMin,
-                Math.abs(config.maxSpeedMetersPerSecond()) * feedforwardTargetDeadbandRatio);
+                FEEDFORWARD_TARGET_DEADBAND_MPS_MIN,
+                Math.abs(config.maxSpeedMetersPerSecond()) * FEEDFORWARD_TARGET_DEADBAND_RATIO);
         if (Math.abs(targetSpeedMetersPerSecond) <= targetDeadband) {
             resetFeedforwardState();
             return 0.0;
@@ -1075,7 +934,7 @@ public class SwerveModule implements RobotSendableDevice {
             hasFilteredDriveVelocity = true;
             return filteredDriveVelocityMetersPerSecond;
         }
-        filteredDriveVelocityMetersPerSecond += feedforwardMeasuredSpeedFilterAlpha
+        filteredDriveVelocityMetersPerSecond += FEEDFORWARD_MEASURED_SPEED_FILTER_ALPHA
                 * (measuredSpeedMetersPerSecond - filteredDriveVelocityMetersPerSecond);
         return filteredDriveVelocityMetersPerSecond;
     }
@@ -1116,9 +975,6 @@ public class SwerveModule implements RobotSendableDevice {
                 node.putDouble("driveFeedforwardKv", driveFeedforward.getKv());
                 node.putDouble("driveFeedforwardKa", driveFeedforward.getKa());
             }
-            node.putDouble("driveFeedforwardTargetDeadbandMpsMin", feedforwardTargetDeadbandMpsMin);
-            node.putDouble("driveFeedforwardTargetDeadbandRatio", feedforwardTargetDeadbandRatio);
-            node.putDouble("driveFeedforwardMeasuredSpeedFilterAlpha", feedforwardMeasuredSpeedFilterAlpha);
         }
 
         return node;
