@@ -97,10 +97,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private SimpleMotorFeedforward driveFeedforward = null;
     /** Whether the configured drive feedforward is enabled. */
     private boolean driveFeedforwardEnabled = true;
-    /** Whether modules apply cosine speed scaling while steering to target angles. */
-    private boolean cosineCompensationEnabled = true;
-    /** Minimum steering error (degrees) required before cosine compensation applies. */
-    private double cosineCompensationErrorDegrees = 0.0;
     /** Drive-side current limit applied per motor (amps). */
     private double driveCurrentLimit = 80;
     /** Steer-side current limit applied per motor (amps). */
@@ -117,34 +113,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
     /** Shared speed source/blend registration store used by speed() sections. */
     private final DrivetrainSpeedConfigSupport speedConfig = new DrivetrainSpeedConfigSupport();
-
-    public static final class CosineCompensationSection {
-        private boolean enabled;
-        private double errorDegrees;
-
-        private CosineCompensationSection(boolean enabled, double errorDegrees) {
-            this.enabled = enabled;
-            this.errorDegrees = errorDegrees;
-        }
-
-        public CosineCompensationSection enabled(boolean enabled) {
-            this.enabled = enabled;
-            return this;
-        }
-
-        public CosineCompensationSection error(double errorDegrees) {
-            this.errorDegrees = errorDegrees;
-            return this;
-        }
-
-        private boolean enabled() {
-            return enabled;
-        }
-
-        private double error() {
-            return errorDegrees;
-        }
-    }
 
     public static SwerveDrivetrainConfig create() {
         return new SwerveDrivetrainConfig();
@@ -367,22 +335,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
             applyDriveFeedforwardEnabled(enabled);
             return this;
         }
-
-        public ControlSection cosineCompensation(boolean enabled) {
-            applyCosineCompensation(enabled);
-            return this;
-        }
-
-        public ControlSection cosineCompensation(Consumer<CosineCompensationSection> section) {
-            CosineCompensationSection resolved =
-                    new CosineCompensationSection(cosineCompensationEnabled, cosineCompensationErrorDegrees);
-            if (section != null) {
-                section.accept(resolved);
-            }
-            applyCosineCompensation(resolved.enabled());
-            applyCosineCompensationError(resolved.error());
-            return this;
-        }
     }
 
     public final class SimulationSection {
@@ -510,22 +462,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
 
         public ConfigSection driveFeedforwardEnabled(boolean enabled) {
             applyDriveFeedforwardEnabled(enabled);
-            return this;
-        }
-
-        public ConfigSection cosineCompensation(boolean enabled) {
-            applyCosineCompensation(enabled);
-            return this;
-        }
-
-        public ConfigSection cosineCompensation(Consumer<CosineCompensationSection> section) {
-            CosineCompensationSection resolved =
-                    new CosineCompensationSection(cosineCompensationEnabled, cosineCompensationErrorDegrees);
-            if (section != null) {
-                section.accept(resolved);
-            }
-            applyCosineCompensation(resolved.enabled());
-            applyCosineCompensationError(resolved.error());
             return this;
         }
 
@@ -865,25 +801,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         this.driveFeedforwardEnabled = enabled;
         return this;
     }
-
-    /**
-     * Enables or disables module cosine compensation that scales speed during steering transients.
-     */
-    private SwerveDrivetrainConfig applyCosineCompensation(boolean enabled) {
-        this.cosineCompensationEnabled = enabled;
-        return this;
-    }
-
-    /**
-     * Sets the minimum steering error (degrees) before cosine compensation scales wheel speed.
-     */
-    private SwerveDrivetrainConfig applyCosineCompensationError(double errorDegrees) {
-        if (!Double.isFinite(errorDegrees)) {
-            return this;
-        }
-        this.cosineCompensationErrorDegrees = Math.max(0.0, errorDegrees);
-        return this;
-    }
     
     /**
      * Applies the same current limit to both drive and steer motors.
@@ -1058,9 +975,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
             dt.driveFeedforward(driveFeedforward);
             dt.driveFeedforwardEnabled(driveFeedforwardEnabled);
         }
-
-        dt.cosineCompensationEnabled(cosineCompensationEnabled);
-        dt.cosineCompensationError(cosineCompensationErrorDegrees);
 
         if (edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
             dt.configureSimulation(simulationConfig != null ? simulationConfig : SwerveSimulationConfig.defaults());
