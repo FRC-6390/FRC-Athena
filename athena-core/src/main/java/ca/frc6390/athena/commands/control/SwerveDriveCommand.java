@@ -51,6 +51,7 @@ public class SwerveDriveCommand extends Command {
   @Override
   public void execute() {
 
+    SmartDashboard.putNumber("FudgeFactor", SmartDashboard.getNumber("FudgeFactor", 1.3));
     double xSpeed = xInput.getAsDouble() * driveTrain.speeds().maxVelocity();
     double ySpeed = yInput.getAsDouble() * driveTrain.speeds().maxVelocity();
     double thetaSpeed = thetaInput.getAsDouble() * driveTrain.speeds().maxAngularVelocity();
@@ -73,7 +74,7 @@ public class SwerveDriveCommand extends Command {
 
 
     ChassisSpeeds chassisSpeeds = fieldRelativeSupplier.getAsBoolean()
-        ? ChassisSpeeds.fromFieldRelativeSpeeds(x, y, thetaSpeed, driveTrain.imu().device().getVirtualAxis("driver"))
+        ? ChassisSpeeds.fromFieldRelativeSpeeds(xSpeed, ySpeed, thetaSpeed, driveTrain.imu().device().getVirtualAxis("driver"))
         : new ChassisSpeeds(x, y, thetaSpeed);
 
     driveTrain.speeds().set(RobotSpeeds.DRIVE_SOURCE, chassisSpeeds);
