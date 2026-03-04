@@ -59,6 +59,17 @@ public interface RobotCoreContext<T extends RobotDrivetrain<T>>
     }
 
     /**
+     * Returns loop dt for this context, falling back to robot base-loop dt when unavailable.
+     */
+    default double effectiveLoopDtSeconds() {
+        double dtSeconds = controlLoopDtSeconds();
+        if (Double.isFinite(dtSeconds) && dtSeconds > 0.0) {
+            return dtSeconds;
+        }
+        return robotLoopDtSeconds();
+    }
+
+    /**
      * Returns a named PID controller registered in {@link RobotCoreHooks.HooksSection#pidProfile}.
      */
     PIDController pid(String name);

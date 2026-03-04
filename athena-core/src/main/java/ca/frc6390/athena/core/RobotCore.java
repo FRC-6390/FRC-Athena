@@ -4078,7 +4078,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private static double nowSeconds() {
-        double now = RobotTime.nowSeconds();
+        double now = RobotTime.nowSecondsProjectedIfStale(0.002);
+        if (!Double.isFinite(now)) {
+            now = RobotTime.nowSeconds();
+        }
         if (!Double.isFinite(now)) {
             now = Timer.getFPGATimestamp();
         }

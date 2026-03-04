@@ -4071,7 +4071,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private double currentLoopNowSeconds() {
-        double nowSeconds = RobotTime.nowSeconds();
+        double nowSeconds = RobotTime.nowSecondsProjectedIfStale(0.002);
+        if (!Double.isFinite(nowSeconds)) {
+            nowSeconds = RobotTime.nowSeconds();
+        }
         if (Double.isFinite(nowSeconds)) {
             return nowSeconds;
         }

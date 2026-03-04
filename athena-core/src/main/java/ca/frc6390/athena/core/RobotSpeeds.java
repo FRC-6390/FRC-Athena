@@ -428,6 +428,17 @@ public class RobotSpeeds {
 
         private void markUpdated() {
             double now = RobotTime.nowSeconds();
+            if (Double.isFinite(now)
+                    && Double.isFinite(lastUpdateSeconds)
+                    && now <= lastUpdateSeconds + 1e-9) {
+                double projectedNow = RobotTime.nowSecondsProjected();
+                if (Double.isFinite(projectedNow) && projectedNow > now) {
+                    now = projectedNow;
+                }
+            }
+            if (!Double.isFinite(now)) {
+                now = RobotTime.nowSecondsProjected();
+            }
             if (Double.isFinite(now)) {
                 if (Double.isFinite(lastUpdateSeconds)) {
                     double delta = now - lastUpdateSeconds;
@@ -442,6 +453,7 @@ public class RobotSpeeds {
                 lastUpdateSeconds = now;
             }
         }
+
     }
 
     private static final double EPSILON = 1E-9;
