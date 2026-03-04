@@ -81,6 +81,7 @@ public class SwerveDriveCommand extends Command {
 
   @Override
   public void end(boolean interrupted) {
+    driveTrain.clearDriveCommandInputs();
     driveTrain.speeds().stop(RobotSpeeds.DRIVE_SOURCE);
   }
 

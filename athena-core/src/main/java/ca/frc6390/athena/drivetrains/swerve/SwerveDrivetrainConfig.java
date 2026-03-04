@@ -57,6 +57,7 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private static final long DEFAULT_CONNECTIVITY_TIMEOUT_MS = 250L;
     private static final int MAX_CONNECTIVITY_CHECK_THREADS = 8;
     private static final AtomicInteger CONNECTIVITY_THREAD_COUNTER = new AtomicInteger(1);
+    private static final double DEFAULT_UPDATE_PERIOD_SECONDS = 0.005;
     
     /** Optional IMU configuration that provides field-centric heading. */
     private ImuConfig imu = null;
@@ -68,6 +69,8 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private double driftActivationSpeed = 0.05;
     /** Whether open-loop driving defaults to field-relative chassis speeds. */
     private boolean fieldRelative = true;
+    /** Desired control update loop period (seconds) for swerve command + drivetrain updates. */
+    private double updatePeriodSeconds = DEFAULT_UPDATE_PERIOD_SECONDS;
     /** CAN IDs for drive motors ordered FL, FR, BL, BR (negatives invert motors). */
     private int[] driveIds = DriveIDs.SWERVE_CHASSIS_STANDARD.getIDs();
     /** CAN IDs for steer motors ordered FL, FR, BL, BR (negatives invert motors). */
@@ -330,6 +333,16 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
             return this;
         }
 
+        public ControlSection updatePeriodSeconds(double seconds) {
+            applyUpdatePeriodSeconds(seconds);
+            return this;
+        }
+
+        public ControlSection updatePeriodMs(double milliseconds) {
+            applyUpdatePeriodMs(milliseconds);
+            return this;
+        }
+
         public ControlSection rotationPid(double kP, double kI, double kD) {
             applyRotationPid(kP, kI, kD);
             return this;
@@ -407,6 +420,16 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
 
         public ConfigSection fieldRelative(boolean enabled) {
             applyFieldRelative(enabled);
+            return this;
+        }
+
+        public ConfigSection updatePeriodSeconds(double seconds) {
+            applyUpdatePeriodSeconds(seconds);
+            return this;
+        }
+
+        public ConfigSection updatePeriodMs(double milliseconds) {
+            applyUpdatePeriodMs(milliseconds);
             return this;
         }
 
@@ -694,6 +717,24 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private SwerveDrivetrainConfig applyFieldRelative(boolean fieldRelative){
         this.fieldRelative = fieldRelative;
         return this;
+    }
+
+    /**
+     * Sets the drivetrain/control update loop period in seconds.
+     */
+    private SwerveDrivetrainConfig applyUpdatePeriodSeconds(double updatePeriodSeconds) {
+        if (!Double.isFinite(updatePeriodSeconds) || updatePeriodSeconds <= 0.0) {
+            return this;
+        }
+        this.updatePeriodSeconds = updatePeriodSeconds;
+        return this;
+    }
+
+    /**
+     * Sets the drivetrain/control update loop period in milliseconds.
+     */
+    private SwerveDrivetrainConfig applyUpdatePeriodMs(double updatePeriodMs) {
+        return applyUpdatePeriodSeconds(updatePeriodMs / 1000.0);
     }
 
     /**
@@ -1030,6 +1071,7 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
             dt.driftCorrectionEnabled(true);
         }
 
+        dt.updatePeriodSeconds(updatePeriodSeconds);
         dt.fieldRelative(fieldRelative);
         dt.driftActivationSpeed = driftActivationSpeed;
         speedConfig.apply(dt.robotSpeeds());
