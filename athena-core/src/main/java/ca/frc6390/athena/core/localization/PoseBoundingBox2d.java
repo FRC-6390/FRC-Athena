@@ -18,7 +18,7 @@ public record PoseBoundingBox2d(double minX, double minY, double maxX, double ma
      * Default field dimensions (meters) used by convenience mirror helpers.
      */
     public static final double DEFAULT_FIELD_LENGTH_METERS = 16.54;
-    public static final double DEFAULT_FIELD_WIDTH_METERS = 8.21;
+    public static final double DEFAULT_FIELD_WIDTH_METERS = 8.069326;
 
     /**
      * Built-in pivot anchors for box rotation.
