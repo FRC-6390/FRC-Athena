@@ -12,7 +12,6 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj2.command.Command;
 
 public class SwerveDriveCommand extends Command {
-
   //Creates a drivetrain subsystem
   private final SwerveDrivetrain driveTrain;
   private final BooleanSupplier fieldRelativeSupplier;
@@ -41,42 +40,49 @@ public class SwerveDriveCommand extends Command {
   @Override
   public void initialize() 
   {
-
+    driveTrain.bindDriveCommandInputs(xInput, yInput, thetaInput, fieldRelativeSupplier);
 
   }
 
   @Override
   public void execute() {
-
-    double xSpeed = xInput.getAsDouble() * driveTrain.speeds().maxVelocity();
-    double ySpeed = yInput.getAsDouble() * driveTrain.speeds().maxVelocity();
-    double thetaSpeed = thetaInput.getAsDouble() * driveTrain.speeds().maxAngularVelocity();
-
-    // Keep command-space shaping linear. Skew correction is handled once in drivetrain update()
-    // via ChassisSpeeds.discretize() immediately before kinematics.
-    ChassisSpeeds chassisSpeeds = computeChassisSpeeds(
-        xSpeed,
-        ySpeed,
-        thetaSpeed,
-        fieldRelativeSupplier.getAsBoolean(),
-        driveTrain.imu().device().getVirtualAxis("driver"));
-
-    driveTrain.speeds().set(RobotSpeeds.DRIVE_SOURCE, chassisSpeeds);
   }
 
-  static ChassisSpeeds computeChassisSpeeds(
+  public static ChassisSpeeds computeChassisSpeeds(
       double xSpeed,
       double ySpeed,
       double thetaSpeed,
       boolean fieldRelative,
       Rotation2d driverHeading) {
+    return computeChassisSpeeds(
+        xSpeed,
+        ySpeed,
+        thetaSpeed,
+        fieldRelative,
+        driverHeading,
+        0.0);
+  }
+
+  public static ChassisSpeeds computeChassisSpeeds(
+      double xSpeed,
+      double ySpeed,
+      double thetaSpeed,
+      boolean fieldRelative,
+      Rotation2d driverHeading,
+      double fieldRelativeLeadSeconds) {
     if (fieldRelative) {
       Rotation2d resolvedHeading = driverHeading != null ? driverHeading : Rotation2d.kZero;
+      double leadSeconds =
+          Double.isFinite(fieldRelativeLeadSeconds) && fieldRelativeLeadSeconds > 0.0
+              ? fieldRelativeLeadSeconds
+              : 0.0;
+      Rotation2d compensatedHeading =
+          resolvedHeading.plus(Rotation2d.fromRadians(thetaSpeed * leadSeconds));
       return ChassisSpeeds.fromFieldRelativeSpeeds(
           xSpeed,
           ySpeed,
           thetaSpeed,
-          resolvedHeading);
+          compensatedHeading);
     }
     return new ChassisSpeeds(xSpeed, ySpeed, thetaSpeed);
   }

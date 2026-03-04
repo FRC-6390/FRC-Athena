@@ -79,6 +79,13 @@ public class SwerveDrivetrain extends SubsystemBase
   private static final Pose2d ZERO_POSE = new Pose2d();
   private static final double DEFAULT_UPDATE_PERIOD_SECONDS = 0.005;
   private static final double MAX_DISCRETIZE_DT_SECONDS = 0.25;
+  private static final double MIN_FIELD_RELATIVE_COMP_OMEGA_RAD_PER_SEC = 0.05;
+  private static final double MIN_FIELD_RELATIVE_COMP_SPEED_MPS = 0.1;
+  private static final double FIELD_RELATIVE_LEAD_ESTIMATOR_TIME_CONSTANT_SECONDS = 0.05;
+  private static final double FIELD_RELATIVE_PIPELINE_CYCLES = 3.2;
+  private static final double MAX_FIELD_RELATIVE_COMMAND_AGE_SECONDS = 0.1;
+  private static final double MAX_FIELD_RELATIVE_ADAPTIVE_LEAD_SECONDS = 0.03;
+  private static final double MAX_FIELD_RELATIVE_TOTAL_LEAD_SECONDS = 0.08;
 
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
@@ -114,7 +121,14 @@ public class SwerveDrivetrain extends SubsystemBase
   private final Translation2d[] moduleLocations;
   private final double maxDriveVelocityMetersPerSecond;
   private double lastMotionLimitTimestampSeconds = Double.NaN;
+  private Rotation2d lastMotionLimitHeading = Rotation2d.kZero;
+  private boolean hasLastMotionLimitHeading = false;
   private double lastDiscretizeTimestampSeconds = Double.NaN;
+  private double fieldRelativeAdaptiveLeadSeconds = 0.0;
+  private double lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+  private double lastFieldRelativeTotalLeadSeconds = 0.0;
+  private double lastFieldRelativeCommandAgeSeconds = 0.0;
+  private boolean lastFieldRelativeTranslationActive = false;
   private SimpleMotorFeedForwardsSendable driveFeedforward;
   private boolean driveFeedforwardEnabled = false;
   private double nominalVoltage = 12.0;
@@ -584,7 +598,14 @@ public class SwerveDrivetrain extends SubsystemBase
     setChassisSpeeds(discretizedSpeeds, 0.0, 0.0, 0.0);
     setChassisSpeeds(lastLimitedSpeeds, 0.0, 0.0, 0.0);
     lastMotionLimitTimestampSeconds = Double.NaN;
+    hasLastMotionLimitHeading = false;
+    lastMotionLimitHeading = Rotation2d.kZero;
     lastDiscretizeTimestampSeconds = Double.NaN;
+    fieldRelativeAdaptiveLeadSeconds = 0.0;
+    lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+    lastFieldRelativeTotalLeadSeconds = 0.0;
+    lastFieldRelativeCommandAgeSeconds = 0.0;
+    lastFieldRelativeTranslationActive = false;
     desiredHeading = imu.getVirtualAxis("drift").getRadians();
     for (SwerveModule module : swerveModules) {
       module.stop();
@@ -631,6 +652,7 @@ public class SwerveDrivetrain extends SubsystemBase
 
   public void clearDriveCommandInputs() {
     driveCommandInputs = null;
+    lastFieldRelativeLeadTimestampSeconds = Double.NaN;
   }
 
   public void applyBoundDriveCommandInputs() {
@@ -644,19 +666,23 @@ public class SwerveDrivetrain extends SubsystemBase
     double xSpeed = inputs.xInput().getAsDouble() * robotSpeeds.getMaxVelocity();
     double ySpeed = inputs.yInput().getAsDouble() * robotSpeeds.getMaxVelocity();
     double thetaSpeed = inputs.thetaInput().getAsDouble() * robotSpeeds.getMaxAngularVelocity();
-    ChassisSpeeds chassisSpeeds = inputs.fieldRelativeSupplier().getAsBoolean()
-        ? ChassisSpeeds.fromFieldRelativeSpeeds(
-            xSpeed,
-            ySpeed,
-            thetaSpeed,
-            imu.getVirtualAxis("driver"))
-        : new ChassisSpeeds(xSpeed, ySpeed, thetaSpeed);
-    robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, chassisSpeeds);
+    boolean inputFieldRelative = inputs.fieldRelativeSupplier().getAsBoolean();
+    if (inputFieldRelative) {
+      robotSpeeds.setFieldRelativeSpeeds(
+          RobotSpeeds.DRIVE_SOURCE,
+          xSpeed,
+          ySpeed,
+          thetaSpeed);
+    } else {
+      robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, xSpeed, ySpeed, thetaSpeed);
+    }
   }
 
   @Override
   public void update() {
     imu.update();
+    double nowSeconds = nowSeconds();
+    Rotation2d driverHeading = imu.getVirtualAxis("driver");
     
     if (sysIdActive) {
       for (SwerveModule module : swerveModules) {
@@ -666,9 +692,10 @@ public class SwerveDrivetrain extends SubsystemBase
     }
 
     applyBoundDriveCommandInputs();
-    robotSpeeds.calculate(calculatedSpeeds);
+    robotSpeeds.calculate(calculatedSpeeds, driverHeading);
     ChassisSpeeds speed = calculatedSpeeds;
-    double nowSeconds = nowSeconds();
+    boolean fieldRelativeTranslationActive = hasActiveFieldRelativeTranslationSource();
+    boolean driveFieldRelativeTranslationActive = isDriveFieldRelativeTranslationActive();
 
     boolean driverControlActive =
         robotSpeeds.isSpeedsSourceActive(RobotSpeeds.DRIVE_SOURCE);
@@ -678,7 +705,18 @@ public class SwerveDrivetrain extends SubsystemBase
       // Prevent stale teleop heading hold from biasing auto rotation after mode transitions.
       desiredHeading = imu.getVirtualAxis("drift").getRadians();
     }
-    speed = applyMotionLimits(speed, nowSeconds);
+
+    ChassisSpeeds speedBeforeLeadCompensation = new ChassisSpeeds(
+        speed.vxMetersPerSecond,
+        speed.vyMetersPerSecond,
+        speed.omegaRadiansPerSecond);
+    speed = applyFieldRelativeLeadCompensation(
+        speed,
+        nowSeconds,
+        fieldRelativeTranslationActive,
+        driveFieldRelativeTranslationActive);
+
+    speed = applyMotionLimits(speed, nowSeconds, driverHeading, fieldRelativeTranslationActive);
     speed = discretizeSpeedsForKinematics(speed, nowSeconds);
 
     calculateModuleStates(speed, desiredModuleStates);
@@ -699,6 +737,11 @@ public class SwerveDrivetrain extends SubsystemBase
         speed.vxMetersPerSecond,
         speed.vyMetersPerSecond,
         speed.omegaRadiansPerSecond);
+    updateFieldRelativeLeadEstimator(
+        speedBeforeLeadCompensation,
+        driverHeading,
+        nowSeconds,
+        driveFieldRelativeTranslationActive);
   }
 
   public SwerveDrivetrain configureSimulation(SwerveSimulationConfig config) {
@@ -773,6 +816,11 @@ public class SwerveDrivetrain extends SubsystemBase
 
     ntDriftNode.putBoolean("enabled", driftCorrectionEnabled());
     ntDriftNode.putDouble("desiredHeadingDeg", desiredHeading);
+    ntDriftNode.putBoolean("driveSourceFieldRelative", robotSpeeds.isFieldRelativeSource(RobotSpeeds.DRIVE_SOURCE));
+    ntDriftNode.putBoolean("fieldRelativeTranslationActive", lastFieldRelativeTranslationActive);
+    ntDriftNode.putDouble("fieldRelativeLeadSec", lastFieldRelativeTotalLeadSeconds);
+    ntDriftNode.putDouble("fieldRelativeLeadAdaptiveSec", fieldRelativeAdaptiveLeadSeconds());
+    ntDriftNode.putDouble("fieldRelativeLeadCommandAgeSec", lastFieldRelativeCommandAgeSeconds);
 
     ntSysIdNode.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
     ntSysIdNode.putDouble("stepVoltageV", sysIdStepVoltage());
@@ -1091,16 +1139,245 @@ public class SwerveDrivetrain extends SubsystemBase
     return limits != null ? limits : MotionLimits.DriveLimits.none();
   }
 
-  private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds, double nowSeconds) {
+  private boolean hasActiveFieldRelativeTranslationSource() {
+    for (String source : robotSpeeds.getSpeedSources()) {
+      if (!robotSpeeds.isSpeedsSourceActive(source) || !robotSpeeds.isFieldRelativeSource(source)) {
+        continue;
+      }
+      ChassisSpeeds sourceSpeeds = robotSpeeds.getSpeeds(source);
+      if (Math.hypot(sourceSpeeds.vxMetersPerSecond, sourceSpeeds.vyMetersPerSecond) > 1e-6) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean isDriveFieldRelativeTranslationActive() {
+    if (!robotSpeeds.isSpeedsSourceActive(RobotSpeeds.DRIVE_SOURCE)
+        || !robotSpeeds.isFieldRelativeSource(RobotSpeeds.DRIVE_SOURCE)) {
+      return false;
+    }
+    ChassisSpeeds driveSpeeds = robotSpeeds.getSpeeds(RobotSpeeds.DRIVE_SOURCE);
+    return Math.hypot(driveSpeeds.vxMetersPerSecond, driveSpeeds.vyMetersPerSecond) > 1e-6;
+  }
+
+  private ChassisSpeeds applyMotionLimits(
+      ChassisSpeeds speeds,
+      double nowSeconds,
+      Rotation2d heading,
+      boolean fieldRelativeTranslationActive) {
     MotionLimits.DriveLimits limits = resolveDriveLimits();
     ChassisSpeeds limited = limitVelocity(speeds, limits);
-    limited = limitAcceleration(limited, limits, nowSeconds);
+    limited = limitAcceleration(
+        limited,
+        limits,
+        nowSeconds,
+        heading,
+        fieldRelativeTranslationActive);
     setChassisSpeeds(
         lastLimitedSpeeds,
         limited.vxMetersPerSecond,
         limited.vyMetersPerSecond,
         limited.omegaRadiansPerSecond);
     return limited;
+  }
+
+  private double fieldRelativeAdaptiveLeadSeconds() {
+    if (!Double.isFinite(fieldRelativeAdaptiveLeadSeconds)) {
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+    }
+    fieldRelativeAdaptiveLeadSeconds = MathUtil.clamp(
+        fieldRelativeAdaptiveLeadSeconds,
+        0.0,
+        MAX_FIELD_RELATIVE_ADAPTIVE_LEAD_SECONDS);
+    return fieldRelativeAdaptiveLeadSeconds;
+  }
+
+  private double fieldRelativePipelineLeadSeconds() {
+    double dt = updatePeriodSeconds;
+    if (!Double.isFinite(dt) || dt <= 0.0) {
+      dt = DEFAULT_UPDATE_PERIOD_SECONDS;
+    }
+    return Math.max(0.0, FIELD_RELATIVE_PIPELINE_CYCLES * dt);
+  }
+
+  private double fieldRelativeCommandAgeSeconds(double nowSeconds) {
+    if (!Double.isFinite(nowSeconds)) {
+      return 0.0;
+    }
+    double weightedAge = 0.0;
+    double totalWeight = 0.0;
+    for (String source : robotSpeeds.getSpeedSources()) {
+      if (!robotSpeeds.isSpeedsSourceActive(source) || !robotSpeeds.isFieldRelativeSource(source)) {
+        continue;
+      }
+      ChassisSpeeds sourceSpeeds = robotSpeeds.getSpeeds(source);
+      double weight = Math.hypot(sourceSpeeds.vxMetersPerSecond, sourceSpeeds.vyMetersPerSecond);
+      if (weight <= 1e-6) {
+        continue;
+      }
+      double sourceTimestamp = robotSpeeds.getSourceLastUpdateSeconds(source);
+      double age = 0.0;
+      if (Double.isFinite(sourceTimestamp)) {
+        age = Math.max(0.0, nowSeconds - sourceTimestamp);
+      }
+      double estimatedPeriod = robotSpeeds.getSourceEstimatedUpdatePeriodSeconds(source);
+      if (Double.isFinite(estimatedPeriod) && estimatedPeriod > 1e-6) {
+        age += 0.5 * estimatedPeriod;
+      }
+      if (!Double.isFinite(age)) {
+        continue;
+      }
+      age = Math.min(age, MAX_FIELD_RELATIVE_COMMAND_AGE_SECONDS);
+      weightedAge += age * weight;
+      totalWeight += weight;
+    }
+    if (totalWeight <= 1e-6) {
+      return 0.0;
+    }
+    return weightedAge / totalWeight;
+  }
+
+  private ChassisSpeeds applyFieldRelativeLeadCompensation(
+      ChassisSpeeds speeds,
+      double nowSeconds,
+      boolean fieldRelativeTranslationActive,
+      boolean adaptiveLeadActive) {
+    if (speeds == null) {
+      return new ChassisSpeeds();
+    }
+    lastFieldRelativeTranslationActive = fieldRelativeTranslationActive;
+    if (!fieldRelativeTranslationActive) {
+      lastFieldRelativeCommandAgeSeconds = 0.0;
+      lastFieldRelativeTotalLeadSeconds = 0.0;
+      return speeds;
+    }
+
+    double omega = speeds.omegaRadiansPerSecond;
+    double linearSpeed = Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+    if (Math.abs(omega) < MIN_FIELD_RELATIVE_COMP_OMEGA_RAD_PER_SEC
+        || linearSpeed < MIN_FIELD_RELATIVE_COMP_SPEED_MPS) {
+      lastFieldRelativeCommandAgeSeconds = 0.0;
+      lastFieldRelativeTotalLeadSeconds = 0.0;
+      return speeds;
+    }
+
+    double commandAgeLead = fieldRelativeCommandAgeSeconds(nowSeconds);
+    double adaptiveLead = adaptiveLeadActive ? fieldRelativeAdaptiveLeadSeconds() : 0.0;
+    double totalLead = commandAgeLead
+        + fieldRelativePipelineLeadSeconds()
+        + adaptiveLead;
+    totalLead = MathUtil.clamp(totalLead, 0.0, MAX_FIELD_RELATIVE_TOTAL_LEAD_SECONDS);
+    lastFieldRelativeCommandAgeSeconds = commandAgeLead;
+    lastFieldRelativeTotalLeadSeconds = totalLead;
+    if (totalLead <= 1e-6) {
+      return speeds;
+    }
+
+    double angle = -omega * totalLead;
+    double cos = Math.cos(angle);
+    double sin = Math.sin(angle);
+    double vx = speeds.vxMetersPerSecond * cos - speeds.vyMetersPerSecond * sin;
+    double vy = speeds.vxMetersPerSecond * sin + speeds.vyMetersPerSecond * cos;
+    return new ChassisSpeeds(vx, vy, omega);
+  }
+
+  private void updateFieldRelativeLeadEstimator(
+      ChassisSpeeds commandedRobotSpeeds,
+      Rotation2d heading,
+      double nowSeconds,
+      boolean adaptiveLeadActive) {
+    if (!adaptiveLeadActive || commandedRobotSpeeds == null) {
+      lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      return;
+    }
+    if (!Double.isFinite(nowSeconds)) {
+      nowSeconds = Timer.getFPGATimestamp();
+    }
+    if (!Double.isFinite(nowSeconds)) {
+      lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      return;
+    }
+    if (!Double.isFinite(lastFieldRelativeLeadTimestampSeconds)) {
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    double dt = nowSeconds - lastFieldRelativeLeadTimestampSeconds;
+    if (!Double.isFinite(dt) || dt <= 1e-6 || dt > MAX_DISCRETIZE_DT_SECONDS) {
+      dt = updatePeriodSeconds;
+    }
+    if (!Double.isFinite(dt) || dt <= 1e-6) {
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    double omega = commandedRobotSpeeds.omegaRadiansPerSecond;
+    if (Math.abs(omega) < MIN_FIELD_RELATIVE_COMP_OMEGA_RAD_PER_SEC) {
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    ChassisSpeeds commandedField = ChassisSpeeds.fromRobotRelativeSpeeds(
+        commandedRobotSpeeds.vxMetersPerSecond,
+        commandedRobotSpeeds.vyMetersPerSecond,
+        commandedRobotSpeeds.omegaRadiansPerSecond,
+        heading != null ? heading : Rotation2d.kZero);
+    double commandedFieldSpeed = Math.hypot(
+        commandedField.vxMetersPerSecond,
+        commandedField.vyMetersPerSecond);
+    if (commandedFieldSpeed < MIN_FIELD_RELATIVE_COMP_SPEED_MPS) {
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    ChassisSpeeds measuredField = measuredFieldRelativeSpeeds(heading);
+    double measuredFieldSpeed = Math.hypot(
+        measuredField.vxMetersPerSecond,
+        measuredField.vyMetersPerSecond);
+    if (measuredFieldSpeed < MIN_FIELD_RELATIVE_COMP_SPEED_MPS) {
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    double commandedDirection = Math.atan2(commandedField.vyMetersPerSecond, commandedField.vxMetersPerSecond);
+    double measuredDirection = Math.atan2(measuredField.vyMetersPerSecond, measuredField.vxMetersPerSecond);
+    double directionError = MathUtil.angleModulus(commandedDirection - measuredDirection);
+    directionError = MathUtil.clamp(directionError, -Math.PI / 2.0, Math.PI / 2.0);
+    double measuredLeadSeconds = Math.abs(directionError / omega);
+    if (Double.isFinite(measuredLeadSeconds)) {
+      measuredLeadSeconds = MathUtil.clamp(
+          measuredLeadSeconds,
+          0.0,
+          MAX_FIELD_RELATIVE_ADAPTIVE_LEAD_SECONDS);
+      double alpha = 1.0 - Math.exp(-dt / FIELD_RELATIVE_LEAD_ESTIMATOR_TIME_CONSTANT_SECONDS);
+      alpha = MathUtil.clamp(alpha, 0.0, 1.0);
+      fieldRelativeAdaptiveLeadSeconds += alpha * (measuredLeadSeconds - fieldRelativeAdaptiveLeadSeconds);
+      fieldRelativeAdaptiveLeadSeconds();
+    }
+    lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+  }
+
+  private ChassisSpeeds measuredFieldRelativeSpeeds(Rotation2d heading) {
+    SwerveModuleState[] measuredStates = new SwerveModuleState[swerveModules.length];
+    for (int i = 0; i < swerveModules.length; i++) {
+      measuredStates[i] = swerveModules[i].getState();
+    }
+    ChassisSpeeds measuredRobot = kinematics.toChassisSpeeds(measuredStates);
+    Rotation2d resolvedHeading = heading != null ? heading : Rotation2d.kZero;
+    return ChassisSpeeds.fromRobotRelativeSpeeds(
+        measuredRobot.vxMetersPerSecond,
+        measuredRobot.vyMetersPerSecond,
+        measuredRobot.omegaRadiansPerSecond,
+        resolvedHeading);
+  }
+
+  double fieldRelativeLeadSecondsForTest() {
+    return lastFieldRelativeTotalLeadSeconds;
   }
 
   private ChassisSpeeds discretizeSpeedsForKinematics(ChassisSpeeds speeds, double nowSeconds) {
@@ -1169,13 +1446,24 @@ public class SwerveDrivetrain extends SubsystemBase
     return velocityLimitedSpeeds;
   }
 
-  private ChassisSpeeds limitAcceleration(ChassisSpeeds speeds, MotionLimits.DriveLimits limits, double nowSeconds) {
+  private ChassisSpeeds limitAcceleration(
+      ChassisSpeeds speeds,
+      MotionLimits.DriveLimits limits,
+      double nowSeconds,
+      Rotation2d heading,
+      boolean fieldRelativeTranslationActive) {
+    Rotation2d resolvedHeading = heading != null ? heading : Rotation2d.kZero;
     if (!Double.isFinite(lastMotionLimitTimestampSeconds)) {
       lastMotionLimitTimestampSeconds = nowSeconds;
+      lastMotionLimitHeading = resolvedHeading;
+      hasLastMotionLimitHeading = true;
       return speeds;
     }
     double dt = nowSeconds - lastMotionLimitTimestampSeconds;
     lastMotionLimitTimestampSeconds = nowSeconds;
+    Rotation2d lastHeading = hasLastMotionLimitHeading ? lastMotionLimitHeading : resolvedHeading;
+    lastMotionLimitHeading = resolvedHeading;
+    hasLastMotionLimitHeading = true;
     if (dt <= 0.0) {
       return speeds;
     }
@@ -1185,8 +1473,32 @@ public class SwerveDrivetrain extends SubsystemBase
     double maxAngularDelta = limits.maxAngularAcceleration() > 0.0
         ? limits.maxAngularAcceleration() * dt
         : Double.POSITIVE_INFINITY;
-    double vx = limitDelta(speeds.vxMetersPerSecond, lastLimitedSpeeds.vxMetersPerSecond, maxLinearDelta);
-    double vy = limitDelta(speeds.vyMetersPerSecond, lastLimitedSpeeds.vyMetersPerSecond, maxLinearDelta);
+    double vx;
+    double vy;
+    if (fieldRelativeTranslationActive) {
+      ChassisSpeeds fieldTarget = ChassisSpeeds.fromRobotRelativeSpeeds(
+          speeds.vxMetersPerSecond,
+          speeds.vyMetersPerSecond,
+          speeds.omegaRadiansPerSecond,
+          resolvedHeading);
+      ChassisSpeeds fieldLast = ChassisSpeeds.fromRobotRelativeSpeeds(
+          lastLimitedSpeeds.vxMetersPerSecond,
+          lastLimitedSpeeds.vyMetersPerSecond,
+          lastLimitedSpeeds.omegaRadiansPerSecond,
+          lastHeading);
+      double fieldVx = limitDelta(fieldTarget.vxMetersPerSecond, fieldLast.vxMetersPerSecond, maxLinearDelta);
+      double fieldVy = limitDelta(fieldTarget.vyMetersPerSecond, fieldLast.vyMetersPerSecond, maxLinearDelta);
+      ChassisSpeeds robotLimited = ChassisSpeeds.fromFieldRelativeSpeeds(
+          fieldVx,
+          fieldVy,
+          speeds.omegaRadiansPerSecond,
+          resolvedHeading);
+      vx = robotLimited.vxMetersPerSecond;
+      vy = robotLimited.vyMetersPerSecond;
+    } else {
+      vx = limitDelta(speeds.vxMetersPerSecond, lastLimitedSpeeds.vxMetersPerSecond, maxLinearDelta);
+      vy = limitDelta(speeds.vyMetersPerSecond, lastLimitedSpeeds.vyMetersPerSecond, maxLinearDelta);
+    }
     double omega = limitDelta(speeds.omegaRadiansPerSecond, lastLimitedSpeeds.omegaRadiansPerSecond, maxAngularDelta);
     setChassisSpeeds(accelerationLimitedSpeeds, vx, vy, omega);
     return accelerationLimitedSpeeds;
@@ -1278,6 +1590,18 @@ public class SwerveDrivetrain extends SubsystemBase
     @Override
     public RobotDrivetrain.SpeedsSection set(String source, double x, double y, double theta) {
       speedsModel().setSpeeds(source, x, y, theta);
+      return this;
+    }
+
+    @Override
+    public RobotDrivetrain.SpeedsSection setFieldRelative(String source, ChassisSpeeds speeds) {
+      speedsModel().setFieldRelativeSpeeds(source, speeds);
+      return this;
+    }
+
+    @Override
+    public RobotDrivetrain.SpeedsSection setFieldRelative(String source, double x, double y, double theta) {
+      speedsModel().setFieldRelativeSpeeds(source, x, y, theta);
       return this;
     }
 

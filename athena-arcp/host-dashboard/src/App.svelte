@@ -84,6 +84,8 @@
   import DashboardContextMenu from './components/DashboardContextMenu.svelte';
 
   const REFRESH_MS_DASHBOARDS = 120;
+  const REFRESH_MS_DASHBOARDS_HEAVY = 180;
+  const REFRESH_MS_DASHBOARDS_DENSE = 240;
   const REFRESH_MS_OTHER = 180;
   const REFRESH_MS_DISCONNECTED = 500;
   const SERVER_LAYOUT_POLL_MS = 2000;
@@ -325,6 +327,7 @@
   let lastError = $state('');
 
   let snapshot = $state<DashboardSnapshot | null>(null);
+  let liveSignals = $state<SignalRow[]>([]);
   let selectedId = $state<number | null>(null);
   let selectedWidgetId = $state<string | null>(null);
 
@@ -392,7 +395,7 @@
   let robotLinkProbeInFlight = $state(false);
   let controlTunerTrackedSignalIds = $state<number[]>([]);
 
-  const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
+  const signalRows = $derived(liveSignals.filter((signal) => !isIgnoredPublishSignal(signal)));
   const ntCompatSignalRows = $derived(signalRows.filter((signal) => isNtCompatPath(signal.path)));
   const arcpSignalRows = $derived(signalRows.filter((signal) => !isNtCompatPath(signal.path)));
   const signalById = $derived(new Map(signalRows.map((signal) => [signal.signal_id, signal])));
@@ -719,6 +722,7 @@
     elapsedMs: number
   ) {
     const signals = buildReplaySignals(recording, valueById);
+    liveSignals = signals;
     const clampedDuration = Math.max(1, recording.durationMs);
     const progress = Math.max(0, Math.min(100, Math.round((elapsedMs / clampedDuration) * 100)));
     const previous = snapshot;
@@ -2725,8 +2729,10 @@
         lastManifestRevision >= 0 ? lastManifestRevision : null
       );
       const previous = snapshot;
+      let resolvedSignals = liveSignals;
 
       if (!next.connected && next.signals.length === 0 && previous && !next.full_snapshot) {
+        resolvedSignals = previous.signals;
         snapshot = {
           ...previous,
           connected: false,
@@ -2742,7 +2748,8 @@
           server_disk_total_bytes: next.server_disk_total_bytes,
           server_disk_available_bytes: next.server_disk_available_bytes,
           host_cpu_percent: next.host_cpu_percent,
-          host_rss_bytes: next.host_rss_bytes
+          host_rss_bytes: next.host_rss_bytes,
+          signals: resolvedSignals
         };
       } else {
         let nextSignals: SignalRow[];
@@ -2771,6 +2778,7 @@
           }
           nextSignals = merged;
         }
+        resolvedSignals = nextSignals;
 
         snapshot = {
           connected: next.connected,
@@ -2790,12 +2798,15 @@
           signals: nextSignals
         };
       }
+      if (liveSignals !== resolvedSignals) {
+        liveSignals = resolvedSignals;
+      }
 
       connected = next.connected;
       status = next.status;
       needsSessionReconnect = false;
 
-      const filteredSignals = (snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal));
+      const filteredSignals = resolvedSignals.filter((signal) => !isIgnoredPublishSignal(signal));
       const updateChanged = next.full_snapshot || next.update_count !== lastProcessedUpdateCount;
       if (connected) {
         if (updateChanged) {
@@ -3098,7 +3109,11 @@
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const refreshDelayMs = () => {
       if (!connected) return REFRESH_MS_DISCONNECTED;
-      return railSection === 'dashboards' ? REFRESH_MS_DASHBOARDS : REFRESH_MS_OTHER;
+      if (railSection !== 'dashboards') return REFRESH_MS_OTHER;
+      const panelCount = widgets.length;
+      if (panelCount >= 40) return REFRESH_MS_DASHBOARDS_DENSE;
+      if (panelCount >= 20) return REFRESH_MS_DASHBOARDS_HEAVY;
+      return REFRESH_MS_DASHBOARDS;
     };
     const refreshTick = async () => {
       if (refreshCancelled) return;

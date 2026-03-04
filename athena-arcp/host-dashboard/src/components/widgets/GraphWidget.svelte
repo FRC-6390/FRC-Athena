@@ -8,6 +8,7 @@
     signalById: Map<number, SignalRow>;
     historyBySignal: Map<number, number[]>;
     historyTimeBySignal: Map<number, number[]>;
+    nowMs: number;
     configRaw?: WidgetConfigRecord;
   };
 
@@ -30,20 +31,9 @@
     label: string;
   };
 
-  let { signal, signalById, historyBySignal, historyTimeBySignal, configRaw }: Props = $props();
-  let clockNowMs = $state(Date.now());
+  let { signal, signalById, historyBySignal, historyTimeBySignal, nowMs, configRaw }: Props = $props();
   const GRAPH_TIME_WINDOW_MS = 10_000;
   const STALE_THRESHOLD_MIN_MS = 1200;
-
-  $effect(() => {
-    if (typeof window === 'undefined') return;
-    const timer = window.setInterval(() => {
-      clockNowMs = Date.now();
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  });
 
   function numericFromSignal(value: string): number | null {
     const parsed = Number(value);
@@ -112,7 +102,6 @@
 
   const computed = $derived.by(() => {
     const config = readGraphConfig(configRaw, signal);
-    const nowMs = clockNowMs;
 
     const series = config.series
       .map((entry): SeriesRender | null => {

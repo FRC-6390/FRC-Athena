@@ -158,6 +158,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   let copyToastVisible = $state(false);
   let copyToastTimer: ReturnType<typeof setTimeout> | null = null;
   let layoutMeasureTick = $state(0);
+  let graphClockNowMs = $state(Date.now());
 
   const widgetById = $derived.by(() => new Map(widgets.map((widget) => [widget.id, widget])));
 
@@ -655,6 +656,10 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   }
 
   function resolveWidgetSignal(widget: DashboardWidget): SignalRow | null {
+    if (isLayoutWidgetKind(widget.kind)) {
+      return null;
+    }
+
     const directSignal =
       Number.isFinite(widget.signalId) && widget.signalId > 0
         ? signalById.get(widget.signalId) ?? null
@@ -2259,6 +2264,9 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       gridHeight = gridEl.clientHeight;
       observer.observe(gridEl);
     }
+    const graphClockTimer = window.setInterval(() => {
+      graphClockNowMs = Date.now();
+    }, 1000);
 
     let moveRaf = 0;
     let pendingMove: { x: number; y: number } | null = null;
@@ -2331,6 +2339,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
         clearTimeout(copyToastTimer);
         copyToastTimer = null;
       }
+      window.clearInterval(graphClockTimer);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointerdown', onPointerDown);
@@ -2404,8 +2413,8 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     {/if}
 
     {#each widgetsForRender as widget (widget.id)}
-      {@const signal = resolvedSignalByWidgetId.get(widget.id) ?? null}
       {@const isLayoutWidget = isLayoutWidgetKind(widget.kind)}
+      {@const signal = isLayoutWidget ? null : (resolvedSignalByWidgetId.get(widget.id) ?? null)}
       {@const accordionConfig = widget.kind === 'layout_accordion' ? readLayoutAccordionConfig(widget.config) : null}
       {@const accordionOpen = accordionConfig ? !accordionConfig.collapsed : false}
       {@const hiddenByAccordion = isHiddenByCollapsedAccordion(widget)}
@@ -2538,6 +2547,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
                   {signalById}
                   {historyBySignal}
                   {historyTimeBySignal}
+                  nowMs={graphClockNowMs}
                   configRaw={widget.config}
                 />
               {:else if widget.kind === 'controller'}

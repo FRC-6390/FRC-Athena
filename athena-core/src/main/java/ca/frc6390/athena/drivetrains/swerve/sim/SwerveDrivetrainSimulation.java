@@ -17,6 +17,8 @@ public class SwerveDrivetrainSimulation {
     private final SwerveModuleSimulation[] moduleSimulations;
     private Pose2d pose = new Pose2d();
     private ChassisSpeeds lastChassisSpeeds = new ChassisSpeeds();
+    private Rotation2d lastChassisHeading = Rotation2d.kZero;
+    private boolean hasLastChassisHeading = false;
 
     public SwerveDrivetrainSimulation(SwerveDrivetrain drivetrain, SwerveSimulationConfig config) {
         this.drivetrain = drivetrain;
@@ -50,16 +52,41 @@ public class SwerveDrivetrainSimulation {
         double tractionScaleDecel = 1.1; // allow slightly stronger braking than acceleration
         double maxAccel = Math.max(0.0, tractionScaleAccel * config.getWheelCoefficientOfFriction() * 9.81); // m/s^2
         double maxDecel = Math.max(0.0, tractionScaleDecel * config.getWheelCoefficientOfFriction() * 9.81); // m/s^2
-        double dvx = vx - lastChassisSpeeds.vxMetersPerSecond;
-        double dvy = vy - lastChassisSpeeds.vyMetersPerSecond;
-        double lastSpeedNorm = Math.hypot(lastChassisSpeeds.vxMetersPerSecond, lastChassisSpeeds.vyMetersPerSecond);
-        double decelDot = dvx * lastChassisSpeeds.vxMetersPerSecond + dvy * lastChassisSpeeds.vyMetersPerSecond;
+
+        // Apply linear acceleration limiting in field frame to avoid artificial axis coupling
+        // when robot-relative velocity components rotate under nonzero omega.
+        Rotation2d heading = pose.getRotation();
+        Rotation2d lastHeading = hasLastChassisHeading ? lastChassisHeading : heading;
+        ChassisSpeeds fieldMeasured = ChassisSpeeds.fromRobotRelativeSpeeds(
+                vx,
+                vy,
+                omega,
+                heading);
+        ChassisSpeeds fieldLast = ChassisSpeeds.fromRobotRelativeSpeeds(
+                lastChassisSpeeds.vxMetersPerSecond,
+                lastChassisSpeeds.vyMetersPerSecond,
+                lastChassisSpeeds.omegaRadiansPerSecond,
+                lastHeading);
+
+        double dvxField = fieldMeasured.vxMetersPerSecond - fieldLast.vxMetersPerSecond;
+        double dvyField = fieldMeasured.vyMetersPerSecond - fieldLast.vyMetersPerSecond;
+        double lastSpeedNorm = Math.hypot(fieldLast.vxMetersPerSecond, fieldLast.vyMetersPerSecond);
+        double decelDot = dvxField * fieldLast.vxMetersPerSecond + dvyField * fieldLast.vyMetersPerSecond;
         double maxDelta = (lastSpeedNorm > 1e-6 && decelDot < 0.0) ? maxDecel * dtSeconds : maxAccel * dtSeconds;
-        double deltaNorm = Math.hypot(dvx, dvy);
+        double deltaNorm = Math.hypot(dvxField, dvyField);
         if (deltaNorm > maxDelta && deltaNorm > 1e-6) {
             double scale = maxDelta / deltaNorm;
-            vx = lastChassisSpeeds.vxMetersPerSecond + dvx * scale;
-            vy = lastChassisSpeeds.vyMetersPerSecond + dvy * scale;
+            fieldMeasured = new ChassisSpeeds(
+                    fieldLast.vxMetersPerSecond + dvxField * scale,
+                    fieldLast.vyMetersPerSecond + dvyField * scale,
+                    omega);
+            ChassisSpeeds limitedRobot = ChassisSpeeds.fromFieldRelativeSpeeds(
+                    fieldMeasured.vxMetersPerSecond,
+                    fieldMeasured.vyMetersPerSecond,
+                    omega,
+                    heading);
+            vx = limitedRobot.vxMetersPerSecond;
+            vy = limitedRobot.vyMetersPerSecond;
         }
 
         double maxVelCapability = drivetrain.speeds().maxVelocity();
@@ -101,6 +128,8 @@ public class SwerveDrivetrainSimulation {
 
         pose = pose.exp(twist);
         lastChassisSpeeds = chassisSpeeds;
+        lastChassisHeading = heading;
+        hasLastChassisHeading = true;
 
         drivetrain.imu().device().setSimulatedHeading(pose.getRotation(), Rotation2d.fromRadians(chassisSpeeds.omegaRadiansPerSecond));
         return chassisSpeeds;
@@ -115,6 +144,9 @@ public class SwerveDrivetrainSimulation {
         for (SwerveModuleSimulation moduleSimulation : moduleSimulations) {
             moduleSimulation.reset(0, 0);
         }
+        lastChassisSpeeds = new ChassisSpeeds();
+        lastChassisHeading = pose.getRotation();
+        hasLastChassisHeading = false;
         drivetrain.imu().device().setSimulatedHeading(pose.getRotation(), Rotation2d.fromDegrees(0));
     }
 

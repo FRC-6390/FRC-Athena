@@ -805,11 +805,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                             desiredSpeeds.vyMetersPerSecond + yFeedback,
                             desiredSpeeds.omegaRadiansPerSecond + thetaFeedback);
 
-                    ChassisSpeeds robotRelative = ChassisSpeeds.fromFieldRelativeSpeeds(
-                            fieldSpeeds,
-                            measuredHeading);
-
-                    robotSpeeds.setSpeeds(RobotSpeeds.AUTO_SOURCE, robotRelative);
+                    robotSpeeds.setFieldRelativeSpeeds(RobotSpeeds.AUTO_SOURCE, fieldSpeeds);
                 },
                 true,
                 drivetrain);

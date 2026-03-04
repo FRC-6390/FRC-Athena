@@ -10,6 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 
 public class RobotSpeeds {
@@ -215,6 +216,9 @@ public class RobotSpeeds {
         private boolean enableX;
         private boolean enableY;
         private boolean enableTheta;
+        private boolean fieldRelative;
+        private double lastUpdateSeconds;
+        private double estimatedUpdatePeriodSeconds;
 
         public SpeedSource(String name) {
             this.name = name;
@@ -222,6 +226,9 @@ public class RobotSpeeds {
             this.enableX = true;
             this.enableY = true;
             this.enableTheta = true;
+            this.fieldRelative = false;
+            this.lastUpdateSeconds = Double.NaN;
+            this.estimatedUpdatePeriodSeconds = Double.NaN;
         }
 
         public String getName() {
@@ -243,6 +250,30 @@ public class RobotSpeeds {
             this.vxMetersPerSecond = vxMetersPerSecond;
             this.vyMetersPerSecond = vyMetersPerSecond;
             this.omegaRadiansPerSecond = omegaRadiansPerSecond;
+            this.fieldRelative = false;
+            markUpdated();
+        }
+
+        public void setInputFieldRelativeSpeeds(ChassisSpeeds speeds) {
+            if (speeds == null) {
+                setInputFieldRelativeSpeeds(0.0, 0.0, 0.0);
+                return;
+            }
+            setInputFieldRelativeSpeeds(
+                    speeds.vxMetersPerSecond,
+                    speeds.vyMetersPerSecond,
+                    speeds.omegaRadiansPerSecond);
+        }
+
+        public void setInputFieldRelativeSpeeds(
+                double vxMetersPerSecond,
+                double vyMetersPerSecond,
+                double omegaRadiansPerSecond) {
+            this.vxMetersPerSecond = vxMetersPerSecond;
+            this.vyMetersPerSecond = vyMetersPerSecond;
+            this.omegaRadiansPerSecond = omegaRadiansPerSecond;
+            this.fieldRelative = true;
+            markUpdated();
         }
 
         public double outputVx() {
@@ -266,7 +297,7 @@ public class RobotSpeeds {
             return omegaRadiansPerSecond;
         }
 
-        private void writeOutputs(double[] values) {
+        private void writeOutputs(double[] values, Rotation2d fieldHeading) {
             if (values == null) {
                 return;
             }
@@ -276,9 +307,23 @@ public class RobotSpeeds {
                 values[AXIS_THETA] = 0.0;
                 return;
             }
-            values[AXIS_X] = enableX ? vxMetersPerSecond : 0.0;
-            values[AXIS_Y] = enableY ? vyMetersPerSecond : 0.0;
-            values[AXIS_THETA] = enableTheta ? omegaRadiansPerSecond : 0.0;
+            double outputVx = vxMetersPerSecond;
+            double outputVy = vyMetersPerSecond;
+            double outputOmega = omegaRadiansPerSecond;
+            if (fieldRelative) {
+                Rotation2d resolvedHeading = fieldHeading != null ? fieldHeading : Rotation2d.kZero;
+                ChassisSpeeds robotRelative = ChassisSpeeds.fromFieldRelativeSpeeds(
+                        vxMetersPerSecond,
+                        vyMetersPerSecond,
+                        omegaRadiansPerSecond,
+                        resolvedHeading);
+                outputVx = robotRelative.vxMetersPerSecond;
+                outputVy = robotRelative.vyMetersPerSecond;
+                outputOmega = robotRelative.omegaRadiansPerSecond;
+            }
+            values[AXIS_X] = enableX ? outputVx : 0.0;
+            values[AXIS_Y] = enableY ? outputVy : 0.0;
+            values[AXIS_THETA] = enableTheta ? outputOmega : 0.0;
         }
 
         public ChassisSpeeds getOutputSpeeds() {
@@ -293,6 +338,19 @@ public class RobotSpeeds {
             vxMetersPerSecond = 0.0;
             vyMetersPerSecond = 0.0;
             omegaRadiansPerSecond = 0.0;
+            markUpdated();
+        }
+
+        public boolean isFieldRelativeInput() {
+            return fieldRelative;
+        }
+
+        public double getLastUpdateSeconds() {
+            return lastUpdateSeconds;
+        }
+
+        public double getEstimatedUpdatePeriodSeconds() {
+            return estimatedUpdatePeriodSeconds;
         }
 
         public boolean isEnabled() {
@@ -365,6 +423,23 @@ public class RobotSpeeds {
                     return outputOmega();
                 default:
                     return 0.0;
+            }
+        }
+
+        private void markUpdated() {
+            double now = RobotTime.nowSeconds();
+            if (Double.isFinite(now)) {
+                if (Double.isFinite(lastUpdateSeconds)) {
+                    double delta = now - lastUpdateSeconds;
+                    if (Double.isFinite(delta) && delta > 1e-6 && delta < 1.0) {
+                        if (!Double.isFinite(estimatedUpdatePeriodSeconds)) {
+                            estimatedUpdatePeriodSeconds = delta;
+                        } else {
+                            estimatedUpdatePeriodSeconds += 0.2 * (delta - estimatedUpdatePeriodSeconds);
+                        }
+                    }
+                }
+                lastUpdateSeconds = now;
             }
         }
     }
@@ -567,6 +642,14 @@ public class RobotSpeeds {
         speedSource(source).setInputSpeeds(x, y, theta);
     }
 
+    public void setFieldRelativeSpeeds(String source, ChassisSpeeds speeds) {
+        speedSource(source).setInputFieldRelativeSpeeds(speeds);
+    }
+
+    public void setFieldRelativeSpeeds(String source, double x, double y, double theta) {
+        speedSource(source).setInputFieldRelativeSpeeds(x, y, theta);
+    }
+
     public ChassisSpeeds getSpeeds(String source) {
         return speedSource(source).getOutputSpeeds();
     }
@@ -625,15 +708,25 @@ public class RobotSpeeds {
 
     public ChassisSpeeds calculate() {
         ChassisSpeeds output = new ChassisSpeeds();
-        calculate(output);
+        calculate(output, Rotation2d.kZero);
         return output;
     }
 
     public void calculate(ChassisSpeeds target) {
+        calculate(target, Rotation2d.kZero);
+    }
+
+    public ChassisSpeeds calculate(Rotation2d fieldHeading) {
+        ChassisSpeeds output = new ChassisSpeeds();
+        calculate(output, fieldHeading);
+        return output;
+    }
+
+    public void calculate(ChassisSpeeds target, Rotation2d fieldHeading) {
         if (target == null) {
             return;
         }
-        initializeSourceValues();
+        initializeSourceValues(fieldHeading);
         applySourceBlends();
 
         outputScratch[AXIS_X] = 0.0;
@@ -646,10 +739,22 @@ public class RobotSpeeds {
         target.omegaRadiansPerSecond = clamp(outputScratch[AXIS_THETA], maxAngularVelocity);
     }
 
-    private void initializeSourceValues() {
+    private void initializeSourceValues(Rotation2d fieldHeading) {
         for (SourceValueSlot slot : sourceValueSlots) {
-            slot.source.writeOutputs(slot.values);
+            slot.source.writeOutputs(slot.values, fieldHeading);
         }
+    }
+
+    public boolean isFieldRelativeSource(String source) {
+        return speedSource(source).isFieldRelativeInput();
+    }
+
+    public double getSourceLastUpdateSeconds(String source) {
+        return speedSource(source).getLastUpdateSeconds();
+    }
+
+    public double getSourceEstimatedUpdatePeriodSeconds(String source) {
+        return speedSource(source).getEstimatedUpdatePeriodSeconds();
     }
 
     private void applySourceBlends() {

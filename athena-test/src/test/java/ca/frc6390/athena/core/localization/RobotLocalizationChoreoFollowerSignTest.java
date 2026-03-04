@@ -93,7 +93,7 @@ final class RobotLocalizationChoreoFollowerSignTest {
                 new Pose2d(1.0, 0.0, Rotation2d.fromDegrees(90.0)),
                 new ChassisSpeeds());
 
-        ChassisSpeeds output = fixture.speeds.getInputSpeeds(RobotSpeeds.AUTO_SOURCE);
+        ChassisSpeeds output = fixture.speeds.calculate(Rotation2d.fromDegrees(90.0));
         assertTrue(
                 Math.abs(output.vxMetersPerSecond) < 1e-6,
                 "At 90deg heading, field +X correction should map to near-zero robot vx, got "
