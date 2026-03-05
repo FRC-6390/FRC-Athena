@@ -128,7 +128,7 @@ public class SwerveDrivetrainSimulation {
 
         pose = pose.exp(twist);
         lastChassisSpeeds = chassisSpeeds;
-        lastChassisHeading = heading;
+        lastChassisHeading = pose.getRotation();
         hasLastChassisHeading = true;
 
         drivetrain.imu().device().setSimulatedHeading(pose.getRotation(), Rotation2d.fromRadians(chassisSpeeds.omegaRadiansPerSecond));

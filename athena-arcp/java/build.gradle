@@ -112,7 +112,6 @@ def publishTaskRequested = gradle.startParameter.taskNames.any { name ->
 def wpilibRootDir = new File(System.getenv('PUBLIC') ?: 'C:/Users/Public', 'wpilib/2026/roborio/bin')
 def wpilibArmGcc = new File(wpilibRootDir, hostOs.isWindows() ? 'arm-frc2025-linux-gnueabi-gcc.exe' : 'arm-frc2025-linux-gnueabi-gcc')
 def wpilibArmAr = new File(wpilibRootDir, hostOs.isWindows() ? 'arm-frc2025-linux-gnueabi-ar.exe' : 'arm-frc2025-linux-gnueabi-ar')
-def wpilibArmToolchainAvailable = hostOs.isWindows() && wpilibArmGcc.exists() && wpilibArmAr.exists()
 def configuredNativeModeRaw = (project.findProperty('arcpNativeMode')
         ?: System.getenv('ARCP_NATIVE_MODE')) as String
 def nativeModeExplicitlyConfigured = configuredNativeModeRaw != null && !configuredNativeModeRaw.trim().isEmpty()
@@ -124,13 +123,9 @@ def publishDefaultTargets = [
         'host'
 ]
 def explicitTargetsRaw = (project.findProperty('arcpJniTargets') ?: System.getenv('ARCP_JNI_TARGETS')) as String
-def dockerHostSupported = ((hostOs.isLinux() && hostArch in ['arm32', 'x86_64', 'aarch64'])
-        || (hostOs.isWindows() && hostArch == 'x86_64'))
 def dockerCrossDefault = (nativeMode == 'none')
         ? 'false'
-        : ((nativeMode == 'host')
-        ? ((dockerHostSupported && !(publishTaskRequested && wpilibArmToolchainAvailable)) ? 'true' : 'false')
-        : 'true')
+        : 'true'
 def useDockerCross = ((project.findProperty('arcpUseDockerCross')
         ?: System.getenv('ARCP_USE_DOCKER_CROSS')
         ?: dockerCrossDefault) as String).toBoolean()

@@ -179,17 +179,79 @@ public final class RobotCoreConfig {
     }
 
     public static final class DrivetrainSection {
+        private double updatePeriodSeconds = Double.NaN;
+        private double driverCommandPeriodSeconds = Double.NaN;
+
         private DrivetrainSection() {}
 
+        /**
+         * Sets the drivetrain control/update loop period in seconds.
+         *
+         * <p>Applied to drivetrains that expose a configurable update period (currently swerve).</p>
+         */
+        public DrivetrainSection updatePeriodSeconds(double seconds) {
+            if (Double.isFinite(seconds) && seconds > 0.0) {
+                updatePeriodSeconds = seconds;
+            }
+            return this;
+        }
+
+        /**
+         * Sets the drivetrain control/update loop period in milliseconds.
+         */
+        public DrivetrainSection updatePeriodMs(double milliseconds) {
+            return updatePeriodSeconds(milliseconds / 1000.0);
+        }
+
+        /**
+         * Sets the expected driver-command update period in seconds.
+         *
+         * <p>Applied to drivetrains that expose a configurable driver input period (currently swerve).</p>
+         */
+        public DrivetrainSection driverCommandPeriodSeconds(double seconds) {
+            if (Double.isFinite(seconds) && seconds > 0.0) {
+                driverCommandPeriodSeconds = seconds;
+            }
+            return this;
+        }
+
+        /**
+         * Sets the expected driver-command update period in milliseconds.
+         */
+        public DrivetrainSection driverCommandPeriodMs(double milliseconds) {
+            return driverCommandPeriodSeconds(milliseconds / 1000.0);
+        }
+
+        private void applyTimingIfSupported(RobotDrivetrain<?> drivetrain) {
+            if (drivetrain instanceof SwerveDrivetrain swerve) {
+                if (Double.isFinite(updatePeriodSeconds) && updatePeriodSeconds > 0.0) {
+                    swerve.updatePeriodSeconds(updatePeriodSeconds);
+                }
+                if (Double.isFinite(driverCommandPeriodSeconds) && driverCommandPeriodSeconds > 0.0) {
+                    swerve.driverCommandPeriodSeconds(driverCommandPeriodSeconds);
+                }
+            }
+        }
+
         public RobotDrivetrainConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
-            return Objects.requireNonNull(config, "config");
+            Objects.requireNonNull(config, "config");
+            return () -> {
+                SwerveDrivetrain drivetrain = config.build();
+                applyTimingIfSupported(drivetrain);
+                return drivetrain;
+            };
         }
 
         public RobotDrivetrainConfig<SwerveDrivetrain> swerve(Consumer<SwerveSection> section) {
             Objects.requireNonNull(section, "section");
-            SwerveSection s = new SwerveSection();
+            SwerveSection s = new SwerveSection(this);
             section.accept(s);
-            return s.config;
+            RobotDrivetrainConfig<SwerveDrivetrain> baseConfig = s.drivetrainConfig();
+            return () -> {
+                SwerveDrivetrain drivetrain = baseConfig.build();
+                applyTimingIfSupported(drivetrain);
+                return drivetrain;
+            };
         }
 
         public RobotDrivetrainConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
@@ -206,9 +268,16 @@ public final class RobotCoreConfig {
 
     public static final class SwerveSection {
         private final SwerveDrivetrainConfig config = new SwerveDrivetrainConfig();
+        private final DrivetrainSection owner;
         private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
 
-        private SwerveSection() {}
+        private SwerveSection(DrivetrainSection owner) {
+            this.owner = Objects.requireNonNull(owner, "owner");
+        }
+
+        private RobotDrivetrainConfig<SwerveDrivetrain> drivetrainConfig() {
+            return config;
+        }
 
         public SwerveSection trackWidthMeters(double trackWidthMeters) {
             return moduleLocations(trackWidthMeters);
@@ -289,6 +358,32 @@ public final class RobotCoreConfig {
 
         public SwerveSection fieldRelative(boolean enabled) {
             config.control().fieldRelative(enabled);
+            return this;
+        }
+
+        public SwerveSection control(Consumer<SwerveDrivetrainConfig.ControlSection> section) {
+            Objects.requireNonNull(section, "section");
+            section.accept(config.control());
+            return this;
+        }
+
+        /**
+         * @deprecated Use {@link DrivetrainSection#driverCommandPeriodSeconds(double)} on the
+         *             parent drivetrain section instead.
+         */
+        @Deprecated(since = "2026.2.10", forRemoval = false)
+        public SwerveSection driverCommandPeriodSeconds(double seconds) {
+            owner.driverCommandPeriodSeconds(seconds);
+            return this;
+        }
+
+        /**
+         * @deprecated Use {@link DrivetrainSection#driverCommandPeriodMs(double)} on the
+         *             parent drivetrain section instead.
+         */
+        @Deprecated(since = "2026.2.10", forRemoval = false)
+        public SwerveSection driverCommandPeriodMs(double milliseconds) {
+            owner.driverCommandPeriodMs(milliseconds);
             return this;
         }
 
@@ -666,6 +761,22 @@ public final class RobotCoreConfig {
          */
         public AutoSection pose(String poseName) {
             config = config.pose(poseName);
+            return this;
+        }
+
+        /**
+         * Sets the expected period for auto-follower speed updates.
+         */
+        public AutoSection followerPeriodSeconds(double seconds) {
+            config = config.followerPeriodSeconds(seconds);
+            return this;
+        }
+
+        /**
+         * Sets the expected period for auto-follower speed updates.
+         */
+        public AutoSection followerPeriodMs(double milliseconds) {
+            config = config.followerPeriodMs(milliseconds);
             return this;
         }
 

@@ -820,16 +820,24 @@ public class SwerveModule implements RobotSendableDevice {
 
     public void setDesiredState(SwerveModuleState state) {
         refresh();
+        Rotation2d currentAngle = getEncoderPosition();
 
         if (Math.abs(state.speedMetersPerSecond) < 0.001) {
-            stop();
-
+            // Keep steering active even when the requested wheel speed is near zero so
+            // rotate+translate commands do not freeze module azimuth when one module
+            // momentarily crosses through zero speed.
+            setDriveMotor(0.0);
+            resetFeedforwardState();
+            Rotation2d targetAngle = state.angle != null ? state.angle : currentAngle;
+            setRotationMotor(
+                    rotationPidController.calculate(
+                            MathUtil.angleModulus(currentAngle.getRadians()),
+                            targetAngle.getRadians()));
             return;
         }
 
         SwerveModuleState optimizedState =
                 new SwerveModuleState(state.speedMetersPerSecond, state.angle);
-        Rotation2d currentAngle = getEncoderPosition();
         optimizedState.optimize(currentAngle);
         optimizedState.speedMetersPerSecond *= optimizedState.angle.minus(currentAngle).getCos();
         if (driveFeedforwardEnabled && driveFeedforward != null) {

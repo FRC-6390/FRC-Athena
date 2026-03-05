@@ -124,15 +124,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             HolonomicPidConstants rotationPid,
             String poseName,
             RobotLocalizationConfig.AutoPlannerPidAutotunerConfig pidAutotunerConfig,
-            List<Consumer<RobotAuto.RegistrySection>> registryBindings) {
+            List<Consumer<RobotAuto.RegistrySection>> registryBindings,
+            double followerPeriodSeconds) {
+        private static final double DEFAULT_FOLLOWER_PERIOD_SECONDS = 0.005;
 
         public AutoConfig {
             poseName = normalizePoseName(poseName);
             registryBindings = registryBindings != null ? List.copyOf(registryBindings) : List.of();
+            followerPeriodSeconds = normalizeFollowerPeriodSeconds(followerPeriodSeconds);
         }
 
         public static AutoConfig defaults() {
-            return new AutoConfig(null, null, null, null, List.of());
+            return new AutoConfig(null, null, null, null, List.of(), DEFAULT_FOLLOWER_PERIOD_SECONDS);
         }
 
         public AutoConfig pid(
@@ -146,7 +149,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         public AutoConfig pid(HolonomicPidConstants translation, HolonomicPidConstants rotation) {
-            return new AutoConfig(translation, rotation, poseName, pidAutotunerConfig, registryBindings);
+            return new AutoConfig(
+                    translation,
+                    rotation,
+                    poseName,
+                    pidAutotunerConfig,
+                    registryBindings,
+                    followerPeriodSeconds);
         }
 
         public AutoConfig pid(Consumer<RobotLocalizationConfig.AutoPlannerPidSection> section) {
@@ -173,11 +182,32 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     seed.rotation(),
                     poseName,
                     seed.autoPlannerPidAutotuner(),
-                    registryBindings);
+                    registryBindings,
+                    followerPeriodSeconds);
         }
 
         public AutoConfig pose(String poseName) {
-            return new AutoConfig(translationPid, rotationPid, poseName, pidAutotunerConfig, registryBindings);
+            return new AutoConfig(
+                    translationPid,
+                    rotationPid,
+                    poseName,
+                    pidAutotunerConfig,
+                    registryBindings,
+                    followerPeriodSeconds);
+        }
+
+        public AutoConfig followerPeriodSeconds(double seconds) {
+            return new AutoConfig(
+                    translationPid,
+                    rotationPid,
+                    poseName,
+                    pidAutotunerConfig,
+                    registryBindings,
+                    seconds);
+        }
+
+        public AutoConfig followerPeriodMs(double milliseconds) {
+            return followerPeriodSeconds(milliseconds / 1000.0);
         }
 
         public AutoConfig registry(Consumer<RobotAuto.RegistrySection> section) {
@@ -186,7 +216,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             List<Consumer<RobotAuto.RegistrySection>> merged = new ArrayList<>(registryBindings);
             merged.add(section);
-            return new AutoConfig(translationPid, rotationPid, poseName, pidAutotunerConfig, merged);
+            return new AutoConfig(
+                    translationPid,
+                    rotationPid,
+                    poseName,
+                    pidAutotunerConfig,
+                    merged,
+                    followerPeriodSeconds);
         }
 
         private static String normalizePoseName(String poseName) {
@@ -195,6 +231,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             String trimmed = poseName.trim();
             return trimmed.isEmpty() ? null : trimmed;
+        }
+
+        private static double normalizeFollowerPeriodSeconds(double seconds) {
+            if (!Double.isFinite(seconds) || seconds <= 0.0) {
+                return DEFAULT_FOLLOWER_PERIOD_SECONDS;
+            }
+            return seconds;
         }
 
         private static void setPidAxis(
@@ -635,6 +678,16 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 return this;
             }
 
+            public AutoSection followerPeriodSeconds(double seconds) {
+                config = config.followerPeriodSeconds(seconds);
+                return this;
+            }
+
+            public AutoSection followerPeriodMs(double milliseconds) {
+                config = config.followerPeriodMs(milliseconds);
+                return this;
+            }
+
             public AutoSection registry(Consumer<RobotAuto.RegistrySection> section) {
                 config = config.registry(section);
                 return this;
@@ -913,6 +966,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         RobotLocalizationConfig resolvedLocalizationConfig =
                 applyAutoConfigToLocalization(config.localizationConfig(), autoConfig);
         drivetrain = timedStartupStep("constructor.driveTrain.build", () -> config.driveTrain.build());
+        applyAutoFollowerTimingConfig(drivetrain, autoConfig);
         configureDrivetrainUpdateLoop(drivetrain);
         localization = timedStartupStep(
                 "constructor.localization.create",
@@ -5177,6 +5231,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         swerve.externalUpdateLoopEnabled(true);
         addPeriodic(swerve::update, period);
+    }
+
+    private void applyAutoFollowerTimingConfig(T drivetrain, AutoConfig autoConfig) {
+        if (!(drivetrain instanceof SwerveDrivetrain swerve)) {
+            return;
+        }
+        AutoConfig resolved = autoConfig != null ? autoConfig : AutoConfig.defaults();
+        swerve.autoFollowerPeriodSeconds(resolved.followerPeriodSeconds());
     }
 
     public RobotCore<T> registerMechanism(Mechanism... mechs) {

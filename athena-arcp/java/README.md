@@ -54,7 +54,7 @@ Properties/env:
 
 - `-ParcpNativeMode=<host|vendor|full|none>`
 - `-ParcpJniTargets=triple1,triple2,...` (overrides mode matrix)
-- `-ParcpUseDockerCross=<true|false>` (default `true` for `vendor/full` and for `host` on supported Linux/Windows hosts; unsupported host OS/arch defaults to `false`)
+- `-ParcpUseDockerCross=<true|false>` (default `true` for all native modes except `none`)
 - `-ParcpDockerImage=<tag>` (default `athena-arcp-cross:latest`)
 - `-ParcpDockerRebuild=<true|false>` (force rebuild of cross image)
 - `-ParcpInstallRustTargets=<true|false>` (auto-run `rustup target add` for missing targets)
