@@ -1,5 +1,12 @@
 package ca.frc6390.athena.hardware.motor;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
@@ -14,6 +21,18 @@ import edu.wpi.first.math.controller.PIDController;
  * through the new vendordep-backed hardware layer.
  */
 public class MotorControllerGroup implements RobotSendableDevice {
+    private static final String MOTOR_BUILD_PARALLELISM_PROPERTY = "athena.mechanism.motorBuildParallelism";
+    private static final int MAX_MOTOR_BUILD_THREADS = 8;
+    private static final AtomicInteger MOTOR_BUILD_THREAD_COUNTER = new AtomicInteger(1);
+    private static final int MOTOR_BUILD_POOL_SIZE = resolveMotorBuildPoolSize();
+    private static final ExecutorService MOTOR_BUILD_EXECUTOR = Executors.newFixedThreadPool(
+            MOTOR_BUILD_POOL_SIZE,
+            runnable -> {
+                Thread thread =
+                        new Thread(runnable, "athena-motor-build-" + MOTOR_BUILD_THREAD_COUNTER.getAndIncrement());
+                thread.setDaemon(true);
+                return thread;
+            });
     private final MotorController[] controllers;
     private final String[] controllerTopicKeys;
     private final OutputSection outputSection;
@@ -40,11 +59,63 @@ public class MotorControllerGroup implements RobotSendableDevice {
         if (configs == null || configs.length == 0) {
             return new MotorControllerGroup();
         }
+        if (configs.length == 1 || MOTOR_BUILD_POOL_SIZE <= 1) {
+            MotorController[] motors = new MotorController[configs.length];
+            for (int i = 0; i < configs.length; i++) {
+                motors[i] = HardwareFactories.motor(configs[i]);
+            }
+            return new MotorControllerGroup(motors);
+        }
         MotorController[] motors = new MotorController[configs.length];
-        for (int i = 0; i < configs.length; i++) {
-            motors[i] = HardwareFactories.motor(configs[i]);
+        List<Future<MotorController>> futures = new ArrayList<>(configs.length);
+        for (MotorControllerConfig config : configs) {
+            futures.add(MOTOR_BUILD_EXECUTOR.submit(() -> HardwareFactories.motor(config)));
+        }
+        for (int i = 0; i < futures.size(); i++) {
+            motors[i] = awaitMotorBuild(futures.get(i), i);
         }
         return new MotorControllerGroup(motors);
+    }
+
+    private static int resolveMotorBuildPoolSize() {
+        Integer configured = parsePositiveIntProperty(MOTOR_BUILD_PARALLELISM_PROPERTY);
+        if (configured != null) {
+            return Math.max(1, configured);
+        }
+        int cpus = Math.max(1, Runtime.getRuntime().availableProcessors());
+        int defaultThreads = Math.max(2, cpus * 2);
+        return Math.max(1, Math.min(MAX_MOTOR_BUILD_THREADS, defaultThreads));
+    }
+
+    private static Integer parsePositiveIntProperty(String propertyName) {
+        String raw = System.getProperty(propertyName);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static MotorController awaitMotorBuild(Future<MotorController> future, int index) {
+        try {
+            return future.get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while creating motor controller at index " + index, ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("Failed to create motor controller at index " + index, cause);
+        }
     }
 
     /**

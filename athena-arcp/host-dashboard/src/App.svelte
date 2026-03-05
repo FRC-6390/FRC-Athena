@@ -1,20 +1,32 @@
 <script lang="ts">
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import { faMagnifyingGlass, faXmark } from '@fortawesome/free-solid-svg-icons';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import type { DashboardSnapshot, SignalRow } from './lib/arcp';
+  import type {
+    DashboardSnapshot,
+    RemoteLogEntry,
+    RobotLinkProbe,
+    SignalRow
+  } from './lib/arcp';
   import {
     connectArcp,
+    downloadRemoteLog,
     deltaArcp,
     deleteServerLayout,
     disconnectArcp,
     fireAction,
+    listRemoteLogs,
     listServerLayouts,
     loadServerLayout,
+    probeRobotLink,
+    readRemoteLogPreview,
     saveServerLayout,
     setDriverstationDockMode,
     setPresentationMode,
     setSignal,
+    startRemoteLogStream,
+    stopRemoteLogStream,
     windowModeSnapshot
   } from './lib/arcp';
   import {
@@ -29,7 +41,6 @@
     formatMemory,
     formatUptime,
     hardwareWidgetKindForPath,
-    isActionSignal,
     isLayoutWidgetKind,
     isWritableSignal,
     leafPath,
@@ -65,14 +76,16 @@
   import WidgetCanvas from './components/WidgetCanvas.svelte';
   import InspectorPanel from './components/InspectorPanel.svelte';
   import SettingsScreen from './components/SettingsScreen.svelte';
-  import ActionsScreen from './components/ActionsScreen.svelte';
-  import CameraTuningScreen from './components/CameraTuningScreen.svelte';
   import DiagnosticsScreen from './components/DiagnosticsScreen.svelte';
+  import LogsScreen from './components/LogsScreen.svelte';
   import MechanismsScreen from './components/MechanismsScreen.svelte';
+  import ControlTunerScreen from './components/ControlTunerScreen.svelte';
   import FloatingDock from './components/FloatingDock.svelte';
   import DashboardContextMenu from './components/DashboardContextMenu.svelte';
 
   const REFRESH_MS_DASHBOARDS = 120;
+  const REFRESH_MS_DASHBOARDS_HEAVY = 180;
+  const REFRESH_MS_DASHBOARDS_DENSE = 240;
   const REFRESH_MS_OTHER = 180;
   const REFRESH_MS_DISCONNECTED = 500;
   const SERVER_LAYOUT_POLL_MS = 2000;
@@ -87,6 +100,9 @@
   const RECORDING_SCHEMA = 'arcp-recording-v1';
   const RECORDING_CLIENT_HEARTBEAT_INTERVAL_MS = 1_000;
   const RECORDING_REPLAY_TICK_MS = 33;
+  const REMOTE_LOG_LIVE_POLL_MS = 1_000;
+  const REMOTE_LOG_MAX_LINES = 6000;
+  const ATHENA_MECHANISM_LOG_PATH_PREFIX = 'athena://mechanisms/log/';
 
   type GridDensity = 'compact' | 'balanced' | 'comfortable';
 
@@ -94,9 +110,9 @@
     | 'dashboards'
     | 'signals'
     | 'mechanisms'
-    | 'actions'
+    | 'control_tuner'
     | 'diagnostics'
-    | 'camera_tuning'
+    | 'logs'
     | 'settings';
   type CommitLayoutOptions = {
     recordHistory?: boolean;
@@ -169,6 +185,17 @@
     sequence: number;
     status: string;
   };
+  type RemoteLogStreamLinePayload = {
+    host: string;
+    path: string;
+    line: string;
+  };
+  type RemoteLogStreamStatusPayload = {
+    host: string;
+    path: string;
+    state: string;
+    message: string;
+  };
 
   function parseGridDensity(raw: unknown): GridDensity {
     return raw === 'compact' || raw === 'comfortable' || raw === 'balanced' ? raw : 'balanced';
@@ -234,6 +261,10 @@
     return token.includes('publish');
   }
 
+  function isNtCompatPath(path: string): boolean {
+    return path.startsWith('Athena/NT4/') || path.startsWith('NT4/');
+  }
+
   function collectConfiguredSignalIds(value: unknown, out: Set<number>): void {
     if (value === null || value === undefined) return;
     if (typeof value === 'number') {
@@ -285,7 +316,7 @@
     return typeof topicPath === 'string' && topicPath.trim().length > 0;
   }
 
-  let host = $state('127.0.0.1');
+  let host = $state('ds');
   let controlPort = $state('5805');
   let serverLayoutName = $state(DEFAULT_SERVER_LAYOUT_PROFILE);
   let availableServerLayouts = $state<string[]>([]);
@@ -296,6 +327,7 @@
   let lastError = $state('');
 
   let snapshot = $state<DashboardSnapshot | null>(null);
+  let liveSignals = $state<SignalRow[]>([]);
   let selectedId = $state<number | null>(null);
   let selectedWidgetId = $state<string | null>(null);
 
@@ -311,6 +343,7 @@
 
   let widgetInputs = $state<Record<string, string>>({});
   let historyBySignal = $state(new Map<number, number[]>());
+  let historyTimeBySignal = $state(new Map<number, number[]>());
 
   let query = $state('');
   let layoutToolQuery = $state('');
@@ -345,14 +378,26 @@
   let pendingRecordingAck: PendingRecordingAck | null = null;
   let lastProcessedUpdateCount = -1;
   let lastManifestRevision = -1;
+  let remoteLogs = $state<RemoteLogEntry[]>([]);
+  let remoteLogsResolvedHost = $state('');
+  let remoteLogsRefreshInFlight = $state(false);
+  let remoteLogPreviewInFlight = $state(false);
+  let remoteLogDownloadInFlightPath = $state<string | null>(null);
+  let remoteLogError = $state('');
+  let selectedRemoteLogPath = $state('');
+  let selectedRemoteLogLines = $state<string[]>([]);
+  let selectedRemoteLogPreviewTruncated = $state(false);
+  let remoteLogLiveFollow = $state(true);
+  let remoteLogStreamConnected = $state(false);
+  let remoteLogStreamState = $state('idle');
+  let remoteLogStreamMessage = $state('');
+  let robotLinkProbe = $state<RobotLinkProbe | null>(null);
+  let robotLinkProbeInFlight = $state(false);
+  let controlTunerTrackedSignalIds = $state<number[]>([]);
 
-  const signalRows = $derived((snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal)));
-  const ntCompatSignalRows = $derived(
-    signalRows.filter((signal) => signal.path.startsWith('Athena/NT4/'))
-  );
-  const arcpSignalRows = $derived(
-    signalRows.filter((signal) => !signal.path.startsWith('Athena/NT4/'))
-  );
+  const signalRows = $derived(liveSignals.filter((signal) => !isIgnoredPublishSignal(signal)));
+  const ntCompatSignalRows = $derived(signalRows.filter((signal) => isNtCompatPath(signal.path)));
+  const arcpSignalRows = $derived(signalRows.filter((signal) => !isNtCompatPath(signal.path)));
   const signalById = $derived(new Map(signalRows.map((signal) => [signal.signal_id, signal])));
   const trimmedQuery = $derived(query.trim());
   const filteredSignals = $derived.by(() => {
@@ -372,7 +417,6 @@
       ? applyFilters(pendingSignalMapRequest.candidates, query, 'all', 'all')
       : filteredSignals
   );
-  const actionSignals = $derived(arcpSignalRows.filter((signal) => isActionSignal(signal)));
 
   const activeTab = $derived(
     layoutState.tabs.find((tab) => tab.id === layoutState.activeTabId) ?? layoutState.tabs[0] ?? null
@@ -402,9 +446,7 @@
     { key: 'updates', label: 'updates', value: String(snapshot?.update_count ?? 0), valueWidthCh: 7 },
     { key: 'uptime', label: 'uptime', value: snapshot ? formatUptime(snapshot.uptime_ms) : '0m 0s', valueWidthCh: 9 },
     { key: 'server-cpu', label: 'server cpu', value: snapshot ? formatCpu(snapshot.server_cpu_percent) : 'n/a', valueWidthCh: 6 },
-    { key: 'server-rss', label: 'server rss', value: snapshot ? formatMemory(snapshot.server_rss_bytes) : 'n/a', valueWidthCh: 10 },
-    { key: 'ui-cpu', label: 'ui cpu', value: snapshot ? formatCpu(snapshot.host_cpu_percent) : 'n/a', valueWidthCh: 6 },
-    { key: 'ui-rss', label: 'ui rss', value: snapshot ? formatMemory(snapshot.host_rss_bytes) : 'n/a', valueWidthCh: 10 }
+    { key: 'server-rss', label: 'server rss', value: snapshot ? formatMemory(snapshot.server_rss_bytes) : 'n/a', valueWidthCh: 10 }
   ]);
   const staleData = $derived(!connected && snapshot !== null);
   const reconnecting = $derived(!connected && connectInFlight);
@@ -431,6 +473,11 @@
           ids.add(widget.signalId);
         }
         collectConfiguredSignalIds(widget.config, ids);
+      }
+    }
+    for (const signalId of controlTunerTrackedSignalIds) {
+      if (signalId > 0) {
+        ids.add(signalId);
       }
     }
     return ids;
@@ -484,6 +531,29 @@
       return null;
     }
     return value;
+  }
+
+  function isTauriRuntime(): boolean {
+    if (typeof window === 'undefined') return false;
+    return '__TAURI_INTERNALS__' in window;
+  }
+
+  function splitLogContent(content: string): string[] {
+    const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+    if (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+    return lines;
+  }
+
+  function trimLogLines(lines: string[]): string[] {
+    if (lines.length <= REMOTE_LOG_MAX_LINES) return lines;
+    return lines.slice(lines.length - REMOTE_LOG_MAX_LINES);
+  }
+
+  function isStreamableRemoteLogPath(path: string): boolean {
+    return !path.trim().startsWith(ATHENA_MECHANISM_LOG_PATH_PREFIX);
   }
 
   function nowPerfMs(): number {
@@ -652,6 +722,7 @@
     elapsedMs: number
   ) {
     const signals = buildReplaySignals(recording, valueById);
+    liveSignals = signals;
     const clampedDuration = Math.max(1, recording.durationMs);
     const progress = Math.max(0, Math.min(100, Math.round((elapsedMs / clampedDuration) * 100)));
     const previous = snapshot;
@@ -662,7 +733,12 @@
       update_count: previous?.update_count ?? 0,
       uptime_ms: elapsedMs,
       server_cpu_percent: previous?.server_cpu_percent ?? null,
+      server_cpu_cores: previous?.server_cpu_cores ?? null,
       server_rss_bytes: previous?.server_rss_bytes ?? null,
+      server_ram_total_bytes: previous?.server_ram_total_bytes ?? null,
+      server_ram_available_bytes: previous?.server_ram_available_bytes ?? null,
+      server_disk_total_bytes: previous?.server_disk_total_bytes ?? null,
+      server_disk_available_bytes: previous?.server_disk_available_bytes ?? null,
       host_cpu_percent: previous?.host_cpu_percent ?? null,
       host_rss_bytes: previous?.host_rss_bytes ?? null,
       signals
@@ -925,13 +1001,13 @@
 
     const normalizedHost = host.trim();
     const port = parseControlPort(controlPort);
-    if (!normalizedHost || port === null) {
+    if (port === null) {
       connected = false;
       needsSessionReconnect = true;
       if (source === 'auto') {
         status = 'offline (retrying...)';
       } else {
-        lastError = 'connection failed: host must be set and port must be 1-65535';
+        lastError = 'connection failed: port must be 1-65535';
         status = 'connection failed';
       }
       scheduleReconnect();
@@ -965,6 +1041,7 @@
       connected = false;
       needsSessionReconnect = true;
       scheduleReconnect();
+      void refreshRobotLinkProbe({ silent: true });
       if (source === 'auto') {
         status = 'offline (retrying...)';
       } else {
@@ -992,6 +1069,12 @@
   }
 
   function activateRail(section: RailSection) {
+    if (railSection === 'logs' && section !== 'logs') {
+      void stopRemoteLogStreaming({ silent: true });
+    }
+    if (section !== 'control_tuner') {
+      controlTunerTrackedSignalIds = [];
+    }
     dashboardMenu = null;
     railSection = section;
     if (section !== 'dashboards') {
@@ -1008,13 +1091,14 @@
         typeFilter = 'all';
         selectedWidgetId = null;
         break;
-      case 'actions':
-        roleFilter = 'action';
+      case 'mechanisms':
+        roleFilter = 'all';
         typeFilter = 'all';
         query = '';
-        showInspector = true;
+        showInspector = false;
+        selectedWidgetId = null;
         break;
-      case 'mechanisms':
+      case 'control_tuner':
         roleFilter = 'all';
         typeFilter = 'all';
         query = '';
@@ -1028,12 +1112,14 @@
         showInspector = false;
         selectedWidgetId = null;
         break;
-      case 'camera_tuning':
+      case 'logs':
         roleFilter = 'all';
         typeFilter = 'all';
         query = '';
         showInspector = false;
         selectedWidgetId = null;
+        void refreshRobotLinkProbe({ silent: true });
+        void refreshRemoteLogs(true);
         break;
       case 'settings':
         roleFilter = 'all';
@@ -1428,8 +1514,9 @@
 
   function updateHistory(signals: SignalRow[], trackedSignalIds: Set<number>) {
     if (trackedSignalIds.size === 0) {
-      if (historyBySignal.size > 0) {
+      if (historyBySignal.size > 0 || historyTimeBySignal.size > 0) {
         historyBySignal = new Map();
+        historyTimeBySignal = new Map();
       }
       return;
     }
@@ -1440,10 +1527,16 @@
     }
 
     const next = new Map(historyBySignal);
+    const nextTime = new Map(historyTimeBySignal);
 
     for (const signalId of [...next.keys()]) {
       if (!trackedSignalIds.has(signalId)) {
         next.delete(signalId);
+      }
+    }
+    for (const signalId of [...nextTime.keys()]) {
+      if (!trackedSignalIds.has(signalId)) {
+        nextTime.delete(signalId);
       }
     }
 
@@ -1451,20 +1544,29 @@
       const signal = byId.get(signalId);
       if (!signal) {
         next.delete(signalId);
+        nextTime.delete(signalId);
         continue;
       }
       const numeric = parseNumericSignal(signal);
       if (numeric === null) continue;
 
+      const nowMs = Date.now();
       const values = [...(next.get(signalId) ?? [])];
+      const times = [...(nextTime.get(signalId) ?? [])];
       values.push(numeric);
+      times.push(nowMs);
       if (values.length > 90) {
         values.splice(0, values.length - 90);
       }
+      if (times.length > 90) {
+        times.splice(0, times.length - 90);
+      }
       next.set(signalId, values);
+      nextTime.set(signalId, times);
     }
 
     historyBySignal = next;
+    historyTimeBySignal = nextTime;
   }
 
   const TOPIC_HARDWARE_PRIORITY: WidgetKind[] = [
@@ -1478,8 +1580,11 @@
   function normalizeTopicPath(path: string): string {
     const trimmed = path.trim();
     if (!trimmed) return '';
-    const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
-    const withoutAthenaRoot = withoutLeadingSlash.replace(/^athena\/?/i, '');
+    const withoutLeadingSlash = trimmed.replace(/^\/+/, '').replace(/\\/g, '/');
+    const withoutNtCompatRoot = withoutLeadingSlash
+      .replace(/^athena\/nt4\/?/i, '')
+      .replace(/^nt4\/?/i, '');
+    const withoutAthenaRoot = withoutNtCompatRoot.replace(/^athena\/?/i, '');
     const withoutTrailingSlash = withoutAthenaRoot.replace(/\/+$/, '');
     return withoutTrailingSlash ? `/${withoutTrailingSlash}` : '';
   }
@@ -1785,6 +1890,19 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  function downloadBinaryFile(filename: string, bytes: Uint8Array) {
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   async function pickJsonFileText(): Promise<string | null> {
     return new Promise((resolve, reject) => {
       const input = document.createElement('input');
@@ -1902,6 +2020,241 @@
       lastError = `server layout list failed: ${String(err)}`;
     } finally {
       layoutListRefreshInFlight = false;
+    }
+  }
+
+  function clearRemoteLogSelection() {
+    void stopRemoteLogStreaming({ silent: true });
+    selectedRemoteLogPath = '';
+    selectedRemoteLogLines = [];
+    selectedRemoteLogPreviewTruncated = false;
+    remoteLogDownloadInFlightPath = null;
+    remoteLogPreviewInFlight = false;
+    remoteLogStreamConnected = false;
+    remoteLogStreamState = 'idle';
+    remoteLogStreamMessage = '';
+  }
+
+  function clearRemoteLogs() {
+    remoteLogs = [];
+    remoteLogsResolvedHost = '';
+    remoteLogError = '';
+    robotLinkProbe = null;
+    clearRemoteLogSelection();
+  }
+
+  function setRemoteLogLiveFollow(enabled: boolean) {
+    if (remoteLogLiveFollow === enabled) return;
+    remoteLogLiveFollow = enabled;
+    if (!enabled) {
+      void stopRemoteLogStreaming({ silent: true });
+      return;
+    }
+
+    if (!selectedRemoteLogPath) return;
+    if (isTauriRuntime()) {
+      if (isStreamableRemoteLogPath(selectedRemoteLogPath)) {
+        void startRemoteLogStreaming(selectedRemoteLogPath, { silent: false });
+      } else {
+        void stopRemoteLogStreaming({ silent: true });
+      }
+    } else {
+      void loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
+    }
+  }
+
+  async function stopRemoteLogStreaming(options?: { silent?: boolean }) {
+    if (!isTauriRuntime()) {
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'idle';
+      remoteLogStreamMessage = '';
+      return;
+    }
+
+    try {
+      await stopRemoteLogStream();
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'stopped';
+      remoteLogStreamMessage = 'stream stopped';
+      if (!options?.silent) {
+        remoteLogError = '';
+      }
+    } catch (err) {
+      if (!options?.silent) {
+        remoteLogError = String(err);
+      }
+    }
+  }
+
+  async function startRemoteLogStreaming(
+    path: string,
+    options?: {
+      silent?: boolean;
+    }
+  ) {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) return;
+    if (!remoteLogLiveFollow) return;
+    if (!isTauriRuntime()) return;
+    if (!isStreamableRemoteLogPath(normalizedPath)) {
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'unsupported';
+      remoteLogStreamMessage = 'live stream not supported for Athena mechanism logs';
+      return;
+    }
+
+    try {
+      await startRemoteLogStream(host.trim(), normalizedPath);
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'starting';
+      remoteLogStreamMessage = 'starting stream';
+      if (!options?.silent) {
+        remoteLogError = '';
+      }
+    } catch (err) {
+      remoteLogStreamConnected = false;
+      remoteLogStreamState = 'error';
+      remoteLogStreamMessage = String(err);
+      if (!options?.silent) {
+        remoteLogError = String(err);
+      }
+    }
+  }
+
+  function setRemoteLogPreviewContent(content: string, truncated: boolean) {
+    const lines = trimLogLines(splitLogContent(content));
+    selectedRemoteLogLines = lines;
+    selectedRemoteLogPreviewTruncated = truncated || lines.length >= REMOTE_LOG_MAX_LINES;
+  }
+
+  function appendRemoteLogLine(line: string) {
+    const normalized = line.replace(/\r$/, '');
+    const next = [...selectedRemoteLogLines, normalized];
+    const trimmed = trimLogLines(next);
+    selectedRemoteLogLines = trimmed;
+    if (trimmed.length < next.length) {
+      selectedRemoteLogPreviewTruncated = true;
+    }
+  }
+
+  async function refreshRobotLinkProbe(
+    options?: {
+      silent?: boolean;
+    }
+  ) {
+    const port = parseControlPort(controlPort);
+    if (port === null) {
+      robotLinkProbe = null;
+      return;
+    }
+    if (robotLinkProbeInFlight) return;
+
+    robotLinkProbeInFlight = true;
+    try {
+      const probe = await probeRobotLink(host.trim(), port);
+      robotLinkProbe = probe;
+      if (!remoteLogsResolvedHost && probe.host) {
+        remoteLogsResolvedHost = probe.host;
+      }
+      if (!options?.silent) {
+        remoteLogError = '';
+      }
+    } catch (err) {
+      if (!options?.silent) {
+        remoteLogError = String(err);
+      }
+    } finally {
+      robotLinkProbeInFlight = false;
+    }
+  }
+
+  async function refreshRemoteLogs(force = false) {
+    if (remoteLogsRefreshInFlight) return;
+    if (!force && remoteLogs.length > 0) return;
+
+    remoteLogsRefreshInFlight = true;
+    remoteLogError = '';
+    try {
+      await refreshRobotLinkProbe({ silent: true });
+      const listing = await listRemoteLogs(host.trim());
+      remoteLogs = listing.entries;
+      remoteLogsResolvedHost = listing.host;
+      const hasSelection = listing.entries.some((entry) => entry.path === selectedRemoteLogPath);
+      if (!hasSelection) {
+        selectedRemoteLogPath = listing.entries[0]?.path ?? '';
+        selectedRemoteLogLines = [];
+        selectedRemoteLogPreviewTruncated = false;
+      }
+      if (selectedRemoteLogPath) {
+        await loadRemoteLogPreview(selectedRemoteLogPath, { silent: true });
+        if (remoteLogLiveFollow && isStreamableRemoteLogPath(selectedRemoteLogPath)) {
+          await startRemoteLogStreaming(selectedRemoteLogPath, { silent: true });
+        } else {
+          await stopRemoteLogStreaming({ silent: true });
+        }
+      } else {
+        await stopRemoteLogStreaming({ silent: true });
+      }
+      status = `log index refreshed (${listing.entries.length} files)`;
+      lastError = '';
+    } catch (err) {
+      remoteLogError = String(err);
+    } finally {
+      remoteLogsRefreshInFlight = false;
+    }
+  }
+
+  async function loadRemoteLogPreview(
+    path: string,
+    options?: {
+      silent?: boolean;
+    }
+  ) {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      clearRemoteLogSelection();
+      return;
+    }
+
+    selectedRemoteLogPath = normalizedPath;
+    remoteLogPreviewInFlight = true;
+    remoteLogError = '';
+    try {
+      const preview = await readRemoteLogPreview(host.trim(), normalizedPath, 64 * 1024);
+      remoteLogsResolvedHost = preview.host;
+      setRemoteLogPreviewContent(preview.content, preview.truncated);
+      if (!options?.silent) {
+        lastError = '';
+      }
+    } catch (err) {
+      selectedRemoteLogLines = [];
+      selectedRemoteLogPreviewTruncated = false;
+      remoteLogError = String(err);
+      if (!options?.silent) {
+        lastError = String(err);
+      }
+    } finally {
+      remoteLogPreviewInFlight = false;
+    }
+  }
+
+  async function downloadSelectedRemoteLog(path: string) {
+    const normalizedPath = path.trim();
+    if (!normalizedPath || remoteLogDownloadInFlightPath) return;
+
+    remoteLogDownloadInFlightPath = normalizedPath;
+    remoteLogError = '';
+    try {
+      const payload = await downloadRemoteLog(host.trim(), normalizedPath, 20 * 1024 * 1024);
+      remoteLogsResolvedHost = payload.host;
+      const fileName = payload.fileName || 'remote-log.bin';
+      downloadBinaryFile(fileName, new Uint8Array(payload.bytes));
+      status = `downloaded ${fileName}`;
+      lastError = '';
+    } catch (err) {
+      remoteLogError = String(err);
+    } finally {
+      remoteLogDownloadInFlightPath = null;
     }
   }
 
@@ -2376,8 +2729,10 @@
         lastManifestRevision >= 0 ? lastManifestRevision : null
       );
       const previous = snapshot;
+      let resolvedSignals = liveSignals;
 
       if (!next.connected && next.signals.length === 0 && previous && !next.full_snapshot) {
+        resolvedSignals = previous.signals;
         snapshot = {
           ...previous,
           connected: false,
@@ -2386,9 +2741,15 @@
           update_count: next.update_count,
           uptime_ms: next.uptime_ms,
           server_cpu_percent: next.server_cpu_percent,
+          server_cpu_cores: next.server_cpu_cores,
           server_rss_bytes: next.server_rss_bytes,
+          server_ram_total_bytes: next.server_ram_total_bytes,
+          server_ram_available_bytes: next.server_ram_available_bytes,
+          server_disk_total_bytes: next.server_disk_total_bytes,
+          server_disk_available_bytes: next.server_disk_available_bytes,
           host_cpu_percent: next.host_cpu_percent,
-          host_rss_bytes: next.host_rss_bytes
+          host_rss_bytes: next.host_rss_bytes,
+          signals: resolvedSignals
         };
       } else {
         let nextSignals: SignalRow[];
@@ -2417,6 +2778,7 @@
           }
           nextSignals = merged;
         }
+        resolvedSignals = nextSignals;
 
         snapshot = {
           connected: next.connected,
@@ -2425,18 +2787,26 @@
           update_count: next.update_count,
           uptime_ms: next.uptime_ms,
           server_cpu_percent: next.server_cpu_percent,
+          server_cpu_cores: next.server_cpu_cores,
           server_rss_bytes: next.server_rss_bytes,
+          server_ram_total_bytes: next.server_ram_total_bytes,
+          server_ram_available_bytes: next.server_ram_available_bytes,
+          server_disk_total_bytes: next.server_disk_total_bytes,
+          server_disk_available_bytes: next.server_disk_available_bytes,
           host_cpu_percent: next.host_cpu_percent,
           host_rss_bytes: next.host_rss_bytes,
           signals: nextSignals
         };
+      }
+      if (liveSignals !== resolvedSignals) {
+        liveSignals = resolvedSignals;
       }
 
       connected = next.connected;
       status = next.status;
       needsSessionReconnect = false;
 
-      const filteredSignals = (snapshot?.signals ?? []).filter((signal) => !isIgnoredPublishSignal(signal));
+      const filteredSignals = resolvedSignals.filter((signal) => !isIgnoredPublishSignal(signal));
       const updateChanged = next.full_snapshot || next.update_count !== lastProcessedUpdateCount;
       if (connected) {
         if (updateChanged) {
@@ -2589,11 +2959,13 @@
   function handleHostInput(value: string) {
     host = value;
     availableServerLayouts = [];
+    clearRemoteLogs();
   }
 
   function handlePortInput(value: string) {
     controlPort = value;
     availableServerLayouts = [];
+    robotLinkProbe = null;
   }
 
   function openInspectorForSelection() {
@@ -2722,7 +3094,7 @@
     undoStack = [];
     redoStack = [];
     void refreshWindowModes();
-    if (host.trim() && Number(controlPort) > 0) {
+    if (Number(controlPort) > 0) {
       void connect();
     }
     const onFullscreenChange = () => {
@@ -2737,7 +3109,11 @@
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const refreshDelayMs = () => {
       if (!connected) return REFRESH_MS_DISCONNECTED;
-      return railSection === 'dashboards' ? REFRESH_MS_DASHBOARDS : REFRESH_MS_OTHER;
+      if (railSection !== 'dashboards') return REFRESH_MS_OTHER;
+      const panelCount = widgets.length;
+      if (panelCount >= 40) return REFRESH_MS_DASHBOARDS_DENSE;
+      if (panelCount >= 20) return REFRESH_MS_DASHBOARDS_HEAVY;
+      return REFRESH_MS_DASHBOARDS;
     };
     const refreshTick = async () => {
       if (refreshCancelled) return;
@@ -2753,6 +3129,39 @@
       if (!connected) return;
       void refreshServerLayoutList();
     }, SERVER_LAYOUT_POLL_MS);
+    const robotLinkProbeTimer = setInterval(() => {
+      if (railSection !== 'logs') return;
+      if (robotLinkProbeInFlight) return;
+      void refreshRobotLinkProbe({ silent: true });
+    }, REMOTE_LOG_LIVE_POLL_MS);
+    let unlistenRemoteLogLine: UnlistenFn | null = null;
+    let unlistenRemoteLogStatus: UnlistenFn | null = null;
+    if (isTauriRuntime()) {
+      void listen<RemoteLogStreamLinePayload>('remote-log-stream-line', (event) => {
+        const payload = event.payload;
+        if (!payload || payload.path !== selectedRemoteLogPath) return;
+        if (!remoteLogLiveFollow) return;
+        appendRemoteLogLine(payload.line);
+      }).then((unlisten) => {
+        unlistenRemoteLogLine = unlisten;
+      });
+
+      void listen<RemoteLogStreamStatusPayload>('remote-log-stream-status', (event) => {
+        const payload = event.payload;
+        if (!payload || payload.path !== selectedRemoteLogPath) return;
+        remoteLogStreamState = payload.state || 'unknown';
+        remoteLogStreamMessage = payload.message || '';
+        remoteLogStreamConnected = payload.state === 'connected';
+        if (payload.host) {
+          remoteLogsResolvedHost = payload.host;
+        }
+        if (payload.state === 'error') {
+          remoteLogError = payload.message || 'stream error';
+        }
+      }).then((unlisten) => {
+        unlistenRemoteLogStatus = unlisten;
+      });
+    }
     window.addEventListener('keydown', onGlobalKeyDown);
     window.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('fullscreenchange', onFullscreenChange);
@@ -2762,6 +3171,14 @@
         clearTimeout(refreshTimer);
       }
       clearInterval(serverLayoutTimer);
+      clearInterval(robotLinkProbeTimer);
+      if (unlistenRemoteLogLine) {
+        unlistenRemoteLogLine();
+      }
+      if (unlistenRemoteLogStatus) {
+        unlistenRemoteLogStatus();
+      }
+      void stopRemoteLogStreaming({ silent: true });
       if (replayState?.timerId !== null) {
         window.clearInterval(replayState.timerId);
       }
@@ -2900,38 +3317,6 @@
             {/if}
           </div>
         </section>
-      {:else if railSection === 'actions'}
-        <section class={`actions-stage ${showInspector ? '' : 'no-inspector'}`}>
-          <div class="actions-layout">
-            <ActionsScreen
-              actions={actionSignals}
-              onTriggerAction={sendAction}
-              onSelectSignal={(signalId) => {
-                selectedId = signalId;
-                showInspector = true;
-              }}
-            />
-            {#if showInspector}
-              <InspectorPanel
-                signals={signalRows}
-                {signalById}
-                {selectedSignal}
-                {selectedWidget}
-                widgetKinds={widgetKindsFor(selectedSignal)}
-                {widgetKindLabel}
-                onShowAsKind={showAsWidgetKind}
-                onTriggerAction={sendAction}
-                onSelectTunableWidget={() => {
-                  if (selectedSignal) createWidget(selectedSignal, 'tunable');
-                }}
-                onRemoveWidget={removeWidget}
-                onUpdateWidgetTitle={updateWidgetTitle}
-                onUpdateWidgetConfig={updateWidgetConfig}
-                onRequestSignalMap={requestSignalMapFromExplorer}
-              />
-            {/if}
-          </div>
-        </section>
       {:else if railSection === 'mechanisms'}
         <MechanismsScreen
           signals={arcpSignalRows}
@@ -2942,6 +3327,21 @@
           }}
           onTriggerAction={sendAction}
           onSendSet={sendSet}
+        />
+      {:else if railSection === 'control_tuner'}
+        <ControlTunerScreen
+          signals={arcpSignalRows}
+          {historyBySignal}
+          {selectedId}
+          onSelectSignal={(signalId) => {
+            selectedId = signalId;
+            selectedWidgetId = null;
+          }}
+          onSendSet={sendSet}
+          onTriggerAction={sendAction}
+          onTrackSignalIds={(signalIds) => {
+            controlTunerTrackedSignalIds = signalIds;
+          }}
         />
       {:else if railSection === 'diagnostics'}
         <DiagnosticsScreen
@@ -2957,16 +3357,46 @@
             showInspector = true;
           }}
         />
-      {:else if railSection === 'camera_tuning'}
-        <CameraTuningScreen
-          signals={arcpSignalRows}
-          onSelectSignal={(signalId) => {
-            selectedId = signalId;
-            selectedWidgetId = null;
-            railSection = 'signals';
-            showInspector = true;
+      {:else if railSection === 'logs'}
+        <LogsScreen
+          {connected}
+          {status}
+          requestedHost={host}
+          resolvedHost={remoteLogsResolvedHost}
+          probeHost={robotLinkProbe?.host ?? ''}
+          controlPort={robotLinkProbe?.controlPort ?? parseControlPort(controlPort) ?? 0}
+          robotReachable={robotLinkProbe?.robotReachable ?? false}
+          arcpReachable={robotLinkProbe?.arcpReachable ?? false}
+          probeLoading={robotLinkProbeInFlight}
+          refreshing={remoteLogsRefreshInFlight}
+          previewLoading={remoteLogPreviewInFlight}
+          downloadingPath={remoteLogDownloadInFlightPath}
+          error={remoteLogError}
+          entries={remoteLogs}
+          selectedPath={selectedRemoteLogPath}
+          previewLines={selectedRemoteLogLines}
+          previewTruncated={selectedRemoteLogPreviewTruncated}
+          liveFollow={remoteLogLiveFollow}
+          streamConnected={remoteLogStreamConnected}
+          streamState={remoteLogStreamState}
+          streamMessage={remoteLogStreamMessage}
+          onRefresh={() => {
+            void refreshRobotLinkProbe();
+            void refreshRemoteLogs(true);
           }}
-          onSendSet={sendSet}
+          onSelectLog={(path) => {
+            setRemoteLogLiveFollow(true);
+            void (async () => {
+              await loadRemoteLogPreview(path);
+              if (isStreamableRemoteLogPath(path)) {
+                await startRemoteLogStreaming(path, { silent: true });
+              } else {
+                await stopRemoteLogStreaming({ silent: true });
+              }
+            })();
+          }}
+          onDownloadLog={(path) => void downloadSelectedRemoteLog(path)}
+          onToggleLiveFollow={(enabled) => setRemoteLogLiveFollow(enabled)}
         />
       {:else}
         <section
@@ -2984,6 +3414,7 @@
               {selectedWidgetId}
               {widgetInputs}
               {historyBySignal}
+              {historyTimeBySignal}
               {sparklinePath}
               {editMode}
               onSelectWidget={(widgetId, signalId) => {
@@ -3250,8 +3681,7 @@
     display: block;
   }
 
-  .signals-stage,
-  .actions-stage {
+  .signals-stage {
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
@@ -3259,33 +3689,25 @@
     gap: 0;
   }
 
-  .signals-layout,
-  .actions-layout {
+  .signals-layout {
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(280px, 420px) minmax(320px, 1fr);
     gap: 0.58rem;
   }
 
-  .actions-layout {
-    grid-template-columns: minmax(320px, 1fr) minmax(300px, 420px);
-  }
-
-  .signals-stage.no-inspector .signals-layout,
-  .actions-stage.no-inspector .actions-layout {
+  .signals-stage.no-inspector .signals-layout {
     grid-template-columns: 1fr;
   }
 
   @media (max-width: 1200px) {
-    .signals-layout,
-    .actions-layout {
+    .signals-layout {
       grid-template-columns: 1fr;
     }
   }
 
   @media (max-width: 900px) {
-    .signals-stage,
-    .actions-stage {
+    .signals-stage {
       grid-template-rows: auto 1fr;
     }
   }

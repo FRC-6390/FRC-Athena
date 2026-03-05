@@ -2,6 +2,16 @@ package ca.frc6390.athena.drivetrains.swerve;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import ca.frc6390.athena.drivetrains.DrivetrainSpeedSectionBase;
@@ -36,6 +46,17 @@ import edu.wpi.first.wpilibj.RobotBase;
  */
 public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDrivetrainConfig>
         implements RobotDrivetrainConfig<SwerveDrivetrain> {
+    private static final String CONNECTIVITY_FAIL_FAST_PROPERTY =
+            "athena.startup.connectivity.failFast";
+    private static final String CONNECTIVITY_ASYNC_PROPERTY =
+            "athena.startup.connectivity.async";
+    private static final String CONNECTIVITY_TIMEOUT_MS_PROPERTY =
+            "athena.startup.connectivity.timeoutMs";
+    private static final String CONNECTIVITY_PARALLELISM_PROPERTY =
+            "athena.startup.connectivity.parallelism";
+    private static final long DEFAULT_CONNECTIVITY_TIMEOUT_MS = 250L;
+    private static final int MAX_CONNECTIVITY_CHECK_THREADS = 8;
+    private static final AtomicInteger CONNECTIVITY_THREAD_COUNTER = new AtomicInteger(1);
     
     /** Optional IMU configuration that provides field-centric heading. */
     private ImuConfig imu = null;
@@ -73,10 +94,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private SimpleMotorFeedforward driveFeedforward = null;
     /** Whether the configured drive feedforward is enabled. */
     private boolean driveFeedforwardEnabled = true;
-    /** Whether modules apply cosine speed scaling while steering to target angles. */
-    private boolean cosineCompensationEnabled = true;
-    /** Minimum steering error (degrees) required before cosine compensation applies. */
-    private double cosineCompensationErrorDegrees = 0.0;
     /** Drive-side current limit applied per motor (amps). */
     private double driveCurrentLimit = 80;
     /** Steer-side current limit applied per motor (amps). */
@@ -93,34 +110,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
     private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
     /** Shared speed source/blend registration store used by speed() sections. */
     private final DrivetrainSpeedConfigSupport speedConfig = new DrivetrainSpeedConfigSupport();
-
-    public static final class CosineCompensationSection {
-        private boolean enabled;
-        private double errorDegrees;
-
-        private CosineCompensationSection(boolean enabled, double errorDegrees) {
-            this.enabled = enabled;
-            this.errorDegrees = errorDegrees;
-        }
-
-        public CosineCompensationSection enabled(boolean enabled) {
-            this.enabled = enabled;
-            return this;
-        }
-
-        public CosineCompensationSection error(double errorDegrees) {
-            this.errorDegrees = errorDegrees;
-            return this;
-        }
-
-        private boolean enabled() {
-            return enabled;
-        }
-
-        private double error() {
-            return errorDegrees;
-        }
-    }
 
     public static SwerveDrivetrainConfig create() {
         return new SwerveDrivetrainConfig();
@@ -333,22 +322,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
             applyDriveFeedforwardEnabled(enabled);
             return this;
         }
-
-        public ControlSection cosineCompensation(boolean enabled) {
-            applyCosineCompensation(enabled);
-            return this;
-        }
-
-        public ControlSection cosineCompensation(Consumer<CosineCompensationSection> section) {
-            CosineCompensationSection resolved =
-                    new CosineCompensationSection(cosineCompensationEnabled, cosineCompensationErrorDegrees);
-            if (section != null) {
-                section.accept(resolved);
-            }
-            applyCosineCompensation(resolved.enabled());
-            applyCosineCompensationError(resolved.error());
-            return this;
-        }
     }
 
     public final class SimulationSection {
@@ -466,22 +439,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
 
         public ConfigSection driveFeedforwardEnabled(boolean enabled) {
             applyDriveFeedforwardEnabled(enabled);
-            return this;
-        }
-
-        public ConfigSection cosineCompensation(boolean enabled) {
-            applyCosineCompensation(enabled);
-            return this;
-        }
-
-        public ConfigSection cosineCompensation(Consumer<CosineCompensationSection> section) {
-            CosineCompensationSection resolved =
-                    new CosineCompensationSection(cosineCompensationEnabled, cosineCompensationErrorDegrees);
-            if (section != null) {
-                section.accept(resolved);
-            }
-            applyCosineCompensation(resolved.enabled());
-            applyCosineCompensationError(resolved.error());
             return this;
         }
 
@@ -803,25 +760,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         this.driveFeedforwardEnabled = enabled;
         return this;
     }
-
-    /**
-     * Enables or disables module cosine compensation that scales speed during steering transients.
-     */
-    private SwerveDrivetrainConfig applyCosineCompensation(boolean enabled) {
-        this.cosineCompensationEnabled = enabled;
-        return this;
-    }
-
-    /**
-     * Sets the minimum steering error (degrees) before cosine compensation scales wheel speed.
-     */
-    private SwerveDrivetrainConfig applyCosineCompensationError(double errorDegrees) {
-        if (!Double.isFinite(errorDegrees)) {
-            return this;
-        }
-        this.cosineCompensationErrorDegrees = Math.max(0.0, errorDegrees);
-        return this;
-    }
     
     /**
      * Applies the same current limit to both drive and steer motors.
@@ -997,9 +935,6 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
             dt.driveFeedforwardEnabled(driveFeedforwardEnabled);
         }
 
-        dt.cosineCompensationEnabled(cosineCompensationEnabled);
-        dt.cosineCompensationError(cosineCompensationErrorDegrees);
-
         if (edu.wpi.first.wpilibj.RobotBase.isSimulation()) {
             dt.configureSimulation(simulationConfig != null ? simulationConfig : SwerveSimulationConfig.defaults());
         }
@@ -1057,50 +992,241 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
             return;
         }
 
-        List<String> missing = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
+        List<ConnectivityProbe> probes = new ArrayList<>();
         if (imuDevice == null) {
-            missing.add("imu missing");
-        } else if (!imuDevice.isConnected(true)) {
-            missing.add(describeImu(imuDevice));
+            failures.add("imu missing");
+        } else {
+            probes.add(new ConnectivityProbe("imu", () -> imuDevice.isConnected(true), describeImu(imuDevice)));
         }
 
         SwerveModule[] modules = drivetrain != null ? drivetrain.swerveModules : null;
         if (modules == null || modules.length == 0) {
-            missing.add("no swerve modules configured");
+            failures.add("no swerve modules configured");
         } else {
             for (int i = 0; i < modules.length; i++) {
                 SwerveModule module = modules[i];
                 if (module == null) {
-                    missing.add("module[" + i + "] missing");
+                    failures.add("module[" + i + "] missing");
                     continue;
                 }
 
                 MotorController driveMotor = module.getDriveMotorController();
                 if (driveMotor == null) {
-                    missing.add("module[" + i + "] drive motor missing");
-                } else if (!driveMotor.isConnected(true)) {
-                    missing.add(describeMotor("module[" + i + "] drive", driveMotor));
+                    failures.add("module[" + i + "] drive motor missing");
+                } else {
+                    int index = i;
+                    probes.add(new ConnectivityProbe(
+                            "module[" + index + "] drive",
+                            () -> driveMotor.isConnected(true),
+                            describeMotor("module[" + index + "] drive", driveMotor)));
                 }
 
                 MotorController steerMotor = module.getSteerMotorController();
                 if (steerMotor == null) {
-                    missing.add("module[" + i + "] steer motor missing");
-                } else if (!steerMotor.isConnected(true)) {
-                    missing.add(describeMotor("module[" + i + "] steer", steerMotor));
+                    failures.add("module[" + i + "] steer motor missing");
+                } else {
+                    int index = i;
+                    probes.add(new ConnectivityProbe(
+                            "module[" + index + "] steer",
+                            () -> steerMotor.isConnected(true),
+                            describeMotor("module[" + index + "] steer", steerMotor)));
                 }
 
                 Encoder steerEncoder = module.getSteerEncoder();
                 if (steerEncoder == null) {
-                    missing.add("module[" + i + "] steer encoder missing");
-                } else if (!steerEncoder.isConnected(true)) {
-                    missing.add(describeEncoder("module[" + i + "] steer encoder", steerEncoder));
+                    failures.add("module[" + i + "] steer encoder missing");
+                } else {
+                    int index = i;
+                    probes.add(new ConnectivityProbe(
+                            "module[" + index + "] steer encoder",
+                            () -> steerEncoder.isConnected(true),
+                            describeEncoder("module[" + index + "] steer encoder", steerEncoder)));
                 }
             }
         }
 
-        if (!missing.isEmpty()) {
-            throwConnectivityError("Swerve", missing);
+        if (probes.isEmpty()) {
+            reportConnectivityFailures("Swerve", failures, connectivityFailFastEnabled());
+            return;
         }
+
+        boolean failFast = connectivityFailFastEnabled();
+        if (connectivityAsyncEnabled() && !failFast) {
+            List<String> baseFailures = List.copyOf(failures);
+            List<ConnectivityProbe> queuedProbes = List.copyOf(probes);
+            Thread asyncCheck = new Thread(
+                    () -> {
+                        List<String> asyncFailures = new ArrayList<>(baseFailures);
+                        asyncFailures.addAll(runConnectivityProbes(queuedProbes, connectivityTimeoutMs()));
+                        reportConnectivityFailures("Swerve", asyncFailures, false);
+                    },
+                    "athena-connectivity-swerve");
+            asyncCheck.setDaemon(true);
+            asyncCheck.start();
+            return;
+        }
+
+        failures.addAll(runConnectivityProbes(probes, connectivityTimeoutMs()));
+        reportConnectivityFailures("Swerve", failures, failFast);
+    }
+
+    private static List<String> runConnectivityProbes(List<ConnectivityProbe> probes, long timeoutMs) {
+        if (probes == null || probes.isEmpty()) {
+            return List.of();
+        }
+        int parallelism = resolveConnectivityParallelism(probes.size());
+        ExecutorService executor = Executors.newFixedThreadPool(parallelism, connectivityThreadFactory());
+        List<Future<Boolean>> futures = new ArrayList<>(probes.size());
+        try {
+            for (ConnectivityProbe probe : probes) {
+                if (probe == null || probe.check() == null) {
+                    futures.add(null);
+                    continue;
+                }
+                Callable<Boolean> callable = probe.check()::call;
+                futures.add(executor.submit(callable));
+            }
+
+            List<String> failures = new ArrayList<>();
+            long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(1L, timeoutMs));
+            long deadlineNs = System.nanoTime() + timeoutNanos;
+            for (int i = 0; i < probes.size(); i++) {
+                ConnectivityProbe probe = probes.get(i);
+                Future<Boolean> future = futures.get(i);
+                if (probe == null || future == null) {
+                    continue;
+                }
+                long remainingNs = deadlineNs - System.nanoTime();
+                if (remainingNs <= 0L) {
+                    future.cancel(true);
+                    failures.add(probe.label() + " connectivity probe timed out");
+                    continue;
+                }
+                try {
+                    boolean connected = future.get(remainingNs, TimeUnit.NANOSECONDS);
+                    if (!connected) {
+                        failures.add(probe.failureMessage());
+                    }
+                } catch (TimeoutException ex) {
+                    future.cancel(true);
+                    failures.add(probe.label() + " connectivity probe timed out");
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    failures.add(probe.label() + " connectivity probe interrupted");
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause();
+                    String message = cause != null && cause.getMessage() != null && !cause.getMessage().isBlank()
+                            ? cause.getMessage()
+                            : cause != null
+                                    ? cause.getClass().getSimpleName()
+                                    : ex.getClass().getSimpleName();
+                    failures.add(probe.label() + " connectivity probe failed: " + message);
+                }
+            }
+            return failures;
+        } finally {
+            for (Future<Boolean> future : futures) {
+                if (future != null && !future.isDone()) {
+                    future.cancel(true);
+                }
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    private static void reportConnectivityFailures(String drivetrainType, List<String> failures, boolean failFast) {
+        if (failures == null || failures.isEmpty()) {
+            return;
+        }
+        String message = drivetrainType
+                + " drivetrain required-device connectivity check failed: "
+                + String.join("; ", failures);
+        if (failFast) {
+            DriverStation.reportError(message, false);
+            throw new IllegalStateException(message);
+        }
+        DriverStation.reportWarning(message, false);
+    }
+
+    private static boolean connectivityFailFastEnabled() {
+        return parseBooleanProperty(CONNECTIVITY_FAIL_FAST_PROPERTY, false);
+    }
+
+    private static boolean connectivityAsyncEnabled() {
+        return parseBooleanProperty(CONNECTIVITY_ASYNC_PROPERTY, true);
+    }
+
+    private static long connectivityTimeoutMs() {
+        return parsePositiveLongProperty(CONNECTIVITY_TIMEOUT_MS_PROPERTY, DEFAULT_CONNECTIVITY_TIMEOUT_MS);
+    }
+
+    private static int resolveConnectivityParallelism(int probeCount) {
+        int fallback = Math.max(1, Math.min(MAX_CONNECTIVITY_CHECK_THREADS, probeCount));
+        Integer configured = parsePositiveIntProperty(CONNECTIVITY_PARALLELISM_PROPERTY);
+        if (configured == null) {
+            return fallback;
+        }
+        return Math.max(1, Math.min(probeCount, configured));
+    }
+
+    private static ThreadFactory connectivityThreadFactory() {
+        return runnable -> {
+            Thread thread = new Thread(
+                    runnable,
+                    "athena-connectivity-check-" + CONNECTIVITY_THREAD_COUNTER.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
+    }
+
+    private static Integer parsePositiveIntProperty(String key) {
+        String raw = System.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static long parsePositiveLongProperty(String key, long fallback) {
+        String raw = System.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            long parsed = Long.parseLong(raw.trim());
+            return parsed > 0L ? parsed : fallback;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean parseBooleanProperty(String key, boolean fallback) {
+        String raw = System.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized)) {
+            return true;
+        }
+        if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized)) {
+            return false;
+        }
+        return fallback;
+    }
+
+    @FunctionalInterface
+    private interface ConnectivityCheck {
+        boolean call();
+    }
+
+    private record ConnectivityProbe(String label, ConnectivityCheck check, String failureMessage) {
     }
 
     private static String describeMotor(String label, MotorController motor) {
@@ -1124,11 +1250,4 @@ public class SwerveDrivetrainConfig extends SectionedDrivetrainConfig<SwerveDriv
         return "imu disconnected (type=" + type + ", id=" + id + ", canbus=" + bus + ")";
     }
 
-    private static void throwConnectivityError(String drivetrainType, List<String> missing) {
-        String message = drivetrainType
-                + " drivetrain required-device connectivity check failed: "
-                + String.join("; ", missing);
-        DriverStation.reportError(message, false);
-        throw new IllegalStateException(message);
-    }
 }

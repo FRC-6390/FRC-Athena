@@ -51,6 +51,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     selectedWidgetId: string | null;
     widgetInputs: Record<string, string>;
     historyBySignal: Map<number, number[]>;
+    historyTimeBySignal: Map<number, number[]>;
     sparklinePath: (values: number[]) => string;
     editMode: boolean;
     onSelectWidget: (widgetId: string, signalId: number | null) => void;
@@ -92,6 +93,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     selectedWidgetId,
     widgetInputs,
     historyBySignal,
+    historyTimeBySignal,
     sparklinePath,
     editMode,
     onSelectWidget,
@@ -156,6 +158,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   let copyToastVisible = $state(false);
   let copyToastTimer: ReturnType<typeof setTimeout> | null = null;
   let layoutMeasureTick = $state(0);
+  let graphClockNowMs = $state(Date.now());
 
   const widgetById = $derived.by(() => new Map(widgets.map((widget) => [widget.id, widget])));
 
@@ -653,6 +656,10 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   }
 
   function resolveWidgetSignal(widget: DashboardWidget): SignalRow | null {
+    if (isLayoutWidgetKind(widget.kind)) {
+      return null;
+    }
+
     const directSignal =
       Number.isFinite(widget.signalId) && widget.signalId > 0
         ? signalById.get(widget.signalId) ?? null
@@ -966,7 +973,34 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     const w = Math.max(1e-3, innerWidthPx / step);
     const h = Math.max(1e-3, innerHeightPx / step);
 
-    return clampLayout({ x, y, w, h }, gridColumns);
+    const measured = clampLayout({ x, y, w, h }, gridColumns);
+
+    if (isContainerLayoutKind(layoutWidget.kind)) {
+      const anchor = normalizeContainerAxisForBounds(layoutWidget, fallback);
+      // Keep nested container children aligned to the parent's true grid X/width.
+      // Using measured inner X/width compounds visual inset at every nesting level.
+      return clampLayout(
+        {
+          ...measured,
+          x: anchor.x,
+          w: anchor.w
+        },
+        gridColumns
+      );
+    }
+
+    return measured;
+  }
+
+  function normalizeContainerAxisForBounds(
+    widget: DashboardWidget,
+    fallback: WidgetLayout
+  ): WidgetLayout {
+    let normalized = fallback;
+    normalized = normalizedAccordionChildLayout(widget, normalized) ?? normalized;
+    normalized = normalizedListChildLayout(widget, normalized) ?? normalized;
+    normalized = normalizedGridChildLayout(widget, normalized) ?? normalized;
+    return normalized;
   }
 
   function snapshotLayoutBoundsForDrag(): Map<string, WidgetLayout> {
@@ -2230,6 +2264,9 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
       gridHeight = gridEl.clientHeight;
       observer.observe(gridEl);
     }
+    const graphClockTimer = window.setInterval(() => {
+      graphClockNowMs = Date.now();
+    }, 1000);
 
     let moveRaf = 0;
     let pendingMove: { x: number; y: number } | null = null;
@@ -2302,6 +2339,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
         clearTimeout(copyToastTimer);
         copyToastTimer = null;
       }
+      window.clearInterval(graphClockTimer);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointerdown', onPointerDown);
@@ -2375,8 +2413,8 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     {/if}
 
     {#each widgetsForRender as widget (widget.id)}
-      {@const signal = resolvedSignalByWidgetId.get(widget.id) ?? null}
       {@const isLayoutWidget = isLayoutWidgetKind(widget.kind)}
+      {@const signal = isLayoutWidget ? null : (resolvedSignalByWidgetId.get(widget.id) ?? null)}
       {@const accordionConfig = widget.kind === 'layout_accordion' ? readLayoutAccordionConfig(widget.config) : null}
       {@const accordionOpen = accordionConfig ? !accordionConfig.collapsed : false}
       {@const hiddenByAccordion = isHiddenByCollapsedAccordion(widget)}
@@ -2508,6 +2546,8 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
                   {signal}
                   {signalById}
                   {historyBySignal}
+                  {historyTimeBySignal}
+                  nowMs={graphClockNowMs}
                   configRaw={widget.config}
                 />
               {:else if widget.kind === 'controller'}
@@ -2875,9 +2915,9 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     border: 1px solid rgba(99, 115, 140, 0.5);
     border-radius: 7px;
     background: rgba(26, 33, 45, 0.98);
-    padding: 0.16rem 0.3rem 0.3rem;
+    padding: 0.12rem 0.28rem 0.24rem;
     display: grid;
-    grid-template-rows: minmax(0.9rem, calc(var(--cell) * 0.5)) minmax(0, 1fr);
+    grid-template-rows: minmax(0.82rem, calc(var(--cell) * 0.46)) minmax(0, 1fr);
     gap: 0;
     cursor: pointer;
     overflow: hidden;
@@ -2898,8 +2938,8 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
   .widget-card.layout-card {
     border-style: dashed;
     background: rgba(30, 37, 49, 0.86);
-    padding: 0.08rem 0.16rem 0.16rem;
-    grid-template-rows: minmax(0.5rem, calc(var(--cell) * 0.22)) minmax(0, 1fr);
+    padding: 0.06rem 0.14rem 0.12rem;
+    grid-template-rows: minmax(0.46rem, calc(var(--cell) * 0.2)) minmax(0, 1fr);
   }
 
   .widget-card.layout-card.accordion-open {
@@ -2923,7 +2963,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     width: 100%;
     height: auto;
     min-height: 0;
-    padding: 0;
+    padding: 0 0 0.02rem;
     border: 0;
     border-radius: 0;
     border-bottom: 1px solid var(--border-subtle);
@@ -2931,6 +2971,7 @@ import ToggleWidget from './widgets/ToggleWidget.svelte';
     color: inherit;
     text-align: left;
     font: inherit;
+    line-height: 1.05;
   }
 
   .head-left {

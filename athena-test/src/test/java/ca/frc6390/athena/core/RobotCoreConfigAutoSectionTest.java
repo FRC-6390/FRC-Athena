@@ -4,12 +4,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
 import ca.frc6390.athena.core.auto.HolonomicPidConstants;
+import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrain;
 import ca.frc6390.athena.drivetrains.swerve.SwerveDrivetrainConfig;
+import ca.frc6390.athena.drivetrains.swerve.SwerveModule;
+import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import ca.frc6390.athena.hardware.imu.Imu;
+import ca.frc6390.athena.hardware.imu.ImuConfig;
+import ca.frc6390.athena.hardware.imu.ImuType;
+import ca.frc6390.athena.hardware.imu.VirtualImu;
+import ca.frc6390.athena.hardware.motor.AthenaMotor;
+import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.logging.TelemetryRegistry;
+import ca.frc6390.athena.testsupport.hardware.TestSimHardwareFactory.TestEncoderType;
+import ca.frc6390.athena.testsupport.hardware.TestSimHardwareFactory.TestMotorType;
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.util.Units;
 import org.junit.jupiter.api.Test;
 
 final class RobotCoreConfigAutoSectionTest {
+
+    @Test
+    void autoConfigFollowerPeriodDefaultsToFiveMilliseconds() {
+        assertEquals(0.005, RobotCore.AutoConfig.defaults().followerPeriodSeconds(), 1e-9);
+    }
 
     @Test
     void autoSectionSupportsAxisDslAndInvertedFlags() {
@@ -22,11 +45,12 @@ final class RobotCoreConfigAutoSectionTest {
                                 .kd(0.1)
                                 .iZone(1.5)
                                 .inverted(true))
-                        .rotation(p -> p
+                                .rotation(p -> p
                                 .kp(2.0)
                                 .ki(0.0)
                                 .kd(0.05)
-                                .inverted(false)))
+                                .inverted(false))
+                        .followerPeriodMs(20.0))
                 .build();
 
         HolonomicPidConstants translation = cfg.autoConfig().translationPid();
@@ -42,6 +66,7 @@ final class RobotCoreConfigAutoSectionTest {
         assertEquals(0.0, rotation.kI(), 1e-9);
         assertEquals(0.05, rotation.kD(), 1e-9);
         assertFalse(rotation.inverted());
+        assertEquals(0.02, cfg.autoConfig().followerPeriodSeconds(), 1e-9);
     }
 
     @Test
@@ -50,11 +75,138 @@ final class RobotCoreConfigAutoSectionTest {
                 .swerve(SwerveDrivetrainConfig.standard(0.6))
                 .auto(a -> a
                         .translation(p -> p.kp(4.0).inverted(false))
-                        .rotation(p -> p.kp(1.5).inverted(true)));
+                        .rotation(p -> p.kp(1.5).inverted(true))
+                        .followerPeriodSeconds(0.01));
 
         assertEquals(4.0, cfg.autoConfig().translationPid().kP(), 1e-9);
         assertFalse(cfg.autoConfig().translationPid().inverted());
         assertEquals(1.5, cfg.autoConfig().rotationPid().kP(), 1e-9);
         assertTrue(cfg.autoConfig().rotationPid().inverted());
+        assertEquals(0.01, cfg.autoConfig().followerPeriodSeconds(), 1e-9);
+    }
+
+    @Test
+    void drivetrainSectionTimingKnobsApplyToBuiltSwerveDrivetrain() {
+        RobotCore.RobotCoreConfig<SwerveDrivetrain> cfg = RobotCoreConfig.create()
+                .drivetrain(d -> {
+                    d.updatePeriodMs(20.0)
+                            .driverCommandPeriodMs(10.0);
+                    return RobotCoreConfigAutoSectionTest::configuredSwerveDrivetrain;
+                })
+                .build();
+
+        SwerveDrivetrain drivetrain = cfg.driveTrain().build();
+        assertEquals(0.02, drivetrain.updatePeriodSeconds(), 1e-9);
+        assertEquals(0.01, drivetrain.driverCommandPeriodSeconds(), 1e-9);
+    }
+
+    @Test
+    void nestedRobotCoreConfigSupportsBaseDrivetrainTimingKnobs() {
+        RobotCore.RobotCoreConfig<SwerveDrivetrain> cfg = new RobotCore.RobotCoreConfig<>(
+                RobotCoreConfigAutoSectionTest::configuredSwerveDrivetrain,
+                RobotLocalizationConfig.defaults(),
+                RobotVision.RobotVisionConfig.defaults(),
+                true,
+                TelemetryRegistry.TelemetryConfig.defaults(),
+                List.of(),
+                false,
+                false,
+                true,
+                RobotCore.AutoConfig.defaults(),
+                RobotCoreHooks.empty(),
+                RobotCore.SystemConfig.defaults())
+                .drivetrainUpdatePeriodMs(20.0)
+                .driverCommandPeriodMs(10.0);
+
+        SwerveDrivetrain drivetrain = cfg.driveTrain().build();
+        assertEquals(0.02, drivetrain.updatePeriodSeconds(), 1e-9);
+        assertEquals(0.01, drivetrain.driverCommandPeriodSeconds(), 1e-9);
+    }
+
+    private static SwerveDrivetrain configuredSwerveDrivetrain() {
+        double trackWidthMeters = 0.57;
+        double wheelbaseMeters = 0.57;
+        Translation2d[] locations = SwerveModule.SwerveModuleConfig.generateModuleLocations(
+                trackWidthMeters,
+                wheelbaseMeters);
+        VirtualImu imu = new VirtualImu(new TestImu());
+        return new SwerveDrivetrain(
+                imu,
+                createModuleConfig(locations[0], 1, 5, 9),
+                createModuleConfig(locations[1], 2, 6, 10),
+                createModuleConfig(locations[2], 3, 7, 11),
+                createModuleConfig(locations[3], 4, 8, 12));
+    }
+
+    private static SwerveModule.SwerveModuleConfig createModuleConfig(
+            Translation2d location,
+            int driveId,
+            int steerId,
+            int encoderId) {
+        double wheelDiameterMeters = Units.inchesToMeters(4.0);
+        double driveRatio = 1.0 / 6.12;
+        double steerRatio = 150.0 / 7.0;
+        double neoFreeSpeedRpm = 5820.0;
+        double maxSpeedMetersPerSecond = (neoFreeSpeedRpm / 60.0) * driveRatio * Math.PI * wheelDiameterMeters;
+
+        MotorControllerConfig driveMotor = MotorControllerConfig.create(TestMotorType.INSTANCE, driveId)
+                .encoder(e -> e.config(EncoderConfig.create(TestEncoderType.INSTANCE, driveId)
+                        .measurement(m -> m
+                                .gearRatio(driveRatio)
+                                .conversion(Math.PI * wheelDiameterMeters))));
+
+        MotorControllerConfig steerMotor = MotorControllerConfig.create(TestMotorType.INSTANCE, steerId)
+                .encoder(e -> e.config(EncoderConfig.create(TestEncoderType.INSTANCE, steerId)
+                        .measurement(m -> m.gearRatio(steerRatio))));
+
+        EncoderConfig moduleEncoder = EncoderConfig.create(TestEncoderType.INSTANCE, encoderId)
+                .measurement(m -> m.gearRatio(1.0));
+
+        return new SwerveModule.SwerveModuleConfig(
+                location,
+                wheelDiameterMeters,
+                maxSpeedMetersPerSecond,
+                driveMotor,
+                steerMotor,
+                new PIDController(40.0, 0.0, 0.0),
+                moduleEncoder,
+                SwerveModule.SwerveModuleSimConfig.fromMotors(AthenaMotor.NEO_V1, AthenaMotor.NEO_V1));
+    }
+
+    private static final class TestImu implements Imu {
+        private static final ImuType TYPE = () -> "test";
+
+        @Override
+        public Rotation2d getRoll() {
+            return Rotation2d.kZero;
+        }
+
+        @Override
+        public Rotation2d getPitch() {
+            return Rotation2d.kZero;
+        }
+
+        @Override
+        public Rotation2d getYaw() {
+            return Rotation2d.kZero;
+        }
+
+        @Override
+        public Rotation2d getVelocityZ() {
+            return Rotation2d.kZero;
+        }
+
+        @Override
+        public void setInverted(boolean inverted) {
+        }
+
+        @Override
+        public void setSimulatedHeading(Rotation2d yaw, Rotation2d angularVelocityZ) {
+        }
+
+        @Override
+        public ImuConfig getConfig() {
+            return ImuConfig.create(TYPE, 0);
+        }
     }
 }

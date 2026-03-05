@@ -1,13 +1,19 @@
 package ca.frc6390.athena.core;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.GarbageCollectorMXBean;
@@ -25,7 +31,10 @@ import java.util.function.DoubleSupplier;
 import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import ca.frc6390.athena.commands.movement.RotateToAngle;
 import ca.frc6390.athena.commands.movement.RotateToPoint;
@@ -101,6 +110,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final String AUTO_FOLLOWER_ROTATION_PID_WIDGET_KEY = "Athena/Auto/Follower/Pid/Rotation";
     private static final Pose2d[] EMPTY_POSE2D_ARRAY = new Pose2d[0];
     private static final String EMPTY_AUTO_TRAJECTORY_SIGNATURE = "";
+    private static final int ARCP_AUTO_TRAJECTORY_MAX_POINTS = 400;
 
     public enum RuntimeMode {
         AUTO,
@@ -114,15 +124,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             HolonomicPidConstants rotationPid,
             String poseName,
             RobotLocalizationConfig.AutoPlannerPidAutotunerConfig pidAutotunerConfig,
-            List<Consumer<RobotAuto.RegistrySection>> registryBindings) {
+            List<Consumer<RobotAuto.RegistrySection>> registryBindings,
+            double followerPeriodSeconds) {
+        private static final double DEFAULT_FOLLOWER_PERIOD_SECONDS = 0.005;
 
         public AutoConfig {
             poseName = normalizePoseName(poseName);
             registryBindings = registryBindings != null ? List.copyOf(registryBindings) : List.of();
+            followerPeriodSeconds = normalizeFollowerPeriodSeconds(followerPeriodSeconds);
         }
 
         public static AutoConfig defaults() {
-            return new AutoConfig(null, null, null, null, List.of());
+            return new AutoConfig(null, null, null, null, List.of(), DEFAULT_FOLLOWER_PERIOD_SECONDS);
         }
 
         public AutoConfig pid(
@@ -136,7 +149,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         public AutoConfig pid(HolonomicPidConstants translation, HolonomicPidConstants rotation) {
-            return new AutoConfig(translation, rotation, poseName, pidAutotunerConfig, registryBindings);
+            return new AutoConfig(
+                    translation,
+                    rotation,
+                    poseName,
+                    pidAutotunerConfig,
+                    registryBindings,
+                    followerPeriodSeconds);
         }
 
         public AutoConfig pid(Consumer<RobotLocalizationConfig.AutoPlannerPidSection> section) {
@@ -163,11 +182,32 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     seed.rotation(),
                     poseName,
                     seed.autoPlannerPidAutotuner(),
-                    registryBindings);
+                    registryBindings,
+                    followerPeriodSeconds);
         }
 
         public AutoConfig pose(String poseName) {
-            return new AutoConfig(translationPid, rotationPid, poseName, pidAutotunerConfig, registryBindings);
+            return new AutoConfig(
+                    translationPid,
+                    rotationPid,
+                    poseName,
+                    pidAutotunerConfig,
+                    registryBindings,
+                    followerPeriodSeconds);
+        }
+
+        public AutoConfig followerPeriodSeconds(double seconds) {
+            return new AutoConfig(
+                    translationPid,
+                    rotationPid,
+                    poseName,
+                    pidAutotunerConfig,
+                    registryBindings,
+                    seconds);
+        }
+
+        public AutoConfig followerPeriodMs(double milliseconds) {
+            return followerPeriodSeconds(milliseconds / 1000.0);
         }
 
         public AutoConfig registry(Consumer<RobotAuto.RegistrySection> section) {
@@ -176,7 +216,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             List<Consumer<RobotAuto.RegistrySection>> merged = new ArrayList<>(registryBindings);
             merged.add(section);
-            return new AutoConfig(translationPid, rotationPid, poseName, pidAutotunerConfig, merged);
+            return new AutoConfig(
+                    translationPid,
+                    rotationPid,
+                    poseName,
+                    pidAutotunerConfig,
+                    merged,
+                    followerPeriodSeconds);
         }
 
         private static String normalizePoseName(String poseName) {
@@ -185,6 +231,13 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             String trimmed = poseName.trim();
             return trimmed.isEmpty() ? null : trimmed;
+        }
+
+        private static double normalizeFollowerPeriodSeconds(double seconds) {
+            if (!Double.isFinite(seconds) || seconds <= 0.0) {
+                return DEFAULT_FOLLOWER_PERIOD_SECONDS;
+            }
+            return seconds;
         }
 
         private static void setPidAxis(
@@ -582,6 +635,68 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             return auto(builder.config);
         }
 
+        /**
+         * Sets drivetrain control/update loop period in seconds.
+         *
+         * <p>Applied to drivetrains that expose this runtime knob (currently swerve).</p>
+         */
+        public RobotCoreConfig<T> drivetrainUpdatePeriodSeconds(double seconds) {
+            if (!Double.isFinite(seconds) || seconds <= 0.0) {
+                return this;
+            }
+            return withDrivetrainRuntimeTiming(swerve -> swerve.updatePeriodSeconds(seconds));
+        }
+
+        /**
+         * Sets drivetrain control/update loop period in milliseconds.
+         */
+        public RobotCoreConfig<T> drivetrainUpdatePeriodMs(double milliseconds) {
+            return drivetrainUpdatePeriodSeconds(milliseconds / 1000.0);
+        }
+
+        /**
+         * Sets expected driver command update period in seconds.
+         *
+         * <p>Applied to drivetrains that expose this runtime knob (currently swerve).</p>
+         */
+        public RobotCoreConfig<T> driverCommandPeriodSeconds(double seconds) {
+            if (!Double.isFinite(seconds) || seconds <= 0.0) {
+                return this;
+            }
+            return withDrivetrainRuntimeTiming(swerve -> swerve.driverCommandPeriodSeconds(seconds));
+        }
+
+        /**
+         * Sets expected driver command update period in milliseconds.
+         */
+        public RobotCoreConfig<T> driverCommandPeriodMs(double milliseconds) {
+            return driverCommandPeriodSeconds(milliseconds / 1000.0);
+        }
+
+        private RobotCoreConfig<T> withDrivetrainRuntimeTiming(Consumer<SwerveDrivetrain> applier) {
+            RobotDrivetrainConfig<T> wrappedConfig = () -> {
+                T drivetrain = driveTrain.build();
+                if (drivetrain instanceof SwerveDrivetrain swerve) {
+                    applier.accept(swerve);
+                }
+                return drivetrain;
+            };
+            return new RobotCoreConfig<>(
+                    wrappedConfig,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled,
+                    autoConfig,
+                    hooks,
+                    systemConfig,
+                    arcpConfig);
+        }
+
         public static final class AutoSection {
             private AutoConfig config;
 
@@ -622,6 +737,16 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
             public AutoSection pose(String poseName) {
                 config = config.pose(poseName);
+                return this;
+            }
+
+            public AutoSection followerPeriodSeconds(double seconds) {
+                config = config.followerPeriodSeconds(seconds);
+                return this;
+            }
+
+            public AutoSection followerPeriodMs(double milliseconds) {
+                config = config.followerPeriodMs(milliseconds);
                 return this;
             }
 
@@ -768,6 +893,14 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private final List<Consumer<RobotAuto.RegistrySection>> configuredAutoRegistryBindings;
     private final List<RegisterableMechanism> configuredMechanisms;
     private boolean configuredMechanismsRegistered;
+    private final boolean deferNonDriveStartupInit;
+    private final boolean deferMechanismRegistration;
+    private final double deferredStartupInitBudgetSeconds;
+    private final double startupDriveLagGuardSeconds;
+    private final Deque<DeferredStartupTask> deferredStartupTasks;
+    private boolean deferredStartupInitComplete;
+    private boolean deferredStartupInitCompleteLogged;
+    private double startupDriveLagGuardUntilSeconds = Double.NaN;
     private final boolean timingDebugEnabled;
     private final boolean telemetryEnabled;
     private boolean mechanismsNetworkTablesPublished;
@@ -825,6 +958,21 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     private static final long ARCP_RECORDING_CLIENT_PRESENCE_WINDOW_MS = 5_000L;
     private static final double COMPETITION_AUTO_PUBLISH_PERIOD_SECONDS = 0.2;
     private static final double STARTUP_LOG_THRESHOLD_SECONDS = 0.05;
+    private static final String STARTUP_DEFER_NON_DRIVE_INIT_PROPERTY =
+            "athena.startup.deferNonDriveInit";
+    private static final String STARTUP_DEFER_MECHANISM_REGISTRATION_PROPERTY =
+            "athena.startup.deferMechanismRegistration";
+    private static final String STARTUP_DEFERRED_INIT_BUDGET_MS_PROPERTY =
+            "athena.startup.deferredInitBudgetMs";
+    private static final String STARTUP_DRIVE_LAG_GUARD_SECONDS_PROPERTY =
+            "athena.startup.driveLagGuardSeconds";
+    private static final double STARTUP_DEFAULT_DEFERRED_INIT_BUDGET_SECONDS = 0.002;
+    private static final double STARTUP_DEFAULT_DRIVE_LAG_GUARD_SECONDS = 1.0;
+    private static final String MECHANISM_FACTORY_BUILD_PARALLELISM_PROPERTY =
+            "athena.mechanism.factoryBuildParallelism";
+    private static final int MAX_MECHANISM_FACTORY_BUILD_THREADS = 8;
+    private static final AtomicInteger MECHANISM_FACTORY_BUILD_THREAD_COUNTER = new AtomicInteger(1);
+    private static final AtomicInteger SYSTEM_TWEAKS_THREAD_COUNTER = new AtomicInteger(1);
     private static final String SYSTEM_WEBSERVER_BINARY_PATH = "/usr/local/natinst/share/NIWebServer/SystemWebServer";
     private static final String SYSTEM_WEBSERVER_PROCESS_NAME = "SystemWebServer";
     private static final String SYSTEM_WEBCONTAINER_PROCESS_NAME = "NIWebServiceContainer";
@@ -849,6 +997,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         void force(Enum<?> state);
         boolean at(Enum<?> state);
         String ownerName();
+    }
+
+    private record DeferredStartupTask(String step, Runnable action) {
     }
 
     private record ConfigExportUrls(
@@ -877,6 +1028,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         RobotLocalizationConfig resolvedLocalizationConfig =
                 applyAutoConfigToLocalization(config.localizationConfig(), autoConfig);
         drivetrain = timedStartupStep("constructor.driveTrain.build", () -> config.driveTrain.build());
+        applyAutoFollowerTimingConfig(drivetrain, autoConfig);
+        configureDrivetrainUpdateLoop(drivetrain);
         localization = timedStartupStep(
                 "constructor.localization.create",
                 () -> createLocalizationForDrivetrain(drivetrain, resolvedLocalizationConfig));
@@ -919,6 +1072,17 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         configuredAutoRegistryBindings = autoConfig.registryBindings();
         configuredMechanisms = config.mechanisms() != null ? List.copyOf(config.mechanisms()) : List.of();
         configuredMechanismsRegistered = false;
+        deferNonDriveStartupInit = parseBooleanProperty(STARTUP_DEFER_NON_DRIVE_INIT_PROPERTY, true);
+        deferMechanismRegistration = parseBooleanProperty(STARTUP_DEFER_MECHANISM_REGISTRATION_PROPERTY, false);
+        deferredStartupInitBudgetSeconds = parseNonNegativeDoubleProperty(
+                STARTUP_DEFERRED_INIT_BUDGET_MS_PROPERTY,
+                STARTUP_DEFAULT_DEFERRED_INIT_BUDGET_SECONDS * 1000.0) / 1000.0;
+        startupDriveLagGuardSeconds = parseNonNegativeDoubleProperty(
+                STARTUP_DRIVE_LAG_GUARD_SECONDS_PROPERTY,
+                STARTUP_DEFAULT_DRIVE_LAG_GUARD_SECONDS);
+        deferredStartupTasks = new ArrayDeque<>();
+        deferredStartupInitComplete = true;
+        deferredStartupInitCompleteLogged = false;
         timingDebugEnabled = config.timingDebugEnabled();
         telemetryEnabled = config.telemetryEnabled();
         SystemConfig systemConfig = config.systemConfig() != null ? config.systemConfig() : SystemConfig.defaults();
@@ -929,16 +1093,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         arcpLegacyNt4MirrorEnabled = resolvedArcpConfig.legacyNt4MirrorEnabled();
         applyArcpNtMirrorPolicy();
         if (RobotBase.isReal()) {
-            boolean tweaksOk = systemConfig.tweaksEnabled()
-                    ? applySystemTweaks(systemConfig)
-                    : resetSystemTweaksToRioDefaults();
-            if (!tweaksOk) {
-                diagnosticsSection.core().warn(
-                        "system",
-                        systemConfig.tweaksEnabled()
-                                ? "one or more system tweaks failed to apply"
-                                : "one or more system tweaks failed to reset");
-            }
+            startSystemTweaksInitializationAsync(systemConfig);
             // Runtime-only toggles apply regardless of OS tweak mode.
             systemSection.configServerEnabled(systemConfig.configServerEnabled());
             systemSection.telemetryEnabled(systemConfig.telemetryEnabled());
@@ -1056,8 +1211,15 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
 
         // Make declared mechanisms available immediately after RobotCore construction (before subclass
-        // constructors run). robotInit() still calls this, but it is guarded to prevent duplicates.
-        timedStartupStep("constructor.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
+        // constructors run). This can be deferred via startup property when drive-first bring-up is
+        // preferred over immediate mechanism availability.
+        if (deferMechanismRegistration) {
+            diagnosticsSection.core().info(
+                    "startup",
+                    "deferring mechanism registration from constructor to robotInit/disabled cycles");
+        } else {
+            timedStartupStep("constructor.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
+        }
         logStartupDuration("constructor.total", Timer.getFPGATimestamp() - constructorStart);
     }
 
@@ -1065,29 +1227,41 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void robotInit() {
         diagnosticsSection.core().info("lifecycle", "robotInit");
         double robotInitStart = Timer.getFPGATimestamp();
-        timedStartupStep("robotInit.registerConfiguredMechanisms", this::registerConfiguredMechanisms);
-        timedStartupStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded);
-        timedStartupStep("robotInit.startArcpIfNeeded", this::startArcpIfNeeded);
+        runRobotInitStep(
+                "robotInit.registerConfiguredMechanisms",
+                this::registerConfiguredMechanisms,
+                deferMechanismRegistration);
+        runRobotInitStep("robotInit.startConfigServerIfNeeded", this::startConfigServerIfNeeded, true);
+        runRobotInitStep("robotInit.startArcpIfNeeded", this::startArcpIfNeeded, true);
         timedStartupStep("robotInit.configureAutoRegistry", this::configureAutoRegistry);
         timedStartupStep("robotInit.configureAutos", () -> configureAutos(autos));
         timedStartupStep("robotInit.autos.finalizeRegistration", () -> autos.execution().prepare());
         timedStartupStep("robotInit.ensureAutoChooserPublished", this::ensureAutoChooserPublished);
-        timedStartupStep("robotInit.publishConfig", robotNetworkTables::publishConfig);
+        runRobotInitStep("robotInit.publishConfig", robotNetworkTables::publishConfig, true);
         if (robotNetworkTables.isPublishingEnabled() && robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
-            timedStartupStep("robotInit.publishNetworkTables", () -> {
+            runRobotInitStep("robotInit.publishNetworkTables", () -> {
                 publishNetworkTables();
-            });
+            }, true);
         }
         if (robotNetworkTables.isPublishingEnabled() && robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
-            timedStartupStep("robotInit.publishNetworkTablesMechanisms", () -> {
+            runRobotInitStep("robotInit.publishNetworkTablesMechanisms", () -> {
                 publishNetworkTablesMechanisms();
-            });
+            }, true);
         }
-        timedStartupStep("robotInit.runInitHooks", this::runInitHooks);
+        runRobotInitStep("robotInit.runInitHooks", this::runInitHooks, deferMechanismRegistration);
         timedStartupStep("robotInit.runCorePhaseBindings",
                 () -> runCorePhaseBindings(RobotCoreHooks.Phase.ROBOT_INIT, coreHooks.initBindings()));
         timedStartupStep("robotInit.onRobotInit", this::onRobotInit);
-        timedStartupStep("robotInit.registerPIDCycles", this::registerPIDCycles);
+        runRobotInitStep("robotInit.registerPIDCycles", this::registerPIDCycles, deferMechanismRegistration);
+        if (!deferredStartupTasks.isEmpty()) {
+            deferredStartupInitComplete = false;
+            diagnosticsSection.core().info(
+                    "startup",
+                    "deferred " + deferredStartupTasks.size()
+                            + " non-drive startup steps; processing during disabled loops");
+        } else {
+            deferredStartupInitComplete = true;
+        }
         logStartupDuration("robotInit.total", Timer.getFPGATimestamp() - robotInitStart);
     }
 
@@ -1489,6 +1663,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             publisher.put("Athena/Auto/Follower/output/vyMps", output.vyMetersPerSecond);
             publisher.put("Athena/Auto/Follower/output/omegaRadPerSec", output.omegaRadiansPerSecond);
         }
+        RobotLocalization<?> localizationRef = localization;
+        if (localizationRef != null) {
+            RobotLocalizationConfig cfg = localizationRef.getLocalizationConfig();
+            if (cfg != null) {
+                publishArcpAutoFollowerPidSignals(
+                        publisher,
+                        "Athena/Auto/Follower/Pid/translation",
+                        cfg.translation());
+                publishArcpAutoFollowerPidSignals(
+                        publisher,
+                        "Athena/Auto/Follower/Pid/rotation",
+                        cfg.rotation());
+            }
+        }
 
         RobotAuto.AutoRoutine selectedRoutine = resolveArcpSelectedAutoRoutine(routines);
         publisher.put(
@@ -1503,8 +1691,18 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             publisher.put("Athena/Auto/Selected/reference", "");
             publisher.put("Athena/Auto/Selected/hasStartingPose", false);
             publisher.put("Athena/Auto/Selected/hasTrajectory", false);
-            publisher.put("Athena/Auto/Selected/trajectoryPointCount", 0.0);
+            publisher.put("Athena/Auto/Selected/trajectoryPointCount", 0L);
+            publisher.put("Athena/Auto/Selected/trajectoryRenderPointCount", 0L);
             publisher.put("Athena/Auto/Selected/trajectory", "[]");
+            publisher.put("Athena/Auto/Program/id", "");
+            publisher.put("Athena/Auto/Program/displayName", "");
+            publisher.put("Athena/Auto/Program/source", "");
+            publisher.put("Athena/Auto/Program/reference", "");
+            publisher.put("Athena/Auto/Program/hasStartingPose", false);
+            publisher.put("Athena/Auto/Program/hasTrajectory", false);
+            publisher.put("Athena/Auto/Program/trajectoryPointCount", 0L);
+            publisher.put("Athena/Auto/Program/trajectoryRenderPointCount", 0L);
+            publisher.put("Athena/Auto/Program/trajectory", "[]");
             return;
         }
 
@@ -1513,6 +1711,11 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         publisher.put("Athena/Auto/Selected/source", selectedRoutine.source().name());
         publisher.put("Athena/Auto/Selected/reference", selectedRoutine.reference());
         publisher.put("Athena/Auto/Selected/hasStartingPose", selectedRoutine.hasStartingPose());
+        publisher.put("Athena/Auto/Program/id", selectedRoutine.key().id());
+        publisher.put("Athena/Auto/Program/displayName", selectedRoutine.key().displayName());
+        publisher.put("Athena/Auto/Program/source", selectedRoutine.source().name());
+        publisher.put("Athena/Auto/Program/reference", selectedRoutine.reference());
+        publisher.put("Athena/Auto/Program/hasStartingPose", selectedRoutine.hasStartingPose());
 
         RobotAuto.AutoRoutine chooserSelected = autos.selection().selected().orElse(null);
         boolean usingChooserSelection = chooserSelected != null
@@ -1528,9 +1731,36 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         List<Pose2d> poses = selectedPoses.orElse(List.of());
         int trajectoryPointCount = poses.size();
+        List<Pose2d> renderPoses = sampleArcpTrajectory(poses, ARCP_AUTO_TRAJECTORY_MAX_POINTS);
+        String trajectoryJson = toArcpFieldTrajectoryJson(renderPoses);
+        int renderPointCount = renderPoses.size();
         publisher.put("Athena/Auto/Selected/hasTrajectory", trajectoryPointCount > 0);
-        publisher.put("Athena/Auto/Selected/trajectoryPointCount", trajectoryPointCount);
-        publisher.put("Athena/Auto/Selected/trajectory", toArcpFieldTrajectoryJson(poses));
+        publisher.put("Athena/Auto/Selected/trajectoryPointCount", (long) trajectoryPointCount);
+        publisher.put("Athena/Auto/Selected/trajectoryRenderPointCount", (long) renderPointCount);
+        publisher.put("Athena/Auto/Selected/trajectory", trajectoryJson);
+        publisher.put("Athena/Auto/Program/hasTrajectory", trajectoryPointCount > 0);
+        publisher.put("Athena/Auto/Program/trajectoryPointCount", (long) trajectoryPointCount);
+        publisher.put("Athena/Auto/Program/trajectoryRenderPointCount", (long) renderPointCount);
+        publisher.put("Athena/Auto/Program/trajectory", trajectoryJson);
+    }
+
+    private static void publishArcpAutoFollowerPidSignals(
+            ARCP publisher,
+            String rootPath,
+            HolonomicPidConstants constants) {
+        if (publisher == null || rootPath == null || rootPath.isBlank()) {
+            return;
+        }
+        boolean available = constants != null;
+        publisher.put(rootPath + "/available", available);
+        if (!available) {
+            return;
+        }
+        publisher.put(rootPath + "/kP", constants.kP());
+        publisher.put(rootPath + "/kI", constants.kI());
+        publisher.put(rootPath + "/kD", constants.kD());
+        publisher.put(rootPath + "/iZone", constants.iZone());
+        publisher.put(rootPath + "/inverted", constants.inverted());
     }
 
     private RobotAuto.AutoRoutine resolveArcpSelectedAutoRoutine(List<RobotAuto.AutoRoutine> routines) {
@@ -1586,16 +1816,58 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         return out.toString();
     }
 
+    private static List<Pose2d> sampleArcpTrajectory(List<Pose2d> poses, int maxPoints) {
+        if (poses == null || poses.isEmpty()) {
+            return List.of();
+        }
+        int resolvedMaxPoints = Math.max(2, maxPoints);
+        List<Pose2d> filtered = new ArrayList<>(poses.size());
+        for (Pose2d pose : poses) {
+            if (pose != null) {
+                filtered.add(pose);
+            }
+        }
+        if (filtered.isEmpty() || filtered.size() <= resolvedMaxPoints) {
+            return filtered;
+        }
+        int lastIndex = filtered.size() - 1;
+        int denominator = resolvedMaxPoints - 1;
+        List<Pose2d> sampled = new ArrayList<>(resolvedMaxPoints);
+        for (int i = 0; i < resolvedMaxPoints; i++) {
+            int index = (int) (((long) i * lastIndex) / denominator);
+            sampled.add(filtered.get(index));
+        }
+        return sampled;
+    }
+
     private void publishArcpLocalizationSignals(ARCP publisher) {
         if (publisher == null || localization == null) {
             return;
         }
+        String poseXPath = "Athena/Localization/Pose/xMeters";
+        String poseYPath = "Athena/Localization/Pose/yMeters";
+        String poseHeadingPath = "Athena/Localization/Pose/headingDeg";
         String updatesSuppressedPath = "Athena/Localization/Status/updatesSuppressed";
         String visionEnabledPath = "Athena/Localization/Status/visionEnabled";
         String autoPoseNamePath = "Athena/Localization/Status/autoPoseName";
+        String slipOverrideEnabledPath = "Athena/Localization/Slip/overrideEnabled";
+        String slipEnabledPath = "Athena/Localization/Slip/enabled";
+        String slipYawRateThresholdPath = "Athena/Localization/Slip/yawRateThresholdRadPerSec";
+        String slipYawRateDisagreementPath = "Athena/Localization/Slip/yawRateDisagreementRadPerSec";
+        String slipAccelThresholdPath = "Athena/Localization/Slip/accelThresholdMps2";
+        String slipAccelDisagreementPath = "Athena/Localization/Slip/accelDisagreementMps2";
+        String slipHoldSecondsPath = "Athena/Localization/Slip/holdSeconds";
+        String slipVisionStdDevScalePath = "Athena/Localization/Slip/visionStdDevScale";
+        String slipProcessStdDevScalePath = "Athena/Localization/Slip/processStdDevScale";
 
         publisher.writableBoolean(updatesSuppressedPath).onSetBoolean(localization::setSuppressUpdates);
         publisher.writableBoolean(visionEnabledPath).onSetBoolean(value -> localization.enableVisionForLocalization(value));
+        publisher.writableDouble(poseXPath).onSetDouble(value ->
+                applyLocalizationPoseSetpoint(localization, value, null, null));
+        publisher.writableDouble(poseYPath).onSetDouble(value ->
+                applyLocalizationPoseSetpoint(localization, null, value, null));
+        publisher.writableDouble(poseHeadingPath).onSetDouble(value ->
+                applyLocalizationPoseSetpoint(localization, null, null, value));
         publisher.writableString(autoPoseNamePath).onSet(value -> {
             if (value == null) {
                 return;
@@ -1606,11 +1878,44 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
             localization.getLocalizationConfig().poses().autoPoseName(trimmed);
         });
+        publisher.writableBoolean(slipOverrideEnabledPath).onSetBoolean(localization::setBackendOverrideEnabled);
+        publisher.writableBoolean(slipEnabledPath).onSetBoolean(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipDetectionEnabled(value),
+                true));
+        publisher.writableDouble(slipYawRateThresholdPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipYawRateThreshold(value),
+                true));
+        publisher.writableDouble(slipYawRateDisagreementPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipYawRateDisagreement(value),
+                true));
+        publisher.writableDouble(slipAccelThresholdPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipAccelThreshold(value),
+                true));
+        publisher.writableDouble(slipAccelDisagreementPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipAccelDisagreement(value),
+                true));
+        publisher.writableDouble(slipHoldSecondsPath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipHoldSeconds(value),
+                true));
+        publisher.writableDouble(slipVisionStdDevScalePath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipVisionStdDevScale(value),
+                true));
+        publisher.writableDouble(slipProcessStdDevScalePath).onSetDouble(value -> applyLocalizationBackendOverride(
+                localization,
+                cfg -> cfg.withSlipProcessStdDevScale(value),
+                true));
 
         Pose2d pose = localization.pose();
-        publisher.put("Athena/Localization/Pose/xMeters", pose.getX());
-        publisher.put("Athena/Localization/Pose/yMeters", pose.getY());
-        publisher.put("Athena/Localization/Pose/headingDeg", pose.getRotation().getDegrees());
+        publisher.put(poseXPath, pose.getX());
+        publisher.put(poseYPath, pose.getY());
+        publisher.put(poseHeadingPath, pose.getRotation().getDegrees());
 
         Pose3d pose3d = localization.pose3d();
         publisher.put("Athena/Localization/Pose3d/xMeters", pose3d.getX());
@@ -1648,6 +1953,71 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         publisher.put("Athena/Localization/Status/autoPoseOptions", poseOptions);
         publisher.put(autoPoseNamePath, poseName != null ? poseName : "");
         publisher.put("Athena/Localization/Status/visionEnabled", visionEnabled);
+
+        RobotLocalizationConfig.BackendConfig slipOverrideConfig = localization.getBackendOverrideConfig();
+        publisher.put(slipOverrideEnabledPath, localization.isBackendOverrideEnabled());
+        publisher.put(slipEnabledPath, slipOverrideConfig.slipDetectionEnabled());
+        publisher.put(slipYawRateThresholdPath, slipOverrideConfig.slipYawRateThreshold());
+        publisher.put(slipYawRateDisagreementPath, slipOverrideConfig.slipYawRateDisagreement());
+        publisher.put(slipAccelThresholdPath, slipOverrideConfig.slipAccelThreshold());
+        publisher.put(slipAccelDisagreementPath, slipOverrideConfig.slipAccelDisagreement());
+        publisher.put(slipHoldSecondsPath, slipOverrideConfig.slipHoldSeconds());
+        publisher.put(slipVisionStdDevScalePath, slipOverrideConfig.slipVisionStdDevScale());
+        publisher.put(slipProcessStdDevScalePath, slipOverrideConfig.slipProcessStdDevScale());
+
+        Map<String, Object> localizationSummary = localization.getDiagnosticsSummary();
+        Object slipActiveValue = localizationSummary.get("slipActive");
+        boolean slipActive = slipActiveValue instanceof Boolean bool && bool;
+        Object slipModeValue = localizationSummary.get("slipMode");
+        String slipMode = slipModeValue != null ? slipModeValue.toString() : "";
+        Object slipCauseValue = localizationSummary.get("slipCause");
+        String slipCause = slipCauseValue != null ? slipCauseValue.toString() : "";
+        Object slipScoreValue = localizationSummary.get("slipScore");
+        double slipScore = slipScoreValue instanceof Number number ? number.doubleValue() : 0.0;
+        publisher.put("Athena/Localization/Slip/active", slipActive);
+        publisher.put("Athena/Localization/Slip/mode", slipMode);
+        publisher.put("Athena/Localization/Slip/cause", slipCause);
+        publisher.put("Athena/Localization/Slip/score", slipScore);
+    }
+
+    private static void applyLocalizationBackendOverride(
+            RobotLocalization<?> localization,
+            UnaryOperator<RobotLocalizationConfig.BackendConfig> updater,
+            boolean enableOverride) {
+        if (localization == null || updater == null) {
+            return;
+        }
+        RobotLocalizationConfig.BackendConfig current = localization.getBackendOverrideConfig();
+        RobotLocalizationConfig.BackendConfig updated = updater.apply(current);
+        localization.setBackendOverrideConfig(updated != null ? updated : current);
+        if (enableOverride) {
+            localization.setBackendOverrideEnabled(true);
+        }
+    }
+
+    private static void applyLocalizationPoseSetpoint(
+            RobotLocalization<?> localization,
+            Double xMeters,
+            Double yMeters,
+            Double headingDeg) {
+        if (localization == null) {
+            return;
+        }
+        Pose2d currentPose = localization.pose();
+        if (currentPose == null) {
+            currentPose = new Pose2d();
+        }
+        double resolvedX = xMeters != null && Double.isFinite(xMeters) ? xMeters : currentPose.getX();
+        double resolvedY = yMeters != null && Double.isFinite(yMeters) ? yMeters : currentPose.getY();
+        double resolvedHeadingDeg = headingDeg != null && Double.isFinite(headingDeg)
+                ? headingDeg
+                : currentPose.getRotation().getDegrees();
+
+        RobotLocalizationConfig cfg = localization.getLocalizationConfig();
+        String poseName = cfg != null && cfg.autoPoseName() != null && !cfg.autoPoseName().isBlank()
+                ? cfg.autoPoseName().trim()
+                : "field";
+        localization.resetPose(poseName, new Pose2d(resolvedX, resolvedY, Rotation2d.fromDegrees(resolvedHeadingDeg)));
     }
 
     private void publishArcpDrivetrainSignals(ARCP publisher) {
@@ -1947,6 +2317,8 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
         String chooserPath = "Athena/Auto/Chooser/selectedId";
         String selectedNamePath = "Athena/Auto/Selected/displayName";
+        String selectedTrajectoryPath = "Athena/Auto/Selected/trajectory";
+        String programTrajectoryPath = "Athena/Auto/Program/trajectory";
         int chooserSignalId = publisher.existingSignalId(chooserPath);
 
         List<Map<String, Object>> chooserOptions = new ArrayList<>();
@@ -1964,7 +2336,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             chooserOptions.add(dropdownOption(display, id));
         }
 
-        int trajectorySignalId = publisher.existingSignalId("Athena/Auto/Selected/trajectory");
+        int trajectorySignalId = firstExistingSignalId(publisher, programTrajectoryPath, selectedTrajectoryPath);
         int fieldXSignalId = publisher.existingSignalId("Athena/Localization/Pose/xMeters");
         int fieldYSignalId = publisher.existingSignalId("Athena/Localization/Pose/yMeters");
         int fieldHeadingSignalId = publisher.existingSignalId("Athena/Localization/Pose/headingDeg");
@@ -1991,7 +2363,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .id("w-auto-field-preview")
                 .kind("field")
                 .title("Auto Field Preview")
-                .signalId(firstExistingSignalId(publisher, "Athena/Auto/Selected/trajectory", chooserPath))
+                .signalId(firstExistingSignalId(publisher, programTrajectoryPath, selectedTrajectoryPath, chooserPath))
                 .layout(0, 1, 14, 8)
                 .config("trajectorySignalId", trajectorySignalId)
                 .config("xSignalId", fieldXSignalId)
@@ -2041,12 +2413,34 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         String visionEnabledPath = "Athena/Localization/Status/visionEnabled";
         String updatesSuppressedPath = "Athena/Localization/Status/updatesSuppressed";
         String autoPoseNamePath = "Athena/Localization/Status/autoPoseName";
+        String slipOverrideEnabledPath = "Athena/Localization/Slip/overrideEnabled";
+        String slipEnabledPath = "Athena/Localization/Slip/enabled";
+        String slipYawRateThresholdPath = "Athena/Localization/Slip/yawRateThresholdRadPerSec";
+        String slipYawRateDisagreementPath = "Athena/Localization/Slip/yawRateDisagreementRadPerSec";
+        String slipAccelThresholdPath = "Athena/Localization/Slip/accelThresholdMps2";
+        String slipAccelDisagreementPath = "Athena/Localization/Slip/accelDisagreementMps2";
+        String slipHoldSecondsPath = "Athena/Localization/Slip/holdSeconds";
+        String slipVisionStdDevScalePath = "Athena/Localization/Slip/visionStdDevScale";
+        String slipProcessStdDevScalePath = "Athena/Localization/Slip/processStdDevScale";
+        String slipScorePath = "Athena/Localization/Slip/score";
+        String selectedTrajectoryPath = "Athena/Auto/Selected/trajectory";
+        String programTrajectoryPath = "Athena/Auto/Program/trajectory";
 
         int headingId = publisher.existingSignalId(headingPath);
         int normalizedSpeedId = publisher.existingSignalId(normalizedSpeedPath);
         int visionEnabledId = publisher.existingSignalId(visionEnabledPath);
         int updatesSuppressedId = publisher.existingSignalId(updatesSuppressedPath);
         int autoPoseNameId = publisher.existingSignalId(autoPoseNamePath);
+        int slipOverrideEnabledId = publisher.existingSignalId(slipOverrideEnabledPath);
+        int slipEnabledId = publisher.existingSignalId(slipEnabledPath);
+        int slipScoreId = publisher.existingSignalId(slipScorePath);
+        int slipYawRateThresholdId = publisher.existingSignalId(slipYawRateThresholdPath);
+        int slipYawRateDisagreementId = publisher.existingSignalId(slipYawRateDisagreementPath);
+        int slipAccelThresholdId = publisher.existingSignalId(slipAccelThresholdPath);
+        int slipAccelDisagreementId = publisher.existingSignalId(slipAccelDisagreementPath);
+        int slipHoldSecondsId = publisher.existingSignalId(slipHoldSecondsPath);
+        int slipVisionStdDevScaleId = publisher.existingSignalId(slipVisionStdDevScalePath);
+        int slipProcessStdDevScaleId = publisher.existingSignalId(slipProcessStdDevScalePath);
 
         int robotVxId = publisher.existingSignalId("Athena/Localization/Speeds/robot/vxMps");
         int robotVyId = publisher.existingSignalId("Athena/Localization/Speeds/robot/vyMps");
@@ -2055,13 +2449,36 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         int fieldVyId = publisher.existingSignalId("Athena/Localization/Speeds/field/vyMps");
         int fieldOmegaId = publisher.existingSignalId("Athena/Localization/Speeds/field/omegaRadPerSec");
 
-        int fieldXId = publisher.existingSignalId("Athena/Localization/FieldPose/xMeters");
-        int fieldZId = publisher.existingSignalId("Athena/Localization/FieldPose/zMeters");
-        int fieldThetaId = publisher.existingSignalId("Athena/Localization/FieldPose/thetaDeg");
+        int poseXId = publisher.existingSignalId("Athena/Localization/Pose/xMeters");
+        int poseYId = publisher.existingSignalId("Athena/Localization/Pose/yMeters");
+        int poseHeadingId = publisher.existingSignalId("Athena/Localization/Pose/headingDeg");
+        int trajectorySignalId = firstExistingSignalId(publisher, programTrajectoryPath, selectedTrajectoryPath);
 
         List<Map<String, Object>> autoPoseOptions = new ArrayList<>();
         for (String poseName : sortedLocalizationPoseNames()) {
             autoPoseOptions.add(dropdownOption(poseName, poseName));
+        }
+        List<Map<String, Object>> slipParams = new ArrayList<>();
+        if (slipYawRateThresholdId > 0) {
+            addControllerParam(slipParams, "yaw_rate_threshold", "Yaw Rate Threshold", slipYawRateThresholdId);
+        }
+        if (slipYawRateDisagreementId > 0) {
+            addControllerParam(slipParams, "yaw_rate_disagreement", "Yaw Rate Disagree", slipYawRateDisagreementId);
+        }
+        if (slipAccelThresholdId > 0) {
+            addControllerParam(slipParams, "accel_threshold", "Accel Threshold", slipAccelThresholdId);
+        }
+        if (slipAccelDisagreementId > 0) {
+            addControllerParam(slipParams, "accel_disagreement", "Accel Disagree", slipAccelDisagreementId);
+        }
+        if (slipHoldSecondsId > 0) {
+            addControllerParam(slipParams, "hold_seconds", "Hold Seconds", slipHoldSecondsId);
+        }
+        if (slipVisionStdDevScaleId > 0) {
+            addControllerParam(slipParams, "vision_std_scale", "Vision Std Scale", slipVisionStdDevScaleId);
+        }
+        if (slipProcessStdDevScaleId > 0) {
+            addControllerParam(slipParams, "process_std_scale", "Process Std Scale", slipProcessStdDevScaleId);
         }
 
         page.widget(ArcpDashboardLayout.Widget.builder()
@@ -2133,18 +2550,76 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                 .layout(20, 4, 4, 1)
                 .config("signalPath", normalizedSpeedPath)
                 .build());
+        if (slipOverrideEnabledId > 0) {
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-localization-slip-override")
+                    .kind("toggle")
+                    .title("Slip Override")
+                    .signalId(slipOverrideEnabledId)
+                    .layout(0, 5, 4, 1)
+                    .config("signalPath", slipOverrideEnabledPath)
+                    .build());
+        }
+        if (slipEnabledId > 0) {
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-localization-slip-enabled")
+                    .kind("toggle")
+                    .title("Slip Detect")
+                    .signalId(slipEnabledId)
+                    .layout(4, 5, 4, 1)
+                    .config("signalPath", slipEnabledPath)
+                    .build());
+        }
+        if (slipScoreId > 0) {
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-localization-slip-score")
+                    .kind("metric")
+                    .title("Slip Score")
+                    .signalId(slipScoreId)
+                    .layout(8, 5, 4, 1)
+                    .config("signalPath", slipScorePath)
+                    .build());
+        }
+        if (!slipParams.isEmpty()) {
+            int slipControllerSignalId = firstExistingSignalId(
+                    publisher,
+                    slipYawRateThresholdPath,
+                    slipEnabledPath,
+                    headingPath);
+            String slipAccordionId = "w-localization-slip-tuner-accordion";
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id(slipAccordionId)
+                    .kind("layout_accordion")
+                    .title("Slip Profile Tuner")
+                    .signalId(slipControllerSignalId)
+                    .layout(12, 5, 12, 1)
+                    .config("collapsed", true)
+                    .config("expandedRows", 3)
+                    .build());
+            page.widget(ArcpDashboardLayout.Widget.builder()
+                    .id("w-localization-slip-tuner")
+                    .kind("controller")
+                    .title("Slip Profile Tuner")
+                    .signalId(slipControllerSignalId)
+                    .layout(0, 0, 12, 3)
+                    .parentLayoutId(slipAccordionId)
+                    .config("topicPath", "Athena/Localization/Slip")
+                    .config("params", slipParams)
+                    .build());
+        }
         page.widget(ArcpDashboardLayout.Widget.builder()
                 .id("w-localization-field-view")
                 .kind("field")
-                .title("Field Pose (X/Z/Theta)")
-                .signalId(firstExistingSignalId(publisher, "Athena/Localization/FieldPose/xMeters", headingPath))
-                .layout(0, 5, 24, 8)
-                .config("xSignalId", fieldXId)
-                .config("ySignalId", fieldZId)
-                .config("headingSignalId", fieldThetaId)
-                .config("allowPoseSet", false)
+                .title("Field Pose (Click To Set)")
+                .signalId(firstExistingSignalId(publisher, "Athena/Localization/Pose/xMeters", headingPath))
+                .layout(0, 6, 24, 7)
+                .config("xSignalId", poseXId)
+                .config("ySignalId", poseYId)
+                .config("headingSignalId", poseHeadingId)
+                .config("trajectorySignalId", trajectorySignalId)
+                .config("allowPoseSet", poseXId > 0 && poseYId > 0)
                 .config("fieldLength", 16.54)
-                .config("fieldWidth", 4.0)
+                .config("fieldWidth", 8.02)
                 .build());
         return page.build();
     }
@@ -3282,16 +3757,20 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         LoopTiming.beginCycle();
         updateRuntimeModeCache();
         maybeApplyCompetitionStreamShedding();
+        prelightSelectedAutoIfDisabled();
 
         double cycleStartSeconds = nowSeconds();
+        boolean startupDriveLagGuardActive = isStartupDriveLagGuardActive(cycleStartSeconds);
 
         long t0Ns = System.nanoTime();
         CommandScheduler.getInstance().run();
         long t1Ns = System.nanoTime();
-        telemetry.tick();
-        AthenaNT.tick();
+        if (!startupDriveLagGuardActive) {
+            telemetry.tick();
+            AthenaNT.tick();
+        }
         long t2Ns = System.nanoTime();
-        if (localization != null) {
+        if (!startupDriveLagGuardActive && localization != null) {
             localization.updateAutoVisualization(autos);
         }
         long t3Ns = System.nanoTime();
@@ -3304,30 +3783,32 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
                     periodicHookRunners);
         }
         onRobotPeriodic();
-        robotNetworkTables.refresh();
-        robotNetworkTables.beginPublishCycle();
-        updateAutoChooserPublishers();
+        if (!startupDriveLagGuardActive) {
+            robotNetworkTables.refresh();
+            robotNetworkTables.beginPublishCycle();
+            updateAutoChooserPublishers();
 
-        // Keep control-loop work ahead of NT publishing to reduce input lag under I/O stalls.
-        if (robotNetworkTables.isPublishingEnabled()) {
-            double now = nowSeconds();
-            if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
-                double period = robotNetworkTables.getDefaultPeriodSeconds();
-                boolean due = !Double.isFinite(lastCoreNetworkTablesPublishSeconds)
-                        || !Double.isFinite(now)
-                        || (now - lastCoreNetworkTablesPublishSeconds) >= period
-                        || robotNetworkTables.revision() != lastCoreNetworkTablesConfigRevision;
-                if (due) {
-                    publishNetworkTables();
-                    lastCoreNetworkTablesPublishSeconds = now;
-                    lastCoreNetworkTablesConfigRevision = robotNetworkTables.revision();
+            // Keep control-loop work ahead of NT publishing to reduce input lag under I/O stalls.
+            if (robotNetworkTables.isPublishingEnabled()) {
+                double now = nowSeconds();
+                if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_CORE)) {
+                    double period = robotNetworkTables.getDefaultPeriodSeconds();
+                    boolean due = !Double.isFinite(lastCoreNetworkTablesPublishSeconds)
+                            || !Double.isFinite(now)
+                            || (now - lastCoreNetworkTablesPublishSeconds) >= period
+                            || robotNetworkTables.revision() != lastCoreNetworkTablesConfigRevision;
+                    if (due) {
+                        publishNetworkTables();
+                        lastCoreNetworkTablesPublishSeconds = now;
+                        lastCoreNetworkTablesConfigRevision = robotNetworkTables.revision();
+                    }
+                }
+                if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
+                    autoPublishMechanismsIncremental(now);
                 }
             }
-            if (robotNetworkTables.enabled(RobotNetworkTables.Flag.AUTO_PUBLISH_MECHANISMS)) {
-                autoPublishMechanismsIncremental(now);
-            }
+            publishArcpSignals(cycleStartSeconds);
         }
-        publishArcpSignals(cycleStartSeconds);
         long t4Ns = System.nanoTime();
 
         double schedulerSeconds = (t1Ns - t0Ns) * 1e-9;
@@ -3452,6 +3933,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void autonomousInit() {
         diagnosticsSection.core().info("mode", "autonomousInit");
         triggerArcpRecordingRequest("autonomous");
+        armStartupDriveLagGuardWindow();
         prepareDrivetrainForModeTransition(false, true);
         boolean autoPoseReset = resetAutoInitPoseIfConfigured();
         if (autoPoseReset) {
@@ -3468,6 +3950,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void autonomousExit() {
         diagnosticsSection.core().info("mode", "autonomousExit");
         prepareDrivetrainForModeTransition(false, false);
+        resetDriverAxesToAllianceForward();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.AUTONOMOUS_EXIT);
         runCoreExitBindings(RobotCoreHooks.Phase.AUTONOMOUS_EXIT, coreHooks.autonomousExitBindings());
         onAutonomousExit();
@@ -3491,8 +3974,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     public final void teleopInit() {
         diagnosticsSection.core().info("mode", "teleopInit");
         triggerArcpRecordingRequest("teleop");
+        armStartupDriveLagGuardWindow();
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(true, false);
+        resetDriverAxesToAllianceForward();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.TELEOP_INIT);
         resetPeriodicRunners(teleopPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.TELEOP_INIT, coreHooks.teleopInitBindings());
@@ -3520,8 +4005,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void disabledInit() {
         diagnosticsSection.core().info("mode", "disabledInit");
+        startupDriveLagGuardUntilSeconds = Double.NaN;
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(true, false);
+        resetDriverAxesToAllianceForward();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_INIT);
         resetPeriodicRunners(disabledPeriodicHookRunners);
         runCorePhaseBindings(RobotCoreHooks.Phase.DISABLED_INIT, coreHooks.disabledInitBindings());
@@ -3538,6 +4025,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
 
     @Override
     public final void disabledPeriodic() {
+        processDeferredStartupSteps();
         runRegisteredPhaseHooks(RobotCoreHooks.Phase.DISABLED_PERIODIC);
         runCorePeriodicBindings(
                 RobotCoreHooks.Phase.DISABLED_PERIODIC,
@@ -3549,6 +4037,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     @Override
     public final void testInit() {
         diagnosticsSection.core().info("mode", "testInit");
+        startupDriveLagGuardUntilSeconds = Double.NaN;
         CommandScheduler.getInstance().cancelAll();
         cancelAutonomousCommand();
         prepareDrivetrainForModeTransition(false, false);
@@ -3705,7 +4194,10 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     private static double nowSeconds() {
-        double now = RobotTime.nowSeconds();
+        double now = RobotTime.nowSecondsProjectedIfStale(0.002);
+        if (!Double.isFinite(now)) {
+            now = RobotTime.nowSeconds();
+        }
         if (!Double.isFinite(now)) {
             now = Timer.getFPGATimestamp();
         }
@@ -3740,6 +4232,71 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         R result = action.get();
         logStartupDuration(step, Timer.getFPGATimestamp() - start);
         return result;
+    }
+
+    private void runRobotInitStep(String step, Runnable action, boolean allowDeferred) {
+        if (action == null) {
+            return;
+        }
+        if (!deferNonDriveStartupInit || !allowDeferred) {
+            timedStartupStep(step, action);
+            return;
+        }
+        deferredStartupTasks.addLast(new DeferredStartupTask(step, action));
+        deferredStartupInitComplete = false;
+        deferredStartupInitCompleteLogged = false;
+    }
+
+    private void processDeferredStartupSteps() {
+        if (!deferNonDriveStartupInit || deferredStartupTasks.isEmpty()) {
+            if (deferredStartupTasks.isEmpty()) {
+                deferredStartupInitComplete = true;
+            }
+            return;
+        }
+        double cycleStart = nowSeconds();
+        boolean hasCycleStart = Double.isFinite(cycleStart);
+        while (!deferredStartupTasks.isEmpty()) {
+            DeferredStartupTask task = deferredStartupTasks.pollFirst();
+            if (task == null || task.action() == null) {
+                continue;
+            }
+            timedStartupStep("deferred." + task.step(), task.action());
+            if (deferredStartupInitBudgetSeconds <= 0.0 || !hasCycleStart) {
+                continue;
+            }
+            double now = nowSeconds();
+            if (Double.isFinite(now) && (now - cycleStart) >= deferredStartupInitBudgetSeconds) {
+                break;
+            }
+        }
+        if (deferredStartupTasks.isEmpty()) {
+            deferredStartupInitComplete = true;
+            if (!deferredStartupInitCompleteLogged) {
+                deferredStartupInitCompleteLogged = true;
+                diagnosticsSection.core().info("startup", "deferred startup initialization complete");
+            }
+        }
+    }
+
+    private void armStartupDriveLagGuardWindow() {
+        if (!Double.isFinite(startupDriveLagGuardSeconds) || startupDriveLagGuardSeconds <= 0.0) {
+            startupDriveLagGuardUntilSeconds = Double.NaN;
+            return;
+        }
+        double now = nowSeconds();
+        if (!Double.isFinite(now)) {
+            startupDriveLagGuardUntilSeconds = Double.NaN;
+            return;
+        }
+        startupDriveLagGuardUntilSeconds = now + startupDriveLagGuardSeconds;
+    }
+
+    private boolean isStartupDriveLagGuardActive(double nowSeconds) {
+        if (!Double.isFinite(startupDriveLagGuardUntilSeconds) || !Double.isFinite(nowSeconds)) {
+            return false;
+        }
+        return nowSeconds < startupDriveLagGuardUntilSeconds;
     }
 
     private boolean hookInput(String key) {
@@ -4016,7 +4573,9 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
     }
 
     protected Command createAutonomousCommand() {
-        return autos.execution().selectedCommand().orElse(null);
+        return autos.execution().prelightSelectedCommand()
+                .or(autos.execution()::selectedCommand)
+                .orElse(null);
     }
 
     private static RobotLocalizationConfig applyAutoConfigToLocalization(
@@ -4226,6 +4785,49 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         ok = systemSection.setLoopSwapEnabled(false, defaults.loopSwapSizeMiB()) && ok;
         ok = systemSection.setSystemWebServerEnabled(defaults.systemWebServerEnabled()) && ok;
         return ok;
+    }
+
+    private void startSystemTweaksInitializationAsync(SystemConfig config) {
+        if (!RobotBase.isReal()) {
+            return;
+        }
+        final SystemConfig resolvedConfig = config != null ? config : SystemConfig.defaults();
+        final boolean tweaksEnabled = resolvedConfig.tweaksEnabled();
+        diagnosticsSection.core().info(
+                "startup",
+                tweaksEnabled
+                        ? "scheduling system tweaks in background"
+                        : "scheduling system tweak reset in background");
+        Thread thread = new Thread(
+                () -> {
+                    double start = Timer.getFPGATimestamp();
+                    boolean tweaksOk;
+                    try {
+                        tweaksOk = tweaksEnabled
+                                ? applySystemTweaks(resolvedConfig)
+                                : resetSystemTweaksToRioDefaults();
+                    } catch (Throwable ex) {
+                        String message = "system tweak startup task crashed: "
+                                + ex.getClass().getSimpleName()
+                                + (ex.getMessage() != null && !ex.getMessage().isBlank()
+                                        ? " - " + ex.getMessage()
+                                        : "");
+                        DriverStation.reportWarning("[Athena][System] " + message, false);
+                        diagnosticsSection.core().warn("system", message);
+                        return;
+                    }
+                    logStartupDuration("background.systemTweaks", Timer.getFPGATimestamp() - start);
+                    if (!tweaksOk) {
+                        diagnosticsSection.core().warn(
+                                "system",
+                                tweaksEnabled
+                                        ? "one or more system tweaks failed to apply"
+                                        : "one or more system tweaks failed to reset");
+                    }
+                },
+                "athena-system-tweaks-" + SYSTEM_TWEAKS_THREAD_COUNTER.getAndIncrement());
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private boolean setVmSysctl(String key, int value) {
@@ -4679,6 +5281,28 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         addPeriodic(mechanism::updatePID, period);
     }
 
+    private void configureDrivetrainUpdateLoop(T drivetrain) {
+        if (!(drivetrain instanceof SwerveDrivetrain swerve)) {
+            return;
+        }
+        double period = swerve.updatePeriodSeconds();
+        double basePeriod = getPeriod();
+        if (!Double.isFinite(period) || period <= 0.0 || period >= basePeriod) {
+            swerve.externalUpdateLoopEnabled(false);
+            return;
+        }
+        swerve.externalUpdateLoopEnabled(true);
+        addPeriodic(swerve::update, period);
+    }
+
+    private void applyAutoFollowerTimingConfig(T drivetrain, AutoConfig autoConfig) {
+        if (!(drivetrain instanceof SwerveDrivetrain swerve)) {
+            return;
+        }
+        AutoConfig resolved = autoConfig != null ? autoConfig : AutoConfig.defaults();
+        swerve.autoFollowerPeriodSeconds(resolved.followerPeriodSeconds());
+    }
+
     public RobotCore<T> registerMechanism(Mechanism... mechs) {
         if (mechs == null || mechs.length == 0) {
             return this;
@@ -4735,35 +5359,164 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (entries == null || entries.length == 0) {
             return this;
         }
+        int factoryCount = 0;
         for (RegisterableMechanism entry : entries) {
-            if (entry == null) {
-                continue;
+            if (entry instanceof RegisterableMechanismFactory) {
+                factoryCount++;
             }
-            if (entry instanceof RegisterableMechanismFactory factory) {
-                RegisterableMechanism built = factory.build();
-                if (built == null) {
+        }
+        @SuppressWarnings("unchecked")
+        Future<RegisterableMechanism>[] builtFactories = factoryCount > 1
+                ? new Future[entries.length]
+                : null;
+        ExecutorService factoryBuildExecutor = null;
+        if (builtFactories != null) {
+            int parallelism = resolveMechanismFactoryBuildParallelism(factoryCount);
+            if (parallelism > 1) {
+                factoryBuildExecutor = Executors.newFixedThreadPool(parallelism, mechanismFactoryBuildThreadFactory());
+                for (int i = 0; i < entries.length; i++) {
+                    RegisterableMechanism entry = entries[i];
+                    if (!(entry instanceof RegisterableMechanismFactory factory)) {
+                        continue;
+                    }
+                    builtFactories[i] = factoryBuildExecutor.submit(() -> buildRegisterableMechanism(factory));
+                }
+            } else {
+                builtFactories = null;
+            }
+        }
+        try {
+            for (int i = 0; i < entries.length; i++) {
+                RegisterableMechanism entry = entries[i];
+                if (entry == null) {
                     continue;
                 }
-                if (built == entry) {
-                    throw new IllegalStateException("RegisterableMechanismFactory returned itself.");
+                if (entry instanceof RegisterableMechanismFactory factory) {
+                    RegisterableMechanism built = builtFactories != null && builtFactories[i] != null
+                            ? awaitRegisterableMechanismBuild(builtFactories[i], factory)
+                            : buildRegisterableMechanism(factory);
+                    if (built == null) {
+                        continue;
+                    }
+                    registerMechanism(built);
+                    continue;
                 }
-                registerMechanism(built);
-                continue;
+                if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
+                    registerSuperstructureInternal(superstructure);
+                    RobotNetworkTables.Node superNode = mechanismsRootNode.child(
+                            superstructure.getName() != null ? superstructure.getName() : "Superstructure");
+                    robotNetworkTables.superstructureConfig(superNode);
+                    superstructure.setRobotCore(this);
+                    superstructure.diagnostics().info("lifecycle", "superstructure registered");
+                    registerSuperstructureDiagnosticsProviderIfReady(superstructure);
+                    indexSuperstructureStateEndpoint(superstructure);
+                    superstructure.networkTables().ownerPath(superstructure.getName());
+                }
+                registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
             }
-            if (entry instanceof SuperstructureMechanism<?, ?> superstructure) {
-                registerSuperstructureInternal(superstructure);
-                RobotNetworkTables.Node superNode =
-                        mechanismsRootNode.child(superstructure.getName() != null ? superstructure.getName() : "Superstructure");
-                robotNetworkTables.superstructureConfig(superNode);
-                superstructure.setRobotCore(this);
-                superstructure.diagnostics().info("lifecycle", "superstructure registered");
-                registerSuperstructureDiagnosticsProviderIfReady(superstructure);
-                indexSuperstructureStateEndpoint(superstructure);
-                superstructure.networkTables().ownerPath(superstructure.getName());
+        } finally {
+            if (factoryBuildExecutor != null) {
+                factoryBuildExecutor.shutdown();
             }
-            registerMechanism(entry.flattenForRegistration().toArray(Mechanism[]::new));
         }
         return this;
+    }
+
+    private static RegisterableMechanism buildRegisterableMechanism(RegisterableMechanismFactory factory) {
+        RegisterableMechanism built = factory.build();
+        if (built == factory) {
+            throw new IllegalStateException("RegisterableMechanismFactory returned itself.");
+        }
+        return built;
+    }
+
+    private static RegisterableMechanism awaitRegisterableMechanismBuild(
+            Future<RegisterableMechanism> future,
+            RegisterableMechanismFactory factory) {
+        try {
+            RegisterableMechanism built = future.get();
+            if (built == factory) {
+                throw new IllegalStateException("RegisterableMechanismFactory returned itself.");
+            }
+            return built;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while building registerable mechanism factory", ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("Failed to build registerable mechanism factory", cause);
+        }
+    }
+
+    private static int resolveMechanismFactoryBuildParallelism(int factoryCount) {
+        Integer configured = parsePositiveIntProperty(MECHANISM_FACTORY_BUILD_PARALLELISM_PROPERTY);
+        if (configured != null) {
+            return Math.max(1, Math.min(factoryCount, configured));
+        }
+        int cpus = Math.max(1, Runtime.getRuntime().availableProcessors());
+        int defaultThreads = Math.max(2, cpus * 2);
+        int capped = Math.max(1, Math.min(MAX_MECHANISM_FACTORY_BUILD_THREADS, defaultThreads));
+        return Math.max(1, Math.min(factoryCount, capped));
+    }
+
+    private static Integer parsePositiveIntProperty(String propertyName) {
+        String raw = System.getProperty(propertyName);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean parseBooleanProperty(String propertyName, boolean fallback) {
+        String raw = System.getProperty(propertyName);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        String normalized = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized)) {
+            return true;
+        }
+        if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized)) {
+            return false;
+        }
+        return fallback;
+    }
+
+    private static double parseNonNegativeDoubleProperty(String propertyName, double fallback) {
+        String raw = System.getProperty(propertyName);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            double parsed = Double.parseDouble(raw.trim());
+            if (!Double.isFinite(parsed) || parsed < 0.0) {
+                return fallback;
+            }
+            return parsed;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static ThreadFactory mechanismFactoryBuildThreadFactory() {
+        return runnable -> {
+            Thread thread = new Thread(
+                    runnable,
+                    "athena-mechanism-factory-build-" + MECHANISM_FACTORY_BUILD_THREAD_COUNTER.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
     }
 
     private void registerConfiguredMechanisms() {
@@ -6330,19 +7083,24 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         if (count <= 0) {
             return routineId + "|" + routineSource + "|" + routineReference + "|0";
         }
-        Pose2d first = poses.get(0);
-        Pose2d last = poses.get(count - 1);
+        long hash = 0xcbf29ce484222325L;
+        for (int i = 0; i < poses.size(); i++) {
+            Pose2d pose = poses.get(i);
+            if (pose == null) {
+                hash = mixTrajectoryHash(hash, i + 1L);
+                continue;
+            }
+            hash = mixTrajectoryHash(hash, Double.doubleToLongBits(pose.getX()));
+            hash = mixTrajectoryHash(hash, Double.doubleToLongBits(pose.getY()));
+            hash = mixTrajectoryHash(hash, Double.doubleToLongBits(pose.getRotation().getRadians()));
+        }
         return routineId + "|" + routineSource + "|" + routineReference + "|" + count + "|"
-                + poseSignature(first) + "|" + poseSignature(last);
+                + Long.toUnsignedString(hash, 16);
     }
 
-    private static String poseSignature(Pose2d pose) {
-        if (pose == null) {
-            return "null";
-        }
-        return Double.doubleToLongBits(pose.getX()) + ","
-                + Double.doubleToLongBits(pose.getY()) + ","
-                + Double.doubleToLongBits(pose.getRotation().getRadians());
+    private static long mixTrajectoryHash(long hash, long value) {
+        hash ^= value;
+        return hash * 0x100000001b3L;
     }
 
     private static PIDController syncAutoFollowerPidWidget(
@@ -6465,5 +7223,29 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         imu.setVirtualAxis("field", newFieldHeading);
         imu.setVirtualAxis("driver", newFieldHeading.plus(driverOffsetFromField));
         imu.setVirtualAxis("drift", newFieldHeading.plus(driftOffsetFromField));
+    }
+
+    private void resetDriverAxesToAllianceForward() {
+        RobotDrivetrain<?> drivetrainRef = drivetrain;
+        if (drivetrainRef == null) {
+            return;
+        }
+        Imu imu = drivetrainRef.imu().device();
+        if (imu == null) {
+            return;
+        }
+        Rotation2d driverHeading = DriverStation.getAlliance()
+                .filter(alliance -> alliance == DriverStation.Alliance.Red)
+                .map(alliance -> Rotation2d.fromDegrees(180.0))
+                .orElse(Rotation2d.kZero);
+        imu.setVirtualAxis("driver", driverHeading);
+        imu.setVirtualAxis("drift", driverHeading);
+    }
+
+    private void prelightSelectedAutoIfDisabled() {
+        if (runtimeMode != RuntimeMode.DISABLED) {
+            return;
+        }
+        autos.execution().prelightSelectedCommand();
     }
 }

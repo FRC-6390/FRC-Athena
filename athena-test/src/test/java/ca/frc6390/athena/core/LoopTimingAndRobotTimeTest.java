@@ -1,7 +1,6 @@
 package ca.frc6390.athena.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
@@ -14,6 +13,7 @@ final class LoopTimingAndRobotTimeTest {
     void resetLoopTimingState() {
         LoopTiming.setDebugAlways(false);
         LoopTiming.clearMechanismDurationsForTest();
+        RobotTime.resetNowSecondsForTest();
     }
 
     @Test
@@ -52,5 +52,43 @@ final class LoopTimingAndRobotTimeTest {
     void robotTimeUpdateNowSecondsIsDirectlyReadable() {
         RobotTime.updateNowSeconds(123.456);
         assertEquals(123.456, RobotTime.nowSeconds(), 1e-9);
+    }
+
+    @Test
+    void robotTimeSnapshotTracksLoopDtAndCycleCount() {
+        RobotTime.updateNowSeconds(10.0);
+        RobotTime.updateNowSeconds(10.02);
+
+        assertEquals(10.02, RobotTime.nowSeconds(), 1e-9);
+        assertEquals(0.02, RobotTime.loopDtSeconds(), 1e-9);
+        assertEquals(2L, RobotTime.loopCycleCount());
+
+        RobotTime.LoopSnapshot snapshot = RobotTime.loopSnapshot();
+        assertEquals(10.02, snapshot.nowSeconds(), 1e-9);
+        assertEquals(0.02, snapshot.loopDtSeconds(), 1e-9);
+        assertEquals(2L, snapshot.cycleCount());
+        assertTrue(snapshot.hasNowSeconds());
+        assertTrue(snapshot.hasLoopDtSeconds());
+    }
+
+    @Test
+    void robotTimeProjectedNowAdvancesMonotonicallyFromCachedSample() {
+        RobotTime.updateNowSeconds(42.0);
+
+        double projectedNow = RobotTime.nowSecondsProjected();
+        assertTrue(projectedNow >= 42.0);
+        assertTrue(projectedNow <= 42.25);
+    }
+
+    @Test
+    void robotTimeResetClearsSnapshot() {
+        RobotTime.updateNowSeconds(5.0);
+        RobotTime.updateNowSeconds(5.02);
+
+        RobotTime.resetNowSecondsForTest();
+
+        assertTrue(Double.isNaN(RobotTime.nowSeconds()));
+        assertTrue(Double.isNaN(RobotTime.loopDtSeconds()));
+        assertEquals(0L, RobotTime.loopCycleCount());
     }
 }

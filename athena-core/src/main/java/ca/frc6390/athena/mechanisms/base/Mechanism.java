@@ -83,7 +83,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private static final String MOTION_AXIS_ID = "axis";
     private final MotionLimits motionLimits;
     private boolean override, emergencyStopped, manualEmergencyStopped, connectivityFaultEmergencyStopped,
-            pidEnabled, feedforwardEnabled, setpointIsOutput, customPIDCycle;
+            pidEnabled, feedforwardEnabled, setpointIsOutput, customPIDCycle, configDisabled;
     private boolean hooksEnabled = true;
     private boolean controlLoopsEnabled = true;
     private double setpoint, pidOutput, feedforwardOutput, output, nudge, pidPeriod; 
@@ -175,6 +175,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean cachedPidEnabled;
     private boolean cachedHooksEnabled;
     private boolean cachedControlLoopsEnabled;
+    private boolean cachedConfigDisabled;
     private double cachedSysIdRampRate;
     private double cachedSysIdStepVoltage;
     private double cachedSysIdTimeoutSeconds;
@@ -522,6 +523,69 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public MechanismConfig<? extends Mechanism> getSourceConfig() {
         return sourceConfig;
+    }
+
+    void setConfigDisabled(boolean configDisabled) {
+        if (this.configDisabled == configDisabled) {
+            return;
+        }
+        this.configDisabled = configDisabled;
+        if (configDisabled) {
+            applyConfigDisabledMode();
+            appendDiagnosticLog("WARN", "lifecycle", "disabled via config; mechanism is inert");
+            return;
+        }
+        appendDiagnosticLog("INFO", "lifecycle", "config-disabled mode cleared");
+    }
+
+    private void applyConfigDisabledMode() {
+        cancelActiveSysIdCommand();
+        sysIdActive = false;
+        sysIdConstraintAbortIssued = false;
+        sysIdLastVoltage = 0.0;
+        sysIdPreviousOverride = false;
+        override = false;
+        manualOutputActive = false;
+        manualOutput = 0.0;
+        manualOutputIsVoltage = false;
+        setpoint = 0.0;
+        nudge = 0.0;
+        output = 0.0;
+        pidOutput = 0.0;
+        feedforwardOutput = 0.0;
+        pidEnabled = false;
+        feedforwardEnabled = false;
+        hooksEnabled = false;
+        controlLoopsEnabled = false;
+        customPIDCycle = false;
+        disabledControlLoops.clear();
+        disabledControlLoops.addAll(controlLoopsByName.keySet());
+        manualEmergencyStopped = false;
+        connectivityFaultEmergencyStopped = false;
+        connectivityFaultReason = "";
+        emergencyStopped = false;
+        lastFaultReason = "disabled by config";
+        lastOutputValid = true;
+        lastOutput = 0.0;
+        lastOutputIsVoltage = isUseVoltage();
+        motors.stopMotors();
+        resetPID();
+        resetTimedPeriodicHooks();
+        resetControlLoopRunners();
+    }
+
+    private boolean ignoreControlMutationForDisabledConfig() {
+        if (!configDisabled) {
+            return false;
+        }
+        output = 0.0;
+        pidOutput = 0.0;
+        feedforwardOutput = 0.0;
+        lastOutputValid = true;
+        lastOutput = 0.0;
+        lastOutputIsVoltage = isUseVoltage();
+        motors.stopMotors();
+        return true;
     }
 
     public void runLifecycleHooks(RobotCoreHooks.Phase phase) {
@@ -984,6 +1048,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public boolean controlLoopsEnabled() {
         return controlLoopsEnabled;
+    }
+
+    public boolean configDisabled() {
+        return configDisabled;
     }
 
     public double position() {
@@ -1638,18 +1706,30 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     void sysIdRampRateVoltsPerSecondInternal(double value) {
+        if (configDisabled) {
+            return;
+        }
         setSysIdRampRateVoltsPerSecond(value);
     }
 
     void sysIdStepVoltageInternal(double value) {
+        if (configDisabled) {
+            return;
+        }
         setSysIdStepVoltage(value);
     }
 
     void sysIdTimeoutSecondsInternal(double value) {
+        if (configDisabled) {
+            return;
+        }
         setSysIdTimeoutSeconds(value);
     }
 
     void sysIdVoltageLimitInternal(double value) {
+        if (configDisabled) {
+            return;
+        }
         setSysIdVoltageLimit(value);
     }
 
@@ -1670,14 +1750,20 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     boolean sysIdActiveInternal() {
-        return sysIdActive;
+        return !configDisabled && sysIdActive;
     }
 
     Command sysIdQuasistaticInternal(SysIdRoutine.Direction direction) {
+        if (configDisabled) {
+            return Commands.none();
+        }
         return sysIdCommand(() -> getSysIdRoutine().quasistatic(direction));
     }
 
     Command sysIdDynamicInternal(SysIdRoutine.Direction direction) {
+        if (configDisabled) {
+            return Commands.none();
+        }
         return sysIdCommand(() -> getSysIdRoutine().dynamic(direction));
     }
 
@@ -1906,6 +1992,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void setSysIdRampRateVoltsPerSecond(double rampRate) {
+        if (configDisabled) {
+            return;
+        }
         if (!Double.isFinite(rampRate) || rampRate <= 0.0) {
             return;
         }
@@ -1918,6 +2007,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void setSysIdStepVoltage(double stepVoltage) {
+        if (configDisabled) {
+            return;
+        }
         if (!Double.isFinite(stepVoltage) || stepVoltage <= 0.0) {
             return;
         }
@@ -1930,6 +2022,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void setSysIdTimeoutSeconds(double timeoutSeconds) {
+        if (configDisabled) {
+            return;
+        }
         if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0.0) {
             return;
         }
@@ -1942,6 +2037,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void setSysIdVoltageLimit(double voltageLimit) {
+        if (configDisabled) {
+            return;
+        }
         if (!Double.isFinite(voltageLimit) || voltageLimit <= 0.0) {
             sysIdVoltageLimit = Double.NaN;
             return;
@@ -2002,6 +2100,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private double readOutput() {
+        if (configDisabled) {
+            return 0.0;
+        }
         if (override) {
             return manualOutputActive ? manualOutput : 0.0;
         }
@@ -2031,6 +2132,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setVoltage(double voltage){
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         recordOutput(voltage, true);
         if (emergencyStopped) {
             motors.stopMotors();
@@ -2042,6 +2146,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setSpeed(double speed){
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         recordOutput(speed, false);
         if (emergencyStopped) {
             motors.stopMotors();
@@ -2056,6 +2163,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setOutput(double output) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         setOverride(true);
         switch (outputType) {
             case VOLTAGE -> setVoltage(output);
@@ -2085,6 +2195,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setMotors(double speed){
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         setOverride(true);
         setSpeed(speed);
     }
@@ -2156,6 +2269,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public boolean atSetpoint(){
+        if (configDisabled) {
+            return true;
+        }
         double target = getSetpoint() + getNudge();
 
         for (Map.Entry<String, MechanismConfig.PidProfile> entry : controlLoopPidProfilesConfig.entrySet()) {
@@ -2196,6 +2312,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setSetpoint(double setpoint){
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         this.setpoint = applyBounds(setpoint);
     }
 
@@ -2304,6 +2423,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setOverride(boolean override) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (this.override != override) {
             appendDiagnosticLog("INFO", "control", override ? "manual override enabled" : "manual override disabled");
         }
@@ -2322,6 +2444,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setUseAbsolute(boolean useAbsolute) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         this.useAbsolute = useAbsolute;
     }
 
@@ -2336,6 +2461,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setOutputType(OutputType outputType) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (outputType == null) {
             return;
         }
@@ -2357,6 +2485,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void setNeutralModeFromArcp(String rawMode) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (rawMode == null || rawMode.isBlank()) {
             return;
         }
@@ -2371,6 +2502,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void setControlLoopsEnabledFromArcp(boolean enabled) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (!enabled) {
             disableAllControlLoopsInternal();
             return;
@@ -2873,6 +3007,20 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void update(double nowSeconds) {
+        if (configDisabled) {
+            applyLimitSwitchZeroing();
+            output = 0.0;
+            pidOutput = 0.0;
+            feedforwardOutput = 0.0;
+            manualOutputActive = false;
+            manualOutput = 0.0;
+            manualOutputIsVoltage = false;
+            lastOutputValid = true;
+            lastOutput = 0.0;
+            lastOutputIsVoltage = isUseVoltage();
+            motors.stopMotors();
+            return;
+        }
 
         double output = 0;
         boolean testMode = robotMode == RobotMode.TEST;
@@ -3067,6 +3215,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private String resolveActiveFaultReason() {
+        if (configDisabled) {
+            return "disabled by config";
+        }
         if (manualEmergencyStopped && connectivityFaultEmergencyStopped) {
             return "manual emergency stop, " + connectivityFaultReason;
         }
@@ -3266,6 +3417,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         control.put("feedforwardEnabled", feedforwardEnabled);
         control.put("hooksEnabled", hooksEnabled);
         control.put("controlLoopsEnabled", controlLoopsEnabled);
+        control.put("configDisabled", configDisabled);
         control.put("setpointAsOutput", setpointIsOutput);
         control.put("loopOutputs", captureControlLoopOutputs());
 
@@ -3315,12 +3467,18 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setCurrentLimit(double currentLimit){
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         motors.setCurrentLimit(currentLimit);
     }
 
     /**
      */
     private void setMotorNeutralMode(MotorNeutralMode mode){
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         motors.setNeutralMode(mode);
     }
 
@@ -3347,6 +3505,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setFeedforwardEnabled(boolean feedforwardEnabled) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (this.feedforwardEnabled != feedforwardEnabled) {
             appendDiagnosticLog(
                     "INFO",
@@ -3363,6 +3524,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setPidEnabled(boolean pidEnabled) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (this.pidEnabled != pidEnabled) {
             appendDiagnosticLog("INFO", "control", pidEnabled ? "pid enabled" : "pid disabled");
         }
@@ -3375,6 +3539,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void setHooksEnabled(boolean enabled) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (hooksEnabled == enabled) {
             return;
         }
@@ -3419,6 +3586,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setEmergencyStopped(boolean emergancyStopped) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (this.manualEmergencyStopped != emergancyStopped) {
             appendDiagnosticLog(
                     emergancyStopped ? "ERROR" : "INFO",
@@ -3433,6 +3603,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private double getOutput() {
+        if (configDisabled) {
+            return 0.0;
+        }
         if (override) {
             return manualOutputActive ? manualOutput : 0.0;
         }
@@ -3445,6 +3618,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void setNudge(double nudge){
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         this.nudge = nudge;
     }
 
@@ -3491,6 +3667,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void disableControlLoop(String name) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (name == null || !controlLoopsByName.containsKey(name)) {
             return;
         }
@@ -3501,6 +3680,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     /**
      */
     private void enableControlLoop(String name) {
+        if (ignoreControlMutationForDisabledConfig()) {
+            return;
+        }
         if (name == null || !controlLoopsByName.containsKey(name)) {
             return;
         }
@@ -3523,6 +3705,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private boolean isControlLoopEnabled(String name) {
+        if (configDisabled) {
+            return false;
+        }
         if (name == null || !controlLoopsByName.containsKey(name)) {
             return false;
         }
@@ -3788,6 +3973,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         cachedPidEnabled = pidEnabled;
         cachedHooksEnabled = hooksEnabled;
         cachedControlLoopsEnabled = controlLoopsEnabled;
+        cachedConfigDisabled = configDisabled;
         cachedSysIdRampRate = sysIdRampRateVoltsPerSecond;
         cachedSysIdStepVoltage = sysIdStepVoltage;
         cachedSysIdTimeoutSeconds = sysIdTimeoutSeconds;
@@ -3885,7 +4071,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private double currentLoopNowSeconds() {
-        double nowSeconds = RobotTime.nowSeconds();
+        double nowSeconds = RobotTime.nowSecondsProjectedIfStale(0.002);
+        if (!Double.isFinite(nowSeconds)) {
+            nowSeconds = RobotTime.nowSeconds();
+        }
         if (Double.isFinite(nowSeconds)) {
             return nowSeconds;
         }
@@ -3907,6 +4096,34 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private void periodicImpl() {
         robotMode = resolveRobotMode();
         double nowSeconds = currentLoopNowSeconds();
+
+        if (configDisabled) {
+            if (simulationModel != null) {
+                advanceSimulation(nowSeconds);
+            } else {
+                refreshHardwareSignals(false, nowSeconds);
+            }
+            sensorSimulation.update(this);
+            output = 0.0;
+            pidOutput = 0.0;
+            feedforwardOutput = 0.0;
+            manualOutputActive = false;
+            manualOutput = 0.0;
+            manualOutputIsVoltage = false;
+            lastOutputValid = true;
+            lastOutput = 0.0;
+            lastOutputIsVoltage = isUseVoltage();
+            motors.stopMotors();
+            updateNetworkTablesCache(nowSeconds);
+            refreshNetworkTablesOnConfigChange();
+            attemptNetworkTablesPublishIfNeeded(nowSeconds);
+            if (visualization != null) {
+                visualization.setExternalRootPose(visualizationRootOverride);
+                visualization.update(this);
+            }
+            prevRobotMode = robotMode;
+            return;
+        }
 
         if (prevRobotMode != robotMode) {
             resetPID();
@@ -4332,8 +4549,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         String commandRoot = controlRoot + "/Commands";
         publisher.command(commandRoot + "/forceEStop").onInvoke(() -> setEmergencyStopped(true));
         publisher.command(commandRoot + "/releaseEStop").onInvoke(() -> setEmergencyStopped(false));
-        publisher.command(commandRoot + "/setNeutralBrake").onInvoke(() -> motors.setNeutralMode(MotorNeutralMode.Brake));
-        publisher.command(commandRoot + "/setNeutralCoast").onInvoke(() -> motors.setNeutralMode(MotorNeutralMode.Coast));
+        publisher.command(commandRoot + "/setNeutralBrake").onInvoke(() -> setMotorNeutralMode(MotorNeutralMode.Brake));
+        publisher.command(commandRoot + "/setNeutralCoast").onInvoke(() -> setMotorNeutralMode(MotorNeutralMode.Coast));
         publisher.command(commandRoot + "/stopOutput").onInvoke(() -> setOutput(0.0));
 
         publisher.put(statusRoot + "/emergencyStopped", cachedEmergencyStopped);
@@ -4342,6 +4559,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         publisher.put(statusRoot + "/feedforwardEnabled", cachedFeedforwardEnabled);
         publisher.put(statusRoot + "/hooksEnabled", cachedHooksEnabled);
         publisher.put(statusRoot + "/controlLoopsEnabled", cachedControlLoopsEnabled);
+        publisher.put(statusRoot + "/configDisabled", cachedConfigDisabled);
         publisher.put(statusRoot + "/outputType", String.valueOf(getOutputType()));
         publisher.put(statusRoot + "/position", getPosition());
         publisher.put(statusRoot + "/velocity", getVelocity());
@@ -4735,6 +4953,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             status.putBoolean("feedforwardEnabled", cachedFeedforwardEnabled);
             status.putBoolean("hooksEnabled", cachedHooksEnabled);
             status.putBoolean("controlLoopsEnabled", cachedControlLoopsEnabled);
+            status.putBoolean("configDisabled", cachedConfigDisabled);
             status.putString("outputType", String.valueOf(getOutputType()));
             status.putString("faultReason", cachedFaultReason != null ? cachedFaultReason : "");
             status.putString("lastFaultReason", cachedLastFaultReason != null ? cachedLastFaultReason : "");
@@ -5135,11 +5354,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         ntControlSetNeutralBrakeButton = createCommandButton(
                 commandsNode.child("SetNeutralBrake"),
                 "SetNeutralBrake",
-                Commands.runOnce(() -> motors.setNeutralMode(MotorNeutralMode.Brake)).ignoringDisable(true));
+                Commands.runOnce(() -> setMotorNeutralMode(MotorNeutralMode.Brake)).ignoringDisable(true));
         ntControlSetNeutralCoastButton = createCommandButton(
                 commandsNode.child("SetNeutralCoast"),
                 "SetNeutralCoast",
-                Commands.runOnce(() -> motors.setNeutralMode(MotorNeutralMode.Coast)).ignoringDisable(true));
+                Commands.runOnce(() -> setMotorNeutralMode(MotorNeutralMode.Coast)).ignoringDisable(true));
 
         initIfAbsent(ntControlOutputEntry, output);
         if (stateful) {
@@ -5306,7 +5525,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void forceStatefulState(Enum<?> state) {
-        if (state == null || !(this instanceof StatefulLike<?> stateful)) {
+        if (configDisabled || state == null || !(this instanceof StatefulLike<?> stateful)) {
             return;
         }
         StatefulLike raw = (StatefulLike) stateful;
@@ -5315,7 +5534,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void queueStatefulState(Enum<?> state) {
-        if (state == null || !(this instanceof StatefulLike<?> stateful)) {
+        if (configDisabled || state == null || !(this instanceof StatefulLike<?> stateful)) {
             return;
         }
         StatefulLike raw = (StatefulLike) stateful;
@@ -5324,7 +5543,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void forceStatefulSetpoint(double setpoint) {
-        if (!Double.isFinite(setpoint) || !(this instanceof StatefulLike<?> stateful)) {
+        if (configDisabled || !Double.isFinite(setpoint) || !(this instanceof StatefulLike<?> stateful)) {
             return;
         }
         StatefulLike raw = (StatefulLike) stateful;
@@ -5333,7 +5552,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void queueStatefulSetpoint(double setpoint) {
-        if (!Double.isFinite(setpoint) || !(this instanceof StatefulLike<?> stateful)) {
+        if (configDisabled || !Double.isFinite(setpoint) || !(this instanceof StatefulLike<?> stateful)) {
             return;
         }
         StatefulLike raw = (StatefulLike) stateful;
@@ -5342,7 +5561,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void clearStatefulAll() {
-        if (!(this instanceof StatefulLike<?> stateful)) {
+        if (configDisabled || !(this instanceof StatefulLike<?> stateful)) {
             return;
         }
         StatefulLike raw = (StatefulLike) stateful;
@@ -5498,6 +5717,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void scheduleSysIdCommand(Command command) {
+        if (configDisabled) {
+            return;
+        }
         if (command == null) {
             return;
         }
@@ -5735,6 +5957,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void applySysIdVoltage(Voltage voltage) {
+        if (configDisabled) {
+            sysIdLastVoltage = 0.0;
+            motors.stopMotors();
+            return;
+        }
         double requested = voltage.in(edu.wpi.first.units.Units.Volts);
         double constrained = applySysIdSafetyConstraints(requested);
         if (!sysIdConstraintAbortIssued && isSysIdSafetyBlocked(requested, constrained)) {
@@ -5763,6 +5990,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void startSysId() {
+        if (configDisabled) {
+            return;
+        }
         sysIdActive = true;
         sysIdConstraintAbortIssued = false;
         sysIdPreviousOverride = override;
@@ -5770,6 +6000,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     private void stopSysId() {
+        if (configDisabled) {
+            sysIdActive = false;
+            motors.stopMotors();
+            return;
+        }
         sysIdActive = false;
         sysIdConstraintAbortIssued = false;
         setOverride(sysIdPreviousOverride);

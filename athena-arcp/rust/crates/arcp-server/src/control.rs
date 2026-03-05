@@ -506,30 +506,46 @@ fn decode_hex_nibble(byte: u8) -> Result<u8, &'static str> {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct ServerStatsSample {
+    cpu_percent: Option<f32>,
+    rss_bytes: Option<u64>,
+    cpu_cores: Option<u32>,
+    ram_total_bytes: Option<u64>,
+    ram_available_bytes: Option<u64>,
+    disk_total_bytes: Option<u64>,
+    disk_available_bytes: Option<u64>,
+}
+
 #[derive(Default)]
 struct ServerStatsSampler {
     prev_proc_jiffies: Option<u64>,
     prev_total_jiffies: Option<u64>,
     cpu_scale: f64,
+    cpu_cores: Option<u32>,
     last_sample: Option<Instant>,
 }
 
 impl ServerStatsSampler {
     fn new() -> Self {
+        let cpu_cores = std::thread::available_parallelism()
+            .ok()
+            .map(|value| value.get() as u32);
         Self {
             prev_proc_jiffies: None,
             prev_total_jiffies: None,
-            cpu_scale: std::thread::available_parallelism()
-                .map(|v| v.get() as f64)
-                .unwrap_or(1.0),
+            cpu_scale: cpu_cores.map(|value| value as f64).unwrap_or(1.0),
+            cpu_cores,
             last_sample: None,
         }
     }
 
-    fn sample(&mut self) -> (Option<f32>, Option<u64>) {
-        let rss = read_rss_bytes();
+    fn sample(&mut self) -> ServerStatsSample {
+        let rss_bytes = read_rss_bytes();
         let proc_jiffies = read_process_jiffies();
         let total_jiffies = read_total_jiffies();
+        let (ram_total_bytes, ram_available_bytes) = read_memory_totals_bytes().unwrap_or((None, None));
+        let (disk_total_bytes, disk_available_bytes) = read_disk_usage_bytes("/").unwrap_or((None, None));
 
         let mut cpu_percent = None;
         if let (Some(proc_now), Some(total_now)) = (proc_jiffies, total_jiffies) {
@@ -550,20 +566,102 @@ impl ServerStatsSampler {
             self.last_sample = Some(Instant::now());
         }
 
-        (cpu_percent, rss)
+        ServerStatsSample {
+            cpu_percent,
+            rss_bytes,
+            cpu_cores: self.cpu_cores,
+            ram_total_bytes,
+            ram_available_bytes,
+            disk_total_bytes,
+            disk_available_bytes,
+        }
     }
 }
 
+fn format_optional_f32(raw: Option<f32>) -> String {
+    raw.map(|value| format!("{value:.2}"))
+        .unwrap_or_else(|| String::from("na"))
+}
+
+fn format_optional_u64(raw: Option<u64>) -> String {
+    raw.map(|value| value.to_string())
+        .unwrap_or_else(|| String::from("na"))
+}
+
+fn format_optional_u32(raw: Option<u32>) -> String {
+    raw.map(|value| value.to_string())
+        .unwrap_or_else(|| String::from("na"))
+}
+
 fn handle_stats(stats: &mut ServerStatsSampler, stream: &mut TcpStream) -> io::Result<()> {
-    let (cpu_percent, rss_bytes) = stats.sample();
-    let cpu = cpu_percent
-        .map(|value| format!("{value:.2}"))
-        .unwrap_or_else(|| String::from("na"));
-    let rss = rss_bytes
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| String::from("na"));
-    stream.write_all(format!("STATS cpu={cpu} rss={rss}\n").as_bytes())?;
+    let sample = stats.sample();
+    stream.write_all(
+        format!(
+            "STATS cpu={} rss={} cores={} ram_total={} ram_available={} disk_total={} disk_available={}\n",
+            format_optional_f32(sample.cpu_percent),
+            format_optional_u64(sample.rss_bytes),
+            format_optional_u32(sample.cpu_cores),
+            format_optional_u64(sample.ram_total_bytes),
+            format_optional_u64(sample.ram_available_bytes),
+            format_optional_u64(sample.disk_total_bytes),
+            format_optional_u64(sample.disk_available_bytes),
+        )
+        .as_bytes(),
+    )?;
     stream.flush()
+}
+
+#[cfg(target_os = "linux")]
+fn read_memory_totals_bytes() -> Option<(Option<u64>, Option<u64>)> {
+    let content = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let mut total_bytes = None;
+    let mut available_bytes = None;
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("MemTotal:") {
+            let kb = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+            total_bytes = Some(kb.saturating_mul(1024));
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("MemAvailable:") {
+            let kb = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+            available_bytes = Some(kb.saturating_mul(1024));
+            continue;
+        }
+    }
+    Some((total_bytes, available_bytes))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_memory_totals_bytes() -> Option<(Option<u64>, Option<u64>)> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn read_disk_usage_bytes(path: &str) -> Option<(Option<u64>, Option<u64>)> {
+    let path_c = std::ffi::CString::new(path).ok()?;
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statvfs(path_c.as_ptr(), &mut stat as *mut libc::statvfs) };
+    if rc != 0 {
+        return None;
+    }
+
+    let block_size = if stat.f_frsize > 0 {
+        stat.f_frsize as u128
+    } else {
+        stat.f_bsize as u128
+    };
+    let total = (stat.f_blocks as u128)
+        .saturating_mul(block_size)
+        .min(u64::MAX as u128) as u64;
+    let available = (stat.f_bavail as u128)
+        .saturating_mul(block_size)
+        .min(u64::MAX as u128) as u64;
+    Some((Some(total), Some(available)))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_disk_usage_bytes(_path: &str) -> Option<(Option<u64>, Option<u64>)> {
+    None
 }
 
 #[cfg(target_os = "linux")]

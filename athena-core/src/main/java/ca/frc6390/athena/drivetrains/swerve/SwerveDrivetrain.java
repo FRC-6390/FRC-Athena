@@ -1,10 +1,21 @@
 package ca.frc6390.athena.drivetrains.swerve;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
+import java.util.Objects;
 
+import ca.frc6390.athena.core.ControlLatencyModel;
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotSpeeds;
 import ca.frc6390.athena.core.RobotTime;
@@ -62,7 +73,27 @@ public class SwerveDrivetrain extends SubsystemBase
   private static final double DRIFT_TURN_DEADBAND_RAD_PER_SEC = 0.05;
   private static final double MODULE_HEADING_EPSILON = 1e-6;
   private static final double MODULE_ANGLE_UPDATE_EPSILON_RAD = 1e-4;
+  private static final double MODULE_STATIONARY_LINEAR_DEADBAND_MPS = 0.02;
+  private static final double MODULE_STATIONARY_OMEGA_DEADBAND_RAD_PER_SEC = 0.02;
+  private static final String MODULE_BUILD_PARALLELISM_PROPERTY =
+      "athena.drivetrain.swerve.moduleBuildParallelism";
+  private static final int MAX_MODULE_BUILD_THREADS = 8;
+  private static final AtomicInteger MODULE_BUILD_THREAD_COUNTER = new AtomicInteger(1);
   private static final Pose2d ZERO_POSE = new Pose2d();
+  private static final double DEFAULT_UPDATE_PERIOD_SECONDS = 0.005;
+  private static final double DEFAULT_DRIVER_COMMAND_PERIOD_SECONDS = 0.005;
+  private static final double DEFAULT_AUTO_FOLLOWER_PERIOD_SECONDS = 0.005;
+  private static final double MAX_SIMULATION_SUBSTEP_SECONDS = 0.02;
+  private static final int MAX_SIMULATION_SUBSTEPS = 128;
+  private static final double MAX_DISCRETIZE_DT_SECONDS = 0.25;
+  private static final double MIN_FIELD_RELATIVE_COMP_OMEGA_RAD_PER_SEC = 0.05;
+  private static final double MIN_FIELD_RELATIVE_COMP_SPEED_MPS = 0.1;
+  private static final boolean FIELD_RELATIVE_LEAD_COMPENSATION_ENABLED = true;
+  private static final double FIELD_RELATIVE_LEAD_ESTIMATOR_TIME_CONSTANT_SECONDS = 0.05;
+  private static final double FIELD_RELATIVE_PIPELINE_CYCLES = 3.0;
+  private static final double MAX_FIELD_RELATIVE_COMMAND_AGE_SECONDS = 0.1;
+  private static final double MAX_FIELD_RELATIVE_ADAPTIVE_LEAD_SECONDS = 0.03;
+  private static final double MAX_FIELD_RELATIVE_TOTAL_LEAD_SECONDS = 0.08;
 
   public SwerveModule[] swerveModules;
   public SwerveDriveKinematics kinematics;
@@ -87,20 +118,27 @@ public class SwerveDrivetrain extends SubsystemBase
   private double lastSwerveStatePublishSeconds = Double.NaN;
   private SwerveDrivetrainSimulation simulation;
   private Field2d simulationField;
-  private double lastSimulationTimestamp = -1;
   private final ChassisSpeeds lastCommandedSpeeds = new ChassisSpeeds();
   private final ChassisSpeeds calculatedSpeeds = new ChassisSpeeds();
+  private final ChassisSpeeds discretizedSpeeds = new ChassisSpeeds();
   private final ChassisSpeeds lastLimitedSpeeds = new ChassisSpeeds();
   private final ChassisSpeeds velocityLimitedSpeeds = new ChassisSpeeds();
   private final ChassisSpeeds accelerationLimitedSpeeds = new ChassisSpeeds();
+  private final ChassisSpeeds translationPriorityLimitedSpeeds = new ChassisSpeeds();
   private final SwerveModuleState[] desiredModuleStates;
   private final Translation2d[] moduleLocations;
   private final double maxDriveVelocityMetersPerSecond;
   private double lastMotionLimitTimestampSeconds = Double.NaN;
+  private Rotation2d lastMotionLimitHeading = Rotation2d.kZero;
+  private boolean hasLastMotionLimitHeading = false;
+  private double lastUpdateTimestampSeconds = Double.NaN;
+  private double fieldRelativeAdaptiveLeadSeconds = 0.0;
+  private double lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+  private double lastFieldRelativeTotalLeadSeconds = 0.0;
+  private double lastFieldRelativeCommandAgeSeconds = 0.0;
+  private boolean lastFieldRelativeTranslationActive = false;
   private SimpleMotorFeedForwardsSendable driveFeedforward;
   private boolean driveFeedforwardEnabled = false;
-  private boolean cosineCompensationEnabled = true;
-  private double cosineCompensationErrorThresholdDegrees = 0.0;
   private double nominalVoltage = 12.0;
   private SysIdRoutine sysIdRoutine;
   private double sysIdRampRateVoltsPerSecond = 1.0;
@@ -123,6 +161,12 @@ public class SwerveDrivetrain extends SubsystemBase
   private NtCommandButton ntSysIdDynamicReverseButton;
   private NtCommandButton ntSysIdCancelButton;
   private Command activeSysIdCommand;
+  private volatile double updatePeriodSeconds = DEFAULT_UPDATE_PERIOD_SECONDS;
+  private volatile double driverCommandPeriodSeconds = DEFAULT_DRIVER_COMMAND_PERIOD_SECONDS;
+  private volatile double autoFollowerPeriodSeconds = DEFAULT_AUTO_FOLLOWER_PERIOD_SECONDS;
+  private volatile boolean externalUpdateLoopEnabled = false;
+  private volatile DriveCommandInputs driveCommandInputs;
+  private double lastDriverCommandTimestampSeconds = Double.NaN;
   
   public SwerveDrivetrain(Imu imu, SwerveModuleConfig... modules) {
 
@@ -132,14 +176,16 @@ public class SwerveDrivetrain extends SubsystemBase
     driftpid = new PIDController(0, 0,0);
     driftpid.enableContinuousInput(-Math.PI, Math.PI);
 
-    swerveModules = new SwerveModule[modules.length];
-    desiredModuleStates = new SwerveModuleState[modules.length];
-    moduleLocations = new Translation2d[modules.length];
+    int moduleCount = modules != null ? modules.length : 0;
+    swerveModules = new SwerveModule[moduleCount];
+    desiredModuleStates = new SwerveModuleState[moduleCount];
+    moduleLocations = new Translation2d[moduleCount];
     double maxVelocity = 0;
     double minVelocity = Double.POSITIVE_INFINITY;
     double maxModuleRadius = 0;
-    for (int i = 0; i < modules.length; i++) {
-      swerveModules[i] = new SwerveModule(modules[i]);
+    SwerveModule[] builtModules = buildModules(modules);
+    for (int i = 0; i < moduleCount; i++) {
+      swerveModules[i] = builtModules[i];
       desiredModuleStates[i] = new SwerveModuleState(0.0, new Rotation2d());
       double moduleMax = modules[i].maxSpeedMetersPerSecond();
       maxVelocity = Math.max(maxVelocity, moduleMax);
@@ -166,10 +212,99 @@ public class SwerveDrivetrain extends SubsystemBase
     imu.addVirtualAxis("drift", imu::getYaw);
     imu.setVirtualAxis("drift", imu.getVirtualAxis("driver"));
     desiredHeading = imu.getVirtualAxis("drift").getRadians();
-    cosineCompensationEnabled(cosineCompensationEnabled);
-    cosineCompensationError(cosineCompensationErrorThresholdDegrees);
     setNominalVoltage(nominalVoltage);
     
+  }
+
+  private record DriveCommandInputs(
+      DoubleSupplier xInput,
+      DoubleSupplier yInput,
+      DoubleSupplier thetaInput,
+      BooleanSupplier fieldRelativeSupplier) {
+  }
+
+  private static SwerveModule[] buildModules(SwerveModuleConfig[] moduleConfigs) {
+    int moduleCount = moduleConfigs != null ? moduleConfigs.length : 0;
+    if (moduleCount == 0) {
+      return new SwerveModule[0];
+    }
+
+    int parallelism = resolveModuleBuildParallelism(moduleCount);
+    if (parallelism <= 1 || moduleCount == 1) {
+      SwerveModule[] modules = new SwerveModule[moduleCount];
+      for (int i = 0; i < moduleCount; i++) {
+        modules[i] = new SwerveModule(moduleConfigs[i]);
+      }
+      return modules;
+    }
+
+    ExecutorService executor = Executors.newFixedThreadPool(parallelism, moduleBuildThreadFactory());
+    try {
+      List<Future<SwerveModule>> futures = new ArrayList<>(moduleCount);
+      for (int i = 0; i < moduleCount; i++) {
+        final SwerveModuleConfig moduleConfig = moduleConfigs[i];
+        futures.add(executor.submit(() -> new SwerveModule(moduleConfig)));
+      }
+      SwerveModule[] modules = new SwerveModule[moduleCount];
+      for (int i = 0; i < moduleCount; i++) {
+        modules[i] = awaitBuiltModule(futures.get(i), i);
+      }
+      return modules;
+    } finally {
+      executor.shutdown();
+    }
+  }
+
+  private static SwerveModule awaitBuiltModule(Future<SwerveModule> future, int index) {
+    try {
+      return future.get();
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Interrupted while creating swerve module at index " + index, ex);
+    } catch (ExecutionException ex) {
+      Throwable cause = ex.getCause();
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      if (cause instanceof Error error) {
+        throw error;
+      }
+      throw new IllegalStateException("Failed to create swerve module at index " + index, cause);
+    }
+  }
+
+  private static int resolveModuleBuildParallelism(int moduleCount) {
+    Integer configured = parsePositiveIntProperty(MODULE_BUILD_PARALLELISM_PROPERTY);
+    if (configured != null) {
+      return Math.max(1, Math.min(moduleCount, configured));
+    }
+    int cpus = Math.max(1, Runtime.getRuntime().availableProcessors());
+    int defaultThreads = Math.max(2, cpus * 2);
+    int capped = Math.max(1, Math.min(MAX_MODULE_BUILD_THREADS, defaultThreads));
+    return Math.max(1, Math.min(moduleCount, capped));
+  }
+
+  private static Integer parsePositiveIntProperty(String propertyName) {
+    String raw = System.getProperty(propertyName);
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    try {
+      int parsed = Integer.parseInt(raw.trim());
+      return parsed > 0 ? parsed : null;
+    } catch (NumberFormatException ignored) {
+      return null;
+    }
+  }
+
+  private static ThreadFactory moduleBuildThreadFactory() {
+    return runnable -> {
+      Thread thread = new Thread(
+          runnable,
+          "athena-swerve-module-build-" + MODULE_BUILD_THREAD_COUNTER.getAndIncrement());
+      thread.setDaemon(true);
+      return thread;
+    };
   }
 
   @Override
@@ -300,17 +435,28 @@ public class SwerveDrivetrain extends SubsystemBase
   }
 
   private void calculateModuleStates(ChassisSpeeds speed, SwerveModuleState[] states) {
-    double vx = speed.vxMetersPerSecond;
-    double vy = speed.vyMetersPerSecond;
-    double omega = speed.omegaRadiansPerSecond;
-    boolean stationary = vx == 0.0 && vy == 0.0 && omega == 0.0;
+    double vx = sanitizeSpeedComponent(speed != null ? speed.vxMetersPerSecond : 0.0);
+    double vy = sanitizeSpeedComponent(speed != null ? speed.vyMetersPerSecond : 0.0);
+    double omega = sanitizeSpeedComponent(speed != null ? speed.omegaRadiansPerSecond : 0.0);
+    boolean stationary = Math.abs(vx) <= MODULE_STATIONARY_LINEAR_DEADBAND_MPS
+        && Math.abs(vy) <= MODULE_STATIONARY_LINEAR_DEADBAND_MPS
+        && Math.abs(omega) <= MODULE_STATIONARY_OMEGA_DEADBAND_RAD_PER_SEC;
 
-    SwerveModuleState[] calculatedStates = stationary ? null : kinematics.toSwerveModuleStates(speed);
+    ChassisSpeeds resolvedSpeeds = stationary
+        ? null
+        : new ChassisSpeeds(vx, vy, omega);
+    SwerveModuleState[] calculatedStates = stationary ? null : kinematics.toSwerveModuleStates(resolvedSpeeds);
 
     for (int i = 0; i < states.length; i++) {
       SwerveModuleState state = states[i];
       if (stationary) {
         state.speedMetersPerSecond = 0.0;
+        Rotation2d holdAngle = swerveModules[i].getState().angle;
+        if (holdAngle != null) {
+          if (state.angle == null || angleNeedsUpdate(state.angle, holdAngle.getRadians())) {
+            state.angle = holdAngle;
+          }
+        }
         continue;
       }
 
@@ -318,6 +464,13 @@ public class SwerveDrivetrain extends SubsystemBase
       state.speedMetersPerSecond = calculated.speedMetersPerSecond;
       state.angle = calculated.angle;
     }
+  }
+
+  private static double sanitizeSpeedComponent(double value) {
+    if (!Double.isFinite(value)) {
+      return 0.0;
+    }
+    return value;
   }
 
 
@@ -388,31 +541,6 @@ public class SwerveDrivetrain extends SubsystemBase
 
   public boolean driveFeedforwardConfigured() {
     return driveFeedforward != null;
-  }
-
-  public void cosineCompensationEnabled(boolean enabled) {
-    cosineCompensationEnabled = enabled;
-    for (SwerveModule module : swerveModules) {
-      module.setCosineCompensationEnabled(enabled);
-    }
-  }
-
-  public boolean cosineCompensationEnabled() {
-    return cosineCompensationEnabled;
-  }
-
-  public void cosineCompensationError(double errorDegrees) {
-    if (!Double.isFinite(errorDegrees)) {
-      return;
-    }
-    cosineCompensationErrorThresholdDegrees = Math.max(0.0, errorDegrees);
-    for (SwerveModule module : swerveModules) {
-      module.setCosineCompensationErrorThresholdDegrees(cosineCompensationErrorThresholdDegrees);
-    }
-  }
-
-  public double cosineCompensationError() {
-    return cosineCompensationErrorThresholdDegrees;
   }
 
   private double sysIdRampRateVoltsPerSecond() {
@@ -496,17 +624,159 @@ public class SwerveDrivetrain extends SubsystemBase
   private void resetControlState() {
     robotSpeeds.stop();
     setChassisSpeeds(lastCommandedSpeeds, 0.0, 0.0, 0.0);
+    setChassisSpeeds(discretizedSpeeds, 0.0, 0.0, 0.0);
     setChassisSpeeds(lastLimitedSpeeds, 0.0, 0.0, 0.0);
     lastMotionLimitTimestampSeconds = Double.NaN;
+    hasLastMotionLimitHeading = false;
+    lastMotionLimitHeading = Rotation2d.kZero;
+    lastUpdateTimestampSeconds = Double.NaN;
+    lastDriverCommandTimestampSeconds = Double.NaN;
+    fieldRelativeAdaptiveLeadSeconds = 0.0;
+    lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+    lastFieldRelativeTotalLeadSeconds = 0.0;
+    lastFieldRelativeCommandAgeSeconds = 0.0;
+    lastFieldRelativeTranslationActive = false;
     desiredHeading = imu.getVirtualAxis("drift").getRadians();
     for (SwerveModule module : swerveModules) {
       module.stop();
     }
   }
 
+  public double updatePeriodSeconds() {
+    return updatePeriodSeconds;
+  }
+
+  public void updatePeriodSeconds(double periodSeconds) {
+    if (Double.isFinite(periodSeconds) && periodSeconds > 0.0) {
+      updatePeriodSeconds = periodSeconds;
+    }
+  }
+
+  public double updatePeriodMs() {
+    return updatePeriodSeconds * 1000.0;
+  }
+
+  public void updatePeriodMs(double periodMs) {
+    updatePeriodSeconds(periodMs / 1000.0);
+  }
+
+  public double driverCommandPeriodSeconds() {
+    return driverCommandPeriodSeconds;
+  }
+
+  public void driverCommandPeriodSeconds(double periodSeconds) {
+    if (Double.isFinite(periodSeconds) && periodSeconds > 0.0) {
+      driverCommandPeriodSeconds = periodSeconds;
+    }
+  }
+
+  public double driverCommandPeriodMs() {
+    return driverCommandPeriodSeconds * 1000.0;
+  }
+
+  public void driverCommandPeriodMs(double periodMs) {
+    driverCommandPeriodSeconds(periodMs / 1000.0);
+  }
+
+  public double autoFollowerPeriodSeconds() {
+    return autoFollowerPeriodSeconds;
+  }
+
+  public void autoFollowerPeriodSeconds(double periodSeconds) {
+    if (Double.isFinite(periodSeconds) && periodSeconds > 0.0) {
+      autoFollowerPeriodSeconds = periodSeconds;
+    }
+  }
+
+  public double autoFollowerPeriodMs() {
+    return autoFollowerPeriodSeconds * 1000.0;
+  }
+
+  public void autoFollowerPeriodMs(double periodMs) {
+    autoFollowerPeriodSeconds(periodMs / 1000.0);
+  }
+
+  public boolean externalUpdateLoopEnabled() {
+    return externalUpdateLoopEnabled;
+  }
+
+  public void externalUpdateLoopEnabled(boolean enabled) {
+    externalUpdateLoopEnabled = enabled;
+  }
+
+  public void bindDriveCommandInputs(
+      DoubleSupplier xInput,
+      DoubleSupplier yInput,
+      DoubleSupplier thetaInput,
+      BooleanSupplier fieldRelativeSupplier) {
+    driveCommandInputs = new DriveCommandInputs(
+        Objects.requireNonNull(xInput, "xInput"),
+        Objects.requireNonNull(yInput, "yInput"),
+        Objects.requireNonNull(thetaInput, "thetaInput"),
+        Objects.requireNonNull(fieldRelativeSupplier, "fieldRelativeSupplier"));
+    lastDriverCommandTimestampSeconds = Double.NaN;
+  }
+
+  public void clearDriveCommandInputs() {
+    driveCommandInputs = null;
+    lastDriverCommandTimestampSeconds = Double.NaN;
+    lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+  }
+
+  public void applyBoundDriveCommandInputs() {
+    applyBoundDriveCommandInputs(nowSeconds());
+  }
+
+  public void applyBoundDriveCommandInputs(double nowSeconds) {
+    if (driveCommandInputs == null) {
+      return;
+    }
+    if (!shouldRunPeriodic(nowSeconds, lastDriverCommandTimestampSeconds, driverCommandPeriodSeconds)) {
+      return;
+    }
+    applyDriveCommandInputs(driveCommandInputs);
+    lastDriverCommandTimestampSeconds = nowSeconds;
+  }
+
+  private void applyDriveCommandInputs(DriveCommandInputs inputs) {
+    if (inputs == null) {
+      return;
+    }
+    double xSpeed = inputs.xInput().getAsDouble() * robotSpeeds.getMaxVelocity();
+    double ySpeed = inputs.yInput().getAsDouble() * robotSpeeds.getMaxVelocity();
+    double thetaSpeed = inputs.thetaInput().getAsDouble() * robotSpeeds.getMaxAngularVelocity();
+    boolean inputFieldRelative = inputs.fieldRelativeSupplier().getAsBoolean();
+    if (inputFieldRelative) {
+      robotSpeeds.setFieldRelativeSpeeds(
+          RobotSpeeds.DRIVE_SOURCE,
+          xSpeed,
+          ySpeed,
+          thetaSpeed);
+    } else {
+      robotSpeeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, xSpeed, ySpeed, thetaSpeed);
+    }
+  }
+
+  private boolean shouldRunPeriodic(double nowSeconds, double lastRunSeconds, double configuredPeriodSeconds) {
+    double periodSeconds = configuredPeriodSeconds;
+    if (!Double.isFinite(periodSeconds) || periodSeconds <= 0.0) {
+      periodSeconds = DEFAULT_UPDATE_PERIOD_SECONDS;
+    }
+    if (!Double.isFinite(lastRunSeconds)) {
+      return true;
+    }
+    if (!Double.isFinite(nowSeconds)) {
+      return true;
+    }
+    return (nowSeconds - lastRunSeconds) >= periodSeconds;
+  }
+
   @Override
   public void update() {
+    double nowSeconds = nowSeconds();
+    double loopDtSeconds = resolveLoopDtSeconds(nowSeconds);
     imu.update();
+    Rotation2d driverHeading = imu.getVirtualAxis("driver");
     
     if (sysIdActive) {
       for (SwerveModule module : swerveModules) {
@@ -515,9 +785,13 @@ public class SwerveDrivetrain extends SubsystemBase
       return;
     }
 
-    robotSpeeds.calculate(calculatedSpeeds);
+    applyBoundDriveCommandInputs(nowSeconds);
+    robotSpeeds.calculate(calculatedSpeeds, driverHeading);
     ChassisSpeeds speed = calculatedSpeeds;
-    double nowSeconds = nowSeconds();
+    boolean fieldRelativeTranslationActive = hasActiveFieldRelativeTranslationSource();
+    boolean driveFieldRelativeTranslationActive = isDriveFieldRelativeTranslationActive();
+    boolean adaptiveLeadActive = FIELD_RELATIVE_LEAD_COMPENSATION_ENABLED
+        && driveFieldRelativeTranslationActive;
 
     boolean driverControlActive =
         robotSpeeds.isSpeedsSourceActive(RobotSpeeds.DRIVE_SOURCE);
@@ -527,13 +801,31 @@ public class SwerveDrivetrain extends SubsystemBase
       // Prevent stale teleop heading hold from biasing auto rotation after mode transitions.
       desiredHeading = imu.getVirtualAxis("drift").getRadians();
     }
-    speed = applyMotionLimits(speed, nowSeconds);
+
+    speed = applyMotionLimits(speed, nowSeconds, driverHeading, fieldRelativeTranslationActive);
+    speed = clampOmegaForTranslationPriority(speed);
+    ChassisSpeeds speedBeforeLeadCompensation = new ChassisSpeeds(
+        speed.vxMetersPerSecond,
+        speed.vyMetersPerSecond,
+        speed.omegaRadiansPerSecond);
+    speed = applyFieldRelativeLeadCompensation(
+        speed,
+        nowSeconds,
+        loopDtSeconds,
+        fieldRelativeTranslationActive,
+        adaptiveLeadActive);
+    speed = discretizeSpeedsForKinematics(speed, loopDtSeconds);
 
     calculateModuleStates(speed, desiredModuleStates);
 
     publishSwerveStatesIfDue(desiredModuleStates, nowSeconds);
 
-    SwerveDriveKinematics.desaturateWheelSpeeds(desiredModuleStates, maxDriveVelocityMetersPerSecond);
+    SwerveDriveKinematics.desaturateWheelSpeeds(
+        desiredModuleStates,
+        speed,
+        maxDriveVelocityMetersPerSecond,
+        robotSpeeds.getMaxVelocity(),
+        robotSpeeds.getMaxAngularVelocity());
 
     setModuleStates(desiredModuleStates);   
 
@@ -542,6 +834,13 @@ public class SwerveDrivetrain extends SubsystemBase
         speed.vxMetersPerSecond,
         speed.vyMetersPerSecond,
         speed.omegaRadiansPerSecond);
+    updateFieldRelativeLeadEstimator(
+        speedBeforeLeadCompensation,
+        driverHeading,
+        nowSeconds,
+        loopDtSeconds,
+        adaptiveLeadActive);
+    updateSimulation(loopDtSeconds);
   }
 
   public SwerveDrivetrain configureSimulation(SwerveSimulationConfig config) {
@@ -556,7 +855,6 @@ public class SwerveDrivetrain extends SubsystemBase
       simulationField = new Field2d();
     }
     simulationField.setRobotPose(ZERO_POSE);
-    lastSimulationTimestamp = -1;
     return this;
   }
 
@@ -616,6 +914,14 @@ public class SwerveDrivetrain extends SubsystemBase
 
     ntDriftNode.putBoolean("enabled", driftCorrectionEnabled());
     ntDriftNode.putDouble("desiredHeadingDeg", desiredHeading);
+    ntDriftNode.putBoolean("driveSourceFieldRelative", robotSpeeds.isFieldRelativeSource(RobotSpeeds.DRIVE_SOURCE));
+    ntDriftNode.putBoolean("fieldRelativeTranslationActive", lastFieldRelativeTranslationActive);
+    ntDriftNode.putDouble("fieldRelativeLeadSec", lastFieldRelativeTotalLeadSeconds);
+    ntDriftNode.putDouble("fieldRelativeLeadAdaptiveSec", fieldRelativeAdaptiveLeadSeconds());
+    ntDriftNode.putDouble("fieldRelativeLeadCommandAgeSec", lastFieldRelativeCommandAgeSeconds);
+    ntDriftNode.putDouble("drivetrainLoopPeriodSec", updatePeriodSeconds());
+    ntDriftNode.putDouble("driverCommandLoopPeriodSec", driverCommandPeriodSeconds());
+    ntDriftNode.putDouble("autoFollowerLoopPeriodSec", autoFollowerPeriodSeconds());
 
     ntSysIdNode.putDouble("rampRateVPerSec", sysIdRampRateVoltsPerSecond());
     ntSysIdNode.putDouble("stepVoltageV", sysIdStepVoltage());
@@ -636,23 +942,42 @@ public class SwerveDrivetrain extends SubsystemBase
 
   @Override
   public void periodic() {
-      update();
+      if (!externalUpdateLoopEnabled) {
+        update();
+      }
   }
 
   @Override
   public void simulationPeriodic() {
       if (simulation != null) {
-        double now = nowSeconds();
-        if (lastSimulationTimestamp < 0) {
-          lastSimulationTimestamp = now;
-        }
-        double dt = now - lastSimulationTimestamp;
-        lastSimulationTimestamp = now;
-        simulation.update(dt > 0 ? dt : 0.02, lastCommandedSpeeds);
         if (simulationField != null) {
           simulationField.setRobotPose(simulation.getPose());
         }
       }
+  }
+
+  private void updateSimulation(double loopDtSeconds) {
+    if (simulation == null) {
+      return;
+    }
+    double dtSeconds = sanitizeLoopDtSeconds(loopDtSeconds);
+    double configuredStepSeconds = sanitizeLoopDtSeconds(updatePeriodSeconds);
+    double maxStepSeconds = Math.max(configuredStepSeconds, MAX_SIMULATION_SUBSTEP_SECONDS);
+    if (!Double.isFinite(maxStepSeconds) || maxStepSeconds <= 0.0) {
+      maxStepSeconds = MAX_SIMULATION_SUBSTEP_SECONDS;
+    }
+    int substeps = (int) Math.ceil(dtSeconds / maxStepSeconds);
+    if (!Double.isFinite(dtSeconds) || dtSeconds <= 0.0 || substeps <= 1) {
+      simulation.update(dtSeconds, lastCommandedSpeeds);
+      return;
+    }
+    if (substeps > MAX_SIMULATION_SUBSTEPS) {
+      substeps = MAX_SIMULATION_SUBSTEPS;
+    }
+    double stepSeconds = dtSeconds / substeps;
+    for (int i = 0; i < substeps; i++) {
+      simulation.update(stepSeconds, lastCommandedSpeeds);
+    }
   }
 
   @Override
@@ -932,16 +1257,373 @@ public class SwerveDrivetrain extends SubsystemBase
     return limits != null ? limits : MotionLimits.DriveLimits.none();
   }
 
-  private ChassisSpeeds applyMotionLimits(ChassisSpeeds speeds, double nowSeconds) {
+  private boolean hasActiveFieldRelativeTranslationSource() {
+    for (String source : robotSpeeds.getSpeedSources()) {
+      if (!robotSpeeds.isSpeedsSourceActive(source) || !robotSpeeds.isFieldRelativeSource(source)) {
+        continue;
+      }
+      ChassisSpeeds sourceSpeeds = robotSpeeds.getSpeeds(source);
+      if (Math.hypot(sourceSpeeds.vxMetersPerSecond, sourceSpeeds.vyMetersPerSecond) > 1e-6) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean isDriveFieldRelativeTranslationActive() {
+    if (!robotSpeeds.isSpeedsSourceActive(RobotSpeeds.DRIVE_SOURCE)
+        || !robotSpeeds.isFieldRelativeSource(RobotSpeeds.DRIVE_SOURCE)) {
+      return false;
+    }
+    ChassisSpeeds driveSpeeds = robotSpeeds.getSpeeds(RobotSpeeds.DRIVE_SOURCE);
+    return Math.hypot(driveSpeeds.vxMetersPerSecond, driveSpeeds.vyMetersPerSecond) > 1e-6;
+  }
+
+  private ChassisSpeeds applyMotionLimits(
+      ChassisSpeeds speeds,
+      double nowSeconds,
+      Rotation2d heading,
+      boolean fieldRelativeTranslationActive) {
     MotionLimits.DriveLimits limits = resolveDriveLimits();
     ChassisSpeeds limited = limitVelocity(speeds, limits);
-    limited = limitAcceleration(limited, limits, nowSeconds);
+    limited = limitAcceleration(
+        limited,
+        limits,
+        nowSeconds,
+        heading,
+        fieldRelativeTranslationActive);
     setChassisSpeeds(
         lastLimitedSpeeds,
         limited.vxMetersPerSecond,
         limited.vyMetersPerSecond,
         limited.omegaRadiansPerSecond);
     return limited;
+  }
+
+  private ChassisSpeeds clampOmegaForTranslationPriority(ChassisSpeeds speeds) {
+    if (speeds == null) {
+      return new ChassisSpeeds();
+    }
+    double vx = speeds.vxMetersPerSecond;
+    double vy = speeds.vyMetersPerSecond;
+    double omega = speeds.omegaRadiansPerSecond;
+    double maxModuleSpeed = maxDriveVelocityMetersPerSecond;
+    if (!Double.isFinite(maxModuleSpeed) || maxModuleSpeed <= 1e-6) {
+      return speeds;
+    }
+    if (Math.hypot(vx, vy) <= 1e-6) {
+      return speeds;
+    }
+
+    double low = Double.NEGATIVE_INFINITY;
+    double high = Double.POSITIVE_INFINITY;
+    double c = (vx * vx) + (vy * vy) - (maxModuleSpeed * maxModuleSpeed);
+
+    for (Translation2d location : moduleLocations) {
+      if (location == null) {
+        continue;
+      }
+      double x = location.getX();
+      double y = location.getY();
+      double a = (x * x) + (y * y);
+      if (a <= 1e-9) {
+        continue;
+      }
+      double b = 2.0 * ((-vx * y) + (vy * x));
+      double discriminant = (b * b) - (4.0 * a * c);
+      if (discriminant < 0.0) {
+        if (discriminant > -1e-9) {
+          discriminant = 0.0;
+        } else {
+          return speeds;
+        }
+      }
+      double sqrt = Math.sqrt(discriminant);
+      double denom = 2.0 * a;
+      double rootA = (-b - sqrt) / denom;
+      double rootB = (-b + sqrt) / denom;
+      double localLow = Math.min(rootA, rootB);
+      double localHigh = Math.max(rootA, rootB);
+      low = Math.max(low, localLow);
+      high = Math.min(high, localHigh);
+      if (low > high) {
+        return speeds;
+      }
+    }
+
+    double clampedOmega = MathUtil.clamp(omega, low, high);
+    setChassisSpeeds(translationPriorityLimitedSpeeds, vx, vy, clampedOmega);
+    return translationPriorityLimitedSpeeds;
+  }
+
+  private double resolveLoopDtSeconds(double nowSeconds) {
+    double dtSeconds = updatePeriodSeconds;
+    if (Double.isFinite(lastUpdateTimestampSeconds) && Double.isFinite(nowSeconds)) {
+      double elapsedSeconds = nowSeconds - lastUpdateTimestampSeconds;
+      if (Double.isFinite(elapsedSeconds)
+          && elapsedSeconds > 1e-6
+          && elapsedSeconds <= MAX_DISCRETIZE_DT_SECONDS) {
+        dtSeconds = elapsedSeconds;
+      }
+    }
+    lastUpdateTimestampSeconds = nowSeconds;
+    return sanitizeLoopDtSeconds(dtSeconds);
+  }
+
+  private double sanitizeLoopDtSeconds(double dtSeconds) {
+    if (!Double.isFinite(dtSeconds) || dtSeconds <= 0.0 || dtSeconds > MAX_DISCRETIZE_DT_SECONDS) {
+      dtSeconds = updatePeriodSeconds;
+    }
+    if (!Double.isFinite(dtSeconds) || dtSeconds <= 0.0 || dtSeconds > MAX_DISCRETIZE_DT_SECONDS) {
+      dtSeconds = DEFAULT_UPDATE_PERIOD_SECONDS;
+    }
+    return dtSeconds;
+  }
+
+  private double fieldRelativeAdaptiveLeadSeconds() {
+    if (!Double.isFinite(fieldRelativeAdaptiveLeadSeconds)) {
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+    }
+    fieldRelativeAdaptiveLeadSeconds = MathUtil.clamp(
+        fieldRelativeAdaptiveLeadSeconds,
+        0.0,
+        MAX_FIELD_RELATIVE_ADAPTIVE_LEAD_SECONDS);
+    return fieldRelativeAdaptiveLeadSeconds;
+  }
+
+  private double fieldRelativePipelineLeadSeconds(double loopDtSeconds) {
+    double measuredDtSeconds = sanitizeLoopDtSeconds(loopDtSeconds);
+    double configuredDtSeconds = sanitizeLoopDtSeconds(updatePeriodSeconds);
+    // Pipeline delay should track the configured control cadence, not occasional scheduler stalls.
+    double effectiveDtSeconds = Math.min(measuredDtSeconds, configuredDtSeconds);
+    return Math.max(0.0, FIELD_RELATIVE_PIPELINE_CYCLES * effectiveDtSeconds);
+  }
+
+  private double fieldRelativeEffectiveInputLatencySeconds(double nowSeconds, double loopDtSeconds) {
+    if (!Double.isFinite(nowSeconds)) {
+      return 0.0;
+    }
+    double pipelineDelaySeconds = fieldRelativePipelineLeadSeconds(loopDtSeconds);
+    double weightedLatency = 0.0;
+    double totalWeight = 0.0;
+    for (String source : robotSpeeds.getSpeedSources()) {
+      if (!robotSpeeds.isSpeedsSourceActive(source) || !robotSpeeds.isFieldRelativeSource(source)) {
+        continue;
+      }
+      ChassisSpeeds sourceSpeeds = robotSpeeds.getSpeeds(source);
+      double weight = Math.hypot(sourceSpeeds.vxMetersPerSecond, sourceSpeeds.vyMetersPerSecond);
+      if (weight <= 1e-6) {
+        continue;
+      }
+      double sourceTimestamp = robotSpeeds.getSourceLastUpdateSeconds(source);
+      double estimatedPeriod = robotSpeeds.getSourceEstimatedUpdatePeriodSeconds(source);
+      double sourcePeriodSeconds = resolveSourcePeriodForLatency(source, estimatedPeriod);
+      double latencySeconds = ControlLatencyModel.effectiveInputLatencySeconds(
+          nowSeconds,
+          sourceTimestamp,
+          sourcePeriodSeconds,
+          pipelineDelaySeconds,
+          MAX_FIELD_RELATIVE_COMMAND_AGE_SECONDS);
+      if (!Double.isFinite(latencySeconds)) {
+        continue;
+      }
+      weightedLatency += latencySeconds * weight;
+      totalWeight += weight;
+    }
+    if (totalWeight <= 1e-6) {
+      return 0.0;
+    }
+    return weightedLatency / totalWeight;
+  }
+
+  private double resolveSourcePeriodForLatency(String source, double estimatedPeriodSeconds) {
+    if (Double.isFinite(estimatedPeriodSeconds)
+        && estimatedPeriodSeconds > 1e-6
+        && estimatedPeriodSeconds <= MAX_DISCRETIZE_DT_SECONDS) {
+      return estimatedPeriodSeconds;
+    }
+    if (RobotSpeeds.DRIVE_SOURCE.equals(source)) {
+      return sanitizeLoopDtSeconds(driverCommandPeriodSeconds);
+    }
+    if (RobotSpeeds.AUTO_SOURCE.equals(source)) {
+      return sanitizeLoopDtSeconds(autoFollowerPeriodSeconds);
+    }
+    return sanitizeLoopDtSeconds(updatePeriodSeconds);
+  }
+
+  private ChassisSpeeds applyFieldRelativeLeadCompensation(
+      ChassisSpeeds speeds,
+      double nowSeconds,
+      double loopDtSeconds,
+      boolean fieldRelativeTranslationActive,
+      boolean adaptiveLeadActive) {
+    if (speeds == null) {
+      return new ChassisSpeeds();
+    }
+    if (!FIELD_RELATIVE_LEAD_COMPENSATION_ENABLED) {
+      lastFieldRelativeTranslationActive = fieldRelativeTranslationActive;
+      lastFieldRelativeCommandAgeSeconds = 0.0;
+      lastFieldRelativeTotalLeadSeconds = 0.0;
+      return speeds;
+    }
+    lastFieldRelativeTranslationActive = fieldRelativeTranslationActive;
+    if (!fieldRelativeTranslationActive) {
+      lastFieldRelativeCommandAgeSeconds = 0.0;
+      lastFieldRelativeTotalLeadSeconds = 0.0;
+      return speeds;
+    }
+
+    double omega = speeds.omegaRadiansPerSecond;
+    double linearSpeed = Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+    if (Math.abs(omega) < MIN_FIELD_RELATIVE_COMP_OMEGA_RAD_PER_SEC
+        || linearSpeed < MIN_FIELD_RELATIVE_COMP_SPEED_MPS) {
+      lastFieldRelativeCommandAgeSeconds = 0.0;
+      lastFieldRelativeTotalLeadSeconds = 0.0;
+      return speeds;
+    }
+
+    double effectiveLatencySeconds =
+        fieldRelativeEffectiveInputLatencySeconds(nowSeconds, loopDtSeconds);
+    double adaptiveLead = adaptiveLeadActive ? fieldRelativeAdaptiveLeadSeconds() : 0.0;
+    double totalLead = ControlLatencyModel.predictiveLeadSeconds(
+        effectiveLatencySeconds,
+        adaptiveLead,
+        MAX_FIELD_RELATIVE_TOTAL_LEAD_SECONDS);
+    lastFieldRelativeCommandAgeSeconds = effectiveLatencySeconds;
+    lastFieldRelativeTotalLeadSeconds = totalLead;
+    if (totalLead <= 1e-6) {
+      return speeds;
+    }
+
+    // Positive omega means the robot rotated CCW since command sample time, so rotate
+    // the commanded robot-relative translation backward by -omega*lead to align timing.
+    double angle = -omega * totalLead;
+    double cos = Math.cos(angle);
+    double sin = Math.sin(angle);
+    double vx = speeds.vxMetersPerSecond * cos - speeds.vyMetersPerSecond * sin;
+    double vy = speeds.vxMetersPerSecond * sin + speeds.vyMetersPerSecond * cos;
+    return new ChassisSpeeds(vx, vy, omega);
+  }
+
+  private void updateFieldRelativeLeadEstimator(
+      ChassisSpeeds commandedRobotSpeeds,
+      Rotation2d heading,
+      double nowSeconds,
+      double loopDtSeconds,
+      boolean adaptiveLeadActive) {
+    if (!FIELD_RELATIVE_LEAD_COMPENSATION_ENABLED) {
+      lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      return;
+    }
+    if (!adaptiveLeadActive || commandedRobotSpeeds == null) {
+      lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      return;
+    }
+    if (!Double.isFinite(nowSeconds)) {
+      nowSeconds = Timer.getFPGATimestamp();
+    }
+    if (!Double.isFinite(nowSeconds)) {
+      lastFieldRelativeLeadTimestampSeconds = Double.NaN;
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      return;
+    }
+    if (!Double.isFinite(lastFieldRelativeLeadTimestampSeconds)) {
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    double dt = sanitizeLoopDtSeconds(loopDtSeconds);
+
+    double omega = commandedRobotSpeeds.omegaRadiansPerSecond;
+    if (Math.abs(omega) < MIN_FIELD_RELATIVE_COMP_OMEGA_RAD_PER_SEC) {
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    ChassisSpeeds commandedField = ChassisSpeeds.fromRobotRelativeSpeeds(
+        commandedRobotSpeeds.vxMetersPerSecond,
+        commandedRobotSpeeds.vyMetersPerSecond,
+        commandedRobotSpeeds.omegaRadiansPerSecond,
+        heading != null ? heading : Rotation2d.kZero);
+    double commandedFieldSpeed = Math.hypot(
+        commandedField.vxMetersPerSecond,
+        commandedField.vyMetersPerSecond);
+    if (commandedFieldSpeed < MIN_FIELD_RELATIVE_COMP_SPEED_MPS) {
+      fieldRelativeAdaptiveLeadSeconds = 0.0;
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    ChassisSpeeds measuredField = measuredFieldRelativeSpeeds(heading);
+    double measuredFieldSpeed = Math.hypot(
+        measuredField.vxMetersPerSecond,
+        measuredField.vyMetersPerSecond);
+    if (measuredFieldSpeed < MIN_FIELD_RELATIVE_COMP_SPEED_MPS) {
+      lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+      return;
+    }
+
+    double commandedDirection = Math.atan2(commandedField.vyMetersPerSecond, commandedField.vxMetersPerSecond);
+    double measuredDirection = Math.atan2(measuredField.vyMetersPerSecond, measuredField.vxMetersPerSecond);
+    double directionError = MathUtil.angleModulus(commandedDirection - measuredDirection);
+    directionError = MathUtil.clamp(directionError, -Math.PI / 2.0, Math.PI / 2.0);
+    double measuredLeadSeconds = Math.abs(directionError / omega);
+    if (Double.isFinite(measuredLeadSeconds)) {
+      measuredLeadSeconds = MathUtil.clamp(
+          measuredLeadSeconds,
+          0.0,
+          MAX_FIELD_RELATIVE_ADAPTIVE_LEAD_SECONDS);
+      double alpha = 1.0 - Math.exp(-dt / FIELD_RELATIVE_LEAD_ESTIMATOR_TIME_CONSTANT_SECONDS);
+      alpha = MathUtil.clamp(alpha, 0.0, 1.0);
+      fieldRelativeAdaptiveLeadSeconds += alpha * (measuredLeadSeconds - fieldRelativeAdaptiveLeadSeconds);
+      fieldRelativeAdaptiveLeadSeconds();
+    }
+    lastFieldRelativeLeadTimestampSeconds = nowSeconds;
+  }
+
+  private ChassisSpeeds measuredFieldRelativeSpeeds(Rotation2d heading) {
+    SwerveModuleState[] measuredStates = new SwerveModuleState[swerveModules.length];
+    for (int i = 0; i < swerveModules.length; i++) {
+      measuredStates[i] = swerveModules[i].getState();
+    }
+    ChassisSpeeds measuredRobot = kinematics.toChassisSpeeds(measuredStates);
+    Rotation2d resolvedHeading = heading != null ? heading : Rotation2d.kZero;
+    return ChassisSpeeds.fromRobotRelativeSpeeds(
+        measuredRobot.vxMetersPerSecond,
+        measuredRobot.vyMetersPerSecond,
+        measuredRobot.omegaRadiansPerSecond,
+        resolvedHeading);
+  }
+
+  double fieldRelativeLeadSecondsForTest() {
+    return lastFieldRelativeTotalLeadSeconds;
+  }
+
+  private ChassisSpeeds discretizeSpeedsForKinematics(ChassisSpeeds speeds, double loopDtSeconds) {
+    double dtSeconds = sanitizeLoopDtSeconds(loopDtSeconds);
+    ChassisSpeeds discretized = discretizeChassisSpeeds(speeds, dtSeconds);
+    setChassisSpeeds(
+        discretizedSpeeds,
+        discretized.vxMetersPerSecond,
+        discretized.vyMetersPerSecond,
+        discretized.omegaRadiansPerSecond);
+    return discretizedSpeeds;
+  }
+
+  static ChassisSpeeds discretizeChassisSpeeds(ChassisSpeeds speeds, double dtSeconds) {
+    if (speeds == null) {
+      return new ChassisSpeeds();
+    }
+    if (!Double.isFinite(dtSeconds) || dtSeconds <= 0.0) {
+      return new ChassisSpeeds(
+          speeds.vxMetersPerSecond,
+          speeds.vyMetersPerSecond,
+          speeds.omegaRadiansPerSecond);
+    }
+    return ChassisSpeeds.discretize(speeds, dtSeconds);
   }
 
   private void publishSwerveStatesIfDue(SwerveModuleState[] states, double nowSeconds) {
@@ -972,13 +1654,24 @@ public class SwerveDrivetrain extends SubsystemBase
     return velocityLimitedSpeeds;
   }
 
-  private ChassisSpeeds limitAcceleration(ChassisSpeeds speeds, MotionLimits.DriveLimits limits, double nowSeconds) {
+  private ChassisSpeeds limitAcceleration(
+      ChassisSpeeds speeds,
+      MotionLimits.DriveLimits limits,
+      double nowSeconds,
+      Rotation2d heading,
+      boolean fieldRelativeTranslationActive) {
+    Rotation2d resolvedHeading = heading != null ? heading : Rotation2d.kZero;
     if (!Double.isFinite(lastMotionLimitTimestampSeconds)) {
       lastMotionLimitTimestampSeconds = nowSeconds;
+      lastMotionLimitHeading = resolvedHeading;
+      hasLastMotionLimitHeading = true;
       return speeds;
     }
     double dt = nowSeconds - lastMotionLimitTimestampSeconds;
     lastMotionLimitTimestampSeconds = nowSeconds;
+    Rotation2d lastHeading = hasLastMotionLimitHeading ? lastMotionLimitHeading : resolvedHeading;
+    lastMotionLimitHeading = resolvedHeading;
+    hasLastMotionLimitHeading = true;
     if (dt <= 0.0) {
       return speeds;
     }
@@ -988,8 +1681,32 @@ public class SwerveDrivetrain extends SubsystemBase
     double maxAngularDelta = limits.maxAngularAcceleration() > 0.0
         ? limits.maxAngularAcceleration() * dt
         : Double.POSITIVE_INFINITY;
-    double vx = limitDelta(speeds.vxMetersPerSecond, lastLimitedSpeeds.vxMetersPerSecond, maxLinearDelta);
-    double vy = limitDelta(speeds.vyMetersPerSecond, lastLimitedSpeeds.vyMetersPerSecond, maxLinearDelta);
+    double vx;
+    double vy;
+    if (fieldRelativeTranslationActive) {
+      ChassisSpeeds fieldTarget = ChassisSpeeds.fromRobotRelativeSpeeds(
+          speeds.vxMetersPerSecond,
+          speeds.vyMetersPerSecond,
+          speeds.omegaRadiansPerSecond,
+          resolvedHeading);
+      ChassisSpeeds fieldLast = ChassisSpeeds.fromRobotRelativeSpeeds(
+          lastLimitedSpeeds.vxMetersPerSecond,
+          lastLimitedSpeeds.vyMetersPerSecond,
+          lastLimitedSpeeds.omegaRadiansPerSecond,
+          lastHeading);
+      double fieldVx = limitDelta(fieldTarget.vxMetersPerSecond, fieldLast.vxMetersPerSecond, maxLinearDelta);
+      double fieldVy = limitDelta(fieldTarget.vyMetersPerSecond, fieldLast.vyMetersPerSecond, maxLinearDelta);
+      ChassisSpeeds robotLimited = ChassisSpeeds.fromFieldRelativeSpeeds(
+          fieldVx,
+          fieldVy,
+          speeds.omegaRadiansPerSecond,
+          resolvedHeading);
+      vx = robotLimited.vxMetersPerSecond;
+      vy = robotLimited.vyMetersPerSecond;
+    } else {
+      vx = limitDelta(speeds.vxMetersPerSecond, lastLimitedSpeeds.vxMetersPerSecond, maxLinearDelta);
+      vy = limitDelta(speeds.vyMetersPerSecond, lastLimitedSpeeds.vyMetersPerSecond, maxLinearDelta);
+    }
     double omega = limitDelta(speeds.omegaRadiansPerSecond, lastLimitedSpeeds.omegaRadiansPerSecond, maxAngularDelta);
     setChassisSpeeds(accelerationLimitedSpeeds, vx, vy, omega);
     return accelerationLimitedSpeeds;
@@ -1002,7 +1719,10 @@ public class SwerveDrivetrain extends SubsystemBase
   }
 
   private static double nowSeconds() {
-    double now = RobotTime.nowSeconds();
+    double now = RobotTime.nowSecondsProjectedIfStale(0.002);
+    if (!Double.isFinite(now)) {
+      now = RobotTime.nowSeconds();
+    }
     if (!Double.isFinite(now)) {
       now = Timer.getFPGATimestamp();
     }
@@ -1081,6 +1801,18 @@ public class SwerveDrivetrain extends SubsystemBase
     @Override
     public RobotDrivetrain.SpeedsSection set(String source, double x, double y, double theta) {
       speedsModel().setSpeeds(source, x, y, theta);
+      return this;
+    }
+
+    @Override
+    public RobotDrivetrain.SpeedsSection setFieldRelative(String source, ChassisSpeeds speeds) {
+      speedsModel().setFieldRelativeSpeeds(source, speeds);
+      return this;
+    }
+
+    @Override
+    public RobotDrivetrain.SpeedsSection setFieldRelative(String source, double x, double y, double theta) {
+      speedsModel().setFieldRelativeSpeeds(source, x, y, theta);
       return this;
     }
 

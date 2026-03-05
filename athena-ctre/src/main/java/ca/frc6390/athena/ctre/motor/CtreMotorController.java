@@ -34,6 +34,7 @@ import edu.wpi.first.math.controller.PIDController;
  */
 public class CtreMotorController implements MotorController {
     private static final int TEMPERATURE_REFRESH_INTERVAL_CYCLES = 25;
+    private static final int STALL_REFRESH_INTERVAL_CYCLES = 5;
     private static final double CONFIG_EPSILON = 1e-6;
     private static final Map<String, TalonConfigSnapshot> APPLIED_TALON_CONFIGS = new ConcurrentHashMap<>();
     private final TalonFX controller;
@@ -54,6 +55,7 @@ public class CtreMotorController implements MotorController {
     private double cachedTemperatureCelsius = 0.0;
     private double cachedCurrentAmps = Double.NaN;
     private double cachedAppliedVoltage = Double.NaN;
+    private boolean cachedStalled = false;
     private boolean cachedConnected = true;
     private double appliedCurrentLimitAmps = Double.NaN;
     private boolean appliedInverted = false;
@@ -99,6 +101,10 @@ public class CtreMotorController implements MotorController {
         supplyCurrentSignal.setUpdateFrequency(20.0, 0.0);
         motorVoltageSignal.setUpdateFrequency(20.0, 0.0);
         controller.optimizeBusUtilization(4.0, 0.0);
+        faultStatorCurrentLimitSignal.refresh(false);
+        faultSupplyCurrentLimitSignal.refresh(false);
+        cachedStalled = Boolean.TRUE.equals(faultStatorCurrentLimitSignal.getValue())
+                || Boolean.TRUE.equals(faultSupplyCurrentLimitSignal.getValue());
         appliedCurrentLimitAmps = config.currentLimit();
         appliedInverted = config.inverted();
         PIDController configuredPid = config.pid();
@@ -294,10 +300,7 @@ public class CtreMotorController implements MotorController {
 
     @Override
     public boolean isStalled() {
-        faultStatorCurrentLimitSignal.refresh(false);
-        faultSupplyCurrentLimitSignal.refresh(false);
-        return Boolean.TRUE.equals(faultStatorCurrentLimitSignal.getValue())
-                || Boolean.TRUE.equals(faultSupplyCurrentLimitSignal.getValue());
+        return cachedStalled;
     }
 
     @Override
@@ -363,13 +366,17 @@ public class CtreMotorController implements MotorController {
         updateCycles++;
         if (updateCycles == 1 || updateCycles % TEMPERATURE_REFRESH_INTERVAL_CYCLES == 0) {
             deviceTemperatureSignal.refresh(false);
-            faultStatorCurrentLimitSignal.refresh(false);
-            faultSupplyCurrentLimitSignal.refresh(false);
             supplyCurrentSignal.refresh(false);
             motorVoltageSignal.refresh(false);
             cachedTemperatureCelsius = deviceTemperatureSignal.getValueAsDouble();
             cachedCurrentAmps = supplyCurrentSignal.getValueAsDouble();
             cachedAppliedVoltage = motorVoltageSignal.getValueAsDouble();
+        }
+        if (updateCycles == 1 || updateCycles % STALL_REFRESH_INTERVAL_CYCLES == 0) {
+            faultStatorCurrentLimitSignal.refresh(false);
+            faultSupplyCurrentLimitSignal.refresh(false);
+            cachedStalled = Boolean.TRUE.equals(faultStatorCurrentLimitSignal.getValue())
+                    || Boolean.TRUE.equals(faultSupplyCurrentLimitSignal.getValue());
         }
         if (updateCycles >= 1_000_000) {
             updateCycles = 0;

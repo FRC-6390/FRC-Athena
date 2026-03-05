@@ -491,7 +491,8 @@ function resolveSignalIdFromKeys(
     if (parsed !== null && signals.some((signal) => signal.signal_id === parsed)) {
       return parsed;
     }
-    return null;
+    // Stale/missing signal ids in persisted layouts should fall back to current auto-binding.
+    continue;
   }
 
   if (defaultSignalId !== null && signals.some((signal) => signal.signal_id === defaultSignalId)) {
@@ -1616,12 +1617,22 @@ function findSignalByLeaf(
 function defaultFieldSignalBinding(anchor: SignalRow, signals: SignalRow[]): FieldWidgetConfig {
   const anchorParent = parentPath(anchor.path);
 
-  const xSignal = findSignalByLeaf(signals, anchorParent, ['x', 'posex', 'robotx'], ['f64', 'i64']);
-  const ySignal = findSignalByLeaf(signals, anchorParent, ['y', 'posey', 'roboty'], ['f64', 'i64']);
+  const xSignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['x', 'xmeters', 'posex', 'robotx'],
+    ['f64', 'i64']
+  );
+  const ySignal = findSignalByLeaf(
+    signals,
+    anchorParent,
+    ['y', 'ymeters', 'posey', 'roboty'],
+    ['f64', 'i64']
+  );
   const headingSignal = findSignalByLeaf(
     signals,
     anchorParent,
-    ['heading', 'yaw', 'theta', 'rotation', 'angle', 'gyro'],
+    ['heading', 'headingdeg', 'yaw', 'yawdeg', 'theta', 'rotation', 'rotationdeg', 'angle', 'gyro'],
     ['f64', 'i64']
   );
   const trajectorySignal = findSignalByLeaf(
@@ -3529,13 +3540,46 @@ function pointFromUnknown(value: unknown): FieldPoint | null {
   }
 
   if (!isObject(value)) return null;
-  const x = toNumber(value.x);
-  const y = toNumber(value.y);
+  const x =
+    toNumber(value.x) ??
+    toNumber(value.xMeters) ??
+    (isObject(value.translation) ? toNumber(value.translation.x) ?? toNumber(value.translation.xMeters) : null);
+  const y =
+    toNumber(value.y) ??
+    toNumber(value.yMeters) ??
+    (isObject(value.translation) ? toNumber(value.translation.y) ?? toNumber(value.translation.yMeters) : null);
   if (x !== null && y !== null) {
     return { x, y };
   }
 
   return null;
+}
+
+function trajectoryCandidatesFromUnknown(value: unknown, depth = 0): unknown[] {
+  if (depth > 2) return [];
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      return trajectoryCandidatesFromUnknown(JSON.parse(trimmed) as unknown, depth + 1);
+    } catch {
+      return [];
+    }
+  }
+
+  if (Array.isArray(value)) return value;
+  if (!isObject(value)) return [];
+
+  if (Array.isArray(value.points)) return value.points;
+  if (Array.isArray(value.trajectory)) return value.trajectory;
+  if (Array.isArray(value.path)) return value.path;
+  if (Array.isArray(value.poses)) return value.poses;
+  if (Array.isArray(value.samples)) return value.samples;
+  if (Array.isArray(value.waypoints)) return value.waypoints;
+  if (pointFromUnknown(value) !== null) return [value];
+
+  return [];
 }
 
 export function parseTrajectoryPoints(raw: string): FieldPoint[] {
@@ -3544,12 +3588,7 @@ export function parseTrajectoryPoints(raw: string): FieldPoint[] {
 
   try {
     const parsed = JSON.parse(trimmed) as unknown;
-
-    const candidates = Array.isArray(parsed)
-      ? parsed
-      : isObject(parsed) && Array.isArray(parsed.points)
-        ? parsed.points
-        : [];
+    const candidates = trajectoryCandidatesFromUnknown(parsed);
 
     return candidates
       .map((entry) => pointFromUnknown(entry))

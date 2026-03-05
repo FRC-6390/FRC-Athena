@@ -77,8 +77,6 @@ fn control_set_and_action_emit_events() {
         control_port: 0,
         realtime_port: 0,
         max_signals: 64,
-        nt4_bridge_enabled: false,
-        nt4_unsecure_port: 5810,
     });
     server
         .register_signal(SignalDescriptor::telemetry(
@@ -149,8 +147,6 @@ fn publishes_all_supported_types_over_udp() {
         control_port: 0,
         realtime_port: 0,
         max_signals: 128,
-        nt4_bridge_enabled: false,
-        nt4_unsecure_port: 5810,
     });
     let descriptors = [
         SignalDescriptor::telemetry(
@@ -288,8 +284,6 @@ fn control_stats_reports_server_metrics() {
         control_port: 0,
         realtime_port: 0,
         max_signals: 8,
-        nt4_bridge_enabled: false,
-        nt4_unsecure_port: 5810,
     });
     server.start().expect("server start");
     wait_for_ports(&server);
@@ -322,8 +316,6 @@ fn control_layout_save_and_load_roundtrip() {
         control_port: 0,
         realtime_port: 0,
         max_signals: 8,
-        nt4_bridge_enabled: false,
-        nt4_unsecure_port: 5810,
     });
     server.start().expect("server start");
     wait_for_ports(&server);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -24,11 +25,28 @@ if (process.platform === 'linux') {
 }
 
 const isWindows = process.platform === 'win32';
-const localTauri = path.join(rootDir, 'node_modules', '.bin', isWindows ? 'tauri.cmd' : 'tauri');
+const localBinDir = path.join(rootDir, 'node_modules', '.bin');
+const localTauriCandidates = isWindows
+  ? ['tauri.exe', 'tauri.cmd', 'tauri']
+  : ['tauri'];
+const tauriCommandCandidates = isWindows
+  ? ['tauri.exe', 'tauri.cmd', 'tauri']
+  : ['tauri'];
+const bunxCommandCandidates = isWindows
+  ? ['bunx.exe', 'bunx.cmd', 'bunx']
+  : ['bunx'];
+const bunCommandCandidates = isWindows
+  ? ['bun.exe', 'bun.cmd', 'bun']
+  : ['bun'];
+
 const candidates = [
-  { command: isWindows ? 'tauri.cmd' : 'tauri', args: tauriArgs },
-  { command: localTauri, args: tauriArgs },
-  { command: isWindows ? 'bunx.cmd' : 'bunx', args: ['tauri', ...tauriArgs] },
+  ...localTauriCandidates
+    .map((name) => path.join(localBinDir, name))
+    .filter((command) => existsSync(command))
+    .map((command) => ({ command, args: tauriArgs })),
+  ...tauriCommandCandidates.map((command) => ({ command, args: tauriArgs })),
+  ...bunxCommandCandidates.map((command) => ({ command, args: ['tauri', ...tauriArgs] })),
+  ...bunCommandCandidates.map((command) => ({ command, args: ['x', 'tauri', ...tauriArgs] })),
 ];
 
 function spawnCandidate(index) {

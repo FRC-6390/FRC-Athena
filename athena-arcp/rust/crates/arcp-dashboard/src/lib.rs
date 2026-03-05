@@ -8,7 +8,7 @@ mod telemetry;
 mod value;
 
 pub use args::{parse_cli_args, parse_web_args, CliArgs, WebArgs};
-pub use control::ControlClient;
+pub use control::{ControlClient, ServerStats};
 pub use http::{run_http_server, WebServerConfig};
 pub use json::render_state_json;
 pub use manifest::ManifestItem;

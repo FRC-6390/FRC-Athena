@@ -17,9 +17,12 @@
 
   let { connected, status, lastError, snapshot, signals, onSelectSignal }: Props = $props();
 
-  function formatMemory(bytes: number | null): string {
+  function formatBytes(bytes: number | null): string {
     if (bytes === null) return 'n/a';
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
   }
 
   function formatCpu(value: number | null): string {
@@ -39,6 +42,22 @@
 
   function normalizeToken(value: string): string {
     return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  function usedBytes(total: number | null, available: number | null): number | null {
+    if (total === null || available === null) return null;
+    return Math.max(0, total - available);
+  }
+
+  function usedPercent(total: number | null, available: number | null): number | null {
+    const used = usedBytes(total, available);
+    if (used === null || total === null || total <= 0) return null;
+    return (used / total) * 100;
+  }
+
+  function formatPercent(value: number | null, digits = 1): string {
+    if (value === null || !Number.isFinite(value)) return 'n/a';
+    return `${value.toFixed(digits)}%`;
   }
 
   function boolValue(raw: string): boolean | null {
@@ -107,9 +126,18 @@
     if ((snapshot?.server_cpu_percent ?? 0) >= 80) items.push('Server CPU is above 80%.');
     if ((snapshot?.host_cpu_percent ?? 0) >= 80) items.push('Host UI CPU is above 80%.');
     if ((snapshot?.server_rss_bytes ?? 0) >= 512 * 1024 * 1024) items.push('Server RSS is above 512 MiB.');
+    const ramUsed = usedPercent(snapshot?.server_ram_total_bytes ?? null, snapshot?.server_ram_available_bytes ?? null);
+    if ((ramUsed ?? 0) >= 90) items.push('Server RAM usage is above 90%.');
+    const diskUsed = usedPercent(snapshot?.server_disk_total_bytes ?? null, snapshot?.server_disk_available_bytes ?? null);
+    if ((diskUsed ?? 0) >= 90) items.push('Server disk usage is above 90%.');
     if (warningSignals.length > 0) items.push(`${warningSignals.length} fault-like boolean signals are asserted.`);
     return items;
   });
+
+  const serverRamUsedBytes = $derived(usedBytes(snapshot?.server_ram_total_bytes ?? null, snapshot?.server_ram_available_bytes ?? null));
+  const serverRamUsedPercent = $derived(usedPercent(snapshot?.server_ram_total_bytes ?? null, snapshot?.server_ram_available_bytes ?? null));
+  const serverDiskUsedBytes = $derived(usedBytes(snapshot?.server_disk_total_bytes ?? null, snapshot?.server_disk_available_bytes ?? null));
+  const serverDiskUsedPercent = $derived(usedPercent(snapshot?.server_disk_total_bytes ?? null, snapshot?.server_disk_available_bytes ?? null));
 
   function topN(counters: Counter[], limit = 8): Counter[] {
     return counters.slice(0, limit);
@@ -134,14 +162,30 @@
       <small>{snapshot?.update_count ?? 0} updates</small>
     </article>
     <article class="summary-card">
-      <span>Server</span>
+      <span>Server CPU</span>
       <strong>{formatCpu(snapshot?.server_cpu_percent ?? null)}</strong>
-      <small>{formatMemory(snapshot?.server_rss_bytes ?? null)}</small>
+      <small>{snapshot?.server_cpu_cores ?? 'n/a'} cores</small>
+    </article>
+    <article class="summary-card">
+      <span>Server RAM</span>
+      <strong>{formatBytes(serverRamUsedBytes)}</strong>
+      <small>
+        {formatPercent(serverRamUsedPercent)} used |
+        {formatBytes(snapshot?.server_ram_available_bytes ?? null)} free
+      </small>
+    </article>
+    <article class="summary-card">
+      <span>Server Disk</span>
+      <strong>{formatBytes(serverDiskUsedBytes)}</strong>
+      <small>
+        {formatPercent(serverDiskUsedPercent)} used |
+        {formatBytes(snapshot?.server_disk_available_bytes ?? null)} free
+      </small>
     </article>
     <article class="summary-card">
       <span>UI Host</span>
       <strong>{formatCpu(snapshot?.host_cpu_percent ?? null)}</strong>
-      <small>{formatMemory(snapshot?.host_rss_bytes ?? null)}</small>
+      <small>{formatBytes(snapshot?.host_rss_bytes ?? null)}</small>
     </article>
     <article class="summary-card">
       <span>Uptime</span>
@@ -165,6 +209,44 @@
     </section>
 
     <section class="panel-card">
+      <h3>Server Health</h3>
+      <div class="health-grid">
+        <div class="health-item">
+          <span>CPU usage</span>
+          <strong>{formatCpu(snapshot?.server_cpu_percent ?? null)}</strong>
+        </div>
+        <div class="health-item">
+          <span>CPU cores</span>
+          <strong>{snapshot?.server_cpu_cores ?? 'n/a'}</strong>
+        </div>
+        <div class="health-item">
+          <span>RAM used</span>
+          <strong>{formatBytes(serverRamUsedBytes)}</strong>
+        </div>
+        <div class="health-item">
+          <span>RAM free</span>
+          <strong>{formatBytes(snapshot?.server_ram_available_bytes ?? null)}</strong>
+        </div>
+        <div class="health-item">
+          <span>RAM total</span>
+          <strong>{formatBytes(snapshot?.server_ram_total_bytes ?? null)}</strong>
+        </div>
+        <div class="health-item">
+          <span>Disk used</span>
+          <strong>{formatBytes(serverDiskUsedBytes)}</strong>
+        </div>
+        <div class="health-item">
+          <span>Disk free</span>
+          <strong>{formatBytes(snapshot?.server_disk_available_bytes ?? null)}</strong>
+        </div>
+        <div class="health-item">
+          <span>Disk total</span>
+          <strong>{formatBytes(snapshot?.server_disk_total_bytes ?? null)}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel-card">
       <h3>Active Fault Signals</h3>
       {#if warningSignals.length === 0}
         <p class="empty">No fault-like bool signals are currently true.</p>
@@ -173,7 +255,7 @@
           {#each warningSignals as signal (signal.signal_id)}
             <button class="signal-row" onclick={() => onSelectSignal(signal.signal_id)}>
               <strong>{signal.path}</strong>
-              <span>#{signal.signal_id} · {signal.kind} · {signal.access}</span>
+              <span>#{signal.signal_id} | {signal.kind} | {signal.access}</span>
             </button>
           {/each}
         </div>
@@ -232,7 +314,7 @@
 
   .summary-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 0.44rem;
   }
 
@@ -300,6 +382,35 @@
     color: var(--text-strong);
   }
 
+  .health-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.28rem;
+    min-height: 0;
+  }
+
+  .health-item {
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    background: var(--surface-3);
+    padding: 0.3rem 0.34rem;
+    display: grid;
+    gap: 0.06rem;
+  }
+
+  .health-item span {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-soft);
+  }
+
+  .health-item strong {
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    color: var(--text-strong);
+  }
+
   .empty {
     margin: 0;
     font-size: 0.72rem;
@@ -363,7 +474,7 @@
 
   @media (max-width: 1260px) {
     .summary-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     }
 
     .body-grid {
@@ -373,7 +484,7 @@
 
   @media (max-width: 860px) {
     .summary-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     }
   }
 </style>

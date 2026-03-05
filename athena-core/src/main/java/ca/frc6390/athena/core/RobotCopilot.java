@@ -210,6 +210,7 @@ public class RobotCopilot {
             }
             Pose2d current = localization.getFieldPose();
             ChassisSpeeds desiredSpeeds;
+            boolean desiredFieldRelative = false;
             if (driveStyle == DriveStyle.DIFFERENTIAL) {
                 Translation2d toTarget = target.getTranslation().minus(current.getTranslation());
                 double distance = toTarget.getNorm();
@@ -225,15 +226,17 @@ public class RobotCopilot {
                 double omega = headingController.calculate(
                         current.getRotation().getRadians(),
                         target.getRotation().getRadians());
-                ChassisSpeeds fieldRelative = new ChassisSpeeds(vx, vy, omega);
-                desiredSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(
-                        fieldRelative,
-                        current.getRotation());
+                desiredSpeeds = new ChassisSpeeds(vx, vy, omega);
+                desiredFieldRelative = true;
             }
             MotionLimits.DriveLimits constraints = resolveConstraints();
             double now = Timer.getFPGATimestamp();
             ChassisSpeeds limited = applyConstraints(desiredSpeeds, constraints, now);
-            robotSpeeds.setSpeeds(config.speedSource(), limited);
+            if (desiredFieldRelative) {
+                robotSpeeds.setFieldRelativeSpeeds(config.speedSource(), limited);
+            } else {
+                robotSpeeds.setSpeeds(config.speedSource(), limited);
+            }
         }
 
         @Override

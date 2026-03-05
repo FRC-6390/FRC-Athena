@@ -18,7 +18,12 @@ export type DashboardSnapshot = {
   update_count: number;
   uptime_ms: number;
   server_cpu_percent: number | null;
+  server_cpu_cores: number | null;
   server_rss_bytes: number | null;
+  server_ram_total_bytes: number | null;
+  server_ram_available_bytes: number | null;
+  server_disk_total_bytes: number | null;
+  server_disk_available_bytes: number | null;
   host_cpu_percent: number | null;
   host_rss_bytes: number | null;
   signals: SignalRow[];
@@ -31,7 +36,12 @@ export type DashboardDelta = {
   update_count: number;
   uptime_ms: number;
   server_cpu_percent: number | null;
+  server_cpu_cores: number | null;
   server_rss_bytes: number | null;
+  server_ram_total_bytes: number | null;
+  server_ram_available_bytes: number | null;
+  server_disk_total_bytes: number | null;
+  server_disk_available_bytes: number | null;
   host_cpu_percent: number | null;
   host_rss_bytes: number | null;
   manifest_revision: number;
@@ -50,6 +60,40 @@ export type ConnectionInfo = {
 export type WindowModeSnapshot = {
   presentationMode: boolean;
   dockMode: boolean;
+};
+
+export type RemoteLogEntry = {
+  source: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  modifiedEpochSec: number;
+};
+
+export type RemoteLogList = {
+  host: string;
+  entries: RemoteLogEntry[];
+};
+
+export type RemoteLogPreview = {
+  host: string;
+  path: string;
+  content: string;
+  truncated: boolean;
+};
+
+export type RemoteLogDownload = {
+  host: string;
+  path: string;
+  fileName: string;
+  bytes: number[];
+};
+
+export type RobotLinkProbe = {
+  host: string;
+  controlPort: number;
+  robotReachable: boolean;
+  arcpReachable: boolean;
 };
 
 function isTauriRuntime(): boolean {
@@ -115,6 +159,52 @@ export async function listServerLayouts(): Promise<string[]> {
 export async function deleteServerLayout(layoutName: string): Promise<void> {
   return invoke('delete_server_layout', {
     layoutName
+  });
+}
+
+export async function listRemoteLogs(host: string): Promise<RemoteLogList> {
+  return invoke('list_remote_logs', { host });
+}
+
+export async function readRemoteLogPreview(
+  host: string,
+  path: string,
+  maxBytes = 64 * 1024
+): Promise<RemoteLogPreview> {
+  return invoke('read_remote_log_preview', {
+    host,
+    path,
+    maxBytes
+  });
+}
+
+export async function downloadRemoteLog(
+  host: string,
+  path: string,
+  maxBytes = 20 * 1024 * 1024
+): Promise<RemoteLogDownload> {
+  return invoke('download_remote_log', {
+    host,
+    path,
+    maxBytes
+  });
+}
+
+export async function startRemoteLogStream(host: string, path: string): Promise<void> {
+  return invoke('start_remote_log_stream', {
+    host,
+    path
+  });
+}
+
+export async function stopRemoteLogStream(): Promise<void> {
+  return invoke('stop_remote_log_stream');
+}
+
+export async function probeRobotLink(host: string, controlPort: number): Promise<RobotLinkProbe> {
+  return invoke('probe_robot_link', {
+    host,
+    controlPort
   });
 }
 

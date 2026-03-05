@@ -1,11 +1,11 @@
 <script lang="ts">
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import {
-    faBolt,
-    faCamera,
     faChartLine,
+    faFileLines,
     faStethoscope,
     faMicrochip,
+    faSliders,
     faGear,
     faTableCellsLarge,
     type IconDefinition
@@ -16,9 +16,9 @@
     | 'dashboards'
     | 'signals'
     | 'mechanisms'
-    | 'actions'
+    | 'control_tuner'
     | 'diagnostics'
-    | 'camera_tuning'
+    | 'logs'
     | 'settings';
 
   type Props = {
@@ -30,10 +30,9 @@
     { key: 'dashboards', label: 'Dashboards', icon: faTableCellsLarge },
     { key: 'signals', label: 'Signals', icon: faChartLine },
     { key: 'mechanisms', label: 'Mechanisms', icon: faMicrochip },
-    { key: 'actions', label: 'Actions', icon: faBolt },
+    { key: 'control_tuner', label: 'Control Tuner', icon: faSliders },
     { key: 'diagnostics', label: 'Diagnostics', icon: faStethoscope },
-    { key: 'camera_tuning', label: 'Camera Tuning', icon: faCamera },
-    { key: 'settings', label: 'Settings', icon: faGear }
+    { key: 'logs', label: 'Logs', icon: faFileLines }
   ];
 
   let { section, onActivate }: Props = $props();
@@ -56,7 +55,18 @@
       </button>
     {/each}
   </nav>
-  <div class="rail-footer">ARCP</div>
+  <div class="rail-footer-wrap">
+    <button
+      class={`rail-item rail-footer-settings ${section === 'settings' ? 'active' : ''}`}
+      aria-label="Settings"
+      aria-pressed={section === 'settings'}
+      title="Settings"
+      onclick={() => onActivate('settings')}
+    >
+      <FontAwesomeIcon icon={faGear} class="rail-icon" />
+    </button>
+    <div class="rail-footer">ARCP</div>
+  </div>
 </aside>
 
 <style>
@@ -137,6 +147,16 @@
     color: var(--text-soft);
     font-family: var(--font-display);
     letter-spacing: 0.06em;
+  }
+
+  .rail-footer-wrap {
+    display: grid;
+    justify-items: center;
+    gap: 0.36rem;
+  }
+
+  .rail-footer-settings {
+    margin: 0 auto;
   }
 
   @media (max-width: 1380px) {

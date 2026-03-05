@@ -1,5 +1,6 @@
 package ca.frc6390.athena.core.localization;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,13 +29,20 @@ import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.math.numbers.N4;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class RobotLocalizationChoreoFollowerSignTest {
+
+    @AfterEach
+    void resetRobotTimeCache() {
+        ca.frc6390.athena.core.RobotTime.resetNowSecondsForTest();
+    }
 
     @Test
     void followerCommandsPositiveOmegaForPositiveHeadingError() throws Exception {
@@ -93,7 +101,7 @@ final class RobotLocalizationChoreoFollowerSignTest {
                 new Pose2d(1.0, 0.0, Rotation2d.fromDegrees(90.0)),
                 new ChassisSpeeds());
 
-        ChassisSpeeds output = fixture.speeds.getInputSpeeds(RobotSpeeds.AUTO_SOURCE);
+        ChassisSpeeds output = fixture.speeds.calculate(Rotation2d.fromDegrees(90.0));
         assertTrue(
                 Math.abs(output.vxMetersPerSecond) < 1e-6,
                 "At 90deg heading, field +X correction should map to near-zero robot vx, got "
@@ -157,6 +165,43 @@ final class RobotLocalizationChoreoFollowerSignTest {
                         + output.vyMetersPerSecond);
     }
 
+    @Test
+    void followerTelemetryPublishesPathErrorAndFollowerLag() throws Exception {
+        TestFixture fixture = newFixture();
+
+        fixture.localization.resetPose("field", new Pose2d(0.2, -0.4, Rotation2d.fromDegrees(5.0)));
+        setRobotTimeSeconds(10.00);
+        fixture.follower.accept(
+                new Pose2d(1.2, 0.6, Rotation2d.fromDegrees(15.0)),
+                new ChassisSpeeds(1.5, -0.4, 0.8));
+
+        assertEquals(1.0, readDoubleField(fixture.localization, "autoFollowerErrorXMeters"), 1e-6);
+        assertEquals(1.0, readDoubleField(fixture.localization, "autoFollowerErrorYMeters"), 1e-6);
+        assertEquals(
+                Math.hypot(1.0, 1.0),
+                readDoubleField(fixture.localization, "autoFollowerTranslationErrorMeters"),
+                1e-6);
+        assertEquals(10.0, readDoubleField(fixture.localization, "autoFollowerHeadingErrorDegrees"), 1e-6);
+
+        setRobotTimeSeconds(10.02);
+        fixture.follower.accept(
+                new Pose2d(1.2, 0.6, Rotation2d.fromDegrees(15.0)),
+                new ChassisSpeeds(1.5, -0.4, 0.8));
+
+        double updateDtSeconds = readDoubleField(fixture.localization, "autoFollowerUpdateDtSeconds");
+        double sourceAgeSeconds = readDoubleField(fixture.localization, "autoFollowerSourceAgeSeconds");
+        double sourceEstimatedPeriodSeconds =
+                readDoubleField(fixture.localization, "autoFollowerSourceEstimatedPeriodSeconds");
+        assertTrue(updateDtSeconds >= 0.019 && updateDtSeconds <= 0.021,
+                "expected 20ms follower dt telemetry, got " + updateDtSeconds);
+        assertTrue(sourceAgeSeconds >= 0.019 && sourceAgeSeconds <= 0.021,
+                "expected 20ms source-age telemetry, got " + sourceAgeSeconds);
+        assertTrue(sourceEstimatedPeriodSeconds > 0.0,
+                "expected positive source estimated period telemetry, got " + sourceEstimatedPeriodSeconds);
+        assertTrue(readBooleanField(fixture.localization, "autoFollowerTelemetryValid"),
+                "auto follower telemetry should be marked valid after follower updates.");
+    }
+
     private static TestFixture newFixture() throws Exception {
         return newFixture(false, false);
     }
@@ -187,6 +232,25 @@ final class RobotLocalizationChoreoFollowerSignTest {
         assertNotNull(follower, "Choreo backend follower should be configured.");
 
         return new TestFixture(localization, speeds, follower);
+    }
+
+    private static void setRobotTimeSeconds(double nowSeconds) throws Exception {
+        Method updateNowSeconds = ca.frc6390.athena.core.RobotTime.class
+                .getDeclaredMethod("updateNowSeconds", double.class);
+        updateNowSeconds.setAccessible(true);
+        updateNowSeconds.invoke(null, nowSeconds);
+    }
+
+    private static double readDoubleField(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.getDouble(target);
+    }
+
+    private static boolean readBooleanField(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.getBoolean(target);
     }
 
     @SuppressWarnings("unchecked")

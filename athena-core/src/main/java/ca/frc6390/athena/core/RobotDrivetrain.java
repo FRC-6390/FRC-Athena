@@ -47,6 +47,14 @@ public interface RobotDrivetrain<T extends RobotDrivetrain<T>> extends RobotSend
 
         SpeedsSection set(String source, double x, double y, double theta);
 
+        default SpeedsSection setFieldRelative(String source, ChassisSpeeds speeds) {
+            return set(source, speeds);
+        }
+
+        default SpeedsSection setFieldRelative(String source, double x, double y, double theta) {
+            return set(source, x, y, theta);
+        }
+
         SpeedsSection stop(String source);
 
         SpeedsSection stop();

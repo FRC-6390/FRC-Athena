@@ -72,15 +72,6 @@
   let explorerTab = $state<ExplorerTab>('arcp');
   let dragGhostEl: HTMLDivElement | null = null;
 
-  function ntCompatPath(path: string): string {
-    const trimmed = path.trim();
-    if (!trimmed) return '';
-    const normalized = trimmed.replace(/^\/+/, '');
-    return normalized.startsWith('Athena/') || normalized === 'Athena'
-      ? normalized
-      : `Athena/${normalized}`;
-  }
-
   function ntDisplayPath(path: string): string {
     const trimmed = path.trim();
     if (!trimmed) return '';
@@ -88,7 +79,10 @@
     if (normalized.startsWith('Athena/NT4/')) {
       return `Athena/${normalized.slice('Athena/NT4/'.length)}`;
     }
-    return ntCompatPath(normalized);
+    if (normalized.startsWith('NT4/')) {
+      return normalized.slice('NT4/'.length);
+    }
+    return normalized;
   }
 
   const activeSignals = $derived(explorerTab === 'nt' ? ntSignals : signals);
@@ -240,11 +234,14 @@
     const trimmed = groupKey.trim();
     if (!trimmed) return '/';
     const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
-    const withoutAthenaRoot =
+    const withoutNtCompatRoot =
       explorerTab === 'nt'
-        ? withoutLeadingSlash.replace(/^athena\/?/i, '')
+        ? withoutLeadingSlash
+            .replace(/^athena\/nt4\/?/i, '')
+            .replace(/^nt4\/?/i, '')
+            .replace(/^athena\/?/i, '')
         : withoutLeadingSlash;
-    const withoutTrailingSlash = withoutAthenaRoot.replace(/\/+$/, '');
+    const withoutTrailingSlash = withoutNtCompatRoot.replace(/\/+$/, '');
     return withoutTrailingSlash ? `/${withoutTrailingSlash}` : '/';
   }
 

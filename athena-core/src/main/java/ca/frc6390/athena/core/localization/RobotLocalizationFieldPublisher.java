@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.RobotAuto;
@@ -154,7 +155,8 @@ final class RobotLocalizationFieldPublisher {
             clearPlannedPath();
             return;
         }
-        String selectedId = autos.selection().selected()
+        Optional<RobotAuto.AutoRoutine> selectedRoutine = autos.selection().selected();
+        String selectedId = selectedRoutine
                 .map(routine -> routine.key().id())
                 .orElse(null);
         String allianceKey = DriverStation.getAlliance().map(Enum::name).orElse("UNKNOWN");
@@ -165,7 +167,11 @@ final class RobotLocalizationFieldPublisher {
         }
         lastPlannedAutoId = selectedId;
         lastPlannedAllianceKey = allianceKey;
-        autos.selection().selectedPoses()
+        Optional<List<Pose2d>> selectedPoses = autos.selection().selectedPoses();
+        if (selectedPoses.isEmpty()) {
+            selectedPoses = selectedRoutine.flatMap(routine -> autos.routines().poses(routine));
+        }
+        selectedPoses
                 .filter(list -> !list.isEmpty())
                 .ifPresentOrElse(this::setPlannedPath, this::clearPlannedPath);
     }

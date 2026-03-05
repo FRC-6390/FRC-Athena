@@ -34,6 +34,15 @@ athenaPlugin {
 }
 ```
 
+## VS Code Contract
+
+- `athenaConfigureVscode` should maintain `.vscode/settings.json` for DSL compatibility.
+- Required settings include:
+  - `java.jdt.ls.javac.enabled = "on"`
+  - `java.completion.engine = "dom"`
+  - `java.import.gradle.annotationProcessing.enabled = true`
+  - `java.jdt.ls.vmargs` containing required `--add-exports=jdk.compiler/...` entries.
+
 ## Executable References
 
 - Runtime/plugin classes:

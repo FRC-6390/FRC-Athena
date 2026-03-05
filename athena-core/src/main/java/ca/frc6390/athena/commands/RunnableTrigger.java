@@ -1,10 +1,13 @@
 package ca.frc6390.athena.commands;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 import ca.frc6390.athena.controllers.DelayedOutput;
 import edu.wpi.first.math.filter.Debouncer.DebounceType;
+import edu.wpi.first.wpilibj.RobotState;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 
@@ -31,7 +34,7 @@ public class RunnableTrigger extends Trigger {
    * @return this trigger, so calls can be chained
    */
   public RunnableTrigger onTrue(Runnable runnable) {
-    return (RunnableTrigger) super.onTrue(new InstantCommand(runnable));
+    return onTrue(new InstantCommand(runnable));
   }
 
   /**
@@ -55,7 +58,7 @@ public class RunnableTrigger extends Trigger {
    * @return this trigger, so calls can be chained
    */
   public RunnableTrigger whileTrue(Runnable runnable) {
-    return (RunnableTrigger) super.whileTrue(new InstantCommand(runnable));
+    return whileTrue(new InstantCommand(runnable));
   }
 
   /**
@@ -79,7 +82,7 @@ public class RunnableTrigger extends Trigger {
    * @return this trigger, so calls can be chained
    */
   public RunnableTrigger toggleOnTrue(Runnable runnable) {
-    return (RunnableTrigger) super.toggleOnTrue(new InstantCommand(runnable));
+    return toggleOnTrue(new InstantCommand(runnable));
   }
 
   /**
@@ -111,7 +114,11 @@ public class RunnableTrigger extends Trigger {
    * @return this trigger, so calls can be chained
    */
   public RunnableTrigger onTrue(Command command) {
-    return (RunnableTrigger) super.onTrue(command);
+    super.onTrue(command);
+    scheduleIfInitiallyTrue(
+        () -> canScheduleCommand(command),
+        () -> CommandScheduler.getInstance().schedule(command));
+    return this;
   }
 
   /**
@@ -135,7 +142,11 @@ public class RunnableTrigger extends Trigger {
    * @return this trigger, so calls can be chained
    */
   public RunnableTrigger whileTrue(Command command) {
-    return (RunnableTrigger) super.whileTrue(command);
+    super.whileTrue(command);
+    scheduleIfInitiallyTrue(
+        () -> canScheduleCommand(command),
+        () -> CommandScheduler.getInstance().schedule(command));
+    return this;
   }
 
   /**
@@ -159,7 +170,11 @@ public class RunnableTrigger extends Trigger {
    * @return this trigger, so calls can be chained
    */
   public RunnableTrigger toggleOnTrue(Command command) {
-    return (RunnableTrigger) super.toggleOnTrue(command);
+    super.toggleOnTrue(command);
+    scheduleIfInitiallyTrue(
+        () -> command.isScheduled() || canScheduleCommand(command),
+        () -> toggle(command));
+    return this;
   }
 
   /**
@@ -230,6 +245,43 @@ public class RunnableTrigger extends Trigger {
 
   public RunnableTrigger after(double seconds) {
     return new RunnableTrigger(new DelayedOutput(this, seconds));
+  }
+
+  private void scheduleIfInitiallyTrue(BooleanSupplier ready, Runnable action) {
+    if (!getAsBoolean()) {
+      return;
+    }
+    if (ready.getAsBoolean()) {
+      action.run();
+      return;
+    }
+    AtomicBoolean pending = new AtomicBoolean(true);
+    CommandScheduler.getInstance().getDefaultButtonLoop().bind(() -> {
+      if (!pending.get()) {
+        return;
+      }
+      if (!getAsBoolean()) {
+        pending.set(false);
+        return;
+      }
+      if (!ready.getAsBoolean()) {
+        return;
+      }
+      action.run();
+      pending.set(false);
+    });
+  }
+
+  private static boolean canScheduleCommand(Command command) {
+    return command.runsWhenDisabled() || !RobotState.isDisabled();
+  }
+
+  private static void toggle(Command command) {
+    if (command.isScheduled()) {
+      command.cancel();
+    } else {
+      CommandScheduler.getInstance().schedule(command);
+    }
   }
 
 }

@@ -12,6 +12,17 @@ pub struct ControlClient {
     reader: BufReader<TcpStream>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ServerStats {
+    pub cpu_percent: Option<f32>,
+    pub rss_bytes: Option<u64>,
+    pub cpu_cores: Option<u32>,
+    pub ram_total_bytes: Option<u64>,
+    pub ram_available_bytes: Option<u64>,
+    pub disk_total_bytes: Option<u64>,
+    pub disk_available_bytes: Option<u64>,
+}
+
 impl ControlClient {
     pub fn connect(host: &str, control_port: u16) -> io::Result<Self> {
         let mut last_err = None;
@@ -77,6 +88,11 @@ impl ControlClient {
     }
 
     pub fn server_stats(&mut self) -> io::Result<(Option<f32>, Option<u64>)> {
+        let stats = self.server_health()?;
+        Ok((stats.cpu_percent, stats.rss_bytes))
+    }
+
+    pub fn server_health(&mut self) -> io::Result<ServerStats> {
         self.write_line("STATS")?;
         let response = self.read_line_trimmed()?;
         if response == "ERR UNKNOWN" {
@@ -89,23 +105,52 @@ impl ControlClient {
             .strip_prefix("STATS ")
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid STATS response"))?;
 
-        let mut cpu_percent = None;
-        let mut rss_bytes = None;
+        let mut snapshot = ServerStats::default();
         for token in stats.split_whitespace() {
             if let Some(raw) = token.strip_prefix("cpu=") {
-                cpu_percent = parse_optional_f32(raw).ok_or_else(|| {
+                snapshot.cpu_percent = parse_optional_f32(raw).ok_or_else(|| {
                     io::Error::new(io::ErrorKind::InvalidData, "invalid STATS cpu value")
                 })?;
                 continue;
             }
             if let Some(raw) = token.strip_prefix("rss=") {
-                rss_bytes = parse_optional_u64(raw).ok_or_else(|| {
+                snapshot.rss_bytes = parse_optional_u64(raw).ok_or_else(|| {
                     io::Error::new(io::ErrorKind::InvalidData, "invalid STATS rss value")
+                })?;
+                continue;
+            }
+            if let Some(raw) = token.strip_prefix("cores=") {
+                snapshot.cpu_cores = parse_optional_u32(raw).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid STATS cores value")
+                })?;
+                continue;
+            }
+            if let Some(raw) = token.strip_prefix("ram_total=") {
+                snapshot.ram_total_bytes = parse_optional_u64(raw).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid STATS ram_total value")
+                })?;
+                continue;
+            }
+            if let Some(raw) = token.strip_prefix("ram_available=") {
+                snapshot.ram_available_bytes = parse_optional_u64(raw).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid STATS ram_available value")
+                })?;
+                continue;
+            }
+            if let Some(raw) = token.strip_prefix("disk_total=") {
+                snapshot.disk_total_bytes = parse_optional_u64(raw).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid STATS disk_total value")
+                })?;
+                continue;
+            }
+            if let Some(raw) = token.strip_prefix("disk_available=") {
+                snapshot.disk_available_bytes = parse_optional_u64(raw).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid STATS disk_available value")
                 })?;
             }
         }
 
-        Ok((cpu_percent, rss_bytes))
+        Ok(snapshot)
     }
 
     pub fn subscribe(&mut self, udp_port: u16) -> io::Result<()> {
@@ -401,4 +446,11 @@ fn parse_optional_u64(raw: &str) -> Option<Option<u64>> {
         return Some(None);
     }
     raw.parse::<u64>().ok().map(Some)
+}
+
+fn parse_optional_u32(raw: &str) -> Option<Option<u32>> {
+    if matches!(raw, "na" | "null" | "-") {
+        return Some(None);
+    }
+    raw.parse::<u32>().ok().map(Some)
 }

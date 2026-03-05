@@ -3,6 +3,16 @@ package ca.frc6390.athena.drivetrains.differential;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
@@ -24,7 +34,6 @@ import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.encoder.EncoderGroup;
 import ca.frc6390.athena.hardware.encoder.Encoder;
-import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.imu.VirtualImu;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.drivetrains.differential.sim.DifferentialSimulationConfig;
@@ -38,6 +47,17 @@ import edu.wpi.first.wpilibj.RobotBase;
  */
 public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<DifferentialDrivetrainConfig>
         implements RobotDrivetrainConfig<DifferentialDrivetrain>{
+    private static final String CONNECTIVITY_FAIL_FAST_PROPERTY =
+            "athena.startup.connectivity.failFast";
+    private static final String CONNECTIVITY_ASYNC_PROPERTY =
+            "athena.startup.connectivity.async";
+    private static final String CONNECTIVITY_TIMEOUT_MS_PROPERTY =
+            "athena.startup.connectivity.timeoutMs";
+    private static final String CONNECTIVITY_PARALLELISM_PROPERTY =
+            "athena.startup.connectivity.parallelism";
+    private static final long DEFAULT_CONNECTIVITY_TIMEOUT_MS = 250L;
+    private static final int MAX_CONNECTIVITY_CHECK_THREADS = 8;
+    private static final AtomicInteger CONNECTIVITY_THREAD_COUNTER = new AtomicInteger(1);
    
     /** Estimated maximum linear velocity of the drivetrain (m/s). */
     private double maxVelocity;
@@ -779,46 +799,73 @@ public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<Diff
             return;
         }
 
-        List<String> missing = new ArrayList<>();
-        collectDisconnectedMotors("left", leftMotors, missing);
-        collectDisconnectedMotors("right", rightMotors, missing);
-        collectDisconnectedEncoders("left", leftEncoders, missing);
-        collectDisconnectedEncoders("right", rightEncoders, missing);
+        List<String> failures = new ArrayList<>();
+        List<ConnectivityProbe> probes = new ArrayList<>();
+        collectDisconnectedMotors("left", leftMotors, failures, probes);
+        collectDisconnectedMotors("right", rightMotors, failures, probes);
+        collectDisconnectedEncoders("left", leftEncoders, probes);
+        collectDisconnectedEncoders("right", rightEncoders, probes);
 
-        if (imuDevice != null && !imuDevice.isConnected(true)) {
-            missing.add(describeImu(imuDevice));
+        if (imuDevice != null) {
+            probes.add(new ConnectivityProbe("imu", () -> imuDevice.isConnected(true), describeImu(imuDevice)));
         }
 
-        if (!missing.isEmpty()) {
-            throwConnectivityError("Differential", missing);
+        if (probes.isEmpty()) {
+            reportConnectivityFailures("Differential", failures, connectivityFailFastEnabled());
+            return;
         }
+
+        boolean failFast = connectivityFailFastEnabled();
+        if (connectivityAsyncEnabled() && !failFast) {
+            List<String> baseFailures = List.copyOf(failures);
+            List<ConnectivityProbe> queuedProbes = List.copyOf(probes);
+            Thread asyncCheck = new Thread(
+                    () -> {
+                        List<String> asyncFailures = new ArrayList<>(baseFailures);
+                        asyncFailures.addAll(runConnectivityProbes(queuedProbes, connectivityTimeoutMs()));
+                        reportConnectivityFailures("Differential", asyncFailures, false);
+                    },
+                    "athena-connectivity-differential");
+            asyncCheck.setDaemon(true);
+            asyncCheck.start();
+            return;
+        }
+
+        failures.addAll(runConnectivityProbes(probes, connectivityTimeoutMs()));
+        reportConnectivityFailures("Differential", failures, failFast);
     }
 
-    private static void collectDisconnectedMotors(String side, MotorControllerGroup group, List<String> missing) {
+    private static void collectDisconnectedMotors(
+            String side,
+            MotorControllerGroup group,
+            List<String> failures,
+            List<ConnectivityProbe> probes) {
         if (group == null) {
-            missing.add(side + " motor group missing");
+            failures.add(side + " motor group missing");
             return;
         }
 
         MotorController[] controllers = group.getControllers();
         if (controllers == null || controllers.length == 0) {
-            missing.add(side + " motor group has no controllers");
+            failures.add(side + " motor group has no controllers");
             return;
         }
 
         for (int i = 0; i < controllers.length; i++) {
             MotorController motor = controllers[i];
             if (motor == null) {
-                missing.add(side + " motor[" + i + "] missing");
+                failures.add(side + " motor[" + i + "] missing");
                 continue;
             }
-            if (!motor.isConnected(true)) {
-                missing.add(describeMotor(side + " motor[" + i + "]", motor));
-            }
+            int index = i;
+            probes.add(new ConnectivityProbe(
+                    side + " motor[" + index + "]",
+                    () -> motor.isConnected(true),
+                    describeMotor(side + " motor[" + index + "]", motor)));
         }
     }
 
-    private static void collectDisconnectedEncoders(String side, EncoderGroup group, List<String> missing) {
+    private static void collectDisconnectedEncoders(String side, EncoderGroup group, List<ConnectivityProbe> probes) {
         if (group == null) {
             return;
         }
@@ -833,10 +880,170 @@ public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<Diff
             if (encoder == null) {
                 continue;
             }
-            if (!encoder.isConnected(true)) {
-                missing.add(describeEncoder(side + " encoder[" + i + "]", encoder));
-            }
+            int index = i;
+            probes.add(new ConnectivityProbe(
+                    side + " encoder[" + index + "]",
+                    () -> encoder.isConnected(true),
+                    describeEncoder(side + " encoder[" + index + "]", encoder)));
         }
+    }
+
+    private static List<String> runConnectivityProbes(List<ConnectivityProbe> probes, long timeoutMs) {
+        if (probes == null || probes.isEmpty()) {
+            return List.of();
+        }
+        int parallelism = resolveConnectivityParallelism(probes.size());
+        ExecutorService executor = Executors.newFixedThreadPool(parallelism, connectivityThreadFactory());
+        List<Future<Boolean>> futures = new ArrayList<>(probes.size());
+        try {
+            for (ConnectivityProbe probe : probes) {
+                if (probe == null || probe.check() == null) {
+                    futures.add(null);
+                    continue;
+                }
+                Callable<Boolean> callable = probe.check()::call;
+                futures.add(executor.submit(callable));
+            }
+
+            List<String> failures = new ArrayList<>();
+            long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(1L, timeoutMs));
+            long deadlineNs = System.nanoTime() + timeoutNanos;
+            for (int i = 0; i < probes.size(); i++) {
+                ConnectivityProbe probe = probes.get(i);
+                Future<Boolean> future = futures.get(i);
+                if (probe == null || future == null) {
+                    continue;
+                }
+                long remainingNs = deadlineNs - System.nanoTime();
+                if (remainingNs <= 0L) {
+                    future.cancel(true);
+                    failures.add(probe.label() + " connectivity probe timed out");
+                    continue;
+                }
+                try {
+                    boolean connected = future.get(remainingNs, TimeUnit.NANOSECONDS);
+                    if (!connected) {
+                        failures.add(probe.failureMessage());
+                    }
+                } catch (TimeoutException ex) {
+                    future.cancel(true);
+                    failures.add(probe.label() + " connectivity probe timed out");
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    failures.add(probe.label() + " connectivity probe interrupted");
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause();
+                    String message = cause != null && cause.getMessage() != null && !cause.getMessage().isBlank()
+                            ? cause.getMessage()
+                            : cause != null
+                                    ? cause.getClass().getSimpleName()
+                                    : ex.getClass().getSimpleName();
+                    failures.add(probe.label() + " connectivity probe failed: " + message);
+                }
+            }
+            return failures;
+        } finally {
+            for (Future<Boolean> future : futures) {
+                if (future != null && !future.isDone()) {
+                    future.cancel(true);
+                }
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    private static void reportConnectivityFailures(String drivetrainType, List<String> failures, boolean failFast) {
+        if (failures == null || failures.isEmpty()) {
+            return;
+        }
+        String message = drivetrainType
+                + " drivetrain required-device connectivity check failed: "
+                + String.join("; ", failures);
+        if (failFast) {
+            DriverStation.reportError(message, false);
+            throw new IllegalStateException(message);
+        }
+        DriverStation.reportWarning(message, false);
+    }
+
+    private static boolean connectivityFailFastEnabled() {
+        return parseBooleanProperty(CONNECTIVITY_FAIL_FAST_PROPERTY, false);
+    }
+
+    private static boolean connectivityAsyncEnabled() {
+        return parseBooleanProperty(CONNECTIVITY_ASYNC_PROPERTY, true);
+    }
+
+    private static long connectivityTimeoutMs() {
+        return parsePositiveLongProperty(CONNECTIVITY_TIMEOUT_MS_PROPERTY, DEFAULT_CONNECTIVITY_TIMEOUT_MS);
+    }
+
+    private static int resolveConnectivityParallelism(int probeCount) {
+        int fallback = Math.max(1, Math.min(MAX_CONNECTIVITY_CHECK_THREADS, probeCount));
+        Integer configured = parsePositiveIntProperty(CONNECTIVITY_PARALLELISM_PROPERTY);
+        if (configured == null) {
+            return fallback;
+        }
+        return Math.max(1, Math.min(probeCount, configured));
+    }
+
+    private static ThreadFactory connectivityThreadFactory() {
+        return runnable -> {
+            Thread thread = new Thread(
+                    runnable,
+                    "athena-connectivity-check-" + CONNECTIVITY_THREAD_COUNTER.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
+    }
+
+    private static Integer parsePositiveIntProperty(String key) {
+        String raw = System.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static long parsePositiveLongProperty(String key, long fallback) {
+        String raw = System.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            long parsed = Long.parseLong(raw.trim());
+            return parsed > 0L ? parsed : fallback;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean parseBooleanProperty(String key, boolean fallback) {
+        String raw = System.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized)) {
+            return true;
+        }
+        if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized)) {
+            return false;
+        }
+        return fallback;
+    }
+
+    @FunctionalInterface
+    private interface ConnectivityCheck {
+        boolean call();
+    }
+
+    private record ConnectivityProbe(String label, ConnectivityCheck check, String failureMessage) {
     }
 
     private static String describeMotor(String label, MotorController motor) {
@@ -860,11 +1067,4 @@ public class DifferentialDrivetrainConfig extends SectionedDrivetrainConfig<Diff
         return "imu disconnected (type=" + type + ", id=" + id + ", canbus=" + bus + ")";
     }
 
-    private static void throwConnectivityError(String drivetrainType, List<String> missing) {
-        String message = drivetrainType
-                + " drivetrain required-device connectivity check failed: "
-                + String.join("; ", missing);
-        DriverStation.reportError(message, false);
-        throw new IllegalStateException(message);
-    }
 }

@@ -1,0 +1,1044 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.Locale
+
+/*
+ * Athena bootstrap (drop-in script)
+ *
+ * Team usage:
+ *   apply from: "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/tags/<version>/gradle/athena-bootstrap.gradle"
+ *
+ * Tasks:
+ *   athenaFindRepo  - print detected local FRC-Athena path
+ *   athenaSync      - copy Athena vendordep JSON files from local FRC-Athena repo
+ *   athenaBuild     - run Athena build tasks, then sync vendordeps
+ *   athenaUpload    - deploy only src/main/deploy files to the roboRIO
+ *   athenaDoctor    - print bootstrap health checks
+ *   athenaConfigureVscode - apply VS Code settings needed for Athena DSL IntelliSense
+ *
+ * Optional properties:
+ *   -PathenaRepoDir=/abs/path/to/FRC-Athena
+ *   -PathenaBuildTasks=:athena-core:publishToMavenLocal,:athena-plugin:publishToMavenLocal
+ *   -PathenaEnableDsl=true
+ *   -PathenaPluginVersion=2026.1.67
+ *   -PathenaMergeServices=false
+ */
+
+def athenaBootstrapConfig = [
+        repoDirProperty      : 'athenaRepoDir',
+        repoDirEnv           : 'ATHENA_REPO_DIR',
+        buildTasksProperty   : 'athenaBuildTasks',
+        vendordepsProperty   : 'athenaVendordeps',
+        defaultBuildTasks    : [
+                ':updateAthenaJson',
+                ':outputVersions',
+                ':athena-core:publishToMavenLocal',
+                ':athena-arcp-java:publishToMavenLocal',
+                ':athena-ctre:publishToMavenLocal',
+                ':athena-rev:publishToMavenLocal',
+                ':athena-pathplanner:publishToMavenLocal',
+                ':athena-limelight:publishToMavenLocal',
+                ':athena-photonvision:publishToMavenLocal',
+                ':athena-choreo:publishToMavenLocal',
+                ':athena-studica:publishToMavenLocal',
+                ':athena-plugin:publishToMavenLocal'
+        ],
+        enableDslProperty    : 'athenaEnableDsl',
+        pluginVersionProperty: 'athenaPluginVersion',
+        mergeServicesProperty: 'athenaMergeServices',
+        mergeServicesTaskName: 'athenaMergeServiceFiles',
+        athenaCoreVendordep  : 'FRC6390-Athena-Core.json',
+        athenaVendorPrefix   : 'FRC6390-Athena-',
+        athenaMavenUrl       : 'https://maven.frc6390.ca/FRC-6390/FRC-Athena',
+        wpilibMavenUrl       : 'https://frcmaven.wpi.edu/artifactory/release'
+]
+
+def parseBoolean = { Object raw ->
+    if (raw == null) {
+        return false
+    }
+    String normalized = raw.toString().trim().toLowerCase(Locale.ROOT)
+    return normalized == '1'
+            || normalized == 'true'
+            || normalized == 'yes'
+            || normalized == 'on'
+}
+
+def parseBooleanOrDefault = { Object raw, boolean defaultValue ->
+    return raw == null ? defaultValue : parseBoolean(raw)
+}
+
+def canonicalOrSelf = { File dir ->
+    if (dir == null) {
+        return null
+    }
+    try {
+        return dir.canonicalFile
+    } catch (IOException ignored) {
+        return dir
+    }
+}
+
+def readAthenaVersionFromVendordep = { File jsonFile ->
+    if (jsonFile == null || !jsonFile.isFile()) {
+        return null
+    }
+    def parsed = new JsonSlurper().parse(jsonFile)
+    String version = parsed?.version?.toString()?.trim()
+    return version ? version : null
+}
+
+def isLikelyAthenaRepo = { File dir ->
+    if (dir == null || !dir.isDirectory()) {
+        return false
+    }
+    def coreVendordep = new File(dir, "vendordeps/${athenaBootstrapConfig.athenaCoreVendordep}")
+    def settingsGroovy = new File(dir, 'settings.gradle')
+    def settingsKts = new File(dir, 'settings.gradle.kts')
+    return coreVendordep.isFile() && (settingsGroovy.isFile() || settingsKts.isFile())
+}
+
+def collectAthenaCandidates = {
+    def candidates = [] as List<File>
+    def addCandidate = { File candidate ->
+        def normalized = canonicalOrSelf(candidate)
+        if (normalized == null) {
+            return
+        }
+        if (!candidates.any { it.absolutePath == normalized.absolutePath }) {
+            candidates << normalized
+        }
+    }
+
+    def repoOverride = project.findProperty(athenaBootstrapConfig.repoDirProperty)?.toString()?.trim()
+    if (repoOverride) {
+        addCandidate(file(repoOverride))
+    }
+
+    def envOverride = System.getenv(athenaBootstrapConfig.repoDirEnv)?.toString()?.trim()
+    if (envOverride) {
+        addCandidate(file(envOverride))
+    }
+
+    def userHome = new File(System.getProperty('user.home'))
+    addCandidate(new File(rootDir, '../FRC-Athena'))
+    addCandidate(new File(rootDir, '../frc-athena'))
+    addCandidate(new File(rootDir, '../../FRC-Athena'))
+    addCandidate(new File(rootDir, '../../frc-athena'))
+    addCandidate(new File(userHome, 'Documents/GitHub/FRC-Athena'))
+    addCandidate(new File(userHome, 'GitHub/FRC-Athena'))
+
+    [
+            rootDir.parentFile,
+            rootDir.parentFile?.parentFile,
+            new File(userHome, 'Documents/GitHub'),
+            new File(userHome, 'GitHub')
+    ].findAll { it?.isDirectory() }.each { searchRoot ->
+        searchRoot.listFiles()?.findAll { child ->
+            child.isDirectory() && child.name.equalsIgnoreCase('FRC-Athena')
+        }?.each { addCandidate(it) }
+    }
+
+    return candidates
+}
+
+def resolveAthenaRepoDir = { boolean required ->
+    def candidates = collectAthenaCandidates()
+    def match = candidates.find { isLikelyAthenaRepo(it) }
+    if (match != null || !required) {
+        return match
+    }
+
+    def tried = candidates
+            ? candidates.collect { " - ${it}" }.join(System.lineSeparator())
+            : ' - (no candidates found)'
+    throw new GradleException(
+            "Could not find FRC-Athena.\n" +
+                    "Set -P${athenaBootstrapConfig.repoDirProperty}=<path> " +
+                    "or ${athenaBootstrapConfig.repoDirEnv}=<path>.\n" +
+                    "Searched:\n${tried}"
+    )
+}
+
+def resolveAthenaPluginVersion = {
+    def explicit = project.findProperty(athenaBootstrapConfig.pluginVersionProperty)?.toString()?.trim()
+    if (explicit) {
+        return explicit
+    }
+
+    def projectVendordep = file("$rootDir/vendordeps/${athenaBootstrapConfig.athenaCoreVendordep}")
+    def vendordepVersion = readAthenaVersionFromVendordep(projectVendordep)
+    if (vendordepVersion != null) {
+        return vendordepVersion
+    }
+
+    File athenaRepo = resolveAthenaRepoDir(false)
+    if (athenaRepo != null) {
+        def repoVendordep = new File(athenaRepo, "vendordeps/${athenaBootstrapConfig.athenaCoreVendordep}")
+        def repoVersion = readAthenaVersionFromVendordep(repoVendordep)
+        if (repoVersion != null) {
+            return repoVersion
+        }
+    }
+
+    throw new GradleException(
+            "Could not resolve Athena plugin version.\n" +
+                    "Set -P${athenaBootstrapConfig.pluginVersionProperty}=<version>, " +
+                    "install ${athenaBootstrapConfig.athenaCoreVendordep}, or provide a local FRC-Athena repo."
+    )
+}
+
+def readAthenaVersionFromRepo = { File athenaRepo ->
+    def coreJson = new File(athenaRepo, "vendordeps/${athenaBootstrapConfig.athenaCoreVendordep}")
+    def version = readAthenaVersionFromVendordep(coreJson)
+    if (version == null) {
+        throw new GradleException("Could not read Athena version from ${coreJson}")
+    }
+    return version
+}
+
+def copyAthenaVendordeps = { File athenaRepo ->
+    def sourceDir = new File(athenaRepo, 'vendordeps')
+    def targetDir = file("$rootDir/vendordeps")
+    if (!sourceDir.isDirectory()) {
+        throw new GradleException("Missing Athena vendordeps directory: ${sourceDir}")
+    }
+
+    def allAthenaVendordeps = sourceDir.listFiles()?.findAll { vendordep ->
+        if (!vendordep.isFile() || !(vendordep.name.toLowerCase(Locale.ROOT).endsWith('.json'))) {
+            return false
+        }
+        return vendordep.name.startsWith(athenaBootstrapConfig.athenaVendorPrefix)
+    }?.sort { it.name } ?: []
+    def athenaByName = allAthenaVendordeps.collectEntries { [(it.name): it] }
+
+    def explicitRaw = project.findProperty(athenaBootstrapConfig.vendordepsProperty)?.toString()?.trim()
+    def includeAll = false
+    def selectedNames = new LinkedHashSet<String>()
+    if (explicitRaw) {
+        explicitRaw.split(',').collect { it.trim() }.findAll { !it.isEmpty() }.each { token ->
+            String normalized = token.toLowerCase(Locale.ROOT)
+            if (normalized == 'all') {
+                includeAll = true
+                return
+            }
+            if (normalized == 'core') {
+                selectedNames.add(athenaBootstrapConfig.athenaCoreVendordep)
+                return
+            }
+            String canonical = "FRC6390-Athena-${token}.json"
+            selectedNames.add(canonical)
+        }
+    } else {
+        targetDir.mkdirs()
+        def existingAthenaNames = targetDir.listFiles()?.findAll { candidate ->
+            candidate.isFile() && candidate.name.startsWith(athenaBootstrapConfig.athenaVendorPrefix)
+        }?.collect { it.name }?.sort() ?: []
+
+        if (!existingAthenaNames.isEmpty()) {
+            selectedNames.addAll(existingAthenaNames)
+        } else {
+            selectedNames.add(athenaBootstrapConfig.athenaCoreVendordep)
+        }
+    }
+
+    def vendordepFiles = includeAll
+            ? allAthenaVendordeps
+            : selectedNames.collect { athenaByName[it] }.findAll { it != null }
+
+    if (!includeAll) {
+        def missing = selectedNames.findAll { !athenaByName.containsKey(it) }
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                    "Requested Athena vendordep(s) not found in ${sourceDir}: ${missing.join(', ')}"
+            )
+        }
+    }
+    vendordepFiles = vendordepFiles.sort { it.name }
+
+    if (!vendordepFiles || vendordepFiles.isEmpty()) {
+        throw new GradleException(
+                "No Athena vendordep files selected from ${sourceDir}. " +
+                        "Use -P${athenaBootstrapConfig.vendordepsProperty}=core or all."
+        )
+    }
+
+    targetDir.mkdirs()
+    project.copy {
+        from vendordepFiles
+        into targetDir
+    }
+
+    if (vendordepFiles.any { it.name == 'FRC6390-Athena-Studica.json' }) {
+        def legacyStudica = new File(targetDir, 'Studica-2026.0.0.json')
+        if (legacyStudica.isFile()) {
+            legacyStudica.delete()
+        }
+    }
+    return vendordepFiles.collect { it.name }
+}
+
+def resolveAthenaBuildTasks = {
+    def override = project.findProperty(athenaBootstrapConfig.buildTasksProperty)?.toString()?.trim()
+    def rawTasks = override ? override.split(',') as List<String> : athenaBootstrapConfig.defaultBuildTasks
+    def taskNames = rawTasks.collect { it.trim() }.findAll { !it.isEmpty() }
+    if (taskNames.isEmpty()) {
+        throw new GradleException(
+                "No Athena build tasks resolved. Set -P${athenaBootstrapConfig.buildTasksProperty}=task1,task2"
+        )
+    }
+    return taskNames
+}
+
+def runAthenaGradleCommand = { File athenaRepo, List<String> taskNames, List<String> extraArgs ->
+    if (taskNames == null || taskNames.isEmpty()) {
+        throw new GradleException("No Athena command tasks provided.")
+    }
+
+    def command = [] as List<String>
+    if (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('win')) {
+        command.addAll(['cmd', '/c', 'gradlew.bat'])
+    } else {
+        command.addAll(['bash', './gradlew'])
+    }
+    command.add('--console=plain')
+    command.addAll(taskNames)
+    if (extraArgs != null) {
+        command.addAll(extraArgs.findAll { it != null && !it.toString().trim().isEmpty() })
+    }
+
+    logger.lifecycle("Running Athena build in ${athenaRepo}: ${command.join(' ')}")
+    project.exec {
+        workingDir athenaRepo
+        commandLine command
+    }
+}
+
+def runAthenaBuild = { File athenaRepo ->
+    def taskNames = resolveAthenaBuildTasks()
+    runAthenaGradleCommand(athenaRepo, taskNames, [])
+}
+
+def ensureAthenaPluginPublished = { File athenaRepo, String pluginVersion ->
+    if (pluginVersion == null || pluginVersion.trim().isEmpty()) {
+        throw new GradleException("Cannot publish Athena plugin without a resolved version.")
+    }
+    logger.lifecycle("Ensuring Athena Gradle plugin ${pluginVersion} is published to mavenLocal.")
+    runAthenaGradleCommand(
+            athenaRepo,
+            [':athena-plugin:publishToMavenLocal'],
+            ["-Pversion=${pluginVersion.trim()}"]
+    )
+}
+
+def syncFromAthenaRepo = { File athenaRepo ->
+    def version = readAthenaVersionFromRepo(athenaRepo)
+    def vendordepNames = copyAthenaVendordeps(athenaRepo)
+    logger.lifecycle("Athena repo: ${athenaRepo}")
+    logger.lifecycle("Athena version: ${version}")
+    logger.lifecycle("Copied ${vendordepNames.size()} vendordep file(s): ${vendordepNames.join(', ')}")
+}
+
+def athenaDslRequested = parseBoolean(project.findProperty(athenaBootstrapConfig.enableDslProperty))
+if (athenaDslRequested) {
+    logger.lifecycle(
+            "Athena DSL requested via -P${athenaBootstrapConfig.enableDslProperty}=true. " +
+                    "Run task athenaEnableDsl once, then rerun your build."
+    )
+} else {
+    logger.lifecycle("Athena DSL auto-apply is disabled (run athenaEnableDsl if you need DSL features).")
+}
+
+def athenaMergeServicesEnabled = parseBooleanOrDefault(
+        project.findProperty(athenaBootstrapConfig.mergeServicesProperty),
+        true
+)
+
+def configureAthenaServiceMerge = {
+    if (!athenaMergeServicesEnabled) {
+        logger.lifecycle(
+                "Athena META-INF/services merge injection disabled " +
+                        "(-P${athenaBootstrapConfig.mergeServicesProperty}=false)."
+        )
+        return
+    }
+
+    plugins.withId('java') {
+        def existingMergeTask = tasks.findByName('mergeServiceFiles')
+        if (existingMergeTask != null) {
+            logger.info("Athena bootstrap: found existing mergeServiceFiles task, skipping injection.")
+            return
+        }
+
+        def mergeTaskName = athenaBootstrapConfig.mergeServicesTaskName
+        def existingAthenaMergeTask = tasks.findByName(mergeTaskName)
+        def mergeTaskProvider = existingAthenaMergeTask != null
+                ? tasks.named(mergeTaskName)
+                : tasks.register(mergeTaskName) {
+            description = 'Merges META-INF/services entries for ServiceLoader discovery in the fat jar.'
+            group = 'Build'
+
+            def runtimeClasspath = configurations.findByName('runtimeClasspath')
+            if (runtimeClasspath != null) {
+                inputs.files(runtimeClasspath)
+            }
+            outputs.dir(file("$buildDir/athena/merged-services"))
+
+            doLast {
+                def outputDir = file("$buildDir/athena/merged-services")
+                delete(outputDir)
+                outputDir.mkdirs()
+
+                def services = [:].withDefault { new LinkedHashSet<String>() }
+                def collectServiceLines = { FileTree tree ->
+                    tree.visit { details ->
+                        if (details.isDirectory()) {
+                            return
+                        }
+                        def relPath = details.relativePath.pathString
+                        details.file.readLines('UTF-8').each { line ->
+                            def trimmed = line.trim()
+                            if (trimmed && !trimmed.startsWith('#')) {
+                                services[relPath].add(trimmed)
+                            }
+                        }
+                    }
+                }
+
+                def runtimeClasspathFiles = (configurations.findByName('runtimeClasspath')?.files ?: []) as Set<File>
+                runtimeClasspathFiles.each { File dep ->
+                    if (dep.isDirectory()) {
+                        collectServiceLines(fileTree(dep).matching { include 'META-INF/services/**' })
+                    } else if (dep.name.toLowerCase(Locale.ROOT).endsWith('.jar')) {
+                        collectServiceLines(zipTree(dep).matching { include 'META-INF/services/**' })
+                    }
+                }
+
+                services.each { relPath, lines ->
+                    def outFile = new File(outputDir, relPath)
+                    outFile.parentFile.mkdirs()
+                    outFile.write(lines.join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
+                }
+            }
+        }
+
+        tasks.named('jar').configure {
+            dependsOn(mergeTaskProvider)
+            from(file("$buildDir/athena/merged-services"))
+        }
+        logger.lifecycle("Athena bootstrap: injected META-INF/services merge into jar.")
+    }
+}
+configureAthenaServiceMerge()
+
+repositories {
+    mavenLocal()
+    maven { url athenaBootstrapConfig.athenaMavenUrl }
+}
+
+def resolveRobotBuildFile = {
+    def groovyBuild = file("$rootDir/build.gradle")
+    if (groovyBuild.isFile()) {
+        return groovyBuild
+    }
+    def ktsBuild = file("$rootDir/build.gradle.kts")
+    if (ktsBuild.isFile()) {
+        return ktsBuild
+    }
+    throw new GradleException("Could not find build.gradle or build.gradle.kts at ${rootDir}")
+}
+
+def readText = { File source ->
+    source.isFile() ? source.getText('UTF-8') : ''
+}
+
+def resolveSettingsFile = {
+    def groovySettings = file("$rootDir/settings.gradle")
+    if (groovySettings.isFile()) {
+        return groovySettings
+    }
+    def ktsSettings = file("$rootDir/settings.gradle.kts")
+    if (ktsSettings.isFile()) {
+        return ktsSettings
+    }
+    throw new GradleException("Could not find settings.gradle or settings.gradle.kts at ${rootDir}")
+}
+
+def upsertAthenaPluginInBuildFile = { File buildFile, String version ->
+    boolean kts = buildFile.name.toLowerCase(Locale.ROOT).endsWith('.kts')
+    String athenaLine = kts
+            ? "    id(\"ca.frc6390.athena.plugin\") version \"${version}\""
+            : "    id \"ca.frc6390.athena.plugin\" version \"${version}\""
+    String original = readText(buildFile)
+
+    def existingPattern = kts
+            ? ~/(?m)^\s*id\(\s*"ca\.frc6390\.athena\.plugin"\s*\)\s*(version\s*"[^"]+")?\s*$/
+            : ~/(?m)^\s*id\s*["']ca\.frc6390\.athena\.plugin["']\s*(version\s*["'][^"']+["'])?\s*$/
+    if ((original =~ existingPattern).find()) {
+        String updated = original.replaceFirst(existingPattern, athenaLine)
+        buildFile.write(updated, 'UTF-8')
+        return
+    }
+
+    def pluginsBlockPattern = ~/(?s)(plugins\s*\{)(.*?)(\})/
+    def matcher = pluginsBlockPattern.matcher(original)
+    if (!matcher.find()) {
+        throw new GradleException(
+                "Could not find plugins { } block in ${buildFile}. " +
+                        "Add Athena plugin manually: ${athenaLine.trim()}"
+        )
+    }
+    String replacement = matcher.group(1) + matcher.group(2) + "\n" + athenaLine + "\n" + matcher.group(3)
+    String updated = original.substring(0, matcher.start()) + replacement + original.substring(matcher.end())
+    buildFile.write(updated, 'UTF-8')
+}
+
+def removeAthenaPluginFromBuildFile = { File buildFile ->
+    boolean kts = buildFile.name.toLowerCase(Locale.ROOT).endsWith('.kts')
+    String original = readText(buildFile)
+    def linePattern = kts
+            ? ~/(?m)^\s*id\(\s*"ca\.frc6390\.athena\.plugin"\s*\)\s*(version\s*"[^"]+")?\s*\n?/
+            : ~/(?m)^\s*id\s*["']ca\.frc6390\.athena\.plugin["']\s*(version\s*["'][^"']+["'])?\s*\n?/
+    String updated = original.replaceFirst(linePattern, '')
+    if (updated != original) {
+        buildFile.write(updated, 'UTF-8')
+        return true
+    }
+    return false
+}
+
+def ensureAthenaRepoInSettings = { File settingsFile ->
+    String original = readText(settingsFile)
+    if (original.contains(athenaBootstrapConfig.athenaMavenUrl)) {
+        return false
+    }
+
+    boolean kts = settingsFile.name.toLowerCase(Locale.ROOT).endsWith('.kts')
+    String bootstrapBlock = kts
+            ? "        maven(url = \"${athenaBootstrapConfig.athenaMavenUrl}\")"
+            : "        maven { url '${athenaBootstrapConfig.athenaMavenUrl}' }"
+    String updated = original
+
+    if (original.contains('gradlePluginPortal()')) {
+        updated = original.replaceFirst(
+                /gradlePluginPortal\(\)/,
+                "gradlePluginPortal()\n${bootstrapBlock}"
+        )
+    } else if (original.contains('mavenLocal()')) {
+        updated = original.replaceFirst(
+                /mavenLocal\(\)/,
+                "mavenLocal()\n${bootstrapBlock}"
+        )
+    } else {
+        throw new GradleException(
+                "Could not inject Athena plugin repo into ${settingsFile}. " +
+                        "Please add repository manually: ${athenaBootstrapConfig.athenaMavenUrl}"
+        )
+    }
+
+    settingsFile.write(updated, 'UTF-8')
+    return true
+}
+
+def ensureAthenaPluginIncludeBuildInSettings = { File settingsFile, File athenaRepo ->
+    if (settingsFile == null || !settingsFile.isFile()) {
+        return false
+    }
+
+    String original = readText(settingsFile)
+    boolean kts = settingsFile.name.toLowerCase(Locale.ROOT).endsWith('.kts')
+
+    String optionalIncludeBuildBlock = kts
+            ? """    // Athena optional local plugin override (generated by athenaBootstrap)
+    val athenaLocalRepoDir = gradle.startParameter.projectProperties["athenaRepoDir"]
+            ?: System.getProperty("athenaRepoDir")
+            ?: System.getenv("ATHENA_REPO_DIR")
+    val athenaPluginCandidates = mutableListOf<File>()
+    if (!athenaLocalRepoDir.isNullOrBlank()) {
+        val athenaOverrideBase = File(athenaLocalRepoDir.trim())
+        athenaPluginCandidates.add(athenaOverrideBase)
+        athenaPluginCandidates.add(File(athenaOverrideBase, "athena-plugin"))
+    }
+    athenaPluginCandidates.add(File(settingsDir, "../FRC-Athena/athena-plugin"))
+    for (athenaCandidate in athenaPluginCandidates) {
+        val athenaNormalized = athenaCandidate.canonicalFile
+        val hasGradleBuildFile =
+                File(athenaNormalized, "build.gradle.kts").exists() ||
+                        File(athenaNormalized, "build.gradle").exists()
+        if (athenaNormalized.exists() && hasGradleBuildFile) {
+            includeBuild(athenaNormalized.toString().replace("\\\\", "/"))
+            break
+        }
+    }
+    // Athena optional local plugin override end"""
+            : """    // Athena optional local plugin override (generated by athenaBootstrap)
+    def athenaLocalRepoDir =
+            gradle.startParameter.projectProperties['athenaRepoDir']
+                    ?: System.getProperty('athenaRepoDir')
+                    ?: System.getenv('ATHENA_REPO_DIR')
+    def athenaPluginCandidates = []
+    if (athenaLocalRepoDir != null && !athenaLocalRepoDir.toString().trim().isEmpty()) {
+        def athenaOverrideBase = new File(athenaLocalRepoDir.toString().trim())
+        athenaPluginCandidates.add(athenaOverrideBase)
+        athenaPluginCandidates.add(new File(athenaOverrideBase, 'athena-plugin'))
+    }
+    athenaPluginCandidates.add(new File(settingsDir, '../FRC-Athena/athena-plugin'))
+    for (File athenaCandidate : athenaPluginCandidates) {
+        if (athenaCandidate == null) {
+            continue
+        }
+        def athenaNormalized = athenaCandidate.canonicalFile
+        def hasGradleBuildFile = new File(athenaNormalized, 'build.gradle').exists()
+                || new File(athenaNormalized, 'build.gradle.kts').exists()
+        if (athenaNormalized.exists() && hasGradleBuildFile) {
+            includeBuild(athenaNormalized)
+            break
+        }
+    }
+    // Athena optional local plugin override end"""
+
+    String updated = original
+    // Remove old generated optional block if present so it can be re-inserted in canonical form.
+    updated = updated.replaceAll(
+            /(?ms)^\s*\/\/ Athena optional local plugin override \(generated by athenaBootstrap\).*?^\s*\/\/ Athena optional local plugin override end\s*\r?\n?/,
+            ''
+    )
+    // Remove hardcoded athena-plugin includeBuild lines to avoid machine-specific paths.
+    updated = updated.replaceAll(
+            /(?m)^\s*includeBuild\(\s*["'][^"']*athena-plugin[^"']*["']\s*\)\s*\r?\n?/,
+            ''
+    )
+
+    def pluginManagementPattern = ~/(?s)(pluginManagement\s*\{)/
+    def matcher = pluginManagementPattern.matcher(updated)
+    if (!matcher.find()) {
+        throw new GradleException(
+                "Could not inject Athena optional plugin includeBuild logic into ${settingsFile}. " +
+                        "Please add the athena optional includeBuild block inside pluginManagement { }."
+        )
+    }
+
+    updated = updated.substring(0, matcher.end()) + "\n${optionalIncludeBuildBlock}" + updated.substring(matcher.end())
+    if (updated == original) {
+        return false
+    }
+    settingsFile.write(updated, 'UTF-8')
+    return true
+}
+
+def dslConfigured = {
+    File buildFile = resolveRobotBuildFile()
+    String body = readText(buildFile)
+    return body.contains('ca.frc6390.athena.plugin')
+}
+
+def athenaDslJdtExports = [
+        '--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED'
+]
+
+def stripJsoncComments = { String raw ->
+    if (raw == null || raw.isEmpty()) {
+        return ''
+    }
+
+    String text = raw.replace('\uFEFF', '')
+    StringBuilder out = new StringBuilder(text.length())
+    boolean inString = false
+    boolean escaped = false
+    boolean inLineComment = false
+    boolean inBlockComment = false
+
+    for (int i = 0; i < text.length(); i++) {
+        char c = text.charAt(i)
+        char next = (i + 1 < text.length()) ? text.charAt(i + 1) : '\u0000'
+
+        if (inLineComment) {
+            if (c == '\n' || c == '\r') {
+                inLineComment = false
+                out.append(c)
+            }
+            continue
+        }
+
+        if (inBlockComment) {
+            if (c == '*' && next == '/') {
+                inBlockComment = false
+                i++
+            }
+            continue
+        }
+
+        if (inString) {
+            out.append(c)
+            if (escaped) {
+                escaped = false
+            } else if (c == '\\') {
+                escaped = true
+            } else if (c == '"') {
+                inString = false
+            }
+            continue
+        }
+
+        if (c == '"') {
+            inString = true
+            out.append(c)
+            continue
+        }
+
+        if (c == '/' && next == '/') {
+            inLineComment = true
+            i++
+            continue
+        }
+
+        if (c == '/' && next == '*') {
+            inBlockComment = true
+            i++
+            continue
+        }
+
+        out.append(c)
+    }
+
+    return out.toString()
+}
+
+def stripJsonTrailingCommas = { String raw ->
+    if (raw == null || raw.isEmpty()) {
+        return ''
+    }
+
+    StringBuilder out = new StringBuilder(raw.length())
+    boolean inString = false
+    boolean escaped = false
+
+    for (int i = 0; i < raw.length(); i++) {
+        char c = raw.charAt(i)
+
+        if (inString) {
+            out.append(c)
+            if (escaped) {
+                escaped = false
+            } else if (c == '\\') {
+                escaped = true
+            } else if (c == '"') {
+                inString = false
+            }
+            continue
+        }
+
+        if (c == '"') {
+            inString = true
+            out.append(c)
+            continue
+        }
+
+        if (c == ',') {
+            int j = i + 1
+            while (j < raw.length() && Character.isWhitespace(raw.charAt(j))) {
+                j++
+            }
+            if (j < raw.length()) {
+                char next = raw.charAt(j)
+                if (next == ']' || next == '}') {
+                    continue
+                }
+            }
+        }
+
+        out.append(c)
+    }
+
+    return out.toString()
+}
+
+def readJsonObjectLax = { File source ->
+    if (source == null || !source.isFile()) {
+        return [:]
+    }
+    String raw = readText(source)
+    if (raw == null || raw.trim().isEmpty()) {
+        return [:]
+    }
+
+    try {
+        String normalized = stripJsonTrailingCommas(stripJsoncComments(raw))
+        def parsed = new JsonSlurper().parseText(normalized)
+        if (parsed instanceof Map) {
+            return new LinkedHashMap<>(parsed as Map)
+        }
+        throw new GradleException(
+                "Expected a top-level JSON object in ${source}, but got ${parsed?.getClass()?.simpleName ?: 'null'}"
+        )
+    } catch (Throwable t) {
+        throw new GradleException(
+                "Could not parse VS Code settings file ${source}. " +
+                        "Please ensure it contains valid JSON/JSONC.",
+                t
+        )
+    }
+}
+
+def mergeJvmArgs = { String existing, List<String> required ->
+    String merged = existing?.trim() ?: ''
+    required.each { arg ->
+        if (!merged.contains(arg)) {
+            merged = merged.isEmpty() ? arg : "${merged} ${arg}"
+        }
+    }
+    return merged
+}
+
+def ensureAthenaDslVscodeSettings = {
+    File settingsFile = file("$rootDir/.vscode/settings.json")
+    Map<String, Object> settings = readJsonObjectLax(settingsFile)
+    boolean changed = false
+
+    def putIfChanged = { String key, Object value ->
+        if (!settings.containsKey(key) || settings[key] != value) {
+            settings[key] = value
+            changed = true
+        }
+    }
+
+    putIfChanged('java.configuration.updateBuildConfiguration', 'automatic')
+    putIfChanged('java.import.gradle.annotationProcessing.enabled', true)
+    putIfChanged('java.jdt.ls.javac.enabled', 'on')
+    putIfChanged('java.completion.engine', 'dom')
+
+    String currentVmArgs = settings['java.jdt.ls.vmargs']?.toString() ?: ''
+    String mergedVmArgs = mergeJvmArgs(currentVmArgs, athenaDslJdtExports)
+    if (currentVmArgs != mergedVmArgs) {
+        settings['java.jdt.ls.vmargs'] = mergedVmArgs
+        changed = true
+    }
+
+    if (changed || !settingsFile.isFile()) {
+        settingsFile.parentFile?.mkdirs()
+        settingsFile.write(
+                JsonOutput.prettyPrint(JsonOutput.toJson(settings)) + System.lineSeparator(),
+                'UTF-8'
+        )
+    }
+
+    return [changed: changed, file: settingsFile]
+}
+
+def athenaDslVscodeConfigured = {
+    File settingsFile = file("$rootDir/.vscode/settings.json")
+    if (!settingsFile.isFile()) {
+        return false
+    }
+
+    Map<String, Object> settings
+    try {
+        settings = readJsonObjectLax(settingsFile)
+    } catch (Throwable ignored) {
+        return false
+    }
+
+    String vmArgs = settings['java.jdt.ls.vmargs']?.toString() ?: ''
+    boolean hasExports = athenaDslJdtExports.every { vmArgs.contains(it) }
+    boolean javacEnabled = 'on'.equalsIgnoreCase(settings['java.jdt.ls.javac.enabled']?.toString())
+    boolean domCompletion = 'dom'.equalsIgnoreCase(settings['java.completion.engine']?.toString())
+    boolean annotationProcessing = parseBooleanOrDefault(
+            settings['java.import.gradle.annotationProcessing.enabled'],
+            false
+    )
+
+    return javacEnabled && domCompletion && annotationProcessing && hasExports
+}
+
+def resolveStaticDeployTaskNames = {
+    def allStaticTasks = tasks.matching { task ->
+        def lower = task.name.toLowerCase(Locale.ROOT)
+        lower.startsWith('deploy') && lower.contains('frcstaticfiledeploy')
+    }.collect { it.name }.sort()
+
+    def preferred = allStaticTasks.findAll { taskName ->
+        taskName.toLowerCase(Locale.ROOT).startsWith('deployfrcstaticfiledeploy')
+    }
+    def taskNames = !preferred.isEmpty() ? preferred : allStaticTasks
+    if (taskNames.isEmpty()) {
+        throw new GradleException(
+                "Could not find a GradleRIO static deploy task. " +
+                        "Expected something like deployfrcStaticFileDeploy*."
+        )
+    }
+    return taskNames
+}
+
+tasks.register('athenaFindRepo') {
+    group = 'Athena'
+    description = 'Prints the detected local FRC-Athena repository path.'
+    doLast {
+        def repo = resolveAthenaRepoDir(true)
+        logger.lifecycle("Resolved FRC-Athena repo: ${repo}")
+    }
+}
+
+tasks.register('athenaSync') {
+    group = 'Athena'
+    description = 'Copies Athena vendordep JSON files from local FRC-Athena into this robot project.'
+    doLast {
+        def repo = resolveAthenaRepoDir(true)
+        syncFromAthenaRepo(repo)
+    }
+}
+
+tasks.register('athenaBuild') {
+    group = 'Athena'
+    description = 'Runs Athena build tasks in local FRC-Athena, then syncs vendordep JSON files.'
+    doLast {
+        def repo = resolveAthenaRepoDir(true)
+        Throwable buildFailure = null
+        try {
+            runAthenaBuild(repo)
+        } catch (Throwable t) {
+            buildFailure = t
+            logger.warn(
+                    "Athena build tasks failed; continuing bootstrap sync/plugin publish before failing this task."
+            )
+        }
+
+        syncFromAthenaRepo(repo)
+        String syncedVersion = readAthenaVersionFromRepo(repo)
+        ensureAthenaPluginPublished(repo, syncedVersion)
+
+        // If DSL is already enabled in the robot project, keep plugin version aligned
+        // with the just-synced Athena vendordep version.
+        if (dslConfigured()) {
+            File buildFile = resolveRobotBuildFile()
+            File settingsFile = resolveSettingsFile()
+            boolean includeBuildChanged = ensureAthenaPluginIncludeBuildInSettings(settingsFile, repo)
+            upsertAthenaPluginInBuildFile(buildFile, syncedVersion)
+            def vscodeResult = ensureAthenaDslVscodeSettings()
+            logger.lifecycle("Aligned Athena DSL plugin version in ${buildFile} to ${syncedVersion}")
+            if (includeBuildChanged) {
+                logger.lifecycle("Updated Athena plugin includeBuild entry in ${settingsFile}")
+            }
+            if (vscodeResult.changed) {
+                logger.lifecycle("Updated VS Code DSL IntelliSense settings in ${vscodeResult.file}")
+            }
+        } else {
+            logger.lifecycle(
+                    "Published Athena Gradle plugin ${syncedVersion} to mavenLocal " +
+                            "(DSL plugin id not currently configured in build script)."
+            )
+        }
+
+        if (buildFailure != null) {
+            throw new GradleException(
+                    "Athena build tasks failed before bootstrap completion. " +
+                            "Vendordeps and plugin publish were still attempted; see earlier logs for details.",
+                    buildFailure
+            )
+        }
+    }
+}
+
+tasks.register('athenaEnableDsl') {
+    group = 'Athena'
+    description = 'Patches settings/build scripts to enable Athena DSL plugin through plugins { }.'
+    doLast {
+        File repo = resolveAthenaRepoDir(false)
+        String version = resolveAthenaPluginVersion()
+        if (repo != null) {
+            ensureAthenaPluginPublished(repo, version)
+        } else {
+            logger.lifecycle(
+                    "Local FRC-Athena repo not found; continuing without local plugin publish " +
+                            "(expecting plugin ${version} from configured repositories)."
+            )
+        }
+        File buildFile = resolveRobotBuildFile()
+        File settingsFile = resolveSettingsFile()
+        boolean includeBuildChanged = repo != null
+                ? ensureAthenaPluginIncludeBuildInSettings(settingsFile, repo)
+                : false
+        boolean settingsChanged = ensureAthenaRepoInSettings(settingsFile)
+        upsertAthenaPluginInBuildFile(buildFile, version)
+        def vscodeResult = ensureAthenaDslVscodeSettings()
+        logger.lifecycle("Enabled Athena DSL plugin in ${buildFile} (version ${version})")
+        if (settingsChanged) {
+            logger.lifecycle("Added Athena plugin repository to ${settingsFile}")
+        }
+        if (includeBuildChanged) {
+            logger.lifecycle("Configured Athena plugin includeBuild in ${settingsFile}")
+        }
+        if (vscodeResult.changed) {
+            logger.lifecycle("Updated VS Code DSL IntelliSense settings in ${vscodeResult.file}")
+        }
+    }
+}
+
+tasks.register('athenaConfigureVscode') {
+    group = 'Athena'
+    description = 'Applies VS Code settings needed for Athena DSL IntelliSense compatibility.'
+    doLast {
+        def result = ensureAthenaDslVscodeSettings()
+        if (result.changed) {
+            logger.lifecycle("Updated VS Code DSL IntelliSense settings in ${result.file}")
+        } else {
+            logger.lifecycle("VS Code DSL IntelliSense settings already configured in ${result.file}")
+        }
+    }
+}
+
+tasks.register('athenaDisableDsl') {
+    group = 'Athena'
+    description = 'Removes Athena plugin id line from build.gradle(.kts).'
+    doLast {
+        File buildFile = resolveRobotBuildFile()
+        boolean removed = removeAthenaPluginFromBuildFile(buildFile)
+        if (removed) {
+            logger.lifecycle("Removed Athena DSL plugin id line from ${buildFile}")
+        } else {
+            logger.lifecycle("No Athena DSL plugin id line found in ${buildFile}")
+        }
+    }
+}
+
+tasks.register('athenaUpload') {
+    group = 'Athena'
+    description = 'Uploads only src/main/deploy files to the roboRIO (no robot code deploy).'
+    dependsOn {
+        resolveStaticDeployTaskNames()
+    }
+    doFirst {
+        def taskNames = resolveStaticDeployTaskNames()
+        logger.lifecycle("athenaUpload -> ${taskNames.join(', ')}")
+    }
+}
+
+tasks.register('athenaDoctor') {
+    group = 'Athena'
+    description = 'Prints Athena bootstrap health checks for this robot project.'
+    doLast {
+        def coreVendordep = file("$rootDir/vendordeps/${athenaBootstrapConfig.athenaCoreVendordep}")
+        def vendordepVersion = readAthenaVersionFromVendordep(coreVendordep)
+        logger.lifecycle("Athena core vendordep present: ${coreVendordep.isFile()}")
+        if (vendordepVersion != null) {
+            logger.lifecycle("Athena core vendordep version: ${vendordepVersion}")
+        }
+
+        def repo = resolveAthenaRepoDir(false)
+        logger.lifecycle("Local FRC-Athena repo detected: ${repo != null ? repo : '<none>'}")
+        if (repo != null) {
+            logger.lifecycle("Local FRC-Athena version: ${readAthenaVersionFromRepo(repo)}")
+        }
+
+        logger.lifecycle("Athena DSL plugin configured in build file: ${dslConfigured()}")
+        logger.lifecycle("Athena VS Code DSL settings configured: ${athenaDslVscodeConfigured()}")
+        logger.lifecycle(
+                "Athena DSL requested by property now: ${athenaDslRequested} " +
+                        "(requires athenaEnableDsl + rerun)"
+        )
+        def staticTasks = resolveStaticDeployTaskNames()
+        logger.lifecycle("Resolved static deploy task(s): ${staticTasks.join(', ')}")
+    }
+}

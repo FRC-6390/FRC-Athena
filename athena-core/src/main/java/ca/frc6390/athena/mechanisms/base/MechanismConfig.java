@@ -1964,7 +1964,8 @@ public class MechanismConfig<T extends Mechanism> {
 
     /**
      * Enables/disables this mechanism config.
-     * When disabled, {@link #build()} returns {@code null} and no hardware is constructed.
+     * When disabled, {@link #build()} still returns a mechanism instance so callers can keep stable
+     * references, but it is forced into an inert no-op runtime mode.
      */
     public MechanismConfig<T> disabled(boolean disabled) {
         this.disabled = disabled;
@@ -3023,7 +3024,15 @@ public class MechanismConfig<T extends Mechanism> {
      */
     public T build(){
         if (disabled) {
-            return null;
+            T mechanism = buildDisabledMechanism();
+            if (mechanismName != null && !mechanismName.isBlank()) {
+                mechanism.setName(mechanismName);
+            }
+            mechanism.setConfigDisabled(true);
+            if (stateGraph != null && mechanism instanceof StatefulLike<?> stateful) {
+                applyStateGraph(stateful, stateGraph);
+            }
+            return mechanism;
         }
         MechanismConfigRecord cfg = data;
         if (autoContinuousPidForUnboundedTurret) {
@@ -3128,6 +3137,35 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         return mechanism;
+    }
+
+    private T buildDisabledMechanism() {
+        MechanismConfigRecord originalData = data;
+        MechanismSimulationConfig originalSimulationConfig = simulationConfig;
+        ElevatorSimulationParameters originalElevatorSimulationParameters = elevatorSimulationParameters;
+        ArmSimulationParameters originalArmSimulationParameters = armSimulationParameters;
+        SimpleMotorSimulationParameters originalSimpleMotorSimulationParameters = simpleMotorSimulationParameters;
+        MechanismSensorSimulationConfig originalSensorSimulationConfig = sensorSimulationConfig;
+        try {
+            data = data.toBuilder()
+                    .motors(new ArrayList<>())
+                    .encoder(null)
+                    .limitSwitches(new ArrayList<>())
+                    .build();
+            simulationConfig = null;
+            elevatorSimulationParameters = null;
+            armSimulationParameters = null;
+            simpleMotorSimulationParameters = null;
+            sensorSimulationConfig = null;
+            return factory.apply(this);
+        } finally {
+            data = originalData;
+            simulationConfig = originalSimulationConfig;
+            elevatorSimulationParameters = originalElevatorSimulationParameters;
+            armSimulationParameters = originalArmSimulationParameters;
+            simpleMotorSimulationParameters = originalSimpleMotorSimulationParameters;
+            sensorSimulationConfig = originalSensorSimulationConfig;
+        }
     }
 
     /**

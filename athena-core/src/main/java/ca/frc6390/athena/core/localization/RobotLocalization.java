@@ -140,6 +140,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private NetworkTableEntry backendOverrideEnabledEntry;
     private NetworkTableEntry backendImuStrategyEntry;
     private NetworkTableEntry backendVisionStrategyEntry;
+    private NetworkTableEntry backendSlipDetectionEnabledEntry;
+    private NetworkTableEntry backendSlipYawRateThresholdEntry;
+    private NetworkTableEntry backendSlipYawRateDisagreementEntry;
+    private NetworkTableEntry backendSlipAccelThresholdEntry;
+    private NetworkTableEntry backendSlipAccelDisagreementEntry;
+    private NetworkTableEntry backendSlipHoldSecondsEntry;
+    private NetworkTableEntry backendSlipVisionStdDevScaleEntry;
+    private NetworkTableEntry backendSlipProcessStdDevScaleEntry;
 
     private double visionMaxLatencySeconds = 0.9;
     private double visionOutlierTranslationMeters = 2.5;
@@ -202,6 +210,19 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private ChassisSpeeds robotRelativeSpeeds = new ChassisSpeeds();
     private final ChassisSpeeds commandedSpeedsScratchA = new ChassisSpeeds();
     private final ChassisSpeeds commandedSpeedsScratchB = new ChassisSpeeds();
+    private Pose2d autoFollowerTargetPose = ZERO_POSE_2D;
+    private Pose2d autoFollowerMeasuredPose = ZERO_POSE_2D;
+    private ChassisSpeeds autoFollowerDesiredSpeeds = new ChassisSpeeds();
+    private ChassisSpeeds autoFollowerOutputSpeeds = new ChassisSpeeds();
+    private double autoFollowerErrorXMeters = 0.0;
+    private double autoFollowerErrorYMeters = 0.0;
+    private double autoFollowerTranslationErrorMeters = 0.0;
+    private double autoFollowerHeadingErrorDegrees = 0.0;
+    private double autoFollowerLastUpdateTimestampSeconds = Double.NaN;
+    private double autoFollowerUpdateDtSeconds = 0.0;
+    private double autoFollowerSourceAgeSeconds = 0.0;
+    private double autoFollowerSourceEstimatedPeriodSeconds = 0.0;
+    private boolean autoFollowerTelemetryValid = false;
     private double normalizedMovementSpeed = 0.0;
     private Pose2d lastVelocityPose = new Pose2d();
     private double lastVelocityTimestamp = Double.NaN;
@@ -505,24 +526,134 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         backendOverrideEnabledEntry = backendTable.getEntry("EnableOverride");
         backendImuStrategyEntry = backendTable.getEntry("ImuStrategy");
         backendVisionStrategyEntry = backendTable.getEntry("VisionStrategy");
+        backendSlipDetectionEnabledEntry = backendTable.getEntry("SlipDetectionEnabled");
+        backendSlipYawRateThresholdEntry = backendTable.getEntry("SlipYawRateThreshold");
+        backendSlipYawRateDisagreementEntry = backendTable.getEntry("SlipYawRateDisagreement");
+        backendSlipAccelThresholdEntry = backendTable.getEntry("SlipAccelThreshold");
+        backendSlipAccelDisagreementEntry = backendTable.getEntry("SlipAccelDisagreement");
+        backendSlipHoldSecondsEntry = backendTable.getEntry("SlipHoldSeconds");
+        backendSlipVisionStdDevScaleEntry = backendTable.getEntry("SlipVisionStdDevScale");
+        backendSlipProcessStdDevScaleEntry = backendTable.getEntry("SlipProcessStdDevScale");
 
         backendOverrideEnabledEntry.setBoolean(false);
         RobotLocalizationConfig.BackendConfig base = backendConfig();
         backendImuStrategyEntry.setString(base.imuStrategy().name());
         backendVisionStrategyEntry.setString(base.visionStrategy().name());
+        backendSlipDetectionEnabledEntry.setBoolean(base.slipDetectionEnabled());
+        backendSlipYawRateThresholdEntry.setDouble(base.slipYawRateThreshold());
+        backendSlipYawRateDisagreementEntry.setDouble(base.slipYawRateDisagreement());
+        backendSlipAccelThresholdEntry.setDouble(base.slipAccelThreshold());
+        backendSlipAccelDisagreementEntry.setDouble(base.slipAccelDisagreement());
+        backendSlipHoldSecondsEntry.setDouble(base.slipHoldSeconds());
+        backendSlipVisionStdDevScaleEntry.setDouble(base.slipVisionStdDevScale());
+        backendSlipProcessStdDevScaleEntry.setDouble(base.slipProcessStdDevScale());
     }
 
     // Backend override values are edited directly via NetworkTables under Athena/Localization/Backend.
 
     private RobotLocalizationConfig.BackendConfig applyBackendOverride(RobotLocalizationConfig.BackendConfig base) {
+        if (base == null) {
+            base = RobotLocalizationConfig.BackendConfig.defaults();
+        }
         RobotLocalizationConfig.BackendConfig.ImuStrategy imuStrategy =
-                parseEnum(backendImuStrategyEntry.getString(base.imuStrategy().name()), base.imuStrategy());
+                backendImuStrategyEntry != null
+                        ? parseEnum(backendImuStrategyEntry.getString(base.imuStrategy().name()), base.imuStrategy())
+                        : base.imuStrategy();
         RobotLocalizationConfig.BackendConfig.VisionStrategy visionStrategy =
-                parseEnum(backendVisionStrategyEntry.getString(base.visionStrategy().name()), base.visionStrategy());
+                backendVisionStrategyEntry != null
+                        ? parseEnum(backendVisionStrategyEntry.getString(base.visionStrategy().name()), base.visionStrategy())
+                        : base.visionStrategy();
+        boolean slipDetectionEnabled = backendSlipDetectionEnabledEntry != null
+                ? backendSlipDetectionEnabledEntry.getBoolean(base.slipDetectionEnabled())
+                : base.slipDetectionEnabled();
+        double slipYawRateThreshold = backendSlipYawRateThresholdEntry != null
+                ? backendSlipYawRateThresholdEntry.getDouble(base.slipYawRateThreshold())
+                : base.slipYawRateThreshold();
+        double slipYawRateDisagreement = backendSlipYawRateDisagreementEntry != null
+                ? backendSlipYawRateDisagreementEntry.getDouble(base.slipYawRateDisagreement())
+                : base.slipYawRateDisagreement();
+        double slipAccelThreshold = backendSlipAccelThresholdEntry != null
+                ? backendSlipAccelThresholdEntry.getDouble(base.slipAccelThreshold())
+                : base.slipAccelThreshold();
+        double slipAccelDisagreement = backendSlipAccelDisagreementEntry != null
+                ? backendSlipAccelDisagreementEntry.getDouble(base.slipAccelDisagreement())
+                : base.slipAccelDisagreement();
+        double slipHoldSeconds = backendSlipHoldSecondsEntry != null
+                ? backendSlipHoldSecondsEntry.getDouble(base.slipHoldSeconds())
+                : base.slipHoldSeconds();
+        double slipVisionStdDevScale = backendSlipVisionStdDevScaleEntry != null
+                ? backendSlipVisionStdDevScaleEntry.getDouble(base.slipVisionStdDevScale())
+                : base.slipVisionStdDevScale();
+        double slipProcessStdDevScale = backendSlipProcessStdDevScaleEntry != null
+                ? backendSlipProcessStdDevScaleEntry.getDouble(base.slipProcessStdDevScale())
+                : base.slipProcessStdDevScale();
 
         return base
                 .withImuStrategy(imuStrategy)
-                .withVisionStrategy(visionStrategy);
+                .withVisionStrategy(visionStrategy)
+                .withSlipDetectionEnabled(slipDetectionEnabled)
+                .withSlipYawRateThreshold(slipYawRateThreshold)
+                .withSlipYawRateDisagreement(slipYawRateDisagreement)
+                .withSlipAccelThreshold(slipAccelThreshold)
+                .withSlipAccelDisagreement(slipAccelDisagreement)
+                .withSlipHoldSeconds(slipHoldSeconds)
+                .withSlipVisionStdDevScale(slipVisionStdDevScale)
+                .withSlipProcessStdDevScale(slipProcessStdDevScale);
+    }
+
+    public boolean isBackendOverrideEnabled() {
+        return backendOverrideEnabledEntry != null && backendOverrideEnabledEntry.getBoolean(false);
+    }
+
+    public void setBackendOverrideEnabled(boolean enabled) {
+        if (backendOverrideEnabledEntry != null) {
+            backendOverrideEnabledEntry.setBoolean(enabled);
+        }
+    }
+
+    public RobotLocalizationConfig.BackendConfig getBackendOverrideConfig() {
+        RobotLocalizationConfig.BackendConfig base =
+                localizationConfig != null ? localizationConfig.backend() : RobotLocalizationConfig.BackendConfig.defaults();
+        return applyBackendOverride(base);
+    }
+
+    public RobotLocalizationConfig.BackendConfig getActiveBackendConfig() {
+        return backendConfig();
+    }
+
+    public void setBackendOverrideConfig(RobotLocalizationConfig.BackendConfig config) {
+        RobotLocalizationConfig.BackendConfig resolved =
+                config != null ? config : RobotLocalizationConfig.BackendConfig.defaults();
+        if (backendImuStrategyEntry != null) {
+            backendImuStrategyEntry.setString(resolved.imuStrategy().name());
+        }
+        if (backendVisionStrategyEntry != null) {
+            backendVisionStrategyEntry.setString(resolved.visionStrategy().name());
+        }
+        if (backendSlipDetectionEnabledEntry != null) {
+            backendSlipDetectionEnabledEntry.setBoolean(resolved.slipDetectionEnabled());
+        }
+        if (backendSlipYawRateThresholdEntry != null) {
+            backendSlipYawRateThresholdEntry.setDouble(resolved.slipYawRateThreshold());
+        }
+        if (backendSlipYawRateDisagreementEntry != null) {
+            backendSlipYawRateDisagreementEntry.setDouble(resolved.slipYawRateDisagreement());
+        }
+        if (backendSlipAccelThresholdEntry != null) {
+            backendSlipAccelThresholdEntry.setDouble(resolved.slipAccelThreshold());
+        }
+        if (backendSlipAccelDisagreementEntry != null) {
+            backendSlipAccelDisagreementEntry.setDouble(resolved.slipAccelDisagreement());
+        }
+        if (backendSlipHoldSecondsEntry != null) {
+            backendSlipHoldSecondsEntry.setDouble(resolved.slipHoldSeconds());
+        }
+        if (backendSlipVisionStdDevScaleEntry != null) {
+            backendSlipVisionStdDevScaleEntry.setDouble(resolved.slipVisionStdDevScale());
+        }
+        if (backendSlipProcessStdDevScaleEntry != null) {
+            backendSlipProcessStdDevScaleEntry.setDouble(resolved.slipProcessStdDevScale());
+        }
     }
 
     private static <E extends Enum<E>> E parseEnum(String value, E fallback) {
@@ -664,6 +795,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 pose -> resetPose(localizationConfig.autoPoseName(), pose),
                 (desiredPose, desiredSpeeds) -> {
                     Pose2d botpose = getFieldPose();
+                    double nowSeconds = currentTimestampSeconds();
+                    double sourceAgeSeconds = sourceAgeSeconds(
+                            nowSeconds,
+                            robotSpeeds.getSourceLastUpdateSeconds(RobotSpeeds.AUTO_SOURCE));
+                    double sourceEstimatedPeriodSeconds =
+                            robotSpeeds.getSourceEstimatedUpdatePeriodSeconds(RobotSpeeds.AUTO_SOURCE);
                     // Use the estimator heading so x/y/theta feedback share the same frame.
                     Rotation2d measuredHeading = botpose.getRotation();
                     double desiredHeadingRadians = desiredPose.getRotation().getRadians();
@@ -687,11 +824,15 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                             desiredSpeeds.vyMetersPerSecond + yFeedback,
                             desiredSpeeds.omegaRadiansPerSecond + thetaFeedback);
 
-                    ChassisSpeeds robotRelative = ChassisSpeeds.fromFieldRelativeSpeeds(
+                    robotSpeeds.setFieldRelativeSpeeds(RobotSpeeds.AUTO_SOURCE, fieldSpeeds);
+                    updateAutoFollowerTelemetry(
+                            desiredPose,
+                            botpose,
+                            desiredSpeeds,
                             fieldSpeeds,
-                            measuredHeading);
-
-                    robotSpeeds.setSpeeds(RobotSpeeds.AUTO_SOURCE, robotRelative);
+                            nowSeconds,
+                            sourceAgeSeconds,
+                            sourceEstimatedPeriodSeconds);
                 },
                 true,
                 drivetrain);
@@ -2249,6 +2390,28 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         speedsNode.putDouble("movementNormalized", normalizedMovementSpeed);
         speedsNode.putDouble("normalizedSpeed", getNormalizedSpeed());
 
+        RobotNetworkTables.Node autoFollowerNode = node.child("AutoFollower");
+        autoFollowerNode.putBoolean("valid", autoFollowerTelemetryValid);
+        autoFollowerNode.putDouble("targetXM", autoFollowerTargetPose.getX());
+        autoFollowerNode.putDouble("targetYM", autoFollowerTargetPose.getY());
+        autoFollowerNode.putDouble("targetHeadingDeg", autoFollowerTargetPose.getRotation().getDegrees());
+        autoFollowerNode.putDouble("measuredXM", autoFollowerMeasuredPose.getX());
+        autoFollowerNode.putDouble("measuredYM", autoFollowerMeasuredPose.getY());
+        autoFollowerNode.putDouble("measuredHeadingDeg", autoFollowerMeasuredPose.getRotation().getDegrees());
+        autoFollowerNode.putDouble("errorXM", autoFollowerErrorXMeters);
+        autoFollowerNode.putDouble("errorYM", autoFollowerErrorYMeters);
+        autoFollowerNode.putDouble("translationErrorM", autoFollowerTranslationErrorMeters);
+        autoFollowerNode.putDouble("headingErrorDeg", autoFollowerHeadingErrorDegrees);
+        autoFollowerNode.putDouble("updateDtSec", autoFollowerUpdateDtSeconds);
+        autoFollowerNode.putDouble("sourceAgeSec", autoFollowerSourceAgeSeconds);
+        autoFollowerNode.putDouble("sourceEstimatedPeriodSec", autoFollowerSourceEstimatedPeriodSeconds);
+        autoFollowerNode.putDouble("desiredVxMps", autoFollowerDesiredSpeeds.vxMetersPerSecond);
+        autoFollowerNode.putDouble("desiredVyMps", autoFollowerDesiredSpeeds.vyMetersPerSecond);
+        autoFollowerNode.putDouble("desiredOmegaRadPerSec", autoFollowerDesiredSpeeds.omegaRadiansPerSecond);
+        autoFollowerNode.putDouble("outputVxMps", autoFollowerOutputSpeeds.vxMetersPerSecond);
+        autoFollowerNode.putDouble("outputVyMps", autoFollowerOutputSpeeds.vyMetersPerSecond);
+        autoFollowerNode.putDouble("outputOmegaRadPerSec", autoFollowerOutputSpeeds.omegaRadiansPerSecond);
+
         publishBoundingBoxes(node, pose);
 
         // Field2d is a localization concern (not vision). Publish it only when explicitly enabled.
@@ -2315,6 +2478,61 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             return nowSeconds;
         }
         return Timer.getFPGATimestamp();
+    }
+
+    private static double sourceAgeSeconds(double nowSeconds, double sourceTimestampSeconds) {
+        if (!Double.isFinite(nowSeconds) || !Double.isFinite(sourceTimestampSeconds)) {
+            return 0.0;
+        }
+        return Math.max(0.0, nowSeconds - sourceTimestampSeconds);
+    }
+
+    private void updateAutoFollowerTelemetry(
+            Pose2d desiredPose,
+            Pose2d measuredPose,
+            ChassisSpeeds desiredSpeeds,
+            ChassisSpeeds outputSpeeds,
+            double nowSeconds,
+            double sourceAgeSeconds,
+            double sourceEstimatedPeriodSeconds) {
+        if (desiredPose == null || measuredPose == null || desiredSpeeds == null || outputSpeeds == null) {
+            return;
+        }
+        if (Double.isFinite(nowSeconds)
+                && Double.isFinite(autoFollowerLastUpdateTimestampSeconds)) {
+            double dtSeconds = nowSeconds - autoFollowerLastUpdateTimestampSeconds;
+            if (Double.isFinite(dtSeconds) && dtSeconds >= 0.0 && dtSeconds < 1.0) {
+                autoFollowerUpdateDtSeconds = dtSeconds;
+            }
+        }
+        autoFollowerLastUpdateTimestampSeconds = nowSeconds;
+        autoFollowerTargetPose = desiredPose;
+        autoFollowerMeasuredPose = measuredPose;
+        autoFollowerDesiredSpeeds = new ChassisSpeeds(
+                desiredSpeeds.vxMetersPerSecond,
+                desiredSpeeds.vyMetersPerSecond,
+                desiredSpeeds.omegaRadiansPerSecond);
+        autoFollowerOutputSpeeds = new ChassisSpeeds(
+                outputSpeeds.vxMetersPerSecond,
+                outputSpeeds.vyMetersPerSecond,
+                outputSpeeds.omegaRadiansPerSecond);
+        autoFollowerErrorXMeters = desiredPose.getX() - measuredPose.getX();
+        autoFollowerErrorYMeters = desiredPose.getY() - measuredPose.getY();
+        autoFollowerTranslationErrorMeters = Math.hypot(autoFollowerErrorXMeters, autoFollowerErrorYMeters);
+        double headingErrorRadians = MathUtil.inputModulus(
+                desiredPose.getRotation().getRadians() - measuredPose.getRotation().getRadians(),
+                -Math.PI,
+                Math.PI);
+        autoFollowerHeadingErrorDegrees = Units.radiansToDegrees(headingErrorRadians);
+        autoFollowerSourceAgeSeconds = Math.max(0.0, sourceAgeSeconds);
+        if (Double.isFinite(sourceEstimatedPeriodSeconds) && sourceEstimatedPeriodSeconds > 0.0) {
+            autoFollowerSourceEstimatedPeriodSeconds = sourceEstimatedPeriodSeconds;
+        } else if (Double.isFinite(autoFollowerUpdateDtSeconds) && autoFollowerUpdateDtSeconds > 0.0) {
+            autoFollowerSourceEstimatedPeriodSeconds = autoFollowerUpdateDtSeconds;
+        } else {
+            autoFollowerSourceEstimatedPeriodSeconds = 0.0;
+        }
+        autoFollowerTelemetryValid = true;
     }
 
     @Override

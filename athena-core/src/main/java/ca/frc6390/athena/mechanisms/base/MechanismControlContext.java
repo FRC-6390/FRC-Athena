@@ -48,6 +48,17 @@ public interface MechanismControlContext<T extends Mechanism>
     }
 
     /**
+     * Returns loop dt for this context, falling back to robot base-loop dt when unavailable.
+     */
+    default double effectiveLoopDtSeconds() {
+        double dtSeconds = controlLoopDtSeconds();
+        if (Double.isFinite(dtSeconds) && dtSeconds > 0.0) {
+            return dtSeconds;
+        }
+        return robotLoopDtSeconds();
+    }
+
+    /**
      * Returns the motor group for the mechanism, if any.
      */
     default MotorControllerGroup motorGroup() {

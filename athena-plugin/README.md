@@ -40,3 +40,16 @@ enum IntakeState {
 ```
 
 In this mode, the plugin generates `SetpointProvider<IntakeTuple>` and `getSetpoint()`.
+
+## VS Code IntelliSense
+
+The enum DSL transform is a javac plugin (`-Xplugin:AthenaStateDsl`), so VS Code
+must run the Java language server in javac mode with `jdk.compiler` exports.
+
+When using Athena bootstrap (`athena-bootstrap.gradle`), run:
+
+```bash
+./gradlew athenaConfigureVscode
+```
+
+`athenaEnableDsl` also applies this automatically.

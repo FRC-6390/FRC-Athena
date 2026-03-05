@@ -1,13 +1,22 @@
 package ca.frc6390.athena.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.core.examples.RobotSpeedsExamples;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class RobotSpeedsExamplesTest {
+
+    @AfterEach
+    void resetRobotTimeCache() {
+        RobotTime.resetNowSecondsForTest();
+    }
 
     @Test
     void defaultProfileAddsAndClampsOutput() {
@@ -62,5 +71,35 @@ final class RobotSpeedsExamplesTest {
 
         assertThrows(IllegalStateException.class,
                 () -> speeds.blend("auto", "drive", "assist", RobotSpeeds.BlendMode.ADD, RobotSpeeds.SpeedAxis.X));
+    }
+
+    @Test
+    void fieldRelativeSourceUsesCurrentHeadingAtCalculationTime() {
+        RobotSpeeds speeds = RobotSpeedsExamples.createDefaultProfile(10.0, 10.0);
+        Rotation2d heading = Rotation2d.fromDegrees(90.0);
+
+        speeds.setFieldRelativeSpeeds(RobotSpeeds.DRIVE_SOURCE, 2.0, 0.0, 1.0);
+
+        ChassisSpeeds out = speeds.calculate(heading);
+        ChassisSpeeds expected = ChassisSpeeds.fromFieldRelativeSpeeds(2.0, 0.0, 1.0, heading);
+
+        assertEquals(expected.vxMetersPerSecond, out.vxMetersPerSecond, 1e-9);
+        assertEquals(expected.vyMetersPerSecond, out.vyMetersPerSecond, 1e-9);
+        assertEquals(expected.omegaRadiansPerSecond, out.omegaRadiansPerSecond, 1e-9);
+        assertTrue(speeds.isFieldRelativeSource(RobotSpeeds.DRIVE_SOURCE));
+    }
+
+    @Test
+    void sourceUpdateTimestampTracksLatestWrite() {
+        RobotSpeeds speeds = RobotSpeedsExamples.createDefaultProfile(10.0, 10.0);
+
+        RobotTime.updateNowSeconds(1.25);
+        speeds.setFieldRelativeSpeeds(RobotSpeeds.DRIVE_SOURCE, 1.0, 0.0, 0.0);
+        assertEquals(1.25, speeds.getSourceLastUpdateSeconds(RobotSpeeds.DRIVE_SOURCE), 1e-9);
+
+        RobotTime.updateNowSeconds(2.0);
+        speeds.setSpeeds(RobotSpeeds.DRIVE_SOURCE, 0.0, 1.0, 0.0);
+        assertEquals(2.0, speeds.getSourceLastUpdateSeconds(RobotSpeeds.DRIVE_SOURCE), 1e-9);
+        assertFalse(speeds.isFieldRelativeSource(RobotSpeeds.DRIVE_SOURCE));
     }
 }

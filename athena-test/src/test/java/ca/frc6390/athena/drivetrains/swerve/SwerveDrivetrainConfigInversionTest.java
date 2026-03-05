@@ -110,4 +110,5 @@ final class SwerveDrivetrainConfigInversionTest {
         assertFalse(base.rotationMotor().inverted());
         assertFalse(base.encoder().inverted());
     }
+
 }

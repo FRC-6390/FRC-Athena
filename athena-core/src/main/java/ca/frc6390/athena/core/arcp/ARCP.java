@@ -1010,6 +1010,9 @@ public final class ARCP {
         switch (signalType) {
             case 1 -> {
                 boolean value = record.remaining() >= 1 && record.get() != 0;
+                if (!shouldDispatchSetEvent(signalId, ArcpRuntime.SignalType.BOOL, value)) {
+                    return;
+                }
                 cacheValueForSignalId(signalId, ArcpRuntime.SignalType.BOOL, value);
                 BooleanSetter handler = boolSetHandlers.get(signalId);
                 if (handler != null) {
@@ -1021,6 +1024,9 @@ public final class ARCP {
                     return;
                 }
                 long value = record.getLong();
+                if (!shouldDispatchSetEvent(signalId, ArcpRuntime.SignalType.I64, value)) {
+                    return;
+                }
                 cacheValueForSignalId(signalId, ArcpRuntime.SignalType.I64, value);
                 LongConsumer handler = i64SetHandlers.get(signalId);
                 if (handler != null) {
@@ -1032,6 +1038,9 @@ public final class ARCP {
                     return;
                 }
                 double value = record.getDouble();
+                if (!shouldDispatchSetEvent(signalId, ArcpRuntime.SignalType.F64, value)) {
+                    return;
+                }
                 cacheValueForSignalId(signalId, ArcpRuntime.SignalType.F64, value);
                 DoubleConsumer handler = f64SetHandlers.get(signalId);
                 if (handler != null) {
@@ -1041,6 +1050,9 @@ public final class ARCP {
             case 4 -> {
                 String value = decodeString(record);
                 if (value == null) {
+                    return;
+                }
+                if (!shouldDispatchSetEvent(signalId, ArcpRuntime.SignalType.STRING, value)) {
                     return;
                 }
                 cacheValueForSignalId(signalId, ArcpRuntime.SignalType.STRING, value);
@@ -1053,6 +1065,47 @@ public final class ARCP {
                 // Ignore unsupported event payload types for now.
             }
         }
+    }
+
+    private boolean shouldDispatchSetEvent(int signalId, ArcpRuntime.SignalType signalType, Object incomingValue) {
+        SignalRegistration registration = registrationsById.get(signalId);
+        if (registration == null) {
+            return true;
+        }
+        if (registration.signalAccess() != ArcpRuntime.SignalAccess.WRITE) {
+            return true;
+        }
+        if (registration.signalPolicy() != ArcpRuntime.SignalPolicy.ON_CHANGE) {
+            return true;
+        }
+        String path = registration.path();
+        ArcpRuntime.SignalType cachedType = valueTypes.get(path);
+        if (cachedType != signalType || !valueCache.containsKey(path)) {
+            return true;
+        }
+        Object cachedValue = valueCache.get(path);
+        return !cachedValueEquals(signalType, cachedValue, incomingValue);
+    }
+
+    private static boolean cachedValueEquals(
+            ArcpRuntime.SignalType signalType, Object cachedValue, Object incomingValue) {
+        return switch (signalType) {
+            case BOOL ->
+                cachedValue instanceof Boolean cachedBool
+                        && incomingValue instanceof Boolean incomingBool
+                        && cachedBool.booleanValue() == incomingBool.booleanValue();
+            case I64 ->
+                cachedValue instanceof Number cachedNumber
+                        && incomingValue instanceof Number incomingNumber
+                        && cachedNumber.longValue() == incomingNumber.longValue();
+            case F64 ->
+                cachedValue instanceof Number cachedNumber
+                        && incomingValue instanceof Number incomingNumber
+                        && Double.doubleToLongBits(cachedNumber.doubleValue())
+                                == Double.doubleToLongBits(incomingNumber.doubleValue());
+            case STRING -> Objects.equals(cachedValue, incomingValue);
+            default -> Objects.deepEquals(cachedValue, incomingValue);
+        };
     }
 
     private void patchMetadata(String rawPath, Map<String, ?> metadataPatch) {
@@ -1196,6 +1249,40 @@ public final class ARCP {
                                             && signalAccess == ArcpRuntime.SignalAccess.OBSERVE)
                                     || (existing.signalAccess() == ArcpRuntime.SignalAccess.OBSERVE
                                             && signalAccess == ArcpRuntime.SignalAccess.WRITE))) {
+                        ArcpRuntime.SignalAccess upgradedAccess =
+                                (existing.signalAccess() == ArcpRuntime.SignalAccess.WRITE
+                                                || signalAccess == ArcpRuntime.SignalAccess.WRITE)
+                                        ? ArcpRuntime.SignalAccess.WRITE
+                                        : ArcpRuntime.SignalAccess.OBSERVE;
+                        if (upgradedAccess != existing.signalAccess()) {
+                            int existingSignalId = existing.signalId();
+                            runtime.registerSignal(
+                                    existingSignalId,
+                                    existing.signalType(),
+                                    existing.signalKind(),
+                                    upgradedAccess,
+                                    existing.signalPolicy(),
+                                    existing.signalDurability(),
+                                    existing.path());
+                            SignalRegistration upgraded = new SignalRegistration(
+                                    existing.signalId(),
+                                    existing.path(),
+                                    existing.signalType(),
+                                    existing.signalKind(),
+                                    upgradedAccess,
+                                    existing.signalPolicy(),
+                                    existing.signalDurability());
+                            signalIds.replaceAll((ignored, registration) ->
+                                    registration != null && registration.signalId() == existingSignalId
+                                            ? upgraded
+                                            : registration);
+                            canonicalSignalIds.replaceAll((ignored, registration) ->
+                                    registration != null && registration.signalId() == existingSignalId
+                                            ? upgraded
+                                            : registration);
+                            registrationsById.put(existingSignalId, upgraded);
+                            existing = upgraded;
+                        }
                         signalIds.putIfAbsent(key, existing);
                         if (!canonicalPath.isEmpty()) {
                             canonicalSignalIds.putIfAbsent(canonicalKey, existing);

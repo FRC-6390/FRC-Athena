@@ -45,7 +45,8 @@ to `System.loadLibrary("arcp_jni")`.
 Native build is driven by Gradle task `prepareArcpNativeResources`.
 
 - `host` (default for normal builds): build current host target only.
-- `vendor` (default when running publish tasks): cross-build vendor matrix.
+- publish/copy tasks default to `armv7-unknown-linux-gnueabihf,host` when `arcpNativeMode` is not set.
+- `vendor`: cross-build vendor matrix.
 - `full`: build full configured matrix.
 - `none`: skip native staging.
 
@@ -53,7 +54,7 @@ Properties/env:
 
 - `-ParcpNativeMode=<host|vendor|full|none>`
 - `-ParcpJniTargets=triple1,triple2,...` (overrides mode matrix)
-- `-ParcpUseDockerCross=<true|false>` (default `true` for `vendor/full` and for `host` on supported Linux/Windows hosts; unsupported host OS/arch defaults to `false`)
+- `-ParcpUseDockerCross=<true|false>` (default `true` for all native modes except `none`)
 - `-ParcpDockerImage=<tag>` (default `athena-arcp-cross:latest`)
 - `-ParcpDockerRebuild=<true|false>` (force rebuild of cross image)
 - `-ParcpInstallRustTargets=<true|false>` (auto-run `rustup target add` for missing targets)
@@ -89,4 +90,5 @@ Examples:
 - `./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=vendor -ParcpUseDockerCross=false`
 - `./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=vendor -ParcpOptionalTargets=armv7-unknown-linux-gnueabihf`
 - `./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=vendor -ParcpRequireAllTargets=true`
-- `./gradlew :athena-arcp-java:publishToMavenLocal` (defaults to vendor mode unless overridden)
+- `./gradlew :athena-arcp-java:publishToMavenLocal` (defaults to `armv7-unknown-linux-gnueabihf,host` unless overridden)
+- `./gradlew :athena-arcp-java:publishToMavenLocal -ParcpNativeMode=vendor` (force vendor matrix)

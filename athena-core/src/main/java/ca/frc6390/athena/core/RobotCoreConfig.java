@@ -59,8 +59,10 @@ public final class RobotCoreConfig {
         public <T extends RobotDrivetrain<T>> Builder<T> drivetrain(
                 Function<DrivetrainSection, RobotDrivetrainConfig<T>> selector) {
             Objects.requireNonNull(selector, "selector");
-            RobotDrivetrainConfig<T> config = Objects.requireNonNull(selector.apply(new DrivetrainSection()),
+            DrivetrainSection section = new DrivetrainSection();
+            RobotDrivetrainConfig<T> rawConfig = Objects.requireNonNull(selector.apply(section),
                     "selector returned null drivetrain config");
+            RobotDrivetrainConfig<T> config = section.wrapWithTiming(rawConfig);
             return new Builder<>(name, config);
         }
     }
@@ -179,7 +181,69 @@ public final class RobotCoreConfig {
     }
 
     public static final class DrivetrainSection {
+        private double updatePeriodSeconds = Double.NaN;
+        private double driverCommandPeriodSeconds = Double.NaN;
+
         private DrivetrainSection() {}
+
+        /**
+         * Sets the drivetrain control/update loop period in seconds.
+         *
+         * <p>Applied to drivetrains that expose a configurable update period (currently swerve).</p>
+         */
+        public DrivetrainSection updatePeriodSeconds(double seconds) {
+            if (Double.isFinite(seconds) && seconds > 0.0) {
+                updatePeriodSeconds = seconds;
+            }
+            return this;
+        }
+
+        /**
+         * Sets the drivetrain control/update loop period in milliseconds.
+         */
+        public DrivetrainSection updatePeriodMs(double milliseconds) {
+            return updatePeriodSeconds(milliseconds / 1000.0);
+        }
+
+        /**
+         * Sets the expected driver-command update period in seconds.
+         *
+         * <p>Applied to drivetrains that expose a configurable driver input period (currently swerve).</p>
+         */
+        public DrivetrainSection driverCommandPeriodSeconds(double seconds) {
+            if (Double.isFinite(seconds) && seconds > 0.0) {
+                driverCommandPeriodSeconds = seconds;
+            }
+            return this;
+        }
+
+        /**
+         * Sets the expected driver-command update period in milliseconds.
+         */
+        public DrivetrainSection driverCommandPeriodMs(double milliseconds) {
+            return driverCommandPeriodSeconds(milliseconds / 1000.0);
+        }
+
+        private void applyTimingIfSupported(RobotDrivetrain<?> drivetrain) {
+            if (drivetrain instanceof SwerveDrivetrain swerve) {
+                if (Double.isFinite(updatePeriodSeconds) && updatePeriodSeconds > 0.0) {
+                    swerve.updatePeriodSeconds(updatePeriodSeconds);
+                }
+                if (Double.isFinite(driverCommandPeriodSeconds) && driverCommandPeriodSeconds > 0.0) {
+                    swerve.driverCommandPeriodSeconds(driverCommandPeriodSeconds);
+                }
+            }
+        }
+
+        private <T extends RobotDrivetrain<T>> RobotDrivetrainConfig<T> wrapWithTiming(
+                RobotDrivetrainConfig<T> config) {
+            Objects.requireNonNull(config, "config");
+            return () -> {
+                T drivetrain = config.build();
+                applyTimingIfSupported(drivetrain);
+                return drivetrain;
+            };
+        }
 
         public RobotDrivetrainConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
             return Objects.requireNonNull(config, "config");
@@ -189,7 +253,7 @@ public final class RobotCoreConfig {
             Objects.requireNonNull(section, "section");
             SwerveSection s = new SwerveSection();
             section.accept(s);
-            return s.config;
+            return s.drivetrainConfig();
         }
 
         public RobotDrivetrainConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
@@ -208,7 +272,12 @@ public final class RobotCoreConfig {
         private final SwerveDrivetrainConfig config = new SwerveDrivetrainConfig();
         private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
 
-        private SwerveSection() {}
+        private SwerveSection() {
+        }
+
+        private RobotDrivetrainConfig<SwerveDrivetrain> drivetrainConfig() {
+            return config;
+        }
 
         public SwerveSection trackWidthMeters(double trackWidthMeters) {
             return moduleLocations(trackWidthMeters);
@@ -292,14 +361,9 @@ public final class RobotCoreConfig {
             return this;
         }
 
-        public SwerveSection cosineCompensation(boolean enabled) {
-            config.control().cosineCompensation(enabled);
-            return this;
-        }
-
-        public SwerveSection cosineCompensation(
-                Consumer<SwerveDrivetrainConfig.CosineCompensationSection> section) {
-            config.control().cosineCompensation(section);
+        public SwerveSection control(Consumer<SwerveDrivetrainConfig.ControlSection> section) {
+            Objects.requireNonNull(section, "section");
+            section.accept(config.control());
             return this;
         }
 
@@ -677,6 +741,22 @@ public final class RobotCoreConfig {
          */
         public AutoSection pose(String poseName) {
             config = config.pose(poseName);
+            return this;
+        }
+
+        /**
+         * Sets the expected period for auto-follower speed updates.
+         */
+        public AutoSection followerPeriodSeconds(double seconds) {
+            config = config.followerPeriodSeconds(seconds);
+            return this;
+        }
+
+        /**
+         * Sets the expected period for auto-follower speed updates.
+         */
+        public AutoSection followerPeriodMs(double milliseconds) {
+            config = config.followerPeriodMs(milliseconds);
             return this;
         }
 

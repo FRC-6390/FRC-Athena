@@ -88,7 +88,7 @@
 <section class="settings-screen panel">
   <header>
     <h2>Connection Settings</h2>
-    <p>Configure ARCP control endpoint for this dashboard client.</p>
+    <p>Configure ARCP endpoint. Use <code>ds</code> (or leave Host blank) for Driver Station auto-targeting.</p>
   </header>
 
   <div class="settings-grid">
@@ -96,7 +96,7 @@
       Host
       <input
         value={host}
-        placeholder="127.0.0.1"
+        placeholder="ds"
         oninput={(e) => onHostInput((e.currentTarget as HTMLInputElement).value)}
       />
     </label>
