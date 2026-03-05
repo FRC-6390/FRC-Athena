@@ -84,7 +84,7 @@ public class SwerveDrivetrain extends SubsystemBase
   private static final double MAX_DISCRETIZE_DT_SECONDS = 0.25;
   private static final double MIN_FIELD_RELATIVE_COMP_OMEGA_RAD_PER_SEC = 0.05;
   private static final double MIN_FIELD_RELATIVE_COMP_SPEED_MPS = 0.1;
-  private static final boolean FIELD_RELATIVE_LEAD_COMPENSATION_ENABLED = false;
+  private static final boolean FIELD_RELATIVE_LEAD_COMPENSATION_ENABLED = true;
   private static final double FIELD_RELATIVE_LEAD_ESTIMATOR_TIME_CONSTANT_SECONDS = 0.05;
   private static final double FIELD_RELATIVE_PIPELINE_CYCLES = 3.0;
   private static final double MAX_FIELD_RELATIVE_COMMAND_AGE_SECONDS = 0.1;
@@ -751,9 +751,9 @@ public class SwerveDrivetrain extends SubsystemBase
 
   @Override
   public void update() {
-    imu.update();
     double nowSeconds = nowSeconds();
     double loopDtSeconds = resolveLoopDtSeconds(nowSeconds);
+    imu.update();
     Rotation2d driverHeading = imu.getVirtualAxis("driver");
     
     if (sysIdActive) {
@@ -768,10 +768,8 @@ public class SwerveDrivetrain extends SubsystemBase
     ChassisSpeeds speed = calculatedSpeeds;
     boolean fieldRelativeTranslationActive = hasActiveFieldRelativeTranslationSource();
     boolean driveFieldRelativeTranslationActive = isDriveFieldRelativeTranslationActive();
-    double configuredLoopDtSeconds = sanitizeLoopDtSeconds(updatePeriodSeconds);
     boolean adaptiveLeadActive = FIELD_RELATIVE_LEAD_COMPENSATION_ENABLED
-        && driveFieldRelativeTranslationActive
-        && loopDtSeconds <= (configuredLoopDtSeconds * 1.5);
+        && driveFieldRelativeTranslationActive;
 
     boolean driverControlActive =
         robotSpeeds.isSpeedsSourceActive(RobotSpeeds.DRIVE_SOURCE);
@@ -782,6 +780,8 @@ public class SwerveDrivetrain extends SubsystemBase
       desiredHeading = imu.getVirtualAxis("drift").getRadians();
     }
 
+    speed = applyMotionLimits(speed, nowSeconds, driverHeading, fieldRelativeTranslationActive);
+    speed = clampOmegaForTranslationPriority(speed);
     ChassisSpeeds speedBeforeLeadCompensation = new ChassisSpeeds(
         speed.vxMetersPerSecond,
         speed.vyMetersPerSecond,
@@ -792,9 +792,6 @@ public class SwerveDrivetrain extends SubsystemBase
         loopDtSeconds,
         fieldRelativeTranslationActive,
         adaptiveLeadActive);
-
-    speed = applyMotionLimits(speed, nowSeconds, driverHeading, fieldRelativeTranslationActive);
-    speed = clampOmegaForTranslationPriority(speed);
     speed = discretizeSpeedsForKinematics(speed, loopDtSeconds);
 
     calculateModuleStates(speed, desiredModuleStates);
@@ -1461,8 +1458,8 @@ public class SwerveDrivetrain extends SubsystemBase
     }
 
     // Positive omega means the robot rotated CCW since command sample time, so rotate
-    // the commanded robot-relative translation forward by +omega*lead to align timing.
-    double angle = omega * totalLead;
+    // the commanded robot-relative translation backward by -omega*lead to align timing.
+    double angle = -omega * totalLead;
     double cos = Math.cos(angle);
     double sin = Math.sin(angle);
     double vx = speeds.vxMetersPerSecond * cos - speeds.vyMetersPerSecond * sin;

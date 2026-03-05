@@ -635,6 +635,68 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             return auto(builder.config);
         }
 
+        /**
+         * Sets drivetrain control/update loop period in seconds.
+         *
+         * <p>Applied to drivetrains that expose this runtime knob (currently swerve).</p>
+         */
+        public RobotCoreConfig<T> drivetrainUpdatePeriodSeconds(double seconds) {
+            if (!Double.isFinite(seconds) || seconds <= 0.0) {
+                return this;
+            }
+            return withDrivetrainRuntimeTiming(swerve -> swerve.updatePeriodSeconds(seconds));
+        }
+
+        /**
+         * Sets drivetrain control/update loop period in milliseconds.
+         */
+        public RobotCoreConfig<T> drivetrainUpdatePeriodMs(double milliseconds) {
+            return drivetrainUpdatePeriodSeconds(milliseconds / 1000.0);
+        }
+
+        /**
+         * Sets expected driver command update period in seconds.
+         *
+         * <p>Applied to drivetrains that expose this runtime knob (currently swerve).</p>
+         */
+        public RobotCoreConfig<T> driverCommandPeriodSeconds(double seconds) {
+            if (!Double.isFinite(seconds) || seconds <= 0.0) {
+                return this;
+            }
+            return withDrivetrainRuntimeTiming(swerve -> swerve.driverCommandPeriodSeconds(seconds));
+        }
+
+        /**
+         * Sets expected driver command update period in milliseconds.
+         */
+        public RobotCoreConfig<T> driverCommandPeriodMs(double milliseconds) {
+            return driverCommandPeriodSeconds(milliseconds / 1000.0);
+        }
+
+        private RobotCoreConfig<T> withDrivetrainRuntimeTiming(Consumer<SwerveDrivetrain> applier) {
+            RobotDrivetrainConfig<T> wrappedConfig = () -> {
+                T drivetrain = driveTrain.build();
+                if (drivetrain instanceof SwerveDrivetrain swerve) {
+                    applier.accept(swerve);
+                }
+                return drivetrain;
+            };
+            return new RobotCoreConfig<>(
+                    wrappedConfig,
+                    localizationConfig,
+                    visionConfig,
+                    autoInitResetEnabled,
+                    telemetryConfig,
+                    mechanisms,
+                    performanceMode,
+                    timingDebugEnabled,
+                    telemetryEnabled,
+                    autoConfig,
+                    hooks,
+                    systemConfig,
+                    arcpConfig);
+        }
+
         public static final class AutoSection {
             private AutoConfig config;
 

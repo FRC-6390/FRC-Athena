@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.Locale;
@@ -24,9 +25,11 @@ import java.util.Locale;
 import ca.frc6390.athena.core.auto.AutoBackend;
 import ca.frc6390.athena.core.auto.AutoBackends;
 import ca.frc6390.athena.core.diagnostics.BoundedEventLog;
+import ca.frc6390.athena.core.input.TypedInputContext;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
@@ -43,7 +46,8 @@ public class RobotAuto {
 
     private final Map<String, Supplier<Command>> namedCommandSuppliers;
     private final Map<String, AutoRoutine> autoRoutines;
-    private final Map<String, AutoInputBinding<?>> autoInputs;
+    private final Map<String, InputBinding<?>> autoInputs;
+    private final Map<String, RuntimeInputOverride> runtimeInputOverrides;
     private final Map<String, List<AutoRoutine>> programPathRoutines;
     private final Map<String, Optional<List<Pose2d>>> autoPoseCache;
     private final Map<String, Optional<List<Pose2d>>> programPoseCache;
@@ -79,6 +83,7 @@ public class RobotAuto {
         namedCommandSuppliers = new LinkedHashMap<>();
         autoRoutines = new LinkedHashMap<>();
         autoInputs = new LinkedHashMap<>();
+        runtimeInputOverrides = new LinkedHashMap<>();
         programPathRoutines = new LinkedHashMap<>();
         autoPoseCache = new LinkedHashMap<>();
         programPoseCache = new LinkedHashMap<>();
@@ -191,16 +196,102 @@ public class RobotAuto {
     }
 
     /**
-     * Typed key for external auto inputs.
+     * Read-only typed input access used by auto runtime contexts.
      */
-    public interface AutoInput<T> {
-        String id();
+    public interface RuntimeInputSection {
+        boolean bool(String key);
 
-        Class<T> type();
+        BooleanSupplier boolSupplier(String key);
 
-        static <T> AutoInput<T> of(String id, Class<T> type) {
-            return new SimpleAutoInput<>(id, type);
-        }
+        double dbl(String key);
+
+        DoubleSupplier dblSupplier(String key);
+
+        int integer(String key);
+
+        IntSupplier integerSupplier(String key);
+
+        String string(String key);
+
+        Supplier<String> stringSupplier(String key);
+
+        Pose2d pose2d(String key);
+
+        Supplier<Pose2d> pose2dSupplier(String key);
+
+        Pose3d pose3d(String key);
+
+        Supplier<Pose3d> pose3dSupplier(String key);
+
+        <V> V object(String key, Class<V> type);
+
+        <V> Supplier<V> objectSupplier(String key, Class<V> type);
+    }
+
+    /**
+     * Typed input registration access for {@link AutoRegisterCtx}.
+     */
+    public interface RegisterInputSection extends RuntimeInputSection {
+        RegisterInputSection bool(String key, BooleanSupplier supplier);
+
+        RegisterInputSection bool(String key, boolean value);
+
+        RegisterInputSection dbl(String key, DoubleSupplier supplier);
+
+        RegisterInputSection dbl(String key, double value);
+
+        RegisterInputSection integer(String key, IntSupplier supplier);
+
+        RegisterInputSection integer(String key, int value);
+
+        RegisterInputSection string(String key, Supplier<String> supplier);
+
+        RegisterInputSection string(String key, String value);
+
+        RegisterInputSection pose2d(String key, Supplier<Pose2d> supplier);
+
+        RegisterInputSection pose2d(String key, Pose2d value);
+
+        RegisterInputSection pose3d(String key, Supplier<Pose3d> supplier);
+
+        RegisterInputSection pose3d(String key, Pose3d value);
+
+        <V> RegisterInputSection object(String key, Class<V> type, Supplier<V> supplier);
+    }
+
+    /**
+     * Typed input runtime mutation access for {@link AutoBuildCtx}.
+     */
+    public interface BuildInputSection extends RuntimeInputSection {
+        Command bool(String key, boolean value);
+
+        Command resetBool(String key);
+
+        Command dbl(String key, double value);
+
+        Command resetDouble(String key);
+
+        Command integer(String key, int value);
+
+        Command resetInt(String key);
+
+        Command string(String key, String value);
+
+        Command resetString(String key);
+
+        Command pose2d(String key, Pose2d value);
+
+        Command resetPose2d(String key);
+
+        Command pose3d(String key, Pose3d value);
+
+        Command resetPose3d(String key);
+
+        <V> Command object(String key, Class<V> type, V value);
+
+        <V> Command resetObject(String key, Class<V> type);
+
+        Command clear();
     }
 
     /**
@@ -242,7 +333,7 @@ public class RobotAuto {
      * <p>This context exposes program-scoped metadata and can resolve globally registered
      * autos. It is shared by {@link AutoRegisterCtx} and {@link AutoBuildCtx}.</p>
      */
-    public interface AutoRuntimeCtx {
+    public interface AutoRuntimeCtx extends TypedInputContext {
         RobotCore<?> robot();
 
         boolean hasMarker(String id);
@@ -251,10 +342,161 @@ public class RobotAuto {
 
         boolean hasInput(String id);
 
-        <T> Supplier<T> input(AutoInput<T> key);
+        default RuntimeInputSection input() {
+            AutoRuntimeCtx ctx = this;
+            return new RuntimeInputSection() {
+                @Override
+                public boolean bool(String key) {
+                    return ctx.input(key);
+                }
 
-        default <T> T inputValue(AutoInput<T> key) {
-            return input(key).get();
+                @Override
+                public BooleanSupplier boolSupplier(String key) {
+                    return ctx.inputSupplier(key);
+                }
+
+                @Override
+                public double dbl(String key) {
+                    return ctx.doubleInput(key);
+                }
+
+                @Override
+                public DoubleSupplier dblSupplier(String key) {
+                    return ctx.doubleInputSupplier(key);
+                }
+
+                @Override
+                public int integer(String key) {
+                    return ctx.intVal(key);
+                }
+
+                @Override
+                public IntSupplier integerSupplier(String key) {
+                    return ctx.intValSupplier(key);
+                }
+
+                @Override
+                public String string(String key) {
+                    return ctx.stringVal(key);
+                }
+
+                @Override
+                public Supplier<String> stringSupplier(String key) {
+                    return ctx.stringValSupplier(key);
+                }
+
+                @Override
+                public Pose2d pose2d(String key) {
+                    return ctx.pose2dVal(key);
+                }
+
+                @Override
+                public Supplier<Pose2d> pose2dSupplier(String key) {
+                    return ctx.pose2dValSupplier(key);
+                }
+
+                @Override
+                public Pose3d pose3d(String key) {
+                    return ctx.pose3dVal(key);
+                }
+
+                @Override
+                public Supplier<Pose3d> pose3dSupplier(String key) {
+                    return ctx.pose3dValSupplier(key);
+                }
+
+                @Override
+                public <V> V object(String key, Class<V> type) {
+                    return ctx.objectInput(key, type);
+                }
+
+                @Override
+                public <V> Supplier<V> objectSupplier(String key, Class<V> type) {
+                    return ctx.objectInputSupplier(key, type);
+                }
+            };
+        }
+
+        <V> Supplier<V> input(String key, Class<V> type);
+
+        default <V> V inputValue(String key, Class<V> type) {
+            Objects.requireNonNull(type, "type");
+            return input(key, type).get();
+        }
+
+        @Override
+        default boolean input(String key) {
+            return Boolean.TRUE.equals(inputValue(key, Boolean.class));
+        }
+
+        @Override
+        default BooleanSupplier inputSupplier(String key) {
+            return () -> input(key);
+        }
+
+        @Override
+        default double doubleInput(String key) {
+            Double value = inputValue(key, Double.class);
+            return value != null ? value.doubleValue() : Double.NaN;
+        }
+
+        @Override
+        default DoubleSupplier doubleInputSupplier(String key) {
+            return () -> doubleInput(key);
+        }
+
+        @Override
+        default int intVal(String key) {
+            Integer value = inputValue(key, Integer.class);
+            return value != null ? value.intValue() : 0;
+        }
+
+        @Override
+        default IntSupplier intValSupplier(String key) {
+            return () -> intVal(key);
+        }
+
+        @Override
+        default String stringVal(String key) {
+            return inputValue(key, String.class);
+        }
+
+        @Override
+        default Supplier<String> stringValSupplier(String key) {
+            return input(key, String.class);
+        }
+
+        @Override
+        default Pose2d pose2dVal(String key) {
+            return inputValue(key, Pose2d.class);
+        }
+
+        @Override
+        default Supplier<Pose2d> pose2dValSupplier(String key) {
+            return input(key, Pose2d.class);
+        }
+
+        @Override
+        default Pose3d pose3dVal(String key) {
+            return inputValue(key, Pose3d.class);
+        }
+
+        @Override
+        default Supplier<Pose3d> pose3dValSupplier(String key) {
+            return input(key, Pose3d.class);
+        }
+
+        @Override
+        default <V> V objectInput(String key, Class<V> type) {
+            if (!hasInput(key)) {
+                return null;
+            }
+            return inputValue(key, type);
+        }
+
+        @Override
+        default <V> Supplier<V> objectInputSupplier(String key, Class<V> type) {
+            return input(key, type);
         }
     }
 
@@ -299,7 +541,161 @@ public class RobotAuto {
             robot.state().queue((Enum) state);
         }
 
-        <T> AutoRegisterCtx input(AutoInput<T> key, Supplier<T> supplier);
+        @Override
+        default RegisterInputSection input() {
+            AutoRegisterCtx ctx = this;
+            return new RegisterInputSection() {
+                @Override
+                public RegisterInputSection bool(String key, BooleanSupplier supplier) {
+                    ctx.registerInput(key, Boolean.class, () -> supplier.getAsBoolean());
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection bool(String key, boolean value) {
+                    ctx.registerInput(key, Boolean.class, () -> value);
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection dbl(String key, DoubleSupplier supplier) {
+                    ctx.registerInput(key, Double.class, () -> supplier.getAsDouble());
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection dbl(String key, double value) {
+                    ctx.registerInput(key, Double.class, () -> value);
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection integer(String key, IntSupplier supplier) {
+                    ctx.registerInput(key, Integer.class, () -> supplier.getAsInt());
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection integer(String key, int value) {
+                    ctx.registerInput(key, Integer.class, () -> value);
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection string(String key, Supplier<String> supplier) {
+                    ctx.registerInput(key, String.class, supplier);
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection string(String key, String value) {
+                    ctx.registerInput(key, String.class, () -> value);
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection pose2d(String key, Supplier<Pose2d> supplier) {
+                    ctx.registerInput(key, Pose2d.class, supplier);
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection pose2d(String key, Pose2d value) {
+                    ctx.registerInput(key, Pose2d.class, () -> value);
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection pose3d(String key, Supplier<Pose3d> supplier) {
+                    ctx.registerInput(key, Pose3d.class, supplier);
+                    return this;
+                }
+
+                @Override
+                public RegisterInputSection pose3d(String key, Pose3d value) {
+                    ctx.registerInput(key, Pose3d.class, () -> value);
+                    return this;
+                }
+
+                @Override
+                public <V> RegisterInputSection object(String key, Class<V> type, Supplier<V> supplier) {
+                    ctx.registerInput(key, type, supplier);
+                    return this;
+                }
+
+                @Override
+                public boolean bool(String key) {
+                    return ctx.input(key);
+                }
+
+                @Override
+                public BooleanSupplier boolSupplier(String key) {
+                    return ctx.inputSupplier(key);
+                }
+
+                @Override
+                public double dbl(String key) {
+                    return ctx.doubleInput(key);
+                }
+
+                @Override
+                public DoubleSupplier dblSupplier(String key) {
+                    return ctx.doubleInputSupplier(key);
+                }
+
+                @Override
+                public int integer(String key) {
+                    return ctx.intVal(key);
+                }
+
+                @Override
+                public IntSupplier integerSupplier(String key) {
+                    return ctx.intValSupplier(key);
+                }
+
+                @Override
+                public String string(String key) {
+                    return ctx.stringVal(key);
+                }
+
+                @Override
+                public Supplier<String> stringSupplier(String key) {
+                    return ctx.stringValSupplier(key);
+                }
+
+                @Override
+                public Pose2d pose2d(String key) {
+                    return ctx.pose2dVal(key);
+                }
+
+                @Override
+                public Supplier<Pose2d> pose2dSupplier(String key) {
+                    return ctx.pose2dValSupplier(key);
+                }
+
+                @Override
+                public Pose3d pose3d(String key) {
+                    return ctx.pose3dVal(key);
+                }
+
+                @Override
+                public Supplier<Pose3d> pose3dSupplier(String key) {
+                    return ctx.pose3dValSupplier(key);
+                }
+
+                @Override
+                public <V> V object(String key, Class<V> type) {
+                    return ctx.objectInput(key, type);
+                }
+
+                @Override
+                public <V> Supplier<V> objectSupplier(String key, Class<V> type) {
+                    return ctx.objectInputSupplier(key, type);
+                }
+            };
+        }
+
+        <V> AutoRegisterCtx registerInput(String key, Class<V> type, Supplier<V> supplier);
 
         /**
          * Register a trajectory by file/reference name. The chooser id defaults to the same value.
@@ -486,6 +882,264 @@ public class RobotAuto {
         default Command auto(String id, int splitIndex) {
             Objects.requireNonNull(id, "id");
             return robot().autos().deferredAuto(id, OptionalInt.of(splitIndex));
+        }
+
+        /**
+         * Queues a robot state via {@link RobotCore#state()} and waits until that state is reached.
+         *
+         * <p>This is the auto-build equivalent of "queue state, then block sequence progression until
+         * done". If no unique owner can be resolved for the enum type, scheduling this command throws
+         * an {@link IllegalStateException}.</p>
+         */
+        default <E extends Enum<E>> Command state(E state) {
+            Objects.requireNonNull(state, "state");
+            RobotCore<?> core = robot();
+            String label = stateLabel(state);
+            Command stateCommand = Commands.sequence(
+                    Commands.runOnce(() -> {
+                        if (!queueStateUnchecked(core, state)) {
+                            throw new IllegalStateException(
+                                    "AutoBuildCtx.state(" + label + ") failed: no unique owner was resolved by "
+                                            + "RobotCore.state() for enum type "
+                                            + state.getDeclaringClass().getName());
+                        }
+                    }),
+                    Commands.waitUntil(() -> atStateUnchecked(core, state)));
+            return traceBuild("state", "target=" + label, stateCommand);
+        }
+
+        @Override
+        default BuildInputSection input() {
+            AutoBuildCtx ctx = this;
+            return new BuildInputSection() {
+                @Override
+                public Command bool(String key, boolean value) {
+                    return ctx.bool(key, value);
+                }
+
+                @Override
+                public Command resetBool(String key) {
+                    return ctx.resetBool(key);
+                }
+
+                @Override
+                public Command dbl(String key, double value) {
+                    return ctx.dbl(key, value);
+                }
+
+                @Override
+                public Command resetDouble(String key) {
+                    return ctx.resetDouble(key);
+                }
+
+                @Override
+                public Command integer(String key, int value) {
+                    return ctx.integer(key, value);
+                }
+
+                @Override
+                public Command resetInt(String key) {
+                    return ctx.resetInt(key);
+                }
+
+                @Override
+                public Command string(String key, String value) {
+                    return ctx.string(key, value);
+                }
+
+                @Override
+                public Command resetString(String key) {
+                    return ctx.resetString(key);
+                }
+
+                @Override
+                public Command pose2d(String key, Pose2d value) {
+                    return ctx.pose2d(key, value);
+                }
+
+                @Override
+                public Command resetPose2d(String key) {
+                    return ctx.resetPose2d(key);
+                }
+
+                @Override
+                public Command pose3d(String key, Pose3d value) {
+                    return ctx.pose3d(key, value);
+                }
+
+                @Override
+                public Command resetPose3d(String key) {
+                    return ctx.resetPose3d(key);
+                }
+
+                @Override
+                public <V> Command object(String key, Class<V> type, V value) {
+                    return ctx.object(key, type, value);
+                }
+
+                @Override
+                public <V> Command resetObject(String key, Class<V> type) {
+                    return ctx.resetObject(key, type);
+                }
+
+                @Override
+                public Command clear() {
+                    return ctx.clearInputs();
+                }
+
+                @Override
+                public boolean bool(String key) {
+                    return ctx.input(key);
+                }
+
+                @Override
+                public BooleanSupplier boolSupplier(String key) {
+                    return ctx.inputSupplier(key);
+                }
+
+                @Override
+                public double dbl(String key) {
+                    return ctx.doubleInput(key);
+                }
+
+                @Override
+                public DoubleSupplier dblSupplier(String key) {
+                    return ctx.doubleInputSupplier(key);
+                }
+
+                @Override
+                public int integer(String key) {
+                    return ctx.intVal(key);
+                }
+
+                @Override
+                public IntSupplier integerSupplier(String key) {
+                    return ctx.intValSupplier(key);
+                }
+
+                @Override
+                public String string(String key) {
+                    return ctx.stringVal(key);
+                }
+
+                @Override
+                public Supplier<String> stringSupplier(String key) {
+                    return ctx.stringValSupplier(key);
+                }
+
+                @Override
+                public Pose2d pose2d(String key) {
+                    return ctx.pose2dVal(key);
+                }
+
+                @Override
+                public Supplier<Pose2d> pose2dSupplier(String key) {
+                    return ctx.pose2dValSupplier(key);
+                }
+
+                @Override
+                public Pose3d pose3d(String key) {
+                    return ctx.pose3dVal(key);
+                }
+
+                @Override
+                public Supplier<Pose3d> pose3dSupplier(String key) {
+                    return ctx.pose3dValSupplier(key);
+                }
+
+                @Override
+                public <V> V object(String key, Class<V> type) {
+                    return ctx.objectInput(key, type);
+                }
+
+                @Override
+                public <V> Supplier<V> objectSupplier(String key, Class<V> type) {
+                    return ctx.objectInputSupplier(key, type);
+                }
+            };
+        }
+
+        default <T> Command setInput(String key, Class<T> type, T value) {
+            Objects.requireNonNull(type, "type");
+            Command setCommand = Commands.runOnce(() -> robot().autos().setRuntimeInputOverride(key, type, value));
+            return traceBuild(
+                    "setInput",
+                    "id=" + key + " type=" + type.getSimpleName(),
+                    setCommand);
+        }
+
+        default <T> Command clearInput(String key, Class<T> type) {
+            Objects.requireNonNull(type, "type");
+            Command clearCommand = Commands.runOnce(() -> robot().autos().clearRuntimeInputOverride(key));
+            return traceBuild("clearInput", "id=" + key + " type=" + type.getSimpleName(), clearCommand);
+        }
+
+        default Command triggerInput(String key) {
+            return setInput(key, Boolean.class, Boolean.TRUE);
+        }
+
+        /**
+         * Clears all shared runtime input overrides.
+         */
+        default Command clearInputs() {
+            Command clearAllCommand = Commands.runOnce(() -> robot().autos().clearRuntimeInputOverrides());
+            return traceBuild("clearInputs", "all=true", clearAllCommand);
+        }
+
+        default Command bool(String key, boolean value) {
+            return setInput(key, Boolean.class, value);
+        }
+
+        default Command resetBool(String key) {
+            return clearInput(key, Boolean.class);
+        }
+
+        default Command dbl(String key, double value) {
+            return setInput(key, Double.class, value);
+        }
+
+        default Command resetDouble(String key) {
+            return clearInput(key, Double.class);
+        }
+
+        default Command integer(String key, int value) {
+            return setInput(key, Integer.class, value);
+        }
+
+        default Command resetInt(String key) {
+            return clearInput(key, Integer.class);
+        }
+
+        default Command string(String key, String value) {
+            return setInput(key, String.class, value);
+        }
+
+        default Command resetString(String key) {
+            return clearInput(key, String.class);
+        }
+
+        default Command pose2d(String key, Pose2d value) {
+            return setInput(key, Pose2d.class, value);
+        }
+
+        default Command resetPose2d(String key) {
+            return clearInput(key, Pose2d.class);
+        }
+
+        default Command pose3d(String key, Pose3d value) {
+            return setInput(key, Pose3d.class, value);
+        }
+
+        default Command resetPose3d(String key) {
+            return clearInput(key, Pose3d.class);
+        }
+
+        default <V> Command object(String key, Class<V> type, V value) {
+            return setInput(key, type, value);
+        }
+
+        default <V> Command resetObject(String key, Class<V> type) {
+            return clearInput(key, type);
         }
 
         default Command sequence(Command... steps) {
@@ -797,6 +1451,20 @@ public class RobotAuto {
                 return command.getClass().getSimpleName();
             }
             return name;
+        }
+
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        private static boolean queueStateUnchecked(RobotCore<?> robot, Enum<?> state) {
+            return robot.state().queue((Enum) state);
+        }
+
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        private static boolean atStateUnchecked(RobotCore<?> robot, Enum<?> state) {
+            return robot.state().at((Enum) state);
+        }
+
+        private static String stateLabel(Enum<?> state) {
+            return state.getDeclaringClass().getSimpleName() + "." + state.name();
         }
 
         private Command traceBuild(String operation, String detail, Command command) {
@@ -1116,7 +1784,7 @@ public class RobotAuto {
             String programId,
             Map<String, AutoRoutine> scopedAutos,
             Map<String, Supplier<Command>> scopedMarkers,
-            Map<String, AutoInputBinding<?>> scopedInputs) implements AutoRegisterCtx {
+            Map<String, InputBinding<?>> scopedInputs) implements AutoRegisterCtx {
         private AutoRegisterCtxImpl {
             Objects.requireNonNull(robot, "robot");
             Objects.requireNonNull(autos, "autos");
@@ -1142,8 +1810,8 @@ public class RobotAuto {
         }
 
         @Override
-        public <T> Supplier<T> input(AutoInput<T> key) {
-            return autos.inputSupplier(scopedInputs, key);
+        public <V> Supplier<V> input(String key, Class<V> type) {
+            return autos.inputSupplier(scopedInputs, key, type);
         }
 
         @Override
@@ -1153,8 +1821,8 @@ public class RobotAuto {
         }
 
         @Override
-        public <T> AutoRegisterCtx input(AutoInput<T> key, Supplier<T> supplier) {
-            autos.registerScopedInput(scopedInputs, programId, key, supplier);
+        public <V> AutoRegisterCtx registerInput(String key, Class<V> type, Supplier<V> supplier) {
+            autos.registerScopedInput(scopedInputs, programId, key, type, supplier);
             return this;
         }
 
@@ -1192,7 +1860,7 @@ public class RobotAuto {
         private final RobotAuto autos;
         private final Map<String, AutoRoutine> scopedAutos;
         private final Map<String, Supplier<Command>> scopedMarkers;
-        private final Map<String, AutoInputBinding<?>> scopedInputs;
+        private final Map<String, InputBinding<?>> scopedInputs;
         private boolean odometryResetEnabled = true;
         private OdometryResetTarget odometryResetTarget = OdometryResetTarget.PATH_START;
         private Pose2d odometryResetPose = null;
@@ -1202,7 +1870,7 @@ public class RobotAuto {
                 RobotAuto autos,
                 Map<String, AutoRoutine> scopedAutos,
                 Map<String, Supplier<Command>> scopedMarkers,
-                Map<String, AutoInputBinding<?>> scopedInputs) {
+                Map<String, InputBinding<?>> scopedInputs) {
             this.robot = Objects.requireNonNull(robot, "robot");
             this.autos = Objects.requireNonNull(autos, "autos");
             this.scopedAutos = Objects.requireNonNull(scopedAutos, "scopedAutos");
@@ -1231,8 +1899,8 @@ public class RobotAuto {
         }
 
         @Override
-        public <T> Supplier<T> input(AutoInput<T> key) {
-            return autos.inputSupplier(scopedInputs, key);
+        public <V> Supplier<V> input(String key, Class<V> type) {
+            return autos.inputSupplier(scopedInputs, key, type);
         }
 
         @Override
@@ -1343,17 +2011,17 @@ public class RobotAuto {
         }
     }
 
-    private record SimpleAutoInput<T>(String id, Class<T> type) implements AutoInput<T> {
-        private SimpleAutoInput {
-            Objects.requireNonNull(id, "id");
+    private record InputBinding<T>(String id, Class<T> type, Supplier<T> supplier) {
+        private InputBinding {
+            id = requireNonBlank(id, "auto input id");
             Objects.requireNonNull(type, "type");
+            Objects.requireNonNull(supplier, "supplier");
         }
     }
 
-    private record AutoInputBinding<T>(AutoInput<T> key, Supplier<T> supplier) {
-        private AutoInputBinding {
-            Objects.requireNonNull(key, "key");
-            Objects.requireNonNull(supplier, "supplier");
+    private record RuntimeInputOverride(Class<?> type, Object value) {
+        private RuntimeInputOverride {
+            Objects.requireNonNull(type, "type");
         }
     }
 
@@ -1455,15 +2123,15 @@ public class RobotAuto {
         return registerNamedCommand(NamedCommandKey.of(id), action);
     }
 
-    private <T> RobotAuto registerInput(AutoInput<T> key, Supplier<T> supplier) {
-        Objects.requireNonNull(key, "key");
+    private <T> RobotAuto registerInput(String key, Class<T> type, Supplier<T> supplier) {
+        Objects.requireNonNull(type, "type");
         Objects.requireNonNull(supplier, "supplier");
-        String id = requireNonBlank(key.id(), "auto input id");
-        AutoInputBinding<?> existing = autoInputs.get(id);
+        String id = requireNonBlank(key, "auto input id");
+        InputBinding<?> existing = autoInputs.get(id);
         if (existing != null) {
             throw new IllegalArgumentException("Auto input already registered: " + id);
         }
-        autoInputs.put(id, new AutoInputBinding<>(key, supplier));
+        autoInputs.put(id, new InputBinding<>(id, type, supplier));
         return this;
     }
 
@@ -1483,38 +2151,64 @@ public class RobotAuto {
         return id != null && autoRoutines.containsKey(id);
     }
 
-    private boolean hasInput(AutoInput<?> key) {
-        return key != null && autoInputs.containsKey(key.id());
-    }
-
     private boolean hasInput(String id) {
         return id != null && autoInputs.containsKey(id);
     }
 
-    private <T> Supplier<T> inputSupplier(AutoInput<T> key) {
-        return inputSupplier(autoInputs, key);
+    private <T> Supplier<T> inputSupplier(String key, Class<T> type) {
+        return inputSupplier(autoInputs, key, type);
     }
 
-    private <T> Supplier<T> inputSupplier(Map<String, AutoInputBinding<?>> inputs, AutoInput<T> key) {
+    private <T> Supplier<T> inputSupplier(Map<String, InputBinding<?>> inputs, String key, Class<T> type) {
         Objects.requireNonNull(inputs, "inputs");
-        Objects.requireNonNull(key, "key");
-        AutoInputBinding<?> binding = inputs.get(key.id());
+        Objects.requireNonNull(type, "type");
+        String id = requireNonBlank(key, "auto input id");
+        InputBinding<?> binding = inputs.get(id);
         if (binding == null) {
-            throw new IllegalStateException("Auto input not registered: " + key.id());
+            throw new IllegalStateException("Auto input not registered: " + id);
         }
-        if (!key.type().isAssignableFrom(binding.key().type())) {
+        if (!type.isAssignableFrom(binding.type())) {
             throw new IllegalStateException(
-                    "Auto input type mismatch for '" + key.id() + "': requested "
-                            + key.type().getSimpleName() + " but registered "
-                            + binding.key().type().getSimpleName());
+                    "Auto input type mismatch for '" + id + "': requested "
+                            + type.getSimpleName() + " but registered "
+                            + binding.type().getSimpleName());
         }
         @SuppressWarnings("unchecked")
-        Supplier<T> typed = (Supplier<T>) binding.supplier();
-        return typed;
+        Supplier<T> fallbackSupplier = (Supplier<T>) binding.supplier();
+        return () -> {
+            RuntimeInputOverride override = runtimeInputOverrides.get(id);
+            if (override == null) {
+                return fallbackSupplier.get();
+            }
+            if (!type.isAssignableFrom(override.type())) {
+                throw new IllegalStateException(
+                        "Runtime auto input type mismatch for '" + id + "': requested "
+                                + type.getSimpleName() + " but runtime value is "
+                                + override.type().getSimpleName());
+            }
+            @SuppressWarnings("unchecked")
+            T value = (T) override.value();
+            return value;
+        };
     }
 
-    private <T> T inputValue(AutoInput<T> key) {
-        return inputSupplier(key).get();
+    private <T> T inputValue(String key, Class<T> type) {
+        return inputSupplier(key, type).get();
+    }
+
+    private <T> void setRuntimeInputOverride(String key, Class<T> type, T value) {
+        Objects.requireNonNull(type, "type");
+        String id = requireNonBlank(key, "auto input id");
+        runtimeInputOverrides.put(id, new RuntimeInputOverride(type, value));
+    }
+
+    private void clearRuntimeInputOverride(String key) {
+        String id = requireNonBlank(key, "auto input id");
+        runtimeInputOverrides.remove(id);
+    }
+
+    private void clearRuntimeInputOverrides() {
+        runtimeInputOverrides.clear();
     }
 
     /**
@@ -1555,7 +2249,7 @@ public class RobotAuto {
 
         Map<String, AutoRoutine> scopedAutos = new LinkedHashMap<>();
         Map<String, Supplier<Command>> scopedMarkers = new LinkedHashMap<>();
-        Map<String, AutoInputBinding<?>> scopedInputs = new LinkedHashMap<>();
+        Map<String, InputBinding<?>> scopedInputs = new LinkedHashMap<>();
 
         AutoRegisterCtx regCtx = new AutoRegisterCtxImpl(
                 robot,
@@ -2616,21 +3310,22 @@ public class RobotAuto {
     }
 
     private <T> void registerScopedInput(
-            Map<String, AutoInputBinding<?>> scopedInputs,
+            Map<String, InputBinding<?>> scopedInputs,
             String programId,
-            AutoInput<T> key,
+            String key,
+            Class<T> type,
             Supplier<T> supplier) {
         Objects.requireNonNull(scopedInputs, "scopedInputs");
         Objects.requireNonNull(programId, "programId");
-        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(type, "type");
         Objects.requireNonNull(supplier, "supplier");
-        String id = requireNonBlank(key.id(), "auto input id");
-        AutoInputBinding<?> existing = scopedInputs.get(id);
+        String id = requireNonBlank(key, "auto input id");
+        InputBinding<?> existing = scopedInputs.get(id);
         if (existing != null) {
             throw new IllegalArgumentException(
                     "Auto input already registered in program \"" + programId + "\": " + id);
         }
-        scopedInputs.put(id, new AutoInputBinding<>(key, supplier));
+        scopedInputs.put(id, new InputBinding<>(id, type, supplier));
     }
 
     private Command resetPose(Pose2d pose) {
@@ -2764,6 +3459,7 @@ public class RobotAuto {
     private void resetChoosers() {
         chooser = null;
         commandChooser = null;
+        runtimeInputOverrides.clear();
         autoPoseCache.clear();
         programPoseCache.clear();
         clearPrelightCache();
@@ -2828,8 +3524,78 @@ public class RobotAuto {
             return this;
         }
 
-        public <T> RegistrySection input(AutoInput<T> key, Supplier<T> supplier) {
-            registerInput(key, supplier);
+        public <V> RegistrySection input(String key, Class<V> type, Supplier<V> supplier) {
+            registerInput(key, type, supplier);
+            return this;
+        }
+
+        public RegistrySection bool(String key, BooleanSupplier supplier) {
+            registerInput(key, Boolean.class, () -> supplier.getAsBoolean());
+            return this;
+        }
+
+        public RegistrySection bool(String key, boolean value) {
+            registerInput(key, Boolean.class, () -> value);
+            return this;
+        }
+
+        public RegistrySection dbl(String key, DoubleSupplier supplier) {
+            registerInput(key, Double.class, () -> supplier.getAsDouble());
+            return this;
+        }
+
+        public RegistrySection dbl(String key, double value) {
+            registerInput(key, Double.class, () -> value);
+            return this;
+        }
+
+        public RegistrySection integer(String key, IntSupplier supplier) {
+            registerInput(key, Integer.class, () -> supplier.getAsInt());
+            return this;
+        }
+
+        public RegistrySection integer(String key, int value) {
+            registerInput(key, Integer.class, () -> value);
+            return this;
+        }
+
+        public RegistrySection string(String key, Supplier<String> supplier) {
+            registerInput(key, String.class, supplier);
+            return this;
+        }
+
+        public RegistrySection string(String key, String value) {
+            registerInput(key, String.class, () -> value);
+            return this;
+        }
+
+        public RegistrySection pose2d(String key, Supplier<Pose2d> supplier) {
+            registerInput(key, Pose2d.class, supplier);
+            return this;
+        }
+
+        public RegistrySection pose2d(String key, Pose2d value) {
+            registerInput(key, Pose2d.class, () -> value);
+            return this;
+        }
+
+        public RegistrySection pose3d(String key, Supplier<Pose3d> supplier) {
+            registerInput(key, Pose3d.class, supplier);
+            return this;
+        }
+
+        public RegistrySection pose3d(String key, Pose3d value) {
+            registerInput(key, Pose3d.class, () -> value);
+            return this;
+        }
+
+        public <V> RegistrySection object(String key, Class<V> type, Supplier<V> supplier) {
+            registerInput(key, type, supplier);
+            return this;
+        }
+
+        public <V> RegistrySection object(String key, Class<V> type, V value) {
+            registerInput(key, type, () -> value);
             return this;
         }
 
@@ -2918,21 +3684,183 @@ public class RobotAuto {
     }
 
     public final class InputsSection {
-        public <T> RobotAuto put(AutoInput<T> key, Supplier<T> supplier) {
-            registry().input(key, supplier);
+        public <V> RobotAuto put(String key, Class<V> type, Supplier<V> supplier) {
+            registry().input(key, type, supplier);
             return RobotAuto.this;
+        }
+
+        public InputsSection bool(String key, BooleanSupplier supplier) {
+            registry().bool(key, supplier);
+            return this;
+        }
+
+        public InputsSection dbl(String key, DoubleSupplier supplier) {
+            registry().dbl(key, supplier);
+            return this;
+        }
+
+        public InputsSection integer(String key, IntSupplier supplier) {
+            registry().integer(key, supplier);
+            return this;
+        }
+
+        public InputsSection string(String key, Supplier<String> supplier) {
+            registry().string(key, supplier);
+            return this;
+        }
+
+        public InputsSection pose2d(String key, Supplier<Pose2d> supplier) {
+            registry().pose2d(key, supplier);
+            return this;
+        }
+
+        public InputsSection pose3d(String key, Supplier<Pose3d> supplier) {
+            registry().pose3d(key, supplier);
+            return this;
+        }
+
+        public <V> InputsSection object(String key, Class<V> type, Supplier<V> supplier) {
+            registry().object(key, type, supplier);
+            return this;
+        }
+
+        /**
+         * Overrides the runtime value for an auto input id.
+         *
+         * <p>The override is shared across nested/linked autos and takes precedence over
+         * the registered supplier until cleared.</p>
+         */
+        public <T> InputsSection set(String key, Class<T> type, T value) {
+            setRuntimeInputOverride(key, type, value);
+            return this;
+        }
+
+        public <T> InputsSection clear(String key, Class<T> type) {
+            Objects.requireNonNull(type, "type");
+            clearRuntimeInputOverride(key);
+            return this;
+        }
+
+        public InputsSection clear(String key) {
+            clearRuntimeInputOverride(key);
+            return this;
+        }
+
+        public InputsSection clear() {
+            clearRuntimeInputOverrides();
+            return this;
+        }
+
+        public InputsSection bool(String key, boolean value) {
+            set(key, Boolean.class, value);
+            return this;
+        }
+
+        public InputsSection resetBool(String key) {
+            clear(key, Boolean.class);
+            return this;
+        }
+
+        public InputsSection dbl(String key, double value) {
+            set(key, Double.class, value);
+            return this;
+        }
+
+        public InputsSection resetDouble(String key) {
+            clear(key, Double.class);
+            return this;
+        }
+
+        public InputsSection integer(String key, int value) {
+            set(key, Integer.class, value);
+            return this;
+        }
+
+        public InputsSection resetInt(String key) {
+            clear(key, Integer.class);
+            return this;
+        }
+
+        public InputsSection string(String key, String value) {
+            set(key, String.class, value);
+            return this;
+        }
+
+        public InputsSection resetString(String key) {
+            clear(key, String.class);
+            return this;
+        }
+
+        public InputsSection pose2d(String key, Pose2d value) {
+            set(key, Pose2d.class, value);
+            return this;
+        }
+
+        public InputsSection resetPose2d(String key) {
+            clear(key, Pose2d.class);
+            return this;
+        }
+
+        public InputsSection pose3d(String key, Pose3d value) {
+            set(key, Pose3d.class, value);
+            return this;
+        }
+
+        public InputsSection resetPose3d(String key) {
+            clear(key, Pose3d.class);
+            return this;
+        }
+
+        public <V> InputsSection object(String key, Class<V> type, V value) {
+            set(key, type, value);
+            return this;
+        }
+
+        public <V> InputsSection resetObject(String key, Class<V> type) {
+            clear(key, type);
+            return this;
         }
 
         public boolean has(String id) {
             return registry().hasInput(id);
         }
 
-        public <T> Supplier<T> supplier(AutoInput<T> key) {
-            return inputSupplier(key);
+        public <T> Supplier<T> supplier(String key, Class<T> type) {
+            return inputSupplier(key, type);
         }
 
-        public <T> T value(AutoInput<T> key) {
-            return inputValue(key);
+        public <T> T value(String key, Class<T> type) {
+            return inputValue(key, type);
+        }
+
+        public boolean bool(String key) {
+            return Boolean.TRUE.equals(value(key, Boolean.class));
+        }
+
+        public double dbl(String key) {
+            Double value = value(key, Double.class);
+            return value != null ? value.doubleValue() : Double.NaN;
+        }
+
+        public int integer(String key) {
+            Integer value = value(key, Integer.class);
+            return value != null ? value.intValue() : 0;
+        }
+
+        public String string(String key) {
+            return value(key, String.class);
+        }
+
+        public Pose2d pose2d(String key) {
+            return value(key, Pose2d.class);
+        }
+
+        public Pose3d pose3d(String key) {
+            return value(key, Pose3d.class);
+        }
+
+        public <V> V object(String key, Class<V> type) {
+            return value(key, type);
         }
     }
 

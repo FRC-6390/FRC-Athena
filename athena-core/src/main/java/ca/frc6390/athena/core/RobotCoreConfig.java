@@ -59,8 +59,10 @@ public final class RobotCoreConfig {
         public <T extends RobotDrivetrain<T>> Builder<T> drivetrain(
                 Function<DrivetrainSection, RobotDrivetrainConfig<T>> selector) {
             Objects.requireNonNull(selector, "selector");
-            RobotDrivetrainConfig<T> config = Objects.requireNonNull(selector.apply(new DrivetrainSection()),
+            DrivetrainSection section = new DrivetrainSection();
+            RobotDrivetrainConfig<T> rawConfig = Objects.requireNonNull(selector.apply(section),
                     "selector returned null drivetrain config");
+            RobotDrivetrainConfig<T> config = section.wrapWithTiming(rawConfig);
             return new Builder<>(name, config);
         }
     }
@@ -233,25 +235,25 @@ public final class RobotCoreConfig {
             }
         }
 
-        public RobotDrivetrainConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
+        private <T extends RobotDrivetrain<T>> RobotDrivetrainConfig<T> wrapWithTiming(
+                RobotDrivetrainConfig<T> config) {
             Objects.requireNonNull(config, "config");
             return () -> {
-                SwerveDrivetrain drivetrain = config.build();
+                T drivetrain = config.build();
                 applyTimingIfSupported(drivetrain);
                 return drivetrain;
             };
         }
 
+        public RobotDrivetrainConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
+            return Objects.requireNonNull(config, "config");
+        }
+
         public RobotDrivetrainConfig<SwerveDrivetrain> swerve(Consumer<SwerveSection> section) {
             Objects.requireNonNull(section, "section");
-            SwerveSection s = new SwerveSection(this);
+            SwerveSection s = new SwerveSection();
             section.accept(s);
-            RobotDrivetrainConfig<SwerveDrivetrain> baseConfig = s.drivetrainConfig();
-            return () -> {
-                SwerveDrivetrain drivetrain = baseConfig.build();
-                applyTimingIfSupported(drivetrain);
-                return drivetrain;
-            };
+            return s.drivetrainConfig();
         }
 
         public RobotDrivetrainConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
@@ -268,11 +270,9 @@ public final class RobotCoreConfig {
 
     public static final class SwerveSection {
         private final SwerveDrivetrainConfig config = new SwerveDrivetrainConfig();
-        private final DrivetrainSection owner;
         private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
 
-        private SwerveSection(DrivetrainSection owner) {
-            this.owner = Objects.requireNonNull(owner, "owner");
+        private SwerveSection() {
         }
 
         private RobotDrivetrainConfig<SwerveDrivetrain> drivetrainConfig() {
@@ -364,26 +364,6 @@ public final class RobotCoreConfig {
         public SwerveSection control(Consumer<SwerveDrivetrainConfig.ControlSection> section) {
             Objects.requireNonNull(section, "section");
             section.accept(config.control());
-            return this;
-        }
-
-        /**
-         * @deprecated Use {@link DrivetrainSection#driverCommandPeriodSeconds(double)} on the
-         *             parent drivetrain section instead.
-         */
-        @Deprecated(since = "2026.2.10", forRemoval = false)
-        public SwerveSection driverCommandPeriodSeconds(double seconds) {
-            owner.driverCommandPeriodSeconds(seconds);
-            return this;
-        }
-
-        /**
-         * @deprecated Use {@link DrivetrainSection#driverCommandPeriodMs(double)} on the
-         *             parent drivetrain section instead.
-         */
-        @Deprecated(since = "2026.2.10", forRemoval = false)
-        public SwerveSection driverCommandPeriodMs(double milliseconds) {
-            owner.driverCommandPeriodMs(milliseconds);
             return this;
         }
 

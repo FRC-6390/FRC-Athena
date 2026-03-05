@@ -258,11 +258,71 @@ final class SwerveDrivetrainFullSimulationAxisTest {
                         + " headingDeg=" + finalPose.getRotation().getDegrees()
                         + " leadSec=" + leadSeconds);
         assertTrue(
-                driftY < (traveledX * 0.25),
+                driftY < (traveledX * 0.1),
                 "expected Y drift to remain a minority of X travel in long-distance simulation, got driftY=" + driftY
                         + " traveledX=" + traveledX
                         + " headingDeg=" + finalPose.getRotation().getDegrees()
                         + " leadSec=" + leadSeconds);
+    }
+
+    @Test
+    void fullOmegaWithPartialXFieldCommandAtTwentyMillisecondSchedulerTracksXAxisDuringSustainedRotation()
+            throws Exception {
+        SwerveDrivetrain drivetrain = createDrivetrain(40.0);
+        drivetrain.updatePeriodSeconds(DRIVETRAIN_UPDATE_PERIOD_SECONDS);
+        drivetrain.fieldRelative(true);
+        drivetrain.configureSimulation(
+                SwerveSimulationConfig.defaults()
+                        .withNominalVoltage(12.0)
+                        .withWheelCoefficientOfFriction(1.2)
+                        .withMaxSpeedScale(1.0));
+
+        DoubleSupplier x = () -> 0.35;
+        DoubleSupplier y = () -> 0.0;
+        DoubleSupplier theta = () -> 1.0;
+        SwerveDriveCommand command = new SwerveDriveCommand(drivetrain, x, y, theta, true);
+
+        command.initialize();
+        setRobotTimeSeconds(0.0);
+        drivetrain.update();
+        drivetrain.simulationPeriodic();
+
+        double integratedAbsHeadingRadians = 0.0;
+        int steps = 1000; // 20 seconds at 20ms scheduler period.
+        for (int i = 1; i <= steps; i++) {
+            setRobotTimeSeconds(i * SCHEDULER_PERIOD_SECONDS);
+            command.execute();
+            drivetrain.update();
+            drivetrain.simulationPeriodic();
+            integratedAbsHeadingRadians +=
+                    Math.abs(drivetrain.imu().device().getVelocityZ().getRadians()) * SCHEDULER_PERIOD_SECONDS;
+        }
+        command.end(false);
+
+        Pose2d finalPose = drivetrain.simulation().pose();
+        double traveledX = Math.abs(finalPose.getX());
+        double driftY = Math.abs(finalPose.getY());
+        double leadSeconds = drivetrain.fieldRelativeLeadSecondsForTest();
+
+        assertTrue(
+                integratedAbsHeadingRadians > Math.toRadians(720.0),
+                "expected sustained high omega rotation in simulation, got integratedAbsHeadingDeg="
+                        + Math.toDegrees(integratedAbsHeadingRadians));
+        assertTrue(
+                traveledX > 5.0,
+                "expected significant forward travel along X in partial-translation simulation, got X="
+                        + finalPose.getX()
+                        + " Y=" + finalPose.getY()
+                        + " headingDeg=" + finalPose.getRotation().getDegrees()
+                        + " leadSec=" + leadSeconds
+                        + " integratedAbsHeadingDeg=" + Math.toDegrees(integratedAbsHeadingRadians));
+        assertTrue(
+                driftY < (traveledX * 0.05),
+                "expected Y drift to remain bounded during sustained high omega, got driftY=" + driftY
+                        + " traveledX=" + traveledX
+                        + " headingDeg=" + finalPose.getRotation().getDegrees()
+                        + " leadSec=" + leadSeconds
+                        + " integratedAbsHeadingDeg=" + Math.toDegrees(integratedAbsHeadingRadians));
     }
 
     @Test
