@@ -73,6 +73,8 @@ public class SwerveDrivetrain extends SubsystemBase
   private static final double DRIFT_TURN_DEADBAND_RAD_PER_SEC = 0.05;
   private static final double MODULE_HEADING_EPSILON = 1e-6;
   private static final double MODULE_ANGLE_UPDATE_EPSILON_RAD = 1e-4;
+  private static final double MODULE_STATIONARY_LINEAR_DEADBAND_MPS = 0.02;
+  private static final double MODULE_STATIONARY_OMEGA_DEADBAND_RAD_PER_SEC = 0.02;
   private static final String MODULE_BUILD_PARALLELISM_PROPERTY =
       "athena.drivetrain.swerve.moduleBuildParallelism";
   private static final int MAX_MODULE_BUILD_THREADS = 8;
@@ -81,6 +83,8 @@ public class SwerveDrivetrain extends SubsystemBase
   private static final double DEFAULT_UPDATE_PERIOD_SECONDS = 0.005;
   private static final double DEFAULT_DRIVER_COMMAND_PERIOD_SECONDS = 0.005;
   private static final double DEFAULT_AUTO_FOLLOWER_PERIOD_SECONDS = 0.005;
+  private static final double MAX_SIMULATION_SUBSTEP_SECONDS = 0.02;
+  private static final int MAX_SIMULATION_SUBSTEPS = 128;
   private static final double MAX_DISCRETIZE_DT_SECONDS = 0.25;
   private static final double MIN_FIELD_RELATIVE_COMP_OMEGA_RAD_PER_SEC = 0.05;
   private static final double MIN_FIELD_RELATIVE_COMP_SPEED_MPS = 0.1;
@@ -431,17 +435,28 @@ public class SwerveDrivetrain extends SubsystemBase
   }
 
   private void calculateModuleStates(ChassisSpeeds speed, SwerveModuleState[] states) {
-    double vx = speed.vxMetersPerSecond;
-    double vy = speed.vyMetersPerSecond;
-    double omega = speed.omegaRadiansPerSecond;
-    boolean stationary = vx == 0.0 && vy == 0.0 && omega == 0.0;
+    double vx = sanitizeSpeedComponent(speed != null ? speed.vxMetersPerSecond : 0.0);
+    double vy = sanitizeSpeedComponent(speed != null ? speed.vyMetersPerSecond : 0.0);
+    double omega = sanitizeSpeedComponent(speed != null ? speed.omegaRadiansPerSecond : 0.0);
+    boolean stationary = Math.abs(vx) <= MODULE_STATIONARY_LINEAR_DEADBAND_MPS
+        && Math.abs(vy) <= MODULE_STATIONARY_LINEAR_DEADBAND_MPS
+        && Math.abs(omega) <= MODULE_STATIONARY_OMEGA_DEADBAND_RAD_PER_SEC;
 
-    SwerveModuleState[] calculatedStates = stationary ? null : kinematics.toSwerveModuleStates(speed);
+    ChassisSpeeds resolvedSpeeds = stationary
+        ? null
+        : new ChassisSpeeds(vx, vy, omega);
+    SwerveModuleState[] calculatedStates = stationary ? null : kinematics.toSwerveModuleStates(resolvedSpeeds);
 
     for (int i = 0; i < states.length; i++) {
       SwerveModuleState state = states[i];
       if (stationary) {
         state.speedMetersPerSecond = 0.0;
+        Rotation2d holdAngle = swerveModules[i].getState().angle;
+        if (holdAngle != null) {
+          if (state.angle == null || angleNeedsUpdate(state.angle, holdAngle.getRadians())) {
+            state.angle = holdAngle;
+          }
+        }
         continue;
       }
 
@@ -449,6 +464,13 @@ public class SwerveDrivetrain extends SubsystemBase
       state.speedMetersPerSecond = calculated.speedMetersPerSecond;
       state.angle = calculated.angle;
     }
+  }
+
+  private static double sanitizeSpeedComponent(double value) {
+    if (!Double.isFinite(value)) {
+      return 0.0;
+    }
+    return value;
   }
 
 
@@ -939,7 +961,23 @@ public class SwerveDrivetrain extends SubsystemBase
       return;
     }
     double dtSeconds = sanitizeLoopDtSeconds(loopDtSeconds);
-    simulation.update(dtSeconds, lastCommandedSpeeds);
+    double configuredStepSeconds = sanitizeLoopDtSeconds(updatePeriodSeconds);
+    double maxStepSeconds = Math.max(configuredStepSeconds, MAX_SIMULATION_SUBSTEP_SECONDS);
+    if (!Double.isFinite(maxStepSeconds) || maxStepSeconds <= 0.0) {
+      maxStepSeconds = MAX_SIMULATION_SUBSTEP_SECONDS;
+    }
+    int substeps = (int) Math.ceil(dtSeconds / maxStepSeconds);
+    if (!Double.isFinite(dtSeconds) || dtSeconds <= 0.0 || substeps <= 1) {
+      simulation.update(dtSeconds, lastCommandedSpeeds);
+      return;
+    }
+    if (substeps > MAX_SIMULATION_SUBSTEPS) {
+      substeps = MAX_SIMULATION_SUBSTEPS;
+    }
+    double stepSeconds = dtSeconds / substeps;
+    for (int i = 0; i < substeps; i++) {
+      simulation.update(stepSeconds, lastCommandedSpeeds);
+    }
   }
 
   @Override

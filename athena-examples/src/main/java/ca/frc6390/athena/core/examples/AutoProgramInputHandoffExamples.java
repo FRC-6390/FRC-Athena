@@ -16,7 +16,7 @@ public final class AutoProgramInputHandoffExamples {
     public static final String FIRE_TRIGGER_KEY = "handoff.fireTrigger";
 
     /**
-     * Caller program: sets shared inputs, calls another program, then clears overrides.
+     * Caller program: sets ConsumerProgram-scoped inputs, calls it, then clears only that scope.
      */
     public static final class ProducerProgram implements AutoProgram {
         @Override
@@ -33,10 +33,10 @@ public final class AutoProgramInputHandoffExamples {
         public AutoRoutine build(AutoBuildCtx ctx) {
             return custom(() -> ctx.sequence(
                     ctx.auto("approach"),
-                    ctx.input().string(TARGET_MODE_KEY, "amp"),
-                    ctx.input().bool(FIRE_TRIGGER_KEY, true),
+                    ctx.input("ConsumerProgram").string(TARGET_MODE_KEY, "amp"),
+                    ctx.input("ConsumerProgram").bool(FIRE_TRIGGER_KEY, true),
                     ctx.auto("ConsumerProgram"),
-                    ctx.input().clear()));
+                    ctx.input("ConsumerProgram").clear()));
         }
     }
 

@@ -375,6 +375,98 @@ final class SwerveDrivetrainFullSimulationAxisTest {
                         + " leadSec=" + leadSeconds);
     }
 
+    @Test
+    void fullOmegaWithPureXFieldCommandUnderLagSpikesRemainsPredominantlyOnXAxis()
+            throws Exception {
+        SwerveDrivetrain drivetrain = createDrivetrain(40.0);
+        drivetrain.updatePeriodSeconds(DRIVETRAIN_UPDATE_PERIOD_SECONDS);
+        drivetrain.fieldRelative(true);
+        drivetrain.configureSimulation(
+                SwerveSimulationConfig.defaults()
+                        .withNominalVoltage(12.0)
+                        .withWheelCoefficientOfFriction(1.2)
+                        .withMaxSpeedScale(1.0));
+
+        DoubleSupplier x = () -> 1.0;
+        DoubleSupplier y = () -> 0.0;
+        DoubleSupplier theta = () -> 1.0;
+        SwerveDriveCommand command = new SwerveDriveCommand(drivetrain, x, y, theta, true);
+
+        command.initialize();
+        double nowSeconds = 0.0;
+        setRobotTimeSeconds(nowSeconds);
+        drivetrain.update();
+        drivetrain.simulationPeriodic();
+
+        Pose2d lastSimPose = drivetrain.simulation().pose();
+        double maxSimulationStepMeters = 0.0;
+        int steps = 500;
+        for (int i = 1; i <= steps; i++) {
+            double dtSeconds = (i % 50 == 0) ? 0.12 : SCHEDULER_PERIOD_SECONDS;
+            nowSeconds += dtSeconds;
+            setRobotTimeSeconds(nowSeconds);
+            command.execute();
+            drivetrain.update();
+            drivetrain.simulationPeriodic();
+            Pose2d pose = drivetrain.simulation().pose();
+            maxSimulationStepMeters = Math.max(
+                    maxSimulationStepMeters,
+                    pose.getTranslation().getDistance(lastSimPose.getTranslation()));
+            lastSimPose = pose;
+        }
+        command.end(false);
+
+        Pose2d finalPose = drivetrain.simulation().pose();
+        double traveledX = Math.abs(finalPose.getX());
+        double driftY = Math.abs(finalPose.getY());
+        double leadSeconds = drivetrain.fieldRelativeLeadSecondsForTest();
+
+        assertTrue(
+                traveledX > 4.0,
+                "expected substantial X travel under lag spikes, got X=" + finalPose.getX()
+                        + " Y=" + finalPose.getY()
+                        + " headingDeg=" + finalPose.getRotation().getDegrees()
+                        + " leadSec=" + leadSeconds);
+        assertTrue(
+                driftY < (traveledX * 0.2),
+                "expected lag-spike sim to remain predominantly on X axis, got driftY=" + driftY
+                        + " traveledX=" + traveledX
+                        + " headingDeg=" + finalPose.getRotation().getDegrees()
+                        + " leadSec=" + leadSeconds);
+        assertTrue(
+                maxSimulationStepMeters < 0.8,
+                "unexpected large simulation pose jump under lag spikes; max step was "
+                        + maxSimulationStepMeters + " m");
+    }
+
+    @Test
+    void idleStartupHoldsCurrentModuleAnglesWithoutSteerHunting() throws Exception {
+        SwerveDrivetrain drivetrain = createDrivetrain(40.0);
+        drivetrain.updatePeriodSeconds(DRIVETRAIN_UPDATE_PERIOD_SECONDS);
+        drivetrain.fieldRelative(true);
+
+        // Seed non-zero startup angles to emulate absolute encoders waking at arbitrary headings.
+        double[] startupRotations = new double[] { 0.12, 0.37, -0.22, 0.41 };
+        for (int i = 0; i < drivetrain.swerveModules.length; i++) {
+            drivetrain.swerveModules[i].getSteerEncoder().setPosition(startupRotations[i]);
+        }
+
+        setRobotTimeSeconds(0.0);
+        drivetrain.update();
+        double maxAbsSteerCommand = 0.0;
+        for (SwerveModule module : drivetrain.swerveModules) {
+            maxAbsSteerCommand = Math.max(maxAbsSteerCommand, Math.abs(module.getSteerCommandPercent()));
+            assertTrue(
+                    Math.abs(module.getDriveCommandPercent()) < 1e-6,
+                    "expected zero drive output at idle startup, got " + module.getDriveCommandPercent());
+        }
+
+        assertTrue(
+                maxAbsSteerCommand < 1e-3,
+                "expected idle startup to hold module azimuth without steering hunt; max steer command was "
+                        + maxAbsSteerCommand);
+    }
+
     private static SwerveDrivetrain createDrivetrain(double steerKp) {
         double trackWidthMeters = 0.57;
         double wheelbaseMeters = 0.57;

@@ -210,6 +210,19 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private ChassisSpeeds robotRelativeSpeeds = new ChassisSpeeds();
     private final ChassisSpeeds commandedSpeedsScratchA = new ChassisSpeeds();
     private final ChassisSpeeds commandedSpeedsScratchB = new ChassisSpeeds();
+    private Pose2d autoFollowerTargetPose = ZERO_POSE_2D;
+    private Pose2d autoFollowerMeasuredPose = ZERO_POSE_2D;
+    private ChassisSpeeds autoFollowerDesiredSpeeds = new ChassisSpeeds();
+    private ChassisSpeeds autoFollowerOutputSpeeds = new ChassisSpeeds();
+    private double autoFollowerErrorXMeters = 0.0;
+    private double autoFollowerErrorYMeters = 0.0;
+    private double autoFollowerTranslationErrorMeters = 0.0;
+    private double autoFollowerHeadingErrorDegrees = 0.0;
+    private double autoFollowerLastUpdateTimestampSeconds = Double.NaN;
+    private double autoFollowerUpdateDtSeconds = 0.0;
+    private double autoFollowerSourceAgeSeconds = 0.0;
+    private double autoFollowerSourceEstimatedPeriodSeconds = 0.0;
+    private boolean autoFollowerTelemetryValid = false;
     private double normalizedMovementSpeed = 0.0;
     private Pose2d lastVelocityPose = new Pose2d();
     private double lastVelocityTimestamp = Double.NaN;
@@ -782,6 +795,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 pose -> resetPose(localizationConfig.autoPoseName(), pose),
                 (desiredPose, desiredSpeeds) -> {
                     Pose2d botpose = getFieldPose();
+                    double nowSeconds = currentTimestampSeconds();
+                    double sourceAgeSeconds = sourceAgeSeconds(
+                            nowSeconds,
+                            robotSpeeds.getSourceLastUpdateSeconds(RobotSpeeds.AUTO_SOURCE));
+                    double sourceEstimatedPeriodSeconds =
+                            robotSpeeds.getSourceEstimatedUpdatePeriodSeconds(RobotSpeeds.AUTO_SOURCE);
                     // Use the estimator heading so x/y/theta feedback share the same frame.
                     Rotation2d measuredHeading = botpose.getRotation();
                     double desiredHeadingRadians = desiredPose.getRotation().getRadians();
@@ -806,6 +825,14 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                             desiredSpeeds.omegaRadiansPerSecond + thetaFeedback);
 
                     robotSpeeds.setFieldRelativeSpeeds(RobotSpeeds.AUTO_SOURCE, fieldSpeeds);
+                    updateAutoFollowerTelemetry(
+                            desiredPose,
+                            botpose,
+                            desiredSpeeds,
+                            fieldSpeeds,
+                            nowSeconds,
+                            sourceAgeSeconds,
+                            sourceEstimatedPeriodSeconds);
                 },
                 true,
                 drivetrain);
@@ -2363,6 +2390,28 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         speedsNode.putDouble("movementNormalized", normalizedMovementSpeed);
         speedsNode.putDouble("normalizedSpeed", getNormalizedSpeed());
 
+        RobotNetworkTables.Node autoFollowerNode = node.child("AutoFollower");
+        autoFollowerNode.putBoolean("valid", autoFollowerTelemetryValid);
+        autoFollowerNode.putDouble("targetXM", autoFollowerTargetPose.getX());
+        autoFollowerNode.putDouble("targetYM", autoFollowerTargetPose.getY());
+        autoFollowerNode.putDouble("targetHeadingDeg", autoFollowerTargetPose.getRotation().getDegrees());
+        autoFollowerNode.putDouble("measuredXM", autoFollowerMeasuredPose.getX());
+        autoFollowerNode.putDouble("measuredYM", autoFollowerMeasuredPose.getY());
+        autoFollowerNode.putDouble("measuredHeadingDeg", autoFollowerMeasuredPose.getRotation().getDegrees());
+        autoFollowerNode.putDouble("errorXM", autoFollowerErrorXMeters);
+        autoFollowerNode.putDouble("errorYM", autoFollowerErrorYMeters);
+        autoFollowerNode.putDouble("translationErrorM", autoFollowerTranslationErrorMeters);
+        autoFollowerNode.putDouble("headingErrorDeg", autoFollowerHeadingErrorDegrees);
+        autoFollowerNode.putDouble("updateDtSec", autoFollowerUpdateDtSeconds);
+        autoFollowerNode.putDouble("sourceAgeSec", autoFollowerSourceAgeSeconds);
+        autoFollowerNode.putDouble("sourceEstimatedPeriodSec", autoFollowerSourceEstimatedPeriodSeconds);
+        autoFollowerNode.putDouble("desiredVxMps", autoFollowerDesiredSpeeds.vxMetersPerSecond);
+        autoFollowerNode.putDouble("desiredVyMps", autoFollowerDesiredSpeeds.vyMetersPerSecond);
+        autoFollowerNode.putDouble("desiredOmegaRadPerSec", autoFollowerDesiredSpeeds.omegaRadiansPerSecond);
+        autoFollowerNode.putDouble("outputVxMps", autoFollowerOutputSpeeds.vxMetersPerSecond);
+        autoFollowerNode.putDouble("outputVyMps", autoFollowerOutputSpeeds.vyMetersPerSecond);
+        autoFollowerNode.putDouble("outputOmegaRadPerSec", autoFollowerOutputSpeeds.omegaRadiansPerSecond);
+
         publishBoundingBoxes(node, pose);
 
         // Field2d is a localization concern (not vision). Publish it only when explicitly enabled.
@@ -2429,6 +2478,61 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             return nowSeconds;
         }
         return Timer.getFPGATimestamp();
+    }
+
+    private static double sourceAgeSeconds(double nowSeconds, double sourceTimestampSeconds) {
+        if (!Double.isFinite(nowSeconds) || !Double.isFinite(sourceTimestampSeconds)) {
+            return 0.0;
+        }
+        return Math.max(0.0, nowSeconds - sourceTimestampSeconds);
+    }
+
+    private void updateAutoFollowerTelemetry(
+            Pose2d desiredPose,
+            Pose2d measuredPose,
+            ChassisSpeeds desiredSpeeds,
+            ChassisSpeeds outputSpeeds,
+            double nowSeconds,
+            double sourceAgeSeconds,
+            double sourceEstimatedPeriodSeconds) {
+        if (desiredPose == null || measuredPose == null || desiredSpeeds == null || outputSpeeds == null) {
+            return;
+        }
+        if (Double.isFinite(nowSeconds)
+                && Double.isFinite(autoFollowerLastUpdateTimestampSeconds)) {
+            double dtSeconds = nowSeconds - autoFollowerLastUpdateTimestampSeconds;
+            if (Double.isFinite(dtSeconds) && dtSeconds >= 0.0 && dtSeconds < 1.0) {
+                autoFollowerUpdateDtSeconds = dtSeconds;
+            }
+        }
+        autoFollowerLastUpdateTimestampSeconds = nowSeconds;
+        autoFollowerTargetPose = desiredPose;
+        autoFollowerMeasuredPose = measuredPose;
+        autoFollowerDesiredSpeeds = new ChassisSpeeds(
+                desiredSpeeds.vxMetersPerSecond,
+                desiredSpeeds.vyMetersPerSecond,
+                desiredSpeeds.omegaRadiansPerSecond);
+        autoFollowerOutputSpeeds = new ChassisSpeeds(
+                outputSpeeds.vxMetersPerSecond,
+                outputSpeeds.vyMetersPerSecond,
+                outputSpeeds.omegaRadiansPerSecond);
+        autoFollowerErrorXMeters = desiredPose.getX() - measuredPose.getX();
+        autoFollowerErrorYMeters = desiredPose.getY() - measuredPose.getY();
+        autoFollowerTranslationErrorMeters = Math.hypot(autoFollowerErrorXMeters, autoFollowerErrorYMeters);
+        double headingErrorRadians = MathUtil.inputModulus(
+                desiredPose.getRotation().getRadians() - measuredPose.getRotation().getRadians(),
+                -Math.PI,
+                Math.PI);
+        autoFollowerHeadingErrorDegrees = Units.radiansToDegrees(headingErrorRadians);
+        autoFollowerSourceAgeSeconds = Math.max(0.0, sourceAgeSeconds);
+        if (Double.isFinite(sourceEstimatedPeriodSeconds) && sourceEstimatedPeriodSeconds > 0.0) {
+            autoFollowerSourceEstimatedPeriodSeconds = sourceEstimatedPeriodSeconds;
+        } else if (Double.isFinite(autoFollowerUpdateDtSeconds) && autoFollowerUpdateDtSeconds > 0.0) {
+            autoFollowerSourceEstimatedPeriodSeconds = autoFollowerUpdateDtSeconds;
+        } else {
+            autoFollowerSourceEstimatedPeriodSeconds = 0.0;
+        }
+        autoFollowerTelemetryValid = true;
     }
 
     @Override
