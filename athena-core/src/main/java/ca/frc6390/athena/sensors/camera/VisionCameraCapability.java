@@ -17,7 +17,8 @@ public enum VisionCameraCapability {
     TARGETING_SOURCE(TargetingSource.class),
     FIDUCIAL_SOURCE(FiducialSource.class),
     LIMELIGHT_CAMERA(LimelightCamera.class),
-    PHOTON_VISION_CAMERA(PhotonVisionCamera.class);
+    PHOTON_VISION_CAMERA(PhotonVisionCamera.class),
+    HELIOS_CAMERA(HeliOSCamera.class);
 
     private final Class<?> type;
 

@@ -6,7 +6,8 @@ package ca.frc6390.athena.sensors.camera;
  */
 public enum AthenaCamera {
     LIMELIGHT("camera:limelight"),
-    PHOTON_VISION("camera:photonvision");
+    PHOTON_VISION("camera:photonvision"),
+    HELIOS("camera:helios");
 
     private final String key;
 

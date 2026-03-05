@@ -44,6 +44,13 @@ def vendordepDescriptors = [
         uuid      : "2bce0b98-1373-4c4c-8b53-04637a9550d5"
     ],
     [
+        file      : file("$projectDir/vendordeps/FRC6390-Athena-HeliOS.json"),
+        name      : "FRC6390 Athena HeliOS",
+        artifactId: 'athena-helios',
+        jsonUrl   : "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-HeliOS.json",
+        uuid      : "85556da2-a350-47f5-bb0b-db9680a0daea"
+    ],
+    [
         file      : file("$projectDir/vendordeps/FRC6390-Athena-Pathplanner.json"),
         name      : "FRC6390 Athena Pathplanner",
         artifactId: 'athena-pathplanner',

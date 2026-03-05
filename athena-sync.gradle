@@ -37,6 +37,7 @@ def athenaSyncConfig = [
                 ':athena-pathplanner:publishToMavenLocal',
                 ':athena-limelight:publishToMavenLocal',
                 ':athena-photonvision:publishToMavenLocal',
+                ':athena-helios:publishToMavenLocal',
                 ':athena-choreo:publishToMavenLocal',
                 ':athena-studica:publishToMavenLocal',
                 ':athena-plugin:publishToMavenLocal'

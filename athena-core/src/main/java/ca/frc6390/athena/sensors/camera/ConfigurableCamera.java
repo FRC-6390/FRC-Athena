@@ -5,6 +5,7 @@ public interface ConfigurableCamera {
     enum CameraSoftware {
         LimeLight,
         PhotonVision,
+        HeliOS,
     }
 
     CameraSoftware getSoftware();

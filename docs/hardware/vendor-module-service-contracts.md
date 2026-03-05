@@ -17,6 +17,7 @@ If a descriptor entry drifts, runtime registry/factory lookups fail with missing
 - `auto:choreo`
 - `camera:photonvision`
 - `camera:limelight`
+- `camera:helios`
 
 ## Executable Coverage
 

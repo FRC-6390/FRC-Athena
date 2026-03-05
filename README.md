@@ -8,6 +8,7 @@ Athena vendordeps (install these from WPILib vendordep manager):
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-REV.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-PhotonVision.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Limelight.json
+- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-HeliOS.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Pathplanner.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Choreo.json
 - https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Studica.json
@@ -17,6 +18,7 @@ External vendordeps required by Athena modules:
 - https://maven.ctr-electronics.com/release/com/ctre/phoenix6/latest/Phoenix6-frc2026-latest.json
 - https://software-metadata.revrobotics.com/REVLib-2026.json
 - https://maven.photonvision.org/repository/internal/org/photonvision/photonlib-json/1.0/photonlib-json-1.0.json
+- https://raw.githubusercontent.com/Prometheus-Dynamics/PDLib/refs/heads/main/vendordeps/PDLib-2026.json
 - https://3015rangerrobotics.github.io/pathplannerlib/PathplannerLib.json
 - https://choreo.autos/lib/ChoreoLib2026.json
 
@@ -193,6 +195,7 @@ Build each module directly (per dependency module):
 ./gradlew :athena-rev:build
 ./gradlew :athena-photonvision:build
 ./gradlew :athena-limelight:build
+./gradlew :athena-helios:build
 ./gradlew :athena-pathplanner:build
 ./gradlew :athena-choreo:build
 ./gradlew :athena-studica:build
@@ -215,6 +218,7 @@ Publish a single module locally:
 ./gradlew :athena-rev:publishToMavenLocal
 ./gradlew :athena-photonvision:publishToMavenLocal
 ./gradlew :athena-limelight:publishToMavenLocal
+./gradlew :athena-helios:publishToMavenLocal
 ./gradlew :athena-pathplanner:publishToMavenLocal
 ./gradlew :athena-choreo:publishToMavenLocal
 ./gradlew :athena-studica:publishToMavenLocal

@@ -19,7 +19,8 @@ public final class VendorModuleExamples {
 
     private static final Map<String, String> CAMERA_SOFTWARE_KEYS = Map.of(
             "athena-limelight", "camera:limelight",
-            "athena-photonvision", "camera:photonvision");
+            "athena-photonvision", "camera:photonvision",
+            "athena-helios", "camera:helios");
 
     public static Map<String, String> expectedAutoEngineKeys() {
         return AUTO_ENGINE_KEYS;

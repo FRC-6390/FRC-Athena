@@ -1,0 +1,14 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation project(':athena-core')
+    implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.apriltag:apriltag-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.ext.wpilibVersion}"
+    implementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.ext.wpilibVersion}"
+    implementation "ca.pd.lib:pdlib-helios:${rootProject.ext.athenaVersions.pdlib}"
+}

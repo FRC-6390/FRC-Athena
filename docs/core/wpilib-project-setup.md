@@ -8,7 +8,7 @@ Use WPILib vendordep manager and install at minimum:
 
 - `FRC6390-Athena-Core.json`
 
-Add any optional Athena modules you use (`CTRE`, `REV`, `PhotonVision`, `Limelight`, `Pathplanner`, `Choreo`, `Studica`) and their required upstream vendordeps.
+Add any optional Athena modules you use (`CTRE`, `REV`, `PhotonVision`, `Limelight`, `HeliOS`, `Pathplanner`, `Choreo`, `Studica`) and their required upstream vendordeps.
 
 ## 2) Keep WPILib executable JAR wiring (rio deploy + fat jar)
 

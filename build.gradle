@@ -20,6 +20,7 @@ ext.athenaVersions = [
   choreo        : libs.versions.choreo.get(),
   rev           : libs.versions.rev.get(),
   studica       : libs.versions.studica.get(),
+  pdlib         : libs.versions.pdlib.get(),
   jackson       : libs.versions.jackson.get(),
   ejml          : libs.versions.ejml.get(),
   opencv        : libs.versions.opencv.get(),
@@ -42,6 +43,7 @@ allprojects {
     maven { url 'https://frcmaven.wpi.edu/artifactory/sleipnirgroup-mvn-release/'}
     maven { url 'https://maven.photonvision.org/repository/internal' }
     maven { url 'https://maven.photonvision.org/repository/snapshots' }
+    maven { url 'https://maven.prometheus-dynamics.ca/Prometheus-Dynamics/PDLib' }
     maven {
       url 'https://dev.studica.com/maven/release/2026/'
       content {

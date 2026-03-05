@@ -60,6 +60,7 @@ final class VendorModuleServiceContractsTest {
         assertEquals("auto:choreo", autoKeys.get("athena-choreo"));
         assertEquals("camera:photonvision", cameraKeys.get("athena-photonvision"));
         assertEquals("camera:limelight", cameraKeys.get("athena-limelight"));
+        assertEquals("camera:helios", cameraKeys.get("athena-helios"));
     }
 
     @Test
@@ -73,7 +74,9 @@ final class VendorModuleServiceContractsTest {
                 "athena-photonvision/src/main/java/ca/frc6390/athena/sensors/camera/photonvision/PhotonVisionProvider.java",
                 List.of("\"camera:photonvision\""),
                 "athena-limelight/src/main/java/ca/frc6390/athena/sensors/camera/limelight/LimelightProvider.java",
-                List.of("\"camera:limelight\""));
+                List.of("\"camera:limelight\""),
+                "athena-helios/src/main/java/ca/frc6390/athena/sensors/camera/helios/HeliOSProvider.java",
+                List.of("\"camera:helios\""));
 
         for (Map.Entry<String, List<String>> entry : sourceKeyExpectations.entrySet()) {
             Path sourceFile = repoRoot.resolve(entry.getKey());
@@ -156,6 +159,14 @@ final class VendorModuleServiceContractsTest {
                         "athena-limelight",
                         "ca.frc6390.athena.sensors.camera.CameraProvider",
                         List.of("ca.frc6390.athena.sensors.camera.limelight.LimelightCameraProvider")),
+                new ServiceContract(
+                        "athena-helios",
+                        "ca.frc6390.athena.sensors.camera.CameraRegistry$Provider",
+                        List.of("ca.frc6390.athena.sensors.camera.helios.HeliOSProvider")),
+                new ServiceContract(
+                        "athena-helios",
+                        "ca.frc6390.athena.sensors.camera.CameraProvider",
+                        List.of("ca.frc6390.athena.sensors.camera.helios.HeliOSCameraProvider")),
                 new ServiceContract(
                         "athena-pathplanner",
                         "ca.frc6390.athena.core.AutoRegistry$Provider",
