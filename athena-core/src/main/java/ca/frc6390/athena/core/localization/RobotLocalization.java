@@ -824,13 +824,21 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                             desiredSpeeds.vxMetersPerSecond + xFeedback,
                             desiredSpeeds.vyMetersPerSecond + yFeedback,
                             desiredSpeeds.omegaRadiansPerSecond + thetaFeedback);
+                    // Auto trajectories are authored in the field frame. Convert them here using
+                    // the estimator heading so downstream drivetrain code does not reinterpret the
+                    // command through the driver/alliance frame.
+                    ChassisSpeeds robotRelativeSpeeds = ChassisSpeeds.fromFieldRelativeSpeeds(
+                            fieldSpeeds.vxMetersPerSecond,
+                            fieldSpeeds.vyMetersPerSecond,
+                            fieldSpeeds.omegaRadiansPerSecond,
+                            botpose.getRotation());
 
-                    robotSpeeds.setFieldRelativeSpeeds(RobotSpeeds.AUTO_SOURCE, fieldSpeeds);
+                    robotSpeeds.setSpeeds(RobotSpeeds.AUTO_SOURCE, robotRelativeSpeeds);
                     updateAutoFollowerTelemetry(
                             desiredPose,
                             botpose,
                             desiredSpeeds,
-                            fieldSpeeds,
+                            robotRelativeSpeeds,
                             nowSeconds,
                             sourceAgeSeconds,
                             sourceEstimatedPeriodSeconds);
