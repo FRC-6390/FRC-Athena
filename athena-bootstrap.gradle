@@ -560,6 +560,12 @@ def ensureAthenaPluginIncludeBuildInSettings = { File settingsFile, File athenaR
         athenaPluginCandidates.add(File(athenaOverrideBase, "athena-plugin"))
     }
     athenaPluginCandidates.add(File(settingsDir, "../FRC-Athena/athena-plugin"))
+    athenaPluginCandidates.add(File(settingsDir, "../frc-athena/athena-plugin"))
+    val athenaUserHome = System.getProperty("user.home")
+    if (!athenaUserHome.isNullOrBlank()) {
+        athenaPluginCandidates.add(File(athenaUserHome, "Documents/GitHub/FRC-Athena/athena-plugin"))
+        athenaPluginCandidates.add(File(athenaUserHome, "GitHub/FRC-Athena/athena-plugin"))
+    }
     for (athenaCandidate in athenaPluginCandidates) {
         val athenaNormalized = athenaCandidate.canonicalFile
         val hasGradleBuildFile =
@@ -583,6 +589,12 @@ def ensureAthenaPluginIncludeBuildInSettings = { File settingsFile, File athenaR
         athenaPluginCandidates.add(new File(athenaOverrideBase, 'athena-plugin'))
     }
     athenaPluginCandidates.add(new File(settingsDir, '../FRC-Athena/athena-plugin'))
+    athenaPluginCandidates.add(new File(settingsDir, '../frc-athena/athena-plugin'))
+    def athenaUserHome = System.getProperty('user.home')
+    if (athenaUserHome != null && !athenaUserHome.toString().trim().isEmpty()) {
+        athenaPluginCandidates.add(new File(athenaUserHome.toString().trim(), 'Documents/GitHub/FRC-Athena/athena-plugin'))
+        athenaPluginCandidates.add(new File(athenaUserHome.toString().trim(), 'GitHub/FRC-Athena/athena-plugin'))
+    }
     for (File athenaCandidate : athenaPluginCandidates) {
         if (athenaCandidate == null) {
             continue

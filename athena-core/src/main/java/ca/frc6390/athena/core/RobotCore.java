@@ -5856,7 +5856,6 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         }
         competitionStreamSheddingApplied = true;
 
-        robotNetworkTables.disable(RobotNetworkTables.Flag.LOCALIZATION_POSE_TOPICS);
         robotNetworkTables.disable(RobotNetworkTables.Flag.LOCALIZATION_FIELD_WIDGET);
         robotNetworkTables.disable(RobotNetworkTables.Flag.VISION_CAMERA_WIDGETS);
         robotNetworkTables.disable(RobotNetworkTables.Flag.DRIVETRAIN_SPEED_WIDGETS);
@@ -5873,7 +5872,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
         DataLogManager.logNetworkTables(false);
         diagnosticsSection.core().warn(
                 "networktables",
-                "fms attached: disabled high-bandwidth debug streams and NT datalogging");
+                "fms attached: disabled high-bandwidth debug streams (pose topics preserved) and NT datalogging");
     }
 
     public RobotLocalization<?> localization() {
