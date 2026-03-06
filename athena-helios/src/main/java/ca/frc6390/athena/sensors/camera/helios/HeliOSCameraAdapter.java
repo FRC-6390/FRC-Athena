@@ -22,6 +22,7 @@ import ca.pd.lib.helios.localization.HeliosLocalizationSolverResult;
 import ca.pd.lib.helios.localization.HeliosLocalizationSourceSampleStatus;
 import ca.pd.lib.helios.localization.HeliosLocalizationUtil;
 import ca.pd.lib.helios.localization.HeliosLocalizationVector;
+import ca.pd.lib.helios.model.device.HeliosHostname;
 import ca.pd.lib.helios.vision.HeliosVisionHelpers;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.Matrix;
@@ -108,9 +109,9 @@ public class HeliOSCameraAdapter implements HeliOSCamera, LocalizationSource, Ta
     }
 
     public HeliOSCameraAdapter(HeliOSConfig config) {
-        this.config = config;
         this.helios = new HeliOS(config.target());
-        this.fieldLayout = loadFieldLayout(config.fieldLayout());
+        this.config = resolveTableFromDeviceIfNeeded(config, helios);
+        this.fieldLayout = loadFieldLayout(this.config.fieldLayout());
         this.localizationCamera = createVisionCamera();
     }
 
@@ -431,6 +432,88 @@ public class HeliOSCameraAdapter implements HeliOSCamera, LocalizationSource, Ta
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static HeliOSConfig resolveTableFromDeviceIfNeeded(HeliOSConfig base, HeliOS helios) {
+        String target = sanitize(base.target());
+        if (target == null || !isIpTarget(target)) {
+            return base;
+        }
+
+        String currentTable = sanitize(base.getTable());
+        String derivedFromTarget = HeliOSConfig.deriveTableFromTarget(target);
+        boolean tableLooksAutoDerived = currentTable == null
+                || currentTable.equalsIgnoreCase("helios")
+                || currentTable.equalsIgnoreCase(derivedFromTarget);
+        if (!tableLooksAutoDerived) {
+            return base;
+        }
+
+        try {
+            HeliosHostname hostnameResponse = helios.device().hostname();
+            String hostname = hostnameResponse != null ? sanitize(hostnameResponse.hostname()) : null;
+            if (hostname == null) {
+                return base;
+            }
+            String resolvedTable = HeliOSConfig.deriveTableFromTarget(hostname);
+            if (resolvedTable.equals(base.getTable())) {
+                return base;
+            }
+            return base.withTable(resolvedTable);
+        } catch (Exception ignored) {
+            return base;
+        }
+    }
+
+    private static boolean isIpTarget(String target) {
+        String host = sanitize(HeliOSConfig.extractHost(target));
+        if (host == null) {
+            return false;
+        }
+        if (host.startsWith("[") && host.endsWith("]") && host.length() > 2) {
+            host = host.substring(1, host.length() - 1);
+        }
+        return isIpv4Literal(host) || isLikelyIpv6Literal(host);
+    }
+
+    private static boolean isIpv4Literal(String host) {
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) {
+            return false;
+        }
+        for (String part : parts) {
+            if (part.isEmpty() || part.length() > 3) {
+                return false;
+            }
+            for (int i = 0; i < part.length(); i++) {
+                if (!Character.isDigit(part.charAt(i))) {
+                    return false;
+                }
+            }
+            int value = Integer.parseInt(part);
+            if (value < 0 || value > 255) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isLikelyIpv6Literal(String host) {
+        if (!host.contains(":")) {
+            return false;
+        }
+        for (int i = 0; i < host.length(); i++) {
+            char c = host.charAt(i);
+            boolean allowed = (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F')
+                    || c == ':'
+                    || c == '.';
+            if (!allowed) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static AprilTagFieldLayout loadFieldLayout(edu.wpi.first.apriltag.AprilTagFields layout) {

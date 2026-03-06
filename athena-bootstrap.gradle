@@ -21,6 +21,8 @@ import java.util.Locale
  *   -PathenaBuildTasks=:athena-core:publishToMavenLocal,:athena-plugin:publishToMavenLocal
  *   -PathenaEnableDsl=true
  *   -PathenaPluginVersion=2026.1.67
+ *   -PathenaVscodeJdtJavaHome=/abs/path/to/jdk24-or-newer
+ *   -PathenaVscodeGradleJavaHome=/abs/path/to/gradle-compatible-jdk
  *   -PathenaMergeServices=false
  */
 
@@ -39,6 +41,7 @@ def athenaBootstrapConfig = [
                 ':athena-pathplanner:publishToMavenLocal',
                 ':athena-limelight:publishToMavenLocal',
                 ':athena-photonvision:publishToMavenLocal',
+                ':athena-helios:publishToMavenLocal',
                 ':athena-choreo:publishToMavenLocal',
                 ':athena-studica:publishToMavenLocal',
                 ':athena-plugin:publishToMavenLocal'
@@ -46,6 +49,10 @@ def athenaBootstrapConfig = [
         enableDslProperty    : 'athenaEnableDsl',
         pluginVersionProperty: 'athenaPluginVersion',
         mergeServicesProperty: 'athenaMergeServices',
+        vscodeJdtJavaHomeProperty   : 'athenaVscodeJdtJavaHome',
+        vscodeJdtJavaHomeEnv        : 'ATHENA_VSCODE_JDT_JAVA_HOME',
+        vscodeGradleJavaHomeProperty: 'athenaVscodeGradleJavaHome',
+        vscodeGradleJavaHomeEnv     : 'ATHENA_VSCODE_GRADLE_JAVA_HOME',
         mergeServicesTaskName: 'athenaMergeServiceFiles',
         athenaCoreVendordep  : 'FRC6390-Athena-Core.json',
         athenaVendorPrefix   : 'FRC6390-Athena-',
@@ -795,6 +802,182 @@ def readJsonObjectLax = { File source ->
     }
 }
 
+def normalizeJavaHome = { Object raw ->
+    if (raw == null) {
+        return null
+    }
+
+    File candidate = raw instanceof File ? raw : file(raw.toString())
+    File normalized = canonicalOrSelf(candidate)
+    if (normalized == null || !normalized.exists()) {
+        return null
+    }
+
+    if (normalized.name.equalsIgnoreCase('jre') && normalized.parentFile != null) {
+        normalized = canonicalOrSelf(normalized.parentFile)
+    }
+
+    String javaBinaryName = System.getProperty('os.name')
+            .toLowerCase(Locale.ROOT)
+            .contains('win') ? 'java.exe' : 'java'
+    File javaBinary = new File(new File(normalized, 'bin'), javaBinaryName)
+    return javaBinary.isFile() ? normalized : null
+}
+
+def parseJavaMajorVersion = { Object raw ->
+    if (raw == null) {
+        return null
+    }
+
+    String version = raw.toString().replace('"', '').trim()
+    if (version.isEmpty()) {
+        return null
+    }
+    if (version.startsWith('1.')) {
+        version = version.substring(2)
+    }
+
+    int end = 0
+    while (end < version.length() && Character.isDigit(version.charAt(end))) {
+        end++
+    }
+    if (end == 0) {
+        return null
+    }
+
+    try {
+        return Integer.parseInt(version.substring(0, end))
+    } catch (NumberFormatException ignored) {
+        return null
+    }
+}
+
+def readJavaVersionFromHome = { Object raw ->
+    File javaHome = normalizeJavaHome(raw)
+    if (javaHome == null) {
+        return null
+    }
+
+    File releaseFile = new File(javaHome, 'release')
+    if (!releaseFile.isFile()) {
+        return null
+    }
+
+    try {
+        String line = releaseFile.readLines('UTF-8').find { it.startsWith('JAVA_VERSION=') }
+        if (line == null) {
+            return null
+        }
+        return line.substring('JAVA_VERSION='.length()).trim().replace('"', '')
+    } catch (IOException ignored) {
+        return null
+    }
+}
+
+def readJavaMajorVersionFromHome = { Object raw ->
+    return parseJavaMajorVersion(readJavaVersionFromHome(raw))
+}
+
+def collectAthenaJavaHomeCandidates = { Map<String, Object> settings = [:] ->
+    def candidates = [] as List<File>
+    def addCandidate = { Object raw ->
+        File javaHome = normalizeJavaHome(raw)
+        if (javaHome == null) {
+            return
+        }
+        if (!candidates.any { it.absolutePath == javaHome.absolutePath }) {
+            candidates << javaHome
+        }
+    }
+    def addDirectoryChildren = { File dir, Closure<File> mapper = { child -> child } ->
+        if (dir == null || !dir.isDirectory()) {
+            return
+        }
+        dir.listFiles()
+                ?.findAll { it.isDirectory() }
+                ?.sort { it.name }
+                ?.each { child -> addCandidate(mapper(child)) }
+    }
+
+    addCandidate(settings['java.jdt.ls.java.home'])
+    addCandidate(settings['java.import.gradle.java.home'])
+    addCandidate(project.findProperty('org.gradle.java.home')?.toString()?.trim())
+    addCandidate(System.getenv('JAVA_HOME'))
+    addCandidate(System.getProperty('java.home'))
+
+    def userHomePath = System.getProperty('user.home')
+    if (userHomePath != null && !userHomePath.toString().trim().isEmpty()) {
+        File userHome = new File(userHomePath.toString().trim())
+        addCandidate(new File(userHome, 'wpilib/2026/jdk'))
+        addCandidate(new File(userHome, 'wpilib/current/jdk'))
+        addDirectoryChildren(new File(userHome, '.sdkman/candidates/java'))
+        addDirectoryChildren(new File(userHome, '.jdks'))
+        addDirectoryChildren(new File(userHome, '.gradle/jdks'))
+    }
+
+    addDirectoryChildren(new File('/usr/lib/jvm'))
+    addDirectoryChildren(new File('/Library/Java/JavaVirtualMachines')) { File child ->
+        new File(child, 'Contents/Home')
+    }
+    addDirectoryChildren(new File('C:/Program Files/Java'))
+    addDirectoryChildren(new File('C:/Program Files/Eclipse Adoptium'))
+    addDirectoryChildren(new File('C:/Program Files/Microsoft'))
+    addDirectoryChildren(new File('C:/Program Files/Amazon Corretto'))
+    addCandidate(new File('C:/Users/Public/wpilib/2026/jdk'))
+    addCandidate(new File('C:/Users/Public/wpilib/current/jdk'))
+
+    return candidates
+}
+
+def resolveAthenaDslLanguageServerJavaHome = { Map<String, Object> settings = [:] ->
+    def candidates = [] as List<File>
+    def addCandidate = { Object raw ->
+        File javaHome = normalizeJavaHome(raw)
+        if (javaHome == null) {
+            return
+        }
+        if (!candidates.any { it.absolutePath == javaHome.absolutePath }) {
+            candidates << javaHome
+        }
+    }
+
+    addCandidate(project.findProperty(athenaBootstrapConfig.vscodeJdtJavaHomeProperty)?.toString()?.trim())
+    addCandidate(System.getenv(athenaBootstrapConfig.vscodeJdtJavaHomeEnv))
+    addCandidate(settings['java.jdt.ls.java.home'])
+    collectAthenaJavaHomeCandidates(settings).each { addCandidate(it) }
+
+    return candidates.find { File javaHome ->
+        Integer major = readJavaMajorVersionFromHome(javaHome)
+        return major != null && major >= 24
+    }
+}
+
+def resolveAthenaDslGradleJavaHome = { Map<String, Object> settings = [:] ->
+    def candidates = [] as List<File>
+    def addCandidate = { Object raw ->
+        File javaHome = normalizeJavaHome(raw)
+        if (javaHome == null) {
+            return
+        }
+        if (!candidates.any { it.absolutePath == javaHome.absolutePath }) {
+            candidates << javaHome
+        }
+    }
+
+    addCandidate(project.findProperty(athenaBootstrapConfig.vscodeGradleJavaHomeProperty)?.toString()?.trim())
+    addCandidate(System.getenv(athenaBootstrapConfig.vscodeGradleJavaHomeEnv))
+    addCandidate(settings['java.import.gradle.java.home'])
+    addCandidate(project.findProperty('org.gradle.java.home')?.toString()?.trim())
+    addCandidate(System.getenv('JAVA_HOME'))
+    addCandidate(System.getProperty('java.home'))
+    collectAthenaJavaHomeCandidates(settings).each { addCandidate(it) }
+
+    return candidates.find { File javaHome ->
+        Integer major = readJavaMajorVersionFromHome(javaHome)
+        return major != null && major >= 17
+    }
+}
+
 def mergeJvmArgs = { String existing, List<String> required ->
     String merged = existing?.trim() ?: ''
     required.each { arg ->
@@ -822,6 +1005,16 @@ def ensureAthenaDslVscodeSettings = {
     putIfChanged('java.jdt.ls.javac.enabled', 'on')
     putIfChanged('java.completion.engine', 'dom')
 
+    File languageServerJavaHome = resolveAthenaDslLanguageServerJavaHome(settings)
+    if (languageServerJavaHome != null) {
+        putIfChanged('java.jdt.ls.java.home', languageServerJavaHome.absolutePath)
+    }
+
+    File gradleJavaHome = resolveAthenaDslGradleJavaHome(settings)
+    if (gradleJavaHome != null) {
+        putIfChanged('java.import.gradle.java.home', gradleJavaHome.absolutePath)
+    }
+
     String currentVmArgs = settings['java.jdt.ls.vmargs']?.toString() ?: ''
     String mergedVmArgs = mergeJvmArgs(currentVmArgs, athenaDslJdtExports)
     if (currentVmArgs != mergedVmArgs) {
@@ -840,17 +1033,31 @@ def ensureAthenaDslVscodeSettings = {
     return [changed: changed, file: settingsFile]
 }
 
-def athenaDslVscodeConfigured = {
+def athenaDslVscodeStatus = {
     File settingsFile = file("$rootDir/.vscode/settings.json")
     if (!settingsFile.isFile()) {
-        return false
+        return [
+                configured            : false,
+                file                  : settingsFile,
+                jdtJavaHome           : null,
+                jdtJavaMajor          : null,
+                gradleJavaHome        : null,
+                gradleJavaMajor       : null
+        ]
     }
 
     Map<String, Object> settings
     try {
         settings = readJsonObjectLax(settingsFile)
     } catch (Throwable ignored) {
-        return false
+        return [
+                configured            : false,
+                file                  : settingsFile,
+                jdtJavaHome           : null,
+                jdtJavaMajor          : null,
+                gradleJavaHome        : null,
+                gradleJavaMajor       : null
+        ]
     }
 
     String vmArgs = settings['java.jdt.ls.vmargs']?.toString() ?: ''
@@ -861,8 +1068,30 @@ def athenaDslVscodeConfigured = {
             settings['java.import.gradle.annotationProcessing.enabled'],
             false
     )
+    File languageServerJavaHome = normalizeJavaHome(settings['java.jdt.ls.java.home'])
+    Integer languageServerJavaMajor = readJavaMajorVersionFromHome(languageServerJavaHome)
+    File gradleJavaHome = normalizeJavaHome(settings['java.import.gradle.java.home'])
+    Integer gradleJavaMajor = readJavaMajorVersionFromHome(gradleJavaHome)
 
-    return javacEnabled && domCompletion && annotationProcessing && hasExports
+    return [
+            configured     : javacEnabled
+                    && domCompletion
+                    && annotationProcessing
+                    && hasExports
+                    && languageServerJavaMajor != null
+                    && languageServerJavaMajor >= 24
+                    && gradleJavaMajor != null
+                    && gradleJavaMajor >= 17,
+            file           : settingsFile,
+            jdtJavaHome    : languageServerJavaHome,
+            jdtJavaMajor   : languageServerJavaMajor,
+            gradleJavaHome : gradleJavaHome,
+            gradleJavaMajor: gradleJavaMajor
+    ]
+}
+
+def athenaDslVscodeConfigured = {
+    return athenaDslVscodeStatus().configured
 }
 
 def resolveStaticDeployTaskNames = {
@@ -1045,7 +1274,16 @@ tasks.register('athenaDoctor') {
         }
 
         logger.lifecycle("Athena DSL plugin configured in build file: ${dslConfigured()}")
-        logger.lifecycle("Athena VS Code DSL settings configured: ${athenaDslVscodeConfigured()}")
+        def vscodeStatus = athenaDslVscodeStatus()
+        logger.lifecycle("Athena VS Code DSL settings configured: ${vscodeStatus.configured}")
+        logger.lifecycle(
+                "Athena VS Code language server JDK: ${vscodeStatus.jdtJavaHome ?: '<missing>'}" +
+                        (vscodeStatus.jdtJavaMajor != null ? " (Java ${vscodeStatus.jdtJavaMajor})" : '')
+        )
+        logger.lifecycle(
+                "Athena VS Code Gradle JDK: ${vscodeStatus.gradleJavaHome ?: '<missing>'}" +
+                        (vscodeStatus.gradleJavaMajor != null ? " (Java ${vscodeStatus.gradleJavaMajor})" : '')
+        )
         logger.lifecycle(
                 "Athena DSL requested by property now: ${athenaDslRequested} " +
                         "(requires athenaEnableDsl + rerun)"

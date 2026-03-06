@@ -45,11 +45,21 @@ In this mode, the plugin generates `SetpointProvider<IntakeTuple>` and `getSetpo
 
 The enum DSL transform is a javac plugin (`-Xplugin:AthenaStateDsl`), so VS Code
 must run the Java language server in javac mode with `jdk.compiler` exports.
+Current `vscode-java` javac-mode support also requires the language server to
+launch on JDK 24 or newer.
 
 When using Athena bootstrap (`athena-bootstrap.gradle`), run:
 
 ```bash
 ./gradlew athenaConfigureVscode
 ```
+
+This now maintains:
+- `java.jdt.ls.javac.enabled = "on"`
+- `java.completion.engine = "dom"`
+- `java.import.gradle.annotationProcessing.enabled = true`
+- `java.jdt.ls.vmargs` with Athena's required `jdk.compiler` exports
+- `java.jdt.ls.java.home` set to a detected JDK 24+ when one is available
+- `java.import.gradle.java.home` set to a detected Gradle-compatible JDK
 
 `athenaEnableDsl` also applies this automatically.

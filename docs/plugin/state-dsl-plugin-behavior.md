@@ -42,6 +42,8 @@ athenaPlugin {
   - `java.completion.engine = "dom"`
   - `java.import.gradle.annotationProcessing.enabled = true`
   - `java.jdt.ls.vmargs` containing required `--add-exports=jdk.compiler/...` entries.
+  - `java.jdt.ls.java.home` pointing to JDK 24 or newer for javac-based language-server support.
+  - `java.import.gradle.java.home` pointing to a Gradle-compatible JDK so project import does not inherit the language-server JDK accidentally.
 
 ## Executable References
 

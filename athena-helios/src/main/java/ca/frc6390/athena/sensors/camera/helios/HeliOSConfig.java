@@ -1,5 +1,7 @@
 package ca.frc6390.athena.sensors.camera.helios;
 
+import java.net.URI;
+import java.util.Locale;
 import java.util.EnumSet;
 
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
@@ -61,7 +63,7 @@ public record HeliOSConfig(
     }
 
     public static HeliOSConfig target(String target) {
-        return table(DEFAULT_TABLE, target);
+        return table(deriveTableFromTarget(target), target);
     }
 
     public HeliOSConfig withTable(String table) {
@@ -360,6 +362,73 @@ public record HeliOSConfig(
     private static String sanitizeTarget(String target) {
         String value = sanitizeOptional(target);
         return value != null ? value : DEFAULT_TARGET;
+    }
+
+    static String deriveTableFromTarget(String target) {
+        String value = sanitizeOptional(target);
+        if (value == null) {
+            return DEFAULT_TABLE;
+        }
+
+        String host = extractHost(value);
+        if (host == null) {
+            return DEFAULT_TABLE;
+        }
+
+        host = host.toLowerCase(Locale.ROOT);
+        if (host.endsWith(".local") && host.length() > ".local".length()) {
+            host = host.substring(0, host.length() - ".local".length());
+        }
+        if (host.startsWith("[")) {
+            host = host.substring(1);
+        }
+        if (host.endsWith("]")) {
+            host = host.substring(0, host.length() - 1);
+        }
+
+        // Normalize to a predictable NetworkTables-friendly table segment.
+        String normalized = host.replaceAll("[^a-z0-9_-]", "-");
+        normalized = normalized.replaceAll("[-_]{2,}", "-");
+        normalized = normalized.replaceAll("^[-_]+", "");
+        normalized = normalized.replaceAll("[-_]+$", "");
+        return normalized.isEmpty() ? DEFAULT_TABLE : normalized;
+    }
+
+    static String extractHost(String target) {
+        try {
+            if (target.startsWith("http://") || target.startsWith("https://")) {
+                URI uri = URI.create(target);
+                String host = sanitizeOptional(uri.getHost());
+                if (host != null) {
+                    return host;
+                }
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Fall through and use best-effort parsing below.
+        }
+
+        String value = target;
+        int slash = value.indexOf('/');
+        if (slash >= 0) {
+            value = value.substring(0, slash);
+        }
+
+        // host:port case
+        int firstColon = value.indexOf(':');
+        int lastColon = value.lastIndexOf(':');
+        if (firstColon >= 0 && firstColon == lastColon) {
+            String candidate = value.substring(0, firstColon);
+            if (!candidate.isBlank()) {
+                value = candidate;
+            }
+        }
+
+        // [ipv6]:port case
+        int closingBracket = value.indexOf(']');
+        if (value.startsWith("[") && closingBracket > 0) {
+            return value.substring(1, closingBracket);
+        }
+        return value;
     }
 
     private static String sanitizeOptional(String value) {
