@@ -57,9 +57,17 @@ When using Athena bootstrap (`athena-bootstrap.gradle`), run:
 This now maintains:
 - `java.jdt.ls.javac.enabled = "on"`
 - `java.completion.engine = "dom"`
-- `java.import.gradle.annotationProcessing.enabled = true`
+- `java.import.gradle.annotationProcessing.enabled = false`
 - `java.jdt.ls.vmargs` with Athena's required `jdk.compiler` exports
 - `java.jdt.ls.java.home` set to a detected JDK 24+ when one is available
 - `java.import.gradle.java.home` set to a detected Gradle-compatible JDK
 
 `athenaEnableDsl` also applies this automatically.
+
+Athena's DSL does not rely on IDE annotation processing. Keeping that setting on can
+trigger current VS Code Java builder crashes and surface false enum/generic errors.
+
+For local Athena plugin development, publish the plugin to `mavenLocal` and let the
+robot project resolve it normally. Avoid using `includeBuild` for `athena-plugin`
+inside robot-project `settings.gradle`; VS Code/Buildship can resolve that path to a
+partial transformed jar, which breaks the DSL plugin service lookup.

@@ -94,7 +94,7 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
     }
 
     @SuppressWarnings("unchecked")
-    public <S extends Enum<S> & SetpointProvider<SP>, SP> SuperstructureMechanism<S, SP> byConfig(
+    public <SP, S extends Enum<S> & SetpointProvider<SP>> SuperstructureMechanism<S, SP> byConfig(
             SuperstructureConfig<S, SP> config) {
         if (config == null) {
             return null;
@@ -116,7 +116,7 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
         return superstruct(key.name());
     }
 
-    public <S extends Enum<S> & SetpointProvider<SP>, SP> SuperstructureMechanism<S, SP> superstruct(
+    public <SP, S extends Enum<S> & SetpointProvider<SP>> SuperstructureMechanism<S, SP> superstruct(
             SuperstructureConfig<S, SP> config) {
         return byConfig(config);
     }
@@ -168,7 +168,15 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
 
     public <T> T key(SuperstructureConfig<?, ?> config, Class<T> type) {
         Objects.requireNonNull(type, "type");
-        SuperstructureMechanism<?, ?> superstructure = byConfig(config);
+        SuperstructureMechanism<?, ?> superstructure = null;
+        if (config != null) {
+            for (SuperstructureMechanism<?, ?> candidate : superstructuresByConfig) {
+                if (candidate != null && candidate.getSourceConfig() == config) {
+                    superstructure = candidate;
+                    break;
+                }
+            }
+        }
         if (superstructure == null) {
             return null;
         }
@@ -352,7 +360,7 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
             return this;
         }
 
-        public <S extends Enum<S> & SetpointProvider<SP>, SP> InteractionSection superstructure(
+        public <SP, S extends Enum<S> & SetpointProvider<SP>> InteractionSection superstructure(
                 SuperstructureConfig<S, SP> config,
                 Consumer<SuperstructureMechanism<S, SP>> action) {
             SuperstructureMechanism<S, SP> superstructure = owner.superstruct(config);

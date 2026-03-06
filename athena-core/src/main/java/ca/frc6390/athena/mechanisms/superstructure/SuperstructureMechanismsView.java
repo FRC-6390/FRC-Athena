@@ -29,7 +29,7 @@ public interface SuperstructureMechanismsView<SP> {
 
     <E extends Enum<E> & SetpointProvider<Double>> StatefulMechanism<E> generic(Function<SP, E> mapper);
 
-    <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> SuperstructureMechanism<CS, CSP> superstructure(
+    <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> SuperstructureMechanism<CS, CSP> superstructure(
             Function<SP, CS> mapper);
 
     boolean input(String key);

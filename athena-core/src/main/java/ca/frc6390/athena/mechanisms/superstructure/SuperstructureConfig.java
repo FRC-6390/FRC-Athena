@@ -33,7 +33,7 @@ import ca.frc6390.athena.mechanisms.Mechanism;
  * @param <S> superstate enum type
  * @param <SP> setpoint tuple returned by the superstate enum
  */
-public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>, SP> {
+public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>, SP> {
 
     private S initialState;
     private String superstructureName;
@@ -64,20 +64,25 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     private final List<Binding<SP>> exitAlwaysBindings = new ArrayList<>();
     private SP initialSetpoint;
 
-    public SuperstructureConfig(S initialState) {
-        this.initialState = initialState;
-        this.initialSetpoint = initialState != null ? initialState.getSetpoint() : null;
+    @SuppressWarnings("unchecked")
+    private static <SP> SP setpointOf(SetpointProvider<?> state) {
+        return state == null ? null : (SP) state.getSetpoint();
     }
 
-    public static <S extends Enum<S> & SetpointProvider<SP>, SP> SuperstructureConfig<S, SP> create(S initialState) {
+    public SuperstructureConfig(S initialState) {
+        this.initialState = initialState;
+        this.initialSetpoint = setpointOf(initialState);
+    }
+
+    public static <SP, S extends Enum<S> & SetpointProvider<SP>> SuperstructureConfig<S, SP> create(S initialState) {
         return new SuperstructureConfig<>(initialState);
     }
 
     /**
      * Named variant of {@link #create(Enum)}.
      */
-    public static <S extends Enum<S> & SetpointProvider<SP>, SP> SuperstructureConfig<S, SP> create(String name, S initialState) {
-        return create(initialState).named(name);
+    public static <SP, S extends Enum<S> & SetpointProvider<SP>> SuperstructureConfig<S, SP> create(String name, S initialState) {
+        return SuperstructureConfig.<SP, S>create(initialState).named(name);
     }
 
     /**
@@ -249,7 +254,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
     private void ensureInitialState() {
         this.initialState = Objects.requireNonNull(initialState, "initialState");
         if (initialSetpoint == null) {
-            this.initialSetpoint = initialState.getSetpoint();
+            this.initialSetpoint = setpointOf(initialState);
         }
     }
 
@@ -271,7 +276,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         return this;
     }
 
-    public static final class MechanismsSection<S extends Enum<S> & SetpointProvider<SP>, SP> {
+    public static final class MechanismsSection<S extends Enum<S> & SetpointProvider<?>, SP> {
         private final SuperstructureConfig<S, SP> owner;
 
         private MechanismsSection(SuperstructureConfig<S, SP> owner) {
@@ -322,7 +327,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
             return this;
         }
 
-        public <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> MechanismsSection<S, SP> superstructure(
+        public <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> MechanismsSection<S, SP> superstructure(
                 SuperstructureConfig<CS, CSP> config,
                 Function<SP, CS> mapper) {
             Objects.requireNonNull(config, "config");
@@ -340,7 +345,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
             return this;
         }
 
-        public <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> MechanismsSection<S, SP> existingSuperstructure(
+        public <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> MechanismsSection<S, SP> existingSuperstructure(
                 SuperstructureMechanism<CS, CSP> superstructure,
                 Function<SP, CS> mapper) {
             Objects.requireNonNull(superstructure, "superstructure");
@@ -363,7 +368,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         return this;
     }
 
-    public static final class ConstraintsSection<S extends Enum<S> & SetpointProvider<SP>, SP> {
+    public static final class ConstraintsSection<S extends Enum<S> & SetpointProvider<?>, SP> {
         private final SuperstructureConfig<S, SP> owner;
 
         private ConstraintsSection(SuperstructureConfig<S, SP> owner) {
@@ -406,7 +411,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         return this;
     }
 
-    public static final class HooksSection<S extends Enum<S> & SetpointProvider<SP>, SP>
+    public static final class HooksSection<S extends Enum<S> & SetpointProvider<?>, SP>
             extends LifecycleHooksSectionBase<HooksSection<S, SP>, Binding<SP>, S> {
         private final SuperstructureConfig<S, SP> owner;
 
@@ -612,7 +617,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<SP>
         return this;
     }
 
-    public static final class InputsSection<S extends Enum<S> & SetpointProvider<SP>, SP> {
+    public static final class InputsSection<S extends Enum<S> & SetpointProvider<?>, SP> {
         private final SuperstructureConfig<S, SP> owner;
 
         private InputsSection(SuperstructureConfig<S, SP> owner) {

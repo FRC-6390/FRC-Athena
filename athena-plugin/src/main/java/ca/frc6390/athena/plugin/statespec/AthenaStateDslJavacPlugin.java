@@ -125,10 +125,18 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
 
         private String annotationSetpointTypeName(JCTree.JCAnnotation annotation) {
             if (annotation.args == null || annotation.args.isEmpty()) {
-                return null;
+                return extractClassLiteralTypeNameText(annotation.toString());
             }
             JCTree.JCExpression first = annotation.args.head;
-            return extractClassLiteralTypeName(first);
+            String typeName = extractClassLiteralTypeName(first);
+            if (typeName != null) {
+                return typeName;
+            }
+            typeName = extractClassLiteralTypeNameText(first.toString());
+            if (typeName != null) {
+                return typeName;
+            }
+            return extractClassLiteralTypeNameText(annotation.toString());
         }
 
         private String extractClassLiteralTypeName(JCTree.JCExpression expression) {
@@ -141,6 +149,41 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
                 return fieldAccess.selected.toString();
             }
             return null;
+        }
+
+        private String extractClassLiteralTypeNameText(String text) {
+            if (text == null) {
+                return null;
+            }
+
+            String normalized = text.trim();
+            if (normalized.isEmpty()) {
+                return null;
+            }
+
+            if (normalized.startsWith("@")) {
+                int openParen = normalized.indexOf('(');
+                int closeParen = normalized.lastIndexOf(')');
+                if (openParen < 0 || closeParen <= openParen) {
+                    return null;
+                }
+                normalized = normalized.substring(openParen + 1, closeParen).trim();
+            }
+
+            int commaIndex = normalized.indexOf(',');
+            if (commaIndex >= 0) {
+                normalized = normalized.substring(0, commaIndex).trim();
+            }
+
+            int assignIndex = normalized.indexOf('=');
+            if (assignIndex >= 0) {
+                normalized = normalized.substring(assignIndex + 1).trim();
+            }
+
+            if (!normalized.endsWith(".class")) {
+                return null;
+            }
+            return normalized.substring(0, normalized.length() - ".class".length()).trim();
         }
 
         private Set<String> enumConstantNames(JCTree.JCClassDecl classDecl) {

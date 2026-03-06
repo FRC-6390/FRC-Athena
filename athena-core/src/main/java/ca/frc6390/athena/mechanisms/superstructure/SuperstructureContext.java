@@ -39,7 +39,7 @@ public interface SuperstructureContext<SP> extends TypedInputContext, RobotScope
 
     <E extends Enum<E> & SetpointProvider<Double>> StatefulLike<E> mechanism(Function<SP, E> mapper);
 
-    <CS extends Enum<CS> & SetpointProvider<CSP>, CSP> SuperstructureMechanism<CS, CSP> superstructure(Function<SP, CS> mapper);
+    <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> SuperstructureMechanism<CS, CSP> superstructure(Function<SP, CS> mapper);
 
     /**
      * Returns a typed accessor for child mechanisms and nested superstructures.

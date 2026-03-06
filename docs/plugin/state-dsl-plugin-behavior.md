@@ -40,10 +40,16 @@ athenaPlugin {
 - Required settings include:
   - `java.jdt.ls.javac.enabled = "on"`
   - `java.completion.engine = "dom"`
-  - `java.import.gradle.annotationProcessing.enabled = true`
+  - `java.import.gradle.annotationProcessing.enabled = false`
   - `java.jdt.ls.vmargs` containing required `--add-exports=jdk.compiler/...` entries.
   - `java.jdt.ls.java.home` pointing to JDK 24 or newer for javac-based language-server support.
   - `java.import.gradle.java.home` pointing to a Gradle-compatible JDK so project import does not inherit the language-server JDK accidentally.
+- Local Athena plugin development should resolve through `mavenLocal` rather than a
+  robot-project `includeBuild(athena-plugin)` override; Buildship can turn that
+  composite path into a partial transformed jar that breaks javac plugin discovery.
+- IDE annotation processing must stay off for Athena DSL projects; the current
+  VS Code Java builder stack can crash while configuring APT and then report false
+  enum-constructor/bounds diagnostics instead of the transformed DSL view.
 
 ## Executable References
 

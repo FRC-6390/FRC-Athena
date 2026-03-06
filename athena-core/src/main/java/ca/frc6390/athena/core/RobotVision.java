@@ -6,10 +6,13 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -75,6 +78,7 @@ public class RobotVision implements RobotSendableSystem {
    private final Map<String, VisionCamera> camerasView;
    private final EnumMap<CameraRole, List<VisionCamera>> camerasByRole;
    private final HashMap<String, Object> vendorCameras;
+   private final HashMap<String, Integer> lastPublishedDetectionCounts = new HashMap<>();
    private RobotLocalization<?> localization;
    private DiagnosticsChannel diagnosticsChannel;
    private final DiagnosticsView diagnosticsView = new DiagnosticsView();
@@ -691,6 +695,140 @@ public class RobotVision implements RobotSendableSystem {
       node.putDouble("cameraCount", cameras.size());
       node.putBoolean("hasLocalization", localization != null);
 
+      RobotNetworkTables.Node camerasNode = node.child("Cameras");
+      List<Map.Entry<String, VisionCamera>> cameraEntries = new ArrayList<>(cameras.entrySet());
+      cameraEntries.sort(Map.Entry.comparingByKey(String.CASE_INSENSITIVE_ORDER));
+      Set<String> activeCameraKeys = new HashSet<>();
+
+      for (Map.Entry<String, VisionCamera> entry : cameraEntries) {
+         if (entry == null) {
+            continue;
+         }
+         String key = entry.getKey();
+         VisionCamera camera = entry.getValue();
+         if (key == null || key.isBlank() || camera == null) {
+            continue;
+         }
+         activeCameraKeys.add(key);
+
+         RobotNetworkTables.Node cameraNode = camerasNode.child(key);
+         cameraNode.putBoolean("present", true);
+         cameraNode.putString("table", camera.getConfig().getTable());
+         cameraNode.putString("software", camera.getConfig().getSoftware().name());
+         cameraNode.putBoolean("connected", camera.isConnected());
+         cameraNode.putBoolean("hasValidTarget", camera.hasValidTarget());
+         cameraNode.putBoolean("useForLocalization", camera.isUseForLocalization());
+         cameraNode.putDouble("trustDistanceM", camera.getTrustDistance());
+         cameraNode.putDouble("cameraYawDeg", camera.getCameraYawDegrees());
+
+         LocalizationData localizationData = camera.getLocalizationData();
+         Pose2d pose = localizationData.pose2d();
+         cameraNode.putDouble("poseX_M", pose.getX());
+         cameraNode.putDouble("poseY_M", pose.getY());
+         cameraNode.putDouble("poseHeadingDeg", pose.getRotation().getDegrees());
+         cameraNode.putDouble("latencySec", localizationData.latency());
+
+         Matrix<N3, N1> std = localizationData.stdDevs();
+         cameraNode.putDouble("stdDevX_M", stdValue(std, 0));
+         cameraNode.putDouble("stdDevY_M", stdValue(std, 1));
+         cameraNode.putDouble("stdDevThetaRad", stdValue(std, 2));
+
+         OptionalInt latestTagId = camera.getLatestTagId();
+         cameraNode.putDouble("latestTagId", latestTagId.isPresent() ? latestTagId.getAsInt() : -1);
+         cameraNode.putDouble("targetYawDeg", optionalOrNaN(camera.getTargetYawDegrees()));
+         cameraNode.putDouble("targetPitchDeg", optionalOrNaN(camera.getTargetPitchDegrees()));
+         cameraNode.putDouble("targetDistanceM", optionalOrNaN(camera.getTargetDistanceMeters()));
+         cameraNode.putDouble("confidence", finiteOrNaN(camera.getMeasurementConfidence()));
+         cameraNode.putDouble("ambiguity", finiteOrNaN(camera.getMeasurementAmbiguity()));
+         cameraNode.putDouble("cameraPitchDeg", finiteOrNaN(camera.getCameraPitchDegrees()));
+         cameraNode.putDouble("cameraRollDeg", finiteOrNaN(camera.getCameraRollDegrees()));
+
+         List<VisionCamera.TargetMeasurement> detections = camera.getTargetMeasurements();
+         int detectionCount = detections != null ? detections.size() : 0;
+         cameraNode.putDouble("detectionCount", detectionCount);
+         RobotNetworkTables.Node detectionsNode = cameraNode.child("Detections");
+         for (int i = 0; i < detectionCount; i++) {
+            VisionCamera.TargetMeasurement detection = detections.get(i);
+            RobotNetworkTables.Node detectionNode = detectionsNode.child("D" + i);
+            detectionNode.putBoolean("present", true);
+            if (detection == null) {
+               detectionNode.putDouble("tagId", -1);
+               detectionNode.putDouble("yawDeg", Double.NaN);
+               detectionNode.putDouble("distanceM", Double.NaN);
+               detectionNode.putDouble("confidence", Double.NaN);
+               detectionNode.putDouble("cameraX_M", Double.NaN);
+               detectionNode.putDouble("cameraY_M", Double.NaN);
+               continue;
+            }
+            detectionNode.putDouble("tagId", detection.tagId());
+            detectionNode.putDouble("yawDeg", nullableOrNaN(detection.yawDegrees()));
+            detectionNode.putDouble("distanceM", nullableOrNaN(detection.distanceMeters()));
+            detectionNode.putDouble("confidence", nullableOrNaN(detection.confidence()));
+            Translation2d cameraTranslation = detection.cameraTranslation();
+            detectionNode.putDouble("cameraX_M", cameraTranslation != null ? cameraTranslation.getX() : Double.NaN);
+            detectionNode.putDouble("cameraY_M", cameraTranslation != null ? cameraTranslation.getY() : Double.NaN);
+         }
+
+         int previousCount = lastPublishedDetectionCounts.getOrDefault(key, 0);
+         for (int i = detectionCount; i < previousCount; i++) {
+            RobotNetworkTables.Node detectionNode = detectionsNode.child("D" + i);
+            detectionNode.putBoolean("present", false);
+            detectionNode.putDouble("tagId", -1);
+            detectionNode.putDouble("yawDeg", Double.NaN);
+            detectionNode.putDouble("distanceM", Double.NaN);
+            detectionNode.putDouble("confidence", Double.NaN);
+            detectionNode.putDouble("cameraX_M", Double.NaN);
+            detectionNode.putDouble("cameraY_M", Double.NaN);
+         }
+         lastPublishedDetectionCounts.put(key, detectionCount);
+      }
+
+      if (!lastPublishedDetectionCounts.isEmpty()) {
+         List<String> staleKeys = new ArrayList<>();
+         for (String key : lastPublishedDetectionCounts.keySet()) {
+            if (key == null || !activeCameraKeys.contains(key)) {
+               staleKeys.add(key);
+            }
+         }
+         for (String staleKey : staleKeys) {
+            int staleCount = lastPublishedDetectionCounts.getOrDefault(staleKey, 0);
+            RobotNetworkTables.Node cameraNode = camerasNode.child(staleKey);
+            cameraNode.putBoolean("present", false);
+            RobotNetworkTables.Node detectionsNode = cameraNode.child("Detections");
+            for (int i = 0; i < staleCount; i++) {
+               RobotNetworkTables.Node detectionNode = detectionsNode.child("D" + i);
+               detectionNode.putBoolean("present", false);
+               detectionNode.putDouble("tagId", -1);
+               detectionNode.putDouble("yawDeg", Double.NaN);
+               detectionNode.putDouble("distanceM", Double.NaN);
+               detectionNode.putDouble("confidence", Double.NaN);
+               detectionNode.putDouble("cameraX_M", Double.NaN);
+               detectionNode.putDouble("cameraY_M", Double.NaN);
+            }
+            lastPublishedDetectionCounts.remove(staleKey);
+         }
+      }
+
       return node;
+   }
+
+   private static double optionalOrNaN(OptionalDouble value) {
+      return value != null && value.isPresent() ? value.getAsDouble() : Double.NaN;
+   }
+
+   private static double nullableOrNaN(Double value) {
+      return value != null && Double.isFinite(value) ? value : Double.NaN;
+   }
+
+   private static double finiteOrNaN(double value) {
+      return Double.isFinite(value) ? value : Double.NaN;
+   }
+
+   private static double stdValue(Matrix<N3, N1> std, int row) {
+      if (std == null) {
+         return Double.NaN;
+      }
+      double value = std.get(row, 0);
+      return Double.isFinite(value) ? value : Double.NaN;
    }
 }

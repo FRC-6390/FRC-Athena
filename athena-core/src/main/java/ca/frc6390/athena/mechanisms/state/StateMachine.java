@@ -20,7 +20,7 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implements RobotSendableDevice {
+public class StateMachine<T, E extends Enum<E> & SetpointProvider<?>>  implements RobotSendableDevice {
     
     private final DelayedOutput atGoalDelayedOutput;
 
@@ -249,8 +249,9 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<T>>  implement
         applyDslTransitionIfReady();
     }
 
+    @SuppressWarnings("unchecked")
     public T getGoalStateSetpoint(){
-        return getGoalState().getSetpoint();
+        return (T) getGoalState().getSetpoint();
     }
 
     public double goalStateTimeSeconds() {

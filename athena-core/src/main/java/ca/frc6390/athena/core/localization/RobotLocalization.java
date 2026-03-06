@@ -238,6 +238,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
     private static Field poseEstimatorQField;
     private static Field poseEstimator3dQField;
     private final RobotLocalizationFieldPublisher fieldPublisher;
+    private boolean visionFieldPublished = false;
     private DiagnosticsChannel diagnosticsChannel;
     private final DiagnosticsView diagnosticsView = new DiagnosticsView();
     private Subsystem autoPlannerPidAutotunerRequirement;
@@ -2440,6 +2441,11 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             health.putDouble("slipScore", slipScore);
         }
 
+        if (vision != null && !visionFieldPublished) {
+            SmartDashboard.putData("Athena Vision Field2d", cameraManager.getVisionField());
+            visionFieldPublished = true;
+        }
+
         return node;
     }
 
@@ -3142,8 +3148,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         if (isPrimary) {
             updateHealthMetrics(nowSeconds);
-            RobotNetworkTables nt = robotNetworkTables;
-            if (nt != null && nt.enabled(RobotNetworkTables.Flag.VISION_CAMERA_WIDGETS)) {
+            if (vision != null) {
                 cameraManager.updateCameraVisualizations(vision, fieldPose);
             }
             updateSlipState(nowSeconds);
