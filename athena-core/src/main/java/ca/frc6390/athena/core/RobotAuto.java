@@ -44,6 +44,16 @@ public class RobotAuto {
     private static final int DEFAULT_AUTO_TRACE_LOG_CAPACITY = 512;
     private static final String GLOBAL_INPUT_SCOPE = "<global>";
 
+    // Command overloads may intentionally reuse a prebuilt instance. Clear any prior
+    // composition bookkeeping before handing that instance back to a deferred wrapper.
+    static Supplier<Command> reusableCommandSupplier(Command command) {
+        Command reusable = Objects.requireNonNull(command, "command");
+        return () -> {
+            CommandScheduler.getInstance().removeComposedCommand(reusable);
+            return reusable;
+        };
+    }
+
     private final Map<String, Supplier<Command>> namedCommandSuppliers;
     private final Map<String, AutoRoutine> autoRoutines;
     private final Map<String, InputBinding<?>> autoInputs;
@@ -578,8 +588,7 @@ public class RobotAuto {
 
         default AutoRegisterCtx marker(String id, Command command) {
             Objects.requireNonNull(command, "command");
-            Supplier<Command> supplier = () -> command;
-            return marker(id, supplier);
+            return marker(id, RobotAuto.reusableCommandSupplier(command));
         }
 
         default AutoRegisterCtx marker(String id, Runnable action) {
@@ -784,7 +793,7 @@ public class RobotAuto {
 
         default AutoRegisterCtx custom(String id, Command command) {
             Objects.requireNonNull(command, "command");
-            return custom(id, () -> command);
+            return custom(id, RobotAuto.reusableCommandSupplier(command));
         }
 
         default AutoRegisterCtx custom(String id, Runnable action) {
@@ -805,12 +814,12 @@ public class RobotAuto {
 
         default AutoRegisterCtx auto(AutoKey key, Command command) {
             Objects.requireNonNull(command, "command");
-            return auto(key, () -> command);
+            return auto(key, RobotAuto.reusableCommandSupplier(command));
         }
 
         default AutoRegisterCtx auto(String id, Command command) {
             Objects.requireNonNull(command, "command");
-            return auto(id, () -> command);
+            return auto(id, RobotAuto.reusableCommandSupplier(command));
         }
 
         default AutoRegisterCtx auto(AutoKey key, Runnable action) {
@@ -2228,7 +2237,7 @@ public class RobotAuto {
     }
 
     private RobotAuto registerNamedCommand(NamedCommandKey key, Command command) {
-        return registerNamedCommand(key, () -> command);
+        return registerNamedCommand(key, reusableCommandSupplier(command));
     }
 
     private RobotAuto registerNamedCommand(String id, Command command) {
