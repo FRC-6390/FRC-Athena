@@ -11,7 +11,7 @@ import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
  *
  * @param <E> state enum type
  */
-public interface StatefulLike<E extends Enum<E> & StateMachine.SetpointProvider<Double>> {
+public interface StatefulLike<E extends Enum<E>> {
     StateMachineSection<E> stateMachine();
 
     default StatefulLike<E> stateMachine(Consumer<StateMachineSection<E>> section) {
@@ -21,7 +21,7 @@ public interface StatefulLike<E extends Enum<E> & StateMachine.SetpointProvider<
         return this;
     }
 
-    final class StateMachineSection<E extends Enum<E> & StateMachine.SetpointProvider<Double>> {
+    final class StateMachineSection<E extends Enum<E>> {
         private final StatefulMechanismCore<? extends Mechanism, E> core;
 
         StateMachineSection(StatefulMechanismCore<? extends Mechanism, E> core) {
@@ -106,7 +106,7 @@ public interface StatefulLike<E extends Enum<E> & StateMachine.SetpointProvider<
         }
     }
 
-    record StateMachineSnapshot<E extends Enum<E> & StateMachine.SetpointProvider<Double>>(
+    record StateMachineSnapshot<E extends Enum<E>>(
             E goal,
             E next,
             String queue,

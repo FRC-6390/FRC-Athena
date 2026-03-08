@@ -91,7 +91,7 @@ final class RobotCoreConfigAutoSectionTest {
                 .drivetrain(d -> {
                     d.updatePeriodMs(20.0)
                             .driverCommandPeriodMs(10.0);
-                    return RobotCoreConfigAutoSectionTest::configuredSwerveDrivetrain;
+                    d.config(RobotCoreConfigAutoSectionTest::configuredSwerveDrivetrain);
                 })
                 .build();
 

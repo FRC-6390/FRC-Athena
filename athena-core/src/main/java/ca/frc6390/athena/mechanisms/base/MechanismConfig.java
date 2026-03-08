@@ -3,7 +3,9 @@ package ca.frc6390.athena.mechanisms;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.nio.file.Path;
@@ -14,6 +16,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.function.ToDoubleFunction;
 
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.core.RobotCoreHooks;
@@ -21,11 +24,17 @@ import ca.frc6390.athena.core.hooks.LifecycleHooksSectionBase;
 import ca.frc6390.athena.core.input.TypedInputRegistration;
 import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
+import ca.frc6390.athena.hardware.encoder.ChineseRemainderEncoder;
+import ca.frc6390.athena.hardware.encoder.Encoder;
+import ca.frc6390.athena.hardware.encoder.EncoderAdapter;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
-import ca.frc6390.athena.hardware.encoder.EncoderRegistry;
 import ca.frc6390.athena.hardware.encoder.EncoderType;
+import ca.frc6390.athena.hardware.encoder.SupplierEncoder;
+import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.hardware.motor.AthenaMotor;
+import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
+import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorControllerType;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.hardware.motor.MotorRegistry;
@@ -33,6 +42,7 @@ import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism.StatefulElevatorMechanism;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism;
+import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 	import ca.frc6390.athena.mechanisms.TurretMechanism;
 	import ca.frc6390.athena.mechanisms.TurretMechanism.StatefulTurretMechanism;
@@ -45,6 +55,8 @@ import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulationConfig;
 import ca.frc6390.athena.mechanisms.config.MechanismConfigApplier;
 import ca.frc6390.athena.mechanisms.config.MechanismConfigFile;
 import ca.frc6390.athena.mechanisms.config.MechanismConfigLoader;
+import ca.frc6390.athena.mechanisms.config.MechanismEncoderConfig;
+import ca.frc6390.athena.mechanisms.config.MechanismEncoderCrtInputConfig;
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
@@ -149,10 +161,10 @@ public class MechanismConfig<T extends Mechanism> {
     private Supplier<TurretMechanism.FieldHeadingVisualization> turretHeadingVisualization = null;
     /** Optional sensor simulation configuration used to generate virtual readings. */
     private MechanismSensorSimulationConfig sensorSimulationConfig = null;
-    private boolean shouldCustomEncoder = false;
-    private DoubleSupplier customEncoderPos;
-    /** Tracks whether encoder CAN bus was explicitly overridden from the motors/default bus. */
-    private boolean encoderCanbusOverride = false;
+    private final LinkedHashMap<String, EncoderSourceSpec> encoderSourceSpecs = new LinkedHashMap<>();
+    private String controlPositionSourceName;
+    private String controlVelocitySourceName;
+    private String controlAbsoluteSourceName;
     /**
      * Loads a JSON/TOML deploy-file mechanism config into this builder and applies it using
      * {@link MechanismConfigApplier}. This is intended for teams to keep hardware/constants in deploy
@@ -184,11 +196,11 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Sectioned fluent API: encoder.
+     * Sectioned fluent API: named encoder sources.
      */
-    public MechanismConfig<T> encoder(Consumer<EncoderSection<T>> section) {
+    public MechanismConfig<T> encoders(Consumer<EncodersSection<T>> section) {
         if (section != null) {
-            section.accept(new EncoderSection<>(this));
+            section.accept(new EncodersSection<>(this));
         }
         return this;
     }
@@ -289,134 +301,259 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
-    public static final class EncoderSection<T extends Mechanism> {
+    public static final class EncodersSection<T extends Mechanism> {
         private final MechanismConfig<T> owner;
 
-        private EncoderSection(MechanismConfig<T> owner) {
+        private EncodersSection(MechanismConfig<T> owner) {
             this.owner = owner;
         }
 
-        public EncoderSection<T> config(ca.frc6390.athena.hardware.encoder.EncoderConfig config) {
-            owner.updateData(builder -> builder.encoder(config));
-            if (config != null) {
-                String configCanbus = config.canbus();
-                if (configCanbus != null && !configCanbus.isBlank() && !"rio".equalsIgnoreCase(configCanbus)) {
-                    owner.encoderCanbusOverride = true;
-                }
+        public EncodersSection<T> add(String name, Consumer<EncoderSourceBuilder> section) {
+            String key = normalizeSourceName(name);
+            if (owner.encoderSourceSpecs.containsKey(key)) {
+                throw new IllegalArgumentException("encoder source already registered: " + key);
             }
-            return this;
-        }
-
-        public EncoderSection<T> fromMotor(int motorId) {
-            int abs = Math.abs(motorId);
-            MotorControllerConfig motor = owner.data.motors().stream()
-                    .filter(cfg -> cfg != null && cfg.id() == abs)
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException("No motor controller configured with ID " + abs));
-
-            ca.frc6390.athena.hardware.encoder.EncoderConfig encoderCfg = motor.encoderConfig();
-            if (encoderCfg == null) {
-                encoderCfg = ca.frc6390.athena.hardware.encoder.EncoderConfig.create()
-                        .hardware(h -> h
-                                .type(resolveIntegratedEncoderType(motor.type()))
-                                .id(motor.id())
-                                .canbus(motor.canbus()));
-                motor.encoder().config(encoderCfg);
-            } else if (encoderCfg.type() == null) {
-                ca.frc6390.athena.hardware.encoder.EncoderConfig existing = encoderCfg;
-                ca.frc6390.athena.hardware.encoder.EncoderConfig resolved = ca.frc6390.athena.hardware.encoder.EncoderConfig.create()
-                        .hardware(h -> h
-                                .type(resolveIntegratedEncoderType(motor.type()))
-                                .id(existing.id() != 0 ? existing.id() : motor.id())
-                                .canbus(existing.canbus() != null ? existing.canbus() : motor.canbus())
-                                .inverted(existing.inverted()))
-                        .measurement(m -> m
-                                .gearRatio(existing.gearRatio())
-                                .conversion(existing.conversion())
-                                .conversionOffset(existing.conversionOffset())
-                                .offset(existing.offset())
-                                .discontinuity(existing.discontinuityPoint(), existing.discontinuityRange()));
-                encoderCfg = resolved;
-                motor.encoder().config(encoderCfg);
+            EncoderSourceBuilder builder = new EncoderSourceBuilder(owner, key);
+            if (section != null) {
+                section.accept(builder);
             }
-            encoderCfg.hardware().inverted(motorId < 0);
-            final ca.frc6390.athena.hardware.encoder.EncoderConfig finalEncoderCfg = encoderCfg;
-            owner.updateData(builder -> builder.encoder(finalEncoderCfg));
+            owner.encoderSourceSpecs.put(key, builder.build());
             return this;
         }
 
-        public EncoderSection<T> encoder(AthenaEncoder type, int id) {
-            config(ca.frc6390.athena.hardware.encoder.EncoderConfig.create(type.resolve(), id));
-            return this;
-        }
-
-        public EncoderSection<T> gearRatio(double gearRatio) {
-            owner.updateData(builder -> builder.encoderGearRatio(gearRatio));
-            return this;
-        }
-
-        public EncoderSection<T> conversion(double conversion) {
-            owner.updateData(builder -> builder.encoderConversion(conversion));
-            return this;
-        }
-
-        public EncoderSection<T> conversionOffset(double conversionOffset) {
-            owner.updateData(builder -> builder.encoderConversionOffset(conversionOffset));
-            return this;
-        }
-
-        public EncoderSection<T> mutate(Consumer<ca.frc6390.athena.hardware.encoder.EncoderConfig> mutator) {
-            if (mutator == null) {
-                return this;
+        private static String normalizeSourceName(String name) {
+            if (name == null || name.isBlank()) {
+                throw new IllegalArgumentException("encoder source name cannot be blank");
             }
-            ca.frc6390.athena.hardware.encoder.EncoderConfig cfg = owner.data.encoder();
-            if (cfg == null) {
-                cfg = new ca.frc6390.athena.hardware.encoder.EncoderConfig();
-                ca.frc6390.athena.hardware.encoder.EncoderConfig finalCfg = cfg;
-                owner.updateData(builder -> builder.encoder(finalCfg));
+            return name.trim();
+        }
+    }
+
+    public static final class EncoderSourceBuilder {
+        private final MechanismConfig<?> owner;
+        private final String name;
+        private EncoderSourceKind kind;
+        private AthenaEncoder athenaType;
+        private EncoderType type;
+        private int id;
+        private String canbus;
+        private double gearRatio = 1.0;
+        private double conversion = 1.0;
+        private double offset = 0.0;
+        private double wrapsEvery = Double.NaN;
+        private MechanismEncoderUnit unit;
+        private DoubleSupplier positionSupplier;
+        private DoubleSupplier velocitySupplier;
+        private DoubleSupplier absoluteSupplier;
+        private final List<CrtInputSpec> crtInputs = new ArrayList<>();
+        private double validMin = Double.NaN;
+        private double validMax = Double.NaN;
+
+        private EncoderSourceBuilder(MechanismConfig<?> owner, String name) {
+            this.owner = owner;
+            this.name = name;
+        }
+
+        public EncoderSourceBuilder config(EncoderConfig config) {
+            EncoderConfig resolved = Objects.requireNonNull(config, "config");
+            EncoderType resolvedType = resolved.type();
+            if (resolvedType == null) {
+                throw new IllegalArgumentException("encoder config must declare a type");
             }
-            mutator.accept(cfg);
+            int resolvedId = resolved.id();
+            if (resolved.inverted() && resolvedId > 0) {
+                resolvedId = -resolvedId;
+            }
+            this.kind = EncoderSourceKind.HARDWARE;
+            this.type = resolvedType;
+            this.athenaType = null;
+            this.id = resolvedId;
+            this.canbus = resolved.canbus();
+            this.gearRatio = resolved.gearRatio();
+            this.conversion = resolved.conversion();
+            this.offset = resolved.conversionOffset();
             return this;
         }
 
-        public EncoderSection<T> offset(double offset) {
-            owner.updateData(builder -> builder.encoderOffset(offset));
+        public EncoderSourceBuilder encoder(AthenaEncoder type, int id) {
+            this.kind = EncoderSourceKind.HARDWARE;
+            this.athenaType = Objects.requireNonNull(type, "type");
+            this.type = null;
+            this.id = id;
             return this;
         }
 
-        public EncoderSection<T> discontinuityPoint(double discontinuityPoint) {
-            owner.updateData(builder -> builder.encoderDiscontinuityPoint(discontinuityPoint));
+        public EncoderSourceBuilder encoder(EncoderType type, int id) {
+            this.kind = EncoderSourceKind.HARDWARE;
+            this.type = Objects.requireNonNull(type, "type");
+            this.athenaType = null;
+            this.id = id;
             return this;
         }
 
-        public EncoderSection<T> discontinuityRange(double discontinuityRange) {
-            owner.updateData(builder -> builder.encoderDiscontinuityRange(discontinuityRange));
+        public EncoderSourceBuilder virtual(DoubleSupplier positionSupplier) {
+            this.kind = EncoderSourceKind.VIRTUAL;
+            this.positionSupplier = Objects.requireNonNull(positionSupplier, "positionSupplier");
             return this;
         }
 
-        public EncoderSection<T> absolute(boolean absolute) {
-            owner.updateData(builder -> builder.useAbsolute(absolute));
+        public EncoderSourceBuilder virtual(Consumer<VirtualSourceBuilder> section) {
+            this.kind = EncoderSourceKind.VIRTUAL;
+            VirtualSourceBuilder builder = new VirtualSourceBuilder();
+            if (section != null) {
+                section.accept(builder);
+            }
+            this.positionSupplier = builder.positionSupplier;
+            this.velocitySupplier = builder.velocitySupplier;
+            this.absoluteSupplier = builder.absoluteSupplier;
             return this;
         }
 
-        public EncoderSection<T> canbus(String canbus) {
-            owner.encoderCanbusOverride = canbus != null && !canbus.isBlank();
-            ca.frc6390.athena.hardware.encoder.EncoderConfig existing = owner.data.encoder();
-            owner.updateData(builder -> {
-                ca.frc6390.athena.hardware.encoder.EncoderConfig encoder =
-                        existing != null ? existing : ca.frc6390.athena.hardware.encoder.EncoderConfig.create();
-                encoder.hardware().canbus(canbus);
-                builder.encoder(encoder);
-            });
+        public EncoderSourceBuilder crt(Consumer<CrtSourceBuilder> section) {
+            this.kind = EncoderSourceKind.CRT;
+            CrtSourceBuilder builder = new CrtSourceBuilder(owner);
+            if (section != null) {
+                section.accept(builder);
+            }
+            this.crtInputs.clear();
+            this.crtInputs.addAll(builder.inputs);
+            this.validMin = builder.validMin;
+            this.validMax = builder.validMax;
             return this;
         }
 
-
-        public EncoderSection<T> custom(java.util.function.DoubleSupplier positionSupplier) {
-            owner.shouldCustomEncoder = true;
-            owner.customEncoderPos = positionSupplier;
+        public EncoderSourceBuilder canbus(String canbus) {
+            this.canbus = canbus;
             return this;
         }
+
+        public EncoderSourceBuilder gearRatio(double gearRatio) {
+            this.gearRatio = gearRatio;
+            return this;
+        }
+
+        public EncoderSourceBuilder conversion(double conversion) {
+            this.conversion = conversion;
+            return this;
+        }
+
+        public EncoderSourceBuilder offset(double offset) {
+            this.offset = offset;
+            return this;
+        }
+
+        public EncoderSourceBuilder unit(MechanismEncoderUnit unit) {
+            this.unit = unit;
+            return this;
+        }
+
+        public EncoderSourceBuilder wrapsEvery(double wrapsEvery) {
+            this.wrapsEvery = wrapsEvery;
+            return this;
+        }
+
+        private EncoderSourceSpec build() {
+            if (kind == null) {
+                throw new IllegalStateException("encoder source '" + name + "' is missing a source definition.");
+            }
+            if (kind == EncoderSourceKind.CRT && crtInputs.isEmpty()) {
+                throw new IllegalStateException("CRT encoder source '" + name + "' must declare at least one input.");
+            }
+            return new EncoderSourceSpec(
+                    name,
+                    kind,
+                    athenaType,
+                    type,
+                    id,
+                    canbus,
+                    gearRatio,
+                    conversion,
+                    offset,
+                    unit,
+                    wrapsEvery,
+                    positionSupplier,
+                    velocitySupplier,
+                    absoluteSupplier,
+                    List.copyOf(crtInputs),
+                    validMin,
+                    validMax);
+        }
+    }
+
+    public static final class VirtualSourceBuilder {
+        private DoubleSupplier positionSupplier;
+        private DoubleSupplier velocitySupplier;
+        private DoubleSupplier absoluteSupplier;
+
+        public VirtualSourceBuilder position(DoubleSupplier positionSupplier) {
+            this.positionSupplier = positionSupplier;
+            return this;
+        }
+
+        public VirtualSourceBuilder velocity(DoubleSupplier velocitySupplier) {
+            this.velocitySupplier = velocitySupplier;
+            return this;
+        }
+
+        public VirtualSourceBuilder absolute(DoubleSupplier absoluteSupplier) {
+            this.absoluteSupplier = absoluteSupplier;
+            return this;
+        }
+    }
+
+    public static final class CrtSourceBuilder {
+        private final MechanismConfig<?> owner;
+        private final List<CrtInputSpec> inputs = new ArrayList<>();
+        private double validMin = Double.NaN;
+        private double validMax = Double.NaN;
+
+        private CrtSourceBuilder(MechanismConfig<?> owner) {
+            this.owner = owner;
+        }
+
+        public CrtSourceBuilder input(String sourceName, int modulus) {
+            String key = EncodersSection.normalizeSourceName(sourceName);
+            if (!owner.encoderSourceSpecs.containsKey(key)) {
+                throw new IllegalArgumentException("CRT input source is not defined yet: " + key);
+            }
+            inputs.add(new CrtInputSpec(key, modulus));
+            return this;
+        }
+
+        public CrtSourceBuilder validRange(double min, double max) {
+            this.validMin = min;
+            this.validMax = max;
+            return this;
+        }
+    }
+
+    private enum EncoderSourceKind {
+        HARDWARE,
+        VIRTUAL,
+        CRT
+    }
+
+    private record CrtInputSpec(String sourceName, int modulus) {
+    }
+
+    private record EncoderSourceSpec(
+            String name,
+            EncoderSourceKind kind,
+            AthenaEncoder athenaType,
+            EncoderType type,
+            int id,
+            String canbus,
+            double gearRatio,
+            double conversion,
+            double offset,
+            MechanismEncoderUnit unit,
+            double wrapsEvery,
+            DoubleSupplier positionSupplier,
+            DoubleSupplier velocitySupplier,
+            DoubleSupplier absoluteSupplier,
+            List<CrtInputSpec> crtInputs,
+            double validMin,
+            double validMax) {
     }
 
     public static final class ConstraintsSection<T extends Mechanism> {
@@ -681,67 +818,10 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
-    public static final class InputSource {
-        public enum Kind {
-            POSITION,
-            VELOCITY,
-            SETPOINT,
-            INPUT
-        }
-
-        public static final InputSource position = new InputSource(Kind.POSITION, null);
-        public static final InputSource velocity = new InputSource(Kind.VELOCITY, null);
-        public static final InputSource setpoint = new InputSource(Kind.SETPOINT, null);
-        public static final InputSource POSITION = position;
-        public static final InputSource VELOCITY = velocity;
-        public static final InputSource SETPOINT = setpoint;
-
-        private final Kind kind;
-        private final String inputKey;
-
-        private InputSource(Kind kind, String inputKey) {
-            this.kind = Objects.requireNonNull(kind, "kind");
-            this.inputKey = inputKey;
-        }
-
-        public static InputSource input(String key) {
-            if (key == null || key.isBlank()) {
-                throw new IllegalArgumentException("input source key cannot be blank");
-            }
-            return new InputSource(Kind.INPUT, key.trim());
-        }
-
-        public Kind kind() {
-            return kind;
-        }
-
-        public String inputKey() {
-            return inputKey;
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-            if (!(obj instanceof InputSource other)) {
-                return false;
-            }
-            return kind == other.kind && Objects.equals(inputKey, other.inputKey);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(kind, inputKey);
-        }
-
-        @Override
-        public String toString() {
-            if (kind == Kind.INPUT) {
-                return "input:" + inputKey;
-            }
-            return kind.name().toLowerCase(java.util.Locale.ROOT);
-        }
+    public enum InputSource {
+        Position,
+        Velocity,
+        Absolute
     }
 
     public static final class ControlSection<T extends Mechanism> {
@@ -773,6 +853,21 @@ public class MechanismConfig<T extends Mechanism> {
 
         public ControlSection<T> setpointAsOutput(boolean enabled) {
             owner.updateData(builder -> builder.useSetpointAsOutput(enabled));
+            return this;
+        }
+
+        public ControlSection<T> positionSource(String sourceName) {
+            owner.controlPositionSourceName = EncodersSection.normalizeSourceName(sourceName);
+            return this;
+        }
+
+        public ControlSection<T> velocitySource(String sourceName) {
+            owner.controlVelocitySourceName = EncodersSection.normalizeSourceName(sourceName);
+            return this;
+        }
+
+        public ControlSection<T> absoluteSource(String sourceName) {
+            owner.controlAbsoluteSourceName = EncodersSection.normalizeSourceName(sourceName);
             return this;
         }
 
@@ -850,21 +945,25 @@ public class MechanismConfig<T extends Mechanism> {
                 if (hasPid) {
                     double measurement = resolveInputSource(
                             ctx,
-                            pidProfile != null ? pidProfile.source() : InputSource.position);
-                    double setpoint = ctx.mechanism().setpoint() + ctx.mechanism().nudge();
+                            pidProfile != null ? pidProfile.inputSource() : MechanismInputSource.Position);
+                    double setpoint = resolveSetpointSource(
+                            ctx,
+                            pidProfile != null ? pidProfile.setpointSource() : MechanismSetpointSource.Setpoint);
                     output += ctx.pidOut(normalizedName, measurement, setpoint);
                 }
                 if (hasBangBang) {
                     double measurement = resolveInputSource(
                             ctx,
-                            bangBangProfile != null ? bangBangProfile.source() : InputSource.position);
-                    double setpoint = ctx.mechanism().setpoint() + ctx.mechanism().nudge();
+                            bangBangProfile != null ? bangBangProfile.inputSource() : MechanismInputSource.Position);
+                    double setpoint = resolveSetpointSource(
+                            ctx,
+                            bangBangProfile != null ? bangBangProfile.setpointSource() : MechanismSetpointSource.Setpoint);
                     output += ctx.bangBangOut(normalizedName, measurement, setpoint);
                 }
                 if (hasFf) {
-                    double velocitySetpoint = resolveInputSource(
+                    double velocitySetpoint = resolveSetpointSource(
                             ctx,
-                            ffProfile != null ? ffProfile.source() : InputSource.velocity);
+                            ffProfile != null ? ffProfile.setpointSource() : MechanismSetpointSource.Setpoint);
                     output += ctx.feedforwardOut(normalizedName, velocitySetpoint);
                 }
                 return output;
@@ -873,11 +972,21 @@ public class MechanismConfig<T extends Mechanism> {
 
         private static double resolveInputSource(
                 MechanismControlContext<?> ctx,
-                InputSource source) {
-            InputSource resolved = source != null ? source : InputSource.position;
+                MechanismInputSource source) {
+            MechanismInputSource resolved = source != null ? source : MechanismInputSource.Position;
             return switch (resolved.kind()) {
-                case POSITION -> ctx.mechanism().position();
-                case VELOCITY -> ctx.mechanism().velocity();
+                case POSITION -> ctx.mechanism().position(resolved.encoderId());
+                case VELOCITY -> ctx.mechanism().velocity(resolved.encoderId());
+                case ABSOLUTE -> ctx.mechanism().absolutePosition(resolved.encoderId());
+                case INPUT -> ctx.doubleInput(resolved.inputKey());
+            };
+        }
+
+        private static double resolveSetpointSource(
+                MechanismControlContext<?> ctx,
+                MechanismSetpointSource source) {
+            MechanismSetpointSource resolved = source != null ? source : MechanismSetpointSource.Setpoint;
+            return switch (resolved.kind()) {
                 case SETPOINT -> ctx.mechanism().setpoint() + ctx.mechanism().nudge();
                 case INPUT -> ctx.doubleInput(resolved.inputKey());
             };
@@ -897,6 +1006,22 @@ public class MechanismConfig<T extends Mechanism> {
             return seconds * 1000.0;
         }
 
+        private static MechanismInputSource resolveInputSourceSelection(InputSource source, String encoderId) {
+            InputSource resolved = source != null ? source : InputSource.Position;
+            if (encoderId == null || encoderId.isBlank()) {
+                return switch (resolved) {
+                    case Position -> MechanismInputSource.Position;
+                    case Velocity -> MechanismInputSource.Velocity;
+                    case Absolute -> MechanismInputSource.Absolute;
+                };
+            }
+            return switch (resolved) {
+                case Position -> MechanismInputSource.position(encoderId);
+                case Velocity -> MechanismInputSource.velocity(encoderId);
+                case Absolute -> MechanismInputSource.absolute(encoderId);
+            };
+        }
+
         public ControlSection<T> pid(String name, Consumer<PidBuilder> builder) {
             Objects.requireNonNull(name, "name");
             PidBuilder spec = new PidBuilder();
@@ -914,7 +1039,8 @@ public class MechanismConfig<T extends Mechanism> {
                     spec.maxVelocity,
                     spec.maxAcceleration,
                     spec.autotuner,
-                    spec.source);
+                    spec.inputSource,
+                    spec.setpointSource);
         }
 
         public ControlSection<T> bangBang(String name, Consumer<BangBangBuilder> builder) {
@@ -932,7 +1058,14 @@ public class MechanismConfig<T extends Mechanism> {
             } else {
                 low = -spec.outputLevel;
             }
-            return registerBangBang(name, spec.outputType, high, low, spec.tolerance, spec.source);
+            return registerBangBang(
+                    name,
+                    spec.outputType,
+                    high,
+                    low,
+                    spec.tolerance,
+                    spec.inputSource,
+                    spec.setpointSource);
         }
 
         public ControlSection<T> ff(String name, Consumer<FeedforwardBuilder> builder) {
@@ -950,7 +1083,7 @@ public class MechanismConfig<T extends Mechanism> {
                     spec.kV,
                     spec.kA,
                     spec.tolerance,
-                    spec.source);
+                    spec.setpointSource);
         }
 
         private ControlSection<T> registerPid(
@@ -964,7 +1097,8 @@ public class MechanismConfig<T extends Mechanism> {
                 double maxVelocity,
                 double maxAcceleration,
                 PidAutotunerConfig pidAutotuner,
-                InputSource source) {
+                MechanismInputSource inputSource,
+                MechanismSetpointSource setpointSource) {
             Objects.requireNonNull(name, "name");
             String normalized = normalizeName(name);
             if (normalized == null) {
@@ -997,7 +1131,8 @@ public class MechanismConfig<T extends Mechanism> {
                             maxVelocity,
                             maxAcceleration,
                             pidAutotuner,
-                            source));
+                            inputSource,
+                            setpointSource));
             return this;
         }
 
@@ -1007,7 +1142,8 @@ public class MechanismConfig<T extends Mechanism> {
                 double highOutput,
                 double lowOutput,
                 double tolerance,
-                InputSource source) {
+                MechanismInputSource inputSource,
+                MechanismSetpointSource setpointSource) {
             Objects.requireNonNull(name, "name");
             String normalized = normalizeName(name);
             if (normalized == null) {
@@ -1025,7 +1161,8 @@ public class MechanismConfig<T extends Mechanism> {
                             highOutput,
                             lowOutput,
                             tolerance,
-                            source));
+                            inputSource,
+                            setpointSource));
             return this;
         }
 
@@ -1038,7 +1175,7 @@ public class MechanismConfig<T extends Mechanism> {
                 double kV,
                 double kA,
                 double tolerance,
-                InputSource source) {
+                MechanismSetpointSource setpointSource) {
             Objects.requireNonNull(name, "name");
             String normalized = normalizeName(name);
             if (normalized == null) {
@@ -1063,7 +1200,7 @@ public class MechanismConfig<T extends Mechanism> {
                             kV,
                             kA,
                             tolerance,
-                            source));
+                            setpointSource));
             return this;
         }
 
@@ -1090,7 +1227,8 @@ public class MechanismConfig<T extends Mechanism> {
             private double maxVelocity = Double.NaN;
             private double maxAcceleration = Double.NaN;
             private PidAutotunerConfig autotuner = PidAutotunerConfig.defaults();
-            private InputSource source = InputSource.position;
+            private MechanismInputSource inputSource = MechanismInputSource.Position;
+            private MechanismSetpointSource setpointSource = MechanismSetpointSource.Setpoint;
 
             public PidBuilder output(OutputType outputType) {
                 this.outputType = outputType != null ? outputType : OutputType.PERCENT;
@@ -1138,13 +1276,32 @@ public class MechanismConfig<T extends Mechanism> {
                 return constraints(maxVelocity, maxAcceleration);
             }
 
-            public PidBuilder source(InputSource source) {
-                this.source = source != null ? source : InputSource.position;
+            public PidBuilder inputSource(MechanismInputSource inputSource) {
+                this.inputSource = inputSource != null ? inputSource : MechanismInputSource.Position;
                 return this;
             }
 
-            public PidBuilder sourceInput(String key) {
-                return source(InputSource.input(key));
+            public PidBuilder inputSource(InputSource inputSource) {
+                return inputSource(resolveInputSourceSelection(inputSource, null));
+            }
+
+            public PidBuilder inputSource(InputSource inputSource, String encoderId) {
+                return inputSource(resolveInputSourceSelection(inputSource, encoderId));
+            }
+
+            public PidBuilder inputInput(String key) {
+                return inputSource(MechanismInputSource.input(key));
+            }
+
+            public PidBuilder setpointSource(MechanismSetpointSource setpointSource) {
+                this.setpointSource = setpointSource != null
+                        ? setpointSource
+                        : MechanismSetpointSource.Setpoint;
+                return this;
+            }
+
+            public PidBuilder setpointInput(String key) {
+                return setpointSource(MechanismSetpointSource.input(key));
             }
 
             public PidBuilder autotuner() {
@@ -1219,7 +1376,7 @@ public class MechanismConfig<T extends Mechanism> {
             private double kV = 0.0;
             private double kA = 0.0;
             private double tolerance = Double.NaN;
-            private InputSource source = InputSource.velocity;
+            private MechanismSetpointSource setpointSource = MechanismSetpointSource.Setpoint;
 
             public FeedforwardBuilder simple() {
                 this.type = FeedforwardType.SIMPLE;
@@ -1278,13 +1435,15 @@ public class MechanismConfig<T extends Mechanism> {
                 return this;
             }
 
-            public FeedforwardBuilder source(InputSource source) {
-                this.source = source != null ? source : InputSource.velocity;
+            public FeedforwardBuilder setpointSource(MechanismSetpointSource setpointSource) {
+                this.setpointSource = setpointSource != null
+                        ? setpointSource
+                        : MechanismSetpointSource.Setpoint;
                 return this;
             }
 
-            public FeedforwardBuilder sourceInput(String key) {
-                return source(InputSource.input(key));
+            public FeedforwardBuilder setpointInput(String key) {
+                return setpointSource(MechanismSetpointSource.input(key));
             }
         }
 
@@ -1296,7 +1455,8 @@ public class MechanismConfig<T extends Mechanism> {
             private boolean highOutputSet;
             private boolean lowOutputSet;
             private double tolerance = 0.0;
-            private InputSource source = InputSource.position;
+            private MechanismInputSource inputSource = MechanismInputSource.Position;
+            private MechanismSetpointSource setpointSource = MechanismSetpointSource.Setpoint;
 
             public BangBangBuilder output(OutputType outputType) {
                 this.outputType = outputType != null ? outputType : OutputType.PERCENT;
@@ -1325,13 +1485,32 @@ public class MechanismConfig<T extends Mechanism> {
                 return this;
             }
 
-            public BangBangBuilder source(InputSource source) {
-                this.source = source != null ? source : InputSource.position;
+            public BangBangBuilder inputSource(MechanismInputSource inputSource) {
+                this.inputSource = inputSource != null ? inputSource : MechanismInputSource.Position;
                 return this;
             }
 
-            public BangBangBuilder sourceInput(String key) {
-                return source(InputSource.input(key));
+            public BangBangBuilder inputSource(InputSource inputSource) {
+                return inputSource(resolveInputSourceSelection(inputSource, null));
+            }
+
+            public BangBangBuilder inputSource(InputSource inputSource, String encoderId) {
+                return inputSource(resolveInputSourceSelection(inputSource, encoderId));
+            }
+
+            public BangBangBuilder inputInput(String key) {
+                return inputSource(MechanismInputSource.input(key));
+            }
+
+            public BangBangBuilder setpointSource(MechanismSetpointSource setpointSource) {
+                this.setpointSource = setpointSource != null
+                        ? setpointSource
+                        : MechanismSetpointSource.Setpoint;
+                return this;
+            }
+
+            public BangBangBuilder setpointInput(String key) {
+                return setpointSource(MechanismSetpointSource.input(key));
             }
         }
 
@@ -1397,7 +1576,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         @SafeVarargs
-        public final <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onStateEnter(
+        public final <E extends Enum<E>> HooksSection<T> onStateEnter(
                 MechanismBinding<T, E> binding,
                 E... states) {
             Objects.requireNonNull(binding, "binding");
@@ -1415,7 +1594,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         @SafeVarargs
-        public final <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onStatePeriodic(
+        public final <E extends Enum<E>> HooksSection<T> onStatePeriodic(
                 MechanismBinding<T, E> binding,
                 E... states) {
             Objects.requireNonNull(binding, "binding");
@@ -1433,7 +1612,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         @SafeVarargs
-        public final <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onStateExit(
+        public final <E extends Enum<E>> HooksSection<T> onStateExit(
                 MechanismBinding<T, E> binding,
                 E... states) {
             Objects.requireNonNull(binding, "binding");
@@ -1450,7 +1629,7 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> always(MechanismBinding<T, E> binding) {
+        public <E extends Enum<E>> HooksSection<T> always(MechanismBinding<T, E> binding) {
             Objects.requireNonNull(binding, "binding");
             owner.alwaysHooks.add(binding);
             return this;
@@ -1463,7 +1642,7 @@ public class MechanismConfig<T extends Mechanism> {
          * If the state is already the goal state or already present in the state queue, it will not be
          * enqueued again.</p>
          */
-        public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> stateTrigger(
+        public <E extends Enum<E>> HooksSection<T> stateTrigger(
                 E state,
                 StateTrigger<T, E> trigger) {
             Objects.requireNonNull(state, "state");
@@ -1472,7 +1651,7 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onAnyStateExit(MechanismBinding<T, E> binding) {
+        public <E extends Enum<E>> HooksSection<T> onAnyStateExit(MechanismBinding<T, E> binding) {
             Objects.requireNonNull(binding, "binding");
             owner.exitAlwaysHooks.add(binding);
             return this;
@@ -1506,7 +1685,7 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onInit(MechanismBinding<T, E> binding) {
+        public <E extends Enum<E>> HooksSection<T> onInit(MechanismBinding<T, E> binding) {
             owner.addLifecycleBinding(RobotCoreHooks.Phase.ROBOT_INIT, (MechanismBinding<T, ?>) binding, List.of());
             return this;
         }
@@ -1537,7 +1716,7 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        public <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onStateTransition(
+        public <E extends Enum<E>> HooksSection<T> onStateTransition(
                 MechanismTransitionBinding<T, E> binding,
                 E from,
                 E to) {
@@ -1549,7 +1728,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         @SafeVarargs
-        public final <E extends Enum<E> & SetpointProvider<Double>> HooksSection<T> onStateTransition(
+        public final <E extends Enum<E>> HooksSection<T> onStateTransition(
                 MechanismTransitionBinding<T, E> binding,
                 StateTransitionPair<E>... pairs) {
             Objects.requireNonNull(binding, "binding");
@@ -1612,7 +1791,7 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     @FunctionalInterface
-    public interface StateTrigger<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
+    public interface StateTrigger<T extends Mechanism, E extends Enum<E>> {
         boolean shouldQueue(MechanismContext<T, E> ctx);
     }
 
@@ -1729,7 +1908,7 @@ public class MechanismConfig<T extends Mechanism> {
         rawBinding.apply(new LifecycleMechanismContext<>(mechanism, activeState));
     }
 
-        private final class LifecycleMechanismContext<E extends Enum<E> & SetpointProvider<Double>> implements MechanismContext<T, E> {
+        private final class LifecycleMechanismContext<E extends Enum<E>> implements MechanismContext<T, E> {
             private final T mechanism;
             private final E state;
             private final double setpoint;
@@ -1751,15 +1930,13 @@ public class MechanismConfig<T extends Mechanism> {
             Double resolvedSetpoint = null;
             if (resolvedState != null) {
                 try {
-                    resolvedSetpoint = resolvedState.getSetpoint();
+                    resolvedSetpoint = StateSpecAccess.setpoint(resolvedState);
                 } catch (NullPointerException ignored) {
                     // Some state providers intentionally leave setpoint unset.
                     resolvedSetpoint = null;
                 }
-                if (resolvedSetpoint == null && resolvedState instanceof ca.frc6390.athena.mechanisms.statespec.StateSeedProvider<?> seedProvider) {
-                    @SuppressWarnings("rawtypes")
-                    ca.frc6390.athena.mechanisms.statespec.StateSeed seed =
-                            ((ca.frc6390.athena.mechanisms.statespec.StateSeedProvider) seedProvider).seed();
+                if (resolvedSetpoint == null) {
+                    ca.frc6390.athena.mechanisms.statespec.StateSeed<E> seed = StateSpecAccess.seed(resolvedState);
                     resolvedSetpoint = ca.frc6390.athena.mechanisms.statespec.StateSeedRuntime.doubleSetpoint(seed);
                 }
             }
@@ -1931,20 +2108,13 @@ public class MechanismConfig<T extends Mechanism> {
 
 
     public MechanismConfigRecord data() {
+        synchronizeEncoderData();
         return data;
     }
 
     public MechanismConfig<T> data(MechanismConfigRecord data) {
         this.data = data != null ? data : MechanismConfigRecord.defaults();
-        ca.frc6390.athena.hardware.encoder.EncoderConfig encoderConfig = this.data.encoder();
-        if (encoderConfig != null) {
-            String encoderCanbus = encoderConfig.canbus();
-            this.encoderCanbusOverride = encoderCanbus != null
-                    && !encoderCanbus.isBlank()
-                    && !"rio".equalsIgnoreCase(encoderCanbus);
-        } else {
-            this.encoderCanbusOverride = false;
-        }
+        loadEncoderData(this.data);
         return this;
     }
 
@@ -2068,12 +2238,24 @@ public class MechanismConfig<T extends Mechanism> {
         return List.copyOf(periodicHookBindings);
     }
 
-    public boolean usesCustomEncoder() {
-        return shouldCustomEncoder;
+    public Map<String, MechanismEncoderSource> resolveEncoderSources(MotorControllerGroup motors) {
+        LinkedHashMap<String, MechanismEncoderSource> resolved = new LinkedHashMap<>();
+        for (EncoderSourceSpec spec : encoderSourceSpecs.values()) {
+            resolved.put(spec.name(), resolveEncoderSource(spec, resolved, motors));
+        }
+        return Map.copyOf(resolved);
     }
 
-    public DoubleSupplier customEncoderPositionSupplier() {
-        return customEncoderPos;
+    public String resolvePositionSourceName(Map<String, MechanismEncoderSource> encoderSources) {
+        return resolveSelectedEncoderSourceName(controlPositionSourceName, encoderSources, "position");
+    }
+
+    public String resolveVelocitySourceName(Map<String, MechanismEncoderSource> encoderSources) {
+        return resolveSelectedEncoderSourceName(controlVelocitySourceName, encoderSources, "velocity");
+    }
+
+    public String resolveAbsoluteSourceName(Map<String, MechanismEncoderSource> encoderSources) {
+        return resolveSelectedEncoderSourceName(controlAbsoluteSourceName, encoderSources, "absolute");
     }
 
     public Map<String, Boolean> mutableBoolInputDefaults() {
@@ -2151,10 +2333,432 @@ public class MechanismConfig<T extends Mechanism> {
         return Map.copyOf(copy);
     }
 
+    private MechanismEncoderSource resolveEncoderSource(
+            EncoderSourceSpec spec,
+            Map<String, MechanismEncoderSource> resolved,
+            MotorControllerGroup motors) {
+        return switch (spec.kind()) {
+            case HARDWARE -> resolveHardwareEncoderSource(spec, motors);
+            case VIRTUAL -> resolveVirtualEncoderSource(spec);
+            case CRT -> resolveCrtEncoderSource(spec, resolved);
+        };
+    }
+
+    private MechanismEncoderSource resolveHardwareEncoderSource(
+            EncoderSourceSpec spec,
+            MotorControllerGroup motors) {
+        Encoder device;
+        if (spec.athenaType() != null && spec.athenaType().isInternal()) {
+            String resolvedCanbus = resolveEncoderCanbus(spec.canbus());
+            Encoder rawDevice = resolveInternalEncoder(spec.id(), resolvedCanbus, motors);
+            EncoderConfig config = EncoderConfig.create();
+            config.hardware()
+                    .id(spec.id())
+                    .canbus(resolvedCanbus)
+                    .inverted(spec.id() < 0);
+            config.measurement()
+                    .gearRatio(spec.gearRatio())
+                    .conversion(spec.conversion())
+                    .conversionOffset(spec.offset())
+                    .offset(0.0);
+            device = rawDevice != null ? new EncoderAdapter(rawDevice, config) : null;
+            if (device == null) {
+                throw new IllegalStateException(
+                        "Encoder source '" + spec.name() + "' uses INTERNAL, but no matching motor encoder exists for id "
+                                + Math.abs(spec.id()) + " on canbus '" + resolvedCanbus + "'.");
+            }
+        } else {
+            EncoderType resolvedType = spec.type();
+            if (resolvedType == null && spec.athenaType() != null) {
+                resolvedType = spec.athenaType().resolve();
+            }
+            if (resolvedType == null) {
+                throw new IllegalStateException(
+                        "Encoder source '" + spec.name() + "' is missing an encoder type.");
+            }
+            EncoderConfig config = EncoderConfig.create(resolvedType, spec.id());
+            config.hardware().canbus(resolveEncoderCanbus(spec.canbus()));
+            config.measurement()
+                    .gearRatio(spec.gearRatio())
+                    .conversion(spec.conversion())
+                    .conversionOffset(spec.offset())
+                    .offset(0.0);
+            device = HardwareFactories.encoder(config);
+        }
+        MechanismEncoderUnit unit = spec.unit() != null ? spec.unit() : MechanismEncoderUnit.ROTATIONS;
+        return new MechanismEncoderSource(spec.name(), device, unit, spec.wrapsEvery());
+    }
+
+    private MechanismEncoderSource resolveVirtualEncoderSource(EncoderSourceSpec spec) {
+        DoubleSupplier position = spec.positionSupplier();
+        DoubleSupplier absolute = spec.absoluteSupplier() != null ? spec.absoluteSupplier() : position;
+        Encoder device = new SupplierEncoder(
+                EncoderConfig.create(),
+                position,
+                spec.velocitySupplier(),
+                absolute);
+        MechanismEncoderUnit unit = spec.unit() != null ? spec.unit() : MechanismEncoderUnit.ROTATIONS;
+        return new MechanismEncoderSource(spec.name(), device, unit, spec.wrapsEvery());
+    }
+
+    private MechanismEncoderSource resolveCrtEncoderSource(
+            EncoderSourceSpec spec,
+            Map<String, MechanismEncoderSource> resolved) {
+        if (spec.crtInputs().isEmpty()) {
+            throw new IllegalStateException("CRT encoder source '" + spec.name() + "' has no inputs.");
+        }
+        List<ChineseRemainderEncoder.Input> inputs = new ArrayList<>();
+        MechanismEncoderUnit unit = spec.unit();
+        double commonSpan = Double.NaN;
+        for (CrtInputSpec inputSpec : spec.crtInputs()) {
+            MechanismEncoderSource source = resolved.get(inputSpec.sourceName());
+            if (source == null) {
+                throw new IllegalStateException(
+                        "CRT encoder source '" + spec.name() + "' references unknown source '" + inputSpec.sourceName() + "'.");
+            }
+            if (!Double.isFinite(source.wrapsEvery()) || source.wrapsEvery() <= 0.0) {
+                throw new IllegalStateException(
+                        "CRT encoder source '" + spec.name() + "' requires wrapsEvery(...) on input '" + source.name() + "'.");
+            }
+            if (unit == null || unit == MechanismEncoderUnit.ENCODER_UNITS) {
+                unit = source.unit();
+            } else if (source.unit() != unit) {
+                throw new IllegalStateException(
+                        "CRT encoder source '" + spec.name() + "' mixes units between inputs.");
+            }
+            if (inputSpec.modulus() <= 0) {
+                throw new IllegalStateException(
+                        "CRT encoder source '" + spec.name() + "' has non-positive modulus for input '" + source.name() + "'.");
+            }
+            double span = source.wrapsEvery() * inputSpec.modulus();
+            if (!Double.isFinite(commonSpan)) {
+                commonSpan = span;
+            } else if (Math.abs(commonSpan - span) > 1e-6) {
+                throw new IllegalStateException(
+                        "CRT encoder source '" + spec.name() + "' has incompatible gearing between inputs.");
+            }
+            inputs.add(new ChineseRemainderEncoder.Input(source, inputSpec.modulus()));
+        }
+        validateCrtModuli(spec.name(), spec.crtInputs(), commonSpan, spec.validMin(), spec.validMax());
+        Encoder device = new ChineseRemainderEncoder(
+                EncoderConfig.create(),
+                inputs,
+                spec.validMin(),
+                spec.validMax());
+        return new MechanismEncoderSource(spec.name(), device, unit, commonSpan);
+    }
+
+    private void validateCrtModuli(
+            String name,
+            List<CrtInputSpec> inputs,
+            double commonSpan,
+            double validMin,
+            double validMax) {
+        for (int i = 0; i < inputs.size(); i++) {
+            for (int j = i + 1; j < inputs.size(); j++) {
+                int a = inputs.get(i).modulus();
+                int b = inputs.get(j).modulus();
+                if (greatestCommonDivisor(a, b) != 1) {
+                    throw new IllegalStateException(
+                            "CRT encoder source '" + name + "' requires pairwise-coprime moduli, but got "
+                                    + a + " and " + b + ".");
+                }
+            }
+        }
+        if (Double.isFinite(validMin) && Double.isFinite(validMax) && validMax > validMin
+                && Double.isFinite(commonSpan) && (validMax - validMin) > (commonSpan + 1e-6)) {
+            throw new IllegalStateException(
+                    "CRT encoder source '" + name + "' validRange exceeds the unique span implied by the gearing.");
+        }
+    }
+
+    private static int greatestCommonDivisor(int a, int b) {
+        int left = Math.abs(a);
+        int right = Math.abs(b);
+        while (right != 0) {
+            int next = left % right;
+            left = right;
+            right = next;
+        }
+        return Math.max(left, 1);
+    }
+
+    private String resolveEncoderCanbus(String explicitCanbus) {
+        if (explicitCanbus != null && !explicitCanbus.isBlank()) {
+            return explicitCanbus;
+        }
+        return data.canbus();
+    }
+
+    private static String resolveSelectedEncoderSourceName(
+            String configuredName,
+            Map<String, MechanismEncoderSource> encoderSources,
+            String role) {
+        if (encoderSources == null || encoderSources.isEmpty()) {
+            return null;
+        }
+        if (configuredName == null || configuredName.isBlank()) {
+            return encoderSources.keySet().iterator().next();
+        }
+        if (!encoderSources.containsKey(configuredName)) {
+            throw new IllegalStateException(
+                    "Control " + role + " source '" + configuredName + "' is not a configured encoder source.");
+        }
+        return configuredName;
+    }
+
+    private static Encoder resolveInternalEncoder(int id, String canbus, MotorControllerGroup motors) {
+        if (motors == null) {
+            return null;
+        }
+        int targetId = Math.abs(id);
+        Encoder match = null;
+        for (MotorController controller : motors.getControllers()) {
+            if (controller == null || controller.getId() != targetId) {
+                continue;
+            }
+            if (canbus != null && !canbus.isBlank()
+                    && !canbus.equalsIgnoreCase(controller.getCanbus())) {
+                continue;
+            }
+            if (match != null) {
+                throw new IllegalStateException(
+                        "Multiple motors matched INTERNAL encoder id=" + targetId
+                                + (canbus != null && !canbus.isBlank() ? " canbus=" + canbus : "")
+                                + ". Specify canbus explicitly.");
+            }
+            match = controller.getEncoder();
+        }
+        return match;
+    }
+
+    private void loadEncoderData(MechanismConfigRecord record) {
+        encoderSourceSpecs.clear();
+        controlPositionSourceName = null;
+        controlVelocitySourceName = null;
+        controlAbsoluteSourceName = null;
+        if (record == null) {
+            return;
+        }
+        List<MechanismEncoderConfig> encoders = record.encoders();
+        if (encoders != null) {
+            for (MechanismEncoderConfig cfg : encoders) {
+                if (cfg == null) {
+                    continue;
+                }
+                String name = EncodersSection.normalizeSourceName(cfg.name());
+                if (encoderSourceSpecs.containsKey(name)) {
+                    throw new IllegalArgumentException("duplicate encoder source in config record: " + name);
+                }
+                EncoderSourceBuilder builder = new EncoderSourceBuilder(this, name);
+                applyEncoderData(builder, cfg);
+                encoderSourceSpecs.put(name, builder.build());
+            }
+        }
+        controlPositionSourceName = normalizeOptionalSourceName(record.positionSource());
+        controlVelocitySourceName = normalizeOptionalSourceName(record.velocitySource());
+        controlAbsoluteSourceName = normalizeOptionalSourceName(record.absoluteSource());
+    }
+
+    private static String normalizeOptionalSourceName(String sourceName) {
+        if (sourceName == null || sourceName.isBlank()) {
+            return null;
+        }
+        return EncodersSection.normalizeSourceName(sourceName);
+    }
+
+    private void applyEncoderData(EncoderSourceBuilder builder, MechanismEncoderConfig cfg) {
+        String source = cfg.source() != null ? cfg.source().trim() : "";
+        if (source.isBlank()) {
+            throw new IllegalArgumentException("encoder source '" + cfg.name() + "' is missing a source type");
+        }
+        String normalizedSource = source.toLowerCase(Locale.ROOT);
+        if ("virtual".equals(normalizedSource)) {
+            throw new IllegalArgumentException(
+                    "encoder source '" + cfg.name() + "' uses source=virtual, which is code-only and cannot be loaded from data");
+        } else if ("crt".equals(normalizedSource)) {
+            builder.crt(crt -> {
+                if (cfg.crtInputs() == null || cfg.crtInputs().isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "encoder source '" + cfg.name() + "' requires crtInputs when source=crt");
+                }
+                for (MechanismEncoderCrtInputConfig input : cfg.crtInputs()) {
+                    if (input == null) {
+                        continue;
+                    }
+                    crt.input(input.source(), input.modulus() != null ? input.modulus() : 0);
+                }
+                if (cfg.validMin() != null && cfg.validMax() != null) {
+                    crt.validRange(cfg.validMin(), cfg.validMax());
+                }
+            });
+        } else {
+            int id = cfg.id() != null ? Math.abs(cfg.id()) : 0;
+            if (cfg.id() == null) {
+                throw new IllegalArgumentException("encoder source '" + cfg.name() + "' requires an id");
+            }
+            int signedId = Boolean.TRUE.equals(cfg.inverted()) ? -id : id;
+            if ("internal".equals(normalizedSource)) {
+                builder.encoder(AthenaEncoder.INTERNAL, signedId);
+            } else {
+                boolean matchedAthena = false;
+                for (AthenaEncoder athenaEncoder : AthenaEncoder.values()) {
+                    if (athenaEncoder.name().equalsIgnoreCase(source) && !athenaEncoder.isInternal()) {
+                        builder.encoder(athenaEncoder, signedId);
+                        matchedAthena = true;
+                        break;
+                    }
+                }
+                if (!matchedAthena) {
+                    builder.encoder(ca.frc6390.athena.hardware.encoder.EncoderRegistry.get().encoder(source), signedId);
+                }
+            }
+        }
+        if (cfg.canbus() != null && !cfg.canbus().isBlank()) {
+            builder.canbus(cfg.canbus());
+        }
+        if (cfg.gearRatio() != null) {
+            builder.gearRatio(cfg.gearRatio());
+        }
+        if (cfg.conversion() != null) {
+            builder.conversion(cfg.conversion());
+        }
+        if (cfg.offset() != null) {
+            builder.offset(cfg.offset());
+        }
+        if (cfg.unit() != null && !cfg.unit().isBlank()) {
+            builder.unit(parseEncoderUnit(cfg.unit()));
+        }
+        if (cfg.wrapsEvery() != null) {
+            builder.wrapsEvery(cfg.wrapsEvery());
+        }
+    }
+
+    private static MechanismEncoderUnit parseEncoderUnit(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "rotations" -> MechanismEncoderUnit.ROTATIONS;
+            case "radians" -> MechanismEncoderUnit.RADIANS;
+            case "degrees" -> MechanismEncoderUnit.DEGREES;
+            case "encoder_units", "encoder-units", "encoderunits" -> MechanismEncoderUnit.ENCODER_UNITS;
+            default -> throw new IllegalArgumentException("unknown encoder unit: " + raw);
+        };
+    }
+
     private void updateData(Consumer<MechanismConfigRecord.Builder> mutator) {
         MechanismConfigRecord.Builder builder = data.toBuilder();
         mutator.accept(builder);
         data = builder.build();
+    }
+
+    private void synchronizeEncoderData() {
+        refreshEncoderSummaryData();
+        MechanismConfigRecord.Builder builder = data.toBuilder()
+                .encoders(exportEncoderConfigs())
+                .positionSource(resolveConfiguredSourceName(controlPositionSourceName))
+                .velocitySource(resolveConfiguredSourceName(controlVelocitySourceName))
+                .absoluteSource(resolveConfiguredSourceName(controlAbsoluteSourceName));
+        data = builder.build();
+    }
+
+    private String resolveConfiguredSourceName(String configuredName) {
+        if (encoderSourceSpecs.isEmpty()) {
+            return null;
+        }
+        if (configuredName == null || configuredName.isBlank()) {
+            return encoderSourceSpecs.keySet().iterator().next();
+        }
+        if (!encoderSourceSpecs.containsKey(configuredName)) {
+            throw new IllegalStateException("configured encoder source '" + configuredName + "' is not defined");
+        }
+        return configuredName;
+    }
+
+    private List<MechanismEncoderConfig> exportEncoderConfigs() {
+        List<MechanismEncoderConfig> configs = new ArrayList<>();
+        for (EncoderSourceSpec spec : encoderSourceSpecs.values()) {
+            configs.add(exportEncoderConfig(spec));
+        }
+        return configs;
+    }
+
+    private static MechanismEncoderConfig exportEncoderConfig(EncoderSourceSpec spec) {
+        String source;
+        Integer id = null;
+        Boolean inverted = null;
+        List<MechanismEncoderCrtInputConfig> crtInputs = null;
+        switch (spec.kind()) {
+            case CRT -> {
+                source = "crt";
+                crtInputs = new ArrayList<>();
+                for (CrtInputSpec input : spec.crtInputs()) {
+                    crtInputs.add(new MechanismEncoderCrtInputConfig(input.sourceName(), input.modulus()));
+                }
+            }
+            case HARDWARE -> {
+                if (spec.athenaType() != null) {
+                    source = spec.athenaType().name().toLowerCase(Locale.ROOT);
+                } else if (spec.type() != null) {
+                    source = spec.type().getKey();
+                } else {
+                    source = null;
+                }
+                id = Math.abs(spec.id());
+                inverted = spec.id() < 0;
+            }
+            case VIRTUAL -> source = "virtual";
+            default -> throw new IllegalStateException("unknown encoder source kind: " + spec.kind());
+        }
+        return new MechanismEncoderConfig(
+                spec.name(),
+                source,
+                id,
+                spec.canbus(),
+                inverted,
+                spec.gearRatio(),
+                spec.conversion(),
+                spec.offset(),
+                exportEncoderUnit(spec.unit()),
+                Double.isFinite(spec.wrapsEvery()) ? spec.wrapsEvery() : null,
+                Double.isFinite(spec.validMin()) ? spec.validMin() : null,
+                Double.isFinite(spec.validMax()) ? spec.validMax() : null,
+                crtInputs != null && !crtInputs.isEmpty() ? List.copyOf(crtInputs) : null);
+    }
+
+    private static String exportEncoderUnit(MechanismEncoderUnit unit) {
+        if (unit == null) {
+            return null;
+        }
+        return switch (unit) {
+            case ROTATIONS -> "rotations";
+            case RADIANS -> "radians";
+            case DEGREES -> "degrees";
+            case ENCODER_UNITS -> "encoder_units";
+        };
+    }
+
+    private void refreshEncoderSummaryData() {
+        if (encoderSourceSpecs.isEmpty()) {
+            return;
+        }
+        EncoderSourceSpec summary = null;
+        if (controlPositionSourceName != null) {
+            summary = encoderSourceSpecs.get(controlPositionSourceName);
+        }
+        if (summary == null) {
+            summary = encoderSourceSpecs.values().iterator().next();
+        }
+        if (summary == null) {
+            return;
+        }
+        EncoderSourceSpec resolved = summary;
+        updateData(builder -> builder
+                .encoderGearRatio(resolved.gearRatio())
+                .encoderConversion(resolved.conversion())
+                .encoderConversionOffset(resolved.offset())
+                .encoderOffset(0.0));
     }
 
     /**
@@ -2179,14 +2783,14 @@ public class MechanismConfig<T extends Mechanism> {
      * @param initialState starting state when the mechanism is constructed
      * @param <E> state enum type that provides setpoints
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> stateMachineGeneric(E initialState){
+    public static <E extends Enum<E>> MechanismConfig<StatefulMechanism<E>> stateMachineGeneric(E initialState){
         return custom(config -> new StatefulMechanism<>(config, initialState));
     }
 
     /**
      * Named variant of {@link #stateMachineGeneric(Enum)}.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulMechanism<E>> stateMachineGeneric(String name, E initialState) {
+    public static <E extends Enum<E>> MechanismConfig<StatefulMechanism<E>> stateMachineGeneric(String name, E initialState) {
         return stateMachineGeneric(initialState).named(name);
     }
 
@@ -2198,7 +2802,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @param <E> state enum type that provides setpoints
      * @param <T> concrete mechanism type returned from the factory
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulMechanism<E>> MechanismConfig<T> stateMachine(BiFunction<MechanismConfig<T>, E, T> factory, E initialState) {
+    public static <E extends Enum<E>, T extends StatefulMechanism<E>> MechanismConfig<T> stateMachine(BiFunction<MechanismConfig<T>, E, T> factory, E initialState) {
         return custom(config -> factory.apply(config, initialState));
     }
 
@@ -2231,14 +2835,14 @@ public class MechanismConfig<T extends Mechanism> {
      * @param initialState state machine starting point
      * @param <E> state enum type that provides setpoints
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(E initialState) {
+    public static <E extends Enum<E>> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(E initialState) {
         return custom(config -> new StatefulElevatorMechanism<>(config, initialState));
     }
 
     /**
      * Named variant of {@link #statefulElevator(Enum)}.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(
+    public static <E extends Enum<E>> MechanismConfig<StatefulElevatorMechanism<E>> statefulElevator(
             String name,
             E initialState) {
         return statefulElevator(initialState).named(name);
@@ -2247,7 +2851,7 @@ public class MechanismConfig<T extends Mechanism> {
     /**
      * Builds a stateful elevator configuration backed by a caller-supplied factory.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulElevatorMechanism<E>> MechanismConfig<T> statefulElevator(Function<MechanismConfig<T>, T> factory) {
+    public static <E extends Enum<E>, T extends StatefulElevatorMechanism<E>> MechanismConfig<T> statefulElevator(Function<MechanismConfig<T>, T> factory) {
         return custom(factory);
     }
 
@@ -2257,14 +2861,14 @@ public class MechanismConfig<T extends Mechanism> {
      * @param initialState starting state for the state machine
      * @param <E> state enum type that provides setpoints
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulArmMechanism<E>> statefulArm(E initialState) {
+    public static <E extends Enum<E>> MechanismConfig<StatefulArmMechanism<E>> statefulArm(E initialState) {
         return custom(config -> new StatefulArmMechanism<>(config, initialState));
     }
 
     /**
      * Named variant of {@link #statefulArm(Enum)}.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulArmMechanism<E>> statefulArm(
+    public static <E extends Enum<E>> MechanismConfig<StatefulArmMechanism<E>> statefulArm(
             String name,
             E initialState) {
         return statefulArm(initialState).named(name);
@@ -2273,7 +2877,7 @@ public class MechanismConfig<T extends Mechanism> {
     /**
      * Builds a stateful arm configuration backed by a caller-supplied factory.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulArmMechanism<E>> MechanismConfig<T> statefulArm(Function<MechanismConfig<T>, T> factory) {
+    public static <E extends Enum<E>, T extends StatefulArmMechanism<E>> MechanismConfig<T> statefulArm(Function<MechanismConfig<T>, T> factory) {
         return custom(factory);
     }
 
@@ -2283,7 +2887,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @param initialState starting state for the state machine
      * @param <E> state enum type that provides setpoints
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(E initialState) {
+    public static <E extends Enum<E>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(E initialState) {
         MechanismConfig<StatefulTurretMechanism<E>> cfg =
                 MechanismConfig.<StatefulTurretMechanism<E>>custom(
                         config -> new StatefulTurretMechanism<>(config, initialState));
@@ -2294,7 +2898,7 @@ public class MechanismConfig<T extends Mechanism> {
     /**
      * Named variant of {@link #statefulTurret(Enum)}.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(
+    public static <E extends Enum<E>> MechanismConfig<StatefulTurretMechanism<E>> statefulTurret(
             String name,
             E initialState) {
         return statefulTurret(initialState).named(name);
@@ -2307,7 +2911,7 @@ public class MechanismConfig<T extends Mechanism> {
      * @param <E> state enum type that provides setpoints
      * @param <T> concrete mechanism type created by the factory
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulTurretMechanism<E>> MechanismConfig<T> statefulTurret(Function<MechanismConfig<T>, T> factory) {
+    public static <E extends Enum<E>, T extends StatefulTurretMechanism<E>> MechanismConfig<T> statefulTurret(Function<MechanismConfig<T>, T> factory) {
         MechanismConfig<T> cfg = MechanismConfig.<T>custom(factory);
         cfg.autoContinuousPidForUnboundedTurret = true;
         return cfg;
@@ -2319,14 +2923,14 @@ public class MechanismConfig<T extends Mechanism> {
      * @param initialState starting state for the state machine
      * @param <E> state enum type that provides setpoints
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulFlywheelMechanism<E>> statefulFlywheel(E initialState) {
+    public static <E extends Enum<E>> MechanismConfig<StatefulFlywheelMechanism<E>> statefulFlywheel(E initialState) {
         return custom(config -> new StatefulFlywheelMechanism<>(config, initialState));
     }
 
     /**
      * Named variant of {@link #statefulFlywheel(Enum)}.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>> MechanismConfig<StatefulFlywheelMechanism<E>> statefulFlywheel(
+    public static <E extends Enum<E>> MechanismConfig<StatefulFlywheelMechanism<E>> statefulFlywheel(
             String name,
             E initialState) {
         return statefulFlywheel(initialState).named(name);
@@ -2335,7 +2939,7 @@ public class MechanismConfig<T extends Mechanism> {
     /**
      * Builds a stateful flywheel configuration backed by a caller-supplied factory.
      */
-    public static <E extends Enum<E> & SetpointProvider<Double>, T extends StatefulFlywheelMechanism<E>> MechanismConfig<T> statefulFlywheel(Function<MechanismConfig<T>, T> factory) {
+    public static <E extends Enum<E>, T extends StatefulFlywheelMechanism<E>> MechanismConfig<T> statefulFlywheel(Function<MechanismConfig<T>, T> factory) {
         return custom(factory);
     }
 
@@ -2456,35 +3060,6 @@ public class MechanismConfig<T extends Mechanism> {
         return custom(factory).named(name);
     }
 
-    private static EncoderType resolveIntegratedEncoderType(MotorControllerType type) {
-        if (type == null) {
-            throw new IllegalStateException("Motor controller config is missing a type");
-        }
-        String key = type.getKey();
-        if (key == null || key.isBlank()) {
-            throw new IllegalStateException("Motor controller type key is missing");
-        }
-        String encoderKey = integratedEncoderKey(key);
-        if (encoderKey == null) {
-            throw new IllegalStateException(
-                    "Motor type '" + key + "' does not expose an integrated encoder. "
-                            + "Configure an encoder explicitly with encoder(e -> e.encoder(...)).");
-        }
-        return EncoderRegistry.get().encoder(encoderKey);
-    }
-
-    private static String integratedEncoderKey(String motorKey) {
-        if (motorKey.startsWith("rev:sparkmax")) {
-            return "rev:sparkmax";
-        }
-        if (motorKey.startsWith("rev:sparkflex")) {
-            return "rev:sparkflex";
-        }
-        if (motorKey.startsWith("ctre:talonfx")) {
-            return "ctre:talonfx-integrated";
-        }
-        return null;
-    }
     /**
      * Sets a debounce delay between state-machine transitions.
      *
@@ -2533,18 +3108,30 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     @FunctionalInterface
-    public interface MechanismBinding<M extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
+    public interface MechanismBinding<M extends Mechanism, E extends Enum<E>>
+            extends Consumer<MechanismContext<M, E>> {
         void apply(MechanismContext<M, E> context);
+
+        @Override
+        default void accept(MechanismContext<M, E> context) {
+            apply(context);
+        }
     }
 
     @FunctionalInterface
-    public interface MechanismTransitionBinding<M extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
+    public interface MechanismTransitionBinding<M extends Mechanism, E extends Enum<E>> {
         void apply(MechanismContext<M, E> context, E from, E to);
     }
 
     @FunctionalInterface
-    public interface MechanismControlLoop<M extends Mechanism> {
+    public interface MechanismControlLoop<M extends Mechanism>
+            extends ToDoubleFunction<MechanismControlContext<M>> {
         double calculate(MechanismControlContext<M> context);
+
+        @Override
+        default double applyAsDouble(MechanismControlContext<M> context) {
+            return calculate(context);
+        }
     }
 
     public record ControlLoopBinding<M extends Mechanism>(
@@ -2552,7 +3139,7 @@ public class MechanismConfig<T extends Mechanism> {
             double periodSeconds,
             MechanismControlLoop<M> loop) { }
 
-    public record StateTransitionPair<E extends Enum<E> & SetpointProvider<Double>>(E from, E to) { }
+    public record StateTransitionPair<E extends Enum<E>>(E from, E to) { }
 
     public record TransitionHookBinding<M extends Mechanism>(
             Enum<?> from,
@@ -2596,10 +3183,12 @@ public class MechanismConfig<T extends Mechanism> {
             double maxVelocity,
             double maxAcceleration,
             PidAutotunerConfig autotuner,
-            InputSource source) {
+            MechanismInputSource inputSource,
+            MechanismSetpointSource setpointSource) {
         public PidProfile {
             autotuner = autotuner != null ? autotuner : PidAutotunerConfig.defaults();
-            source = source != null ? source : InputSource.position;
+            inputSource = inputSource != null ? inputSource : MechanismInputSource.Position;
+            setpointSource = setpointSource != null ? setpointSource : MechanismSetpointSource.Setpoint;
         }
 
         public PidProfile(
@@ -2612,8 +3201,23 @@ public class MechanismConfig<T extends Mechanism> {
                 double maxVelocity,
                 double maxAcceleration,
                 PidAutotunerConfig autotuner) {
-            this(outputType, kP, kI, kD, iZone, tolerance, maxVelocity, maxAcceleration, autotuner, null);
+            this(outputType, kP, kI, kD, iZone, tolerance, maxVelocity, maxAcceleration, autotuner, null, null);
         }
+
+        public PidProfile(
+                OutputType outputType,
+                double kP,
+                double kI,
+                double kD,
+                double iZone,
+                double tolerance,
+                double maxVelocity,
+                double maxAcceleration,
+                PidAutotunerConfig autotuner,
+                MechanismInputSource inputSource) {
+            this(outputType, kP, kI, kD, iZone, tolerance, maxVelocity, maxAcceleration, autotuner, inputSource, null);
+        }
+
     }
 
     public record BangBangProfile(
@@ -2621,9 +3225,11 @@ public class MechanismConfig<T extends Mechanism> {
             double highOutput,
             double lowOutput,
             double tolerance,
-            InputSource source) {
+            MechanismInputSource inputSource,
+            MechanismSetpointSource setpointSource) {
         public BangBangProfile {
-            source = source != null ? source : InputSource.position;
+            inputSource = inputSource != null ? inputSource : MechanismInputSource.Position;
+            setpointSource = setpointSource != null ? setpointSource : MechanismSetpointSource.Setpoint;
         }
 
         public BangBangProfile(
@@ -2631,8 +3237,18 @@ public class MechanismConfig<T extends Mechanism> {
                 double highOutput,
                 double lowOutput,
                 double tolerance) {
-            this(outputType, highOutput, lowOutput, tolerance, null);
+            this(outputType, highOutput, lowOutput, tolerance, null, null);
         }
+
+        public BangBangProfile(
+                OutputType outputType,
+                double highOutput,
+                double lowOutput,
+                double tolerance,
+                MechanismInputSource inputSource) {
+            this(outputType, highOutput, lowOutput, tolerance, inputSource, null);
+        }
+
     }
 
     public enum FeedforwardType {
@@ -2672,10 +3288,10 @@ public class MechanismConfig<T extends Mechanism> {
             double kV,
             double kA,
             double tolerance,
-            InputSource source) {
+            MechanismSetpointSource setpointSource) {
         public FeedforwardProfile {
             type = type != null ? type : FeedforwardType.SIMPLE;
-            source = source != null ? source : InputSource.velocity;
+            setpointSource = setpointSource != null ? setpointSource : MechanismSetpointSource.Setpoint;
         }
 
         public FeedforwardProfile(
@@ -3034,6 +3650,7 @@ public class MechanismConfig<T extends Mechanism> {
             }
             return mechanism;
         }
+        synchronizeEncoderData();
         MechanismConfigRecord cfg = data;
         if (autoContinuousPidForUnboundedTurret) {
             cfg = applyAutoContinuousPidForUnboundedTurret(cfg);
@@ -3044,23 +3661,6 @@ public class MechanismConfig<T extends Mechanism> {
                     .neutralMode(cfg.motorNeutralMode())
                     .currentLimit(cfg.motorCurrentLimit())
                     .canbus(cfg.canbus());
-        }
-
-        if (cfg.encoder() != null) {
-             String resolvedEncoderCanbus = cfg.canbus();
-             if (encoderCanbusOverride) {
-                 String configuredEncoderCanbus = cfg.encoder().canbus();
-                 if (configuredEncoderCanbus != null && !configuredEncoderCanbus.isBlank()) {
-                     resolvedEncoderCanbus = configuredEncoderCanbus;
-                 }
-             }
-             cfg.encoder().hardware().canbus(resolvedEncoderCanbus);
-             cfg.encoder().measurement()
-                    .conversion(cfg.encoderConversion())
-                    .conversionOffset(cfg.encoderConversionOffset())
-                    .gearRatio(cfg.encoderGearRatio())
-                    .offset(cfg.encoderOffset())
-                    .discontinuity(cfg.encoderDiscontinuityPoint(), cfg.encoderDiscontinuityRange());
         }
 
         // PID controller construction/config is handled by the mechanism runtime using named profiles.
@@ -3146,12 +3746,23 @@ public class MechanismConfig<T extends Mechanism> {
         ArmSimulationParameters originalArmSimulationParameters = armSimulationParameters;
         SimpleMotorSimulationParameters originalSimpleMotorSimulationParameters = simpleMotorSimulationParameters;
         MechanismSensorSimulationConfig originalSensorSimulationConfig = sensorSimulationConfig;
+        LinkedHashMap<String, EncoderSourceSpec> originalEncoderSources = new LinkedHashMap<>(encoderSourceSpecs);
+        String originalPositionSource = controlPositionSourceName;
+        String originalVelocitySource = controlVelocitySourceName;
+        String originalAbsoluteSource = controlAbsoluteSourceName;
         try {
             data = data.toBuilder()
                     .motors(new ArrayList<>())
-                    .encoder(null)
+                    .encoders(new ArrayList<>())
+                    .positionSource(null)
+                    .velocitySource(null)
+                    .absoluteSource(null)
                     .limitSwitches(new ArrayList<>())
                     .build();
+            encoderSourceSpecs.clear();
+            controlPositionSourceName = null;
+            controlVelocitySourceName = null;
+            controlAbsoluteSourceName = null;
             simulationConfig = null;
             elevatorSimulationParameters = null;
             armSimulationParameters = null;
@@ -3160,6 +3771,11 @@ public class MechanismConfig<T extends Mechanism> {
             return factory.apply(this);
         } finally {
             data = originalData;
+            encoderSourceSpecs.clear();
+            encoderSourceSpecs.putAll(originalEncoderSources);
+            controlPositionSourceName = originalPositionSource;
+            controlVelocitySourceName = originalVelocitySource;
+            controlAbsoluteSourceName = originalAbsoluteSource;
             simulationConfig = originalSimulationConfig;
             elevatorSimulationParameters = originalElevatorSimulationParameters;
             armSimulationParameters = originalArmSimulationParameters;
@@ -3186,7 +3802,7 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     @SuppressWarnings("unchecked")
-    private static <E extends Enum<E> & StateMachine.SetpointProvider<Double>> void applyStateGraph(
+    private static <E extends Enum<E>> void applyStateGraph(
             StatefulLike<?> stateful,
             StateGraph<?> stateGraph) {
         StatefulLike<E> typedMechanism = (StatefulLike<E>) stateful;

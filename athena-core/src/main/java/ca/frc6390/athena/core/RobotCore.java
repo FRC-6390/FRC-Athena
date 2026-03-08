@@ -3041,7 +3041,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             }
         }
 
-        if (mechanism != null && mechanism.encoder().device() != null) {
+        if (mechanism != null && mechanism.positionEncoderDevice() != null) {
             int encoderY = leftY;
             page.widget(ArcpDeviceWidgets.encoder(root + "/Encoder", widget -> widget
                     .id("w-" + slug + "-encoder-standalone")
@@ -3451,7 +3451,7 @@ public class RobotCore<T extends RobotDrivetrain<T>> extends TimedRobot {
             ARCP publisher,
             String parentLayoutId,
             int startRow) {
-        if (mechanism.encoder().device() == null) {
+        if (mechanism.positionEncoderDevice() == null) {
             return startRow;
         }
         String encoderRoot = root + "/Encoder";

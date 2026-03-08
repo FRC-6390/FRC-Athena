@@ -7,6 +7,7 @@ import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.mechanisms.ArmMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.mechanisms.MechanismSetpointSource;
 import ca.frc6390.athena.mechanisms.OutputType;
 import ca.frc6390.athena.mechanisms.SuperstructureConfig;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
@@ -151,11 +152,11 @@ public final class ExampleTurretSuperstructure {
                                 .neutralMode(MotorNeutralMode.Brake)
                                 .canbus(canbus)
                                 .currentLimit(20))
-                        .encoder(enc -> enc.config(EncoderConfig
+                        .encoders(enc -> enc.add("main", src -> src.config(EncoderConfig
                                 .create(AthenaEncoder.CANCODER.resolve(), 1)
                                 .measurement(m -> m
                                         .gearRatio(100.0)
-                                        .conversion(2.0 * Math.PI))))
+                                        .conversion(2.0 * Math.PI)))))
                         .control(control -> control
                                 .pid("main", p -> p
                                         .output(OutputType.PERCENT)
@@ -179,11 +180,11 @@ public final class ExampleTurretSuperstructure {
                                 .neutralMode(MotorNeutralMode.Brake)
                                 .canbus(canbus)
                                 .currentLimit(15))
-                        .encoder(enc -> enc.config(EncoderConfig
+                        .encoders(enc -> enc.add("main", src -> src.config(EncoderConfig
                                 .create(AthenaEncoder.SPARK_MAX.resolve(), 2)
                                 .measurement(m -> m
                                         .gearRatio(50.0)
-                                        .conversion(2.0 * Math.PI))))
+                                        .conversion(2.0 * Math.PI)))))
                         .control(control -> control
                                 .pid("main", p -> p
                                         .output(OutputType.PERCENT)
@@ -205,18 +206,18 @@ public final class ExampleTurretSuperstructure {
                                 .neutralMode(MotorNeutralMode.Coast)
                                 .canbus(canbus)
                                 .currentLimit(30))
-                        .encoder(enc -> enc.config(EncoderConfig
+                        .encoders(enc -> enc.add("main", src -> src.config(EncoderConfig
                                 .create(AthenaEncoder.CANCODER.resolve(), 3)
                                 .measurement(m -> m
                                         .gearRatio(1.0)
-                                        .conversion(2.0 * Math.PI))))
+                                        .conversion(2.0 * Math.PI)))))
                         .control(control -> control
                                 .ff("mainFF", ff -> ff
                                         .simple(0.15, 0.12, 0.0)
-                                        .source(MechanismConfig.InputSource.setpoint))
+                                        .setpointSource(MechanismSetpointSource.Setpoint))
                                 .pid("mainPid", p -> p
                                         .output(OutputType.PERCENT)
-                                        .source(MechanismConfig.InputSource.velocity)
+                                        .inputSource(MechanismConfig.InputSource.Velocity)
                                         .kp(0.1)
                                         .ki(0.0)
                                         .kd(0.0))

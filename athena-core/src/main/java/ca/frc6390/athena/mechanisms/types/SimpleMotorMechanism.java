@@ -54,7 +54,7 @@ public class SimpleMotorMechanism  extends Mechanism  {
         super.publishArcp(publisher, rootPath);
     }
 
-    public static class StatefulSimpleMotorMechanism<E extends Enum<E> & SetpointProvider<Double>> extends SimpleMotorMechanism implements StatefulLike<E> {
+    public static class StatefulSimpleMotorMechanism<E extends Enum<E>> extends SimpleMotorMechanism implements StatefulLike<E> {
     
         private final StatefulMechanismCore<StatefulSimpleMotorMechanism<E>, E> stateMachineCore;
 

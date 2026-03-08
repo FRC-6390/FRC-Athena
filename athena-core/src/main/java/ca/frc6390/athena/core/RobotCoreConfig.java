@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
@@ -57,11 +56,11 @@ public final class RobotCoreConfig {
         }
 
         public <T extends RobotDrivetrain<T>> Builder<T> drivetrain(
-                Function<DrivetrainSection, RobotDrivetrainConfig<T>> selector) {
+                Consumer<DrivetrainSection> selector) {
             Objects.requireNonNull(selector, "selector");
             DrivetrainSection section = new DrivetrainSection();
-            RobotDrivetrainConfig<T> rawConfig = Objects.requireNonNull(selector.apply(section),
-                    "selector returned null drivetrain config");
+            selector.accept(section);
+            RobotDrivetrainConfig<T> rawConfig = section.selectedConfig();
             RobotDrivetrainConfig<T> config = section.wrapWithTiming(rawConfig);
             return new Builder<>(name, config);
         }
@@ -183,6 +182,7 @@ public final class RobotCoreConfig {
     public static final class DrivetrainSection {
         private double updatePeriodSeconds = Double.NaN;
         private double driverCommandPeriodSeconds = Double.NaN;
+        private RobotDrivetrainConfig<?> selectedConfig;
 
         private DrivetrainSection() {}
 
@@ -245,26 +245,40 @@ public final class RobotCoreConfig {
             };
         }
 
+        public <T extends RobotDrivetrain<T>> RobotDrivetrainConfig<T> config(RobotDrivetrainConfig<T> config) {
+            RobotDrivetrainConfig<T> resolved = Objects.requireNonNull(config, "config");
+            selectedConfig = resolved;
+            return resolved;
+        }
+
         public RobotDrivetrainConfig<SwerveDrivetrain> swerve(SwerveDrivetrainConfig config) {
-            return Objects.requireNonNull(config, "config");
+            return config(Objects.requireNonNull(config, "config"));
         }
 
         public RobotDrivetrainConfig<SwerveDrivetrain> swerve(Consumer<SwerveSection> section) {
             Objects.requireNonNull(section, "section");
             SwerveSection s = new SwerveSection();
             section.accept(s);
-            return s.drivetrainConfig();
+            return config(s.drivetrainConfig());
         }
 
         public RobotDrivetrainConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
-            return Objects.requireNonNull(config, "config");
+            return config(Objects.requireNonNull(config, "config"));
         }
 
         public RobotDrivetrainConfig<DifferentialDrivetrain> differential(Consumer<DifferentialSection> section) {
             Objects.requireNonNull(section, "section");
             DifferentialSection d = new DifferentialSection();
             section.accept(d);
-            return d.config;
+            return config(d.config);
+        }
+
+        @SuppressWarnings("unchecked")
+        private <T extends RobotDrivetrain<T>> RobotDrivetrainConfig<T> selectedConfig() {
+            return (RobotDrivetrainConfig<T>) Objects.requireNonNull(
+                    selectedConfig,
+                    "No drivetrain config selected. Call swerve(...), differential(...), or config(...) inside drivetrain(...)."
+            );
         }
     }
 

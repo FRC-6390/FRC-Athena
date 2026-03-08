@@ -187,8 +187,8 @@ public final class MechanismVisualizationConfig {
     }
 
     private static double toRadians(Mechanism mechanism, double value) {
-        if (mechanism != null && mechanism.encoder().device() != null) {
-            double conversion = mechanism.encoder().device().getConversion();
+        if (mechanism != null && mechanism.positionEncoderDevice() != null) {
+            double conversion = mechanism.positionEncoderDevice().getConversion();
             if (Math.abs(conversion - 360.0) < 1e-3) {
                 return Math.toRadians(value);
             }

@@ -14,12 +14,10 @@ import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.loop.TimedRunner;
 import ca.frc6390.athena.hardware.encoder.Encoder;
-import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorController;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
-import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch;
 import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulation;
@@ -60,6 +58,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,8 +75,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final MechanismConfig<? extends Mechanism> sourceConfig;
 
     private final MotorControllerGroup motors;
+    private final Map<String, MechanismEncoderSource> encoderSources;
+    private final String positionSourceName;
+    private final String velocitySourceName;
+    private final String absoluteSourceName;
     private final Encoder encoder;
-    private boolean useAbsolute;
+    private final Set<Encoder> standaloneEncoders;
     private OutputType outputType = OutputType.PERCENT;
     private final GenericLimitSwitch[] limitSwitches;
     private static final String MOTION_AXIS_ID = "axis";
@@ -168,7 +171,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private boolean cachedHasSimulation;
     private double cachedSimulationUpdatePeriodSeconds;
     private boolean cachedUseVoltage;
-    private boolean cachedUseAbsolute;
     private boolean cachedSetpointAsOutput;
     private double cachedPidPeriod;
     private boolean cachedFeedforwardEnabled;
@@ -241,8 +243,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, Double> controlLoopFeedforwardTolerances;
     private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
     private final java.util.function.Consumer<Consumer<Mechanism>> timedHookRunnerInvoker = hook -> hook.accept(this);
-    private  boolean shouldCustomEncoder = false;
-    private  DoubleSupplier customEncoderPos;
     private boolean networkTablesEnabled;
     private double lastNetworkTablesCacheUpdateSeconds = Double.NaN;
     private double lastEmergencyStopLogSeconds = Double.NaN;
@@ -253,8 +253,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             new BoundedEventLog<>(DIAGNOSTIC_LOG_CAPACITY);
     private final DiagnosticsView diagnosticsView = new DiagnosticsView();
     private final InputSection inputSection;
+    private final EncodersSection encodersSection;
     private final MotorsSection motorsSection;
-    private final EncoderSection encoderSection;
     private final ControlSection controlSection;
     private final LoopsSection loopsSection;
     private final MechanismSysIdSection sysIdSection;
@@ -293,8 +293,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.sourceConfig = config;
         this.motors =
                 MotorControllerGroup.fromConfigs(config.data().motors().toArray(MotorControllerConfig[]::new));
-        this.encoder = resolveEncoder(config.data().encoder(), this.motors);
-        this.useAbsolute = config.data().useAbsolute();
+        this.encoderSources = new LinkedHashMap<>(config.resolveEncoderSources(this.motors));
+        this.positionSourceName = config.resolvePositionSourceName(this.encoderSources);
+        this.velocitySourceName = config.resolveVelocitySourceName(this.encoderSources);
+        this.absoluteSourceName = config.resolveAbsoluteSourceName(this.encoderSources);
+        this.encoder = resolveEncoderDevice(this.encoderSources, this.positionSourceName);
         OutputType configOutputType = config.data().outputType();
         if (configOutputType == null) {
             this.outputType = config.data().useVoltage() ? OutputType.VOLTAGE : OutputType.PERCENT;
@@ -310,10 +313,11 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.hardwareUpdatePeriodSeconds = sanitizeHardwareUpdatePeriod(config.data().hardwareUpdatePeriodSeconds());
         this.hardwareUpdateSlot = NEXT_HARDWARE_UPDATE_SLOT.getAndIncrement();
         recomputeHardwareRefreshPhase();
+        this.standaloneEncoders = collectStandaloneEncoders(this.encoderSources, this.motors);
         this.encoderOwnedByMotorGroup = isEncoderOwnedByMotorGroup(this.encoder, this.motors);
         this.inputSection = new InputSection(this);
+        this.encodersSection = new EncodersSection(this);
         this.motorsSection = new MotorsSection(this);
-        this.encoderSection = new EncoderSection(this);
         this.controlSection = new ControlSection(this);
         this.loopsSection = new LoopsSection(this);
         this.sysIdSection = new MechanismSysIdSection(this);
@@ -357,8 +361,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 registerPeriodicHook(binding);
             }
         }
-        this.shouldCustomEncoder = config.usesCustomEncoder();
-        this.customEncoderPos = config.customEncoderPositionSupplier();
         this.controlLoopInputs = new HashMap<>(config.inputs());
         this.controlLoopDoubleInputs = new HashMap<>(config.doubleInputs());
         this.controlLoopIntInputs = new HashMap<>(config.intInputs());
@@ -407,7 +409,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                         profile.maxVelocity(),
                         profile.maxAcceleration(),
                         profile.autotuner(),
-                        profile.source());
+                        profile.inputSource(),
+                        profile.setpointSource());
                 controlLoopPidProfilesConfig.put(name, sanitized);
                 OutputType profileOutput = profile.outputType() != null ? profile.outputType() : OutputType.PERCENT;
                 if (profileOutput != OutputType.PERCENT && profileOutput != OutputType.VOLTAGE) {
@@ -478,7 +481,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                                 sanitizeBangBangLevel(profile.highOutput()),
                                 sanitizeBangBangLevel(profile.lowOutput()),
                                 sanitizeBangBangTolerance(profile.tolerance()),
-                                profile.source()));
+                                profile.inputSource(),
+                                profile.setpointSource()));
             }
         }
         if (config.controlLoopFeedforwardProfiles() != null) {
@@ -502,7 +506,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                         profile.kV(),
                         profile.kA(),
                         sanitizeControlLoopTolerance(profile.tolerance()),
-                        profile.source());
+                        profile.setpointSource());
                 controlLoopFeedforwardProfiles.put(name, sanitized);
                 if (profileType == MechanismConfig.FeedforwardType.SIMPLE) {
                     SimpleMotorFeedforward ff = sanitized.simple();
@@ -595,12 +599,36 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         sourceConfig.runPhaseHooks(this, phase);
     }
 
-    private static Encoder resolveEncoder(EncoderConfig config, MotorControllerGroup motors) {
-        if (config == null) {
+    private static Encoder resolveEncoderDevice(
+            Map<String, MechanismEncoderSource> encoderSources,
+            String sourceName) {
+        if (encoderSources == null || encoderSources.isEmpty()) {
             return null;
         }
-        Encoder integrated = resolveIntegratedEncoder(config, motors);
-        return integrated != null ? integrated : HardwareFactories.encoder(config);
+        String resolvedName = sourceName;
+        if (resolvedName == null || resolvedName.isBlank()) {
+            resolvedName = encoderSources.keySet().iterator().next();
+        }
+        MechanismEncoderSource source = encoderSources.get(resolvedName);
+        return source != null ? source.device() : null;
+    }
+
+    private static Set<Encoder> collectStandaloneEncoders(
+            Map<String, MechanismEncoderSource> encoderSources,
+            MotorControllerGroup motors) {
+        Set<Encoder> encoders = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        if (encoderSources == null || encoderSources.isEmpty()) {
+            return encoders;
+        }
+        for (MechanismEncoderSource source : encoderSources.values()) {
+            if (source == null || source.device() == null) {
+                continue;
+            }
+            if (!isEncoderOwnedByMotorGroup(source.device(), motors)) {
+                encoders.add(source.device());
+            }
+        }
+        return encoders;
     }
 
     private static boolean isEncoderOwnedByMotorGroup(Encoder encoder, MotorControllerGroup motors) {
@@ -656,44 +684,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return Double.NaN;
     }
 
-    private static Encoder resolveIntegratedEncoder(EncoderConfig config, MotorControllerGroup motors) {
-        if (motors == null || config.type() == null) {
-            return null;
-        }
-        String key = config.type().getKey();
-        if (!isIntegratedEncoderKey(key)) {
-            return null;
-        }
-        int encoderId = config.id();
-        MotorController matchingMotor = null;
-        for (MotorController motor : motors.getControllers()) {
-            if (motor.getId() == encoderId) {
-                matchingMotor = motor;
-                break;
-            }
-        }
-        if (matchingMotor == null) {
-            throw new IllegalStateException(
-                    "Integrated encoder requested for motor ID " + encoderId + ", but no matching motor was configured.");
-        }
-        Encoder motorEncoder = matchingMotor.getEncoder();
-        if (motorEncoder == null) {
-            throw new IllegalStateException(
-                    "Motor controller '" + matchingMotor.getName() + "' has no integrated encoder.");
-        }
-        return motorEncoder;
-    }
-
-    private static boolean isIntegratedEncoderKey(String key) {
-        return "ctre:talonfx-integrated".equals(key)
-                || "rev:sparkmax".equals(key)
-                || "rev:sparkflex".equals(key);
-    }
-
     public Mechanism(MotorControllerGroup motors, Encoder encoder,
-            boolean useAbsolute, boolean useVoltage,
+            boolean useVoltage,
             GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod) {
-        this(motors, encoder, useAbsolute, useVoltage, limitSwitches, useSetpointAsOutput, pidPeriod, null, null, null);
+        this(motors, encoder, useVoltage, limitSwitches, useSetpointAsOutput, pidPeriod, null, null, null);
     }
 
     @Override
@@ -702,15 +696,28 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public Mechanism(MotorControllerGroup motors, Encoder encoder,
-            boolean useAbsolute, boolean useVoltage,
+            boolean useVoltage,
             GenericLimitSwitch[] limitSwitches, boolean useSetpointAsOutput, double pidPeriod,
             MechanismSimulationConfig simulationConfig,
             MechanismVisualizationConfig visualizationConfig,
             MechanismSensorSimulationConfig sensorSimulationConfig) {
         this.sourceConfig = null;
         this.motors = motors;
+        this.encoderSources = new LinkedHashMap<>();
+        if (encoder != null) {
+            this.encoderSources.put(
+                    "main",
+                    new MechanismEncoderSource(
+                            "main",
+                            encoder,
+                            MechanismEncoderUnit.ROTATIONS,
+                            Double.NaN));
+        }
+        this.positionSourceName = encoder != null ? "main" : null;
+        this.velocitySourceName = encoder != null ? "main" : null;
+        this.absoluteSourceName = encoder != null ? "main" : null;
         this.encoder = encoder;
-        this.useAbsolute = useAbsolute;
+        this.standaloneEncoders = collectStandaloneEncoders(this.encoderSources, this.motors);
         this.outputType = useVoltage ? OutputType.VOLTAGE : OutputType.PERCENT;
         this.override = false;
         this.limitSwitches = limitSwitches;
@@ -722,8 +729,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         recomputeHardwareRefreshPhase();
         this.encoderOwnedByMotorGroup = isEncoderOwnedByMotorGroup(this.encoder, this.motors);
         this.inputSection = new InputSection(this);
+        this.encodersSection = new EncodersSection(this);
         this.motorsSection = new MotorsSection(this);
-        this.encoderSection = new EncoderSection(this);
         this.controlSection = new ControlSection(this);
         this.loopsSection = new LoopsSection(this);
         this.sysIdSection = new MechanismSysIdSection(this);
@@ -832,19 +839,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return this;
     }
 
-    public MotorsSection motors() {
-        return motorsSection;
-    }
-
-    public Mechanism encoder(Consumer<EncoderSection> section) {
+    public Mechanism encoders(Consumer<EncodersSection> section) {
         if (section != null) {
-            section.accept(encoderSection);
+            section.accept(encodersSection);
         }
         return this;
     }
 
-    public EncoderSection encoder() {
-        return encoderSection;
+    public EncodersSection encoders() {
+        return encodersSection;
+    }
+
+    public MotorsSection motors() {
+        return motorsSection;
     }
 
     public Mechanism control(Consumer<ControlSection> section) {
@@ -1055,15 +1062,68 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public double position() {
-        return readPosition(false);
+        return readPosition(false, null);
+    }
+
+    public double position(String sourceName) {
+        return readPosition(false, sourceName);
     }
 
     public Rotation2d rotation2d() {
-        return readRotation2d(false);
+        return readRotation2d(false, null);
+    }
+
+    public Rotation2d rotation2d(String sourceName) {
+        return readRotation2d(false, sourceName);
     }
 
     public double velocity() {
-        return readVelocity(false);
+        return readVelocity(false, null);
+    }
+
+    public double velocity(String sourceName) {
+        return readVelocity(false, sourceName);
+    }
+
+    public Encoder positionEncoderDevice() {
+        return resolveEncoderDevice(encoderSources, positionSourceName);
+    }
+
+    public Encoder velocityEncoderDevice() {
+        return resolveEncoderDevice(encoderSources, velocitySourceName);
+    }
+
+    public Encoder absoluteEncoderDevice() {
+        return resolveEncoderDevice(encoderSources, absoluteSourceName);
+    }
+
+    public Encoder encoderDevice(String sourceName) {
+        MechanismEncoderSource source = resolveEncoderSource(sourceName, positionSourceName);
+        return source != null ? source.device() : null;
+    }
+
+    public Set<String> encoderSourceNames() {
+        return Set.copyOf(encoderSources.keySet());
+    }
+
+    public String positionSourceName() {
+        return positionSourceName;
+    }
+
+    public String velocitySourceName() {
+        return velocitySourceName;
+    }
+
+    public String absoluteSourceName() {
+        return absoluteSourceName;
+    }
+
+    public double absolutePosition() {
+        return readAbsolutePosition(false, null);
+    }
+
+    public double absolutePosition(String sourceName) {
+        return readAbsolutePosition(false, sourceName);
     }
 
     public double setpoint() {
@@ -1096,10 +1156,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     public boolean emergencyStopped() {
         return emergencyStopped;
-    }
-
-    public boolean useAbsolute() {
-        return useAbsolute;
     }
 
     public boolean useVoltage() {
@@ -1414,6 +1470,32 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
+    public static final class EncodersSection {
+        private final Mechanism owner;
+
+        private EncodersSection(Mechanism owner) {
+            this.owner = owner;
+        }
+
+        public EncodersSection position(double value) {
+            owner.setEncoderPosition(null, value);
+            return this;
+        }
+
+        public EncodersSection position(String sourceName, double value) {
+            owner.setEncoderPosition(sourceName, value);
+            return this;
+        }
+
+        public Encoder device() {
+            return owner.positionEncoderDevice();
+        }
+
+        public Encoder device(String sourceName) {
+            return owner.encoderDevice(sourceName);
+        }
+    }
+
     public static final class MotorsStateView {
         private final Mechanism owner;
         private final boolean poll;
@@ -1456,92 +1538,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
     }
 
-    public static final class EncoderSection {
-        private final Mechanism owner;
-
-        private EncoderSection(Mechanism owner) {
-            this.owner = owner;
-        }
-
-        public EncoderSection useAbsolute(boolean enabled) {
-            owner.useAbsolute = enabled;
-            return this;
-        }
-
-        public boolean useAbsolute() {
-            return owner.useAbsolute;
-        }
-
-        public EncoderSection position(double value) {
-            owner.writeEncoderPosition(value);
-            return this;
-        }
-
-        public EncoderSection simState(double position, double velocity) {
-            owner.setSimulatedEncoderState(position, velocity);
-            return this;
-        }
-
-        public EncoderSection clearSimState() {
-            owner.clearSimulatedEncoderState();
-            return this;
-        }
-
-        public EncoderSection config(Consumer<Encoder.RuntimeSection> section) {
-            if (owner.encoder != null && section != null) {
-                owner.encoder.config(section);
-            }
-            return this;
-        }
-
-        public EncoderSection sim(Consumer<Encoder.SimulationSection> section) {
-            if (owner.encoder != null && section != null) {
-                owner.encoder.sim(section);
-            }
-            return this;
-        }
-
-        public double position() {
-            return owner.readPosition(false);
-        }
-
-        public double position(boolean poll) {
-            return owner.readPosition(poll);
-        }
-
-        public double velocity() {
-            return owner.readVelocity(false);
-        }
-
-        public double velocity(boolean poll) {
-            return owner.readVelocity(poll);
-        }
-
-        public Rotation2d rotation2d() {
-            return owner.readRotation2d(false);
-        }
-
-        public Rotation2d rotation2d(boolean poll) {
-            return owner.readRotation2d(poll);
-        }
-
-        public double positionModulus(double min, double max) {
-            return owner.readPositionModulus(min, max);
-        }
-
-        public Encoder.MeasurementsView measurements() {
-            return owner.encoder != null ? owner.encoder.measurements() : null;
-        }
-
-        public Encoder.StatusView status() {
-            return owner.encoder != null ? owner.encoder.status() : null;
-        }
-
-        public Encoder device() {
-            return owner.encoder;
-        }
-    }
-
     public static final class ControlSection {
         private final Mechanism owner;
 
@@ -1571,11 +1567,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         public ControlSection manualOverride(boolean override) {
             owner.setOverride(override);
-            return this;
-        }
-
-        public ControlSection useAbsolute(boolean useAbsolute) {
-            owner.setUseAbsolute(useAbsolute);
             return this;
         }
 
@@ -1625,7 +1616,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         public ControlSection encoderPosition(double position) {
-            owner.setEncoderPosition(position);
+            owner.encoders().position(position);
             return this;
         }
 
@@ -2061,42 +2052,70 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return wheelCircumferenceMeters * (wheelRPM / 60.0);
     }
 
-    private Rotation2d readRotation2d(boolean poll) {
-        if (encoder == null) {
+    private MechanismEncoderSource resolveEncoderSource(String sourceName, String defaultSourceName) {
+        if (encoderSources == null || encoderSources.isEmpty()) {
+            return null;
+        }
+        String resolvedName = sourceName;
+        if (resolvedName == null || resolvedName.isBlank()) {
+            resolvedName = defaultSourceName;
+        }
+        if (resolvedName == null || resolvedName.isBlank()) {
+            resolvedName = encoderSources.keySet().iterator().next();
+        }
+        return encoderSources.get(resolvedName);
+    }
+
+    private Rotation2d readRotation2d(boolean poll, String sourceName) {
+        MechanismEncoderSource source = resolveEncoderSource(sourceName, positionSourceName);
+        if (source == null || source.device() == null) {
             return Rotation2d.kZero;
         }
-        return useAbsolute
-                ? encoder.getAbsoluteRotation2d(poll)
-                : encoder.getRotation2d(poll);
+        return source.device().getRotation2d(poll);
     }
 
-    private double readPosition(boolean poll) {
-        if (shouldCustomEncoder && customEncoderPos != null) {
-            return customEncoderPos.getAsDouble();
+    private Rotation2d readAbsoluteRotation2d(boolean poll, String sourceName) {
+        MechanismEncoderSource source = resolveEncoderSource(sourceName, absoluteSourceName);
+        if (source == null || source.device() == null) {
+            return Rotation2d.kZero;
         }
-        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
+        return source.device().getAbsoluteRotation2d(poll);
+    }
+
+    private double readPosition(boolean poll, String sourceName) {
+        MechanismEncoderSource source = resolveEncoderSource(sourceName, positionSourceName);
+        Encoder device = source != null ? source.device() : null;
+        if (RobotBase.isSimulation() && simEncoderOverride && (device == null || !device.supportsSimulation())) {
             return simEncoderPosition;
         }
-        if (encoder == null) {
+        if (device == null) {
             return 0.0;
         }
-        return useAbsolute
-                ? encoder.getAbsolutePosition(poll)
-                : encoder.getPosition(poll);
+        return device.getPosition(poll);
     }
 
-    private double readPositionModulus(double min, double max) {
-        return MathUtil.inputModulus(readPosition(false), min, max);
+    private double readAbsolutePosition(boolean poll, String sourceName) {
+        MechanismEncoderSource source = resolveEncoderSource(sourceName, absoluteSourceName);
+        Encoder device = source != null ? source.device() : null;
+        if (RobotBase.isSimulation() && simEncoderOverride && (device == null || !device.supportsSimulation())) {
+            return simEncoderPosition;
+        }
+        if (device == null) {
+            return 0.0;
+        }
+        return device.getAbsolutePosition(poll);
     }
 
-    private double readVelocity(boolean poll) {
-        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
+    private double readVelocity(boolean poll, String sourceName) {
+        MechanismEncoderSource source = resolveEncoderSource(sourceName, velocitySourceName);
+        Encoder device = source != null ? source.device() : null;
+        if (RobotBase.isSimulation() && simEncoderOverride && (device == null || !device.supportsSimulation())) {
             return simEncoderVelocity;
         }
-        if (encoder == null) {
+        if (device == null) {
             return 0.0;
         }
-        return encoder.getVelocity(poll);
+        return device.getVelocity(poll);
     }
 
     private double readOutput() {
@@ -2110,12 +2129,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return lastOutput;
         }
         return output;
-    }
-
-    private void writeEncoderPosition(double position) {
-        if (encoder != null) {
-            encoder.setPosition(position);
-        }
     }
 
     private double readNetworkTablesPeriodSeconds() {
@@ -2206,66 +2219,28 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return motors;
     }
 
-    private Encoder getEncoder(){
-       return encoder;
-    }
-
     private Rotation2d getRotation2d(){
-        if (encoder == null) return Rotation2d.kZero;
-        return useAbsolute ? getEncoder().getAbsoluteRotation2d() : getEncoder().getRotation2d();
+        return readRotation2d(false, null);
     }
 
     private Rotation2d getRotation2d(boolean poll){
-        if (encoder == null) return Rotation2d.kZero;
-        return useAbsolute ? getEncoder().getAbsoluteRotation2d(poll) : getEncoder().getRotation2d(poll);
+        return readRotation2d(poll, null);
     }
 
     private double getPosition(){
-        if (shouldCustomEncoder && customEncoderPos != null) {
-            return customEncoderPos.getAsDouble();
-        }
-        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
-            return simEncoderPosition;
-        }
-        if (encoder == null) return 0;
-        return useAbsolute ? getEncoder().getAbsolutePosition() : getEncoder().getPosition();
+        return readPosition(false, null);
     }
 
     private double getPosition(boolean poll){
-        if (shouldCustomEncoder && customEncoderPos != null) {
-            return customEncoderPos.getAsDouble();
-        }
-        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
-            return simEncoderPosition;
-        }
-        if (encoder == null) return 0;
-        return useAbsolute ? getEncoder().getAbsolutePosition(poll) : getEncoder().getPosition(poll);
-    }
-
-    /**
-     * Returns the current mechanism position wrapped into the provided range.
-     *
-     * This does not change the underlying sensor; it is just a view for dashboards/logging and
-     * angle math. Units match {@link #getPosition()}.
-     */
-    private double getPositionModulus(double min, double max) {
-        return MathUtil.inputModulus(getPosition(), min, max);
+        return readPosition(poll, null);
     }
 
     private double getVelocity(){
-        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
-            return simEncoderVelocity;
-        }
-        if (encoder == null) return 0;
-        return getEncoder().getVelocity();
+        return readVelocity(false, null);
     }
 
     private double getVelocity(boolean poll){
-        if (RobotBase.isSimulation() && simEncoderOverride && (encoder == null || !encoder.supportsSimulation())) {
-            return simEncoderVelocity;
-        }
-        if (encoder == null) return 0;
-        return getEncoder().getVelocity(poll);
+        return readVelocity(poll, null);
     }
 
     public boolean atSetpoint(){
@@ -2284,7 +2259,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             if (!Double.isFinite(tolerance) || tolerance < 0.0) {
                 continue;
             }
-            double measurement = resolveControlLoopInputSource(profile.source(), target);
+            double measurement = resolveControlLoopInputSource(profile.inputSource(), target);
             if (!isWithinTolerance(measurement, target, tolerance)) {
                 return false;
             }
@@ -2300,7 +2275,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             if (!Double.isFinite(tolerance) || tolerance < 0.0) {
                 continue;
             }
-            double measurement = resolveControlLoopInputSource(profile.source(), target);
+            double measurement = resolveControlLoopInputSource(profile.inputSource(), target);
             if (!isWithinTolerance(measurement, target, tolerance)) {
                 return false;
             }
@@ -2382,12 +2357,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return getSetpoint() + getNudge();
     }
 
-    private double resolveControlLoopInputSource(MechanismConfig.InputSource source, double targetSetpoint) {
-        MechanismConfig.InputSource resolved =
-                source != null ? source : MechanismConfig.InputSource.position;
+    private double resolveControlLoopInputSource(MechanismInputSource source, double targetSetpoint) {
+        MechanismInputSource resolved = source != null ? source : MechanismInputSource.Position;
         return switch (resolved.kind()) {
-            case POSITION -> position();
-            case VELOCITY -> velocity();
+            case POSITION -> position(resolved.encoderId());
+            case VELOCITY -> velocity(resolved.encoderId());
+            case ABSOLUTE -> absolutePosition(resolved.encoderId());
+            case INPUT -> readNamedDoubleInput(resolved.inputKey());
+        };
+    }
+
+    private double resolveControlLoopSetpointSource(MechanismSetpointSource source, double targetSetpoint) {
+        MechanismSetpointSource resolved = source != null ? source : MechanismSetpointSource.Setpoint;
+        return switch (resolved.kind()) {
             case SETPOINT -> targetSetpoint;
             case INPUT -> readNamedDoubleInput(resolved.inputKey());
         };
@@ -2435,19 +2417,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             manualOutput = 0.0;
             manualOutputIsVoltage = false;
         }
-    }
-
-    private boolean isUseAbsolute() {
-        return useAbsolute;
-    }
-
-    /**
-     */
-    private void setUseAbsolute(boolean useAbsolute) {
-        if (ignoreControlMutationForDisabledConfig()) {
-            return;
-        }
-        this.useAbsolute = useAbsolute;
     }
 
     private boolean isUseVoltage() {
@@ -2590,7 +2559,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.maxVelocity(),
                 profile.maxAcceleration(),
                 profile.autotuner(),
-                profile.source()));
+                profile.inputSource(),
+                profile.setpointSource()));
     }
 
     private void setControlLoopPidKi(String loopName, double value) {
@@ -2607,7 +2577,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.maxVelocity(),
                 profile.maxAcceleration(),
                 profile.autotuner(),
-                profile.source()));
+                profile.inputSource(),
+                profile.setpointSource()));
     }
 
     private void setControlLoopPidKd(String loopName, double value) {
@@ -2624,7 +2595,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.maxVelocity(),
                 profile.maxAcceleration(),
                 profile.autotuner(),
-                profile.source()));
+                profile.inputSource(),
+                profile.setpointSource()));
     }
 
     private void setControlLoopPidIZone(String loopName, double value) {
@@ -2641,7 +2613,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.maxVelocity(),
                 profile.maxAcceleration(),
                 profile.autotuner(),
-                profile.source()));
+                profile.inputSource(),
+                profile.setpointSource()));
     }
 
     private void updateControlLoopFeedforwardProfile(
@@ -2683,7 +2656,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.kV(),
                 profile.kA(),
                 profile.tolerance(),
-                profile.source()));
+                profile.setpointSource()));
     }
 
     private void setControlLoopFeedforwardKg(String loopName, double value) {
@@ -2698,7 +2671,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.kV(),
                 profile.kA(),
                 profile.tolerance(),
-                profile.source()));
+                profile.setpointSource()));
     }
 
     private void setControlLoopFeedforwardKv(String loopName, double value) {
@@ -2713,7 +2686,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 value,
                 profile.kA(),
                 profile.tolerance(),
-                profile.source()));
+                profile.setpointSource()));
     }
 
     private void setControlLoopFeedforwardKa(String loopName, double value) {
@@ -2728,7 +2701,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.kV(),
                 value,
                 profile.tolerance(),
-                profile.source()));
+                profile.setpointSource()));
     }
 
     private void updateControlLoopBangBangProfile(
@@ -2753,7 +2726,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                         sanitizeBangBangLevel(updated.highOutput()),
                         sanitizeBangBangLevel(updated.lowOutput()),
                         sanitizeBangBangTolerance(updated.tolerance()),
-                        updated.source()));
+                        updated.inputSource(),
+                        updated.setpointSource()));
     }
 
     private void setControlLoopBangBangHighOutput(String loopName, double value) {
@@ -2765,7 +2739,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 value,
                 profile.lowOutput(),
                 profile.tolerance(),
-                profile.source()));
+                profile.inputSource(),
+                profile.setpointSource()));
     }
 
     private void setControlLoopBangBangLowOutput(String loopName, double value) {
@@ -2777,7 +2752,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.highOutput(),
                 value,
                 profile.tolerance(),
-                profile.source()));
+                profile.inputSource(),
+                profile.setpointSource()));
     }
 
     private void setControlLoopBangBangTolerance(String loopName, double value) {
@@ -2789,7 +2765,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 profile.highOutput(),
                 profile.lowOutput(),
                 value,
-                profile.source()));
+                profile.inputSource(),
+                profile.setpointSource()));
     }
 
     protected double percentToOutput(double percent) {
@@ -2957,10 +2934,19 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.customPIDCycle = customPIDCycle;
     }
 
-    private void setEncoderPosition(double position){
-        if(encoder != null){
-            encoder.setPosition(position);
+    private void setEncoderPosition(double position) {
+        setEncoderPosition(null, position);
+    }
+
+    private void setEncoderPosition(String sourceName, double position) {
+        MechanismEncoderSource source = resolveEncoderSource(sourceName, positionSourceName);
+        if (source == null || source.device() == null) {
+            if (sourceName != null && !sourceName.isBlank()) {
+                throw new IllegalArgumentException("unknown encoder source: " + sourceName);
+            }
+            return;
         }
+        source.device().setPosition(position);
     }
 
     /**
@@ -3801,8 +3787,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (pid.outputType() != null) {
                     publisher.put(pidRoot + "/outputType", pid.outputType().name());
                 }
-                if (pid.source() != null) {
-                    publisher.put(pidRoot + "/source", pid.source().toString());
+                if (pid.inputSource() != null) {
+                    publisher.put(pidRoot + "/source", pid.inputSource().toString());
                 }
             }
 
@@ -3824,8 +3810,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (ff.type() != null) {
                     publisher.put(ffRoot + "/type", ff.type().name());
                 }
-                if (ff.source() != null) {
-                    publisher.put(ffRoot + "/source", ff.source().toString());
+                if (ff.setpointSource() != null) {
+                    publisher.put(ffRoot + "/source", ff.setpointSource().toString());
                 }
             }
 
@@ -3841,8 +3827,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (bangBang.outputType() != null) {
                     publisher.put(bbRoot + "/outputType", bangBang.outputType().name());
                 }
-                if (bangBang.source() != null) {
-                    publisher.put(bbRoot + "/source", bangBang.source().toString());
+                if (bangBang.inputSource() != null) {
+                    publisher.put(bbRoot + "/source", bangBang.inputSource().toString());
                 }
             }
         }
@@ -3966,7 +3952,6 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         cachedHasSimulation = hasSimulation();
         cachedSimulationUpdatePeriodSeconds = simulationUpdatePeriodSeconds;
         cachedUseVoltage = isUseVoltage();
-        cachedUseAbsolute = useAbsolute;
         cachedSetpointAsOutput = setpointIsOutput;
         cachedPidPeriod = pidPeriod;
         cachedFeedforwardEnabled = feedforwardEnabled;
@@ -4063,8 +4048,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!force && !shouldRefreshHardwareSignals(nowSeconds)) {
             return;
         }
-        if (encoder != null && !encoderOwnedByMotorGroup) {
-            encoder.update();
+        for (Encoder standaloneEncoder : standaloneEncoders) {
+            if (standaloneEncoder != null) {
+                standaloneEncoder.update();
+            }
         }
         motors.update();
         lastHardwareUpdateSeconds = nowSeconds;
@@ -5242,7 +5229,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             @Override
             public double measurement() {
                 return resolveControlLoopInputSource(
-                        profile != null ? profile.source() : MechanismConfig.InputSource.position,
+                        profile != null ? profile.inputSource() : MechanismInputSource.Position,
                         getSetpoint() + getNudge());
             }
 

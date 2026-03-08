@@ -4,6 +4,7 @@ import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.core.arcp.ARCP;
+import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 
 import edu.wpi.first.math.controller.ArmFeedforward;
 
@@ -53,7 +54,7 @@ public class ArmMechanism extends Mechanism {
         super.publishArcp(publisher, rootPath);
     }
 
-    public static class StatefulArmMechanism<E extends Enum<E> & SetpointProvider<Double>> extends ArmMechanism implements StatefulLike<E> {
+    public static class StatefulArmMechanism<E extends Enum<E>> extends ArmMechanism implements StatefulLike<E> {
 
         private final StatefulMechanismCore<StatefulArmMechanism<E>, E> stateMachineCore;
 
@@ -61,8 +62,9 @@ public class ArmMechanism extends Mechanism {
                                     E initialState) {
             super(config);
             stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
-            if (initialState != null && initialState.getSetpoint() != null) {
-                control().setpoint(initialState.getSetpoint());
+            Double initialSetpoint = StateSpecAccess.setpoint(initialState);
+            if (initialSetpoint != null) {
+                control().setpoint(initialSetpoint);
             }
         }
 

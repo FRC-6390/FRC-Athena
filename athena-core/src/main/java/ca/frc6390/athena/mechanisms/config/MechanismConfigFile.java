@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanisms.config;
 
+import java.util.List;
+
 /**
  * JSON/TOML-friendly mechanism configuration intended to live in deploy files.
  *
@@ -11,11 +13,10 @@ public record MechanismConfigFile(
         String mechanismType,
         String units,
         MechanismMotorsConfig motors,
-        MechanismEncoderConfig encoder,
+        List<MechanismEncoderConfig> encoders,
         MechanismConstraintsConfig constraints,
         MechanismSensorsConfig sensors,
         MechanismControlConfig control,
         MechanismSimConfig sim
 ) {
 }
-

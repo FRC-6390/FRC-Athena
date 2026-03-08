@@ -2,18 +2,23 @@ package ca.frc6390.athena.mechanisms.config;
 
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
-import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.AthenaMotor;
 import ca.frc6390.athena.hardware.motor.MotorControllerType;
 import ca.frc6390.athena.hardware.motor.MotorRegistry;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.mechanisms.MechanismEncoderUnit;
+import ca.frc6390.athena.mechanisms.MechanismInputSource;
+import ca.frc6390.athena.mechanisms.MechanismSetpointSource;
 import ca.frc6390.athena.mechanisms.OutputType;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.BlockDirection;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
 import edu.wpi.first.math.util.Units;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Applies a data-only {@link MechanismConfigFile} to Athena's fluent {@link MechanismConfig} builder.
@@ -35,8 +40,8 @@ public final class MechanismConfigApplier {
         if (file.motors() != null) {
             applyMotors(target, file.motors());
         }
-        if (file.encoder() != null) {
-            applyEncoder(target, file.encoder());
+        if (file.encoders() != null && !file.encoders().isEmpty()) {
+            applyEncoders(target, file.encoders());
         }
         if (file.constraints() != null) {
             applyConstraints(target, file.constraints());
@@ -86,74 +91,120 @@ public final class MechanismConfigApplier {
         });
     }
 
-    private static void applyEncoder(MechanismConfig<?> target, MechanismEncoderConfig enc) {
-        String source = enc.source() != null ? enc.source().trim().toLowerCase(Locale.ROOT) : "";
-        target.encoder(section -> {
-            if (source.equals("motor") || source.equals("integrated")) {
-                if (enc.motorId() != null) {
-                    section.fromMotor(enc.motorId());
-                }
-            } else if (source.equals("cancoder")) {
-                if (enc.id() != null) {
-                    EncoderConfig cfg = EncoderConfig.create(AthenaEncoder.CANCODER.resolve(), enc.id());
-                    applyEncoderNumbers(cfg, enc);
-                    section.config(cfg);
-                }
-            } else if (!source.isBlank() && !source.equals("custom")) {
-                // Best-effort: accept AthenaEncoder enum names in source.
-                try {
-                    AthenaEncoder ae = AthenaEncoder.valueOf(source.toUpperCase(Locale.ROOT));
-                    if (enc.id() != null) {
-                        EncoderConfig cfg = EncoderConfig.create(ae.resolve(), enc.id());
-                        applyEncoderNumbers(cfg, enc);
-                        section.config(cfg);
-                    }
-                } catch (IllegalArgumentException ignored) {
-                    // If not an AthenaEncoder enum, try treating it as a registry key (EncoderType).
-                    try {
-                        var et = ca.frc6390.athena.hardware.encoder.EncoderRegistry.get().encoder(source);
-                        if (enc.id() != null) {
-                            EncoderConfig cfg = EncoderConfig.create(et, enc.id());
-                            applyEncoderNumbers(cfg, enc);
-                            section.config(cfg);
-                        }
-                    } catch (Exception ignored2) {
-                        // Leave unresolved. Custom sensors remain code-only.
-                    }
-                }
+    private static void applyEncoders(MechanismConfig<?> target, java.util.List<MechanismEncoderConfig> encoders) {
+        ArrayList<MechanismEncoderConfig> pending = new ArrayList<>();
+        for (MechanismEncoderConfig enc : encoders) {
+            if (enc != null) {
+                pending.add(enc);
             }
-
-            if (enc.absolute() != null) {
-                section.absolute(enc.absolute());
+        }
+        Set<String> applied = new HashSet<>();
+        while (!pending.isEmpty()) {
+            boolean progress = false;
+            for (int i = 0; i < pending.size(); i++) {
+                MechanismEncoderConfig enc = pending.get(i);
+                if (!canApplyEncoder(enc, applied)) {
+                    continue;
+                }
+                applyEncoder(target, enc);
+                applied.add(normalizeEncoderName(enc.name()));
+                pending.remove(i);
+                i--;
+                progress = true;
             }
-        });
+            if (!progress) {
+                throw new IllegalArgumentException("encoder source graph contains unresolved CRT dependencies");
+            }
+        }
     }
 
-    private static void applyEncoderNumbers(EncoderConfig cfg, MechanismEncoderConfig enc) {
-        if (cfg == null || enc == null) {
-            return;
+    private static boolean canApplyEncoder(MechanismEncoderConfig enc, Set<String> applied) {
+        String source = enc.source() != null ? enc.source().trim().toLowerCase(Locale.ROOT) : "";
+        if (!"crt".equals(source)) {
+            return true;
+        }
+        if (enc.crtInputs() == null || enc.crtInputs().isEmpty()) {
+            throw new IllegalArgumentException("CRT encoder source '" + enc.name() + "' must declare crtInputs");
+        }
+        for (MechanismEncoderCrtInputConfig input : enc.crtInputs()) {
+            if (input == null || input.source() == null || input.source().isBlank()) {
+                throw new IllegalArgumentException("CRT encoder source '" + enc.name() + "' has a blank input source");
+            }
+            if (!applied.contains(normalizeEncoderName(input.source()))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void applyEncoder(MechanismConfig<?> target, MechanismEncoderConfig enc) {
+        String name = normalizeEncoderName(enc.name());
+        String source = enc.source() != null ? enc.source().trim().toLowerCase(Locale.ROOT) : "";
+        target.encoders(section -> section.add(name, builder -> {
+            if ("virtual".equals(source)) {
+                throw new IllegalArgumentException("encoder source '" + name + "' uses code-only source=virtual");
+            }
+            if ("crt".equals(source)) {
+                builder.crt(crt -> {
+                    for (MechanismEncoderCrtInputConfig input : enc.crtInputs()) {
+                        crt.input(input.source(), input.modulus() != null ? input.modulus() : 0);
+                    }
+                    if (enc.validMin() != null && enc.validMax() != null) {
+                        crt.validRange(enc.validMin(), enc.validMax());
+                    }
+                });
+            } else {
+                int signedId = signedEncoderId(enc);
+                if ("internal".equals(source)) {
+                    builder.encoder(AthenaEncoder.INTERNAL, signedId);
+                } else {
+                    try {
+                        AthenaEncoder ae = AthenaEncoder.valueOf(source.toUpperCase(Locale.ROOT));
+                        builder.encoder(ae, signedId);
+                    } catch (IllegalArgumentException ignored) {
+                        builder.encoder(
+                                ca.frc6390.athena.hardware.encoder.EncoderRegistry.get().encoder(source),
+                                signedId);
+                    }
+                }
+            }
+            applyEncoderSettings(builder, enc);
+        }));
+    }
+
+    private static String normalizeEncoderName(String name) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("encoder source name cannot be blank");
+        }
+        return name.trim();
+    }
+
+    private static int signedEncoderId(MechanismEncoderConfig enc) {
+        if (enc.id() == null) {
+            throw new IllegalArgumentException("encoder source '" + enc.name() + "' requires an id");
+        }
+        int id = Math.abs(enc.id());
+        return Boolean.TRUE.equals(enc.inverted()) ? -id : id;
+    }
+
+    private static void applyEncoderSettings(MechanismConfig.EncoderSourceBuilder builder, MechanismEncoderConfig enc) {
+        if (enc.canbus() != null && !enc.canbus().isBlank()) {
+            builder.canbus(enc.canbus());
         }
         if (enc.gearRatio() != null) {
-            cfg.measurement().gearRatio(enc.gearRatio());
+            builder.gearRatio(enc.gearRatio());
         }
         if (enc.conversion() != null) {
-            cfg.measurement().conversion(enc.conversion());
-        }
-        if (enc.conversionOffset() != null) {
-            cfg.measurement().conversionOffset(enc.conversionOffset());
+            builder.conversion(enc.conversion());
         }
         if (enc.offset() != null) {
-            cfg.measurement().offset(enc.offset());
+            builder.offset(enc.offset());
         }
-        if (enc.discontinuityPoint() != null && enc.discontinuityRange() != null) {
-            cfg.measurement().discontinuity(enc.discontinuityPoint(), enc.discontinuityRange());
-        } else if (enc.discontinuityPoint() != null) {
-            cfg.measurement().discontinuityPoint(enc.discontinuityPoint());
-        } else if (enc.discontinuityRange() != null) {
-            cfg.measurement().discontinuityRange(enc.discontinuityRange());
+        if (enc.unit() != null && !enc.unit().isBlank()) {
+            builder.unit(parseEncoderUnit(enc.unit()));
         }
-        if (enc.inverted() != null) {
-            cfg.hardware().inverted(enc.inverted());
+        if (enc.wrapsEvery() != null) {
+            builder.wrapsEvery(enc.wrapsEvery());
         }
     }
 
@@ -208,6 +259,15 @@ public final class MechanismConfigApplier {
             if (control.output() != null && !control.output().isBlank()) {
                 section.output(parseOutput(control.output()));
             }
+            if (control.positionSource() != null && !control.positionSource().isBlank()) {
+                section.positionSource(control.positionSource());
+            }
+            if (control.velocitySource() != null && !control.velocitySource().isBlank()) {
+                section.velocitySource(control.velocitySource());
+            }
+            if (control.absoluteSource() != null && !control.absoluteSource().isBlank()) {
+                section.absoluteSource(control.absoluteSource());
+            }
             if (control.setpointAsOutput() != null) {
                 section.setpointAsOutput(control.setpointAsOutput());
             }
@@ -246,7 +306,8 @@ public final class MechanismConfigApplier {
                 double tolerance = profile.tolerance() != null
                         ? profile.tolerance()
                         : (control.tolerance() != null ? control.tolerance() : Double.NaN);
-                MechanismConfig.InputSource source = parseInputSource(profile.source());
+                MechanismInputSource source = parseMeasurementInputSource(profile.source());
+                MechanismSetpointSource setpointSource = parseSetpointSource(profile.source());
                 target.control(c -> c.pid(profile.name(), builder -> {
                     builder.output(pidOutputTypeHintFinal)
                             .kp(kp)
@@ -262,7 +323,10 @@ public final class MechanismConfigApplier {
                         builder.tolerance(tolerance);
                     }
                     if (source != null) {
-                        builder.source(source);
+                        builder.inputSource(source);
+                    }
+                    if (setpointSource != null) {
+                        builder.setpointSource(setpointSource);
                     }
                 }));
             }
@@ -286,13 +350,15 @@ public final class MechanismConfigApplier {
                 double highOutput = profile.highOutput() != null ? profile.highOutput() : 1.0;
                 double lowOutput = profile.lowOutput() != null ? profile.lowOutput() : -highOutput;
                 double tolerance = profile.tolerance() != null ? profile.tolerance() : 0.0;
-                MechanismConfig.InputSource source = parseInputSource(profile.source());
+                MechanismInputSource source = parseMeasurementInputSource(profile.source());
+                MechanismSetpointSource setpointSource = parseSetpointSource(profile.source());
                 target.control(c -> c.bangBang(profile.name(), builder -> builder
                         .output(profileOutput)
                         .high(highOutput)
                         .low(lowOutput)
                         .tolerance(tolerance)
-                        .source(source)));
+                        .inputSource(source)
+                        .setpointSource(setpointSource)));
             }
         }
 
@@ -310,7 +376,7 @@ public final class MechanismConfigApplier {
                 double tolerance = ff.tolerance() != null
                         ? ff.tolerance()
                         : (control.tolerance() != null ? control.tolerance() : Double.NaN);
-                MechanismConfig.InputSource source = parseInputSource(ff.source());
+                MechanismSetpointSource source = parseSetpointSource(ff.source());
                 target.control(c -> c.ff(ff.name(), builder -> {
                     builder.output(OutputType.VOLTAGE);
                     switch (type) {
@@ -322,7 +388,7 @@ public final class MechanismConfigApplier {
                         builder.tolerance(tolerance);
                     }
                     if (source != null) {
-                        builder.source(source);
+                        builder.setpointSource(source);
                     }
                 }));
             }
@@ -415,6 +481,17 @@ public final class MechanismConfigApplier {
         return OutputType.valueOf(v);
     }
 
+    private static MechanismEncoderUnit parseEncoderUnit(String value) {
+        String v = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return switch (v) {
+            case "", "encoder_units", "encoder-units", "encoderunits" -> MechanismEncoderUnit.ENCODER_UNITS;
+            case "rotations" -> MechanismEncoderUnit.ROTATIONS;
+            case "radians" -> MechanismEncoderUnit.RADIANS;
+            case "degrees" -> MechanismEncoderUnit.DEGREES;
+            default -> throw new IllegalArgumentException("Unknown encoder unit: " + value);
+        };
+    }
+
     private static OutputType parseBangBangOutput(String value, OutputType fallback) {
         OutputType parsed = fallback != null ? fallback : OutputType.PERCENT;
         if (value != null && !value.isBlank()) {
@@ -426,26 +503,60 @@ public final class MechanismConfigApplier {
         return parsed;
     }
 
-    private static MechanismConfig.InputSource parseInputSource(String value) {
+    private static MechanismInputSource parseMeasurementInputSource(String value) {
         if (value == null || value.isBlank()) {
             return null;
         }
         String trimmed = value.trim();
         String normalized = trimmed.toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "position" -> MechanismConfig.InputSource.position;
-            case "velocity" -> MechanismConfig.InputSource.velocity;
-            case "setpoint" -> MechanismConfig.InputSource.setpoint;
+            case "position" -> MechanismInputSource.Position;
+            case "velocity" -> MechanismInputSource.Velocity;
+            case "absolute" -> MechanismInputSource.Absolute;
             default -> {
+                if (normalized.startsWith("position:")) {
+                    yield MechanismInputSource.position(trimmed.substring(trimmed.indexOf(':') + 1).trim());
+                }
+                if (normalized.startsWith("velocity:")) {
+                    yield MechanismInputSource.velocity(trimmed.substring(trimmed.indexOf(':') + 1).trim());
+                }
+                if (normalized.startsWith("absolute:")) {
+                    yield MechanismInputSource.absolute(trimmed.substring(trimmed.indexOf(':') + 1).trim());
+                }
                 if (normalized.startsWith("input:") || normalized.startsWith("inputs:")) {
                     int separator = trimmed.indexOf(':');
                     String key = separator >= 0 ? trimmed.substring(separator + 1).trim() : "";
                     if (key.isBlank()) {
                         throw new IllegalArgumentException("Input source key cannot be blank: " + value);
                     }
-                    yield MechanismConfig.InputSource.input(key);
+                    yield MechanismInputSource.input(key);
+                }
+                if ("setpoint".equals(normalized)) {
+                    yield null;
                 }
                 throw new IllegalArgumentException("Unknown control input source: " + value);
+            }
+        };
+    }
+
+    private static MechanismSetpointSource parseSetpointSource(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        String normalized = trimmed.toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "setpoint" -> MechanismSetpointSource.Setpoint;
+            default -> {
+                if (normalized.startsWith("input:") || normalized.startsWith("inputs:")) {
+                    int separator = trimmed.indexOf(':');
+                    String key = separator >= 0 ? trimmed.substring(separator + 1).trim() : "";
+                    if (key.isBlank()) {
+                        throw new IllegalArgumentException("Setpoint source key cannot be blank: " + value);
+                    }
+                    yield MechanismSetpointSource.input(key);
+                }
+                yield null;
             }
         };
     }

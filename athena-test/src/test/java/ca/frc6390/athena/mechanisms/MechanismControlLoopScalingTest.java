@@ -40,7 +40,7 @@ final class MechanismControlLoopScalingTest {
     void periodicPidUsesConfiguredVelocitySource() {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
         cfg.control(c -> c
-                .pid("pid", p -> p.kp(1.0).source(MechanismConfig.InputSource.velocity))
+                .pid("pid", p -> p.kp(1.0).inputSource(MechanismConfig.InputSource.Velocity))
                 .periodic("pid"));
 
         MechanismConfig.ControlLoopBinding<Mechanism> binding = cfg.controlLoops().get(0);
@@ -62,7 +62,7 @@ final class MechanismControlLoopScalingTest {
     void periodicPidUsesConfiguredInputSource() {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
         cfg.control(c -> c
-                .pid("pid", p -> p.kp(1.0).source(MechanismConfig.InputSource.input("pidMeas")))
+                .pid("pid", p -> p.kp(1.0).inputInput("pidMeas"))
                 .periodic("pid"));
 
         MechanismConfig.ControlLoopBinding<Mechanism> binding = cfg.controlLoops().get(0);
@@ -85,7 +85,7 @@ final class MechanismControlLoopScalingTest {
     void periodicFeedforwardUsesConfiguredInputSource() {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
         cfg.control(c -> c
-                .ff("ff", ff -> ff.simple(0.0, 1.0, 0.0).source(MechanismConfig.InputSource.input("ffVel")))
+                .ff("ff", ff -> ff.simple(0.0, 1.0, 0.0).setpointInput("ffVel"))
                 .periodic("ff"));
 
         MechanismConfig.ControlLoopBinding<Mechanism> binding = cfg.controlLoops().get(0);
@@ -128,7 +128,6 @@ final class MechanismControlLoopScalingTest {
             super(
                     new MotorControllerGroup(),
                     encoder,
-                    false,
                     false,
                     new GenericLimitSwitch[0],
                     false,

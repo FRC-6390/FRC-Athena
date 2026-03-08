@@ -74,10 +74,31 @@ public interface MechanismControlContext<T extends Mechanism>
     }
 
     /**
-     * Returns the primary encoder for the mechanism, if any.
+     * Returns the default position encoder device for the mechanism, if any.
      */
-    default Encoder encoder() {
-        return mechanism().encoder().device();
+    default Encoder positionEncoder() {
+        return mechanism().positionEncoderDevice();
+    }
+
+    /**
+     * Returns the default velocity encoder device for the mechanism, if any.
+     */
+    default Encoder velocityEncoder() {
+        return mechanism().velocityEncoderDevice();
+    }
+
+    /**
+     * Returns the default absolute encoder device for the mechanism, if any.
+     */
+    default Encoder absoluteEncoder() {
+        return mechanism().absoluteEncoderDevice();
+    }
+
+    /**
+     * Returns the named encoder device for the mechanism, if any.
+     */
+    default Encoder encoderDevice(String sourceName) {
+        return mechanism().encoderDevice(sourceName);
     }
 
     /**
@@ -101,7 +122,7 @@ public interface MechanismControlContext<T extends Mechanism>
      * using the encoder's gear ratio, conversion, and offsets.
      */
     default double encoderRawToMechanismPosition(double rawRotations) {
-        Encoder encoder = encoder();
+        Encoder encoder = positionEncoder();
         if (encoder == null) {
             return 0.0;
         }
@@ -121,7 +142,7 @@ public interface MechanismControlContext<T extends Mechanism>
      * using the encoder's gear ratio, conversion, and offsets.
      */
     default double mechanismPositionToEncoderRaw(double position) {
-        Encoder encoder = encoder();
+        Encoder encoder = positionEncoder();
         if (encoder == null) {
             return 0.0;
         }
@@ -140,7 +161,7 @@ public interface MechanismControlContext<T extends Mechanism>
      * Converts a raw encoder velocity (rotations/sec) into mechanism-space units/sec.
      */
     default double encoderRawToMechanismVelocity(double rawRotationsPerSecond) {
-        Encoder encoder = encoder();
+        Encoder encoder = velocityEncoder();
         if (encoder == null) {
             return 0.0;
         }
@@ -157,7 +178,7 @@ public interface MechanismControlContext<T extends Mechanism>
      * Converts a mechanism-space velocity (units/sec) into raw encoder rotations/sec.
      */
     default double mechanismVelocityToEncoderRaw(double velocity) {
-        Encoder encoder = encoder();
+        Encoder encoder = velocityEncoder();
         if (encoder == null) {
             return 0.0;
         }

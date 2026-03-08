@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.function.ToDoubleFunction;
 
 import ca.frc6390.athena.core.input.TypedInputRegistration;
 import ca.frc6390.athena.mechanisms.OutputType;
@@ -46,13 +47,23 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
     }
 
     @FunctionalInterface
-    public interface Binding<T extends RobotDrivetrain<T>> {
+    public interface Binding<T extends RobotDrivetrain<T>> extends Consumer<RobotCoreContext<T>> {
         void apply(RobotCoreContext<T> context);
+
+        @Override
+        default void accept(RobotCoreContext<T> context) {
+            apply(context);
+        }
     }
 
     @FunctionalInterface
-    public interface ControlLoop<T extends RobotDrivetrain<T>> {
+    public interface ControlLoop<T extends RobotDrivetrain<T>> extends ToDoubleFunction<RobotCoreContext<T>> {
         double calculate(RobotCoreContext<T> context);
+
+        @Override
+        default double applyAsDouble(RobotCoreContext<T> context) {
+            return calculate(context);
+        }
     }
 
     public record PeriodicHookBinding<T extends RobotDrivetrain<T>>(

@@ -17,7 +17,7 @@ import java.util.function.Supplier;
 import ca.frc6390.athena.core.RobotCoreHooks;
 import ca.frc6390.athena.core.hooks.LifecycleHooksSectionBase;
 import ca.frc6390.athena.core.input.TypedInputRegistration;
-import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
+import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Pose2d;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
@@ -33,7 +33,7 @@ import ca.frc6390.athena.mechanisms.Mechanism;
  * @param <S> superstate enum type
  * @param <SP> setpoint tuple returned by the superstate enum
  */
-public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>, SP> {
+public final class SuperstructureConfig<S extends Enum<S>, SP> {
 
     private S initialState;
     private String superstructureName;
@@ -64,9 +64,8 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
     private final List<Binding<SP>> exitAlwaysBindings = new ArrayList<>();
     private SP initialSetpoint;
 
-    @SuppressWarnings("unchecked")
-    private static <SP> SP setpointOf(SetpointProvider<?> state) {
-        return state == null ? null : (SP) state.getSetpoint();
+    private static <SP> SP setpointOf(Enum<?> state) {
+        return StateSpecAccess.setpoint(state);
     }
 
     public SuperstructureConfig(S initialState) {
@@ -74,14 +73,14 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
         this.initialSetpoint = setpointOf(initialState);
     }
 
-    public static <SP, S extends Enum<S> & SetpointProvider<SP>> SuperstructureConfig<S, SP> create(S initialState) {
+    public static <SP, S extends Enum<S>> SuperstructureConfig<S, SP> create(S initialState) {
         return new SuperstructureConfig<>(initialState);
     }
 
     /**
      * Named variant of {@link #create(Enum)}.
      */
-    public static <SP, S extends Enum<S> & SetpointProvider<SP>> SuperstructureConfig<S, SP> create(String name, S initialState) {
+    public static <SP, S extends Enum<S>> SuperstructureConfig<S, SP> create(String name, S initialState) {
         return SuperstructureConfig.<SP, S>create(initialState).named(name);
     }
 
@@ -276,14 +275,14 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
         return this;
     }
 
-    public static final class MechanismsSection<S extends Enum<S> & SetpointProvider<?>, SP> {
+    public static final class MechanismsSection<S extends Enum<S>, SP> {
         private final SuperstructureConfig<S, SP> owner;
 
         private MechanismsSection(SuperstructureConfig<S, SP> owner) {
             this.owner = owner;
         }
 
-        public <E extends Enum<E> & SetpointProvider<Double>, T extends Mechanism & StatefulLike<E>> MechanismsSection<S, SP> mechanism(
+        public <E extends Enum<E>, T extends Mechanism & StatefulLike<E>> MechanismsSection<S, SP> mechanism(
                 MechanismConfig<T> config,
                 Function<SP, E> mapper) {
             Objects.requireNonNull(config, "config");
@@ -301,7 +300,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
             return this;
         }
 
-        public <E extends Enum<E> & SetpointProvider<Double>> MechanismsSection<S, SP> existing(
+        public <E extends Enum<E>> MechanismsSection<S, SP> existing(
                 StatefulMechanism<E> mechanism,
                 Function<SP, E> mapper) {
             Objects.requireNonNull(mechanism, "mechanism");
@@ -315,7 +314,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
             return this;
         }
 
-        public <E extends Enum<E> & SetpointProvider<Double>, T extends Mechanism & StatefulLike<E>> MechanismsSection<S, SP> existing(
+        public <E extends Enum<E>, T extends Mechanism & StatefulLike<E>> MechanismsSection<S, SP> existing(
                 T mechanism,
                 Function<SP, E> mapper) {
             Objects.requireNonNull(mechanism, "mechanism");
@@ -327,7 +326,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
             return this;
         }
 
-        public <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> MechanismsSection<S, SP> superstructure(
+        public <CSP, CS extends Enum<CS>> MechanismsSection<S, SP> superstructure(
                 SuperstructureConfig<CS, CSP> config,
                 Function<SP, CS> mapper) {
             Objects.requireNonNull(config, "config");
@@ -345,7 +344,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
             return this;
         }
 
-        public <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> MechanismsSection<S, SP> existingSuperstructure(
+        public <CSP, CS extends Enum<CS>> MechanismsSection<S, SP> existingSuperstructure(
                 SuperstructureMechanism<CS, CSP> superstructure,
                 Function<SP, CS> mapper) {
             Objects.requireNonNull(superstructure, "superstructure");
@@ -368,7 +367,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
         return this;
     }
 
-    public static final class ConstraintsSection<S extends Enum<S> & SetpointProvider<?>, SP> {
+    public static final class ConstraintsSection<S extends Enum<S>, SP> {
         private final SuperstructureConfig<S, SP> owner;
 
         private ConstraintsSection(SuperstructureConfig<S, SP> owner) {
@@ -411,7 +410,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
         return this;
     }
 
-    public static final class HooksSection<S extends Enum<S> & SetpointProvider<?>, SP>
+    public static final class HooksSection<S extends Enum<S>, SP>
             extends LifecycleHooksSectionBase<HooksSection<S, SP>, Binding<SP>, S> {
         private final SuperstructureConfig<S, SP> owner;
 
@@ -617,7 +616,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
         return this;
     }
 
-    public static final class InputsSection<S extends Enum<S> & SetpointProvider<?>, SP> {
+    public static final class InputsSection<S extends Enum<S>, SP> {
         private final SuperstructureConfig<S, SP> owner;
 
         private InputsSection(SuperstructureConfig<S, SP> owner) {
@@ -685,8 +684,13 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
     }
 
     @FunctionalInterface
-    public interface Binding<SP> {
+    public interface Binding<SP> extends Consumer<SuperstructureContext<SP>> {
         void apply(SuperstructureContext<SP> context);
+
+        @Override
+        default void accept(SuperstructureContext<SP> context) {
+            apply(context);
+        }
     }
 
     @FunctionalInterface
@@ -729,7 +733,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
     }
 
 
-    static final class Attachment<SP, E extends Enum<E> & SetpointProvider<Double>> {
+    static final class Attachment<SP, E extends Enum<E>> {
         final Function<SP, E> childMapper;
         final Function<SuperstructureContext<SP>, Mechanism> resolver;
         final Function<SuperstructureContext<SP>, edu.wpi.first.math.geometry.Pose3d> poseSupplier;
@@ -742,13 +746,13 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
             this.poseSupplier = poseSupplier;
         }
 
-        static <SP, E extends Enum<E> & SetpointProvider<Double>> Attachment<SP, E> forMapper(
+        static <SP, E extends Enum<E>> Attachment<SP, E> forMapper(
                 Function<SP, E> childMapper,
                 Function<SuperstructureContext<SP>, edu.wpi.first.math.geometry.Pose3d> poseSupplier) {
             return new Attachment<>(childMapper, null, poseSupplier);
         }
 
-        static <SP, E extends Enum<E> & SetpointProvider<Double>> Attachment<SP, E> forResolver(
+        static <SP, E extends Enum<E>> Attachment<SP, E> forResolver(
                 Function<SuperstructureContext<SP>, Mechanism> resolver,
                 Function<SuperstructureContext<SP>, edu.wpi.first.math.geometry.Pose3d> poseSupplier) {
             return new Attachment<>(null, resolver, poseSupplier);
@@ -817,7 +821,7 @@ public final class SuperstructureConfig<S extends Enum<S> & SetpointProvider<?>,
          * @param childMapper mapper that identifies the child mechanism
          * @param poseSupplier computes the desired pose using the superstructure context
          */
-        public <E extends Enum<E> & SetpointProvider<Double>> SimulationBuilder<SP> attach(
+        public <E extends Enum<E>> SimulationBuilder<SP> attach(
                 Function<SP, E> childMapper,
                 Function<SuperstructureContext<SP>, Pose3d> poseSupplier) {
             Objects.requireNonNull(childMapper, "childMapper");

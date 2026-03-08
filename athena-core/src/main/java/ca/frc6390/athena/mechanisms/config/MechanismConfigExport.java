@@ -1,11 +1,12 @@
 package ca.frc6390.athena.mechanisms.config;
 
 import ca.frc6390.athena.core.MotionLimits;
-import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
 import ca.frc6390.athena.mechanisms.MechanismConfigRecord;
+import ca.frc6390.athena.mechanisms.MechanismInputSource;
+import ca.frc6390.athena.mechanisms.MechanismSetpointSource;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,10 +14,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Data-only export helpers for Athena mechanisms.
@@ -51,7 +54,7 @@ public final class MechanismConfigExport {
                 file.mechanismType(),
                 file.units(),
                 file.motors(),
-                file.encoder(),
+                file.encoders(),
                 file.constraints(),
                 file.sensors(),
                 file.control(),
@@ -63,10 +66,10 @@ public final class MechanismConfigExport {
         MechanismConfigRecord data = cfg.data();
 
         MechanismMotorsConfig motors = exportMotors(data);
-        MechanismEncoderConfig encoder = exportEncoder(data);
+        List<MechanismEncoderConfig> encoders = exportEncoders(data);
         MechanismConstraintsConfig constraints = exportConstraints(data);
         MechanismSensorsConfig sensors = exportSensors(data);
-        MechanismControlConfig control = exportControl(cfg, data);
+        MechanismControlConfig control = exportControl(cfg, data, exportedEncoderNames(encoders));
         MechanismSimConfig sim = exportSim(cfg);
 
         return new MechanismConfigFile(
@@ -74,7 +77,7 @@ public final class MechanismConfigExport {
                 mechanismType,
                 null,
                 motors,
-                encoder,
+                encoders,
                 constraints,
                 sensors,
                 control,
@@ -120,27 +123,47 @@ public final class MechanismConfigExport {
         return new MechanismMotorsConfig(canbus, neutral, currentLimit, controllers.isEmpty() ? null : controllers);
     }
 
-    private static MechanismEncoderConfig exportEncoder(MechanismConfigRecord data) {
+    private static List<MechanismEncoderConfig> exportEncoders(MechanismConfigRecord data) {
         if (data == null) {
             return null;
         }
-        EncoderConfig enc = data.encoder();
-        if (enc == null) {
+        if (data.encoders() == null || data.encoders().isEmpty()) {
             return null;
         }
-        String source = enc.type() != null ? enc.type().getKey() : null;
-        return new MechanismEncoderConfig(
-                source,
-                enc.id(),
-                null,
-                data.useAbsolute(),
-                enc.inverted(),
-                enc.gearRatio(),
-                enc.conversion(),
-                enc.conversionOffset(),
-                enc.offset(),
-                Double.isFinite(enc.discontinuityPoint()) ? enc.discontinuityPoint() : null,
-                Double.isFinite(enc.discontinuityRange()) ? enc.discontinuityRange() : null);
+        List<MechanismEncoderConfig> exportable = new ArrayList<>();
+        Set<String> exportedNames = new LinkedHashSet<>();
+        for (MechanismEncoderConfig enc : data.encoders()) {
+            if (enc == null || enc.name() == null || enc.name().isBlank()) {
+                continue;
+            }
+            if (enc.source() != null && enc.source().equalsIgnoreCase("virtual")) {
+                continue;
+            }
+            exportable.add(enc);
+            exportedNames.add(enc.name());
+        }
+        if (exportable.isEmpty()) {
+            return null;
+        }
+        exportable.removeIf(enc -> enc.source() != null
+                && enc.source().equalsIgnoreCase("crt")
+                && (enc.crtInputs() == null
+                        || enc.crtInputs().stream().anyMatch(input -> input == null
+                                || input.source() == null
+                                || !exportedNames.contains(input.source()))));
+        return exportable.isEmpty() ? null : List.copyOf(exportable);
+    }
+
+    private static Set<String> exportedEncoderNames(List<MechanismEncoderConfig> encoders) {
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        if (encoders != null) {
+            for (MechanismEncoderConfig enc : encoders) {
+                if (enc != null && enc.name() != null && !enc.name().isBlank()) {
+                    names.add(enc.name());
+                }
+            }
+        }
+        return names;
     }
 
     private static MechanismConstraintsConfig exportConstraints(MechanismConfigRecord data) {
@@ -196,7 +219,10 @@ public final class MechanismConfigExport {
         return new MechanismSensorsConfig(switches.isEmpty() ? null : switches, hardwareUpdatePeriodMs);
     }
 
-    private static MechanismControlConfig exportControl(MechanismConfig<?> cfg, MechanismConfigRecord data) {
+    private static MechanismControlConfig exportControl(
+            MechanismConfig<?> cfg,
+            MechanismConfigRecord data,
+            Set<String> exportedEncoderNames) {
         if (cfg == null || data == null) {
             return null;
         }
@@ -230,7 +256,7 @@ public final class MechanismConfigExport {
                         toleranceProfile,
                         maxVelocity,
                         maxAcceleration,
-                        formatInputSource(p.source())));
+                        formatMeasurementSource(p.inputSource(), exportedEncoderNames)));
             }
             if (pidProfiles.isEmpty()) {
                 pidProfiles = null;
@@ -254,7 +280,7 @@ public final class MechanismConfigExport {
                         ff.kV(),
                         ff.kA(),
                         toleranceProfile,
-                        formatInputSource(ff.source())));
+                        formatSetpointSource(ff.setpointSource(), exportedEncoderNames)));
             }
             if (ffProfiles.isEmpty()) {
                 ffProfiles = null;
@@ -276,7 +302,7 @@ public final class MechanismConfigExport {
                         profile.highOutput(),
                         profile.lowOutput(),
                         profile.tolerance(),
-                        formatInputSource(profile.source())));
+                        formatMeasurementSource(profile.inputSource(), exportedEncoderNames)));
             }
             if (bangBangProfiles.isEmpty()) {
                 bangBangProfiles = null;
@@ -285,6 +311,9 @@ public final class MechanismConfigExport {
 
         return new MechanismControlConfig(
                 output,
+                exportSourceName(data.positionSource(), exportedEncoderNames),
+                exportSourceName(data.velocitySource(), exportedEncoderNames),
+                exportSourceName(data.absoluteSource(), exportedEncoderNames),
                 setpointAsOutput,
                 pidContinuous,
                 pidContinuousMin,
@@ -295,18 +324,44 @@ public final class MechanismConfigExport {
                 ffProfiles);
     }
 
-    private static String formatInputSource(MechanismConfig.InputSource source) {
+    private static String formatMeasurementSource(MechanismInputSource source, Set<String> exportedEncoderNames) {
         if (source == null) {
             return null;
         }
         return switch (source.kind()) {
-            case POSITION -> "position";
-            case VELOCITY -> "velocity";
+            case POSITION -> formatNamedMeasurement("position", source.encoderId(), exportedEncoderNames);
+            case VELOCITY -> formatNamedMeasurement("velocity", source.encoderId(), exportedEncoderNames);
+            case ABSOLUTE -> formatNamedMeasurement("absolute", source.encoderId(), exportedEncoderNames);
+            case INPUT -> source.inputKey() != null && !source.inputKey().isBlank()
+                    ? "input:" + source.inputKey()
+                    : null;
+        };
+    }
+
+    private static String formatSetpointSource(MechanismSetpointSource source, Set<String> exportedEncoderNames) {
+        if (source == null) {
+            return null;
+        }
+        return switch (source.kind()) {
             case SETPOINT -> "setpoint";
             case INPUT -> source.inputKey() != null && !source.inputKey().isBlank()
                     ? "input:" + source.inputKey()
                     : null;
         };
+    }
+
+    private static String formatNamedMeasurement(String prefix, String encoderId, Set<String> exportedEncoderNames) {
+        if (encoderId == null || encoderId.isBlank()) {
+            return prefix;
+        }
+        return exportSourceName(encoderId, exportedEncoderNames) != null ? prefix + ":" + encoderId : null;
+    }
+
+    private static String exportSourceName(String sourceName, Set<String> exportedEncoderNames) {
+        if (sourceName == null || sourceName.isBlank()) {
+            return null;
+        }
+        return exportedEncoderNames != null && exportedEncoderNames.contains(sourceName) ? sourceName : null;
     }
 
     private static MechanismSimConfig exportSim(MechanismConfig<?> cfg) {

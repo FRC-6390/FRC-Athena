@@ -22,8 +22,15 @@ class MechanismConfigLoaderTest {
                 name = "Turret"
                 mechanism_type = "stateful_turret"
 
+                [[encoders]]
+                name = "main"
+                source = "internal"
+                id = 7
+                conversion = 360.0
+
                 [control]
                 output = "voltage"
+                position_source = "main"
 
                 [[control.pid_profiles]]
                 name = "pos"
@@ -52,6 +59,16 @@ class MechanismConfigLoaderTest {
                 name = "alt"
                 k_p = 3.0
 
+                [[encoders]]
+                name = "main"
+                conversion = 180.0
+
+                [[encoders]]
+                name = "abs"
+                source = "cancoder"
+                id = 41
+                wraps_every = 21.176470588
+
                 [[control.bang_bang_profiles]]
                 name = "pos_hold"
                 high_output = 5.0
@@ -76,6 +93,15 @@ class MechanismConfigLoaderTest {
         assertEquals("velocity", pos.source());
         assertEquals(40.0, pos.maxVelocity());
         assertEquals(120.0, pos.maxAcceleration());
+
+        assertNotNull(merged.encoders());
+        assertEquals(2, merged.encoders().size());
+        MechanismEncoderConfig main = merged.encoders().stream()
+                .filter(e -> "main".equals(e.name()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(180.0, main.conversion());
+        assertEquals("main", merged.control().positionSource());
 
         assertNotNull(merged.control().bangBangProfiles());
         assertEquals(2, merged.control().bangBangProfiles().size());

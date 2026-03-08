@@ -30,13 +30,29 @@ final class MechanismConfigApplyExportTest {
                         "brake",
                         40.0,
                         List.of(new MechanismMotorConfig(null, "dummy:motor", 5, false))),
-                new MechanismEncoderConfig("custom", null, 5, true, false, 100.0, 1.0, 0.0, 0.0, null, null),
+                List.of(new MechanismEncoderConfig(
+                        "main",
+                        "internal",
+                        5,
+                        null,
+                        false,
+                        100.0,
+                        1.0,
+                        0.0,
+                        "rotations",
+                        null,
+                        null,
+                        null,
+                        null)),
                 new MechanismConstraintsConfig(-2.0, 8.0, null, new MechanismMotionLimitsConfig(5.0, 12.0)),
                 new MechanismSensorsConfig(
                         List.of(new MechanismLimitSwitchConfig(0, false, 0.0, true, "PositiveInput", "top", 0.01)),
                         10.0),
                 new MechanismControlConfig(
                         "voltage",
+                        "main",
+                        "main",
+                        "main",
                         false,
                         true,
                         -180.0,
@@ -63,6 +79,12 @@ final class MechanismConfigApplyExportTest {
         assertEquals("lift", exported.name());
         assertNotNull(exported.control());
         assertEquals("VOLTAGE", exported.control().output());
+        assertNotNull(exported.encoders());
+        assertEquals(1, exported.encoders().size());
+        assertEquals("main", exported.encoders().get(0).name());
+        assertEquals("main", exported.control().positionSource());
+        assertEquals("main", exported.control().velocitySource());
+        assertEquals("main", exported.control().absoluteSource());
         assertEquals(1, exported.control().pidProfiles().size());
         assertEquals("hold", exported.control().pidProfiles().get(0).name());
         assertEquals("velocity", exported.control().pidProfiles().get(0).source());

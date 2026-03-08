@@ -10,6 +10,9 @@ import java.util.List;
  */
 public record MechanismControlConfig(
         String output,
+        String positionSource,
+        String velocitySource,
+        String absoluteSource,
         Boolean setpointAsOutput,
         Boolean pidContinuous,
         Double pidContinuousMin,

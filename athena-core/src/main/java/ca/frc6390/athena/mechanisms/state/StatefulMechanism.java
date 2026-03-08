@@ -12,25 +12,25 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.core.input.TypedInputResolver;
-import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.statespec.StateBuilder;
 import ca.frc6390.athena.mechanisms.statespec.StateCtx;
 import ca.frc6390.athena.mechanisms.statespec.StateSeed;
-import ca.frc6390.athena.mechanisms.statespec.StateSeedProvider;
+import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 
-public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> extends Mechanism implements StatefulLike<E> {
+public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements StatefulLike<E> {
         
     private final StatefulMechanismCore<StatefulMechanism<E>, E> stateMachineCore;
 
     public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
         super(config);
         stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
-        if (initialState != null && initialState.getSetpoint() != null) {
-            control().setpoint(initialState.getSetpoint());
+        Double initialSetpoint = StateSpecAccess.setpoint(initialState);
+        if (initialSetpoint != null) {
+            control().setpoint(initialSetpoint);
         }
     }
 
@@ -69,7 +69,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         super.publishArcp(publisher, rootPath);
     }
 
-    public static class StatefulMechanismCore<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
+    public static class StatefulMechanismCore<T extends Mechanism, E extends Enum<E>> {
         private final StateMachine<Double, E> stateMachine;
         private final Map<Enum<?>, Function<T, Boolean>> stateActions;
         private final Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> enterStateHooks;
@@ -93,7 +93,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
         private E previousState;
         private boolean dslManualOverrideActive;
 
-        public static <T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>>
+        public static <T extends Mechanism, E extends Enum<E>>
                 StatefulMechanismCore<T, E> fromConfig(
                         E initialState,
                         Supplier<Boolean> atSetpointSupplier,
@@ -154,7 +154,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             this.objectInputs = objectInputs;
             this.previousState = initialState;
             this.stateTriggers = buildStateTriggers(stateTriggerBindings);
-            Double initialSetpoint = initialState != null ? initialState.getSetpoint() : null;
+            Double initialSetpoint = StateSpecAccess.setpoint(initialState);
             this.lastFiniteSetpoint = initialSetpoint != null && Double.isFinite(initialSetpoint)
                     ? initialSetpoint
                     : 0.0;
@@ -214,7 +214,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             if (state == null) {
                 return lastFiniteSetpoint;
             }
-            Double setpoint = state.getSetpoint();
+            Double setpoint = StateSpecAccess.setpoint(state);
             if (setpoint != null && Double.isFinite(setpoint)) {
                 lastFiniteSetpoint = setpoint;
                 return setpoint;
@@ -325,7 +325,8 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
                 clearDslManualOverride(instance);
             }
 
-            if (resolved.until() == null || resolved.next() == null) {
+            E nextState = resolved.next() != null ? resolved.next() : StateSpecAccess.resolve(state, resolved.nextName());
+            if (resolved.until() == null || nextState == null) {
                 return;
             }
 
@@ -353,9 +354,9 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
                 return;
             }
             if (shouldQueue
-                    && !stateMachine.isGoalState(resolved.next())
-                    && !stateMachine.isQueued(resolved.next())) {
-                stateMachine.queue(resolved.next());
+                    && !stateMachine.isGoalState(nextState)
+                    && !stateMachine.isQueued(nextState)) {
+                stateMachine.queue(nextState);
             }
         }
 
@@ -367,12 +368,8 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             dslManualOverrideActive = false;
         }
 
-        @SuppressWarnings("unchecked")
         private StateSeed<E> seedFor(E state) {
-            if (!(state instanceof StateSeedProvider<?> provider)) {
-                return null;
-            }
-            return ((StateSeedProvider<E>) provider).seed();
+            return StateSpecAccess.seed(state);
         }
 
         private void updateQueuedSetpoint() {
@@ -388,7 +385,7 @@ public class StatefulMechanism <E extends Enum<E> & SetpointProvider<Double>> ex
             queuedSetpoint = queuedSetpoints.poll();
         }
 
-        private static final class StateTriggerRunner<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>> {
+        private static final class StateTriggerRunner<T extends Mechanism, E extends Enum<E>> {
             private final E target;
             private final MechanismConfig.StateTrigger<T, E> trigger;
             private boolean last;

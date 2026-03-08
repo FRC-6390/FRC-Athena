@@ -11,6 +11,7 @@ import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
 import ca.frc6390.athena.hardware.motor.MotorControllerType;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.hardware.motor.MotorRegistry;
+import ca.frc6390.athena.mechanisms.config.MechanismEncoderConfig;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
@@ -29,6 +30,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public final class MechanismConfigIO {
     private static final ObjectMapper MAPPER = buildMapper();
@@ -80,8 +82,10 @@ public final class MechanismConfigIO {
                 motors.add(fallback);
             }
         }
-        Encoder encoder = mechanism.encoder().device();
-        EncoderConfig encoderConfig = encoder != null ? encoder.getConfig() : null;
+        Encoder encoder = mechanism.positionEncoderDevice();
+        MechanismConfigRecord base = mechanism.getSourceConfig() != null
+                ? mechanism.getSourceConfig().data()
+                : MechanismConfigRecord.defaults();
         MotorNeutralMode neutralMode = controllers.length > 0 ? controllers[0].getNeutralMode() : MotorNeutralMode.Coast;
         double currentLimit = controllers.length > 0 ? controllers[0].getCurrentLimit() : Double.NaN;
         String canbus = controllers.length > 0 ? controllers[0].getCanbus() : null;
@@ -90,10 +94,22 @@ public final class MechanismConfigIO {
         double conversionOffset = encoder != null ? encoder.getConversionOffset() : 0.0;
         double offset = encoder != null ? encoder.getOffset() : 0.0;
         MotionLimits.AxisLimits limits = mechanism.motors().state().motionLimits();
-        return MechanismConfigRecord.defaults().toBuilder()
+        List<MechanismEncoderConfig> encoders = base.encoders();
+        String positionSource = base.positionSource();
+        String velocitySource = base.velocitySource();
+        String absoluteSource = base.absoluteSource();
+        if ((encoders == null || encoders.isEmpty()) && encoder != null) {
+            encoders = List.of(snapshotPrimaryEncoder(mechanism.positionSourceName(), encoder));
+            positionSource = mechanism.positionSourceName();
+            velocitySource = mechanism.velocitySourceName();
+            absoluteSource = mechanism.absoluteSourceName();
+        }
+        return base.toBuilder()
                 .motors(motors)
-                .encoder(encoderConfig)
-                .useAbsolute(mechanism.encoder().useAbsolute())
+                .encoders(encoders)
+                .positionSource(positionSource)
+                .velocitySource(velocitySource)
+                .absoluteSource(absoluteSource)
                 .outputType(mechanism.outputType())
                 .useSetpointAsOutput(mechanism.setpointAsOutput())
                 .customPIDCycle(mechanism.customPidCycle())
@@ -120,7 +136,6 @@ public final class MechanismConfigIO {
         if (mechanism == null || record == null) {
             return;
         }
-        mechanism.encoder().useAbsolute(record.useAbsolute());
         if (record.outputType() != null) {
             mechanism.control().outputType(record.outputType());
         } else {
@@ -143,9 +158,16 @@ public final class MechanismConfigIO {
         if (record.motorNeutralMode() != null) {
             mechanism.motors().neutralMode(record.motorNeutralMode());
         }
-        Encoder mechanismEncoder = mechanism.encoder().device();
-        if (record.encoder() != null && mechanismEncoder != null) {
-            applyEncoderConfig(mechanismEncoder, record.encoder());
+        if (record.encoders() != null) {
+            for (MechanismEncoderConfig enc : record.encoders()) {
+                if (enc == null || enc.name() == null || enc.name().isBlank()) {
+                    continue;
+                }
+                Encoder mechanismEncoder = mechanism.encoderDevice(enc.name());
+                if (mechanismEncoder != null) {
+                    applyEncoderConfig(mechanismEncoder, enc);
+                }
+            }
         }
         if (record.motors() == null || record.motors().isEmpty()) {
             return;
@@ -177,12 +199,53 @@ public final class MechanismConfigIO {
         }
     }
 
+    private static void applyEncoderConfig(Encoder encoder, MechanismEncoderConfig config) {
+        if (encoder == null || config == null) {
+            return;
+        }
+        if (config.gearRatio() != null) {
+            encoder.setGearRatio(config.gearRatio());
+        }
+        if (config.conversion() != null) {
+            encoder.setConversion(config.conversion());
+        }
+        if (config.offset() != null) {
+            encoder.setConversionOffset(config.offset());
+            encoder.setOffset(0.0);
+        }
+        if (config.inverted() != null) {
+            encoder.setInverted(config.inverted());
+        }
+    }
+
     private static void applyEncoderConfig(Encoder encoder, EncoderConfig config) {
         encoder.setGearRatio(config.gearRatio());
         encoder.setConversion(config.conversion());
         encoder.setConversionOffset(config.conversionOffset());
         encoder.setOffset(config.offset());
         encoder.setInverted(config.inverted());
+    }
+
+    private static MechanismEncoderConfig snapshotPrimaryEncoder(String sourceName, Encoder encoder) {
+        EncoderConfig cfg = encoder != null ? encoder.getConfig() : null;
+        String source = cfg != null && cfg.type() != null ? cfg.type().getKey() : null;
+        Integer id = cfg != null ? Math.abs(cfg.id()) : null;
+        String canbus = cfg != null ? cfg.canbus() : null;
+        Boolean inverted = cfg != null ? cfg.inverted() : null;
+        return new MechanismEncoderConfig(
+                sourceName != null && !sourceName.isBlank() ? sourceName : "main",
+                source != null ? source : "internal",
+                id,
+                canbus,
+                inverted,
+                encoder != null ? encoder.getGearRatio() : null,
+                encoder != null ? encoder.getConversion() : null,
+                encoder != null ? encoder.getConversionOffset() : null,
+                "encoder_units",
+                null,
+                null,
+                null,
+                null);
     }
 
     private static ObjectMapper buildMapper() {

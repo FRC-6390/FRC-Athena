@@ -10,6 +10,7 @@ public class StateBuilder<E extends Enum<E>> {
     private Double manualPercent;
     private Predicate<StateCtx<E>> until;
     private E next;
+    private String nextName;
 
     public StateBuilder<E> setpoint(double value) {
         this.setpoint = value;
@@ -28,7 +29,21 @@ public class StateBuilder<E extends Enum<E>> {
 
     public StateBuilder<E> then(E state) {
         this.next = state;
+        this.nextName = state != null ? state.name() : null;
         return this;
+    }
+
+    public StateBuilder<E> then(String stateName) {
+        this.next = null;
+        this.nextName = stateName;
+        return this;
+    }
+
+    /**
+     * Separate name-based transition helper for IDEs that mis-handle the overloaded then(String).
+     */
+    public StateBuilder<E> thenNamed(String stateName) {
+        return then(stateName);
     }
 
     public Double setpoint() {
@@ -45,5 +60,9 @@ public class StateBuilder<E extends Enum<E>> {
 
     public E next() {
         return next;
+    }
+
+    public String nextName() {
+        return nextName;
     }
 }

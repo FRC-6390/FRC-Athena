@@ -94,7 +94,7 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
     }
 
     @SuppressWarnings("unchecked")
-    public <SP, S extends Enum<S> & SetpointProvider<SP>> SuperstructureMechanism<S, SP> byConfig(
+    public <SP, S extends Enum<S>> SuperstructureMechanism<S, SP> byConfig(
             SuperstructureConfig<S, SP> config) {
         if (config == null) {
             return null;
@@ -116,7 +116,7 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
         return superstruct(key.name());
     }
 
-    public <SP, S extends Enum<S> & SetpointProvider<SP>> SuperstructureMechanism<S, SP> superstruct(
+    public <SP, S extends Enum<S>> SuperstructureMechanism<S, SP> superstruct(
             SuperstructureConfig<S, SP> config) {
         return byConfig(config);
     }
@@ -360,7 +360,7 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
             return this;
         }
 
-        public <SP, S extends Enum<S> & SetpointProvider<SP>> InteractionSection superstructure(
+        public <SP, S extends Enum<S>> InteractionSection superstructure(
                 SuperstructureConfig<S, SP> config,
                 Consumer<SuperstructureMechanism<S, SP>> action) {
             SuperstructureMechanism<S, SP> superstructure = owner.superstruct(config);

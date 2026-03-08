@@ -1,17 +1,19 @@
 package ca.frc6390.athena.mechanisms;
 
 import ca.frc6390.athena.core.MotionLimits;
-import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
+import ca.frc6390.athena.mechanisms.config.MechanismEncoderConfig;
 import ca.frc6390.athena.sensors.limitswitch.GenericLimitSwitch.GenericLimitSwitchConfig;
 import java.util.ArrayList;
 import java.util.List;
 
 public record MechanismConfigRecord(
         List<MotorControllerConfig> motors,
-        EncoderConfig encoder,
-        boolean useAbsolute,
+        List<MechanismEncoderConfig> encoders,
+        String positionSource,
+        String velocitySource,
+        String absoluteSource,
         boolean useVoltage,
         OutputType outputType,
         boolean useSetpointAsOutput,
@@ -42,6 +44,9 @@ public record MechanismConfigRecord(
         if (motors == null) {
             motors = new ArrayList<>();
         }
+        if (encoders == null) {
+            encoders = new ArrayList<>();
+        }
         if (limitSwitches == null) {
             limitSwitches = new ArrayList<>();
         }
@@ -59,8 +64,10 @@ public record MechanismConfigRecord(
     public static MechanismConfigRecord defaults() {
         return new MechanismConfigRecord(
                 new ArrayList<>(),
+                new ArrayList<>(),
                 null,
-                false,
+                null,
+                null,
                 false,
                 OutputType.PERCENT,
                 false,
@@ -94,8 +101,10 @@ public record MechanismConfigRecord(
 
     public static final class Builder {
         private List<MotorControllerConfig> motors;
-        private EncoderConfig encoder;
-        private boolean useAbsolute;
+        private List<MechanismEncoderConfig> encoders;
+        private String positionSource;
+        private String velocitySource;
+        private String absoluteSource;
         private boolean useVoltage;
         private OutputType outputType;
         private boolean useSetpointAsOutput;
@@ -124,8 +133,10 @@ public record MechanismConfigRecord(
 
         public Builder(MechanismConfigRecord base) {
             this.motors = base.motors();
-            this.encoder = base.encoder();
-            this.useAbsolute = base.useAbsolute();
+            this.encoders = base.encoders();
+            this.positionSource = base.positionSource();
+            this.velocitySource = base.velocitySource();
+            this.absoluteSource = base.absoluteSource();
             this.useVoltage = base.useVoltage();
             this.outputType = base.outputType();
             this.useSetpointAsOutput = base.useSetpointAsOutput();
@@ -158,13 +169,23 @@ public record MechanismConfigRecord(
             return this;
         }
 
-        public Builder encoder(EncoderConfig encoder) {
-            this.encoder = encoder;
+        public Builder encoders(List<MechanismEncoderConfig> encoders) {
+            this.encoders = encoders;
             return this;
         }
 
-        public Builder useAbsolute(boolean useAbsolute) {
-            this.useAbsolute = useAbsolute;
+        public Builder positionSource(String positionSource) {
+            this.positionSource = positionSource;
+            return this;
+        }
+
+        public Builder velocitySource(String velocitySource) {
+            this.velocitySource = velocitySource;
+            return this;
+        }
+
+        public Builder absoluteSource(String absoluteSource) {
+            this.absoluteSource = absoluteSource;
             return this;
         }
 
@@ -298,8 +319,10 @@ public record MechanismConfigRecord(
         public MechanismConfigRecord build() {
             return new MechanismConfigRecord(
                     motors,
-                    encoder,
-                    useAbsolute,
+                    encoders,
+                    positionSource,
+                    velocitySource,
+                    absoluteSource,
                     useVoltage,
                     outputType,
                     useSetpointAsOutput,

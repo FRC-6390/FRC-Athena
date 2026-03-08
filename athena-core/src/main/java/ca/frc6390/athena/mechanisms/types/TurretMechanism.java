@@ -1,8 +1,8 @@
 package ca.frc6390.athena.mechanisms;
 
-import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
 import ca.frc6390.athena.core.arcp.ARCP;
+import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
@@ -304,7 +304,7 @@ public class TurretMechanism extends SimpleMotorMechanism {
         this.fieldHeadingOffset = visualization.headingOffset;
     }
 
-    public static class StatefulTurretMechanism<E extends Enum<E> & SetpointProvider<Double>> extends TurretMechanism implements StatefulLike<E> {
+    public static class StatefulTurretMechanism<E extends Enum<E>> extends TurretMechanism implements StatefulLike<E> {
 
         private final StatefulMechanismCore<StatefulTurretMechanism<E>, E> stateMachineCore;
 
@@ -312,8 +312,9 @@ public class TurretMechanism extends SimpleMotorMechanism {
                                         E initialState) {
             super(config);
             stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
-            if (initialState != null && initialState.getSetpoint() != null) {
-                control().setpoint(initialState.getSetpoint());
+            Double initialSetpoint = StateSpecAccess.setpoint(initialState);
+            if (initialSetpoint != null) {
+                control().setpoint(initialSetpoint);
             }
         }
 

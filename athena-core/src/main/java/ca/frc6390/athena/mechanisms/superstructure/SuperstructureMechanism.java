@@ -18,8 +18,8 @@ import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
-import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.Mechanism;
+import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.networktables.NetworkTableEntry;
@@ -42,22 +42,21 @@ import java.util.Queue;
  * Constraints reference child mechanisms via {@link SuperstructureContext#mechanisms()} using
  * the same mapper supplied to the config.
  */
-public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
+public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
     private RobotCore<?> robotCore;
     private SuperstructureConfig<?, ?> sourceConfig;
 
-    @SuppressWarnings("unchecked")
-    private static <SP> SP setpointOf(SetpointProvider<?> state) {
-        return state == null ? null : (SP) state.getSetpoint();
+    private static <SP> SP setpointOf(Enum<?> state) {
+        return StateSpecAccess.setpoint(state);
     }
 
-    private static <SP, S extends Enum<S> & SetpointProvider<?>> StateMachine<SP, S> createStateMachine(
+    private static <SP, S extends Enum<S>> StateMachine<SP, S> createStateMachine(
             S initialState,
             BooleanSupplier atStateSupplier) {
         return new StateMachine<>(initialState, atStateSupplier);
     }
 
-    static final class Child<SP, E extends Enum<E> & SetpointProvider<?>> {
+    static final class Child<SP, E extends Enum<E>> {
         final Mechanism mechanism;
         final SuperstructureMechanism<?, ?> superstructure;
         final StateMachine<?, ?> stateMachine;
@@ -65,7 +64,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
         final Class<?> stateType;
 
         @SuppressWarnings("unchecked")
-        <M extends Enum<M> & SetpointProvider<Double>> Child(Mechanism mechanism, Function<SP, M> mapper, Class<M> stateType) {
+        <M extends Enum<M>> Child(Mechanism mechanism, Function<SP, M> mapper, Class<M> stateType) {
             this.mechanism = mechanism;
             this.superstructure = null;
             StatefulLike<M> stateful = (StatefulLike<M>) mechanism;
@@ -74,7 +73,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
             this.stateType = stateType;
         }
 
-        <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> Child(
+        <CSP, CS extends Enum<CS>> Child(
                 SuperstructureMechanism<CS, CSP> superstructure,
                 Function<SP, CS> mapper,
                 Class<CS> stateType) {
@@ -486,7 +485,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
     }
 
     @SuppressWarnings("unchecked")
-    private <E extends Enum<E> & SetpointProvider<Double>> void setAttachmentPose(SuperstructureConfig.Attachment<SP, E> attachment) {
+    private <E extends Enum<E>> void setAttachmentPose(SuperstructureConfig.Attachment<SP, E> attachment) {
         try {
             Mechanism mech = null;
             if (attachment.resolver != null) {
@@ -514,7 +513,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
     }
 
     @SuppressWarnings("unchecked")
-    private <E extends Enum<E> & SetpointProvider<?>> void queueChild(Child<SP, E> child, SP setpoint) {
+    private <E extends Enum<E>> void queueChild(Child<SP, E> child, SP setpoint) {
         E childState = child.mapper.apply(setpoint);
         if (childState != null) {
             StateMachine<?, E> stateMachine = (StateMachine<?, E>) child.stateMachine;
@@ -1043,7 +1042,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
     private final class MechanismsView implements SuperstructureMechanismsView<SP> {
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E> & SetpointProvider<Double>> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
+        public <E extends Enum<E>> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof StatefulArmMechanism<?>) {
                 return (StatefulArmMechanism<E>) mech;
@@ -1053,7 +1052,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
 
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E> & SetpointProvider<Double>> ElevatorMechanism.StatefulElevatorMechanism<E> elevator(Function<SP, E> mapper) {
+        public <E extends Enum<E>> ElevatorMechanism.StatefulElevatorMechanism<E> elevator(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof ElevatorMechanism.StatefulElevatorMechanism<?>) {
                 return (ElevatorMechanism.StatefulElevatorMechanism<E>) mech;
@@ -1063,7 +1062,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
 
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E> & SetpointProvider<Double>> TurretMechanism.StatefulTurretMechanism<E> turret(Function<SP, E> mapper) {
+        public <E extends Enum<E>> TurretMechanism.StatefulTurretMechanism<E> turret(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof TurretMechanism.StatefulTurretMechanism<?>) {
                 return (TurretMechanism.StatefulTurretMechanism<E>) mech;
@@ -1073,7 +1072,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
 
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E> & SetpointProvider<Double>> StatefulFlywheelMechanism<E> flywheel(Function<SP, E> mapper) {
+        public <E extends Enum<E>> StatefulFlywheelMechanism<E> flywheel(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof StatefulFlywheelMechanism<?>) {
                 return (StatefulFlywheelMechanism<E>) mech;
@@ -1083,7 +1082,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
 
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E> & SetpointProvider<Double>> StatefulMechanism<E> generic(Function<SP, E> mapper) {
+        public <E extends Enum<E>> StatefulMechanism<E> generic(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof StatefulMechanism<?>) {
                 return (StatefulMechanism<E>) mech;
@@ -1173,7 +1172,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
          * Returns a nested superstructure resolved via the same mapper used in the parent config.
          */
         @Override
-        public <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> SuperstructureMechanism<CS, CSP> superstructure(
+        public <CSP, CS extends Enum<CS>> SuperstructureMechanism<CS, CSP> superstructure(
                 Function<SP, CS> mapper) {
             return SuperstructureMechanism.this.context.superstructure(mapper);
         }
@@ -1280,7 +1279,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
             return key(key, SuperstructureMechanism.class);
         }
 
-        public <CSP, S extends Enum<S> & SetpointProvider<CSP>> SuperstructureMechanism<S, CSP> superstructure(
+        public <CSP, S extends Enum<S>> SuperstructureMechanism<S, CSP> superstructure(
                 SuperstructureConfig<S, CSP> config) {
             return key(config, SuperstructureMechanism.class);
         }
@@ -1538,7 +1537,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
         }
     }
 
-    public static final class StateMachineSection<S extends Enum<S> & SetpointProvider<?>, SP> {
+    public static final class StateMachineSection<S extends Enum<S>, SP> {
         private final SuperstructureMechanism<S, SP> owner;
 
         private StateMachineSection(SuperstructureMechanism<S, SP> owner) {
@@ -1619,7 +1618,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
         }
     }
 
-    public record StateMachineSnapshot<SP, S extends Enum<S> & SetpointProvider<?>>(
+    public record StateMachineSnapshot<SP, S extends Enum<S>>(
             S goal,
             S next,
             String queue,
@@ -1812,7 +1811,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
 
         @Override
         @SuppressWarnings("unchecked")
-        public <E extends Enum<E> & SetpointProvider<Double>> StatefulLike<E> mechanism(Function<SP, E> mapper) {
+        public <E extends Enum<E>> StatefulLike<E> mechanism(Function<SP, E> mapper) {
             Class<?> desiredType = null;
             SP setpoint = setpoint();
             if (setpoint != null) {
@@ -1838,7 +1837,7 @@ public class SuperstructureMechanism<S extends Enum<S> & SetpointProvider<?>, SP
 
         @Override
         @SuppressWarnings("unchecked")
-        public <CSP, CS extends Enum<CS> & SetpointProvider<CSP>> SuperstructureMechanism<CS, CSP> superstructure(
+        public <CSP, CS extends Enum<CS>> SuperstructureMechanism<CS, CSP> superstructure(
                 Function<SP, CS> mapper) {
             Class<?> desiredType = null;
             SP setpoint = setpoint();

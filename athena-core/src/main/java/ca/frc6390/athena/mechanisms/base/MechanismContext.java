@@ -13,7 +13,7 @@ import ca.frc6390.athena.networktables.NtScope;
  * @param <T> mechanism type
  * @param <E> state enum type
  */
-public interface MechanismContext<T extends Mechanism, E extends Enum<E> & SetpointProvider<Double>>
+public interface MechanismContext<T extends Mechanism, E extends Enum<E>>
         extends TypedInputContext, RobotScopedContext {
 
     T mechanism();

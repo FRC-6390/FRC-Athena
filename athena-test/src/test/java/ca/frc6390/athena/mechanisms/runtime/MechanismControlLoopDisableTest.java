@@ -29,7 +29,7 @@ final class MechanismControlLoopDisableTest {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
         cfg.control(c -> c.ff("vel", ff -> ff
                 .simple(0.1, 0.5, 0.0)
-                .source(MechanismConfig.InputSource.setpoint))
+                .setpointSource(MechanismSetpointSource.Setpoint))
                 .periodic("vel"));
 
         Mechanism mechanism = cfg.build();

@@ -59,7 +59,6 @@ final class MechanismEmergencyStopRecoveryTest {
                 new MotorControllerGroup(motor),
                 null,
                 false,
-                false,
                 new GenericLimitSwitch[0],
                 false,
                 0.02);

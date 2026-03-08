@@ -13,14 +13,14 @@ import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.statespec.StateBuilder;
 import ca.frc6390.athena.mechanisms.statespec.StateCtx;
 import ca.frc6390.athena.mechanisms.statespec.StateSeed;
-import ca.frc6390.athena.mechanisms.statespec.StateSeedProvider;
+import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-public class StateMachine<T, E extends Enum<E> & SetpointProvider<?>>  implements RobotSendableDevice {
+public class StateMachine<T, E extends Enum<E>>  implements RobotSendableDevice {
     
     private final DelayedOutput atGoalDelayedOutput;
 
@@ -249,9 +249,8 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<?>>  implement
         applyDslTransitionIfReady();
     }
 
-    @SuppressWarnings("unchecked")
     public T getGoalStateSetpoint(){
-        return (T) getGoalState().getSetpoint();
+        return StateSpecAccess.setpoint(getGoalState());
     }
 
     public double goalStateTimeSeconds() {
@@ -267,7 +266,8 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<?>>  implement
         StateBuilder<E> builder = new StateBuilder<>();
         StateBuilder<E> applied = seed.dsl().apply(builder);
         StateBuilder<E> resolved = applied != null ? applied : builder;
-        if (resolved.until() == null || resolved.next() == null) {
+        E nextState = resolved.next() != null ? resolved.next() : StateSpecAccess.resolve(goalState, resolved.nextName());
+        if (resolved.until() == null || nextState == null) {
             return;
         }
 
@@ -289,17 +289,13 @@ public class StateMachine<T, E extends Enum<E> & SetpointProvider<?>>  implement
         } catch (RuntimeException ex) {
             return;
         }
-        if (shouldQueue && !goalState.equals(resolved.next()) && !isQueued(resolved.next())) {
-            queue(resolved.next());
+        if (shouldQueue && !goalState.equals(nextState) && !isQueued(nextState)) {
+            queue(nextState);
         }
     }
 
-    @SuppressWarnings("unchecked")
     private StateSeed<E> seedFor(E state) {
-        if (!(state instanceof StateSeedProvider<?> provider)) {
-            return null;
-        }
-        return ((StateSeedProvider<E>) provider).seed();
+        return StateSpecAccess.seed(state);
     }
 
     @Override

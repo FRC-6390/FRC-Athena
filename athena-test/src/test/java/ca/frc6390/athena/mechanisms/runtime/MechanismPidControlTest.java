@@ -21,7 +21,7 @@ final class MechanismPidControlTest {
         MechanismConfig.PidProfile resolved = cfg.controlLoopPidProfiles().get("profiled");
         assertEquals(35.0, resolved.maxVelocity(), 1e-9);
         assertEquals(120.0, resolved.maxAcceleration(), 1e-9);
-        assertEquals(MechanismConfig.InputSource.position, resolved.source());
+        assertEquals(MechanismInputSource.Position, resolved.inputSource());
         assertEquals(1, cfg.controlLoops().size());
         assertEquals("profiled", cfg.controlLoops().get(0).name());
     }
@@ -31,10 +31,10 @@ final class MechanismPidControlTest {
         MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
         cfg.control(c -> c.pid("velPid", p -> p
                 .kp(0.2)
-                .source(MechanismConfig.InputSource.velocity)));
+                .inputSource(MechanismConfig.InputSource.Velocity)));
 
         MechanismConfig.PidProfile resolved = cfg.controlLoopPidProfiles().get("velPid");
-        assertEquals(MechanismConfig.InputSource.velocity, resolved.source());
+        assertEquals(MechanismInputSource.Velocity, resolved.inputSource());
     }
 
     @Test

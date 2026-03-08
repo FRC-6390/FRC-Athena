@@ -952,7 +952,7 @@ def resolveAthenaDslLanguageServerJavaHome = { Map<String, Object> settings = [:
 
     return candidates.find { File javaHome ->
         Integer major = readJavaMajorVersionFromHome(javaHome)
-        return major != null && major >= 24
+        return major != null && major >= 21
     }
 }
 
@@ -1005,12 +1005,22 @@ def ensureAthenaDslVscodeSettings = {
     }
 
     putIfChanged('java.configuration.updateBuildConfiguration', 'automatic')
+    // The Gradle build-server importer is currently unstable with Athena
+    // workspaces and can leave JDT in a source-only fallback state with broken
+    // completion. Force the older Buildship importer until that handshake is
+    // reliable again.
+    putIfChanged('java.gradle.buildServer.enabled', 'off')
     // Athena's enum DSL is a javac plugin, not an annotation processor. Leaving
     // IDE-side annotation processing enabled currently trips a Red Hat/Microsoft
     // Java builder ClassCastException and causes false DSL diagnostics.
     putIfChanged('java.import.gradle.annotationProcessing.enabled', false)
-    putIfChanged('java.jdt.ls.javac.enabled', 'on')
-    putIfChanged('java.completion.engine', 'dom')
+    // Red Hat Java's experimental javac builder on Java 25 currently crashes on
+    // Athena DSL enum constants; keep the language server on the stable path.
+    putIfChanged('java.jdt.ls.javac.enabled', 'off')
+    // The DOM completion engine requires the experimental javac language-server
+    // path. Athena is pinned to the stable ECJ/Java-21 path, so keep completion
+    // on ECJ as well.
+    putIfChanged('java.completion.engine', 'ecj')
     putIfChanged('editor.quickSuggestions', true)
     putIfChanged('editor.suggestOnTriggerCharacters', true)
 
@@ -1230,7 +1240,10 @@ def athenaDslVscodeStatus = {
     String vmArgs = settings['java.jdt.ls.vmargs']?.toString() ?: ''
     boolean hasExports = athenaDslJdtExports.every { vmArgs.contains(it) }
     boolean javacEnabled = 'on'.equalsIgnoreCase(settings['java.jdt.ls.javac.enabled']?.toString())
-    boolean domCompletion = 'dom'.equalsIgnoreCase(settings['java.completion.engine']?.toString())
+    boolean ecjCompletion = !'dom'.equalsIgnoreCase(settings['java.completion.engine']?.toString() ?: 'ecj')
+    boolean buildServerEnabled = !'off'.equalsIgnoreCase(
+            settings['java.gradle.buildServer.enabled']?.toString() ?: 'on'
+    )
     boolean annotationProcessing = parseBooleanOrDefault(
             settings['java.import.gradle.annotationProcessing.enabled'],
             false
@@ -1241,14 +1254,15 @@ def athenaDslVscodeStatus = {
     Integer gradleJavaMajor = readJavaMajorVersionFromHome(gradleJavaHome)
 
     return [
-            configured     : javacEnabled
-                    && domCompletion
+            configured     : ecjCompletion
                     && hasExports
+                    && !buildServerEnabled
                     && languageServerJavaMajor != null
-                    && languageServerJavaMajor >= 24
+                    && languageServerJavaMajor >= 21
                     && gradleJavaMajor != null
                     && gradleJavaMajor >= 17,
             file           : settingsFile,
+            buildServerEnabled: buildServerEnabled,
             annotationProcessingEnabled: annotationProcessing,
             jdtJavaHome    : languageServerJavaHome,
             jdtJavaMajor   : languageServerJavaMajor,
@@ -1501,6 +1515,7 @@ tasks.register('athenaDoctor') {
         logger.lifecycle("Athena DSL plugin configured in build file: ${dslConfigured()}")
         def vscodeStatus = athenaDslVscodeStatus()
         logger.lifecycle("Athena VS Code DSL settings configured: ${vscodeStatus.configured}")
+        logger.lifecycle("Athena VS Code Gradle build server enabled: ${vscodeStatus.buildServerEnabled}")
         logger.lifecycle("Athena VS Code Gradle annotation processing enabled: ${vscodeStatus.annotationProcessingEnabled}")
         logger.lifecycle(
                 "Athena VS Code language server JDK: ${vscodeStatus.jdtJavaHome ?: '<missing>'}" +

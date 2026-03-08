@@ -34,10 +34,10 @@ public final class MechanismSimUtil {
         if (mechanism == null) {
             return;
         }
-        Encoder encoder = mechanism.encoder().device();
+        Encoder encoder = mechanism.positionEncoderDevice();
         if (encoder == null) {
             if (RobotBase.isSimulation()) {
-                mechanism.encoder().simState(position, velocity);
+                mechanism.sim().encoderState(position, velocity);
             }
             return;
         }
@@ -46,9 +46,9 @@ public final class MechanismSimUtil {
         encoder.setSimulatedState(state.rawPosition, state.rawVelocity);
 
         if (RobotBase.isSimulation() && !encoder.supportsSimulation()) {
-            mechanism.encoder().simState(position, velocity);
+            mechanism.sim().encoderState(position, velocity);
         } else {
-            mechanism.encoder().clearSimState();
+            mechanism.sim().clearEncoderState();
         }
     }
 
