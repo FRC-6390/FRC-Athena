@@ -55,6 +55,7 @@ def athenaBootstrapConfig = [
         vscodeGradleJavaHomeProperty: 'athenaVscodeGradleJavaHome',
         vscodeGradleJavaHomeEnv     : 'ATHENA_VSCODE_GRADLE_JAVA_HOME',
         mergeServicesTaskName: 'athenaMergeServiceFiles',
+        localBootstrapRelativePath: 'gradle/athena-bootstrap.gradle',
         athenaCoreVendordep  : 'FRC6390-Athena-Core.json',
         athenaVendorPrefix   : 'FRC6390-Athena-',
         athenaMavenUrl       : 'https://maven.frc6390.ca/FRC-6390/FRC-Athena',
@@ -394,6 +395,30 @@ def syncFromAthenaRepo = { File athenaRepo ->
     logger.lifecycle("Athena repo: ${athenaRepo}")
     logger.lifecycle("Athena version: ${version}")
     logger.lifecycle("Copied ${vendordepNames.size()} vendordep file(s): ${vendordepNames.join(', ')}")
+}
+
+def syncAthenaBootstrapScript = { File athenaRepo ->
+    if (athenaRepo == null || !athenaRepo.isDirectory()) {
+        return [supported: false, changed: false, file: null]
+    }
+
+    File sourceFile = new File(athenaRepo, 'athena-bootstrap.gradle')
+    if (!sourceFile.isFile()) {
+        return [supported: false, changed: false, file: sourceFile]
+    }
+
+    File targetFile = file(athenaBootstrapConfig.localBootstrapRelativePath)
+    if (targetFile.parentFile != null && !targetFile.parentFile.isDirectory()) {
+        targetFile.parentFile.mkdirs()
+    }
+
+    byte[] sourceBytes = sourceFile.bytes
+    boolean changed = !targetFile.isFile() || !java.util.Arrays.equals(targetFile.bytes, sourceBytes)
+    if (changed) {
+        targetFile.bytes = sourceBytes
+    }
+
+    return [supported: true, changed: changed, file: targetFile]
 }
 
 def athenaDslRequested = parseBoolean(project.findProperty(athenaBootstrapConfig.enableDslProperty))
@@ -1270,6 +1295,13 @@ tasks.register('athenaSync') {
     doLast {
         def repo = resolveAthenaRepoDir(true)
         syncFromAthenaRepo(repo)
+        def bootstrapResult = syncAthenaBootstrapScript(repo)
+        if (bootstrapResult.supported) {
+            logger.lifecycle(
+                    (bootstrapResult.changed ? "Updated" : "Bootstrap already synced in") +
+                            " ${bootstrapResult.file}"
+            )
+        }
     }
 }
 
@@ -1289,6 +1321,7 @@ tasks.register('athenaBuild') {
         }
 
         syncFromAthenaRepo(repo)
+        def bootstrapResult = syncAthenaBootstrapScript(repo)
         String syncedVersion = readAthenaVersionFromRepo(repo)
         ensureAthenaPluginPublished(repo, syncedVersion)
 
@@ -1313,6 +1346,12 @@ tasks.register('athenaBuild') {
                             "(DSL plugin id not currently configured in build script)."
             )
         }
+        if (bootstrapResult.supported) {
+            logger.lifecycle(
+                    (bootstrapResult.changed ? "Updated" : "Bootstrap already synced in") +
+                            " ${bootstrapResult.file}"
+            )
+        }
 
         if (buildFailure != null) {
             throw new GradleException(
@@ -1330,6 +1369,7 @@ tasks.register('athenaEnableDsl') {
     doLast {
         File repo = resolveAthenaRepoDir(false)
         String version = resolveAthenaPluginVersion()
+        def bootstrapResult = syncAthenaBootstrapScript(repo)
         if (repo != null) {
             ensureAthenaPluginPublished(repo, version)
         } else {
@@ -1364,6 +1404,12 @@ tasks.register('athenaEnableDsl') {
         if (debugResult.supported && (debugResult.launchChanged || debugResult.tasksChanged)) {
             logger.lifecycle("Updated VS Code desktop debug launch/task files in ${debugResult.launchFile.parentFile}")
         }
+        if (bootstrapResult.supported) {
+            logger.lifecycle(
+                    (bootstrapResult.changed ? "Updated" : "Bootstrap already synced in") +
+                            " ${bootstrapResult.file}"
+            )
+        }
     }
 }
 
@@ -1371,9 +1417,17 @@ tasks.register('athenaConfigureVscode') {
     group = 'Athena'
     description = 'Applies VS Code settings and desktop debug launch files needed for Athena projects.'
     doLast {
+        File repo = resolveAthenaRepoDir(false)
+        def bootstrapResult = syncAthenaBootstrapScript(repo)
         def result = ensureAthenaDslVscodeSettings()
         def eclipsePrefsResult = ensureAthenaDslEclipsePrefs()
         def debugResult = ensureAthenaDesktopDebugVscodeFiles()
+        if (bootstrapResult.supported) {
+            logger.lifecycle(
+                    (bootstrapResult.changed ? "Updated" : "Bootstrap already synced in") +
+                            " ${bootstrapResult.file}"
+            )
+        }
         if (result.changed) {
             logger.lifecycle("Updated VS Code DSL IntelliSense settings in ${result.file}")
         } else {

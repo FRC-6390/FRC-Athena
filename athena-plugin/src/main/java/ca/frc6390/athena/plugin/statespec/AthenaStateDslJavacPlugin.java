@@ -63,7 +63,7 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
 
             @Override
             public void finished(TaskEvent e) {
-                if (e.getKind() != TaskEvent.Kind.PARSE) {
+                if (e.getKind() != TaskEvent.Kind.ENTER) {
                     return;
                 }
                 if (!(e.getCompilationUnit() instanceof JCTree.JCCompilationUnit unit)) {
@@ -543,6 +543,10 @@ public final class AthenaStateDslJavacPlugin implements Plugin {
         private boolean alreadyImplements(JCTree.JCClassDecl classDecl, String simpleName, String fqcn) {
             for (JCTree.JCExpression impl : classDecl.implementing) {
                 String text = impl.toString();
+                int genericStart = text.indexOf('<');
+                if (genericStart >= 0) {
+                    text = text.substring(0, genericStart);
+                }
                 if (text.equals(simpleName)
                         || text.equals(fqcn)
                         || text.endsWith('.' + simpleName)) {
