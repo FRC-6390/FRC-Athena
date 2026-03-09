@@ -1,10 +1,11 @@
 package ca.frc6390.athena.mechanisms.config;
 
 /**
- * One CRT input reference.
+ * One derived encoder input reference.
  */
-public record MechanismEncoderCrtInputConfig(
+public record MechanismEncoderInputConfig(
         String source,
+        String signal,
         Integer modulus
 ) {
 }

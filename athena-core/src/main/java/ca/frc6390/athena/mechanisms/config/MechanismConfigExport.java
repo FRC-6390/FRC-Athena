@@ -130,8 +130,7 @@ public final class MechanismConfigExport {
         if (data.encoders() == null || data.encoders().isEmpty()) {
             return null;
         }
-        List<MechanismEncoderConfig> exportable = new ArrayList<>();
-        Set<String> exportedNames = new LinkedHashSet<>();
+        List<MechanismEncoderConfig> candidates = new ArrayList<>();
         for (MechanismEncoderConfig enc : data.encoders()) {
             if (enc == null || enc.name() == null || enc.name().isBlank()) {
                 continue;
@@ -139,19 +138,48 @@ public final class MechanismConfigExport {
             if (enc.source() != null && enc.source().equalsIgnoreCase("virtual")) {
                 continue;
             }
-            exportable.add(enc);
-            exportedNames.add(enc.name());
+            candidates.add(enc);
         }
-        if (exportable.isEmpty()) {
+        if (candidates.isEmpty()) {
             return null;
         }
-        exportable.removeIf(enc -> enc.source() != null
-                && enc.source().equalsIgnoreCase("crt")
-                && (enc.crtInputs() == null
-                        || enc.crtInputs().stream().anyMatch(input -> input == null
-                                || input.source() == null
-                                || !exportedNames.contains(input.source()))));
+        Set<String> exportedNames = new LinkedHashSet<>();
+        boolean progress;
+        do {
+            progress = false;
+            for (MechanismEncoderConfig enc : candidates) {
+                if (exportedNames.contains(enc.name())) {
+                    continue;
+                }
+                if (encoderInputsResolved(enc, exportedNames)) {
+                    exportedNames.add(enc.name());
+                    progress = true;
+                }
+            }
+        } while (progress);
+
+        List<MechanismEncoderConfig> exportable = new ArrayList<>();
+        for (MechanismEncoderConfig enc : candidates) {
+            if (exportedNames.contains(enc.name()) && encoderInputsResolved(enc, exportedNames)) {
+                exportable.add(enc);
+            }
+        }
         return exportable.isEmpty() ? null : List.copyOf(exportable);
+    }
+
+    private static boolean encoderInputsResolved(MechanismEncoderConfig enc, Set<String> exportedNames) {
+        if (enc.inputs() == null || enc.inputs().isEmpty()) {
+            return true;
+        }
+        for (MechanismEncoderInputConfig input : enc.inputs()) {
+            if (input == null || input.source() == null || input.source().isBlank()) {
+                return false;
+            }
+            if (!exportedNames.contains(input.source())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Set<String> exportedEncoderNames(List<MechanismEncoderConfig> encoders) {

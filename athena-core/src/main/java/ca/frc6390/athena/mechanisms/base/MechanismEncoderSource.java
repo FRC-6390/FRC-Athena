@@ -9,13 +9,24 @@ public record MechanismEncoderSource(
         String name,
         Encoder device,
         MechanismEncoderUnit unit,
-        double wrapsEvery) {
+        double wrapsEvery,
+        boolean positionSupported,
+        boolean velocitySupported,
+        boolean absoluteSupported) {
+
+    public boolean supportsPosition() {
+        return device != null && positionSupported;
+    }
+
+    public boolean supportsVelocity() {
+        return device != null && velocitySupported;
+    }
 
     public boolean supportsAbsolute() {
-        return device != null;
+        return device != null && absoluteSupported;
     }
 
     public boolean supportsWrappedAbsolute() {
-        return device != null && Double.isFinite(wrapsEvery) && wrapsEvery > 0.0;
+        return supportsAbsolute() && Double.isFinite(wrapsEvery) && wrapsEvery > 0.0;
     }
 }

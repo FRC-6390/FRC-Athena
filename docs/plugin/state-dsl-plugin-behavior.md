@@ -37,13 +37,19 @@ athenaPlugin {
 ## VS Code Contract
 
 - `athenaConfigureVscode` should maintain `.vscode/settings.json` for DSL compatibility.
-- Required settings include:
-  - `java.jdt.ls.javac.enabled = "on"`
-  - `java.completion.engine = "dom"`
+- Required settings include either:
+  - preferred mode:
+    `java.jdt.ls.javac.enabled = "on"` and `java.completion.engine = "dom"`
+    with `java.jdt.ls.java.home` on JDK 24 or newer; or
+  - stable fallback mode:
+    `java.jdt.ls.javac.enabled = "off"` and `java.completion.engine = "ecj"`
+    with `java.jdt.ls.java.home` on JDK 21 or newer.
+- In either mode, required settings also include:
   - `java.import.gradle.annotationProcessing.enabled = false`
   - `java.jdt.ls.vmargs` containing required `--add-exports=jdk.compiler/...` entries.
-  - `java.jdt.ls.java.home` pointing to JDK 24 or newer for javac-based language-server support.
   - `java.import.gradle.java.home` pointing to a Gradle-compatible JDK so project import does not inherit the language-server JDK accidentally.
+- Bootstrap should default to the Java 21 / ECJ path.
+- `-PathenaVscodeMode=javac` / `ATHENA_VSCODE_MODE=javac` must opt into the javac/DOM path and require JDK 24+ for `java.jdt.ls.java.home`.
 - Local Athena plugin development should resolve through `mavenLocal` rather than a
   robot-project `includeBuild(athena-plugin)` override; Buildship can turn that
   composite path into a partial transformed jar that breaks javac plugin discovery.

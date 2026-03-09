@@ -43,6 +43,10 @@ final class MechanismConfigApplyExportTest {
                         null,
                         null,
                         null,
+                        null,
+                        null,
+                        null,
+                        null,
                         null)),
                 new MechanismConstraintsConfig(-2.0, 8.0, null, new MechanismMotionLimitsConfig(5.0, 12.0)),
                 new MechanismSensorsConfig(

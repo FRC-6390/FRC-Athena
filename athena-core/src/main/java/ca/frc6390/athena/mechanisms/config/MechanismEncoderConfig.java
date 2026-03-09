@@ -7,7 +7,8 @@ import java.util.List;
  *
  * <p>{@code source} is the encoder source kind or registry key. Supported values include:
  * {@code internal}, Athena encoder enum names such as {@code cancoder}, registry keys such as
- * {@code ctre:cancoder}, and {@code crt} for derived Chinese Remainder sources.
+ * {@code ctre:cancoder}, and derived kinds such as {@code crt}, {@code filter},
+ * {@code differentiate}, {@code average}, {@code difference}, and {@code calibration_map}.
  *
  * <p>For hardware sources, {@code id} is the CAN/device id. For {@code internal}, {@code id}
  * refers to the owning motor id.
@@ -25,6 +26,10 @@ public record MechanismEncoderConfig(
         Double wrapsEvery,
         Double validMin,
         Double validMax,
-        List<MechanismEncoderCrtInputConfig> crtInputs
+        List<MechanismEncoderInputConfig> inputs,
+        String filter,
+        Double filterAlpha,
+        Integer filterWindow,
+        List<MechanismEncoderCalibrationPointConfig> points
 ) {
 }

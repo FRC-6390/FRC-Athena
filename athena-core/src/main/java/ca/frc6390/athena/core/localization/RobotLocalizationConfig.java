@@ -464,19 +464,20 @@ public class RobotLocalizationConfig {
         private final PidAxisSection translation;
         private final PidAxisSection rotation;
         private AutoPlannerPidAutotunerConfig autotuner;
+        private Consumer<AutoPlannerPidSection> onChange;
 
         private AutoPlannerPidSection(
                 HolonomicPidConstants translation,
                 HolonomicPidConstants rotation,
                 AutoPlannerPidAutotunerConfig autotuner) {
-            this.translation = new PidAxisSection(translation);
-            this.rotation = new PidAxisSection(rotation);
+            this.translation = new PidAxisSection(translation, __ -> sync());
+            this.rotation = new PidAxisSection(rotation, __ -> sync());
             this.autotuner = autotuner != null
                     ? autotuner
                     : AutoPlannerPidAutotunerConfig.defaults();
         }
 
-        static AutoPlannerPidSection create(
+        public static AutoPlannerPidSection create(
                 HolonomicPidConstants translation,
                 HolonomicPidConstants rotation,
                 AutoPlannerPidAutotunerConfig autotuner) {
@@ -484,6 +485,16 @@ public class RobotLocalizationConfig {
                     translation != null ? translation : new HolonomicPidConstants(0.0, 0.0, 0.0, 0.0),
                     rotation != null ? rotation : new HolonomicPidConstants(0.0, 0.0, 0.0, 0.0),
                     autotuner);
+        }
+
+        public static AutoPlannerPidSection create(
+                HolonomicPidConstants translation,
+                HolonomicPidConstants rotation,
+                AutoPlannerPidAutotunerConfig autotuner,
+                Consumer<AutoPlannerPidSection> onChange) {
+            AutoPlannerPidSection section = create(translation, rotation, autotuner);
+            section.onChange = onChange;
+            return section;
         }
 
         public PidAxisSection translation() {
@@ -498,24 +509,24 @@ public class RobotLocalizationConfig {
             if (section != null) {
                 section.accept(translation);
             }
-            return this;
+            return sync();
         }
 
         public AutoPlannerPidSection rotation(Consumer<PidAxisSection> section) {
             if (section != null) {
                 section.accept(rotation);
             }
-            return this;
+            return sync();
         }
 
         public AutoPlannerPidSection autotuner() {
             autotuner = autotuner.withEnabled(true);
-            return this;
+            return sync();
         }
 
         public AutoPlannerPidSection autotuner(AutoPlannerPidAutotunerProgram program) {
             autotuner = autotuner.withEnabled(true).withProgram(program);
-            return this;
+            return sync();
         }
 
         public AutoPlannerPidSection autotunerConfig(Consumer<AutoPlannerPidAutotunerSection> section) {
@@ -524,19 +535,26 @@ public class RobotLocalizationConfig {
                 section.accept(builder);
             }
             autotuner = builder.build();
-            return this;
+            return sync();
         }
 
-        HolonomicPidConstants translationConstants() {
+        public HolonomicPidConstants translationConstants() {
             return translation.toConstants();
         }
 
-        HolonomicPidConstants rotationConstants() {
+        public HolonomicPidConstants rotationConstants() {
             return rotation.toConstants();
         }
 
-        AutoPlannerPidAutotunerConfig autotunerConfig() {
+        public AutoPlannerPidAutotunerConfig autotunerConfig() {
             return autotuner;
+        }
+
+        private AutoPlannerPidSection sync() {
+            if (onChange != null) {
+                onChange.accept(this);
+            }
+            return this;
         }
     }
 
@@ -546,8 +564,13 @@ public class RobotLocalizationConfig {
         private double kD;
         private double iZone;
         private boolean inverted;
+        private final Consumer<HolonomicPidConstants> onChange;
 
         private PidAxisSection(HolonomicPidConstants initial) {
+            this(initial, null);
+        }
+
+        private PidAxisSection(HolonomicPidConstants initial, Consumer<HolonomicPidConstants> onChange) {
             HolonomicPidConstants resolved = initial != null
                     ? initial
                     : new HolonomicPidConstants(0.0, 0.0, 0.0, 0.0);
@@ -556,35 +579,49 @@ public class RobotLocalizationConfig {
             this.kD = resolved.kD();
             this.iZone = resolved.iZone();
             this.inverted = resolved.inverted();
+            this.onChange = onChange;
+        }
+
+        public static PidAxisSection from(
+                HolonomicPidConstants initial,
+                Consumer<HolonomicPidConstants> onChange) {
+            return new PidAxisSection(initial, onChange);
         }
 
         public PidAxisSection kp(double kP) {
             this.kP = kP;
-            return this;
+            return sync();
         }
 
         public PidAxisSection ki(double kI) {
             this.kI = kI;
-            return this;
+            return sync();
         }
 
         public PidAxisSection kd(double kD) {
             this.kD = kD;
-            return this;
+            return sync();
         }
 
         public PidAxisSection iZone(double iZone) {
             this.iZone = iZone;
-            return this;
+            return sync();
         }
 
         public PidAxisSection inverted(boolean inverted) {
             this.inverted = inverted;
-            return this;
+            return sync();
         }
 
         HolonomicPidConstants toConstants() {
             return new HolonomicPidConstants(kP, kI, kD, iZone, inverted);
+        }
+
+        private PidAxisSection sync() {
+            if (onChange != null) {
+                onChange.accept(toConstants());
+            }
+            return this;
         }
     }
 
@@ -765,6 +802,10 @@ public class RobotLocalizationConfig {
     }
 
     public final class PosesSection {
+        public PoseSection pose(String name) {
+            return PoseSection.from(name, findPoseConfig(name), this::applyPoseConfig);
+        }
+
         public PosesSection pose(String name, Consumer<PoseSection> section) {
             upsertPoseConfig(buildPoseConfig(name, section));
             return this;
@@ -789,6 +830,10 @@ public class RobotLocalizationConfig {
             applyAutoPoseName(name);
             return this;
         }
+
+        private void applyPoseConfig(PoseConfig poseConfig) {
+            upsertPoseConfig(poseConfig);
+        }
     }
 
     public static final class PoseSection {
@@ -809,8 +854,13 @@ public class RobotLocalizationConfig {
         private boolean publishToNetworkTables;
         private Pose2d startPose2d;
         private Pose3d startPose3d;
+        private final Consumer<PoseConfig> onChange;
 
         private PoseSection(PoseConfig seed) {
+            this(seed, null);
+        }
+
+        private PoseSection(PoseConfig seed, Consumer<PoseConfig> onChange) {
             PoseConfig resolved = seed != null ? seed : defaultsPreset("field");
             this.name = resolved.name();
             this.frame = resolved.frame();
@@ -822,11 +872,17 @@ public class RobotLocalizationConfig {
             this.publishToNetworkTables = resolved.publishToNetworkTables();
             this.startPose2d = resolved.startPose2d();
             this.startPose3d = resolved.startPose3d();
+            this.onChange = onChange;
         }
 
         static PoseSection from(String name, PoseConfig seed) {
             PoseConfig resolvedSeed = seed != null ? seed : defaultsPreset(name);
             return new PoseSection(resolvedSeed);
+        }
+
+        static PoseSection from(String name, PoseConfig seed, Consumer<PoseConfig> onChange) {
+            PoseConfig resolvedSeed = seed != null ? seed : defaultsPreset(name);
+            return new PoseSection(resolvedSeed, onChange);
         }
 
         public PoseSection defaults() {
@@ -847,32 +903,32 @@ public class RobotLocalizationConfig {
 
         public PoseSection frame(PoseFrame frame) {
             this.frame = frame;
-            return this;
+            return sync();
         }
 
         public PoseSection continuousInputs(EnumSet<PoseInput> inputs) {
             this.continuousInputs = copyInputs(inputs);
-            return this;
+            return sync();
         }
 
         public PoseSection continuousInputs(PoseInput... inputs) {
             this.continuousInputs = copyInputs(inputs);
-            return this;
+            return sync();
         }
 
         public PoseSection onDemandInputs(EnumSet<PoseInput> inputs) {
             this.onDemandInputs = copyInputs(inputs);
-            return this;
+            return sync();
         }
 
         public PoseSection onDemandInputs(PoseInput... inputs) {
             this.onDemandInputs = copyInputs(inputs);
-            return this;
+            return sync();
         }
 
         public PoseSection constraints(PoseConstraints constraints) {
             this.constraints = constraints;
-            return this;
+            return sync();
         }
 
         public PoseSection constraints(Consumer<PoseConstraintsSection> section) {
@@ -881,36 +937,44 @@ public class RobotLocalizationConfig {
                 section.accept(builder);
             }
             this.constraints = builder.build();
-            return this;
+            return sync();
         }
 
         public PoseSection backend(BackendConfig backendOverride) {
             this.backendOverride = backendOverride;
-            return this;
+            return sync();
         }
 
         public PoseSection backend(Consumer<PoseBackendSection> section) {
-            PoseBackendSection builder = PoseBackendSection.from(backendOverride);
+            PoseBackendSection builder = backend();
             if (section != null) {
                 section.accept(builder);
             }
-            this.backendOverride = builder.build();
             return this;
+        }
+
+        public PoseBackendSection backend() {
+            return PoseBackendSection.from(
+                    backendOverride,
+                    updated -> {
+                        backendOverride = updated;
+                        sync();
+                    });
         }
 
         public PoseSection clearBackendOverride() {
             this.backendOverride = null;
-            return this;
+            return sync();
         }
 
         public PoseSection active(boolean active) {
             this.active = active;
-            return this;
+            return sync();
         }
 
         public PoseSection networkTablesPublishing(boolean publishToNetworkTables) {
             this.publishToNetworkTables = publishToNetworkTables;
-            return this;
+            return sync();
         }
 
         public PoseSection publishToNetworkTables(boolean publishToNetworkTables) {
@@ -920,13 +984,13 @@ public class RobotLocalizationConfig {
         public PoseSection startPose(Pose2d pose) {
             this.startPose2d = pose;
             this.startPose3d = null;
-            return this;
+            return sync();
         }
 
         public PoseSection startPose(Pose3d pose) {
             this.startPose3d = pose;
             this.startPose2d = null;
-            return this;
+            return sync();
         }
 
         PoseConfig build() {
@@ -951,6 +1015,13 @@ public class RobotLocalizationConfig {
             this.continuousInputs = copyInputs(preset.continuousInputs());
             this.onDemandInputs = copyInputs(preset.onDemandInputs());
             this.constraints = preset.constraints();
+            return sync();
+        }
+
+        private PoseSection sync() {
+            if (onChange != null) {
+                onChange.accept(build());
+            }
             return this;
         }
 
@@ -1055,177 +1126,219 @@ public class RobotLocalizationConfig {
 
     public static final class PoseBackendSection {
         private BackendConfig config;
+        private final Consumer<BackendConfig> onChange;
 
         private PoseBackendSection(BackendConfig config) {
+            this(config, null);
+        }
+
+        private PoseBackendSection(BackendConfig config, Consumer<BackendConfig> onChange) {
             this.config = config != null ? config : BackendConfig.defaults();
+            this.onChange = onChange;
         }
 
         static PoseBackendSection from(BackendConfig config) {
             return new PoseBackendSection(config);
         }
 
+        static PoseBackendSection from(BackendConfig config, Consumer<BackendConfig> onChange) {
+            return new PoseBackendSection(config, onChange);
+        }
+
         public PoseBackendSection config(BackendConfig backendConfig) {
             this.config = backendConfig != null ? backendConfig : BackendConfig.defaults();
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slip(Consumer<PoseBackendSlipSection> section) {
-            PoseBackendSlipSection slipSection = PoseBackendSlipSection.from(config);
+            PoseBackendSlipSection slipSection = slip();
             if (section != null) {
                 section.accept(slipSection);
             }
-            this.config = slipSection.build();
             return this;
+        }
+
+        public PoseBackendSlipSection slip() {
+            return PoseBackendSlipSection.from(
+                    config,
+                    updated -> {
+                        config = updated;
+                        sync();
+                    });
         }
 
         public PoseBackendSection imuStrategy(BackendConfig.ImuStrategy strategy) {
             config = config.withImuStrategy(strategy);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection visionStrategy(BackendConfig.VisionStrategy strategy) {
             config = config.withVisionStrategy(strategy);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slipDetectionEnabled(boolean enabled) {
             config = config.withSlipDetectionEnabled(enabled);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slipYawRateThreshold(double value) {
             config = config.withSlipYawRateThreshold(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slipYawRateDisagreement(double value) {
             config = config.withSlipYawRateDisagreement(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slipAccelThreshold(double value) {
             config = config.withSlipAccelThreshold(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slipAccelDisagreement(double value) {
             config = config.withSlipAccelDisagreement(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slipHoldSeconds(double value) {
             config = config.withSlipHoldSeconds(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slipVisionStdDevScale(double value) {
             config = config.withSlipVisionStdDevScale(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection slipProcessStdDevScale(double value) {
             config = config.withSlipProcessStdDevScale(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection visionFusionMaxSeparationSeconds(double value) {
             config = config.withVisionFusionMaxSeparationSeconds(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection visionFusionMinWeight(double value) {
             config = config.withVisionFusionMinWeight(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection visionFusionDistanceWeight(double value) {
             config = config.withVisionFusionDistanceWeight(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection visionFusionLatencyWeight(double value) {
             config = config.withVisionFusionLatencyWeight(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection visionFusionConfidenceExponent(double value) {
             config = config.withVisionFusionConfidenceExponent(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection poseJumpMeters(double value) {
             config = config.withPoseJumpMeters(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection poseJumpHoldSeconds(double value) {
             config = config.withPoseJumpHoldSeconds(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSection poseJumpAgreementMeters(double value) {
             config = config.withPoseJumpAgreementMeters(value);
-            return this;
+            return sync();
         }
 
         BackendConfig build() {
             return config;
         }
+
+        private PoseBackendSection sync() {
+            if (onChange != null) {
+                onChange.accept(config);
+            }
+            return this;
+        }
     }
 
     public static final class PoseBackendSlipSection {
         private BackendConfig config;
+        private final Consumer<BackendConfig> onChange;
 
         private PoseBackendSlipSection(BackendConfig config) {
+            this(config, null);
+        }
+
+        private PoseBackendSlipSection(BackendConfig config, Consumer<BackendConfig> onChange) {
             this.config = config != null ? config : BackendConfig.defaults();
+            this.onChange = onChange;
         }
 
         static PoseBackendSlipSection from(BackendConfig config) {
             return new PoseBackendSlipSection(config);
         }
 
+        static PoseBackendSlipSection from(BackendConfig config, Consumer<BackendConfig> onChange) {
+            return new PoseBackendSlipSection(config, onChange);
+        }
+
         public PoseBackendSlipSection enabled(boolean enabled) {
             config = config.withSlipDetectionEnabled(enabled);
-            return this;
+            return sync();
         }
 
         public PoseBackendSlipSection yawRateThreshold(double value) {
             config = config.withSlipYawRateThreshold(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSlipSection yawRateDisagreement(double value) {
             config = config.withSlipYawRateDisagreement(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSlipSection accelThreshold(double value) {
             config = config.withSlipAccelThreshold(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSlipSection accelDisagreement(double value) {
             config = config.withSlipAccelDisagreement(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSlipSection holdSeconds(double value) {
             config = config.withSlipHoldSeconds(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSlipSection visionStdDevScale(double value) {
             config = config.withSlipVisionStdDevScale(value);
-            return this;
+            return sync();
         }
 
         public PoseBackendSlipSection processStdDevScale(double value) {
             config = config.withSlipProcessStdDevScale(value);
-            return this;
+            return sync();
         }
 
         BackendConfig build() {
             return config;
+        }
+
+        private PoseBackendSlipSection sync() {
+            if (onChange != null) {
+                onChange.accept(config);
+            }
+            return this;
         }
     }
 

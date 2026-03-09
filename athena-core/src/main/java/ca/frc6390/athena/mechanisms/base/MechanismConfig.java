@@ -14,6 +14,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
+import java.util.function.Predicate;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.function.ToDoubleFunction;
@@ -24,11 +25,19 @@ import ca.frc6390.athena.core.hooks.LifecycleHooksSectionBase;
 import ca.frc6390.athena.core.input.TypedInputRegistration;
 import ca.frc6390.athena.core.input.TypedInputResolver;
 import ca.frc6390.athena.hardware.encoder.AthenaEncoder;
+import ca.frc6390.athena.hardware.encoder.AverageEncoder;
+import ca.frc6390.athena.hardware.encoder.CalibrationMapEncoder;
 import ca.frc6390.athena.hardware.encoder.ChineseRemainderEncoder;
+import ca.frc6390.athena.hardware.encoder.DerivedEncoderInput;
+import ca.frc6390.athena.hardware.encoder.DifferentiatedEncoder;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderAdapter;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
+import ca.frc6390.athena.hardware.encoder.EncoderSignalType;
 import ca.frc6390.athena.hardware.encoder.EncoderType;
+import ca.frc6390.athena.hardware.encoder.DifferenceEncoder;
+import ca.frc6390.athena.hardware.encoder.FilteredEncoder;
+import ca.frc6390.athena.hardware.encoder.SignalFilter;
 import ca.frc6390.athena.hardware.encoder.SupplierEncoder;
 import ca.frc6390.athena.hardware.factory.HardwareFactories;
 import ca.frc6390.athena.hardware.motor.AthenaMotor;
@@ -55,8 +64,9 @@ import ca.frc6390.athena.mechanisms.sim.MechanismSensorSimulationConfig;
 import ca.frc6390.athena.mechanisms.config.MechanismConfigApplier;
 import ca.frc6390.athena.mechanisms.config.MechanismConfigFile;
 import ca.frc6390.athena.mechanisms.config.MechanismConfigLoader;
+import ca.frc6390.athena.mechanisms.config.MechanismEncoderCalibrationPointConfig;
 import ca.frc6390.athena.mechanisms.config.MechanismEncoderConfig;
-import ca.frc6390.athena.mechanisms.config.MechanismEncoderCrtInputConfig;
+import ca.frc6390.athena.mechanisms.config.MechanismEncoderInputConfig;
 import edu.wpi.first.math.controller.ArmFeedforward;
 import edu.wpi.first.math.controller.ElevatorFeedforward;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
@@ -70,7 +80,7 @@ import edu.wpi.first.math.geometry.Pose3d;
  *
  * @param <T> concrete mechanism type that will be created from this configuration
  */
-public class MechanismConfig<T extends Mechanism> {
+public class MechanismConfig<T extends Mechanism> extends MechanismConfigEncodersSupport<T> {
 
     private MechanismConfigRecord data = MechanismConfigRecord.defaults();
     private String mechanismName;
@@ -196,16 +206,6 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     /**
-     * Sectioned fluent API: named encoder sources.
-     */
-    public MechanismConfig<T> encoders(Consumer<EncodersSection<T>> section) {
-        if (section != null) {
-            section.accept(new EncodersSection<>(this));
-        }
-        return this;
-    }
-
-    /**
      * Sectioned fluent API: constraints (formerly bounds/limits).
      */
     public MechanismConfig<T> constraints(Consumer<ConstraintsSection<T>> section) {
@@ -301,21 +301,61 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
-    public static final class EncodersSection<T extends Mechanism> {
+    @FunctionalInterface
+    public interface EncoderSourceSection extends MechanismEncoderSourceSection {
+    }
+
+    @FunctionalInterface
+    public interface VirtualSourceSection {
+        VirtualSourceBuilder apply(VirtualSourceBuilder section);
+    }
+
+    @FunctionalInterface
+    public interface CrtSourceSection {
+        CrtSourceBuilder apply(CrtSourceBuilder section);
+    }
+
+    @FunctionalInterface
+    public interface FilterSourceSection {
+        FilterSourceBuilder apply(FilterSourceBuilder section);
+    }
+
+    @FunctionalInterface
+    public interface DifferentiateSourceSection {
+        DifferentiateSourceBuilder apply(DifferentiateSourceBuilder section);
+    }
+
+    @FunctionalInterface
+    public interface AverageSourceSection {
+        AverageSourceBuilder apply(AverageSourceBuilder section);
+    }
+
+    @FunctionalInterface
+    public interface DifferenceSourceSection {
+        DifferenceSourceBuilder apply(DifferenceSourceBuilder section);
+    }
+
+    @FunctionalInterface
+    public interface CalibrationMapSourceSection {
+        CalibrationMapSourceBuilder apply(CalibrationMapSourceBuilder section);
+    }
+
+    public static final class EncodersSection<T extends Mechanism> implements MechanismEncodersDsl {
         private final MechanismConfig<T> owner;
 
-        private EncodersSection(MechanismConfig<T> owner) {
+        EncodersSection(MechanismConfig<T> owner) {
             this.owner = owner;
         }
 
-        public EncodersSection<T> add(String name, Consumer<EncoderSourceBuilder> section) {
+        @Override
+        public EncodersSection<T> add(String name, MechanismEncoderSourceSection section) {
             String key = normalizeSourceName(name);
             if (owner.encoderSourceSpecs.containsKey(key)) {
                 throw new IllegalArgumentException("encoder source already registered: " + key);
             }
             EncoderSourceBuilder builder = new EncoderSourceBuilder(owner, key);
             if (section != null) {
-                section.accept(builder);
+                section.apply(builder);
             }
             owner.encoderSourceSpecs.put(key, builder.build());
             return this;
@@ -329,7 +369,7 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
-    public static final class EncoderSourceBuilder {
+    public static final class EncoderSourceBuilder implements MechanismEncoderSourceDsl {
         private final MechanismConfig<?> owner;
         private final String name;
         private EncoderSourceKind kind;
@@ -345,7 +385,9 @@ public class MechanismConfig<T extends Mechanism> {
         private DoubleSupplier positionSupplier;
         private DoubleSupplier velocitySupplier;
         private DoubleSupplier absoluteSupplier;
-        private final List<CrtInputSpec> crtInputs = new ArrayList<>();
+        private final List<DerivedInputSpec> inputs = new ArrayList<>();
+        private SignalFilterSpec filter;
+        private final List<CalibrationPointSpec> calibrationPoints = new ArrayList<>();
         private double validMin = Double.NaN;
         private double validMax = Double.NaN;
 
@@ -397,11 +439,14 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        public EncoderSourceBuilder virtual(Consumer<VirtualSourceBuilder> section) {
+        public EncoderSourceBuilder virtual(VirtualSourceSection section) {
             this.kind = EncoderSourceKind.VIRTUAL;
             VirtualSourceBuilder builder = new VirtualSourceBuilder();
             if (section != null) {
-                section.accept(builder);
+                VirtualSourceBuilder configured = section.apply(builder);
+                if (configured != null) {
+                    builder = configured;
+                }
             }
             this.positionSupplier = builder.positionSupplier;
             this.velocitySupplier = builder.velocitySupplier;
@@ -409,16 +454,93 @@ public class MechanismConfig<T extends Mechanism> {
             return this;
         }
 
-        public EncoderSourceBuilder crt(Consumer<CrtSourceBuilder> section) {
+        public EncoderSourceBuilder crt(CrtSourceSection section) {
             this.kind = EncoderSourceKind.CRT;
             CrtSourceBuilder builder = new CrtSourceBuilder(owner);
             if (section != null) {
-                section.accept(builder);
+                CrtSourceBuilder configured = section.apply(builder);
+                if (configured != null) {
+                    builder = configured;
+                }
             }
-            this.crtInputs.clear();
-            this.crtInputs.addAll(builder.inputs);
+            this.inputs.clear();
+            this.inputs.addAll(builder.inputs);
             this.validMin = builder.validMin;
             this.validMax = builder.validMax;
+            return this;
+        }
+
+        public EncoderSourceBuilder filter(FilterSourceSection section) {
+            this.kind = EncoderSourceKind.FILTER;
+            FilterSourceBuilder builder = new FilterSourceBuilder(owner);
+            if (section != null) {
+                FilterSourceBuilder configured = section.apply(builder);
+                if (configured != null) {
+                    builder = configured;
+                }
+            }
+            this.inputs.clear();
+            this.inputs.addAll(builder.inputs);
+            this.filter = builder.filter;
+            return this;
+        }
+
+        public EncoderSourceBuilder differentiate(DifferentiateSourceSection section) {
+            this.kind = EncoderSourceKind.DIFFERENTIATE;
+            DifferentiateSourceBuilder builder = new DifferentiateSourceBuilder(owner);
+            if (section != null) {
+                DifferentiateSourceBuilder configured = section.apply(builder);
+                if (configured != null) {
+                    builder = configured;
+                }
+            }
+            this.inputs.clear();
+            this.inputs.addAll(builder.inputs);
+            this.filter = builder.filter;
+            return this;
+        }
+
+        public EncoderSourceBuilder average(AverageSourceSection section) {
+            this.kind = EncoderSourceKind.AVERAGE;
+            AverageSourceBuilder builder = new AverageSourceBuilder(owner);
+            if (section != null) {
+                AverageSourceBuilder configured = section.apply(builder);
+                if (configured != null) {
+                    builder = configured;
+                }
+            }
+            this.inputs.clear();
+            this.inputs.addAll(builder.inputs);
+            return this;
+        }
+
+        public EncoderSourceBuilder difference(DifferenceSourceSection section) {
+            this.kind = EncoderSourceKind.DIFFERENCE;
+            DifferenceSourceBuilder builder = new DifferenceSourceBuilder(owner);
+            if (section != null) {
+                DifferenceSourceBuilder configured = section.apply(builder);
+                if (configured != null) {
+                    builder = configured;
+                }
+            }
+            this.inputs.clear();
+            this.inputs.addAll(builder.inputs);
+            return this;
+        }
+
+        public EncoderSourceBuilder calibrationMap(CalibrationMapSourceSection section) {
+            this.kind = EncoderSourceKind.CALIBRATION_MAP;
+            CalibrationMapSourceBuilder builder = new CalibrationMapSourceBuilder(owner);
+            if (section != null) {
+                CalibrationMapSourceBuilder configured = section.apply(builder);
+                if (configured != null) {
+                    builder = configured;
+                }
+            }
+            this.inputs.clear();
+            this.inputs.addAll(builder.inputs);
+            this.calibrationPoints.clear();
+            this.calibrationPoints.addAll(builder.points);
             return this;
         }
 
@@ -456,8 +578,53 @@ public class MechanismConfig<T extends Mechanism> {
             if (kind == null) {
                 throw new IllegalStateException("encoder source '" + name + "' is missing a source definition.");
             }
-            if (kind == EncoderSourceKind.CRT && crtInputs.isEmpty()) {
-                throw new IllegalStateException("CRT encoder source '" + name + "' must declare at least one input.");
+            switch (kind) {
+                case CRT -> {
+                    if (inputs.isEmpty()) {
+                        throw new IllegalStateException(
+                                "CRT encoder source '" + name + "' must declare at least one input.");
+                    }
+                }
+                case FILTER -> {
+                    if (inputs.size() != 1) {
+                        throw new IllegalStateException(
+                                "Filter encoder source '" + name + "' must declare exactly one input.");
+                    }
+                    if (filter == null) {
+                        throw new IllegalStateException(
+                                "Filter encoder source '" + name + "' must choose a filter type.");
+                    }
+                }
+                case DIFFERENTIATE -> {
+                    if (inputs.size() != 1) {
+                        throw new IllegalStateException(
+                                "Differentiate encoder source '" + name + "' must declare exactly one input.");
+                    }
+                }
+                case AVERAGE -> {
+                    if (inputs.size() < 2) {
+                        throw new IllegalStateException(
+                                "Average encoder source '" + name + "' must declare at least two inputs.");
+                    }
+                }
+                case DIFFERENCE -> {
+                    if (inputs.size() != 2) {
+                        throw new IllegalStateException(
+                                "Difference encoder source '" + name + "' must declare exactly two inputs.");
+                    }
+                }
+                case CALIBRATION_MAP -> {
+                    if (inputs.size() != 1) {
+                        throw new IllegalStateException(
+                                "Calibration-map encoder source '" + name + "' must declare exactly one input.");
+                    }
+                    if (calibrationPoints.size() < 2) {
+                        throw new IllegalStateException(
+                                "Calibration-map encoder source '" + name + "' must declare at least two points.");
+                    }
+                }
+                default -> {
+                }
             }
             return new EncoderSourceSpec(
                     name,
@@ -474,7 +641,9 @@ public class MechanismConfig<T extends Mechanism> {
                     positionSupplier,
                     velocitySupplier,
                     absoluteSupplier,
-                    List.copyOf(crtInputs),
+                    List.copyOf(inputs),
+                    filter,
+                    List.copyOf(calibrationPoints),
                     validMin,
                     validMax);
         }
@@ -503,7 +672,7 @@ public class MechanismConfig<T extends Mechanism> {
 
     public static final class CrtSourceBuilder {
         private final MechanismConfig<?> owner;
-        private final List<CrtInputSpec> inputs = new ArrayList<>();
+        private final List<DerivedInputSpec> inputs = new ArrayList<>();
         private double validMin = Double.NaN;
         private double validMax = Double.NaN;
 
@@ -512,11 +681,12 @@ public class MechanismConfig<T extends Mechanism> {
         }
 
         public CrtSourceBuilder input(String sourceName, int modulus) {
-            String key = EncodersSection.normalizeSourceName(sourceName);
-            if (!owner.encoderSourceSpecs.containsKey(key)) {
-                throw new IllegalArgumentException("CRT input source is not defined yet: " + key);
-            }
-            inputs.add(new CrtInputSpec(key, modulus));
+            return input(sourceName, InputSource.Absolute, modulus);
+        }
+
+        public CrtSourceBuilder input(String sourceName, InputSource source, int modulus) {
+            String key = requireDefinedEncoderSource(owner, sourceName);
+            inputs.add(new DerivedInputSpec(key, normalizeDerivedInputSource(source, InputSource.Absolute), modulus));
             return this;
         }
 
@@ -527,13 +697,136 @@ public class MechanismConfig<T extends Mechanism> {
         }
     }
 
+    private abstract static class InputSourceBuilderBase<B extends InputSourceBuilderBase<B>> {
+        protected final MechanismConfig<?> owner;
+        protected final List<DerivedInputSpec> inputs = new ArrayList<>();
+
+        private InputSourceBuilderBase(MechanismConfig<?> owner) {
+            this.owner = owner;
+        }
+
+        public B input(String sourceName) {
+            return input(sourceName, InputSource.Position);
+        }
+
+        public B input(String sourceName, InputSource source) {
+            String key = requireDefinedEncoderSource(owner, sourceName);
+            inputs.add(new DerivedInputSpec(key, normalizeDerivedInputSource(source, InputSource.Position), null));
+            return self();
+        }
+
+        protected abstract B self();
+    }
+
+    private abstract static class FilterBuilderBase<B extends FilterBuilderBase<B>> extends InputSourceBuilderBase<B> {
+        protected SignalFilterSpec filter;
+
+        private FilterBuilderBase(MechanismConfig<?> owner) {
+            super(owner);
+        }
+
+        public B lowPass(double alpha) {
+            this.filter = new SignalFilterSpec(FilterKind.LOW_PASS, alpha, null);
+            return self();
+        }
+
+        public B median(int window) {
+            this.filter = new SignalFilterSpec(FilterKind.MEDIAN, null, window);
+            return self();
+        }
+
+        public B movingAverage(int window) {
+            this.filter = new SignalFilterSpec(FilterKind.MOVING_AVERAGE, null, window);
+            return self();
+        }
+    }
+
+    public static final class FilterSourceBuilder extends FilterBuilderBase<FilterSourceBuilder> {
+        private FilterSourceBuilder(MechanismConfig<?> owner) {
+            super(owner);
+        }
+
+        @Override
+        protected FilterSourceBuilder self() {
+            return this;
+        }
+    }
+
+    public static final class DifferentiateSourceBuilder extends FilterBuilderBase<DifferentiateSourceBuilder> {
+        private DifferentiateSourceBuilder(MechanismConfig<?> owner) {
+            super(owner);
+        }
+
+        @Override
+        protected DifferentiateSourceBuilder self() {
+            return this;
+        }
+    }
+
+    public static final class AverageSourceBuilder extends InputSourceBuilderBase<AverageSourceBuilder> {
+        private AverageSourceBuilder(MechanismConfig<?> owner) {
+            super(owner);
+        }
+
+        @Override
+        protected AverageSourceBuilder self() {
+            return this;
+        }
+    }
+
+    public static final class DifferenceSourceBuilder extends InputSourceBuilderBase<DifferenceSourceBuilder> {
+        private DifferenceSourceBuilder(MechanismConfig<?> owner) {
+            super(owner);
+        }
+
+        @Override
+        protected DifferenceSourceBuilder self() {
+            return this;
+        }
+    }
+
+    public static final class CalibrationMapSourceBuilder extends InputSourceBuilderBase<CalibrationMapSourceBuilder> {
+        private final List<CalibrationPointSpec> points = new ArrayList<>();
+
+        private CalibrationMapSourceBuilder(MechanismConfig<?> owner) {
+            super(owner);
+        }
+
+        public CalibrationMapSourceBuilder point(double input, double output) {
+            points.add(new CalibrationPointSpec(input, output));
+            return this;
+        }
+
+        @Override
+        protected CalibrationMapSourceBuilder self() {
+            return this;
+        }
+    }
+
     private enum EncoderSourceKind {
         HARDWARE,
         VIRTUAL,
-        CRT
+        CRT,
+        FILTER,
+        DIFFERENTIATE,
+        AVERAGE,
+        DIFFERENCE,
+        CALIBRATION_MAP
     }
 
-    private record CrtInputSpec(String sourceName, int modulus) {
+    private enum FilterKind {
+        LOW_PASS,
+        MEDIAN,
+        MOVING_AVERAGE
+    }
+
+    private record DerivedInputSpec(String sourceName, InputSource signal, Integer modulus) {
+    }
+
+    private record SignalFilterSpec(FilterKind kind, Double alpha, Integer window) {
+    }
+
+    private record CalibrationPointSpec(double input, double output) {
     }
 
     private record EncoderSourceSpec(
@@ -551,9 +844,23 @@ public class MechanismConfig<T extends Mechanism> {
             DoubleSupplier positionSupplier,
             DoubleSupplier velocitySupplier,
             DoubleSupplier absoluteSupplier,
-            List<CrtInputSpec> crtInputs,
+            List<DerivedInputSpec> inputs,
+            SignalFilterSpec filter,
+            List<CalibrationPointSpec> calibrationPoints,
             double validMin,
             double validMax) {
+    }
+
+    private static String requireDefinedEncoderSource(MechanismConfig<?> owner, String sourceName) {
+        String key = EncodersSection.normalizeSourceName(sourceName);
+        if (!owner.encoderSourceSpecs.containsKey(key)) {
+            throw new IllegalArgumentException("encoder input source is not defined yet: " + key);
+        }
+        return key;
+    }
+
+    private static InputSource normalizeDerivedInputSource(InputSource source, InputSource fallback) {
+        return source != null ? source : fallback;
     }
 
     public static final class ConstraintsSection<T extends Mechanism> {
@@ -1791,8 +2098,11 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     @FunctionalInterface
-    public interface StateTrigger<T extends Mechanism, E extends Enum<E>> {
-        boolean shouldQueue(MechanismContext<T, E> ctx);
+    public interface StateTrigger<T extends Mechanism, E extends Enum<E>>
+            extends Predicate<MechanismContext<T, E>> {
+        default boolean shouldQueue(MechanismContext<T, E> ctx) {
+            return test(ctx);
+        }
     }
 
     public record StateTriggerBinding<T extends Mechanism>(Enum<?> state, StateTrigger<T, ?> trigger) {
@@ -2341,6 +2651,11 @@ public class MechanismConfig<T extends Mechanism> {
             case HARDWARE -> resolveHardwareEncoderSource(spec, motors);
             case VIRTUAL -> resolveVirtualEncoderSource(spec);
             case CRT -> resolveCrtEncoderSource(spec, resolved);
+            case FILTER -> resolveFilterEncoderSource(spec, resolved);
+            case DIFFERENTIATE -> resolveDifferentiateEncoderSource(spec, resolved);
+            case AVERAGE -> resolveAverageEncoderSource(spec, resolved);
+            case DIFFERENCE -> resolveDifferenceEncoderSource(spec, resolved);
+            case CALIBRATION_MAP -> resolveCalibrationMapEncoderSource(spec, resolved);
         };
     }
 
@@ -2386,7 +2701,7 @@ public class MechanismConfig<T extends Mechanism> {
             device = HardwareFactories.encoder(config);
         }
         MechanismEncoderUnit unit = spec.unit() != null ? spec.unit() : MechanismEncoderUnit.ROTATIONS;
-        return new MechanismEncoderSource(spec.name(), device, unit, spec.wrapsEvery());
+        return new MechanismEncoderSource(spec.name(), device, unit, spec.wrapsEvery(), true, true, true);
     }
 
     private MechanismEncoderSource resolveVirtualEncoderSource(EncoderSourceSpec spec) {
@@ -2398,23 +2713,38 @@ public class MechanismConfig<T extends Mechanism> {
                 spec.velocitySupplier(),
                 absolute);
         MechanismEncoderUnit unit = spec.unit() != null ? spec.unit() : MechanismEncoderUnit.ROTATIONS;
-        return new MechanismEncoderSource(spec.name(), device, unit, spec.wrapsEvery());
+        boolean supportsPosition = position != null;
+        boolean supportsVelocity = spec.velocitySupplier() != null;
+        boolean supportsAbsolute = absolute != null;
+        return new MechanismEncoderSource(
+                spec.name(),
+                device,
+                unit,
+                spec.wrapsEvery(),
+                supportsPosition,
+                supportsVelocity,
+                supportsAbsolute);
     }
 
     private MechanismEncoderSource resolveCrtEncoderSource(
             EncoderSourceSpec spec,
             Map<String, MechanismEncoderSource> resolved) {
-        if (spec.crtInputs().isEmpty()) {
+        if (spec.inputs().isEmpty()) {
             throw new IllegalStateException("CRT encoder source '" + spec.name() + "' has no inputs.");
         }
         List<ChineseRemainderEncoder.Input> inputs = new ArrayList<>();
         MechanismEncoderUnit unit = spec.unit();
         double commonSpan = Double.NaN;
-        for (CrtInputSpec inputSpec : spec.crtInputs()) {
+        for (DerivedInputSpec inputSpec : spec.inputs()) {
             MechanismEncoderSource source = resolved.get(inputSpec.sourceName());
             if (source == null) {
                 throw new IllegalStateException(
                         "CRT encoder source '" + spec.name() + "' references unknown source '" + inputSpec.sourceName() + "'.");
+            }
+            if (inputSpec.signal() != InputSource.Absolute) {
+                throw new IllegalStateException(
+                        "CRT encoder source '" + spec.name() + "' requires absolute inputs, but got " + inputSpec.signal()
+                                + " for input '" + source.name() + "'.");
             }
             if (!Double.isFinite(source.wrapsEvery()) || source.wrapsEvery() <= 0.0) {
                 throw new IllegalStateException(
@@ -2426,38 +2756,139 @@ public class MechanismConfig<T extends Mechanism> {
                 throw new IllegalStateException(
                         "CRT encoder source '" + spec.name() + "' mixes units between inputs.");
             }
-            if (inputSpec.modulus() <= 0) {
+            int modulus = inputSpec.modulus() != null ? inputSpec.modulus() : 0;
+            if (modulus <= 0) {
                 throw new IllegalStateException(
                         "CRT encoder source '" + spec.name() + "' has non-positive modulus for input '" + source.name() + "'.");
             }
-            double span = source.wrapsEvery() * inputSpec.modulus();
+            double span = source.wrapsEvery() * modulus;
             if (!Double.isFinite(commonSpan)) {
                 commonSpan = span;
             } else if (Math.abs(commonSpan - span) > 1e-6) {
                 throw new IllegalStateException(
                         "CRT encoder source '" + spec.name() + "' has incompatible gearing between inputs.");
             }
-            inputs.add(new ChineseRemainderEncoder.Input(source, inputSpec.modulus()));
+            inputs.add(new ChineseRemainderEncoder.Input(source, modulus));
         }
-        validateCrtModuli(spec.name(), spec.crtInputs(), commonSpan, spec.validMin(), spec.validMax());
+        validateCrtModuli(spec.name(), spec.inputs(), commonSpan, spec.validMin(), spec.validMax());
         Encoder device = new ChineseRemainderEncoder(
                 EncoderConfig.create(),
                 inputs,
                 spec.validMin(),
                 spec.validMax());
-        return new MechanismEncoderSource(spec.name(), device, unit, commonSpan);
+        return new MechanismEncoderSource(spec.name(), device, unit, commonSpan, true, true, true);
+    }
+
+    private MechanismEncoderSource resolveFilterEncoderSource(
+            EncoderSourceSpec spec,
+            Map<String, MechanismEncoderSource> resolved) {
+        DerivedEncoderInput input = resolveDerivedInput(spec.name(), singleInput(spec), resolved);
+        SignalFilter filter = createSignalFilter(spec.name(), spec.filter(), true);
+        Encoder device = new FilteredEncoder(EncoderConfig.create(), input, filter);
+        MechanismEncoderUnit unit = resolvedUnit(spec.unit(), input.source());
+        boolean isVelocity = input.signal() == EncoderSignalType.VELOCITY;
+        boolean isAbsolute = input.signal() == EncoderSignalType.ABSOLUTE;
+        return new MechanismEncoderSource(
+                spec.name(),
+                device,
+                unit,
+                isAbsolute ? input.wrapsEvery() : Double.NaN,
+                !isVelocity,
+                isVelocity,
+                isAbsolute);
+    }
+
+    private MechanismEncoderSource resolveDifferentiateEncoderSource(
+            EncoderSourceSpec spec,
+            Map<String, MechanismEncoderSource> resolved) {
+        DerivedEncoderInput input = resolveDerivedInput(spec.name(), singleInput(spec), resolved);
+        if (input.signal() == EncoderSignalType.VELOCITY) {
+            throw new IllegalStateException(
+                    "Differentiate encoder source '" + spec.name() + "' cannot use a velocity input.");
+        }
+        SignalFilter filter = createSignalFilter(spec.name(), spec.filter(), false);
+        Encoder device = new DifferentiatedEncoder(EncoderConfig.create(), input, filter);
+        MechanismEncoderUnit unit = resolvedUnit(spec.unit(), input.source());
+        return new MechanismEncoderSource(spec.name(), device, unit, Double.NaN, false, true, false);
+    }
+
+    private MechanismEncoderSource resolveAverageEncoderSource(
+            EncoderSourceSpec spec,
+            Map<String, MechanismEncoderSource> resolved) {
+        List<DerivedEncoderInput> inputs = resolveDerivedInputs(spec.name(), spec.inputs(), resolved);
+        EncoderSignalType signal = commonDerivedSignal(spec.name(), inputs);
+        if (signal == EncoderSignalType.ABSOLUTE) {
+            throw new IllegalStateException(
+                    "Average encoder source '" + spec.name() + "' does not support absolute inputs.");
+        }
+        MechanismEncoderUnit unit = commonDerivedUnit(spec.name(), inputs, spec.unit());
+        Encoder device = new AverageEncoder(EncoderConfig.create(), inputs, signal);
+        return new MechanismEncoderSource(
+                spec.name(),
+                device,
+                unit,
+                Double.NaN,
+                signal != EncoderSignalType.VELOCITY,
+                signal == EncoderSignalType.VELOCITY,
+                false);
+    }
+
+    private MechanismEncoderSource resolveDifferenceEncoderSource(
+            EncoderSourceSpec spec,
+            Map<String, MechanismEncoderSource> resolved) {
+        List<DerivedEncoderInput> inputs = resolveDerivedInputs(spec.name(), spec.inputs(), resolved);
+        EncoderSignalType signal = commonDerivedSignal(spec.name(), inputs);
+        if (signal == EncoderSignalType.ABSOLUTE) {
+            throw new IllegalStateException(
+                    "Difference encoder source '" + spec.name() + "' does not support absolute inputs.");
+        }
+        MechanismEncoderUnit unit = commonDerivedUnit(spec.name(), inputs, spec.unit());
+        Encoder device = new DifferenceEncoder(EncoderConfig.create(), inputs, signal);
+        return new MechanismEncoderSource(
+                spec.name(),
+                device,
+                unit,
+                Double.NaN,
+                signal != EncoderSignalType.VELOCITY,
+                signal == EncoderSignalType.VELOCITY,
+                false);
+    }
+
+    private MechanismEncoderSource resolveCalibrationMapEncoderSource(
+            EncoderSourceSpec spec,
+            Map<String, MechanismEncoderSource> resolved) {
+        DerivedEncoderInput input = resolveDerivedInput(spec.name(), singleInput(spec), resolved);
+        if (input.signal() == EncoderSignalType.VELOCITY) {
+            throw new IllegalStateException(
+                    "Calibration-map encoder source '" + spec.name() + "' cannot use a velocity input.");
+        }
+        List<CalibrationMapEncoder.Point> points = new ArrayList<>();
+        for (CalibrationPointSpec point : spec.calibrationPoints()) {
+            points.add(new CalibrationMapEncoder.Point(point.input(), point.output()));
+        }
+        Encoder device = new CalibrationMapEncoder(EncoderConfig.create(), input, points);
+        MechanismEncoderUnit unit = resolvedUnit(spec.unit(), input.source());
+        boolean absolute = input.signal() == EncoderSignalType.ABSOLUTE;
+        return new MechanismEncoderSource(
+                spec.name(),
+                device,
+                unit,
+                absolute ? input.wrapsEvery() : Double.NaN,
+                true,
+                false,
+                absolute);
     }
 
     private void validateCrtModuli(
             String name,
-            List<CrtInputSpec> inputs,
+            List<DerivedInputSpec> inputs,
             double commonSpan,
             double validMin,
             double validMax) {
         for (int i = 0; i < inputs.size(); i++) {
             for (int j = i + 1; j < inputs.size(); j++) {
-                int a = inputs.get(i).modulus();
-                int b = inputs.get(j).modulus();
+                int a = inputs.get(i).modulus() != null ? inputs.get(i).modulus() : 0;
+                int b = inputs.get(j).modulus() != null ? inputs.get(j).modulus() : 0;
                 if (greatestCommonDivisor(a, b) != 1) {
                     throw new IllegalStateException(
                             "CRT encoder source '" + name + "' requires pairwise-coprime moduli, but got "
@@ -2483,6 +2914,120 @@ public class MechanismConfig<T extends Mechanism> {
         return Math.max(left, 1);
     }
 
+    private static DerivedInputSpec singleInput(EncoderSourceSpec spec) {
+        return spec.inputs().get(0);
+    }
+
+    private static DerivedEncoderInput resolveDerivedInput(
+            String ownerName,
+            DerivedInputSpec inputSpec,
+            Map<String, MechanismEncoderSource> resolved) {
+        MechanismEncoderSource source = resolved.get(inputSpec.sourceName());
+        if (source == null) {
+            throw new IllegalStateException(
+                    "Derived encoder source '" + ownerName + "' references unknown source '" + inputSpec.sourceName() + "'.");
+        }
+        EncoderSignalType signal = toEncoderSignalType(inputSpec.signal());
+        return switch (signal) {
+            case POSITION -> {
+                if (!source.supportsPosition()) {
+                    throw new IllegalStateException(
+                            "Derived encoder source '" + ownerName + "' requires position support from input '"
+                                    + source.name() + "'.");
+                }
+                yield new DerivedEncoderInput(source, signal);
+            }
+            case VELOCITY -> {
+                if (!source.supportsVelocity()) {
+                    throw new IllegalStateException(
+                            "Derived encoder source '" + ownerName + "' requires velocity support from input '"
+                                    + source.name() + "'.");
+                }
+                yield new DerivedEncoderInput(source, signal);
+            }
+            case ABSOLUTE -> {
+                if (!source.supportsAbsolute()) {
+                    throw new IllegalStateException(
+                            "Derived encoder source '" + ownerName + "' requires absolute support from input '"
+                                    + source.name() + "'.");
+                }
+                yield new DerivedEncoderInput(source, signal);
+            }
+        };
+    }
+
+    private static List<DerivedEncoderInput> resolveDerivedInputs(
+            String ownerName,
+            List<DerivedInputSpec> inputSpecs,
+            Map<String, MechanismEncoderSource> resolved) {
+        List<DerivedEncoderInput> inputs = new ArrayList<>();
+        for (DerivedInputSpec inputSpec : inputSpecs) {
+            inputs.add(resolveDerivedInput(ownerName, inputSpec, resolved));
+        }
+        return List.copyOf(inputs);
+    }
+
+    private static EncoderSignalType commonDerivedSignal(String name, List<DerivedEncoderInput> inputs) {
+        EncoderSignalType signal = null;
+        for (DerivedEncoderInput input : inputs) {
+            if (signal == null) {
+                signal = input.signal();
+                continue;
+            }
+            if (signal != input.signal()) {
+                throw new IllegalStateException(
+                        "Derived encoder source '" + name + "' mixes incompatible input signals.");
+            }
+        }
+        return signal != null ? signal : EncoderSignalType.POSITION;
+    }
+
+    private static MechanismEncoderUnit commonDerivedUnit(
+            String name,
+            List<DerivedEncoderInput> inputs,
+            MechanismEncoderUnit requestedUnit) {
+        MechanismEncoderUnit unit = requestedUnit;
+        for (DerivedEncoderInput input : inputs) {
+            if (unit == null || unit == MechanismEncoderUnit.ENCODER_UNITS) {
+                unit = input.unit();
+            } else if (input.unit() != unit) {
+                throw new IllegalStateException(
+                        "Derived encoder source '" + name + "' mixes incompatible units.");
+            }
+        }
+        return unit != null ? unit : MechanismEncoderUnit.ROTATIONS;
+    }
+
+    private static MechanismEncoderUnit resolvedUnit(MechanismEncoderUnit requestedUnit, MechanismEncoderSource source) {
+        if (requestedUnit == null || requestedUnit == MechanismEncoderUnit.ENCODER_UNITS) {
+            return source != null && source.unit() != null ? source.unit() : MechanismEncoderUnit.ROTATIONS;
+        }
+        return requestedUnit;
+    }
+
+    private static EncoderSignalType toEncoderSignalType(InputSource source) {
+        return switch (source != null ? source : InputSource.Position) {
+            case Position -> EncoderSignalType.POSITION;
+            case Velocity -> EncoderSignalType.VELOCITY;
+            case Absolute -> EncoderSignalType.ABSOLUTE;
+        };
+    }
+
+    private static SignalFilter createSignalFilter(String ownerName, SignalFilterSpec filter, boolean required) {
+        if (filter == null) {
+            if (required) {
+                throw new IllegalStateException(
+                        "Derived encoder source '" + ownerName + "' requires a filter configuration.");
+            }
+            return null;
+        }
+        return switch (filter.kind()) {
+            case LOW_PASS -> SignalFilter.lowPass(filter.alpha() != null ? filter.alpha() : Double.NaN);
+            case MEDIAN -> SignalFilter.median(filter.window() != null ? filter.window() : 0);
+            case MOVING_AVERAGE -> SignalFilter.movingAverage(filter.window() != null ? filter.window() : 0);
+        };
+    }
+
     private String resolveEncoderCanbus(String explicitCanbus) {
         if (explicitCanbus != null && !explicitCanbus.isBlank()) {
             return explicitCanbus;
@@ -2503,6 +3048,17 @@ public class MechanismConfig<T extends Mechanism> {
         if (!encoderSources.containsKey(configuredName)) {
             throw new IllegalStateException(
                     "Control " + role + " source '" + configuredName + "' is not a configured encoder source.");
+        }
+        MechanismEncoderSource source = encoderSources.get(configuredName);
+        boolean supported = switch (role) {
+            case "position" -> source != null && source.supportsPosition();
+            case "velocity" -> source != null && source.supportsVelocity();
+            case "absolute" -> source != null && source.supportsAbsolute();
+            default -> true;
+        };
+        if (!supported) {
+            throw new IllegalStateException(
+                    "Control " + role + " source '" + configuredName + "' does not support that signal.");
         }
         return configuredName;
     }
@@ -2578,19 +3134,61 @@ public class MechanismConfig<T extends Mechanism> {
                     "encoder source '" + cfg.name() + "' uses source=virtual, which is code-only and cannot be loaded from data");
         } else if ("crt".equals(normalizedSource)) {
             builder.crt(crt -> {
-                if (cfg.crtInputs() == null || cfg.crtInputs().isEmpty()) {
+                if (cfg.inputs() == null || cfg.inputs().isEmpty()) {
                     throw new IllegalArgumentException(
-                            "encoder source '" + cfg.name() + "' requires crtInputs when source=crt");
+                            "encoder source '" + cfg.name() + "' requires inputs when source=crt");
                 }
-                for (MechanismEncoderCrtInputConfig input : cfg.crtInputs()) {
+                for (MechanismEncoderInputConfig input : cfg.inputs()) {
                     if (input == null) {
                         continue;
                     }
-                    crt.input(input.source(), input.modulus() != null ? input.modulus() : 0);
+                    InputSource signal = parseDerivedInputSource(input.signal(), InputSource.Absolute);
+                    crt.input(input.source(), signal, input.modulus() != null ? input.modulus() : 0);
                 }
                 if (cfg.validMin() != null && cfg.validMax() != null) {
                     crt.validRange(cfg.validMin(), cfg.validMax());
                 }
+                return crt;
+            });
+        } else if ("filter".equals(normalizedSource)) {
+            builder.filter(filter -> {
+                applyDerivedInputs(cfg, filter, InputSource.Position);
+                applyConfiguredFilter(cfg, filter);
+                return filter;
+            });
+        } else if ("differentiate".equals(normalizedSource)) {
+            builder.differentiate(diff -> {
+                applyDerivedInputs(cfg, diff, InputSource.Position);
+                applyConfiguredFilter(cfg, diff);
+                return diff;
+            });
+        } else if ("average".equals(normalizedSource)) {
+            builder.average(avg -> {
+                applyDerivedInputs(cfg, avg, InputSource.Position);
+                return avg;
+            });
+        } else if ("difference".equals(normalizedSource)) {
+            builder.difference(diff -> {
+                applyDerivedInputs(cfg, diff, InputSource.Position);
+                return diff;
+            });
+        } else if ("calibration_map".equals(normalizedSource)
+                || "calibration-map".equals(normalizedSource)
+                || "calibrationmap".equals(normalizedSource)) {
+            builder.calibrationMap(map -> {
+                applyDerivedInputs(cfg, map, InputSource.Position);
+                if (cfg.points() == null || cfg.points().isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "encoder source '" + cfg.name() + "' requires points when source=calibration_map");
+                }
+                for (MechanismEncoderCalibrationPointConfig point : cfg.points()) {
+                    if (point == null || point.input() == null || point.output() == null) {
+                        throw new IllegalArgumentException(
+                                "encoder source '" + cfg.name() + "' has a calibration point with a null input/output");
+                    }
+                    map.point(point.input(), point.output());
+                }
+                return map;
             });
         } else {
             int id = cfg.id() != null ? Math.abs(cfg.id()) : 0;
@@ -2632,6 +3230,54 @@ public class MechanismConfig<T extends Mechanism> {
         if (cfg.wrapsEvery() != null) {
             builder.wrapsEvery(cfg.wrapsEvery());
         }
+    }
+
+    private void applyDerivedInputs(
+            MechanismEncoderConfig cfg,
+            InputSourceBuilderBase<?> builder,
+            InputSource defaultSource) {
+        if (cfg.inputs() == null || cfg.inputs().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "encoder source '" + cfg.name() + "' requires at least one input");
+        }
+        for (MechanismEncoderInputConfig input : cfg.inputs()) {
+            if (input == null || input.source() == null || input.source().isBlank()) {
+                throw new IllegalArgumentException(
+                        "encoder source '" + cfg.name() + "' has a blank input source");
+            }
+            InputSource signal = parseDerivedInputSource(input.signal(), defaultSource);
+            builder.input(input.source(), signal);
+        }
+    }
+
+    private static void applyConfiguredFilter(
+            MechanismEncoderConfig cfg,
+            FilterBuilderBase<?> builder) {
+        String filter = cfg.filter() != null ? cfg.filter().trim().toLowerCase(Locale.ROOT) : "";
+        switch (filter) {
+            case "low_pass", "low-pass", "lowpass" -> builder.lowPass(
+                    cfg.filterAlpha() != null ? cfg.filterAlpha() : Double.NaN);
+            case "median" -> builder.median(
+                    cfg.filterWindow() != null ? cfg.filterWindow() : 0);
+            case "moving_average", "moving-average", "movingaverage" -> builder.movingAverage(
+                    cfg.filterWindow() != null ? cfg.filterWindow() : 0);
+            case "" -> throw new IllegalArgumentException(
+                    "encoder source '" + cfg.name() + "' requires a filter type");
+            default -> throw new IllegalArgumentException(
+                    "encoder source '" + cfg.name() + "' has an unknown filter type: " + cfg.filter());
+        }
+    }
+
+    private static InputSource parseDerivedInputSource(String raw, InputSource fallback) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "position" -> InputSource.Position;
+            case "velocity" -> InputSource.Velocity;
+            case "absolute" -> InputSource.Absolute;
+            default -> throw new IllegalArgumentException("unknown encoder input signal: " + raw);
+        };
     }
 
     private static MechanismEncoderUnit parseEncoderUnit(String raw) {
@@ -2685,16 +3331,47 @@ public class MechanismConfig<T extends Mechanism> {
     }
 
     private static MechanismEncoderConfig exportEncoderConfig(EncoderSourceSpec spec) {
-        String source;
+        String source = null;
         Integer id = null;
         Boolean inverted = null;
-        List<MechanismEncoderCrtInputConfig> crtInputs = null;
+        List<MechanismEncoderInputConfig> inputs = null;
+        String filter = null;
+        Double filterAlpha = null;
+        Integer filterWindow = null;
+        List<MechanismEncoderCalibrationPointConfig> points = null;
         switch (spec.kind()) {
             case CRT -> {
                 source = "crt";
-                crtInputs = new ArrayList<>();
-                for (CrtInputSpec input : spec.crtInputs()) {
-                    crtInputs.add(new MechanismEncoderCrtInputConfig(input.sourceName(), input.modulus()));
+                inputs = exportDerivedInputs(spec.inputs(), InputSource.Absolute);
+            }
+            case FILTER -> {
+                source = "filter";
+                inputs = exportDerivedInputs(spec.inputs(), InputSource.Position);
+                filter = exportFilterKind(spec.filter());
+                filterAlpha = spec.filter() != null ? spec.filter().alpha() : null;
+                filterWindow = spec.filter() != null ? spec.filter().window() : null;
+            }
+            case DIFFERENTIATE -> {
+                source = "differentiate";
+                inputs = exportDerivedInputs(spec.inputs(), InputSource.Position);
+                filter = exportFilterKind(spec.filter());
+                filterAlpha = spec.filter() != null ? spec.filter().alpha() : null;
+                filterWindow = spec.filter() != null ? spec.filter().window() : null;
+            }
+            case AVERAGE -> {
+                source = "average";
+                inputs = exportDerivedInputs(spec.inputs(), InputSource.Position);
+            }
+            case DIFFERENCE -> {
+                source = "difference";
+                inputs = exportDerivedInputs(spec.inputs(), InputSource.Position);
+            }
+            case CALIBRATION_MAP -> {
+                source = "calibration_map";
+                inputs = exportDerivedInputs(spec.inputs(), InputSource.Position);
+                points = new ArrayList<>();
+                for (CalibrationPointSpec point : spec.calibrationPoints()) {
+                    points.add(new MechanismEncoderCalibrationPointConfig(point.input(), point.output()));
                 }
             }
             case HARDWARE -> {
@@ -2709,22 +3386,73 @@ public class MechanismConfig<T extends Mechanism> {
                 inverted = spec.id() < 0;
             }
             case VIRTUAL -> source = "virtual";
-            default -> throw new IllegalStateException("unknown encoder source kind: " + spec.kind());
         }
+        Double gearRatio = spec.kind() == EncoderSourceKind.HARDWARE || spec.kind() == EncoderSourceKind.VIRTUAL
+                ? spec.gearRatio()
+                : null;
+        Double conversion = spec.kind() == EncoderSourceKind.HARDWARE || spec.kind() == EncoderSourceKind.VIRTUAL
+                ? spec.conversion()
+                : null;
+        Double offset = spec.kind() == EncoderSourceKind.HARDWARE || spec.kind() == EncoderSourceKind.VIRTUAL
+                ? spec.offset()
+                : null;
         return new MechanismEncoderConfig(
                 spec.name(),
                 source,
                 id,
                 spec.canbus(),
                 inverted,
-                spec.gearRatio(),
-                spec.conversion(),
-                spec.offset(),
+                gearRatio,
+                conversion,
+                offset,
                 exportEncoderUnit(spec.unit()),
                 Double.isFinite(spec.wrapsEvery()) ? spec.wrapsEvery() : null,
                 Double.isFinite(spec.validMin()) ? spec.validMin() : null,
                 Double.isFinite(spec.validMax()) ? spec.validMax() : null,
-                crtInputs != null && !crtInputs.isEmpty() ? List.copyOf(crtInputs) : null);
+                inputs != null && !inputs.isEmpty() ? List.copyOf(inputs) : null,
+                filter,
+                filterAlpha,
+                filterWindow,
+                points != null && !points.isEmpty() ? List.copyOf(points) : null);
+    }
+
+    private static List<MechanismEncoderInputConfig> exportDerivedInputs(
+            List<DerivedInputSpec> specs,
+            InputSource defaultSignal) {
+        if (specs == null || specs.isEmpty()) {
+            return null;
+        }
+        List<MechanismEncoderInputConfig> inputs = new ArrayList<>();
+        for (DerivedInputSpec input : specs) {
+            inputs.add(new MechanismEncoderInputConfig(
+                    input.sourceName(),
+                    exportDerivedInputSignal(input.signal(), defaultSignal),
+                    input.modulus()));
+        }
+        return inputs;
+    }
+
+    private static String exportDerivedInputSignal(InputSource signal, InputSource defaultSignal) {
+        InputSource resolved = signal != null ? signal : defaultSignal;
+        if (resolved == defaultSignal) {
+            return null;
+        }
+        return switch (resolved) {
+            case Position -> "position";
+            case Velocity -> "velocity";
+            case Absolute -> "absolute";
+        };
+    }
+
+    private static String exportFilterKind(SignalFilterSpec filter) {
+        if (filter == null || filter.kind() == null) {
+            return null;
+        }
+        return switch (filter.kind()) {
+            case LOW_PASS -> "low_pass";
+            case MEDIAN -> "median";
+            case MOVING_AVERAGE -> "moving_average";
+        };
     }
 
     private static String exportEncoderUnit(MechanismEncoderUnit unit) {
@@ -3110,11 +3838,8 @@ public class MechanismConfig<T extends Mechanism> {
     @FunctionalInterface
     public interface MechanismBinding<M extends Mechanism, E extends Enum<E>>
             extends Consumer<MechanismContext<M, E>> {
-        void apply(MechanismContext<M, E> context);
-
-        @Override
-        default void accept(MechanismContext<M, E> context) {
-            apply(context);
+        default void apply(MechanismContext<M, E> context) {
+            accept(context);
         }
     }
 
@@ -3126,11 +3851,8 @@ public class MechanismConfig<T extends Mechanism> {
     @FunctionalInterface
     public interface MechanismControlLoop<M extends Mechanism>
             extends ToDoubleFunction<MechanismControlContext<M>> {
-        double calculate(MechanismControlContext<M> context);
-
-        @Override
-        default double applyAsDouble(MechanismControlContext<M> context) {
-            return calculate(context);
+        default double calculate(MechanismControlContext<M> context) {
+            return applyAsDouble(context);
         }
     }
 
@@ -3831,6 +4553,16 @@ public class MechanismConfig<T extends Mechanism> {
             }
             MechanismSimulationConfig.requireSupportedMotorSim(config.type());
         });
+    }
+
+    @Override
+    protected final MechanismConfig<T> mechanismConfigSelf() {
+        return this;
+    }
+
+    @Override
+    protected final EncodersSection<T> newEncodersSection() {
+        return new EncodersSection<>(this);
     }
 
 }

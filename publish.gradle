@@ -1,6 +1,8 @@
 // Apply the Maven Publish plugin once
 apply plugin: 'maven-publish'
 
+import org.gradle.api.file.RelativePath
+
 // -----------------------------------------------------------------------------
 // Common Variables & Config
 // -----------------------------------------------------------------------------
@@ -205,6 +207,38 @@ task outputVersions() {
     }
 }
 
+def packagePattern = ~/^\s*package\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)\s*;/
+
+def sourceJarRelativePath = { File sourceFile, RelativePath currentPath ->
+    if (sourceFile == null || !sourceFile.name.endsWith('.java')) {
+        return currentPath
+    }
+
+    String declaredPackage = null
+    sourceFile.withReader('UTF-8') { reader ->
+        String line
+        while ((line = reader.readLine()) != null) {
+            def matcher = line =~ packagePattern
+            if (matcher.matches()) {
+                declaredPackage = matcher.group(1)
+                break
+            }
+            String trimmed = line.trim()
+            if (trimmed && !trimmed.startsWith('//') && !trimmed.startsWith('/*') && !trimmed.startsWith('*')) {
+                break
+            }
+        }
+    }
+
+    if (declaredPackage == null || declaredPackage.isBlank()) {
+        return currentPath
+    }
+
+    List<String> segments = new ArrayList<>(declaredPackage.tokenize('.'))
+    segments.add(sourceFile.name)
+    return new RelativePath(true, segments as String[])
+}
+
 // Ensure every subproject builds with Java 17 and publishes a sources jar
 subprojects {
     apply plugin: 'maven-publish'
@@ -216,7 +250,12 @@ subprojects {
 
         tasks.register('subprojectSourcesJar', Jar) {
             archiveClassifier = 'sources'
-            from sourceSets.main.allSource
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+            from(sourceSets.main.allSource) {
+                eachFile { details ->
+                    details.relativePath = sourceJarRelativePath(details.file, details.relativePath)
+                }
+            }
             dependsOn classes
         }
 

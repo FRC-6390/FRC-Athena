@@ -48,21 +48,15 @@ public final class RobotCoreHooks<T extends RobotDrivetrain<T>> {
 
     @FunctionalInterface
     public interface Binding<T extends RobotDrivetrain<T>> extends Consumer<RobotCoreContext<T>> {
-        void apply(RobotCoreContext<T> context);
-
-        @Override
-        default void accept(RobotCoreContext<T> context) {
-            apply(context);
+        default void apply(RobotCoreContext<T> context) {
+            accept(context);
         }
     }
 
     @FunctionalInterface
     public interface ControlLoop<T extends RobotDrivetrain<T>> extends ToDoubleFunction<RobotCoreContext<T>> {
-        double calculate(RobotCoreContext<T> context);
-
-        @Override
-        default double applyAsDouble(RobotCoreContext<T> context) {
-            return calculate(context);
+        default double calculate(RobotCoreContext<T> context) {
+            return applyAsDouble(context);
         }
     }
 

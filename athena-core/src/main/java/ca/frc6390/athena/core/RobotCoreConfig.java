@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import ca.frc6390.athena.core.RobotDrivetrain.RobotDrivetrainConfig;
 import ca.frc6390.athena.core.RobotVision.RobotVisionConfig;
@@ -56,11 +57,12 @@ public final class RobotCoreConfig {
         }
 
         public <T extends RobotDrivetrain<T>> Builder<T> drivetrain(
-                Consumer<DrivetrainSection> selector) {
+                Function<DrivetrainSection, RobotDrivetrainConfig<T>> selector) {
             Objects.requireNonNull(selector, "selector");
             DrivetrainSection section = new DrivetrainSection();
-            selector.accept(section);
-            RobotDrivetrainConfig<T> rawConfig = section.selectedConfig();
+            RobotDrivetrainConfig<T> rawConfig = Objects.requireNonNull(
+                    selector.apply(section),
+                    "drivetrain config");
             RobotDrivetrainConfig<T> config = section.wrapWithTiming(rawConfig);
             return new Builder<>(name, config);
         }
@@ -255,22 +257,34 @@ public final class RobotCoreConfig {
             return config(Objects.requireNonNull(config, "config"));
         }
 
+        public SwerveSection swerve() {
+            SwerveSection section = new SwerveSection();
+            config(section.config());
+            return section;
+        }
+
         public RobotDrivetrainConfig<SwerveDrivetrain> swerve(Consumer<SwerveSection> section) {
             Objects.requireNonNull(section, "section");
-            SwerveSection s = new SwerveSection();
+            SwerveSection s = swerve();
             section.accept(s);
-            return config(s.drivetrainConfig());
+            return s.config();
         }
 
         public RobotDrivetrainConfig<DifferentialDrivetrain> differential(DifferentialDrivetrainConfig config) {
             return config(Objects.requireNonNull(config, "config"));
         }
 
+        public DifferentialSection differential() {
+            DifferentialSection section = new DifferentialSection();
+            config(section.config());
+            return section;
+        }
+
         public RobotDrivetrainConfig<DifferentialDrivetrain> differential(Consumer<DifferentialSection> section) {
             Objects.requireNonNull(section, "section");
-            DifferentialSection d = new DifferentialSection();
+            DifferentialSection d = differential();
             section.accept(d);
-            return config(d.config);
+            return d.config();
         }
 
         @SuppressWarnings("unchecked")
@@ -285,11 +299,18 @@ public final class RobotCoreConfig {
     public static final class SwerveSection {
         private final SwerveDrivetrainConfig config = new SwerveDrivetrainConfig();
         private SwerveSimulationConfig simulationConfig = SwerveSimulationConfig.defaults();
+        private final SwerveSimulationSection simulationSection = new SwerveSimulationSection(
+                simulationConfig,
+                updated -> {
+                    simulationConfig = updated;
+                    config.simulation().config(updated);
+                });
 
         private SwerveSection() {
+            config.simulation().config(simulationConfig);
         }
 
-        private RobotDrivetrainConfig<SwerveDrivetrain> drivetrainConfig() {
+        public RobotDrivetrainConfig<SwerveDrivetrain> config() {
             return config;
         }
 
@@ -391,11 +412,12 @@ public final class RobotCoreConfig {
 
         public SwerveSection simulation(Consumer<SwerveSimulationSection> section) {
             Objects.requireNonNull(section, "section");
-            SwerveSimulationSection s = new SwerveSimulationSection(simulationConfig);
-            section.accept(s);
-            simulationConfig = s.config;
-            config.simulation().config(simulationConfig);
+            section.accept(simulation());
             return this;
+        }
+
+        public SwerveSimulationSection simulation() {
+            return simulationSection;
         }
     }
 
@@ -403,26 +425,39 @@ public final class RobotCoreConfig {
             C extends CommonDrivetrainSimulationConfig<C>,
             Self extends CommonSimulationSection<C, Self>> {
         protected C config;
+        private final Consumer<C> onChange;
 
         protected CommonSimulationSection(C config) {
+            this(config, null);
+        }
+
+        protected CommonSimulationSection(C config, Consumer<C> onChange) {
             this.config = Objects.requireNonNull(config, "config");
+            this.onChange = onChange;
         }
 
         protected abstract Self self();
 
+        protected final Self changed() {
+            if (onChange != null) {
+                onChange.accept(config);
+            }
+            return self();
+        }
+
         public final Self robotMassKg(double kg) {
             config = config.withRobotMassKg(kg);
-            return self();
+            return changed();
         }
 
         public final Self nominalVoltage(double volts) {
             config = config.withNominalVoltage(volts);
-            return self();
+            return changed();
         }
 
         public final Self robotMomentOfInertia(double moi) {
             config = config.withRobotMomentOfInertia(moi);
-            return self();
+            return changed();
         }
     }
 
@@ -433,6 +468,10 @@ public final class RobotCoreConfig {
             super(config);
         }
 
+        private SwerveSimulationSection(SwerveSimulationConfig config, Consumer<SwerveSimulationConfig> onChange) {
+            super(config, onChange);
+        }
+
         @Override
         protected SwerveSimulationSection self() {
             return this;
@@ -440,20 +479,32 @@ public final class RobotCoreConfig {
 
         public SwerveSimulationSection wheelCoefficientOfFriction(double coef) {
             config = config.withWheelCoefficientOfFriction(coef);
-            return this;
+            return changed();
         }
 
         public SwerveSimulationSection maxSpeedScale(double scale) {
             config = config.withMaxSpeedScale(scale);
-            return this;
+            return changed();
         }
     }
 
     public static final class DifferentialSection {
         private final DifferentialDrivetrainConfig config = new DifferentialDrivetrainConfig();
         private DifferentialSimulationConfig simulationConfig = DifferentialSimulationConfig.defaults();
+        private final DifferentialSimulationSection simulationSection = new DifferentialSimulationSection(
+                simulationConfig,
+                updated -> {
+                    simulationConfig = updated;
+                    config.simulation().config(updated);
+                });
 
-        private DifferentialSection() {}
+        private DifferentialSection() {
+            config.simulation().config(simulationConfig);
+        }
+
+        public RobotDrivetrainConfig<DifferentialDrivetrain> config() {
+            return config;
+        }
 
         public DifferentialSection imu(AthenaImu imu, boolean inverted) {
             config.hardware().imu(imu, inverted);
@@ -485,11 +536,12 @@ public final class RobotCoreConfig {
 
         public DifferentialSection simulation(Consumer<DifferentialSimulationSection> section) {
             Objects.requireNonNull(section, "section");
-            DifferentialSimulationSection s = new DifferentialSimulationSection(simulationConfig);
-            section.accept(s);
-            simulationConfig = s.config;
-            config.simulation().config(simulationConfig);
+            section.accept(simulation());
             return this;
+        }
+
+        public DifferentialSimulationSection simulation() {
+            return simulationSection;
         }
     }
 
@@ -500,6 +552,12 @@ public final class RobotCoreConfig {
             super(config);
         }
 
+        private DifferentialSimulationSection(
+                DifferentialSimulationConfig config,
+                Consumer<DifferentialSimulationConfig> onChange) {
+            super(config, onChange);
+        }
+
         @Override
         protected DifferentialSimulationSection self() {
             return this;
@@ -507,22 +565,22 @@ public final class RobotCoreConfig {
 
         public DifferentialSimulationSection gearRatio(double ratio) {
             config = config.withGearRatio(ratio);
-            return this;
+            return changed();
         }
 
         public DifferentialSimulationSection wheelDiameterMeters(double meters) {
             config = config.withWheelDiameterMeters(meters);
-            return this;
+            return changed();
         }
 
         public DifferentialSimulationSection trackWidthMeters(double meters) {
             config = config.withTrackWidthMeters(meters);
-            return this;
+            return changed();
         }
 
         public DifferentialSimulationSection motorsPerSide(int motors) {
             config = config.withMotorsPerSide(motors);
-            return this;
+            return changed();
         }
 
     }
@@ -674,6 +732,10 @@ public final class RobotCoreConfig {
             return this;
         }
 
+        public ca.frc6390.athena.core.localization.RobotLocalizationConfig.PoseSection pose(String name) {
+            return config.poses().pose(name);
+        }
+
         public LocalizationSection boundingBox(
                 String name,
                 ca.frc6390.athena.core.localization.PoseBoundingBox2d box) {
@@ -732,6 +794,20 @@ public final class RobotCoreConfig {
         public AutoSection pid(Consumer<RobotLocalizationConfig.AutoPlannerPidSection> section) {
             config = config.pid(section);
             return this;
+        }
+
+        public RobotLocalizationConfig.AutoPlannerPidSection pid() {
+            return RobotLocalizationConfig.AutoPlannerPidSection.create(
+                    config.translationPid(),
+                    config.rotationPid(),
+                    config.pidAutotunerConfig(),
+                    spec -> config = new RobotCore.AutoConfig(
+                            spec.translationConstants(),
+                            spec.rotationConstants(),
+                            config.poseName(),
+                            spec.autotunerConfig(),
+                            config.registryBindings(),
+                            config.followerPeriodSeconds()));
         }
 
         /**

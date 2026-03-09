@@ -245,6 +245,10 @@ public final class MechanismConfigIO {
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
+                null,
                 null);
     }
 

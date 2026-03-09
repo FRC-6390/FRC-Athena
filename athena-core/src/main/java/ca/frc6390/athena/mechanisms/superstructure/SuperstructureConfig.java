@@ -685,11 +685,8 @@ public final class SuperstructureConfig<S extends Enum<S>, SP> {
 
     @FunctionalInterface
     public interface Binding<SP> extends Consumer<SuperstructureContext<SP>> {
-        void apply(SuperstructureContext<SP> context);
-
-        @Override
-        default void accept(SuperstructureContext<SP> context) {
-            apply(context);
+        default void apply(SuperstructureContext<SP> context) {
+            accept(context);
         }
     }
 

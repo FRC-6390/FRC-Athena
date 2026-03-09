@@ -54,6 +54,8 @@ def athenaBootstrapConfig = [
         vscodeJdtJavaHomeEnv        : 'ATHENA_VSCODE_JDT_JAVA_HOME',
         vscodeGradleJavaHomeProperty: 'athenaVscodeGradleJavaHome',
         vscodeGradleJavaHomeEnv     : 'ATHENA_VSCODE_GRADLE_JAVA_HOME',
+        vscodeModeProperty          : 'athenaVscodeMode',
+        vscodeModeEnv               : 'ATHENA_VSCODE_MODE',
         mergeServicesTaskName: 'athenaMergeServiceFiles',
         localBootstrapRelativePath: 'gradle/athena-bootstrap.gradle',
         athenaCoreVendordep  : 'FRC6390-Athena-Core.json',
@@ -933,7 +935,7 @@ def collectAthenaJavaHomeCandidates = { Map<String, Object> settings = [:] ->
     return candidates
 }
 
-def resolveAthenaDslLanguageServerJavaHome = { Map<String, Object> settings = [:] ->
+def resolveAthenaDslLanguageServerJavaHomeWithMinimum = { Map<String, Object> settings = [:], int minimumMajor = 21 ->
     def candidates = [] as List<File>
     def addCandidate = { Object raw ->
         File javaHome = normalizeJavaHome(raw)
@@ -950,10 +952,41 @@ def resolveAthenaDslLanguageServerJavaHome = { Map<String, Object> settings = [:
     addCandidate(settings['java.jdt.ls.java.home'])
     collectAthenaJavaHomeCandidates(settings).each { addCandidate(it) }
 
-    return candidates.find { File javaHome ->
+    File best = null
+    Integer bestMajor = null
+    candidates.each { File javaHome ->
         Integer major = readJavaMajorVersionFromHome(javaHome)
-        return major != null && major >= 21
+        if (major == null || major < minimumMajor) {
+            return
+        }
+        if (best == null || bestMajor == null || major < bestMajor) {
+            best = javaHome
+            bestMajor = major
+        }
     }
+    return best
+}
+
+def resolveAthenaDslVscodeMode = { Map<String, Object> settings = [:] ->
+    String requested = project.findProperty(athenaBootstrapConfig.vscodeModeProperty)?.toString()?.trim()
+    if (requested == null || requested.isEmpty()) {
+        requested = System.getenv(athenaBootstrapConfig.vscodeModeEnv)?.toString()?.trim()
+    }
+
+    String normalized = requested != null ? requested.toLowerCase(Locale.ROOT) : ''
+    if (normalized == 'stable' || normalized == 'ecj') {
+        return 'ecj'
+    }
+    if (normalized == 'javac' || normalized == 'dom') {
+        return 'javac'
+    }
+
+    return 'ecj'
+}
+
+def resolveAthenaDslLanguageServerJavaHome = { Map<String, Object> settings = [:] ->
+    String mode = resolveAthenaDslVscodeMode(settings)
+    return resolveAthenaDslLanguageServerJavaHomeWithMinimum(settings, 'javac'.equals(mode) ? 24 : 21)
 }
 
 def resolveAthenaDslGradleJavaHome = { Map<String, Object> settings = [:] ->
@@ -996,6 +1029,8 @@ def ensureAthenaDslVscodeSettings = {
     File settingsFile = file("$rootDir/.vscode/settings.json")
     Map<String, Object> settings = readJsonObjectLax(settingsFile)
     boolean changed = false
+    String vscodeMode = resolveAthenaDslVscodeMode(settings)
+    boolean javacMode = 'javac'.equals(vscodeMode)
 
     def putIfChanged = { String key, Object value ->
         if (!settings.containsKey(key) || settings[key] != value) {
@@ -1014,13 +1049,11 @@ def ensureAthenaDslVscodeSettings = {
     // IDE-side annotation processing enabled currently trips a Red Hat/Microsoft
     // Java builder ClassCastException and causes false DSL diagnostics.
     putIfChanged('java.import.gradle.annotationProcessing.enabled', false)
-    // Red Hat Java's experimental javac builder on Java 25 currently crashes on
-    // Athena DSL enum constants; keep the language server on the stable path.
-    putIfChanged('java.jdt.ls.javac.enabled', 'off')
-    // The DOM completion engine requires the experimental javac language-server
-    // path. Athena is pinned to the stable ECJ/Java-21 path, so keep completion
-    // on ECJ as well.
-    putIfChanged('java.completion.engine', 'ecj')
+    // Java 21 / ECJ stays the default Athena workspace path. Callers can opt
+    // into javac/DOM with -PathenaVscodeMode=javac / ATHENA_VSCODE_MODE=javac
+    // if they want to experiment with the newer language-server path.
+    putIfChanged('java.jdt.ls.javac.enabled', javacMode ? 'on' : 'off')
+    putIfChanged('java.completion.engine', javacMode ? 'dom' : 'ecj')
     putIfChanged('editor.quickSuggestions', true)
     putIfChanged('editor.suggestOnTriggerCharacters', true)
 
@@ -1240,6 +1273,7 @@ def athenaDslVscodeStatus = {
     String vmArgs = settings['java.jdt.ls.vmargs']?.toString() ?: ''
     boolean hasExports = athenaDslJdtExports.every { vmArgs.contains(it) }
     boolean javacEnabled = 'on'.equalsIgnoreCase(settings['java.jdt.ls.javac.enabled']?.toString())
+    boolean domCompletion = 'dom'.equalsIgnoreCase(settings['java.completion.engine']?.toString() ?: '')
     boolean ecjCompletion = !'dom'.equalsIgnoreCase(settings['java.completion.engine']?.toString() ?: 'ecj')
     boolean buildServerEnabled = !'off'.equalsIgnoreCase(
             settings['java.gradle.buildServer.enabled']?.toString() ?: 'on'
@@ -1252,18 +1286,26 @@ def athenaDslVscodeStatus = {
     Integer languageServerJavaMajor = readJavaMajorVersionFromHome(languageServerJavaHome)
     File gradleJavaHome = normalizeJavaHome(settings['java.import.gradle.java.home'])
     Integer gradleJavaMajor = readJavaMajorVersionFromHome(gradleJavaHome)
+    boolean javacConfigured = javacEnabled
+            && domCompletion
+            && languageServerJavaMajor != null
+            && languageServerJavaMajor >= 24
+    boolean ecjConfigured = !javacEnabled
+            && ecjCompletion
+            && languageServerJavaMajor != null
+            && languageServerJavaMajor >= 21
+    String intellisenseMode = javacEnabled || domCompletion ? 'javac' : 'ecj'
 
     return [
-            configured     : ecjCompletion
+            configured     : (javacConfigured || ecjConfigured)
                     && hasExports
                     && !buildServerEnabled
-                    && languageServerJavaMajor != null
-                    && languageServerJavaMajor >= 21
                     && gradleJavaMajor != null
                     && gradleJavaMajor >= 17,
             file           : settingsFile,
             buildServerEnabled: buildServerEnabled,
             annotationProcessingEnabled: annotationProcessing,
+            intellisenseMode: intellisenseMode,
             jdtJavaHome    : languageServerJavaHome,
             jdtJavaMajor   : languageServerJavaMajor,
             gradleJavaHome : gradleJavaHome,
@@ -1515,6 +1557,7 @@ tasks.register('athenaDoctor') {
         logger.lifecycle("Athena DSL plugin configured in build file: ${dslConfigured()}")
         def vscodeStatus = athenaDslVscodeStatus()
         logger.lifecycle("Athena VS Code DSL settings configured: ${vscodeStatus.configured}")
+        logger.lifecycle("Athena VS Code IntelliSense mode: ${vscodeStatus.intellisenseMode}")
         logger.lifecycle("Athena VS Code Gradle build server enabled: ${vscodeStatus.buildServerEnabled}")
         logger.lifecycle("Athena VS Code Gradle annotation processing enabled: ${vscodeStatus.annotationProcessingEnabled}")
         logger.lifecycle(

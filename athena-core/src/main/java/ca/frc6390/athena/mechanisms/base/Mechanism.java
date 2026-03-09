@@ -711,7 +711,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                             "main",
                             encoder,
                             MechanismEncoderUnit.ROTATIONS,
-                            Double.NaN));
+                            Double.NaN,
+                            true,
+                            true,
+                            true));
         }
         this.positionSourceName = encoder != null ? "main" : null;
         this.velocitySourceName = encoder != null ? "main" : null;

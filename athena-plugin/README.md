@@ -71,3 +71,8 @@ For local Athena plugin development, publish the plugin to `mavenLocal` and let 
 robot project resolve it normally. Avoid using `includeBuild` for `athena-plugin`
 inside robot-project `settings.gradle`; VS Code/Buildship can resolve that path to a
 partial transformed jar, which breaks the DSL plugin service lookup.
+
+Bootstrap keeps Java 21 / ECJ as the default VS Code path. If you want to
+experiment with the javac/DOM language-server path instead, run with
+`-PathenaVscodeMode=javac` (or `ATHENA_VSCODE_MODE=javac`) and point
+`java.jdt.ls.java.home` at a JDK 24+ install.

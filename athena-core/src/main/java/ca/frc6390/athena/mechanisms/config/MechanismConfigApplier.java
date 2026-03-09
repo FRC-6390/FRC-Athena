@@ -7,6 +7,7 @@ import ca.frc6390.athena.hardware.motor.MotorControllerType;
 import ca.frc6390.athena.hardware.motor.MotorRegistry;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.mechanisms.MechanismEncoderSourceDsl;
 import ca.frc6390.athena.mechanisms.MechanismEncoderUnit;
 import ca.frc6390.athena.mechanisms.MechanismInputSource;
 import ca.frc6390.athena.mechanisms.MechanismSetpointSource;
@@ -113,22 +114,19 @@ public final class MechanismConfigApplier {
                 progress = true;
             }
             if (!progress) {
-                throw new IllegalArgumentException("encoder source graph contains unresolved CRT dependencies");
+                throw new IllegalArgumentException("encoder source graph contains unresolved derived-source dependencies");
             }
         }
     }
 
     private static boolean canApplyEncoder(MechanismEncoderConfig enc, Set<String> applied) {
-        String source = enc.source() != null ? enc.source().trim().toLowerCase(Locale.ROOT) : "";
-        if (!"crt".equals(source)) {
+        if (enc.inputs() == null || enc.inputs().isEmpty()) {
             return true;
         }
-        if (enc.crtInputs() == null || enc.crtInputs().isEmpty()) {
-            throw new IllegalArgumentException("CRT encoder source '" + enc.name() + "' must declare crtInputs");
-        }
-        for (MechanismEncoderCrtInputConfig input : enc.crtInputs()) {
+        for (MechanismEncoderInputConfig input : enc.inputs()) {
             if (input == null || input.source() == null || input.source().isBlank()) {
-                throw new IllegalArgumentException("CRT encoder source '" + enc.name() + "' has a blank input source");
+                throw new IllegalArgumentException(
+                        "encoder source '" + enc.name() + "' has a blank input source");
             }
             if (!applied.contains(normalizeEncoderName(input.source()))) {
                 return false;
@@ -144,32 +142,153 @@ public final class MechanismConfigApplier {
             if ("virtual".equals(source)) {
                 throw new IllegalArgumentException("encoder source '" + name + "' uses code-only source=virtual");
             }
-            if ("crt".equals(source)) {
-                builder.crt(crt -> {
-                    for (MechanismEncoderCrtInputConfig input : enc.crtInputs()) {
-                        crt.input(input.source(), input.modulus() != null ? input.modulus() : 0);
-                    }
+            switch (source) {
+                case "crt" -> builder.crt(crt -> {
+                    applyCrtInputs(name, enc, crt);
                     if (enc.validMin() != null && enc.validMax() != null) {
                         crt.validRange(enc.validMin(), enc.validMax());
                     }
+                    return crt;
                 });
-            } else {
-                int signedId = signedEncoderId(enc);
-                if ("internal".equals(source)) {
-                    builder.encoder(AthenaEncoder.INTERNAL, signedId);
-                } else {
-                    try {
-                        AthenaEncoder ae = AthenaEncoder.valueOf(source.toUpperCase(Locale.ROOT));
-                        builder.encoder(ae, signedId);
-                    } catch (IllegalArgumentException ignored) {
-                        builder.encoder(
-                                ca.frc6390.athena.hardware.encoder.EncoderRegistry.get().encoder(source),
-                                signedId);
+                case "filter" -> builder.filter(filter -> {
+                    applyDerivedInputs(name, enc.inputs(), MechanismConfig.InputSource.Position, filter::input);
+                    applyFilter(name, enc, filter);
+                    return filter;
+                });
+                case "differentiate" -> builder.differentiate(diff -> {
+                    applyDerivedInputs(name, enc.inputs(), MechanismConfig.InputSource.Position, diff::input);
+                    applyFilter(name, enc, diff);
+                    return diff;
+                });
+                case "average" -> builder.average(avg -> {
+                    applyDerivedInputs(name, enc.inputs(), MechanismConfig.InputSource.Position, avg::input);
+                    return avg;
+                });
+                case "difference" -> builder.difference(diff -> {
+                    applyDerivedInputs(name, enc.inputs(), MechanismConfig.InputSource.Position, diff::input);
+                    return diff;
+                });
+                case "calibration_map", "calibration-map", "calibrationmap" -> builder.calibrationMap(map -> {
+                    applyDerivedInputs(name, enc.inputs(), MechanismConfig.InputSource.Position, map::input);
+                    applyCalibrationPoints(name, enc, map);
+                    return map;
+                });
+                default -> {
+                    int signedId = signedEncoderId(enc);
+                    if ("internal".equals(source)) {
+                        builder.encoder(AthenaEncoder.INTERNAL, signedId);
+                    } else {
+                        try {
+                            AthenaEncoder ae = AthenaEncoder.valueOf(source.toUpperCase(Locale.ROOT));
+                            builder.encoder(ae, signedId);
+                        } catch (IllegalArgumentException ignored) {
+                            builder.encoder(
+                                    ca.frc6390.athena.hardware.encoder.EncoderRegistry.get().encoder(source),
+                                    signedId);
+                        }
                     }
                 }
             }
             applyEncoderSettings(builder, enc);
+            return builder;
         }));
+    }
+
+    @FunctionalInterface
+    private interface DerivedInputConsumer {
+        void accept(String sourceName, MechanismConfig.InputSource signal);
+    }
+
+    private static void applyDerivedInputs(
+            String ownerName,
+            java.util.List<MechanismEncoderInputConfig> inputs,
+            MechanismConfig.InputSource defaultSource,
+            DerivedInputConsumer consumer) {
+        if (inputs == null || inputs.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "encoder source '" + ownerName + "' requires at least one input");
+        }
+        for (MechanismEncoderInputConfig input : inputs) {
+            if (input == null || input.source() == null || input.source().isBlank()) {
+                throw new IllegalArgumentException(
+                        "encoder source '" + ownerName + "' has a blank input source");
+            }
+            consumer.accept(input.source(), parseDerivedInputSource(input.signal(), defaultSource));
+        }
+    }
+
+    private static void applyCrtInputs(
+            String ownerName,
+            MechanismEncoderConfig enc,
+            MechanismConfig.CrtSourceBuilder crt) {
+        if (enc.inputs() == null || enc.inputs().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "encoder source '" + ownerName + "' requires inputs when source=crt");
+        }
+        for (MechanismEncoderInputConfig input : enc.inputs()) {
+            if (input == null || input.source() == null || input.source().isBlank()) {
+                throw new IllegalArgumentException(
+                        "encoder source '" + ownerName + "' has a blank input source");
+            }
+            crt.input(
+                    input.source(),
+                    parseDerivedInputSource(input.signal(), MechanismConfig.InputSource.Absolute),
+                    input.modulus() != null ? input.modulus() : 0);
+        }
+    }
+
+    private static void applyFilter(
+            String ownerName,
+            MechanismEncoderConfig enc,
+            MechanismConfig.FilterSourceBuilder builder) {
+        String filter = enc.filter() != null ? enc.filter().trim().toLowerCase(Locale.ROOT) : "";
+        switch (filter) {
+            case "low_pass", "low-pass", "lowpass" -> builder.lowPass(
+                    enc.filterAlpha() != null ? enc.filterAlpha() : Double.NaN);
+            case "median" -> builder.median(enc.filterWindow() != null ? enc.filterWindow() : 0);
+            case "moving_average", "moving-average", "movingaverage" -> builder.movingAverage(
+                    enc.filterWindow() != null ? enc.filterWindow() : 0);
+            case "" -> throw new IllegalArgumentException(
+                    "encoder source '" + ownerName + "' requires a filter type");
+            default -> throw new IllegalArgumentException(
+                    "encoder source '" + ownerName + "' has an unknown filter type: " + enc.filter());
+        }
+    }
+
+    private static void applyFilter(
+            String ownerName,
+            MechanismEncoderConfig enc,
+            MechanismConfig.DifferentiateSourceBuilder builder) {
+        String filter = enc.filter() != null ? enc.filter().trim().toLowerCase(Locale.ROOT) : "";
+        switch (filter) {
+            case "" -> {
+                return;
+            }
+            case "low_pass", "low-pass", "lowpass" -> builder.lowPass(
+                    enc.filterAlpha() != null ? enc.filterAlpha() : Double.NaN);
+            case "median" -> builder.median(enc.filterWindow() != null ? enc.filterWindow() : 0);
+            case "moving_average", "moving-average", "movingaverage" -> builder.movingAverage(
+                    enc.filterWindow() != null ? enc.filterWindow() : 0);
+            default -> throw new IllegalArgumentException(
+                    "encoder source '" + ownerName + "' has an unknown filter type: " + enc.filter());
+        }
+    }
+
+    private static void applyCalibrationPoints(
+            String ownerName,
+            MechanismEncoderConfig enc,
+            MechanismConfig.CalibrationMapSourceBuilder builder) {
+        if (enc.points() == null || enc.points().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "encoder source '" + ownerName + "' requires points when source=calibration_map");
+        }
+        for (MechanismEncoderCalibrationPointConfig point : enc.points()) {
+            if (point == null || point.input() == null || point.output() == null) {
+                throw new IllegalArgumentException(
+                        "encoder source '" + ownerName + "' has a calibration point with a null input/output");
+            }
+            builder.point(point.input(), point.output());
+        }
     }
 
     private static String normalizeEncoderName(String name) {
@@ -187,7 +306,7 @@ public final class MechanismConfigApplier {
         return Boolean.TRUE.equals(enc.inverted()) ? -id : id;
     }
 
-    private static void applyEncoderSettings(MechanismConfig.EncoderSourceBuilder builder, MechanismEncoderConfig enc) {
+    private static void applyEncoderSettings(MechanismEncoderSourceDsl builder, MechanismEncoderConfig enc) {
         if (enc.canbus() != null && !enc.canbus().isBlank()) {
             builder.canbus(enc.canbus());
         }
@@ -489,6 +608,20 @@ public final class MechanismConfigApplier {
             case "radians" -> MechanismEncoderUnit.RADIANS;
             case "degrees" -> MechanismEncoderUnit.DEGREES;
             default -> throw new IllegalArgumentException("Unknown encoder unit: " + value);
+        };
+    }
+
+    private static MechanismConfig.InputSource parseDerivedInputSource(
+            String value,
+            MechanismConfig.InputSource fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        return switch (value.trim().toLowerCase(Locale.ROOT)) {
+            case "position" -> MechanismConfig.InputSource.Position;
+            case "velocity" -> MechanismConfig.InputSource.Velocity;
+            case "absolute" -> MechanismConfig.InputSource.Absolute;
+            default -> throw new IllegalArgumentException("Unknown encoder input signal: " + value);
         };
     }
 
