@@ -52,6 +52,12 @@ allprojects {
       }
     }
     maven {
+      url 'https://mirror.clarkson.edu/photonvision/releases'
+      content {
+        includeGroup 'org.photonvision'
+      }
+    }
+    maven {
       url 'https://maven.photonvision.org/repository/internal'
       content {
         includeGroup 'org.photonvision'

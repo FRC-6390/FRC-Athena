@@ -49,6 +49,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
     private double lastPoseAmbiguity = Double.NaN;
     private double lastCameraPitchDegrees = Double.NaN;
     private double lastCameraRollDegrees = Double.NaN;
+    private Pose3d lastEstimatedPose = new Pose3d();
     private List<VisionCamera.TargetMeasurement> latestMeasurements = List.of();
 
     private static final class LocalizationSnapshot {
@@ -103,8 +104,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         this.config = config;
         this.pose = config.cameraRobotSpace();
         this.fieldLayout = AprilTagFieldLayout.loadField(config.fieldLayout());
-        this.estimator = new PhotonPoseEstimator(fieldLayout, config.poseStrategy(), pose);
-        estimator.setMultiTagFallbackStrategy(config.poseStrategyFallback());
+        this.estimator = new PhotonPoseEstimator(fieldLayout, pose);
         this.useForLocalization = config.useForLocalization();
         this.localizationCamera = createVisionCamera();
     }
@@ -195,7 +195,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         List<PhotonTrackedTarget> lastTargets = List.of();
         PhotonTrackedTarget lastBestTarget = null;
         for (PhotonPipelineResult change : results) {
-            visionEst = estimator.update(change);
+            visionEst = estimatePose(change);
             lastTargets = change.getTargets();
             if (change.hasTargets()) {
                 var bestTarget = change.getBestTarget();
@@ -367,6 +367,29 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         return latestMeasurements;
     }
 
+    private Optional<EstimatedRobotPose> estimatePose(PhotonPipelineResult result) {
+        Optional<EstimatedRobotPose> estimate = estimatePose(result, config.poseStrategy());
+        estimate.ifPresent(value -> lastEstimatedPose = value.estimatedPose);
+        return estimate;
+    }
+
+    private Optional<EstimatedRobotPose> estimatePose(
+            PhotonPipelineResult result, PhotonPoseEstimator.PoseStrategy strategy) {
+        return switch (strategy) {
+            case LOWEST_AMBIGUITY -> estimator.estimateLowestAmbiguityPose(result);
+            case CLOSEST_TO_CAMERA_HEIGHT -> estimator.estimateClosestToCameraHeightPose(result);
+            case CLOSEST_TO_REFERENCE_POSE -> estimator.estimateClosestToReferencePose(result, lastEstimatedPose);
+            case CLOSEST_TO_LAST_POSE -> estimator.estimateClosestToReferencePose(result, lastEstimatedPose);
+            case AVERAGE_BEST_TARGETS -> estimator.estimateAverageBestTargetsPose(result);
+            case MULTI_TAG_PNP_ON_COPROCESSOR -> {
+                Optional<EstimatedRobotPose> estimate = estimator.estimateCoprocMultiTagPose(result);
+                yield estimate.isPresent() ? estimate : estimatePose(result, config.poseStrategyFallback());
+            }
+            case MULTI_TAG_PNP_ON_RIO, CONSTRAINED_SOLVEPNP -> estimatePose(result, config.poseStrategyFallback());
+            case PNP_DISTANCE_TRIG_SOLVE -> estimator.estimatePnpDistanceTrigSolvePose(result);
+        };
+    }
+
     private boolean computeHasTargets() {
         if (!isConnected()) {
             return false;
@@ -384,7 +407,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
 
     public void setRobotOrientation(Pose2d pose){
         estimator.addHeadingData(Timer.getFPGATimestamp(), pose.getRotation());
-        estimator.setLastPose(pose);
+        lastEstimatedPose = new Pose3d(pose);
     }
 
     @Override
