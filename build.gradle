@@ -39,11 +39,36 @@ allprojects {
     mavenCentral()
     maven { url 'https://maven.ctr-electronics.com/release/' }
     maven { url 'https://maven.revrobotics.com/' }
-    maven { url 'https://3015rangerrobotics.github.io/pathplannerlib/repo'}
-    maven { url 'https://frcmaven.wpi.edu/artifactory/sleipnirgroup-mvn-release/'}
-    maven { url 'https://maven.photonvision.org/repository/internal' }
-    maven { url 'https://maven.photonvision.org/repository/snapshots' }
-    maven { url 'https://maven.prometheus-dynamics.ca/Prometheus-Dynamics/PDLib' }
+    maven {
+      url 'https://3015rangerrobotics.github.io/pathplannerlib/repo'
+      content {
+        includeGroup 'com.pathplanner.lib'
+      }
+    }
+    maven {
+      url 'https://frcmaven.wpi.edu/artifactory/sleipnirgroup-mvn-release/'
+      content {
+        includeGroup 'choreo'
+      }
+    }
+    maven {
+      url 'https://maven.photonvision.org/repository/internal'
+      content {
+        includeGroup 'org.photonvision'
+      }
+    }
+    maven {
+      url 'https://maven.photonvision.org/repository/snapshots'
+      content {
+        includeGroup 'org.photonvision'
+      }
+    }
+    maven {
+      url 'https://maven.prometheus-dynamics.ca/Prometheus-Dynamics/PDLib'
+      content {
+        includeGroup 'ca.pd.lib'
+      }
+    }
     maven {
       url 'https://dev.studica.com/maven/release/2026/'
       content {

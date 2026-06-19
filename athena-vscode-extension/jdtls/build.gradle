@@ -12,25 +12,45 @@ java {
 def redHatJavaServerDir = file(System.getenv('REDHAT_JAVA_SERVER_DIR')
         ?: "${System.properties['user.home']}/.vscode/extensions/redhat.java-1.53.0-linux-x64/server/plugins")
 
-def requiredBundle = { String glob ->
-    def matches = fileTree(redHatJavaServerDir).matching { include glob }.files.sort()
-    if (matches.isEmpty()) {
-        throw new GradleException("Missing required Red Hat Java server bundle '${glob}' under ${redHatJavaServerDir}")
+def requiredBundleGlobs = [
+        'org.eclipse.jdt.core_*.jar',
+        'org.eclipse.jdt.core.compiler.batch_*.jar',
+        'org.eclipse.core.resources_*.jar',
+        'org.eclipse.core.runtime_*.jar',
+        'org.eclipse.core.jobs_*.jar',
+        'org.eclipse.equinox.registry_*.jar',
+        'org.eclipse.equinox.common_*.jar',
+        'org.eclipse.osgi_*.jar'
+]
+
+def requiredBundles = {
+    requiredBundleGlobs.collect { glob ->
+        def matches = fileTree(redHatJavaServerDir).matching { include glob }.files.sort()
+        if (matches.isEmpty()) {
+            throw new GradleException("Missing required Red Hat Java server bundle '${glob}' under ${redHatJavaServerDir}")
+        }
+        matches.first()
     }
-    matches.first()
+}
+
+tasks.register('validateRedHatJavaServerBundles') {
+    doLast {
+        requiredBundles()
+    }
+}
+
+def optionalBundleFileTree = { String glob ->
+    fileTree(redHatJavaServerDir).matching { include glob }
 }
 
 dependencies {
-    compileOnly files(
-            requiredBundle('org.eclipse.jdt.core_*.jar'),
-            requiredBundle('org.eclipse.jdt.core.compiler.batch_*.jar'),
-            requiredBundle('org.eclipse.core.resources_*.jar'),
-            requiredBundle('org.eclipse.core.runtime_*.jar'),
-            requiredBundle('org.eclipse.core.jobs_*.jar'),
-            requiredBundle('org.eclipse.equinox.registry_*.jar'),
-            requiredBundle('org.eclipse.equinox.common_*.jar'),
-            requiredBundle('org.eclipse.osgi_*.jar')
-    )
+    requiredBundleGlobs.each { glob ->
+        compileOnly optionalBundleFileTree(glob)
+    }
+}
+
+compileJava {
+    dependsOn tasks.named('validateRedHatJavaServerBundles')
 }
 
 jar {
