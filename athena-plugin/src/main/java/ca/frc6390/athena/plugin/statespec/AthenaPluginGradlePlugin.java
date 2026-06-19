@@ -13,7 +13,6 @@ import java.util.List;
 
 public class AthenaPluginGradlePlugin implements Plugin<Project> {
     private static final String JAVAC_PLUGIN_FLAG = "-Xplugin:AthenaStateDsl";
-    private static final String DISABLE_THIS_ESCAPE_LINT_FLAG = "-Xlint:-this-escape";
     private static final List<String> JAVAC_EXPORTS = List.of(
             "--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
             "--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
@@ -65,9 +64,6 @@ public class AthenaPluginGradlePlugin implements Plugin<Project> {
         project.getTasks().withType(JavaCompile.class).configureEach(task -> {
             if (!task.getOptions().getCompilerArgs().contains(JAVAC_PLUGIN_FLAG)) {
                 task.getOptions().getCompilerArgs().add(JAVAC_PLUGIN_FLAG);
-            }
-            if (!task.getOptions().getCompilerArgs().contains(DISABLE_THIS_ESCAPE_LINT_FLAG)) {
-                task.getOptions().getCompilerArgs().add(DISABLE_THIS_ESCAPE_LINT_FLAG);
             }
 
             task.getOptions().setFork(true);
