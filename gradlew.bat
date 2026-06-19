@@ -101,11 +101,14 @@ goto fail
 :detectJavaVersion
 set JAVA_VERSION=
 set JAVA_MAJOR=0
-for /f "tokens=3" %%v in ('"%JAVA_EXE%" -version 2^>^&1 ^| findstr /i " version "') do (
+set "JAVA_VERSION_FILE=%TEMP%\gradlew-java-version-%RANDOM%-%RANDOM%.txt"
+"%JAVA_EXE%" -version > "%JAVA_VERSION_FILE%" 2>&1
+for /f "tokens=3" %%v in ('findstr /i " version " "%JAVA_VERSION_FILE%"') do (
   set JAVA_VERSION=%%~v
   goto detectJavaVersionDone
 )
 :detectJavaVersionDone
+if exist "%JAVA_VERSION_FILE%" del "%JAVA_VERSION_FILE%" >NUL 2>&1
 set JAVA_VERSION=%JAVA_VERSION:"=%
 for /f "tokens=1 delims=." %%m in ("%JAVA_VERSION%") do set JAVA_MAJOR=%%~m
 if "%JAVA_MAJOR%"=="1" for /f "tokens=2 delims=." %%m in ("%JAVA_VERSION%") do set JAVA_MAJOR=%%~m
