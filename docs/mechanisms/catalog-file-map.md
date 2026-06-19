@@ -1,22 +1,25 @@
 # Mechanisms File Catalog
 
+## V2 Public API (`athena-core/.../api/mechanism`)
+
+- `MechanismConfig`, `StatefulMechanismConfig`: structured authoring roots.
+- `FlowMechanismConfig`, `StatefulFlowMechanismConfig`, `Mechanisms`: flow authoring roots.
+- `MechanismDefinitions`: annotation loading, structured lowering, validation, and direct build.
+- `annotation/*`: mechanism, identity, motor, encoder, input, loop, and automation annotations.
+- `motor/*`, `encoder/*`, `input/*`, `identity/*`: reusable V2 section objects.
+- `behavior/*`: PID, feedforward, bang-bang, custom loops, and state automation.
+- `definition/*`: immutable lowered model shared by all authoring styles.
+- `introspection/*`, `validation/*`, `runtime/*`: annotation loading, validation, and runtime lowering.
+
 ## Core Runtime (`athena-core/.../mechanisms/base`)
 
 - `Mechanism`: primary mechanism runtime/control loop implementation.
-- `MechanismConfig`: builder/DSL for composing mechanism behavior.
-- `MechanismContext`, `MechanismControlContext`: runtime contexts.
-- `MechanismGroup`: bulk grouping helper.
-- `MechanismConfigIO`, `MechanismConfigRecord`: config IO bridge.
-- `MechanismLimitSwitchConfig`, `MechanismTravelRange`: safety/config helpers.
-- `OutputType`, `OutputConversions`: output-space behavior.
+- `MechanismRuntimeConfig`, `MechanismLifecycleHooks`: runtime-owned mechanism setup.
+- `MechanismContext`, `MechanismControlContext`: runtime contexts exposed to hooks and loops.
+- `MechanismConfigIO`, `MechanismConfigRecord`: record-based config snapshot/apply path.
+- `OutputType`, `OutputConversions`, `MechanismTravelRange`: output and bounds helpers.
 
-## Focused Sections (`.../mechanisms/sections`)
-
-- `MechanismSysIdSection`: SysId config/trigger binding API.
-- `MechanismSimulationSection`: simulation helpers.
-- `MechanismNetworkTablesSection`: NT publishing toggles/path control.
-
-## Typed Mechanisms (`.../mechanisms/types`)
+## Typed Runtime Wrappers (`.../mechanisms/types`)
 
 - `ArmMechanism`
 - `ElevatorMechanism`
@@ -24,15 +27,15 @@
 - `SimpleMotorMechanism`
 - `TurretMechanism`
 
-## Superstructure (`.../mechanisms/superstructure`)
+## Superstructure Runtime (`.../mechanisms/superstructure`)
 
 - `SuperstructureMechanism`: parent composition runtime.
-- `SuperstructureConfig`, `SuperstructureContext`: setup + runtime context.
-- `SuperstructureMechanismsView`: sub-mechanism view helpers.
+- `SuperstructureRuntimeConfig`, `SuperstructureLifecycleHooks`: runtime-owned superstructure setup.
+- `SuperstructureContext`, `SuperstructureMechanismsView`: context and child lookup helpers.
 
 ## State Runtime (`.../mechanisms/state`)
 
-- `StateMachine`, `StateGraph`, `StatefulMechanism`, `StatefulLike`
+- `StateMachine`, `StateGraph`, `StatefulMechanism`, `StatefulMechanismRuntimeConfig`, `StatefulLike`
 
 ## State DSL (`.../mechanisms/statespec`)
 
@@ -40,10 +43,10 @@
 - `StateBuilder`, `StateCtx`, `TransitionDirective`
 - `StateSeed`, `StateSeedProvider`, `StateSeedRuntime`
 
-## Config File Model (`.../mechanisms/config`)
+## Config Export and Schema (`.../mechanisms/config`)
 
-- `MechanismConfigLoader`, `MechanismConfigApplier`, `MechanismConfigExport`
-- `Mechanism*Config` schema records
+- `MechanismConfigExport`
+- `MechanismConfigFile` and related `Mechanism*Config` schema records
 - `AthenaTomlWriter`
 
 ## Simulation (`.../mechanisms/sim`)
@@ -64,4 +67,3 @@
 
 - `MechanismDefaultVisualization`
 - `MechanismVisualizationDefaults`
-- `ElevatorMechanismVisualization`

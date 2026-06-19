@@ -70,9 +70,9 @@ import java.util.function.Supplier;
 
 public class Mechanism extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism{
 
-    // Retain the builder instance that constructed this mechanism so RobotCore can resolve
-    // mechanisms by config identity when desired (Constants-style configs).
-    private final MechanismConfig<? extends Mechanism> sourceConfig;
+    private final MechanismConfigRecord configRecord;
+    private final Object sourceKey;
+    private final MechanismLifecycleHooks lifecycleHooks;
 
     private final MotorControllerGroup motors;
     private final Map<String, MechanismEncoderSource> encoderSources;
@@ -207,8 +207,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private Command activeSysIdCommand;
     private final List<Consumer<?>> periodicHooks;
     private final List<TimedRunner<Consumer<Mechanism>>> timedPeriodicHooks;
-    private final List<TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoops;
-    private final Map<String, TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>>> controlLoopsByName;
+    private final List<TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>>> controlLoops;
+    private final Map<String, TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>>> controlLoopsByName;
     private final Set<String> disabledControlLoops;
     private final Map<String, BooleanSupplier> controlLoopInputs;
     private final Map<String, DoubleSupplier> controlLoopDoubleInputs;
@@ -217,7 +217,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, java.util.function.Supplier<edu.wpi.first.math.geometry.Pose2d>> controlLoopPose2dInputs;
     private final Map<String, java.util.function.Supplier<edu.wpi.first.math.geometry.Pose3d>> controlLoopPose3dInputs;
     private final Map<String, Supplier<?>> controlLoopObjectInputs;
-    // Mutable inputs (declared with defaults in MechanismConfig.inputs(...)).
+    // Mutable inputs declared with default values in the mechanism declaration.
     private final Map<String, Boolean> mutableBoolInputDefaults;
     private final Map<String, Boolean> mutableBoolInputs;
     private final Map<String, Double> mutableDoubleInputDefaults;
@@ -232,13 +232,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     private final Map<String, edu.wpi.first.math.geometry.Pose3d> mutablePose3dInputs;
     private final Map<String, PIDController> controlLoopPids;
     private final Map<String, ProfiledPIDController> controlLoopProfiledPids;
-    private final Map<String, MechanismConfig.PidProfile> controlLoopPidProfilesConfig = new HashMap<>();
-    private final Map<String, MechanismConfig.PidAutotunerConfig> controlLoopPidAutotunerConfigs = new HashMap<>();
+    private final Map<String, MechanismRuntimeConfig.PidProfile> controlLoopPidProfilesConfig = new HashMap<>();
+    private final Map<String, MechanismRuntimeConfig.PidAutotunerConfig> controlLoopPidAutotunerConfigs = new HashMap<>();
     private final Map<String, OutputType> controlLoopPidOutputTypes;
     private final Map<String, Double> controlLoopPidTolerances;
-    private final Map<String, MechanismConfig.BangBangProfile> controlLoopBangBangs;
+    private final Map<String, MechanismRuntimeConfig.BangBangProfile> controlLoopBangBangs;
     private final Map<String, SimpleMotorFeedforward> controlLoopFeedforwards;
-    private final Map<String, MechanismConfig.FeedforwardProfile> controlLoopFeedforwardProfiles;
+    private final Map<String, MechanismRuntimeConfig.FeedforwardProfile> controlLoopFeedforwardProfiles;
     private final Map<String, OutputType> controlLoopFeedforwardOutputTypes;
     private final Map<String, Double> controlLoopFeedforwardTolerances;
     private final MechanismControlContextImpl controlContext = new MechanismControlContextImpl();
@@ -289,28 +289,43 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return "mechanisms/" + mechanismName;
     }
 
-    public Mechanism(MechanismConfig<? extends Mechanism> config){
-        this.sourceConfig = config;
-        this.motors =
-                MotorControllerGroup.fromConfigs(config.data().motors().toArray(MotorControllerConfig[]::new));
-        this.encoderSources = new LinkedHashMap<>(config.resolveEncoderSources(this.motors));
-        this.positionSourceName = config.resolvePositionSourceName(this.encoderSources);
-        this.velocitySourceName = config.resolveVelocitySourceName(this.encoderSources);
-        this.absoluteSourceName = config.resolveAbsoluteSourceName(this.encoderSources);
+    public Mechanism(MechanismRuntimeConfig<? extends Mechanism> runtimeConfig) {
+        this(
+                Objects.requireNonNull(runtimeConfig, "runtimeConfig"),
+                runtimeConfig.sourceKey() != null ? runtimeConfig.sourceKey() : runtimeConfig,
+                MechanismLifecycleHooks.NONE);
+    }
+
+    protected Mechanism(
+            MechanismRuntimeConfig<? extends Mechanism> runtimeConfig,
+            Object sourceKey,
+            MechanismLifecycleHooks lifecycleHooks) {
+        Objects.requireNonNull(runtimeConfig, "runtimeConfig");
+        this.configRecord = runtimeConfig.data();
+        this.sourceKey = sourceKey;
+        this.lifecycleHooks = lifecycleHooks != null ? lifecycleHooks : MechanismLifecycleHooks.NONE;
+        this.motors = MotorControllerGroup.fromConfigs(runtimeConfig.motors().toArray(MotorControllerConfig[]::new));
+        this.encoderSources = new LinkedHashMap<>(runtimeConfig.encoderSources());
+        this.positionSourceName = runtimeConfig.positionSourceName();
+        this.velocitySourceName = runtimeConfig.velocitySourceName();
+        this.absoluteSourceName = runtimeConfig.absoluteSourceName();
         this.encoder = resolveEncoderDevice(this.encoderSources, this.positionSourceName);
-        OutputType configOutputType = config.data().outputType();
+        OutputType configOutputType = runtimeConfig.data().outputType();
         if (configOutputType == null) {
-            this.outputType = config.data().useVoltage() ? OutputType.VOLTAGE : OutputType.PERCENT;
+            this.outputType = runtimeConfig.data().useVoltage() ? OutputType.VOLTAGE : OutputType.PERCENT;
         } else {
             this.outputType = configOutputType;
         }
         this.override = false;
-        this.limitSwitches =
-                config.data().limitSwitches().stream().map(GenericLimitSwitch::fromConfig).toArray(GenericLimitSwitch[]::new);
-        this.setpointIsOutput = config.data().useSetpointAsOutput();
-        this.pidPeriod = config.data().pidPeriod();
+        this.limitSwitches = runtimeConfig.data()
+                .limitSwitches()
+                .stream()
+                .map(GenericLimitSwitch::fromConfig)
+                .toArray(GenericLimitSwitch[]::new);
+        this.setpointIsOutput = runtimeConfig.data().useSetpointAsOutput();
+        this.pidPeriod = runtimeConfig.data().pidPeriod();
         this.motionLimits = new MotionLimits();
-        this.hardwareUpdatePeriodSeconds = sanitizeHardwareUpdatePeriod(config.data().hardwareUpdatePeriodSeconds());
+        this.hardwareUpdatePeriodSeconds = sanitizeHardwareUpdatePeriod(runtimeConfig.data().hardwareUpdatePeriodSeconds());
         this.hardwareUpdateSlot = NEXT_HARDWARE_UPDATE_SLOT.getAndIncrement();
         recomputeHardwareRefreshPhase();
         this.standaloneEncoders = collectStandaloneEncoders(this.encoderSources, this.motors);
@@ -328,9 +343,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
         MechanismSimulationModel model = null;
         double updatePeriod = 0.02;
-        if (config.simulationConfig() != null && RobotBase.isSimulation()) {
-            model = config.simulationConfig().createSimulation(this);
-            updatePeriod = config.simulationConfig().updatePeriodSeconds();
+        if (runtimeConfig.simulationConfig() != null && RobotBase.isSimulation()) {
+            model = runtimeConfig.simulationConfig().createSimulation(this);
+            updatePeriod = runtimeConfig.simulationConfig().updatePeriodSeconds();
         }
         this.simulationModel = model;
         this.simulationUpdatePeriodSeconds = updatePeriod;
@@ -339,46 +354,47 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             lastSimulationTimestampSeconds = Timer.getFPGATimestamp();
         }
         MechanismVisualizationConfig resolvedVisualizationConfig =
-                config.visualizationConfig() != null ? config.visualizationConfig() : MechanismVisualizationDefaults.forMechanism(this);
-        this.visualization = resolvedVisualizationConfig != null ? new MechanismVisualization(resolvedVisualizationConfig) : null;
+                runtimeConfig.visualizationConfig() != null
+                        ? runtimeConfig.visualizationConfig()
+                        : MechanismVisualizationDefaults.forMechanism(this);
+        this.visualization =
+                resolvedVisualizationConfig != null ? new MechanismVisualization(resolvedVisualizationConfig) : null;
         if (RobotBase.isSimulation()) {
-            if (config.sensorSimulationConfig() != null) {
-                this.sensorSimulation = MechanismSensorSimulation.fromConfig(this, config.sensorSimulationConfig());
+            if (runtimeConfig.sensorSimulationConfig() != null) {
+                this.sensorSimulation = MechanismSensorSimulation.fromConfig(this, runtimeConfig.sensorSimulationConfig());
             } else {
                 this.sensorSimulation = MechanismSensorSimulation.forLimitSwitches(this);
             }
         } else {
-        this.sensorSimulation = MechanismSensorSimulation.empty();
+            this.sensorSimulation = MechanismSensorSimulation.empty();
         }
         this.periodicHooks = new ArrayList<>();
         this.timedPeriodicHooks = new ArrayList<>();
-        MechanismConfigRecord cfg = config.data();
+        MechanismConfigRecord cfg = runtimeConfig.data();
         setBounds(cfg.minBound(), cfg.maxBound());
         setMotionLimits(cfg.motionLimits());
-        this.periodicHooks.addAll(config.periodicHooks());
-        if (config.periodicHookBindings() != null) {
-            for (MechanismConfig.PeriodicHookBinding<?> binding : config.periodicHookBindings()) {
-                registerPeriodicHook(binding);
-            }
+        this.periodicHooks.addAll(runtimeConfig.periodicHooks());
+        for (MechanismRuntimeConfig.PeriodicHookBinding<?> binding : runtimeConfig.periodicHookBindings()) {
+            registerPeriodicHook(binding);
         }
-        this.controlLoopInputs = new HashMap<>(config.inputs());
-        this.controlLoopDoubleInputs = new HashMap<>(config.doubleInputs());
-        this.controlLoopIntInputs = new HashMap<>(config.intInputs());
-        this.controlLoopStringInputs = new HashMap<>(config.stringInputs());
-        this.controlLoopPose2dInputs = new HashMap<>(config.pose2dInputs());
-        this.controlLoopPose3dInputs = new HashMap<>(config.pose3dInputs());
-        this.controlLoopObjectInputs = new HashMap<>(config.objectInputs());
-        this.mutableBoolInputDefaults = new HashMap<>(config.mutableBoolInputDefaults());
+        this.controlLoopInputs = new HashMap<>(runtimeConfig.inputs());
+        this.controlLoopDoubleInputs = new HashMap<>(runtimeConfig.doubleInputs());
+        this.controlLoopIntInputs = new HashMap<>(runtimeConfig.intInputs());
+        this.controlLoopStringInputs = new HashMap<>(runtimeConfig.stringInputs());
+        this.controlLoopPose2dInputs = new HashMap<>(runtimeConfig.pose2dInputs());
+        this.controlLoopPose3dInputs = new HashMap<>(runtimeConfig.pose3dInputs());
+        this.controlLoopObjectInputs = new HashMap<>(runtimeConfig.objectInputs());
+        this.mutableBoolInputDefaults = new HashMap<>(runtimeConfig.mutableBoolInputDefaults());
         this.mutableBoolInputs = new HashMap<>(this.mutableBoolInputDefaults);
-        this.mutableDoubleInputDefaults = new HashMap<>(config.mutableDoubleInputDefaults());
+        this.mutableDoubleInputDefaults = new HashMap<>(runtimeConfig.mutableDoubleInputDefaults());
         this.mutableDoubleInputs = new HashMap<>(this.mutableDoubleInputDefaults);
-        this.mutableIntInputDefaults = new HashMap<>(config.mutableIntInputDefaults());
+        this.mutableIntInputDefaults = new HashMap<>(runtimeConfig.mutableIntInputDefaults());
         this.mutableIntInputs = new HashMap<>(this.mutableIntInputDefaults);
-        this.mutableStringInputDefaults = new HashMap<>(config.mutableStringInputDefaults());
+        this.mutableStringInputDefaults = new HashMap<>(runtimeConfig.mutableStringInputDefaults());
         this.mutableStringInputs = new HashMap<>(this.mutableStringInputDefaults);
-        this.mutablePose2dInputDefaults = new HashMap<>(config.mutablePose2dInputDefaults());
+        this.mutablePose2dInputDefaults = new HashMap<>(runtimeConfig.mutablePose2dInputDefaults());
         this.mutablePose2dInputs = new HashMap<>(this.mutablePose2dInputDefaults);
-        this.mutablePose3dInputDefaults = new HashMap<>(config.mutablePose3dInputDefaults());
+        this.mutablePose3dInputDefaults = new HashMap<>(runtimeConfig.mutablePose3dInputDefaults());
         this.mutablePose3dInputs = new HashMap<>(this.mutablePose3dInputDefaults);
         this.controlLoopPids = new HashMap<>();
         this.controlLoopProfiledPids = new HashMap<>();
@@ -392,14 +408,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         this.controlLoops = new ArrayList<>();
         this.controlLoopsByName = new HashMap<>();
         this.disabledControlLoops = new HashSet<>();
-        if (config.controlLoopPidProfiles() != null) {
-            for (Map.Entry<String, MechanismConfig.PidProfile> entry : config.controlLoopPidProfiles().entrySet()) {
+        if (runtimeConfig.controlLoopPidProfiles() != null) {
+            for (Map.Entry<String, MechanismRuntimeConfig.PidProfile> entry : runtimeConfig.controlLoopPidProfiles().entrySet()) {
                 String name = entry.getKey();
-                MechanismConfig.PidProfile profile = entry.getValue();
+                MechanismRuntimeConfig.PidProfile profile = entry.getValue();
                 if (name == null || name.isBlank() || profile == null) {
                     continue;
                 }
-                MechanismConfig.PidProfile sanitized = new MechanismConfig.PidProfile(
+                MechanismRuntimeConfig.PidProfile sanitized = new MechanismRuntimeConfig.PidProfile(
                         profile.outputType(),
                         profile.kP(),
                         profile.kI(),
@@ -435,8 +451,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     if (Double.isFinite(sanitized.tolerance()) && sanitized.tolerance() > 0.0) {
                         pid.setTolerance(sanitized.tolerance());
                     }
-                    if (config.data().pidContinous()) {
-                        pid.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
+                    if (runtimeConfig.data().pidContinous()) {
+                        pid.enableContinuousInput(runtimeConfig.data().continousMin(), runtimeConfig.data().continousMax());
                     }
                     controlLoopProfiledPids.put(name, pid);
                 } else {
@@ -447,14 +463,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                     if (Double.isFinite(sanitized.tolerance()) && sanitized.tolerance() > 0.0) {
                         pid.setTolerance(sanitized.tolerance());
                     }
-                    if (config.data().pidContinous()) {
-                        pid.enableContinuousInput(config.data().continousMin(), config.data().continousMax());
+                    if (runtimeConfig.data().pidContinous()) {
+                        pid.enableContinuousInput(runtimeConfig.data().continousMin(), runtimeConfig.data().continousMax());
                     }
                     controlLoopPids.put(name, pid);
                 }
                 controlLoopPidOutputTypes.put(name, profileOutput);
                 controlLoopPidTolerances.put(name, sanitizeControlLoopTolerance(sanitized.tolerance()));
-                MechanismConfig.PidAutotunerConfig autotuner = sanitized.autotuner();
+                MechanismRuntimeConfig.PidAutotunerConfig autotuner = sanitized.autotuner();
                 if (autotuner != null && autotuner.enabled()) {
                     controlLoopPidAutotunerConfigs.put(name, autotuner);
                 }
@@ -463,10 +479,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!controlLoopPids.isEmpty() || !controlLoopProfiledPids.isEmpty()) {
             pidEnabled = true;
         }
-        if (config.controlLoopBangBangProfiles() != null) {
-            for (Map.Entry<String, MechanismConfig.BangBangProfile> entry : config.controlLoopBangBangProfiles().entrySet()) {
+        if (runtimeConfig.controlLoopBangBangProfiles() != null) {
+            for (Map.Entry<String, MechanismRuntimeConfig.BangBangProfile> entry : runtimeConfig.controlLoopBangBangProfiles().entrySet()) {
                 String name = entry.getKey();
-                MechanismConfig.BangBangProfile profile = entry.getValue();
+                MechanismRuntimeConfig.BangBangProfile profile = entry.getValue();
                 if (name == null || name.isBlank() || profile == null) {
                     continue;
                 }
@@ -476,7 +492,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 }
                 controlLoopBangBangs.put(
                         name,
-                        new MechanismConfig.BangBangProfile(
+                        new MechanismRuntimeConfig.BangBangProfile(
                                 profileOutput,
                                 sanitizeBangBangLevel(profile.highOutput()),
                                 sanitizeBangBangLevel(profile.lowOutput()),
@@ -485,10 +501,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                                 profile.setpointSource()));
             }
         }
-        if (config.controlLoopFeedforwardProfiles() != null) {
-            for (Map.Entry<String, MechanismConfig.FeedforwardProfile> entry : config.controlLoopFeedforwardProfiles().entrySet()) {
+        if (runtimeConfig.controlLoopFeedforwardProfiles() != null) {
+            for (Map.Entry<String, MechanismRuntimeConfig.FeedforwardProfile> entry : runtimeConfig.controlLoopFeedforwardProfiles().entrySet()) {
                 String name = entry.getKey();
-                MechanismConfig.FeedforwardProfile profile = entry.getValue();
+                MechanismRuntimeConfig.FeedforwardProfile profile = entry.getValue();
                 if (name == null || name.isBlank() || profile == null) {
                     continue;
                 }
@@ -496,9 +512,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 if (profileOutput != OutputType.VOLTAGE) {
                     throw new IllegalStateException("Feedforward profile '" + name + "' output type must be VOLTAGE");
                 }
-                MechanismConfig.FeedforwardType profileType =
-                        profile.type() != null ? profile.type() : MechanismConfig.FeedforwardType.SIMPLE;
-                MechanismConfig.FeedforwardProfile sanitized = new MechanismConfig.FeedforwardProfile(
+                MechanismRuntimeConfig.FeedforwardType profileType =
+                        profile.type() != null ? profile.type() : MechanismRuntimeConfig.FeedforwardType.SIMPLE;
+                MechanismRuntimeConfig.FeedforwardProfile sanitized = new MechanismRuntimeConfig.FeedforwardProfile(
                         profileOutput,
                         profileType,
                         profile.kS(),
@@ -508,7 +524,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                         sanitizeControlLoopTolerance(profile.tolerance()),
                         profile.setpointSource());
                 controlLoopFeedforwardProfiles.put(name, sanitized);
-                if (profileType == MechanismConfig.FeedforwardType.SIMPLE) {
+                if (profileType == MechanismRuntimeConfig.FeedforwardType.SIMPLE) {
                     SimpleMotorFeedforward ff = sanitized.simple();
                     controlLoopFeedforwards.put(name, new SimpleMotorFeedforward(ff.getKs(), ff.getKv(), ff.getKa()));
                 }
@@ -519,14 +535,45 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!controlLoopFeedforwardProfiles.isEmpty()) {
             feedforwardEnabled = true;
         }
-        for (MechanismConfig.ControlLoopBinding<?> binding : config.controlLoops()) {
+        for (MechanismRuntimeConfig.ControlLoopBinding<?> binding : runtimeConfig.controlLoops()) {
             registerControlLoop(binding);
         }
+        this.disabledControlLoops.addAll(runtimeConfig.initiallyDisabledControlLoops());
 
+        if (!runtimeConfig.name().isBlank()) {
+            setName(runtimeConfig.name());
+        }
+        if (runtimeConfig.configDisabled()) {
+            setConfigDisabled(true);
+        }
     }
 
-    public MechanismConfig<? extends Mechanism> getSourceConfig() {
-        return sourceConfig;
+    public static Mechanism create(MechanismRuntimeConfig<Mechanism> runtimeConfig) {
+        return new Mechanism(runtimeConfig);
+    }
+
+    public MechanismConfigRecord getConfigRecord() {
+        return configRecord;
+    }
+
+    public Object getSourceKey() {
+        return sourceKey;
+    }
+
+    public Map<String, MechanismRuntimeConfig.PidProfile> getControlLoopPidProfiles() {
+        return Map.copyOf(controlLoopPidProfilesConfig);
+    }
+
+    public Map<String, MechanismRuntimeConfig.BangBangProfile> getControlLoopBangBangProfiles() {
+        return Map.copyOf(controlLoopBangBangs);
+    }
+
+    public Map<String, MechanismRuntimeConfig.FeedforwardProfile> getControlLoopFeedforwardProfiles() {
+        return Map.copyOf(controlLoopFeedforwardProfiles);
+    }
+
+    public void runInitHooks() {
+        lifecycleHooks.runInitHooks(this);
     }
 
     void setConfigDisabled(boolean configDisabled) {
@@ -593,10 +640,10 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     public void runLifecycleHooks(RobotCoreHooks.Phase phase) {
-        if (sourceConfig == null || phase == null) {
+        if (phase == null) {
             return;
         }
-        sourceConfig.runPhaseHooks(this, phase);
+        lifecycleHooks.runPhaseHooks(this, phase);
     }
 
     private static Encoder resolveEncoderDevice(
@@ -701,7 +748,13 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             MechanismSimulationConfig simulationConfig,
             MechanismVisualizationConfig visualizationConfig,
             MechanismSensorSimulationConfig sensorSimulationConfig) {
-        this.sourceConfig = null;
+        this.configRecord = MechanismConfigRecord.defaults().toBuilder()
+                .outputType(useVoltage ? OutputType.VOLTAGE : OutputType.PERCENT)
+                .useSetpointAsOutput(useSetpointAsOutput)
+                .pidPeriod(pidPeriod)
+                .build();
+        this.sourceKey = null;
+        this.lifecycleHooks = MechanismLifecycleHooks.NONE;
         this.motors = motors;
         this.encoderSources = new LinkedHashMap<>();
         if (encoder != null) {
@@ -1213,7 +1266,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return maxBound;
     }
 
-    public Enum<?> activeState() {
+    public Object activeState() {
         return getActiveState();
     }
 
@@ -2252,9 +2305,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
         double target = getSetpoint() + getNudge();
 
-        for (Map.Entry<String, MechanismConfig.PidProfile> entry : controlLoopPidProfilesConfig.entrySet()) {
+        for (Map.Entry<String, MechanismRuntimeConfig.PidProfile> entry : controlLoopPidProfilesConfig.entrySet()) {
             String name = entry.getKey();
-            MechanismConfig.PidProfile profile = entry.getValue();
+            MechanismRuntimeConfig.PidProfile profile = entry.getValue();
             if (name == null || name.isBlank() || profile == null) {
                 continue;
             }
@@ -2268,9 +2321,9 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             }
         }
 
-        for (Map.Entry<String, MechanismConfig.BangBangProfile> entry : controlLoopBangBangs.entrySet()) {
+        for (Map.Entry<String, MechanismRuntimeConfig.BangBangProfile> entry : controlLoopBangBangs.entrySet()) {
             String name = entry.getKey();
-            MechanismConfig.BangBangProfile profile = entry.getValue();
+            MechanismRuntimeConfig.BangBangProfile profile = entry.getValue();
             if (name == null || name.isBlank() || profile == null) {
                 continue;
             }
@@ -2300,7 +2353,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return setpoint;
     }
 
-    protected Enum<?> getActiveState() {
+    protected Object getActiveState() {
         return null;
     }
 
@@ -2499,15 +2552,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private void updateControlLoopPidProfile(
             String loopName,
-            java.util.function.Function<MechanismConfig.PidProfile, MechanismConfig.PidProfile> updater) {
+            java.util.function.Function<MechanismRuntimeConfig.PidProfile, MechanismRuntimeConfig.PidProfile> updater) {
         if (loopName == null || updater == null) {
             return;
         }
-        MechanismConfig.PidProfile current = controlLoopPidProfilesConfig.get(loopName);
+        MechanismRuntimeConfig.PidProfile current = controlLoopPidProfilesConfig.get(loopName);
         if (current == null) {
             return;
         }
-        MechanismConfig.PidProfile updated = updater.apply(current);
+        MechanismRuntimeConfig.PidProfile updated = updater.apply(current);
         if (updated == null) {
             return;
         }
@@ -2552,7 +2605,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopPidProfile(loopName, profile -> new MechanismConfig.PidProfile(
+        updateControlLoopPidProfile(loopName, profile -> new MechanismRuntimeConfig.PidProfile(
                 profile.outputType(),
                 value,
                 profile.kI(),
@@ -2570,7 +2623,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopPidProfile(loopName, profile -> new MechanismConfig.PidProfile(
+        updateControlLoopPidProfile(loopName, profile -> new MechanismRuntimeConfig.PidProfile(
                 profile.outputType(),
                 profile.kP(),
                 value,
@@ -2588,7 +2641,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopPidProfile(loopName, profile -> new MechanismConfig.PidProfile(
+        updateControlLoopPidProfile(loopName, profile -> new MechanismRuntimeConfig.PidProfile(
                 profile.outputType(),
                 profile.kP(),
                 profile.kI(),
@@ -2606,7 +2659,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopPidProfile(loopName, profile -> new MechanismConfig.PidProfile(
+        updateControlLoopPidProfile(loopName, profile -> new MechanismRuntimeConfig.PidProfile(
                 profile.outputType(),
                 profile.kP(),
                 profile.kI(),
@@ -2622,15 +2675,15 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private void updateControlLoopFeedforwardProfile(
             String loopName,
-            java.util.function.Function<MechanismConfig.FeedforwardProfile, MechanismConfig.FeedforwardProfile> updater) {
+            java.util.function.Function<MechanismRuntimeConfig.FeedforwardProfile, MechanismRuntimeConfig.FeedforwardProfile> updater) {
         if (loopName == null || updater == null) {
             return;
         }
-        MechanismConfig.FeedforwardProfile current = controlLoopFeedforwardProfiles.get(loopName);
+        MechanismRuntimeConfig.FeedforwardProfile current = controlLoopFeedforwardProfiles.get(loopName);
         if (current == null) {
             return;
         }
-        MechanismConfig.FeedforwardProfile updated = updater.apply(current);
+        MechanismRuntimeConfig.FeedforwardProfile updated = updater.apply(current);
         if (updated == null) {
             return;
         }
@@ -2640,7 +2693,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         controlLoopFeedforwardOutputTypes.put(loopName, output);
         controlLoopFeedforwardTolerances.put(loopName, sanitizeControlLoopTolerance(updated.tolerance()));
 
-        if (updated.type() == MechanismConfig.FeedforwardType.SIMPLE) {
+        if (updated.type() == MechanismRuntimeConfig.FeedforwardType.SIMPLE) {
             controlLoopFeedforwards.put(loopName, new SimpleMotorFeedforward(updated.kS(), updated.kV(), updated.kA()));
         } else {
             controlLoopFeedforwards.remove(loopName);
@@ -2651,7 +2704,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismConfig.FeedforwardProfile(
+        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismRuntimeConfig.FeedforwardProfile(
                 profile.outputType(),
                 profile.type(),
                 value,
@@ -2666,7 +2719,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismConfig.FeedforwardProfile(
+        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismRuntimeConfig.FeedforwardProfile(
                 profile.outputType(),
                 profile.type(),
                 profile.kS(),
@@ -2681,7 +2734,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismConfig.FeedforwardProfile(
+        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismRuntimeConfig.FeedforwardProfile(
                 profile.outputType(),
                 profile.type(),
                 profile.kS(),
@@ -2696,7 +2749,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismConfig.FeedforwardProfile(
+        updateControlLoopFeedforwardProfile(loopName, profile -> new MechanismRuntimeConfig.FeedforwardProfile(
                 profile.outputType(),
                 profile.type(),
                 profile.kS(),
@@ -2709,22 +2762,22 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private void updateControlLoopBangBangProfile(
             String loopName,
-            java.util.function.Function<MechanismConfig.BangBangProfile, MechanismConfig.BangBangProfile> updater) {
+            java.util.function.Function<MechanismRuntimeConfig.BangBangProfile, MechanismRuntimeConfig.BangBangProfile> updater) {
         if (loopName == null || updater == null) {
             return;
         }
-        MechanismConfig.BangBangProfile current = controlLoopBangBangs.get(loopName);
+        MechanismRuntimeConfig.BangBangProfile current = controlLoopBangBangs.get(loopName);
         if (current == null) {
             return;
         }
-        MechanismConfig.BangBangProfile updated = updater.apply(current);
+        MechanismRuntimeConfig.BangBangProfile updated = updater.apply(current);
         if (updated == null) {
             return;
         }
         OutputType output = updated.outputType() != null ? updated.outputType() : OutputType.PERCENT;
         controlLoopBangBangs.put(
                 loopName,
-                new MechanismConfig.BangBangProfile(
+                new MechanismRuntimeConfig.BangBangProfile(
                         output,
                         sanitizeBangBangLevel(updated.highOutput()),
                         sanitizeBangBangLevel(updated.lowOutput()),
@@ -2737,7 +2790,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopBangBangProfile(loopName, profile -> new MechanismConfig.BangBangProfile(
+        updateControlLoopBangBangProfile(loopName, profile -> new MechanismRuntimeConfig.BangBangProfile(
                 profile.outputType(),
                 value,
                 profile.lowOutput(),
@@ -2750,7 +2803,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopBangBangProfile(loopName, profile -> new MechanismConfig.BangBangProfile(
+        updateControlLoopBangBangProfile(loopName, profile -> new MechanismRuntimeConfig.BangBangProfile(
                 profile.outputType(),
                 profile.highOutput(),
                 value,
@@ -2763,7 +2816,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (!Double.isFinite(value)) {
             return;
         }
-        updateControlLoopBangBangProfile(loopName, profile -> new MechanismConfig.BangBangProfile(
+        updateControlLoopBangBangProfile(loopName, profile -> new MechanismRuntimeConfig.BangBangProfile(
                 profile.outputType(),
                 profile.highOutput(),
                 profile.lowOutput(),
@@ -2813,14 +2866,14 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return controlLoopPidTolerances.getOrDefault(name, Double.NaN);
     }
 
-    public MechanismConfig.PidProfile getControlLoopPidProfile(String name) {
+    public MechanismRuntimeConfig.PidProfile getControlLoopPidProfile(String name) {
         if (name == null) {
             return null;
         }
         return controlLoopPidProfilesConfig.get(name);
     }
 
-    public MechanismConfig.BangBangProfile getControlLoopBangBangProfile(String name) {
+    public MechanismRuntimeConfig.BangBangProfile getControlLoopBangBangProfile(String name) {
         if (name == null) {
             return null;
         }
@@ -2834,7 +2887,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return controlLoopFeedforwardOutputTypes.getOrDefault(name, OutputType.VOLTAGE);
     }
 
-    public MechanismConfig.FeedforwardProfile getControlLoopFeedforwardProfile(String name) {
+    public MechanismRuntimeConfig.FeedforwardProfile getControlLoopFeedforwardProfile(String name) {
         if (name == null) {
             return null;
         }
@@ -2877,7 +2930,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     static boolean isBangBangWithinTolerance(
-            MechanismConfig.BangBangProfile profile,
+            MechanismRuntimeConfig.BangBangProfile profile,
             double measurement,
             double setpoint) {
         if (profile == null || !Double.isFinite(measurement) || !Double.isFinite(setpoint)) {
@@ -2888,7 +2941,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     static double calculateBangBangRaw(
-            MechanismConfig.BangBangProfile profile,
+            MechanismRuntimeConfig.BangBangProfile profile,
             double measurement,
             double setpoint) {
         if (profile == null || !Double.isFinite(measurement) || !Double.isFinite(setpoint)) {
@@ -3705,7 +3758,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private Map<String, Object> captureControlLoopOutputs() {
         Map<String, Object> loops = new LinkedHashMap<>();
-        for (TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
+        for (TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
             if (runner == null || runner.name() == null || runner.name().isBlank()) {
                 continue;
             }
@@ -3724,7 +3777,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return;
         }
         RobotNetworkTables.Node loopsNode = outputNode.child("Loops");
-        for (TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
+        for (TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
             if (runner == null || runner.name() == null || runner.name().isBlank()) {
                 continue;
             }
@@ -3739,7 +3792,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (publisher == null || outputRoot == null || outputRoot.isBlank()) {
             return;
         }
-        for (TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
+        for (TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
             if (runner == null || runner.name() == null || runner.name().isBlank()) {
                 continue;
             }
@@ -3761,7 +3814,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             String loopKey = sanitizeTopicKeyCached(loopName);
             String loopRoot = controlRoot + "/Loops/" + loopKey;
 
-            TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner = controlLoopsByName.get(loopName);
+            TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>> runner = controlLoopsByName.get(loopName);
             if (runner != null) {
                 publisher.writableBoolean(loopRoot + "/enabled").onSetBoolean(value -> setControlLoopEnabled(loopName, value));
                 publisher.put(loopRoot + "/enabled", isControlLoopEnabled(loopName));
@@ -3769,7 +3822,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 publisher.put(loopRoot + "/output/periodMs", runner.periodMs());
             }
 
-            MechanismConfig.PidProfile pid = controlLoopPidProfilesConfig.get(loopName);
+            MechanismRuntimeConfig.PidProfile pid = controlLoopPidProfilesConfig.get(loopName);
             if (pid != null) {
                 String pidRoot = loopRoot + "/pid";
                 publisher.writableDouble(pidRoot + "/kp").onSetDouble(value -> setControlLoopPidKp(loopName, value));
@@ -3795,7 +3848,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 }
             }
 
-            MechanismConfig.FeedforwardProfile ff = controlLoopFeedforwardProfiles.get(loopName);
+            MechanismRuntimeConfig.FeedforwardProfile ff = controlLoopFeedforwardProfiles.get(loopName);
             if (ff != null) {
                 String ffRoot = loopRoot + "/ff";
                 publisher.writableDouble(ffRoot + "/ks").onSetDouble(value -> setControlLoopFeedforwardKs(loopName, value));
@@ -3818,7 +3871,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
                 }
             }
 
-            MechanismConfig.BangBangProfile bangBang = controlLoopBangBangs.get(loopName);
+            MechanismRuntimeConfig.BangBangProfile bangBang = controlLoopBangBangs.get(loopName);
             if (bangBang != null) {
                 String bbRoot = loopRoot + "/bangBang";
                 publisher.writableDouble(bbRoot + "/highOutput").onSetDouble(value -> setControlLoopBangBangHighOutput(loopName, value));
@@ -3926,7 +3979,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (controlLoops.isEmpty()) {
             return;
         }
-        for (TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
+        for (TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
             if (runner == null) {
                 continue;
             }
@@ -3988,7 +4041,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             return 0.0;
         }
         double total = 0.0;
-        for (TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
+        for (TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>> runner : controlLoops) {
             if (!isControlLoopRunnerEnabled(runner)) {
                 runner.setLastOutput(0.0);
                 continue;
@@ -4012,7 +4065,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return total;
     }
 
-    private boolean isControlLoopRunnerEnabled(TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner) {
+    private boolean isControlLoopRunnerEnabled(TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>> runner) {
         if (runner == null) {
             return false;
         }
@@ -4199,7 +4252,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     @SuppressWarnings("unchecked")
-    private void registerControlLoop(MechanismConfig.ControlLoopBinding<?> binding) {
+    private void registerControlLoop(MechanismRuntimeConfig.ControlLoopBinding<?> binding) {
         if (binding == null) {
             return;
         }
@@ -4210,16 +4263,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         if (controlLoopsByName.containsKey(name)) {
             throw new IllegalArgumentException("control loop name already registered: " + name);
         }
-        TimedRunner<MechanismConfig.MechanismControlLoop<Mechanism>> runner = new TimedRunner<>(
+        TimedRunner<MechanismRuntimeConfig.MechanismControlLoop<Mechanism>> runner = new TimedRunner<>(
                 name,
                 binding.periodSeconds(),
-                (MechanismConfig.MechanismControlLoop<Mechanism>) binding.loop());
+                (MechanismRuntimeConfig.MechanismControlLoop<Mechanism>) binding.loop());
         controlLoops.add(runner);
         controlLoopsByName.put(name, runner);
     }
 
     @SuppressWarnings("unchecked")
-    private void registerPeriodicHook(MechanismConfig.PeriodicHookBinding<?> binding) {
+    private void registerPeriodicHook(MechanismRuntimeConfig.PeriodicHookBinding<?> binding) {
         if (binding == null) {
             return;
         }
@@ -4316,7 +4369,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         @Override
-        public Enum<?> state() {
+        public Object state() {
             return getActiveState();
         }
 
@@ -4409,8 +4462,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         @Override
-        public MechanismConfig.BangBangProfile bangBang(String name) {
-            MechanismConfig.BangBangProfile profile = controlLoopBangBangs.get(name);
+        public MechanismRuntimeConfig.BangBangProfile bangBang(String name) {
+            MechanismRuntimeConfig.BangBangProfile profile = controlLoopBangBangs.get(name);
             if (profile == null) {
                 throw new IllegalArgumentException("No bang-bang profile found for name " + name);
             }
@@ -4427,7 +4480,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         }
 
         @Override
-        public MechanismConfig.FeedforwardProfile feedforwardProfile(String name) {
+        public MechanismRuntimeConfig.FeedforwardProfile feedforwardProfile(String name) {
             return controlLoopFeedforwardProfiles.get(name);
         }
 
@@ -5141,16 +5194,16 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         ntPidAutotunerCommandsPath = path;
 
         Set<String> active = new HashSet<>();
-        for (Map.Entry<String, MechanismConfig.PidAutotunerConfig> entry : controlLoopPidAutotunerConfigs.entrySet()) {
+        for (Map.Entry<String, MechanismRuntimeConfig.PidAutotunerConfig> entry : controlLoopPidAutotunerConfigs.entrySet()) {
             if (entry == null || entry.getKey() == null || entry.getKey().isBlank()) {
                 continue;
             }
             String pidName = entry.getKey();
-            MechanismConfig.PidAutotunerConfig tunerConfig = entry.getValue();
+            MechanismRuntimeConfig.PidAutotunerConfig tunerConfig = entry.getValue();
             if (tunerConfig == null || !tunerConfig.enabled()) {
                 continue;
             }
-            MechanismConfig.PidProfile profile = controlLoopPidProfilesConfig.get(pidName);
+            MechanismRuntimeConfig.PidProfile profile = controlLoopPidProfilesConfig.get(pidName);
             if (profile == null) {
                 continue;
             }
@@ -5191,8 +5244,8 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private Command buildPidAutotunerCommand(
             String pidName,
-            MechanismConfig.PidProfile profile,
-            MechanismConfig.PidAutotunerConfig tunerConfig,
+            MechanismRuntimeConfig.PidProfile profile,
+            MechanismRuntimeConfig.PidAutotunerConfig tunerConfig,
             String dashboardPath) {
         if (pidName == null || pidName.isBlank() || profile == null) {
             return null;
@@ -5215,7 +5268,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             }
 
             @Override
-            public MechanismConfig.PidProfile pidProfile() {
+            public MechanismRuntimeConfig.PidProfile pidProfile() {
                 return profile;
             }
 
@@ -5274,7 +5327,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
 
     private String resolvePidAutotunerDashboardPath(
             String pidName,
-            MechanismConfig.PidAutotunerConfig config) {
+            MechanismRuntimeConfig.PidAutotunerConfig config) {
         String configured = config != null ? config.dashboardPath() : null;
         if (configured != null) {
             String trimmed = configured.trim();
@@ -5408,7 +5461,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return this instanceof StatefulLike<?>;
     }
 
-    private Enum<?> currentStatefulGoal() {
+    private Object currentStatefulGoal() {
         StatefulLike.StateMachineSection<?> section = statefulSection();
         return section != null ? section.goal() : null;
     }
@@ -5443,7 +5496,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             forceStatefulCustomSetpoint();
             return;
         }
-        Enum<?> selected = selectedStatefulState();
+        Object selected = selectedStatefulState();
         if (selected != null) {
             forceStatefulState(selected);
         }
@@ -5454,7 +5507,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
             queueStatefulCustomSetpoint();
             return;
         }
-        Enum<?> selected = selectedStatefulState();
+        Object selected = selectedStatefulState();
         if (selected != null) {
             queueStatefulState(selected);
         }
@@ -5501,12 +5554,12 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private Enum<?> selectedStatefulState() {
+    private Object selectedStatefulState() {
         StatefulLike.StateMachineSection<?> section = statefulSection();
         if (section == null) {
             return null;
         }
-        Enum<?> selected = section.machine().chooser().getSelected();
+        Object selected = section.machine().chooser().getSelected();
         if (selected != null) {
             return selected;
         }
@@ -5514,7 +5567,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private void forceStatefulState(Enum<?> state) {
+    private void forceStatefulState(Object state) {
         if (configDisabled || state == null || !(this instanceof StatefulLike<?> stateful)) {
             return;
         }
@@ -5523,7 +5576,7 @@ public class Mechanism extends SubsystemBase implements RobotSendableSystem, Reg
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private void queueStatefulState(Enum<?> state) {
+    private void queueStatefulState(Object state) {
         if (configDisabled || state == null || !(this instanceof StatefulLike<?> stateful)) {
             return;
         }

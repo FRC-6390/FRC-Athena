@@ -3,7 +3,6 @@ package ca.frc6390.athena.mechanisms.config;
 import ca.frc6390.athena.core.MotionLimits;
 import ca.frc6390.athena.hardware.motor.MotorControllerConfig;
 import ca.frc6390.athena.mechanisms.Mechanism;
-import ca.frc6390.athena.mechanisms.MechanismConfig;
 import ca.frc6390.athena.mechanisms.MechanismConfigRecord;
 import ca.frc6390.athena.mechanisms.MechanismInputSource;
 import ca.frc6390.athena.mechanisms.MechanismSetpointSource;
@@ -34,54 +33,22 @@ public final class MechanismConfigExport {
 
     public static MechanismConfigFile export(Mechanism mechanism) {
         Objects.requireNonNull(mechanism, "mechanism");
-        MechanismConfig<?> cfg = mechanism.getSourceConfig();
-        if (cfg == null) {
-            return new MechanismConfigFile(
-                    mechanism.getName(),
-                    mechanism.networkTables().typeName(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null);
-        }
-        MechanismConfigFile file = export(cfg, mechanism.networkTables().typeName());
-        // Prefer the runtime mechanism name (RobotCore enforces uniqueness and may suffix unnamed mechs).
-        return new MechanismConfigFile(
-                mechanism.getName(),
-                file.mechanismType(),
-                file.units(),
-                file.motors(),
-                file.encoders(),
-                file.constraints(),
-                file.sensors(),
-                file.control(),
-                file.sim());
-    }
-
-    public static MechanismConfigFile export(MechanismConfig<?> cfg, String mechanismType) {
-        Objects.requireNonNull(cfg, "cfg");
-        MechanismConfigRecord data = cfg.data();
-
+        MechanismConfigRecord data = ca.frc6390.athena.mechanisms.MechanismConfigIO.snapshot(mechanism);
         MechanismMotorsConfig motors = exportMotors(data);
         List<MechanismEncoderConfig> encoders = exportEncoders(data);
         MechanismConstraintsConfig constraints = exportConstraints(data);
         MechanismSensorsConfig sensors = exportSensors(data);
-        MechanismControlConfig control = exportControl(cfg, data, exportedEncoderNames(encoders));
-        MechanismSimConfig sim = exportSim(cfg);
-
+        MechanismControlConfig control = exportControl(mechanism, data, exportedEncoderNames(encoders));
         return new MechanismConfigFile(
-                cfg.name(),
-                mechanismType,
+                mechanism.getName(),
+                mechanism.networkTables().typeName(),
                 null,
                 motors,
                 encoders,
                 constraints,
                 sensors,
                 control,
-                sim);
+                null);
     }
 
     public static String toJson(MechanismConfigFile file) {
@@ -248,10 +215,10 @@ public final class MechanismConfigExport {
     }
 
     private static MechanismControlConfig exportControl(
-            MechanismConfig<?> cfg,
+            Mechanism mechanism,
             MechanismConfigRecord data,
             Set<String> exportedEncoderNames) {
-        if (cfg == null || data == null) {
+        if (mechanism == null || data == null) {
             return null;
         }
         String output = data.outputType() != null ? data.outputType().name() : null;
@@ -261,15 +228,15 @@ public final class MechanismConfigExport {
         Double pidContinuousMax = Double.isFinite(data.continousMax()) ? data.continousMax() : null;
         Double tolerance = Double.isFinite(data.tolerance()) ? data.tolerance() : null;
 
-        // Export named loop profiles (data-only) so teams can inspect/round-trip them later.
         List<MechanismPidConfig> pidProfiles = null;
-        if (cfg.controlLoopPidProfiles() != null && !cfg.controlLoopPidProfiles().isEmpty()) {
+        if (!mechanism.getControlLoopPidProfiles().isEmpty()) {
             pidProfiles = new ArrayList<>();
-            for (Map.Entry<String, MechanismConfig.PidProfile> e : cfg.controlLoopPidProfiles().entrySet()) {
+            for (Map.Entry<String, ca.frc6390.athena.mechanisms.MechanismRuntimeConfig.PidProfile> e
+                    : mechanism.getControlLoopPidProfiles().entrySet()) {
                 if (e == null || e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                     continue;
                 }
-                MechanismConfig.PidProfile p = e.getValue();
+                var p = e.getValue();
                 Double iZone = Double.isFinite(p.iZone()) ? p.iZone() : null;
                 Double toleranceProfile = Double.isFinite(p.tolerance()) ? p.tolerance() : null;
                 Double maxVelocity = Double.isFinite(p.maxVelocity()) ? p.maxVelocity() : null;
@@ -292,17 +259,18 @@ public final class MechanismConfigExport {
         }
 
         List<MechanismFeedforwardConfig> ffProfiles = null;
-        if (cfg.controlLoopFeedforwardProfiles() != null && !cfg.controlLoopFeedforwardProfiles().isEmpty()) {
+        if (!mechanism.getControlLoopFeedforwardProfiles().isEmpty()) {
             ffProfiles = new ArrayList<>();
-            for (Map.Entry<String, MechanismConfig.FeedforwardProfile> e : cfg.controlLoopFeedforwardProfiles().entrySet()) {
+            for (Map.Entry<String, ca.frc6390.athena.mechanisms.MechanismRuntimeConfig.FeedforwardProfile> e
+                    : mechanism.getControlLoopFeedforwardProfiles().entrySet()) {
                 if (e == null || e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                     continue;
                 }
-                MechanismConfig.FeedforwardProfile ff = e.getValue();
+                var ff = e.getValue();
                 Double toleranceProfile = Double.isFinite(ff.tolerance()) ? ff.tolerance() : null;
                 ffProfiles.add(new MechanismFeedforwardConfig(
                         e.getKey(),
-                        ff.type() != null ? ff.type().configKey() : MechanismConfig.FeedforwardType.SIMPLE.configKey(),
+                        ff.type() != null ? ff.type().name().toLowerCase(Locale.ROOT) : "simple",
                         ff.kS(),
                         ff.kG(),
                         ff.kV(),
@@ -316,13 +284,14 @@ public final class MechanismConfigExport {
         }
 
         List<MechanismBangBangConfig> bangBangProfiles = null;
-        if (cfg.controlLoopBangBangProfiles() != null && !cfg.controlLoopBangBangProfiles().isEmpty()) {
+        if (!mechanism.getControlLoopBangBangProfiles().isEmpty()) {
             bangBangProfiles = new ArrayList<>();
-            for (Map.Entry<String, MechanismConfig.BangBangProfile> e : cfg.controlLoopBangBangProfiles().entrySet()) {
+            for (Map.Entry<String, ca.frc6390.athena.mechanisms.MechanismRuntimeConfig.BangBangProfile> e
+                    : mechanism.getControlLoopBangBangProfiles().entrySet()) {
                 if (e == null || e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                     continue;
                 }
-                MechanismConfig.BangBangProfile profile = e.getValue();
+                var profile = e.getValue();
                 String outputProfile = profile.outputType() != null ? profile.outputType().name() : null;
                 bangBangProfiles.add(new MechanismBangBangConfig(
                         e.getKey(),
@@ -390,55 +359,6 @@ public final class MechanismConfigExport {
             return null;
         }
         return exportedEncoderNames != null && exportedEncoderNames.contains(sourceName) ? sourceName : null;
-    }
-
-    private static MechanismSimConfig exportSim(MechanismConfig<?> cfg) {
-        if (cfg == null) {
-            return null;
-        }
-        // Keep this conservative: export only the explicit sim parameters set on the config.
-        if (cfg.simpleMotorSimulationParameters() != null) {
-            var sm = cfg.simpleMotorSimulationParameters();
-            return new MechanismSimConfig(
-                    new MechanismSimSimpleMotorConfig(
-                            Double.isFinite(sm.momentOfInertia) ? sm.momentOfInertia : null,
-                            Double.isFinite(sm.nominalVoltage) ? sm.nominalVoltage : null,
-                            Double.isFinite(sm.unitsPerRadianOverride) ? sm.unitsPerRadianOverride : null),
-                    null,
-                    null);
-        }
-        if (cfg.armSimulationParameters() != null) {
-            var a = cfg.armSimulationParameters();
-            return new MechanismSimConfig(
-                    null,
-                    new MechanismSimArmConfig(
-                            Double.isFinite(a.armLengthMeters) ? a.armLengthMeters : null,
-                            Double.isFinite(a.motorReduction) ? a.motorReduction : null,
-                            Double.isFinite(a.minAngleRadians) ? Math.toDegrees(a.minAngleRadians) : null,
-                            Double.isFinite(a.maxAngleRadians) ? Math.toDegrees(a.maxAngleRadians) : null,
-                            Double.isFinite(a.startingAngleRadians) ? Math.toDegrees(a.startingAngleRadians) : null,
-                            Double.isFinite(a.unitsPerRadianOverride) ? a.unitsPerRadianOverride : null,
-                            a.simulateGravity,
-                            Double.isFinite(a.nominalVoltage) ? a.nominalVoltage : null,
-                            Double.isFinite(a.momentOfInertia) ? a.momentOfInertia : null),
-                    null);
-        }
-        if (cfg.elevatorSimulationParameters() != null) {
-            var e = cfg.elevatorSimulationParameters();
-            return new MechanismSimConfig(
-                    null,
-                    null,
-                    new MechanismSimElevatorConfig(
-                            Double.isFinite(e.drumRadiusMeters) ? e.drumRadiusMeters : null,
-                            Double.isFinite(e.carriageMassKg) ? e.carriageMassKg : null,
-                            Double.isFinite(e.minHeightMeters) ? e.minHeightMeters : null,
-                            Double.isFinite(e.maxHeightMeters) ? e.maxHeightMeters : null,
-                            Double.isFinite(e.startingHeightMeters) ? e.startingHeightMeters : null,
-                            e.simulateGravity,
-                            Double.isFinite(e.nominalVoltage) ? e.nominalVoltage : null,
-                            Double.isFinite(e.unitsPerMeterOverride) ? e.unitsPerMeterOverride : null));
-        }
-        return null;
     }
 
     private static ObjectMapper buildMapper() {

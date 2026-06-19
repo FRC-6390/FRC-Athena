@@ -2,7 +2,7 @@ package ca.frc6390.athena.mechanisms.statespec;
 
 import java.util.Objects;
 
-public final class StateSeed<E extends Enum<E>> {
+public final class StateSeed<E> {
     public enum Kind {
         AUTO,
         SETPOINT,
@@ -19,15 +19,15 @@ public final class StateSeed<E extends Enum<E>> {
         this.dsl = dsl;
     }
 
-    public static <E extends Enum<E>> StateSeed<E> auto() {
+    public static <E> StateSeed<E> auto() {
         return new StateSeed<>(Kind.AUTO, Double.NaN, null);
     }
 
-    public static <E extends Enum<E>> StateSeed<E> setpoint(double setpoint) {
+    public static <E> StateSeed<E> setpoint(double setpoint) {
         return new StateSeed<>(Kind.SETPOINT, setpoint, null);
     }
 
-    public static <E extends Enum<E>> StateSeed<E> dsl(StateDsl<E> dsl) {
+    public static <E> StateSeed<E> dsl(StateDsl<E> dsl) {
         return new StateSeed<>(Kind.DSL, Double.NaN, Objects.requireNonNull(dsl, "dsl"));
     }
 

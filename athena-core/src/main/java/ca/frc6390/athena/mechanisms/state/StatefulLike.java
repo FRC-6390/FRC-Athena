@@ -9,9 +9,9 @@ import ca.frc6390.athena.mechanisms.StatefulMechanism.StatefulMechanismCore;
  * Marker for mechanisms that own a state machine with a Double setpoint.
  * Implemented by all stateful mechanism variants (generic, arm, elevator, turret, etc.).
  *
- * @param <E> state enum type
+ * @param <E> state key type
  */
-public interface StatefulLike<E extends Enum<E>> {
+public interface StatefulLike<E> {
     StateMachineSection<E> stateMachine();
 
     default StatefulLike<E> stateMachine(Consumer<StateMachineSection<E>> section) {
@@ -21,7 +21,7 @@ public interface StatefulLike<E extends Enum<E>> {
         return this;
     }
 
-    final class StateMachineSection<E extends Enum<E>> {
+    final class StateMachineSection<E> {
         private final StatefulMechanismCore<? extends Mechanism, E> core;
 
         StateMachineSection(StatefulMechanismCore<? extends Mechanism, E> core) {
@@ -106,7 +106,7 @@ public interface StatefulLike<E extends Enum<E>> {
         }
     }
 
-    record StateMachineSnapshot<E extends Enum<E>>(
+    record StateMachineSnapshot<E>(
             E goal,
             E next,
             String queue,

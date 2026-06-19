@@ -12,6 +12,8 @@ import ca.frc6390.athena.core.RobotSendableSystem.RobotSendableDevice;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.statespec.StateBuilder;
 import ca.frc6390.athena.mechanisms.statespec.StateCtx;
+import ca.frc6390.athena.mechanisms.statespec.StateId;
+import ca.frc6390.athena.mechanisms.statespec.StateNames;
 import ca.frc6390.athena.mechanisms.statespec.StateSeed;
 import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 import ca.frc6390.athena.core.RobotNetworkTables;
@@ -20,7 +22,7 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-public class StateMachine<T, E extends Enum<E>>  implements RobotSendableDevice {
+public class StateMachine<T, E>  implements RobotSendableDevice {
     
     private final DelayedOutput atGoalDelayedOutput;
 
@@ -39,6 +41,7 @@ public class StateMachine<T, E extends Enum<E>>  implements RobotSendableDevice 
     }
 
     private E goalState;
+    private final List<E> availableStates;
     private BooleanSupplier changeStateSupplier;
     private final SendableChooser<E> chooser = new SendableChooser<>();
     private final Queue<StateQueueEntry<E>> stateQueue = new LinkedList<>();
@@ -47,9 +50,12 @@ public class StateMachine<T, E extends Enum<E>>  implements RobotSendableDevice 
     private boolean arcpAppendMode;
 
     public StateMachine(E initialState, BooleanSupplier atStateSupplier){
-        chooser.setDefaultOption(initialState.name(), initialState);
-        for (E state: initialState.getDeclaringClass().getEnumConstants()){
-            chooser.addOption(state.name(), state);
+        this.availableStates = availableStates(initialState);
+        chooser.setDefaultOption(stateNameOrBlank(initialState), initialState);
+        for (E state: availableStates){
+            if (!Objects.equals(state, initialState)) {
+                chooser.addOption(stateNameOrBlank(state), state);
+            }
         }
         this.goalState = initialState;
         this.goalStateEnteredSeconds = Timer.getFPGATimestamp();
@@ -176,7 +182,7 @@ public class StateMachine<T, E extends Enum<E>>  implements RobotSendableDevice 
             if (queueString.length() > 0) {
                 queueString.append(", ");
             }
-            queueString.append(entry.state.name());
+            queueString.append(stateNameOrBlank(entry.state));
         }
         return queueString.length() > 0 ? queueString.toString() : "None";
     }
@@ -308,8 +314,8 @@ public class StateMachine<T, E extends Enum<E>>  implements RobotSendableDevice 
         }
         E goal = getGoalState();
         E next = getNextState();
-        node.putString("goalState", goal != null ? goal.name() : "");
-        node.putString("nextState", next != null ? next.name() : "");
+        node.putString("goalState", stateNameOrBlank(goal));
+        node.putString("nextState", stateNameOrBlank(next));
         node.putString("queue", getNextStateQueue());
         node.putBoolean("shouldChangeState", shouldChangeState());
         node.putBoolean("atGoalState", atGoal());
@@ -326,47 +332,56 @@ public class StateMachine<T, E extends Enum<E>>  implements RobotSendableDevice 
 
         E goal = getGoalState();
         E next = getNextState();
-        publisher.put(rootPath + "/currentState", goal != null ? goal.name() : "");
-        publisher.put(rootPath + "/goalState", goal != null ? goal.name() : "");
-        publisher.put(rootPath + "/nextState", next != null ? next.name() : "");
+        publisher.put(rootPath + "/currentState", stateNameOrBlank(goal));
+        publisher.put(rootPath + "/goalState", stateNameOrBlank(goal));
+        publisher.put(rootPath + "/nextState", stateNameOrBlank(next));
         publisher.put(rootPath + "/queue", getNextStateQueue());
         publisher.put(rootPath + "/shouldChangeState", shouldChangeState());
         publisher.put(rootPath + "/atGoalState", atGoal());
         publisher.put(rootPath + "/appendMode", arcpAppendMode);
 
-        E[] states = goal != null ? goal.getDeclaringClass().getEnumConstants() : null;
-        if (states != null && states.length > 0) {
-            String[] names = new String[states.length];
-            for (int i = 0; i < states.length; i++) {
-                names[i] = states[i] != null ? states[i].name() : "";
-            }
-            publisher.put(rootPath + "/availableStates", names);
-        } else {
-            publisher.put(rootPath + "/availableStates", new String[0]);
+        String[] names = new String[availableStates.size()];
+        for (int i = 0; i < availableStates.size(); i++) {
+            names[i] = stateNameOrBlank(availableStates.get(i));
         }
+        publisher.put(rootPath + "/availableStates", names);
     }
 
     private void applyArcpGoalState(String rawState) {
         if (rawState == null || rawState.isBlank() || goalState == null) {
             return;
         }
-        Class<?> enumClass = goalState.getDeclaringClass();
-        Object[] constants = enumClass.getEnumConstants();
-        if (constants == null || constants.length == 0) {
-            return;
-        }
         String requested = rawState.trim();
-        for (Object constant : constants) {
-            if (!(constant instanceof Enum<?> value)) {
+        for (E value : availableStates) {
+            if (!stateNameOrBlank(value).equalsIgnoreCase(requested)) {
                 continue;
             }
-            if (!value.name().equalsIgnoreCase(requested)) {
-                continue;
-            }
-            @SuppressWarnings("unchecked")
-            E typed = (E) value;
-            force(typed, arcpAppendMode);
+            force(value, arcpAppendMode);
             return;
         }
+    }
+
+    private static String stateNameOrBlank(Object state) {
+        String name = StateNames.name(state);
+        return name != null ? name : "";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <E> List<E> availableStates(E initialState) {
+        if (initialState == null) {
+            return List.of();
+        }
+        if (initialState instanceof StateId stateId) {
+            return (List<E>) List.copyOf(stateId.owner().states());
+        }
+        if (initialState instanceof Enum<?> enumState) {
+            Object[] constants = enumState.getDeclaringClass().getEnumConstants();
+            if (constants != null) {
+                return Arrays.stream(constants)
+                        .map(value -> (E) value)
+                        .toList();
+            }
+        }
+        return List.of(initialState);
     }
 }

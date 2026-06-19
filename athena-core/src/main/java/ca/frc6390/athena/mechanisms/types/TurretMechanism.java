@@ -11,6 +11,7 @@ import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 
@@ -60,10 +61,14 @@ public class TurretMechanism extends SimpleMotorMechanism {
     private FieldObject2d fieldHeadingObject;
     private Rotation2d fieldHeadingOffset = Rotation2d.kZero;
 
-    public TurretMechanism(MechanismConfig<? extends TurretMechanism> config) {
-        super(config);
-        if (config != null && config.turretHeadingVisualization() != null) {
-            setFieldHeadingVisualization(config.turretHeadingVisualization());
+    protected TurretMechanism(
+            MechanismRuntimeConfig<? extends TurretMechanism> runtimeConfig,
+            edu.wpi.first.math.controller.SimpleMotorFeedforward feedforward,
+            Supplier<FieldHeadingVisualization> fieldHeadingVisualizationSupplier,
+            MechanismLifecycleHooks lifecycleHooks) {
+        super(runtimeConfig, feedforward, lifecycleHooks);
+        if (fieldHeadingVisualizationSupplier != null) {
+            setFieldHeadingVisualization(fieldHeadingVisualizationSupplier);
         }
     }
 
@@ -304,14 +309,26 @@ public class TurretMechanism extends SimpleMotorMechanism {
         this.fieldHeadingOffset = visualization.headingOffset;
     }
 
-    public static class StatefulTurretMechanism<E extends Enum<E>> extends TurretMechanism implements StatefulLike<E> {
+    public static class StatefulTurretMechanism<E> extends TurretMechanism implements StatefulLike<E> {
 
         private final StatefulMechanismCore<StatefulTurretMechanism<E>, E> stateMachineCore;
 
-        public StatefulTurretMechanism(MechanismConfig<StatefulTurretMechanism<E>> config,
-                                        E initialState) {
-            super(config);
-            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+        StatefulTurretMechanism(
+                MechanismRuntimeConfig<? extends StatefulTurretMechanism<E>> runtimeConfig,
+                E initialState,
+                StatefulMechanismRuntimeConfig<StatefulTurretMechanism<E>, E> stateRuntimeConfig,
+                SimpleMotorFeedforward feedforward,
+                Supplier<FieldHeadingVisualization> fieldHeadingVisualizationSupplier,
+                MechanismLifecycleHooks lifecycleHooks) {
+            super(
+                    runtimeConfig,
+                    feedforward,
+                    fieldHeadingVisualizationSupplier,
+                    lifecycleHooks);
+            stateMachineCore = StatefulMechanismCore.fromRuntimeConfig(
+                    initialState,
+                    this::atSetpoint,
+                    stateRuntimeConfig);
             Double initialSetpoint = StateSpecAccess.setpoint(initialState);
             if (initialSetpoint != null) {
                 control().setpoint(initialSetpoint);

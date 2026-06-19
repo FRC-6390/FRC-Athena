@@ -10,15 +10,17 @@ import ca.frc6390.athena.core.RobotDrivetrain;
 import ca.frc6390.athena.core.localization.RobotDrivetrainLocalizationFactory;
 import ca.frc6390.athena.core.localization.RobotLocalization;
 import ca.frc6390.athena.core.localization.RobotLocalizationConfig;
+import ca.frc6390.athena.api.mechanism.MechanismDefinitions;
+import ca.frc6390.athena.api.mechanism.Mechanisms;
+import ca.frc6390.athena.api.superstructure.SuperstructureDefinitions;
+import ca.frc6390.athena.api.superstructure.Superstructures;
 import ca.frc6390.athena.hardware.imu.Imu;
 import ca.frc6390.athena.hardware.motor.MotorNeutralMode;
 import ca.frc6390.athena.mechanisms.Mechanism;
-import ca.frc6390.athena.mechanisms.MechanismConfig;
 import ca.frc6390.athena.mechanisms.RegisterableMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanismFactory;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism;
-import ca.frc6390.athena.mechanisms.SuperstructureConfig;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.core.MotionLimits;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -135,12 +137,14 @@ final class RobotCoreStateRoutingTest {
         StatefulMechanism<SharedMechanismState> sharedTwo = mechanism("sharedTwo", SharedMechanismState.DEFAULT_B);
         StatefulMechanism<ArmState> arm = mechanism(ArmState.RETRACTED);
         StatefulMechanism<WristState> wrist = mechanism(WristState.FOLDED);
-        SuperstructureMechanism<ArmSuperState, ArmSuperSetpoint> superStructure = SuperstructureConfig
-                .create("armSuper", ArmSuperState.STOW)
-                .mechanisms(mechanisms -> mechanisms
-                        .existing(arm, ArmSuperSetpoint::arm)
-                        .existing(wrist, ArmSuperSetpoint::wrist))
-                .build();
+        @SuppressWarnings("unchecked")
+        SuperstructureMechanism<ArmSuperState, ArmSuperSetpoint> superStructure =
+                (SuperstructureMechanism<ArmSuperState, ArmSuperSetpoint>) SuperstructureDefinitions.build(
+                        Superstructures.<ArmSuperState, ArmSuperSetpoint>stateful("armSuper", ArmSuperState.STOW)
+                                .mechanisms(mechanisms -> mechanisms
+                                        .existing(arm, ArmSuperSetpoint::arm)
+                                        .existing(wrist, ArmSuperSetpoint::wrist))
+                                .definition());
 
         RobotCore<FakeDrivetrain> core = new RobotCore<>(
                 RobotCoreConfig
@@ -249,7 +253,7 @@ final class RobotCoreStateRoutingTest {
                             .create()
                             .drivetrain(__ -> new FakeDriveConfig())
                             .mechanisms(mechanisms -> mechanisms
-                                    .mechanism(MechanismConfig.generic("deferred-startup-mechanism")))
+                                    .mechanism(Mechanisms.create("deferred-startup-mechanism")))
                             .build());
 
             assertNull(core.mechanism("deferred-startup-mechanism"));
@@ -283,7 +287,7 @@ final class RobotCoreStateRoutingTest {
                 } finally {
                     activeBuilders.decrementAndGet();
                 }
-                return MechanismConfig.generic(mechanismName).build();
+                return MechanismDefinitions.build(Mechanisms.create(mechanismName).definition());
             }
 
             @Override
@@ -302,29 +306,37 @@ final class RobotCoreStateRoutingTest {
     }
 
     private static StatefulMechanism<DirectMechanismState> mechanism(DirectMechanismState defaultState) {
-        return MechanismConfig.stateMachineGeneric("direct", defaultState)
-                .control(config -> config.setpointAsOutput(true))
-                .build();
+        @SuppressWarnings("unchecked")
+        StatefulMechanism<DirectMechanismState> mechanism =
+                (StatefulMechanism<DirectMechanismState>) MechanismDefinitions.build(
+                        Mechanisms.stateful("direct", defaultState).definition());
+        return mechanism;
     }
 
     private static StatefulMechanism<ArmState> mechanism(ArmState defaultState) {
-        return MechanismConfig.stateMachineGeneric("arm", defaultState)
-                .control(config -> config.setpointAsOutput(true))
-                .build();
+        @SuppressWarnings("unchecked")
+        StatefulMechanism<ArmState> mechanism =
+                (StatefulMechanism<ArmState>) MechanismDefinitions.build(
+                        Mechanisms.stateful("arm", defaultState).definition());
+        return mechanism;
     }
 
     private static StatefulMechanism<WristState> mechanism(WristState defaultState) {
-        return MechanismConfig.stateMachineGeneric("wrist", defaultState)
-                .control(config -> config.setpointAsOutput(true))
-                .build();
+        @SuppressWarnings("unchecked")
+        StatefulMechanism<WristState> mechanism =
+                (StatefulMechanism<WristState>) MechanismDefinitions.build(
+                        Mechanisms.stateful("wrist", defaultState).definition());
+        return mechanism;
     }
 
     private static StatefulMechanism<SharedMechanismState> mechanism(
             String name,
             SharedMechanismState defaultState) {
-        return MechanismConfig.stateMachineGeneric(name, defaultState)
-                .control(config -> config.setpointAsOutput(true))
-                .build();
+        @SuppressWarnings("unchecked")
+        StatefulMechanism<SharedMechanismState> mechanism =
+                (StatefulMechanism<SharedMechanismState>) MechanismDefinitions.build(
+                        Mechanisms.stateful(name, defaultState).definition());
+        return mechanism;
     }
 
     private static final class FakeDriveConfig implements RobotDrivetrain.RobotDrivetrainConfig<FakeDrivetrain> {

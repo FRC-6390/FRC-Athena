@@ -54,13 +54,6 @@ public final class MechanismConfigIO {
         }
     }
 
-    public static MechanismConfigRecord snapshot(MechanismConfig<?> config) {
-        if (config == null) {
-            return null;
-        }
-        return config.data();
-    }
-
     public static MechanismConfigRecord snapshot(Mechanism mechanism) {
         if (mechanism == null) {
             return null;
@@ -83,8 +76,8 @@ public final class MechanismConfigIO {
             }
         }
         Encoder encoder = mechanism.positionEncoderDevice();
-        MechanismConfigRecord base = mechanism.getSourceConfig() != null
-                ? mechanism.getSourceConfig().data()
+        MechanismConfigRecord base = mechanism.getConfigRecord() != null
+                ? mechanism.getConfigRecord()
                 : MechanismConfigRecord.defaults();
         MotorNeutralMode neutralMode = controllers.length > 0 ? controllers[0].getNeutralMode() : MotorNeutralMode.Coast;
         double currentLimit = controllers.length > 0 ? controllers[0].getCurrentLimit() : Double.NaN;
@@ -123,13 +116,6 @@ public final class MechanismConfigIO {
                 .encoderOffset(offset)
                 .motionLimits(limits)
                 .build();
-    }
-
-    public static void apply(MechanismConfig<?> config, MechanismConfigRecord record) {
-        if (config == null || record == null) {
-            return;
-        }
-        config.data(record);
     }
 
     public static void apply(Mechanism mechanism, MechanismConfigRecord record) {

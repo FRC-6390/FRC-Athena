@@ -19,17 +19,17 @@ import edu.wpi.first.math.geometry.Pose3d;
  */
 public interface SuperstructureMechanismsView<SP> {
 
-    <E extends Enum<E>> StatefulArmMechanism<E> arm(Function<SP, E> mapper);
+    <E> StatefulArmMechanism<E> arm(Function<SP, E> mapper);
 
-    <E extends Enum<E>> StatefulElevatorMechanism<E> elevator(Function<SP, E> mapper);
+    <E> StatefulElevatorMechanism<E> elevator(Function<SP, E> mapper);
 
-    <E extends Enum<E>> StatefulTurretMechanism<E> turret(Function<SP, E> mapper);
+    <E> StatefulTurretMechanism<E> turret(Function<SP, E> mapper);
 
-    <E extends Enum<E>> StatefulFlywheelMechanism<E> flywheel(Function<SP, E> mapper);
+    <E> StatefulFlywheelMechanism<E> flywheel(Function<SP, E> mapper);
 
-    <E extends Enum<E>> StatefulMechanism<E> generic(Function<SP, E> mapper);
+    <E> StatefulMechanism<E> generic(Function<SP, E> mapper);
 
-    <CSP, CS extends Enum<CS>> SuperstructureMechanism<CS, CSP> superstructure(
+    <CSP, CS> SuperstructureMechanism<CS, CSP> superstructure(
             Function<SP, CS> mapper);
 
     boolean input(String key);

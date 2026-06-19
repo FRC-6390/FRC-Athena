@@ -6,7 +6,6 @@ import java.util.function.BooleanSupplier;
 import ca.frc6390.athena.mechanisms.StateGraph;
 import ca.frc6390.athena.mechanisms.StateMachine;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-import ca.frc6390.athena.mechanisms.statespec.AthenaState;
 
 /**
  * Example patterns for guarded state-machine transitions.
@@ -14,7 +13,6 @@ import ca.frc6390.athena.mechanisms.statespec.AthenaState;
 public final class StateMachineExamples {
     private StateMachineExamples() {}
 
-    @AthenaState(Double.class)
     public enum IntakeState implements SetpointProvider<Double> {
         STOW,
         CLEARANCE,

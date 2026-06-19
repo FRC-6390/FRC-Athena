@@ -1,10 +1,12 @@
 package ca.frc6390.athena.mechanisms.examples;
 
-import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.api.mechanism.MechanismDefinitions;
+import ca.frc6390.athena.api.mechanism.Mechanisms;
+import ca.frc6390.athena.api.superstructure.SuperstructureDefinitions;
+import ca.frc6390.athena.api.superstructure.Superstructures;
 import ca.frc6390.athena.mechanisms.StateGraph;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism;
-import ca.frc6390.athena.mechanisms.SuperstructureConfig;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
@@ -12,7 +14,7 @@ import edu.wpi.first.math.util.Units;
 
 /**
  * End-to-end example showing how to express a superstructure (elevator + end effector)
- * using the new SuperstructureConfig API. The superstates mirror the old-style class:
+ * using the V2 superstructure API. The superstates mirror the old implementation:
  * L1-L4, Align/Home, Intaking, Score, Algae variants, etc. Constraints enforce sequencing,
  * and the end effector visualization is anchored to the elevator carriage for sim.
  *
@@ -101,56 +103,43 @@ public final class ExampleCompositeSuperstructure {
      * - Constraints on the superstructure align with the legacy sequencing (stow before intake, etc.).
      */
     public static SuperstructureMechanism<SuperState, SuperTuple> buildSuperstructure() {
-        // Elevator config (stub PID/FF; replace with tuned values + motors/encoders).
-        MechanismConfig<StatefulMechanism<ElevatorState>> elevator =
-                MechanismConfig.stateMachineGeneric(ElevatorState.HomeReset);
-        elevator.control(c -> c.setpointAsOutput(true));
-        elevator.stateMachineDelay(0.04);
-        elevator.stateGraph(StateGraph.create(ElevatorState.class)
+        @SuppressWarnings("unchecked")
+        StatefulMechanism<ElevatorState> elevator =
+                (StatefulMechanism<ElevatorState>) MechanismDefinitions.build(
+                        Mechanisms.stateful("elevator", ElevatorState.HomeReset).definition());
+        elevator.stateMachine().graph(StateGraph.create(ElevatorState.class)
                 .path(ElevatorState.HomeReset, ElevatorState.Intaking)
                 .path(ElevatorState.Intaking, ElevatorState.L1, ElevatorState.L2, ElevatorState.L3, ElevatorState.L4)
                 .path(ElevatorState.HomeReset, ElevatorState.HomePID));
 
-        // End effector config (stub; replace with real arm/wrist mechanism configs if you have them).
-        MechanismConfig<StatefulMechanism<EndEffectorState>> eff =
-                MechanismConfig.stateMachineGeneric(EndEffectorState.Home);
-        eff.control(c -> c.setpointAsOutput(true));
-        eff.stateMachineDelay(0.02);
-        eff.stateGraph(StateGraph.create(EndEffectorState.class)
+        @SuppressWarnings("unchecked")
+        StatefulMechanism<EndEffectorState> eff =
+                (StatefulMechanism<EndEffectorState>) MechanismDefinitions.build(
+                        Mechanisms.stateful("end-effector", EndEffectorState.Home).definition());
+        eff.stateMachine().graph(StateGraph.create(EndEffectorState.class)
                 .path(EndEffectorState.Home, EndEffectorState.Intaking)
                 .path(EndEffectorState.Intaking, EndEffectorState.L1, EndEffectorState.L2, EndEffectorState.L3, EndEffectorState.L4));
 
-        // Superstructure config mirrors the legacy sequencing.
-        SuperstructureConfig<SuperState, SuperTuple> config =
-                new SuperstructureConfig<>(SuperState.Home)
-                .mechanisms(m -> m
-                        .mechanism(elevator, SuperTuple::elev)
-                        .mechanism(eff, SuperTuple::eff))
-                // Constraints similar to old class:
-                // - Stow before intaking from high states (queue Home first if not clear)
-                .constraints(c -> c
-                        .state(SuperState.Intaking,
-                                ctx -> ctx.mechanisms().generic(SuperTuple::elev).stateMachine().at(ElevatorState.Intaking)
-                                        || ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home),
-                                SuperState.Home)
-                        // - Keep end effector home before lifting to high nodes
-                        .state(SuperState.L3,
-                                ctx -> ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home, EndEffectorState.L3))
-                        .state(SuperState.L4,
-                                ctx -> ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home, EndEffectorState.L4))
-                        // - Score waits for both children to be at goal
-                        .state(SuperState.Score,
-                                ctx -> ctx.mechanisms().generic(SuperTuple::elev).stateMachine().atGoal()
-                                        && ctx.mechanisms().generic(SuperTuple::eff).stateMachine().atGoal()))
-                .sim(sim -> {
-                    // Anchor end effector visualization to the elevator carriage height.
-                    sim.attach(SuperTuple::eff, ctx -> {
-                        var elevMech = ctx.mechanisms().generic(SuperTuple::elev);
-                        double z = elevMech.position();
-                        return new Pose3d(0.0, 0.0, z, new Rotation3d());
-                    });
-                });
-
-        return config.build();
+        @SuppressWarnings("unchecked")
+        SuperstructureMechanism<SuperState, SuperTuple> superstructure =
+                (SuperstructureMechanism<SuperState, SuperTuple>) SuperstructureDefinitions.build(
+                        Superstructures.<SuperState, SuperTuple>stateful("composite", SuperState.Home)
+                                .mechanisms(m -> m
+                                        .existing(elevator, SuperTuple::elev)
+                                        .existing(eff, SuperTuple::eff))
+                                .behavior(behavior -> behavior.constraints(c -> c
+                                        .state(SuperState.Intaking,
+                                                ctx -> ctx.mechanisms().generic(SuperTuple::elev).stateMachine().at(ElevatorState.Intaking)
+                                                        || ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home),
+                                                SuperState.Home)
+                                        .state(SuperState.L3,
+                                                ctx -> ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home, EndEffectorState.L3))
+                                        .state(SuperState.L4,
+                                                ctx -> ctx.mechanisms().generic(SuperTuple::eff).stateMachine().at(EndEffectorState.Home, EndEffectorState.L4))
+                                        .state(SuperState.Score,
+                                                ctx -> ctx.mechanisms().generic(SuperTuple::elev).stateMachine().atGoal()
+                                                        && ctx.mechanisms().generic(SuperTuple::eff).stateMachine().atGoal())))
+                                .definition());
+        return superstructure;
     }
 }

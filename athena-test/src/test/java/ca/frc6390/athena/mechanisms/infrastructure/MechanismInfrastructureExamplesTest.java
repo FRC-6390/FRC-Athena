@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.frc6390.athena.api.mechanism.MechanismDefinitions;
+import ca.frc6390.athena.api.mechanism.Mechanisms;
 import ca.frc6390.athena.mechanisms.examples.MechanismInfrastructureExamples;
 import ca.frc6390.athena.mechanisms.sim.MechanismVisualizationConfig;
 import java.util.Map;
@@ -13,6 +15,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 final class MechanismInfrastructureExamplesTest {
+    private enum ExampleState implements StateMachine.SetpointProvider<Double> {
+        IDLE(0.0);
+
+        private final double setpoint;
+
+        ExampleState(double setpoint) {
+            this.setpoint = setpoint;
+        }
+
+        @Override
+        public Double getSetpoint() {
+            return setpoint;
+        }
+    }
 
     @Test
     void configuredMechanismAppliesSafeSysIdAndNetworkTablesSettings() {
@@ -28,7 +44,7 @@ final class MechanismInfrastructureExamplesTest {
 
     @Test
     void disableForTestModeShutsOffHooksAndControlLoops() {
-        Mechanism mechanism = MechanismConfig.generic("test-mode").build();
+        Mechanism mechanism = MechanismDefinitions.build(Mechanisms.create("test-mode").definition());
         assertTrue(mechanism.hooksEnabled());
         assertTrue(mechanism.controlLoopsEnabled());
 
@@ -42,7 +58,7 @@ final class MechanismInfrastructureExamplesTest {
     void lazyFactoryBuildsOnlyOnceAndFlattens() {
         AtomicInteger buildCount = new AtomicInteger();
         RegisterableMechanismFactory factory =
-                MechanismInfrastructureExamples.lazyFactory(MechanismConfig.generic("pivot"), buildCount);
+                MechanismInfrastructureExamples.lazyFactory(Mechanisms.create("pivot"), buildCount);
 
         RegisterableMechanism first = factory.build();
         RegisterableMechanism second = factory.build();
@@ -85,11 +101,8 @@ final class MechanismInfrastructureExamplesTest {
     @Test
     void defaultVisualizationsRenderAcrossMechanismTypes() {
         Map<String, Mechanism> mechanisms = Map.of(
-                "generic", MechanismConfig.generic("generic").build(),
-                "arm", MechanismConfig.arm("arm").build(),
-                "elevator", MechanismConfig.elevator("elevator").build(),
-                "flywheel", MechanismConfig.flywheel("flywheel").build(),
-                "turret", MechanismConfig.turret("turret").build());
+                "generic", MechanismDefinitions.build(Mechanisms.create("generic").definition()),
+                "stateful", MechanismDefinitions.build(Mechanisms.stateful("stateful", ExampleState.IDLE).definition()));
 
         for (Map.Entry<String, Mechanism> entry : mechanisms.entrySet()) {
             Mechanism mechanism = entry.getValue();

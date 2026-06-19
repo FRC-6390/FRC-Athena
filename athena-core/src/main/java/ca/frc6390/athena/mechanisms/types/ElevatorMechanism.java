@@ -11,36 +11,43 @@ public class ElevatorMechanism extends Mechanism {
 
     private final ElevatorFeedforward feedforward;
 
-    public ElevatorMechanism(MechanismConfig<? extends ElevatorMechanism> config) {
-        super(ElevatorMechanismVisualization.prepare(config));
-        MechanismConfig.FeedforwardProfile profile =
-                config != null ? config.mechanismFeedforwardProfile(MechanismConfig.FeedforwardType.ELEVATOR) : null;
-        if (profile != null) {
-            this.feedforward = profile.elevator();
+    protected ElevatorMechanism(
+            MechanismRuntimeConfig<? extends ElevatorMechanism> runtimeConfig,
+            ElevatorFeedforward feedforward,
+            double minHeightMeters,
+            double maxHeightMeters,
+            double unitsPerMeter,
+            MechanismLifecycleHooks lifecycleHooks) {
+        super(
+                runtimeConfig,
+                runtimeConfig.sourceKey() != null ? runtimeConfig.sourceKey() : runtimeConfig,
+                lifecycleHooks);
+        if (feedforward != null) {
+            this.feedforward = feedforward;
             control().feedforwardEnabled(true);
         } else {
             this.feedforward = null;
         }
-        if (config.elevatorSimulationParameters() != null) {
-            MechanismConfig.ElevatorSimulationParameters params = config.elevatorSimulationParameters();
-            double min = params.minHeightMeters;
-            double max = params.maxHeightMeters;
-            double unitsPerMeter = params.unitsPerMeterOverride;
-            if (Double.isFinite(unitsPerMeter) && Math.abs(unitsPerMeter) > 1e-9) {
-                min *= unitsPerMeter;
-                max *= unitsPerMeter;
-            } else {
-                min = Double.NaN;
-                max = Double.NaN;
+        applyKnownTravelRange(minHeightMeters, maxHeightMeters, unitsPerMeter);
+    }
+
+    private void applyKnownTravelRange(double minHeightMeters, double maxHeightMeters, double unitsPerMeter) {
+        double min = minHeightMeters;
+        double max = maxHeightMeters;
+        if (Double.isFinite(unitsPerMeter) && Math.abs(unitsPerMeter) > 1e-9) {
+            min *= unitsPerMeter;
+            max *= unitsPerMeter;
+        } else {
+            min = Double.NaN;
+            max = Double.NaN;
+        }
+        if (Double.isFinite(min) && Double.isFinite(max) && max != min) {
+            if (max < min) {
+                double tmp = min;
+                min = max;
+                max = tmp;
             }
-            if (Double.isFinite(min) && Double.isFinite(max) && max != min) {
-                if (max < min) {
-                    double tmp = min;
-                    min = max;
-                    max = tmp;
-                }
-                MechanismTravelRange.registerKnownRange(this, min, max);
-            }
+            MechanismTravelRange.registerKnownRange(this, min, max);
         }
     }
 
@@ -75,14 +82,30 @@ public class ElevatorMechanism extends Mechanism {
         super.publishArcp(publisher, rootPath);
     }
 
-    public static class StatefulElevatorMechanism<E extends Enum<E>> extends ElevatorMechanism implements StatefulLike<E> {
+    public static class StatefulElevatorMechanism<E> extends ElevatorMechanism implements StatefulLike<E> {
 
         private final StatefulMechanismCore<StatefulElevatorMechanism<E>, E> stateMachineCore;
 
-        public StatefulElevatorMechanism(MechanismConfig<StatefulElevatorMechanism<E>> config,
-                                         E initialState) {
-            super(config);
-            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+        StatefulElevatorMechanism(
+                MechanismRuntimeConfig<? extends StatefulElevatorMechanism<E>> runtimeConfig,
+                E initialState,
+                StatefulMechanismRuntimeConfig<StatefulElevatorMechanism<E>, E> stateRuntimeConfig,
+                ElevatorFeedforward feedforward,
+                double minHeightMeters,
+                double maxHeightMeters,
+                double unitsPerMeter,
+                MechanismLifecycleHooks lifecycleHooks) {
+            super(
+                    runtimeConfig,
+                    feedforward,
+                    minHeightMeters,
+                    maxHeightMeters,
+                    unitsPerMeter,
+                    lifecycleHooks);
+            stateMachineCore = StatefulMechanismCore.fromRuntimeConfig(
+                    initialState,
+                    this::atSetpoint,
+                    stateRuntimeConfig);
             Double initialSetpoint = StateSpecAccess.setpoint(initialState);
             if (initialSetpoint != null) {
                 control().setpoint(initialSetpoint);

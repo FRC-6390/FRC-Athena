@@ -2,7 +2,7 @@ package ca.frc6390.athena.mechanisms;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -13,22 +13,24 @@ import java.util.function.BooleanSupplier;
  * required intermediate states between two endpoints so that higher-level code only needs to
  * request the final state and the machine automatically expands the full path.
  *
- * @param <E> enum type backing the state machine
+ * @param <E> state key type backing the state machine
  */
-public final class StateGraph<E extends Enum<E>> {
+public final class StateGraph<E> {
 
-    private final Class<E> enumClass;
     private final Map<E, Map<E, List<E>>> transitions;
     private final Map<E, Map<E, BooleanSupplier>> guards;
 
-    private StateGraph(Class<E> enumClass) {
-        this.enumClass = Objects.requireNonNull(enumClass, "enumClass");
-        this.transitions = new EnumMap<>(enumClass);
-        this.guards = new EnumMap<>(enumClass);
+    private StateGraph() {
+        this.transitions = new LinkedHashMap<>();
+        this.guards = new LinkedHashMap<>();
     }
 
-    public static <E extends Enum<E>> StateGraph<E> create(Class<E> enumClass) {
-        return new StateGraph<>(enumClass);
+    public static <E> StateGraph<E> create() {
+        return new StateGraph<>();
+    }
+
+    public static <E> StateGraph<E> create(Class<E> ignoredStateType) {
+        return new StateGraph<>();
     }
 
     @SafeVarargs
@@ -78,7 +80,7 @@ public final class StateGraph<E extends Enum<E>> {
         Objects.requireNonNull(from, "from");
         Objects.requireNonNull(to, "to");
         Objects.requireNonNull(guard, "guard");
-        guards.computeIfAbsent(from, k -> new EnumMap<>(enumClass)).put(to, guard);
+        guards.computeIfAbsent(from, k -> new LinkedHashMap<>()).put(to, guard);
         return this;
     }
 
@@ -104,12 +106,15 @@ public final class StateGraph<E extends Enum<E>> {
     }
 
     private void register(E from, E to, List<E> path) {
-        Map<E, List<E>> edges = transitions.computeIfAbsent(from, k -> new EnumMap<>(enumClass));
+        Map<E, List<E>> edges = transitions.computeIfAbsent(from, k -> new LinkedHashMap<>());
         List<E> copy = List.copyOf(path);
         List<E> existing = edges.put(to, copy);
         if (existing != null && !existing.equals(copy)) {
             throw new IllegalStateException(
-                    "Conflicting path definition from " + from.name() + " to " + to.name());
+                    "Conflicting path definition from "
+                            + ca.frc6390.athena.mechanisms.statespec.StateNames.name(from)
+                            + " to "
+                            + ca.frc6390.athena.mechanisms.statespec.StateNames.name(to));
         }
     }
 

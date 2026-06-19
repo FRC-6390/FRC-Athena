@@ -6,12 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import ca.frc6390.athena.api.mechanism.Mechanisms;
+import ca.frc6390.athena.api.mechanism.runtime.MechanismRuntimeLowerer;
+
 final class MechanismBangBangControlTest {
 
     @Test
     void calculateBangBangRawUsesHighLowAndTolerance() {
-        MechanismConfig.BangBangProfile profile =
-                new MechanismConfig.BangBangProfile(OutputType.PERCENT, 0.7, -0.4, 0.1);
+        MechanismRuntimeConfig.BangBangProfile profile =
+                new MechanismRuntimeConfig.BangBangProfile(OutputType.PERCENT, 0.7, -0.4, 0.1, null, null);
 
         assertEquals(0.7, Mechanism.calculateBangBangRaw(profile, 0.0, 1.0), 1e-9);
         assertEquals(-0.4, Mechanism.calculateBangBangRaw(profile, 2.0, 1.0), 1e-9);
@@ -21,8 +24,8 @@ final class MechanismBangBangControlTest {
 
     @Test
     void toleranceAndSanitizersHandleInvalidValues() {
-        MechanismConfig.BangBangProfile invalid =
-                new MechanismConfig.BangBangProfile(OutputType.PERCENT, Double.NaN, Double.NaN, Double.NaN);
+        MechanismRuntimeConfig.BangBangProfile invalid =
+                new MechanismRuntimeConfig.BangBangProfile(OutputType.PERCENT, Double.NaN, Double.NaN, Double.NaN, null, null);
 
         assertEquals(0.0, Mechanism.sanitizeBangBangLevel(Double.NaN), 1e-9);
         assertEquals(0.0, Mechanism.sanitizeBangBangTolerance(Double.NaN), 1e-9);
@@ -32,22 +35,23 @@ final class MechanismBangBangControlTest {
 
     @Test
     void controlSectionRegistersAndResolvesBangBangProfiles() {
-        MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
-        cfg.control(c -> c
-                .bangBang("assist", bb -> bb
-                        .output(OutputType.VOLTAGE)
-                        .high(5.0)
-                        .low(-3.0)
-                        .tolerance(0.2))
-                .periodic("assist"));
+        var runtime = MechanismRuntimeLowerer.lower(
+                Mechanisms.create("bangbang")
+                        .behavior(behavior -> behavior.control(control -> control
+                                .bangBang("assist", bangBang -> bangBang
+                                        .output(OutputType.VOLTAGE)
+                                        .high(5.0)
+                                        .low(-3.0)
+                                        .tolerance(0.2))))
+                        .definition());
 
-        MechanismConfig.BangBangProfile resolved = cfg.controlLoopBangBangProfiles().get("assist");
+        MechanismRuntimeConfig.BangBangProfile resolved = runtime.controlLoopBangBangProfiles().get("assist");
         assertEquals(OutputType.VOLTAGE, resolved.outputType());
         assertEquals(5.0, resolved.highOutput(), 1e-9);
         assertEquals(-3.0, resolved.lowOutput(), 1e-9);
         assertEquals(0.2, resolved.tolerance(), 1e-9);
-        assertEquals(1, cfg.controlLoops().size());
-        assertEquals("assist", cfg.controlLoops().get(0).name());
-        assertTrue(cfg.controlLoopBangBangProfiles().containsKey("assist"));
+        assertEquals(1, runtime.controlLoops().size());
+        assertEquals("assist", runtime.controlLoops().get(0).name());
+        assertTrue(runtime.controlLoopBangBangProfiles().containsKey("assist"));
     }
 }

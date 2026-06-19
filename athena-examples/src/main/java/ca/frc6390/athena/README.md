@@ -10,6 +10,7 @@ Top-level example groups:
 - `drivetrains/swerve/examples`
 - `filters/examples`
 - `hardware/examples`
+- `mechanisms/examples/v2`
 - `mechanisms/examples/infrastructure`
 - `mechanisms/examples/state`
 - `mechanisms/examples/superstructure`

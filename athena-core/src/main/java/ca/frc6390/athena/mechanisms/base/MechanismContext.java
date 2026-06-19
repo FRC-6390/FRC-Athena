@@ -11,9 +11,9 @@ import ca.frc6390.athena.networktables.NtScope;
  * Read-only view used by mechanism state hooks.
  *
  * @param <T> mechanism type
- * @param <E> state enum type
+ * @param <E> state key type
  */
-public interface MechanismContext<T extends Mechanism, E extends Enum<E>>
+public interface MechanismContext<T extends Mechanism, E>
         extends TypedInputContext, RobotScopedContext {
 
     T mechanism();

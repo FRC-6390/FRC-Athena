@@ -1,8 +1,6 @@
 package ca.frc6390.athena.mechanisms.examples.state;
 
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-import ca.frc6390.athena.mechanisms.statespec.AthenaState;
-import ca.frc6390.athena.mechanisms.statespec.AthenaStateLogic;
 import ca.frc6390.athena.mechanisms.statespec.StateBuilder;
 import ca.frc6390.athena.mechanisms.statespec.StateDsl;
 import ca.frc6390.athena.mechanisms.statespec.StateSeed;
@@ -15,7 +13,6 @@ import ca.frc6390.athena.mechanisms.statespec.StateSeedRuntime;
 public final class StateSeedExamples {
     private StateSeedExamples() {}
 
-    @AthenaState(Double.class)
     public enum SeededState implements SetpointProvider<Double>, StateSeedProvider<SeededState> {
         IDLE,
         HOLD,
@@ -40,7 +37,6 @@ public final class StateSeedExamples {
         }
     }
 
-    @AthenaStateLogic("TRACK")
     public static StateBuilder<SeededState> trackLogic(StateBuilder<SeededState> builder) {
         return builder.setpoint(2.75).then(SeededState.IDLE);
     }

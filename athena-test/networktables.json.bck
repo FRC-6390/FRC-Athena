@@ -50,7 +50,7 @@
   {
     "name": "/Preferences/Shuffleboard/Localization/Save Data/DriverYawDeg",
     "type": "double",
-    "value": 90.0,
+    "value": 120.00000000000017,
     "properties": {
       "persistent": true
     }

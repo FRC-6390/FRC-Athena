@@ -4,20 +4,23 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.frc6390.athena.api.mechanism.Mechanisms;
+import ca.frc6390.athena.api.mechanism.identity.PositionDomainKind;
+import ca.frc6390.athena.api.mechanism.identity.PositionUnit;
+import ca.frc6390.athena.api.mechanism.runtime.MechanismRuntimeLowerer;
 import org.junit.jupiter.api.Test;
 
 final class MechanismConfigTurretAutoContinuousPidTest {
 
     @Test
-    void enablesContinuousPidWhenUnboundedAndConversionLooksLikeDegrees() {
-        MechanismConfigRecord base = MechanismConfigRecord.defaults();
-        MechanismConfigRecord cfg = base.toBuilder()
-                .encoderConversion(360.0)
-                .minBound(Double.NaN)
-                .maxBound(Double.NaN)
-                .build();
-
-        MechanismConfigRecord out = MechanismConfig.applyAutoContinuousPidForUnboundedTurret(cfg);
+    void enablesContinuousPidWhenContinuousAngularIdentityUsesDegrees() {
+        MechanismConfigRecord out = MechanismRuntimeLowerer.lower(
+                Mechanisms.create("turret")
+                        .identity(identity -> identity
+                                .positionDomain(PositionDomainKind.ANGULAR, PositionUnit.DEGREES)
+                                .continuousRotation())
+                        .definition())
+                .data();
 
         assertTrue(out.pidContinous());
         assertEquals(-180.0, out.continousMin(), 1e-9);
@@ -25,27 +28,27 @@ final class MechanismConfigTurretAutoContinuousPidTest {
     }
 
     @Test
-    void doesNotEnableContinuousPidWhenBoundsAreSet() {
-        MechanismConfigRecord base = MechanismConfigRecord.defaults();
-        MechanismConfigRecord cfg = base.toBuilder()
-                .encoderConversion(360.0)
-                .minBound(0.0)
-                .maxBound(270.0)
-                .build();
-
-        MechanismConfigRecord out = MechanismConfig.applyAutoContinuousPidForUnboundedTurret(cfg);
+    void doesNotEnableContinuousPidWhenMechanismIsBounded() {
+        MechanismConfigRecord out = MechanismRuntimeLowerer.lower(
+                Mechanisms.create("turret")
+                        .identity(identity -> identity
+                                .positionDomain(PositionDomainKind.ANGULAR, PositionUnit.DEGREES)
+                                .travelRange(0.0, 270.0))
+                        .definition())
+                .data();
 
         assertFalse(out.pidContinous());
     }
 
     @Test
-    void doesNotEnableContinuousPidWhenConversionIsInvalid() {
-        MechanismConfigRecord base = MechanismConfigRecord.defaults();
-        MechanismConfigRecord cfg = base.toBuilder()
-                .encoderConversion(Double.NaN)
-                .build();
-
-        MechanismConfigRecord out = MechanismConfig.applyAutoContinuousPidForUnboundedTurret(cfg);
+    void doesNotEnableContinuousPidWhenContinuousUnitsAreUnsupported() {
+        MechanismConfigRecord out = MechanismRuntimeLowerer.lower(
+                Mechanisms.create("elevator")
+                        .identity(identity -> identity
+                                .positionDomain(PositionDomainKind.LINEAR, PositionUnit.METERS)
+                                .continuousRotation())
+                        .definition())
+                .data();
 
         assertFalse(out.pidContinous());
     }

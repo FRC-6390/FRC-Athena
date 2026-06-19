@@ -1,7 +1,10 @@
 package ca.frc6390.athena.mechanisms.examples;
 
+import ca.frc6390.athena.api.mechanism.MechanismConfig;
+import ca.frc6390.athena.api.mechanism.MechanismDefinitions;
+import ca.frc6390.athena.api.mechanism.Mechanisms;
+import ca.frc6390.athena.api.mechanism.definition.MechanismDefinition;
 import ca.frc6390.athena.mechanisms.Mechanism;
-import ca.frc6390.athena.mechanisms.MechanismConfig;
 import ca.frc6390.athena.mechanisms.MechanismPidAutotuners;
 import ca.frc6390.athena.mechanisms.OutputConversions;
 import ca.frc6390.athena.mechanisms.OutputType;
@@ -24,7 +27,7 @@ public final class MechanismInfrastructureExamples {
         if (mechanismName.isEmpty()) {
             throw new IllegalArgumentException("name must not be blank");
         }
-        Mechanism mechanism = MechanismConfig.generic(mechanismName).build();
+        Mechanism mechanism = MechanismDefinitions.build(Mechanisms.create(mechanismName).definition());
         configureSafeSysId(mechanism, 0.35, 2.0, 5.0, 4.0);
         configureNetworkTables(mechanism, "Robot/Mechanisms/" + mechanismName, 0.05, "safe-bindings");
         return mechanism;
@@ -62,9 +65,16 @@ public final class MechanismInfrastructureExamples {
     }
 
     public static RegisterableMechanismFactory lazyFactory(
-            MechanismConfig<Mechanism> config,
+            MechanismConfig config,
             AtomicInteger buildCount) {
         Objects.requireNonNull(config, "config");
+        return lazyFactory(config.definition(), buildCount);
+    }
+
+    public static RegisterableMechanismFactory lazyFactory(
+            MechanismDefinition definition,
+            AtomicInteger buildCount) {
+        Objects.requireNonNull(definition, "definition");
         Objects.requireNonNull(buildCount, "buildCount");
         return new RegisterableMechanismFactory() {
             private RegisterableMechanism cached;
@@ -72,7 +82,7 @@ public final class MechanismInfrastructureExamples {
             @Override
             public RegisterableMechanism build() {
                 if (cached == null) {
-                    cached = config.build();
+                    cached = MechanismDefinitions.build(definition);
                     buildCount.incrementAndGet();
                 }
                 return cached;

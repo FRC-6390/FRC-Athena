@@ -7,11 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import ca.frc6390.athena.api.mechanism.MechanismDefinitions;
+import ca.frc6390.athena.api.mechanism.Mechanisms;
+
 final class MechanismDocsExamplesTest {
 
     @Test
     void disableAllHooksAndControlLoopsMatchesDocsExample() {
-        Mechanism mechanism = MechanismConfig.<Mechanism>generic().build();
+        Mechanism mechanism = MechanismDefinitions.build(Mechanisms.create("docs").definition());
 
         assertTrue(mechanism.hooksEnabled());
         assertTrue(mechanism.controlLoopsEnabled());
@@ -24,9 +27,11 @@ final class MechanismDocsExamplesTest {
 
     @Test
     void testModeSuppressesPidOutput() {
-        MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
-        cfg.control(c -> c.controlLoop("pidLike", 20.0, ctx -> 1.0));
-        Mechanism mechanism = cfg.build();
+        Mechanism mechanism = MechanismDefinitions.build(
+                Mechanisms.create("docs-loop")
+                        .behavior(behavior -> behavior.control(control -> control
+                                .customLoop("pidLike", loop -> loop.custom(ctx -> 1.0))))
+                        .definition());
 
         setRobotMode(mechanism, "TELE");
         mechanism.update();

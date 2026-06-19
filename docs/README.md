@@ -2,6 +2,7 @@
 
 ## Mechanisms
 
+- [Mechanism V2 Authoring Styles and Examples](./mechanisms/v2-authoring-styles.md)
 - [Mechanism File Catalog](./mechanisms/catalog-file-map.md)
 - [Mechanism Example Catalog](./mechanisms/catalog-examples-map.md)
 - [Mechanism Test Catalog](./mechanisms/catalog-test-map.md)

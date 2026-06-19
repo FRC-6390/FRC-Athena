@@ -2,6 +2,8 @@ package ca.frc6390.athena.mechanisms;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ca.frc6390.athena.api.mechanism.Mechanisms;
+import ca.frc6390.athena.api.mechanism.runtime.MechanismRuntimeLowerer;
 import ca.frc6390.athena.hardware.encoder.Encoder;
 import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.motor.MotorControllerGroup;
@@ -21,10 +23,12 @@ final class MechanismControlLoopScalingTest {
 
     @Test
     void periodicSimpleFeedforwardUsesVelocitySetpointNotPositionSetpoint() {
-        MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
-        cfg.control(c -> c.ff("ff", ff -> ff.simple(0.0, 1.0, 0.0)).periodic("ff"));
-
-        MechanismConfig.ControlLoopBinding<Mechanism> binding = cfg.controlLoops().get(0);
+        MechanismRuntimeConfig.ControlLoopBinding<Mechanism> binding = MechanismRuntimeLowerer.lower(
+                Mechanisms.create("ff")
+                        .behavior(behavior -> behavior.control(control -> control
+                                .feedforward("ff", ff -> ff.simple().ks(0.0).kv(1.0).ka(0.0))))
+                        .definition())
+                .controlLoops().get(0);
         TestMechanism mechanism = new TestMechanism(null);
         mechanism.setpoint(180.0);
         mechanism.control().nudge(5.0);
@@ -38,12 +42,12 @@ final class MechanismControlLoopScalingTest {
 
     @Test
     void periodicPidUsesConfiguredVelocitySource() {
-        MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
-        cfg.control(c -> c
-                .pid("pid", p -> p.kp(1.0).inputSource(MechanismConfig.InputSource.Velocity))
-                .periodic("pid"));
-
-        MechanismConfig.ControlLoopBinding<Mechanism> binding = cfg.controlLoops().get(0);
+        MechanismRuntimeConfig.ControlLoopBinding<Mechanism> binding = MechanismRuntimeLowerer.lower(
+                Mechanisms.create("pid-velocity")
+                        .behavior(behavior -> behavior.control(control -> control
+                                .pid("pid", pid -> pid.kp(1.0).inputSource(MechanismInputSource.Velocity))))
+                        .definition())
+                .controlLoops().get(0);
         TestMechanism mechanism = new TestMechanism(null);
         mechanism.positionValue(42.0);
         mechanism.velocityValue(6.5);
@@ -60,12 +64,12 @@ final class MechanismControlLoopScalingTest {
 
     @Test
     void periodicPidUsesConfiguredInputSource() {
-        MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
-        cfg.control(c -> c
-                .pid("pid", p -> p.kp(1.0).inputInput("pidMeas"))
-                .periodic("pid"));
-
-        MechanismConfig.ControlLoopBinding<Mechanism> binding = cfg.controlLoops().get(0);
+        MechanismRuntimeConfig.ControlLoopBinding<Mechanism> binding = MechanismRuntimeLowerer.lower(
+                Mechanisms.create("pid-input")
+                        .behavior(behavior -> behavior.control(control -> control
+                                .pid("pid", pid -> pid.kp(1.0).inputInput("pidMeas"))))
+                        .definition())
+                .controlLoops().get(0);
         TestMechanism mechanism = new TestMechanism(null);
         mechanism.positionValue(42.0);
         mechanism.velocityValue(6.5);
@@ -83,12 +87,17 @@ final class MechanismControlLoopScalingTest {
 
     @Test
     void periodicFeedforwardUsesConfiguredInputSource() {
-        MechanismConfig<Mechanism> cfg = MechanismConfig.generic();
-        cfg.control(c -> c
-                .ff("ff", ff -> ff.simple(0.0, 1.0, 0.0).setpointInput("ffVel"))
-                .periodic("ff"));
-
-        MechanismConfig.ControlLoopBinding<Mechanism> binding = cfg.controlLoops().get(0);
+        MechanismRuntimeConfig.ControlLoopBinding<Mechanism> binding = MechanismRuntimeLowerer.lower(
+                Mechanisms.create("ff-input")
+                        .behavior(behavior -> behavior.control(control -> control
+                                .feedforward("ff", ff -> ff
+                                        .simple()
+                                        .ks(0.0)
+                                        .kv(1.0)
+                                        .ka(0.0)
+                                        .setpointInput("ffVel"))))
+                        .definition())
+                .controlLoops().get(0);
         TestMechanism mechanism = new TestMechanism(null);
         TestControlContext context = new TestControlContext(mechanism);
         context.setDoubleInput("ffVel", 3.25);
@@ -270,7 +279,7 @@ final class MechanismControlLoopScalingTest {
         }
 
         @Override
-        public MechanismConfig.BangBangProfile bangBang(String name) {
+        public MechanismRuntimeConfig.BangBangProfile bangBang(String name) {
             return null;
         }
 
@@ -281,6 +290,12 @@ final class MechanismControlLoopScalingTest {
 
         @Override
         public double feedforwardOut(String name, double velocity) {
+            lastFeedforwardVelocity = velocity;
+            return velocity;
+        }
+
+        @Override
+        public double feedforwardOut(String name, double measurement, double setpoint, double velocity) {
             lastFeedforwardVelocity = velocity;
             return velocity;
         }

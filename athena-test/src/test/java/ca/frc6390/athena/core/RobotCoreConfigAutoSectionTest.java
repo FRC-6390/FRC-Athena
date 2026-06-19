@@ -89,9 +89,9 @@ final class RobotCoreConfigAutoSectionTest {
     void drivetrainSectionTimingKnobsApplyToBuiltSwerveDrivetrain() {
         RobotCore.RobotCoreConfig<SwerveDrivetrain> cfg = RobotCoreConfig.create()
                 .drivetrain(d -> {
-                    d.updatePeriodMs(20.0)
-                            .driverCommandPeriodMs(10.0);
-                    d.config(RobotCoreConfigAutoSectionTest::configuredSwerveDrivetrain);
+                    return d.updatePeriodMs(20.0)
+                            .driverCommandPeriodMs(10.0)
+                            .config(RobotCoreConfigAutoSectionTest::configuredSwerveDrivetrain);
                 })
                 .build();
 

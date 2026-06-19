@@ -4,7 +4,7 @@ public final class StateSeedRuntime {
     private StateSeedRuntime() {
     }
 
-    public static <E extends Enum<E>> Double doubleSetpoint(StateSeed<E> seed) {
+    public static <E> Double doubleSetpoint(StateSeed<E> seed) {
         if (seed == null) {
             return null;
         }

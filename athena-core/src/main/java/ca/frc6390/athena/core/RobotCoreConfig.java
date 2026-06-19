@@ -22,17 +22,15 @@ import ca.frc6390.athena.drivetrains.swerve.sim.SwerveSimulationConfig;
 import ca.frc6390.athena.hardware.imu.AthenaImu;
 import ca.frc6390.athena.logging.TelemetryRegistry;
 import ca.frc6390.athena.mechanisms.Mechanism;
-import ca.frc6390.athena.mechanisms.MechanismConfig;
 import ca.frc6390.athena.mechanisms.RegisterableMechanism;
 import ca.frc6390.athena.mechanisms.RegisterableMechanismFactory;
-import ca.frc6390.athena.mechanisms.SuperstructureConfig;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.sensors.camera.ConfigurableCamera;
 
 /**
  * Declarative, Superstructure-style builder for {@link RobotCore.RobotCoreConfig}.
  *
- * <p>This is intended to "feel" like {@link SuperstructureConfig} and {@link MechanismConfig}:
+ * <p>This is intended to "feel" like Athena mechanism/superstructure configuration:
  * create -> section lambdas -> build().</p>
  *
  * <p>The returned {@link RobotCore.RobotCoreConfig} can be passed to {@code super(...)} when
@@ -958,16 +956,65 @@ public final class RobotCoreConfig {
             return existing(superstructure);
         }
 
-        public MechanismsSection mechanism(MechanismConfig<? extends Mechanism> config) {
+        public MechanismsSection mechanism(ca.frc6390.athena.api.mechanism.MechanismConfig config) {
             if (config != null) {
-                out.add(new LazyRegisterable(() -> config.build()));
+                return mechanism(ca.frc6390.athena.api.mechanism.MechanismDefinitions.structured(config));
             }
             return this;
         }
 
-        public MechanismsSection superstructure(SuperstructureConfig<?, ?> config) {
+        public MechanismsSection mechanism(
+                Class<?> declarationType) {
+            if (declarationType != null) {
+                return mechanism(ca.frc6390.athena.api.mechanism.MechanismDefinitions.structured(declarationType));
+            }
+            return this;
+        }
+
+        public MechanismsSection mechanism(
+                ca.frc6390.athena.api.mechanism.definition.MechanismDefinition definition) {
+            if (definition != null) {
+                out.add(new LazyRegisterable(() ->
+                        ca.frc6390.athena.api.mechanism.MechanismDefinitions.build(definition)));
+            }
+            return this;
+        }
+
+        public MechanismsSection mechanismAnnotation(Class<?> declarationType) {
+            if (declarationType != null) {
+                return mechanism(ca.frc6390.athena.api.mechanism.MechanismDefinitions.annotation(declarationType));
+            }
+            return this;
+        }
+
+        public MechanismsSection mechanismAnnotation(Object declaration) {
+            if (declaration != null) {
+                return mechanism(ca.frc6390.athena.api.mechanism.MechanismDefinitions.annotation(declaration));
+            }
+            return this;
+        }
+
+        public <S, SP> MechanismsSection superstructure(
+                ca.frc6390.athena.api.superstructure.SuperstructureConfig<S, SP> config) {
             if (config != null) {
-                out.add(new LazyRegisterable(config::build));
+                return superstructure(ca.frc6390.athena.api.superstructure.SuperstructureDefinitions.structured(config));
+            }
+            return this;
+        }
+
+        public <S, SP> MechanismsSection superstructure(
+                Class<?> declarationType) {
+            if (declarationType != null) {
+                return superstructure(ca.frc6390.athena.api.superstructure.SuperstructureDefinitions.structured(declarationType));
+            }
+            return this;
+        }
+
+        public MechanismsSection superstructure(
+                ca.frc6390.athena.api.superstructure.definition.SuperstructureDefinition<?> definition) {
+            if (definition != null) {
+                out.add(new LazyRegisterable(() ->
+                        ca.frc6390.athena.api.superstructure.SuperstructureDefinitions.build(definition)));
             }
             return this;
         }

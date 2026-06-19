@@ -2,7 +2,7 @@ package ca.frc6390.athena.mechanisms.statespec;
 
 import ca.frc6390.athena.mechanisms.Mechanism;
 
-public interface StateCtx<E extends Enum<E>> {
+public interface StateCtx<E> {
     E state();
 
     default double timeInState() {

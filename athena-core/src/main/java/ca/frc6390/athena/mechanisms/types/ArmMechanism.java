@@ -11,12 +11,16 @@ import edu.wpi.first.math.controller.ArmFeedforward;
 public class ArmMechanism extends Mechanism {
     private final ArmFeedforward feedforward;
 
-    public ArmMechanism(MechanismConfig<? extends ArmMechanism> config) {
-        super(config);
-        MechanismConfig.FeedforwardProfile profile =
-                config != null ? config.mechanismFeedforwardProfile(MechanismConfig.FeedforwardType.ARM) : null;
-        if (profile != null) {
-            this.feedforward = profile.arm();
+    protected ArmMechanism(
+            MechanismRuntimeConfig<? extends ArmMechanism> runtimeConfig,
+            ArmFeedforward feedforward,
+            MechanismLifecycleHooks lifecycleHooks) {
+        super(
+                runtimeConfig,
+                runtimeConfig.sourceKey() != null ? runtimeConfig.sourceKey() : runtimeConfig,
+                lifecycleHooks);
+        if (feedforward != null) {
+            this.feedforward = feedforward;
             control().feedforwardEnabled(true);
         } else {
             this.feedforward = null;
@@ -54,14 +58,24 @@ public class ArmMechanism extends Mechanism {
         super.publishArcp(publisher, rootPath);
     }
 
-    public static class StatefulArmMechanism<E extends Enum<E>> extends ArmMechanism implements StatefulLike<E> {
+    public static class StatefulArmMechanism<E> extends ArmMechanism implements StatefulLike<E> {
 
         private final StatefulMechanismCore<StatefulArmMechanism<E>, E> stateMachineCore;
 
-        public StatefulArmMechanism(MechanismConfig<StatefulArmMechanism<E>> config,
-                                    E initialState) {
-            super(config);
-            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+        StatefulArmMechanism(
+                MechanismRuntimeConfig<? extends StatefulArmMechanism<E>> runtimeConfig,
+                E initialState,
+                StatefulMechanismRuntimeConfig<StatefulArmMechanism<E>, E> stateRuntimeConfig,
+                ArmFeedforward feedforward,
+                MechanismLifecycleHooks lifecycleHooks) {
+            super(
+                    runtimeConfig,
+                    feedforward,
+                    lifecycleHooks);
+            stateMachineCore = StatefulMechanismCore.fromRuntimeConfig(
+                    initialState,
+                    this::atSetpoint,
+                    stateRuntimeConfig);
             Double initialSetpoint = StateSpecAccess.setpoint(initialState);
             if (initialSetpoint != null) {
                 control().setpoint(initialSetpoint);

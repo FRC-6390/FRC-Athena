@@ -26,6 +26,7 @@ import ca.frc6390.athena.core.auto.AutoBackend;
 import ca.frc6390.athena.core.auto.AutoBackends;
 import ca.frc6390.athena.core.diagnostics.BoundedEventLog;
 import ca.frc6390.athena.core.localization.RobotLocalization;
+import ca.frc6390.athena.mechanisms.statespec.StateNames;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
@@ -596,17 +597,17 @@ public class RobotAuto {
             return marker(id, new InstantCommand(action));
         }
 
-        default <E extends Enum<E>> AutoRegisterCtx marker(String id, E state) {
+        default AutoRegisterCtx marker(String id, Object state) {
             Objects.requireNonNull(state, "state");
-            return marker(id, new Enum<?>[] {state});
+            return marker(id, new Object[] {state});
         }
 
-        default AutoRegisterCtx marker(String id, Enum<?>... states) {
+        default AutoRegisterCtx marker(String id, Object... states) {
             Objects.requireNonNull(states, "states");
             return marker(
                     id,
                     Commands.runOnce(() -> {
-                        for (Enum<?> state : states) {
+                        for (Object state : states) {
                             if (state != null) {
                                 queueStateUnchecked(robot(), state);
                             }
@@ -614,9 +615,8 @@ public class RobotAuto {
                     }).ignoringDisable(true));
         }
 
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        private static void queueStateUnchecked(RobotCore<?> robot, Enum<?> state) {
-            robot.state().queue((Enum) state);
+        private static void queueStateUnchecked(RobotCore<?> robot, Object state) {
+            robot.state().queue(state);
         }
 
         @Override
@@ -966,20 +966,20 @@ public class RobotAuto {
          * Queues a robot state via {@link RobotCore#state()} and waits until that state is reached.
          *
          * <p>This is the auto-build equivalent of "queue state, then block sequence progression until
-         * done". If no unique owner can be resolved for the enum type, scheduling this command throws
+         * done". If no unique owner can be resolved for the state type, scheduling this command throws
          * an {@link IllegalStateException}.</p>
          */
-        default <E extends Enum<E>> Command state(E state) {
+        default Command state(Object state) {
             Objects.requireNonNull(state, "state");
             RobotCore<?> core = robot();
             String label = stateLabel(state);
             Command stateCommand = Commands.sequence(
                     Commands.runOnce(() -> {
                         if (!queueStateUnchecked(core, state)) {
-                            throw new IllegalStateException(
-                                    "AutoBuildCtx.state(" + label + ") failed: no unique owner was resolved by "
-                                            + "RobotCore.state() for enum type "
-                                            + state.getDeclaringClass().getName());
+	                            throw new IllegalStateException(
+	                                    "AutoBuildCtx.state(" + label + ") failed: no unique owner was resolved by "
+	                                            + "RobotCore.state() for state type "
+	                                            + state.getClass().getName());
                         }
                     }),
                     Commands.waitUntil(() -> atStateUnchecked(core, state)));
@@ -1564,18 +1564,16 @@ public class RobotAuto {
             return name;
         }
 
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        private static boolean queueStateUnchecked(RobotCore<?> robot, Enum<?> state) {
-            return robot.state().queue((Enum) state);
+        private static boolean queueStateUnchecked(RobotCore<?> robot, Object state) {
+            return robot.state().queue(state);
         }
 
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        private static boolean atStateUnchecked(RobotCore<?> robot, Enum<?> state) {
-            return robot.state().at((Enum) state);
+        private static boolean atStateUnchecked(RobotCore<?> robot, Object state) {
+            return robot.state().at(state);
         }
 
-        private static String stateLabel(Enum<?> state) {
-            return state.getDeclaringClass().getSimpleName() + "." + state.name();
+        private static String stateLabel(Object state) {
+            return state.getClass().getSimpleName() + "." + StateNames.name(state);
         }
 
         private Command traceBuild(String operation, String detail, Command command) {

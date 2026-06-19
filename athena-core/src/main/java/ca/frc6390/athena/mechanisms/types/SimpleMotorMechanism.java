@@ -12,11 +12,14 @@ public class SimpleMotorMechanism  extends Mechanism  {
     
     private final SimpleMotorFeedForwardsSendable feedforward;
 
-    public SimpleMotorMechanism(MechanismConfig<? extends SimpleMotorMechanism> config) {
-        super(config);
-        MechanismConfig.FeedforwardProfile profile =
-                config != null ? config.mechanismFeedforwardProfile(MechanismConfig.FeedforwardType.SIMPLE) : null;
-        SimpleMotorFeedforward feedforward = profile != null ? profile.simple() : null;
+    protected SimpleMotorMechanism(
+            MechanismRuntimeConfig<? extends SimpleMotorMechanism> runtimeConfig,
+            SimpleMotorFeedforward feedforward,
+            MechanismLifecycleHooks lifecycleHooks) {
+        super(
+                runtimeConfig,
+                runtimeConfig.sourceKey() != null ? runtimeConfig.sourceKey() : runtimeConfig,
+                lifecycleHooks);
         if (feedforward != null) {
             this.feedforward = new SimpleMotorFeedForwardsSendable(feedforward.getKs(), feedforward.getKv(), feedforward.getKa());
             control().feedforwardEnabled(true);
@@ -54,14 +57,24 @@ public class SimpleMotorMechanism  extends Mechanism  {
         super.publishArcp(publisher, rootPath);
     }
 
-    public static class StatefulSimpleMotorMechanism<E extends Enum<E>> extends SimpleMotorMechanism implements StatefulLike<E> {
+    public static class StatefulSimpleMotorMechanism<E> extends SimpleMotorMechanism implements StatefulLike<E> {
     
         private final StatefulMechanismCore<StatefulSimpleMotorMechanism<E>, E> stateMachineCore;
 
-        public StatefulSimpleMotorMechanism(MechanismConfig<StatefulSimpleMotorMechanism<E>> config,
-                                            E initialState) {
-            super(config);
-            stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+        StatefulSimpleMotorMechanism(
+                MechanismRuntimeConfig<? extends StatefulSimpleMotorMechanism<E>> runtimeConfig,
+                E initialState,
+                StatefulMechanismRuntimeConfig<StatefulSimpleMotorMechanism<E>, E> stateRuntimeConfig,
+                SimpleMotorFeedforward feedforward,
+                MechanismLifecycleHooks lifecycleHooks) {
+            super(
+                    runtimeConfig,
+                    feedforward,
+                    lifecycleHooks);
+            stateMachineCore = StatefulMechanismCore.fromRuntimeConfig(
+                    initialState,
+                    this::atSetpoint,
+                    stateRuntimeConfig);
         }
 
         @Override

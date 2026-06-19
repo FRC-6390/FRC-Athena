@@ -37,9 +37,9 @@ public interface SuperstructureContext<SP> extends TypedInputContext, RobotScope
                 .scope("NetworkTables");
     }
 
-    <E extends Enum<E>> StatefulLike<E> mechanism(Function<SP, E> mapper);
+    <E> StatefulLike<E> mechanism(Function<SP, E> mapper);
 
-    <CSP, CS extends Enum<CS>> SuperstructureMechanism<CS, CSP> superstructure(Function<SP, CS> mapper);
+    <CSP, CS> SuperstructureMechanism<CS, CSP> superstructure(Function<SP, CS> mapper);
 
     /**
      * Returns a typed accessor for child mechanisms and nested superstructures.

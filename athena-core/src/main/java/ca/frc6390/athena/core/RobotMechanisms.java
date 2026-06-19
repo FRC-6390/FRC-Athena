@@ -10,15 +10,18 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import ca.frc6390.athena.api.ConfigDeclarations;
+import ca.frc6390.athena.api.mechanism.MechanismConfig;
 import ca.frc6390.athena.mechanisms.ArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism;
 import ca.frc6390.athena.mechanisms.Mechanism;
-import ca.frc6390.athena.mechanisms.MechanismConfig;
-import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
-import ca.frc6390.athena.mechanisms.SuperstructureConfig;
 import ca.frc6390.athena.mechanisms.SuperstructureMechanism;
 import ca.frc6390.athena.mechanisms.TurretMechanism;
+import ca.frc6390.athena.mechanisms.statespec.StateNames;
+import ca.frc6390.athena.api.mechanism.definition.MechanismDefinition;
+import ca.frc6390.athena.api.superstructure.SuperstructureConfig;
+import ca.frc6390.athena.api.superstructure.definition.SuperstructureDefinition;
 
 /**
  * Read-only view over RobotCore's registered mechanisms with convenience lookup helpers.
@@ -81,12 +84,12 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
         return type.cast(mech);
     }
 
-    public Mechanism byConfig(MechanismConfig<?> config) {
-        if (config == null) {
+    public Mechanism bySource(Object source) {
+        if (source == null) {
             return null;
         }
         for (Mechanism mech : mechanisms.values()) {
-            if (mech != null && mech.getSourceConfig() == config) {
+            if (mech != null && mech.getSourceKey() == source) {
                 return mech;
             }
         }
@@ -94,13 +97,12 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
     }
 
     @SuppressWarnings("unchecked")
-    public <SP, S extends Enum<S>> SuperstructureMechanism<S, SP> byConfig(
-            SuperstructureConfig<S, SP> config) {
-        if (config == null) {
+    public <SP, S> SuperstructureMechanism<S, SP> bySuperstructureSource(Object source) {
+        if (source == null) {
             return null;
         }
         for (SuperstructureMechanism<?, ?> superstructure : superstructuresByConfig) {
-            if (superstructure != null && superstructure.getSourceConfig() == config) {
+            if (superstructure != null && superstructure.getSourceKey() == source) {
                 return (SuperstructureMechanism<S, SP>) superstructure;
             }
         }
@@ -111,14 +113,20 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
         return superstructuresByName.get(name);
     }
 
-    public SuperstructureMechanism<?, ?> superstruct(Enum<?> key) {
+    public SuperstructureMechanism<?, ?> superstruct(Object key) {
         Objects.requireNonNull(key, "key");
-        return superstruct(key.name());
+        return superstruct(StateNames.name(key));
     }
 
-    public <SP, S extends Enum<S>> SuperstructureMechanism<S, SP> superstruct(
-            SuperstructureConfig<S, SP> config) {
-        return byConfig(config);
+    public <SP, S> SuperstructureMechanism<S, SP> superstruct(
+            SuperstructureDefinition<?> definition) {
+        return key(definition, SuperstructureMechanism.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <SP, S> SuperstructureMechanism<S, SP> superstruct(
+            Class<?> declarationType) {
+        return (SuperstructureMechanism<S, SP>) key(declarationType, SuperstructureMechanism.class);
     }
 
     public <T> T key(String name, Class<T> type) {
@@ -148,103 +156,122 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
         return type.cast(obj);
     }
 
-    public <T> T key(Enum<?> key, Class<T> type) {
+    public <T> T key(Object key, Class<T> type) {
         Objects.requireNonNull(key, "key");
-        return key(key.name(), type);
+        return key(StateNames.name(key), type);
     }
 
-    public <T> T key(MechanismConfig<?> config, Class<T> type) {
+    public <T> T key(MechanismDefinition definition, Class<T> type) {
         Objects.requireNonNull(type, "type");
-        Mechanism mech = byConfig(config);
+        Mechanism mech = bySource(definition);
         if (mech == null) {
             return null;
         }
         if (!type.isInstance(mech)) {
-            throw new IllegalArgumentException("Mechanism built from config is not a " + type.getSimpleName()
+            throw new IllegalArgumentException("Mechanism built from definition is not a " + type.getSimpleName()
                     + " (was " + mech.getClass().getSimpleName() + ")");
         }
         return type.cast(mech);
     }
 
-    public <T> T key(SuperstructureConfig<?, ?> config, Class<T> type) {
+    public <T> T key(SuperstructureDefinition<?> definition, Class<T> type) {
         Objects.requireNonNull(type, "type");
-        SuperstructureMechanism<?, ?> superstructure = null;
-        if (config != null) {
-            for (SuperstructureMechanism<?, ?> candidate : superstructuresByConfig) {
-                if (candidate != null && candidate.getSourceConfig() == config) {
-                    superstructure = candidate;
-                    break;
-                }
-            }
-        }
+        SuperstructureMechanism<?, ?> superstructure = bySuperstructureSource(definition);
         if (superstructure == null) {
             return null;
         }
         if (!type.isInstance(superstructure)) {
-            throw new IllegalArgumentException("Superstructure built from config is not a " + type.getSimpleName()
+            throw new IllegalArgumentException("Superstructure built from definition is not a " + type.getSimpleName()
                     + " (was " + superstructure.getClass().getSimpleName() + ")");
         }
         return type.cast(superstructure);
+    }
+
+    public <T> T key(Class<?> declarationType, Class<T> type) {
+        Objects.requireNonNull(declarationType, "declarationType");
+        if (MechanismConfig.class.isAssignableFrom(declarationType)) {
+            MechanismConfig declaration = ConfigDeclarations.instance(declarationType.asSubclass(MechanismConfig.class));
+            return key(declaration.name(), type);
+        }
+        if (SuperstructureConfig.class.isAssignableFrom(declarationType)) {
+            SuperstructureConfig<?, ?> declaration =
+                ConfigDeclarations.instance(declarationType.asSubclass(SuperstructureConfig.class));
+            return key(declaration.name(), type);
+        }
+        RuntimeException mechanismFailure;
+        try {
+            return key(ca.frc6390.athena.api.mechanism.MechanismDefinitions.structured(declarationType).name(), type);
+        } catch (RuntimeException ex) {
+            mechanismFailure = ex;
+        }
+        try {
+            return key(ca.frc6390.athena.api.superstructure.SuperstructureDefinitions.structured(declarationType).name(), type);
+        } catch (RuntimeException ex) {
+            IllegalArgumentException failure = new IllegalArgumentException(
+                "Declaration type is not a mechanism or superstructure config: " + declarationType.getName(), ex);
+            failure.addSuppressed(mechanismFailure);
+            throw failure;
+        }
     }
 
     public TurretMechanism turret(String name) {
         return key(name, TurretMechanism.class);
     }
 
-    public TurretMechanism turret(Enum<?> key) {
+    public TurretMechanism turret(Object key) {
         return key(key, TurretMechanism.class);
     }
 
-    public TurretMechanism turret(MechanismConfig<?> config) {
-        return key(config, TurretMechanism.class);
+    public TurretMechanism turret(MechanismDefinition definition) {
+        return key(definition, TurretMechanism.class);
     }
 
     public ElevatorMechanism elevator(String name) {
         return key(name, ElevatorMechanism.class);
     }
 
-    public ElevatorMechanism elevator(Enum<?> key) {
+    public ElevatorMechanism elevator(Object key) {
         return key(key, ElevatorMechanism.class);
     }
 
-    public ElevatorMechanism elevator(MechanismConfig<?> config) {
-        return key(config, ElevatorMechanism.class);
+    public ElevatorMechanism elevator(MechanismDefinition definition) {
+        return key(definition, ElevatorMechanism.class);
     }
 
     public ArmMechanism arm(String name) {
         return key(name, ArmMechanism.class);
     }
 
-    public ArmMechanism arm(Enum<?> key) {
+    public ArmMechanism arm(Object key) {
         return key(key, ArmMechanism.class);
     }
 
-    public ArmMechanism arm(MechanismConfig<?> config) {
-        return key(config, ArmMechanism.class);
+    public ArmMechanism arm(MechanismDefinition definition) {
+        return key(definition, ArmMechanism.class);
     }
 
     public FlywheelMechanism flywheel(String name) {
         return key(name, FlywheelMechanism.class);
     }
 
-    public FlywheelMechanism flywheel(Enum<?> key) {
+    public FlywheelMechanism flywheel(Object key) {
         return key(key, FlywheelMechanism.class);
     }
 
-    public FlywheelMechanism flywheel(MechanismConfig<?> config) {
-        return key(config, FlywheelMechanism.class);
+    public FlywheelMechanism flywheel(MechanismDefinition definition) {
+        return key(definition, FlywheelMechanism.class);
     }
 
     public Mechanism generic(String name) {
         return key(name, Mechanism.class);
     }
 
-    public Mechanism generic(Enum<?> key) {
+    public Mechanism generic(Object key) {
         return key(key, Mechanism.class);
     }
 
-    public Mechanism generic(MechanismConfig<?> config) {
-        return key(config, Mechanism.class);
+    public Mechanism generic(MechanismDefinition definition) {
+        return key(definition, Mechanism.class);
     }
 
     @Override
@@ -308,8 +335,8 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
             return this;
         }
 
-        public InteractionSection mechanism(MechanismConfig<?> config, Consumer<Mechanism> action) {
-            Mechanism mechanism = owner.byConfig(config);
+        public InteractionSection mechanism(MechanismDefinition definition, Consumer<Mechanism> action) {
+            Mechanism mechanism = owner.generic(definition);
             if (mechanism != null && action != null) {
                 action.accept(mechanism);
             }
@@ -317,10 +344,10 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
         }
 
         public <M extends Mechanism> InteractionSection mechanism(
-                MechanismConfig<?> config,
+                MechanismDefinition definition,
                 Class<M> type,
                 Consumer<M> action) {
-            M mechanism = owner.key(config, type);
+            M mechanism = owner.key(definition, type);
             if (mechanism != null && action != null) {
                 action.accept(mechanism);
             }
@@ -360,10 +387,10 @@ public final class RobotMechanisms extends AbstractMap<String, Mechanism> {
             return this;
         }
 
-        public <SP, S extends Enum<S>> InteractionSection superstructure(
-                SuperstructureConfig<S, SP> config,
+        public <SP, S> InteractionSection superstructure(
+                SuperstructureDefinition<?> definition,
                 Consumer<SuperstructureMechanism<S, SP>> action) {
-            SuperstructureMechanism<S, SP> superstructure = owner.superstruct(config);
+            SuperstructureMechanism<S, SP> superstructure = owner.key(definition, SuperstructureMechanism.class);
             if (superstructure != null && action != null) {
                 action.accept(superstructure);
             }

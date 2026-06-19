@@ -5,7 +5,7 @@ import java.util.function.Predicate;
 /**
  * Minimal fluent builder used by enum DSL seeds.
  */
-public class StateBuilder<E extends Enum<E>> {
+public class StateBuilder<E> {
     private Double setpoint;
     private Double manualPercent;
     private Predicate<StateCtx<E>> until;
@@ -29,7 +29,7 @@ public class StateBuilder<E extends Enum<E>> {
 
     public StateBuilder<E> then(E state) {
         this.next = state;
-        this.nextName = state != null ? state.name() : null;
+        this.nextName = StateNames.name(state);
         return this;
     }
 

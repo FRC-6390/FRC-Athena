@@ -15,10 +15,13 @@ import ca.frc6390.athena.core.RobotCoreHooks;
 import ca.frc6390.athena.core.diagnostics.BoundedEventLog;
 import ca.frc6390.athena.core.diagnostics.DiagnosticsChannel;
 import ca.frc6390.athena.core.input.TypedInputResolver;
+import ca.frc6390.athena.api.mechanism.definition.MechanismDefinition;
+import ca.frc6390.athena.api.superstructure.definition.SuperstructureDefinition;
 import ca.frc6390.athena.core.RobotSendableSystem;
 import ca.frc6390.athena.mechanisms.ArmMechanism.StatefulArmMechanism;
 import ca.frc6390.athena.mechanisms.FlywheelMechanism.StatefulFlywheelMechanism;
 import ca.frc6390.athena.mechanisms.Mechanism;
+import ca.frc6390.athena.mechanisms.statespec.StateNames;
 import ca.frc6390.athena.mechanisms.statespec.StateSpecAccess;
 import ca.frc6390.athena.core.RobotNetworkTables;
 import ca.frc6390.athena.core.arcp.ARCP;
@@ -42,21 +45,22 @@ import java.util.Queue;
  * Constraints reference child mechanisms via {@link SuperstructureContext#mechanisms()} using
  * the same mapper supplied to the config.
  */
-public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
+public class SuperstructureMechanism<S, SP> extends SubsystemBase implements RobotSendableSystem, RegisterableMechanism {
     private RobotCore<?> robotCore;
-    private SuperstructureConfig<?, ?> sourceConfig;
+    private Object sourceKey;
+    private SuperstructureLifecycleHooks<S, SP> lifecycleHooks = SuperstructureLifecycleHooks.none();
 
-    private static <SP> SP setpointOf(Enum<?> state) {
+    private static <SP> SP setpointOf(Object state) {
         return StateSpecAccess.setpoint(state);
     }
 
-    private static <SP, S extends Enum<S>> StateMachine<SP, S> createStateMachine(
+    private static <SP, S> StateMachine<SP, S> createStateMachine(
             S initialState,
             BooleanSupplier atStateSupplier) {
         return new StateMachine<>(initialState, atStateSupplier);
     }
 
-    static final class Child<SP, E extends Enum<E>> {
+    public static final class Child<SP, E> {
         final Mechanism mechanism;
         final SuperstructureMechanism<?, ?> superstructure;
         final StateMachine<?, ?> stateMachine;
@@ -64,7 +68,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         final Class<?> stateType;
 
         @SuppressWarnings("unchecked")
-        <M extends Enum<M>> Child(Mechanism mechanism, Function<SP, M> mapper, Class<M> stateType) {
+        public <M> Child(Mechanism mechanism, Function<SP, M> mapper, Class<M> stateType) {
             this.mechanism = mechanism;
             this.superstructure = null;
             StatefulLike<M> stateful = (StatefulLike<M>) mechanism;
@@ -73,7 +77,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
             this.stateType = stateType;
         }
 
-        <CSP, CS extends Enum<CS>> Child(
+        public <CSP, CS> Child(
                 SuperstructureMechanism<CS, CSP> superstructure,
                 Function<SP, CS> mapper,
                 Class<CS> stateType) {
@@ -96,8 +100,8 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
     private final StateMachine<SP, S> stateMachine;
     private final List<Child<SP, ?>> children;
-    private final Map<S, SuperstructureConfig.Constraint<S, SP>> constraints;
-    private final List<SuperstructureConfig.Attachment<SP, ?>> attachments;
+    private final Map<S, SuperstructureRuntimeConfig.Constraint<S, SP>> constraints;
+    private final List<SuperstructureRuntimeConfig.Attachment<SP, ?>> attachments;
     private final Map<String, java.util.function.BooleanSupplier> inputs;
     private final Map<String, DoubleSupplier> doubleInputs;
     private final Map<String, IntSupplier> intInputs;
@@ -106,13 +110,13 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
     private final Map<String, Supplier<Pose3d>> pose3dInputs;
     private final Map<String, Supplier<?>> objectInputs;
     private final TypedInputResolver inputResolver;
-    private final Map<S, List<SuperstructureConfig.Binding<SP>>> enterBindings;
-    private final List<SuperstructureConfig.TransitionBinding<SP, S>> transitionBindings;
-    private final Map<S, List<SuperstructureConfig.Binding<SP>>> bindings;
-    private final List<SuperstructureConfig.Binding<SP>> alwaysBindings;
-    private final List<SuperstructureConfig.Binding<SP>> periodicBindings;
-    private final Map<S, List<SuperstructureConfig.Binding<SP>>> exitBindings;
-    private final List<SuperstructureConfig.Binding<SP>> exitAlwaysBindings;
+    private final Map<S, List<SuperstructureRuntimeConfig.Binding<SP>>> enterBindings;
+    private final List<SuperstructureRuntimeConfig.TransitionBinding<SP, S>> transitionBindings;
+    private final Map<S, List<SuperstructureRuntimeConfig.Binding<SP>>> bindings;
+    private final List<SuperstructureRuntimeConfig.Binding<SP>> alwaysBindings;
+    private final List<SuperstructureRuntimeConfig.Binding<SP>> periodicBindings;
+    private final Map<S, List<SuperstructureRuntimeConfig.Binding<SP>>> exitBindings;
+    private final List<SuperstructureRuntimeConfig.Binding<SP>> exitAlwaysBindings;
     private final SuperstructureContextImpl context;
     private final Queue<SP> queuedSetpoints = new ArrayDeque<>();
     private SP queuedSetpoint;
@@ -139,56 +143,48 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
     private final int flattenedMechanismCount;
     private static final int DIAGNOSTIC_LOG_CAPACITY = 256;
 
-    SuperstructureMechanism(S initialState,
-                            double stateMachineDelaySeconds,
-                            List<Child<SP, ?>> children,
-                            Map<S, SuperstructureConfig.Constraint<S, SP>> constraints,
-                            List<SuperstructureConfig.Attachment<SP, ?>> attachments,
-                            Map<String, java.util.function.BooleanSupplier> inputs,
-                            Map<String, DoubleSupplier> doubleInputs,
-                            Map<String, IntSupplier> intInputs,
-                            Map<String, Supplier<String>> stringInputs,
-                            Map<String, Supplier<Pose2d>> pose2dInputs,
-                            Map<String, Supplier<Pose3d>> pose3dInputs,
-                            Map<String, Supplier<?>> objectInputs,
-                            Map<S, List<SuperstructureConfig.Binding<SP>>> enterBindings,
-                            List<SuperstructureConfig.TransitionBinding<SP, S>> transitionBindings,
-                            Map<S, List<SuperstructureConfig.Binding<SP>>> bindings,
-                            List<SuperstructureConfig.Binding<SP>> alwaysBindings,
-                            List<SuperstructureConfig.Binding<SP>> periodicBindings,
-                            Map<S, List<SuperstructureConfig.Binding<SP>>> exitBindings,
-                            List<SuperstructureConfig.Binding<SP>> exitAlwaysBindings) {
-        this.children = children;
-        this.constraints = constraints;
-        this.attachments = attachments;
-        this.inputs = inputs;
-        this.doubleInputs = doubleInputs;
-        this.intInputs = intInputs;
-        this.stringInputs = stringInputs;
-        this.pose2dInputs = pose2dInputs;
-        this.pose3dInputs = pose3dInputs;
-        this.objectInputs = objectInputs;
+    public static <S, SP> SuperstructureMechanism<S, SP> create(
+            SuperstructureRuntimeConfig<S, SP> runtimeConfig,
+            Object sourceKey) {
+        SuperstructureMechanism<S, SP> mechanism = new SuperstructureMechanism<>(runtimeConfig);
+        mechanism.sourceKey = sourceKey;
+        return mechanism;
+    }
+
+    SuperstructureMechanism(SuperstructureRuntimeConfig<S, SP> runtimeConfig) {
+        Objects.requireNonNull(runtimeConfig, "runtimeConfig");
+        this.children = runtimeConfig.children();
+        this.constraints = runtimeConfig.constraints();
+        this.attachments = runtimeConfig.attachments();
+        this.inputs = runtimeConfig.inputs();
+        this.doubleInputs = runtimeConfig.doubleInputs();
+        this.intInputs = runtimeConfig.intInputs();
+        this.stringInputs = runtimeConfig.stringInputs();
+        this.pose2dInputs = runtimeConfig.pose2dInputs();
+        this.pose3dInputs = runtimeConfig.pose3dInputs();
+        this.objectInputs = runtimeConfig.objectInputs();
         this.inputResolver = new TypedInputResolver(
                 "Superstructure",
                 TypedInputResolver.ValueMode.LENIENT,
                 TypedInputResolver.NO_MUTABLES,
-                inputs,
-                doubleInputs,
-                intInputs,
-                stringInputs,
-                pose2dInputs,
-                pose3dInputs,
-                objectInputs);
-        this.enterBindings = enterBindings;
-        this.transitionBindings = transitionBindings;
-        this.bindings = bindings;
-        this.alwaysBindings = alwaysBindings;
-        this.periodicBindings = periodicBindings;
-        this.exitBindings = exitBindings;
-        this.exitAlwaysBindings = exitAlwaysBindings;
-        this.stateMachine = createStateMachine(initialState, this::childrenAtGoalsInternal);
-        this.stateMachine.setAtStateDelay(stateMachineDelaySeconds);
+                this.inputs,
+                this.doubleInputs,
+                this.intInputs,
+                this.stringInputs,
+                this.pose2dInputs,
+                this.pose3dInputs,
+                this.objectInputs);
+        this.enterBindings = runtimeConfig.enterBindings();
+        this.transitionBindings = runtimeConfig.transitionBindings();
+        this.bindings = runtimeConfig.bindings();
+        this.alwaysBindings = runtimeConfig.alwaysBindings();
+        this.periodicBindings = runtimeConfig.periodicBindings();
+        this.exitBindings = runtimeConfig.exitBindings();
+        this.exitAlwaysBindings = runtimeConfig.exitAlwaysBindings();
+        this.stateMachine = createStateMachine(runtimeConfig.initialState(), this::childrenAtGoalsInternal);
+        this.stateMachine.setAtStateDelay(runtimeConfig.stateMachineDelaySeconds());
         this.context = new SuperstructureContextImpl();
+        this.lifecycleHooks = SuperstructureLifecycleHooks.from(runtimeConfig);
         this.stateMachineSection = new StateMachineSection<>(this);
         this.inputSection = new InputSection(this);
         this.childrenSection = new ChildrenSection<>(this);
@@ -201,9 +197,9 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         List<SuperstructureMechanism<?, ?>> allSuperstructures = new ArrayList<>();
         flattenSuperstructures(allSuperstructures, this);
         this.flattenedSuperstructures = List.copyOf(allSuperstructures);
-        lastAppliedSetpoint = setpointOf(initialState);
+        lastAppliedSetpoint = setpointOf(runtimeConfig.initialState());
         applySetpoints(lastAppliedSetpoint);
-        this.prevState = initialState;
+        this.prevState = runtimeConfig.initialState();
     }
 
     public SuperstructureMechanism<S, SP> stateMachine(Consumer<StateMachineSection<S, SP>> section) {
@@ -275,9 +271,9 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
     private void queueStateInternal(S state) {
         if (state != null) {
-            appendDiagnosticLog("INFO", "state", "queued state '" + state.name() + "'");
+            appendDiagnosticLog("INFO", "state", "queued state '" + StateNames.name(state) + "'");
         }
-        SuperstructureConfig.Constraint<S, SP> constraint = constraints.get(state);
+        SuperstructureRuntimeConfig.Constraint<S, SP> constraint = constraints.get(state);
         if (constraint == null) {
             stateMachine.queue(state);
             return;
@@ -357,8 +353,8 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         if (changed) {
             applyTransitionBindings(from, current);
             applyEnterBindings(current);
-            String fromName = from != null ? from.name() : "<none>";
-            String toName = current != null ? current.name() : "<none>";
+            String fromName = from != null ? StateNames.name(from) : "<none>";
+            String toName = current != null ? StateNames.name(current) : "<none>";
             appendDiagnosticLog("INFO", "transition", fromName + " -> " + toName);
             prevState = current;
         }
@@ -418,11 +414,11 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         if (state == null) {
             return;
         }
-        List<SuperstructureConfig.Binding<SP>> stateBindings = enterBindings.get(state);
+        List<SuperstructureRuntimeConfig.Binding<SP>> stateBindings = enterBindings.get(state);
         if (stateBindings == null) {
             return;
         }
-        for (SuperstructureConfig.Binding<SP> binding : stateBindings) {
+        for (SuperstructureRuntimeConfig.Binding<SP> binding : stateBindings) {
             binding.apply(context);
         }
     }
@@ -431,7 +427,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         if (from == null || to == null || transitionBindings == null) {
             return;
         }
-        for (SuperstructureConfig.TransitionBinding<SP, S> binding : transitionBindings) {
+        for (SuperstructureRuntimeConfig.TransitionBinding<SP, S> binding : transitionBindings) {
             if (binding == null || binding.hook() == null) {
                 continue;
             }
@@ -443,26 +439,26 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
     }
 
     private void applyPeriodicBindings() {
-        for (SuperstructureConfig.Binding<SP> binding : periodicBindings) {
+        for (SuperstructureRuntimeConfig.Binding<SP> binding : periodicBindings) {
             binding.apply(context);
         }
     }
 
     private void applyAttachments() {
-        for (SuperstructureConfig.Attachment<SP, ?> attachment : attachments) {
+        for (SuperstructureRuntimeConfig.Attachment<SP, ?> attachment : attachments) {
             setAttachmentPose(attachment);
         }
     }
 
     private void applyBindings(S state) {
-        for (SuperstructureConfig.Binding<SP> binding : alwaysBindings) {
+        for (SuperstructureRuntimeConfig.Binding<SP> binding : alwaysBindings) {
             binding.apply(context);
         }
-        List<SuperstructureConfig.Binding<SP>> stateBindings = bindings.get(state);
+        List<SuperstructureRuntimeConfig.Binding<SP>> stateBindings = bindings.get(state);
         if (stateBindings == null) {
             return;
         }
-        for (SuperstructureConfig.Binding<SP> binding : stateBindings) {
+        for (SuperstructureRuntimeConfig.Binding<SP> binding : stateBindings) {
             binding.apply(context);
         }
     }
@@ -472,12 +468,12 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
             return;
         }
         context.setOverrideSetpoint(setpointOf(state));
-        for (SuperstructureConfig.Binding<SP> binding : exitAlwaysBindings) {
+        for (SuperstructureRuntimeConfig.Binding<SP> binding : exitAlwaysBindings) {
             binding.apply(context);
         }
-        List<SuperstructureConfig.Binding<SP>> stateBindings = exitBindings.get(state);
+        List<SuperstructureRuntimeConfig.Binding<SP>> stateBindings = exitBindings.get(state);
         if (stateBindings != null) {
-            for (SuperstructureConfig.Binding<SP> binding : stateBindings) {
+            for (SuperstructureRuntimeConfig.Binding<SP> binding : stateBindings) {
                 binding.apply(context);
             }
         }
@@ -485,7 +481,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
     }
 
     @SuppressWarnings("unchecked")
-    private <E extends Enum<E>> void setAttachmentPose(SuperstructureConfig.Attachment<SP, E> attachment) {
+    private <E> void setAttachmentPose(SuperstructureRuntimeConfig.Attachment<SP, E> attachment) {
         try {
             Mechanism mech = null;
             if (attachment.resolver != null) {
@@ -513,7 +509,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
     }
 
     @SuppressWarnings("unchecked")
-    private <E extends Enum<E>> void queueChild(Child<SP, E> child, SP setpoint) {
+    private <E> void queueChild(Child<SP, E> child, SP setpoint) {
         E childState = child.mapper.apply(setpoint);
         if (childState != null) {
             StateMachine<?, E> stateMachine = (StateMachine<?, E>) child.stateMachine;
@@ -545,7 +541,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
             stateMachine.networkTables(node.child("Control").child("StateMachine"));
             RobotNetworkTables.Node status = node.child("Control").child("Status");
             S state = stateMachine.getGoalState();
-            status.putString("state", state != null ? state.name() : "");
+            status.putString("state", state != null ? StateNames.name(state) : "");
         }
 
         if (toggles.inputsEnabled()) {
@@ -633,7 +629,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
         stateMachine.publishArcp(publisher, root + "/Control/StateMachine");
         S state = stateMachine.getGoalState();
-        publisher.put(root + "/Control/Status/state", state != null ? state.name() : "");
+        publisher.put(root + "/Control/Status/state", state != null ? StateNames.name(state) : "");
 
         String inputsRoot = root + "/Inputs";
         for (Map.Entry<String, java.util.function.BooleanSupplier> e : inputs.entrySet()) {
@@ -1042,7 +1038,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
     private final class MechanismsView implements SuperstructureMechanismsView<SP> {
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E>> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
+        public <E> StatefulArmMechanism<E> arm(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof StatefulArmMechanism<?>) {
                 return (StatefulArmMechanism<E>) mech;
@@ -1052,7 +1048,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E>> ElevatorMechanism.StatefulElevatorMechanism<E> elevator(Function<SP, E> mapper) {
+        public <E> ElevatorMechanism.StatefulElevatorMechanism<E> elevator(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof ElevatorMechanism.StatefulElevatorMechanism<?>) {
                 return (ElevatorMechanism.StatefulElevatorMechanism<E>) mech;
@@ -1062,7 +1058,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E>> TurretMechanism.StatefulTurretMechanism<E> turret(Function<SP, E> mapper) {
+        public <E> TurretMechanism.StatefulTurretMechanism<E> turret(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof TurretMechanism.StatefulTurretMechanism<?>) {
                 return (TurretMechanism.StatefulTurretMechanism<E>) mech;
@@ -1072,7 +1068,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E>> StatefulFlywheelMechanism<E> flywheel(Function<SP, E> mapper) {
+        public <E> StatefulFlywheelMechanism<E> flywheel(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof StatefulFlywheelMechanism<?>) {
                 return (StatefulFlywheelMechanism<E>) mech;
@@ -1082,7 +1078,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
         @SuppressWarnings("unchecked")
         @Override
-        public <E extends Enum<E>> StatefulMechanism<E> generic(Function<SP, E> mapper) {
+        public <E> StatefulMechanism<E> generic(Function<SP, E> mapper) {
             StatefulLike<E> mech = context.mechanism(mapper);
             if (mech instanceof StatefulMechanism<?>) {
                 return (StatefulMechanism<E>) mech;
@@ -1172,7 +1168,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
          * Returns a nested superstructure resolved via the same mapper used in the parent config.
          */
         @Override
-        public <CSP, CS extends Enum<CS>> SuperstructureMechanism<CS, CSP> superstructure(
+        public <CSP, CS> SuperstructureMechanism<CS, CSP> superstructure(
                 Function<SP, CS> mapper) {
             return SuperstructureMechanism.this.context.superstructure(mapper);
         }
@@ -1230,22 +1226,22 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
             return null;
         }
 
-        public <T> T key(Enum<?> key, Class<T> type) {
+        public <T> T key(Object key, Class<T> type) {
             Objects.requireNonNull(key, "key");
-            return key(key.name(), type);
+            return key(StateNames.name(key), type);
         }
 
-        public <T> T key(MechanismConfig<?> config, Class<T> type) {
+        public <T> T key(MechanismDefinition definition, Class<T> type) {
             Objects.requireNonNull(type, "type");
-            if (config == null) {
+            if (definition == null) {
                 return null;
             }
             for (Mechanism mechanism : all()) {
-                if (mechanism == null || mechanism.getSourceConfig() != config) {
+                if (mechanism == null || mechanism.getSourceKey() != definition) {
                     continue;
                 }
                 if (!type.isInstance(mechanism)) {
-                    throw new IllegalArgumentException("Child mechanism built from config is not a "
+                    throw new IllegalArgumentException("Child mechanism built from definition is not a "
                             + type.getSimpleName() + " (was " + mechanism.getClass().getSimpleName() + ")");
                 }
                 return type.cast(mechanism);
@@ -1253,17 +1249,17 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
             return null;
         }
 
-        public <T> T key(SuperstructureConfig<?, ?> config, Class<T> type) {
+        public <T> T key(SuperstructureDefinition<?> definition, Class<T> type) {
             Objects.requireNonNull(type, "type");
-            if (config == null) {
+            if (definition == null) {
                 return null;
             }
             for (SuperstructureMechanism<?, ?> superstructure : superstructures()) {
-                if (superstructure == null || superstructure.getSourceConfig() != config) {
+                if (superstructure == null || superstructure.getSourceKey() != definition) {
                     continue;
                 }
                 if (!type.isInstance(superstructure)) {
-                    throw new IllegalArgumentException("Child superstructure built from config is not a "
+                    throw new IllegalArgumentException("Child superstructure built from definition is not a "
                             + type.getSimpleName() + " (was " + superstructure.getClass().getSimpleName() + ")");
                 }
                 return type.cast(superstructure);
@@ -1275,73 +1271,73 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
             return key(name, SuperstructureMechanism.class);
         }
 
-        public SuperstructureMechanism<?, ?> superstructure(Enum<?> key) {
+        public SuperstructureMechanism<?, ?> superstructure(Object key) {
             return key(key, SuperstructureMechanism.class);
         }
 
-        public <CSP, S extends Enum<S>> SuperstructureMechanism<S, CSP> superstructure(
-                SuperstructureConfig<S, CSP> config) {
-            return key(config, SuperstructureMechanism.class);
+        public <CSP, S> SuperstructureMechanism<S, CSP> superstructure(
+                SuperstructureDefinition<?> definition) {
+            return key(definition, SuperstructureMechanism.class);
         }
 
         public TurretMechanism turret(String name) {
             return key(name, TurretMechanism.class);
         }
 
-        public TurretMechanism turret(Enum<?> key) {
+        public TurretMechanism turret(Object key) {
             return key(key, TurretMechanism.class);
         }
 
-        public TurretMechanism turret(MechanismConfig<?> config) {
-            return key(config, TurretMechanism.class);
+        public TurretMechanism turret(MechanismDefinition definition) {
+            return key(definition, TurretMechanism.class);
         }
 
         public ElevatorMechanism elevator(String name) {
             return key(name, ElevatorMechanism.class);
         }
 
-        public ElevatorMechanism elevator(Enum<?> key) {
+        public ElevatorMechanism elevator(Object key) {
             return key(key, ElevatorMechanism.class);
         }
 
-        public ElevatorMechanism elevator(MechanismConfig<?> config) {
-            return key(config, ElevatorMechanism.class);
+        public ElevatorMechanism elevator(MechanismDefinition definition) {
+            return key(definition, ElevatorMechanism.class);
         }
 
         public ArmMechanism arm(String name) {
             return key(name, ArmMechanism.class);
         }
 
-        public ArmMechanism arm(Enum<?> key) {
+        public ArmMechanism arm(Object key) {
             return key(key, ArmMechanism.class);
         }
 
-        public ArmMechanism arm(MechanismConfig<?> config) {
-            return key(config, ArmMechanism.class);
+        public ArmMechanism arm(MechanismDefinition definition) {
+            return key(definition, ArmMechanism.class);
         }
 
         public FlywheelMechanism flywheel(String name) {
             return key(name, FlywheelMechanism.class);
         }
 
-        public FlywheelMechanism flywheel(Enum<?> key) {
+        public FlywheelMechanism flywheel(Object key) {
             return key(key, FlywheelMechanism.class);
         }
 
-        public FlywheelMechanism flywheel(MechanismConfig<?> config) {
-            return key(config, FlywheelMechanism.class);
+        public FlywheelMechanism flywheel(MechanismDefinition definition) {
+            return key(definition, FlywheelMechanism.class);
         }
 
         public Mechanism generic(String name) {
             return key(name, Mechanism.class);
         }
 
-        public Mechanism generic(Enum<?> key) {
+        public Mechanism generic(Object key) {
             return key(key, Mechanism.class);
         }
 
-        public Mechanism generic(MechanismConfig<?> config) {
-            return key(config, Mechanism.class);
+        public Mechanism generic(MechanismDefinition definition) {
+            return key(definition, Mechanism.class);
         }
     }
 
@@ -1402,8 +1398,8 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("name", getName());
         summary.put("systemKey", diagnosticsSystemKey());
-        Enum<?> state = stateMachine.getGoalState();
-        summary.put("state", state != null ? state.name() : "");
+        Object state = stateMachine.getGoalState();
+        summary.put("state", state != null ? StateNames.name(state) : "");
         summary.put("atGoal", stateMachine.atGoal());
         summary.put("childMechanismCount", flattenedMechanismCount);
         summary.put("logCount", diagnosticLogCount());
@@ -1537,7 +1533,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         }
     }
 
-    public static final class StateMachineSection<S extends Enum<S>, SP> {
+    public static final class StateMachineSection<S, SP> {
         private final SuperstructureMechanism<S, SP> owner;
 
         private StateMachineSection(SuperstructureMechanism<S, SP> owner) {
@@ -1549,7 +1545,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
             return this;
         }
 
-        public StateMachineSection<S, SP> queue(SP setpoint) {
+        public StateMachineSection<S, SP> queueSetpoint(SP setpoint) {
             owner.queueSetpointInternal(setpoint);
             return this;
         }
@@ -1559,7 +1555,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
             return this;
         }
 
-        public StateMachineSection<S, SP> force(SP setpoint) {
+        public StateMachineSection<S, SP> forceSetpoint(SP setpoint) {
             owner.forceSetpointInternal(setpoint);
             return this;
         }
@@ -1618,7 +1614,7 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         }
     }
 
-    public record StateMachineSnapshot<SP, S extends Enum<S>>(
+    public record StateMachineSnapshot<SP, S>(
             S goal,
             S next,
             String queue,
@@ -1639,37 +1635,26 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
         return robotCore;
     }
 
-    SuperstructureMechanism<S, SP> setSourceConfig(SuperstructureConfig<?, ?> config) {
-        this.sourceConfig = config;
-        return this;
-    }
-
-    public SuperstructureConfig<?, ?> getSourceConfig() {
-        return sourceConfig;
+    public Object getSourceKey() {
+        return sourceKey;
     }
 
     /**
-     * Runs any init hooks registered on the {@link SuperstructureConfig}.
+     * Runs any init hooks registered on the resolved superstructure runtime config.
      *
      * <p>This is invoked by {@code RobotCore.robotInit()} after registration so hooks can safely
      * reference other mechanisms/superstructures via the context.</p>
      */
     @SuppressWarnings("unchecked")
     public void runInitHooks() {
-        if (sourceConfig == null) {
-            return;
-        }
-        SuperstructureConfig<S, SP> cfg = (SuperstructureConfig<S, SP>) sourceConfig;
-        cfg.runInitHooks(context, stateMachine.getGoalState());
+        lifecycleHooks.runInitHooks(context, stateMachine.getGoalState());
     }
 
-    @SuppressWarnings("unchecked")
     public void runLifecycleHooks(RobotCoreHooks.Phase phase) {
-        if (sourceConfig == null || phase == null) {
+        if (phase == null) {
             return;
         }
-        SuperstructureConfig<S, SP> cfg = (SuperstructureConfig<S, SP>) sourceConfig;
-        cfg.runPhaseHooks(context, stateMachine.getGoalState(), phase);
+        lifecycleHooks.runPhaseHooks(context, stateMachine.getGoalState(), phase);
     }
 
     private static void flattenSuperstructures(List<SuperstructureMechanism<?, ?>> out, SuperstructureMechanism<?, ?> mech) {
@@ -1811,13 +1796,13 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
         @Override
         @SuppressWarnings("unchecked")
-        public <E extends Enum<E>> StatefulLike<E> mechanism(Function<SP, E> mapper) {
+        public <E> StatefulLike<E> mechanism(Function<SP, E> mapper) {
             Class<?> desiredType = null;
             SP setpoint = setpoint();
             if (setpoint != null) {
                 E sample = mapper.apply(setpoint);
                 if (sample != null) {
-                    desiredType = sample.getDeclaringClass();
+                    desiredType = sample.getClass();
                 }
             }
 
@@ -1837,14 +1822,14 @@ public class SuperstructureMechanism<S extends Enum<S>, SP> extends SubsystemBas
 
         @Override
         @SuppressWarnings("unchecked")
-        public <CSP, CS extends Enum<CS>> SuperstructureMechanism<CS, CSP> superstructure(
+        public <CSP, CS> SuperstructureMechanism<CS, CSP> superstructure(
                 Function<SP, CS> mapper) {
             Class<?> desiredType = null;
             SP setpoint = setpoint();
             if (setpoint != null) {
                 CS sample = mapper.apply(setpoint);
                 if (sample != null) {
-                    desiredType = sample.getDeclaringClass();
+                    desiredType = sample.getClass();
                 }
             }
 

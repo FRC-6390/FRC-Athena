@@ -17,9 +17,7 @@ final class SuperstructureExamplesTest {
         AtomicBoolean wristReady = new AtomicBoolean(false);
 
         StatefulMechanism<SuperStructureState> superstructure =
-                ExampleSuperstructure.createConfig(armReady::get, elevatorReady::get, wristReady::get)
-                        .stateMachineDelay(0.0)
-                        .build();
+                ExampleSuperstructure.createMechanism(armReady::get, elevatorReady::get, wristReady::get);
 
         superstructure.stateMachine().force(SuperStructureState.SCORE_HIGH);
         superstructure.periodic();

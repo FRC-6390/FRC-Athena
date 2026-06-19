@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import org.junit.jupiter.api.Test;
 
+import ca.frc6390.athena.api.mechanism.MechanismDefinitions;
+import ca.frc6390.athena.api.mechanism.Mechanisms;
+import ca.frc6390.athena.api.superstructure.SuperstructureDefinitions;
+import ca.frc6390.athena.api.superstructure.Superstructures;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 
 final class SuperstructureNestedPropagationTest {
@@ -79,32 +83,28 @@ final class SuperstructureNestedPropagationTest {
 
     @Test
     void queuedTopStatePropagatesIntoNestedSuperAndKeepsNonZeroLeafSetpoints() {
-        MechanismConfig<StatefulMechanism<TurretState>> turretConfig =
-                MechanismConfig.stateMachineGeneric(TurretState.Off)
-                        .control(c -> c.setpointAsOutput(true));
-        MechanismConfig<StatefulMechanism<HoodState>> hoodConfig =
-                MechanismConfig.stateMachineGeneric(HoodState.Stow)
-                        .control(c -> c.setpointAsOutput(true));
+        var turretDefinition = Mechanisms.stateful("turret", TurretState.Off).definition();
+        var hoodDefinition = Mechanisms.stateful("hood", HoodState.Stow).definition();
+        var turretSuperDefinition = Superstructures.<TurretSuperState, TurretTuple>stateful(
+                "turretSuper",
+                TurretSuperState.Stowed)
+                .mechanisms(m -> m
+                        .mechanism(turretDefinition, TurretTuple::turret)
+                        .mechanism(hoodDefinition, TurretTuple::hood))
+                .definition();
+        var topDefinition = Superstructures.<TopState, TopTuple>stateful("top", TopState.Home)
+                .mechanisms(m -> m.superstructure(turretSuperDefinition, TopTuple::turretSuper))
+                .behavior(behavior -> behavior.constraints(c -> c.state(
+                        TopState.Aim,
+                        ctx -> ctx.mechanisms()
+                                .superstructure(TopTuple::turretSuper)
+                                .stateMachine()
+                                .goal() == TurretSuperState.Aim)))
+                .definition();
 
-        SuperstructureConfig<TurretSuperState, TurretTuple> turretSuperConfig =
-                SuperstructureConfig.create(TurretSuperState.Stowed)
-                        .mechanisms(m -> m
-                                .mechanism(turretConfig, TurretTuple::turret)
-                                .mechanism(hoodConfig, TurretTuple::hood))
-                        .stateMachineDelay(0.0);
-
-        SuperstructureConfig<TopState, TopTuple> topConfig =
-                SuperstructureConfig.create(TopState.Home)
-                        .mechanisms(m -> m.superstructure(turretSuperConfig, TopTuple::turretSuper))
-                        .constraints(c -> c.state(
-                                TopState.Aim,
-                                ctx -> ctx.mechanisms()
-                                        .superstructure(TopTuple::turretSuper)
-                                        .stateMachine()
-                                        .goal() == TurretSuperState.Aim))
-                        .stateMachineDelay(0.0);
-
-        SuperstructureMechanism<TopState, TopTuple> top = topConfig.build();
+        @SuppressWarnings("unchecked")
+        SuperstructureMechanism<TopState, TopTuple> top =
+                (SuperstructureMechanism<TopState, TopTuple>) SuperstructureDefinitions.build(topDefinition);
         SuperstructureMechanism<TurretSuperState, TurretTuple> turretSuper =
                 top.mechanisms().superstructure(TopTuple::turretSuper);
         StatefulMechanism<TurretState> turret = turretSuper.mechanisms().generic(TurretTuple::turret);

@@ -7,7 +7,7 @@ public interface MechanismPidAutotunerContext {
 
     String pidName();
 
-    MechanismConfig.PidProfile pidProfile();
+    MechanismRuntimeConfig.PidProfile pidProfile();
 
     String dashboardPath();
 

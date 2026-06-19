@@ -1,6 +1,6 @@
 package ca.frc6390.athena.mechanisms.statespec;
 
-public final class TransitionDirective<E extends Enum<E>> {
+public final class TransitionDirective<E> {
     public enum Kind {
         STAY,
         TRANSITION
@@ -17,11 +17,11 @@ public final class TransitionDirective<E extends Enum<E>> {
     }
 
     @SuppressWarnings("unchecked")
-    public static <E extends Enum<E>> TransitionDirective<E> stay() {
+    public static <E> TransitionDirective<E> stay() {
         return (TransitionDirective<E>) STAY;
     }
 
-    public static <E extends Enum<E>> TransitionDirective<E> to(E next) {
+    public static <E> TransitionDirective<E> to(E next) {
         return new TransitionDirective<>(Kind.TRANSITION, next);
     }
 

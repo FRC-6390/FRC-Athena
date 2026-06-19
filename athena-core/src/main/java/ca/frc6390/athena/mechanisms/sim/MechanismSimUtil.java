@@ -15,7 +15,7 @@ public final class MechanismSimUtil {
 
     /**
      * Apply the supplied mechanism-space position and velocity to the given encoder. Mechanism-space
-     * units must match the encoder conversion configured via {@code MechanismConfig#setEncoderConversion}.
+     * units must match the encoder conversion configured on that encoder/device.
      *
      * @param encoder mechanism encoder (may be {@code null})
      * @param position mechanism-space position (e.g. inches, degrees)

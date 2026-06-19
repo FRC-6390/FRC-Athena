@@ -10,7 +10,7 @@ import ca.frc6390.athena.mechanisms.ArmMechanism;
 import ca.frc6390.athena.mechanisms.ElevatorMechanism;
 import ca.frc6390.athena.mechanisms.Mechanism;
 import ca.frc6390.athena.mechanisms.MechanismTravelRange;
-import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.mechanisms.MechanismConfigRecord;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.system.plant.LinearSystemId;
@@ -27,7 +27,7 @@ public final class MechanismSimulationConfig {
 
     private final Function<Mechanism, MechanismSimulationModel> factory;
     private final double updatePeriodSeconds;
-    private MechanismConfig<?> sourceConfig;
+    private MechanismConfigRecord configRecord;
 
     private MechanismSimulationConfig(Function<Mechanism, MechanismSimulationModel> factory,
                                       double updatePeriodSeconds) {
@@ -55,20 +55,19 @@ public final class MechanismSimulationConfig {
     }
 
     /**
-     * Internal hook used by {@link MechanismConfig#build()} so the simulation config can read the
-     * original mechanism builder parameters (motor list, encoder gearing, etc.). Users should not
-     * call this directly.
+     * Internal hook used by Athena build paths so the simulation config can derive gearing and
+     * conversion metadata from the resolved config record. Users should not call this directly.
      */
-    public MechanismSimulationConfig bindSourceConfig(MechanismConfig<?> sourceConfig) {
-        this.sourceConfig = sourceConfig;
+    public MechanismSimulationConfig bindConfigRecord(MechanismConfigRecord configRecord) {
+        this.configRecord = configRecord;
         return this;
     }
 
     private double getGearingFromConfig() {
-        if (sourceConfig == null) {
+        if (configRecord == null) {
             return Double.NaN;
         }
-        double ratio = sourceConfig.data().encoderGearRatio();
+        double ratio = configRecord.encoderGearRatio();
         if (Math.abs(ratio) < 1e-6) {
             return Double.NaN;
         }
@@ -91,11 +90,11 @@ public final class MechanismSimulationConfig {
     }
 
     private double deriveDrumRadiusMeters() {
-        if (sourceConfig == null) {
+        if (configRecord == null) {
             return 0.02;
         }
-        double conversion = sourceConfig.data().encoderConversion();
-        double ratio = sourceConfig.data().encoderGearRatio();
+        double conversion = configRecord.encoderConversion();
+        double ratio = configRecord.encoderGearRatio();
         if (Math.abs(conversion) < 1e-6 || Math.abs(ratio) < 1e-6) {
             return 0.02;
         }
@@ -107,14 +106,14 @@ public final class MechanismSimulationConfig {
     }
 
     private double deriveUnitsPerMeter(double drumRadiusMeters) {
-        if (sourceConfig == null) {
+        if (configRecord == null) {
             return 1.0;
         }
         if (!Double.isFinite(drumRadiusMeters) || Math.abs(drumRadiusMeters) < 1e-6) {
             drumRadiusMeters = 0.02;
         }
-        double conversion = sourceConfig.data().encoderConversion();
-        double ratio = sourceConfig.data().encoderGearRatio();
+        double conversion = configRecord.encoderConversion();
+        double ratio = configRecord.encoderGearRatio();
         if (Math.abs(conversion) < 1e-6 || Math.abs(ratio) < 1e-6) {
             return 1.0;
         }
@@ -127,11 +126,11 @@ public final class MechanismSimulationConfig {
     }
 
     private double deriveUnitsPerRadian() {
-        if (sourceConfig == null) {
+        if (configRecord == null) {
             return 1.0;
         }
-        double conversion = sourceConfig.data().encoderConversion();
-        double ratio = sourceConfig.data().encoderGearRatio();
+        double conversion = configRecord.encoderConversion();
+        double ratio = configRecord.encoderGearRatio();
         if (Math.abs(conversion) < 1e-6 || Math.abs(ratio) < 1e-6) {
             return 1.0;
         }
@@ -161,38 +160,25 @@ public final class MechanismSimulationConfig {
                                 "Elevator simulation requires an ElevatorMechanism instance.");
                     }
                     DCMotor motor = resolveMotor(mechanism, params.motorOverride);
-                    MechanismConfig.ElevatorSimulationParameters configParams =
-                            self != null && self.sourceConfig != null
-                                    ? self.sourceConfig.elevatorSimulationParameters()
-                                    : null;
                     double gearing = !Double.isNaN(params.gearing)
                             ? params.gearing
-                            : (!Double.isNaN(self.getGearingFromConfig()) ? self.getGearingFromConfig() : 1.0);
+                            : (self != null && !Double.isNaN(self.getGearingFromConfig())
+                                    ? self.getGearingFromConfig()
+                                    : 1.0);
                     double carriageMass = !Double.isNaN(params.carriageMassKg)
                             ? params.carriageMassKg
-                            : (configParams != null && !Double.isNaN(configParams.carriageMassKg)
-                                    ? configParams.carriageMassKg
-                                    : 20.0);
+                            : 20.0;
                     double drumRadius = !Double.isNaN(params.drumRadiusMeters)
                             ? params.drumRadiusMeters
-                            : (configParams != null && !Double.isNaN(configParams.drumRadiusMeters)
-                                    ? configParams.drumRadiusMeters
-                                    : self.deriveDrumRadiusMeters());
-                    double minHeight = configParams != null ? configParams.minHeightMeters : params.minHeightMeters;
-                    double maxHeight = configParams != null ? configParams.maxHeightMeters : params.maxHeightMeters;
-                    double startingHeight = configParams != null
-                            ? configParams.startingHeightMeters
-                            : params.startingHeightMeters;
-                    boolean simulateGravity = configParams != null
-                            ? configParams.simulateGravity
-                            : params.simulateGravity;
+                            : (self != null ? self.deriveDrumRadiusMeters() : 0.02);
+                    double minHeight = params.minHeightMeters;
+                    double maxHeight = params.maxHeightMeters;
+                    double startingHeight = params.startingHeightMeters;
+                    boolean simulateGravity = params.simulateGravity;
                     double unitsPerMeter = !Double.isNaN(params.unitsPerMeter)
                             ? params.unitsPerMeter
-                            : self.deriveUnitsPerMeter(drumRadius);
-                    if (configParams != null && !Double.isNaN(configParams.unitsPerMeterOverride)) {
-                        unitsPerMeter = configParams.unitsPerMeterOverride;
-                    }
-                    double nominalVoltage = configParams != null ? configParams.nominalVoltage : params.nominalVoltage;
+                            : (self != null ? self.deriveUnitsPerMeter(drumRadius) : 1.0);
+                    double nominalVoltage = params.nominalVoltage;
 
                     ElevatorSim sim = new ElevatorSim(
                             motor,
@@ -231,38 +217,25 @@ public final class MechanismSimulationConfig {
                                 "Arm simulation requires an ArmMechanism instance.");
                     }
                     DCMotor motor = resolveMotor(mechanism, params.motorOverride);
-                    MechanismConfig.ArmSimulationParameters configParams =
-                            self != null && self.sourceConfig != null
-                                    ? self.sourceConfig.armSimulationParameters()
-                                    : null;
                     double gearing = !Double.isNaN(params.gearing)
                             ? params.gearing
-                            : (!Double.isNaN(self.getGearingFromConfig()) ? self.getGearingFromConfig() : 1.0);
+                            : (self != null && !Double.isNaN(self.getGearingFromConfig())
+                                    ? self.getGearingFromConfig()
+                                    : 1.0);
                     double momentOfInertia = !Double.isNaN(params.momentOfInertia)
                             ? params.momentOfInertia
-                            : (configParams != null && !Double.isNaN(configParams.momentOfInertia)
-                                    ? configParams.momentOfInertia
-                                    : 1.0);
+                            : 1.0;
                     double armLength = !Double.isNaN(params.armLengthMeters)
                             ? params.armLengthMeters
-                            : (configParams != null && !Double.isNaN(configParams.armLengthMeters)
-                                    ? configParams.armLengthMeters
-                                    : 0.5);
-                    double minAngle = configParams != null ? configParams.minAngleRadians : params.minAngleRadians;
-                    double maxAngle = configParams != null ? configParams.maxAngleRadians : params.maxAngleRadians;
-                    double startingAngle = configParams != null
-                            ? configParams.startingAngleRadians
-                            : params.startingAngleRadians;
-                    boolean simulateGravity = configParams != null
-                            ? configParams.simulateGravity
-                            : params.simulateGravity;
+                            : 0.5;
+                    double minAngle = params.minAngleRadians;
+                    double maxAngle = params.maxAngleRadians;
+                    double startingAngle = params.startingAngleRadians;
+                    boolean simulateGravity = params.simulateGravity;
                     double unitsPerRadian = !Double.isNaN(params.unitsPerRadian)
                             ? params.unitsPerRadian
-                            : self.deriveUnitsPerRadian();
-                    if (configParams != null && !Double.isNaN(configParams.unitsPerRadianOverride)) {
-                        unitsPerRadian = configParams.unitsPerRadianOverride;
-                    }
-                    double nominalVoltage = configParams != null ? configParams.nominalVoltage : params.nominalVoltage;
+                            : (self != null ? self.deriveUnitsPerRadian() : 1.0);
+                    double nominalVoltage = params.nominalVoltage;
 
                     SingleJointedArmSim sim = new SingleJointedArmSim(
                             motor,
@@ -288,32 +261,25 @@ public final class MechanismSimulationConfig {
      * @return simulation configuration
      */
     public static MechanismSimulationConfig simpleMotor(SimpleMotorParameters params) {
-    Objects.requireNonNull(params);
+        Objects.requireNonNull(params);
         final MechanismSimulationConfig[] holder = new MechanismSimulationConfig[1];
         MechanismSimulationConfig config = new MechanismSimulationConfig(
                 mechanism -> {
                     MechanismSimulationConfig self = holder[0];
                     Mechanism target = mechanism;
                     DCMotor motor = resolveMotor(mechanism, params.motorOverride);
-                    MechanismConfig.SimpleMotorSimulationParameters configParams =
-                            self != null && self.sourceConfig != null
-                                    ? self.sourceConfig.simpleMotorSimulationParameters()
-                                    : null;
                     double gearing = !Double.isNaN(params.gearing)
                             ? params.gearing
-                            : (!Double.isNaN(self.getGearingFromConfig()) ? self.getGearingFromConfig() : 1.0);
+                            : (self != null && !Double.isNaN(self.getGearingFromConfig())
+                                    ? self.getGearingFromConfig()
+                                    : 1.0);
                     double moi = !Double.isNaN(params.momentOfInertia)
                             ? params.momentOfInertia
-                            : (configParams != null && !Double.isNaN(configParams.momentOfInertia)
-                                    ? configParams.momentOfInertia
-                                    : 0.01);
+                            : 0.01;
                     double unitsPerRadian = !Double.isNaN(params.unitsPerRadian)
                             ? params.unitsPerRadian
-                            : self.deriveUnitsPerRadian();
-                    if (configParams != null && !Double.isNaN(configParams.unitsPerRadianOverride)) {
-                        unitsPerRadian = configParams.unitsPerRadianOverride;
-                    }
-                    double nominalVoltage = configParams != null ? configParams.nominalVoltage : params.nominalVoltage;
+                            : (self != null ? self.deriveUnitsPerRadian() : 1.0);
+                    double nominalVoltage = params.nominalVoltage;
 
                     FlywheelSim sim = new FlywheelSim(
                             LinearSystemId.createFlywheelSystem(

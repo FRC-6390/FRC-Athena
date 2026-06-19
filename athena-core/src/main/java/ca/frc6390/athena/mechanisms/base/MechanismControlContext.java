@@ -199,7 +199,7 @@ public interface MechanismControlContext<T extends Mechanism>
     /**
      * Active state for stateful mechanisms, or {@code null} if none exists.
      */
-    Enum<?> state();
+    Object state();
 
     default RobotCore<?> robotCore() {
         RobotCore<?> core = mechanism().getRobotCore();
@@ -236,7 +236,7 @@ public interface MechanismControlContext<T extends Mechanism>
     /**
      * Returns a named bang-bang profile registered in the mechanism config.
      */
-    MechanismConfig.BangBangProfile bangBang(String name);
+    MechanismRuntimeConfig.BangBangProfile bangBang(String name);
 
     /**
      * Returns a named feedforward registered in the mechanism config.
@@ -246,7 +246,7 @@ public interface MechanismControlContext<T extends Mechanism>
     /**
      * Returns a named typed feedforward profile registered in the mechanism config, if present.
      */
-    default MechanismConfig.FeedforwardProfile feedforwardProfile(String name) {
+    default MechanismRuntimeConfig.FeedforwardProfile feedforwardProfile(String name) {
         return null;
     }
 
@@ -279,7 +279,7 @@ public interface MechanismControlContext<T extends Mechanism>
      * Computes bang-bang output for the named profile and converts it into the mechanism output space.
      */
     default double bangBangOut(String name, double measurement, double setpoint) {
-        MechanismConfig.BangBangProfile profile = bangBang(name);
+        MechanismRuntimeConfig.BangBangProfile profile = bangBang(name);
         if (profile == null) {
             return 0.0;
         }
@@ -297,7 +297,7 @@ public interface MechanismControlContext<T extends Mechanism>
         if (!mechanism().feedforwardEnabled()) {
             return 0.0;
         }
-        MechanismConfig.FeedforwardProfile profile = feedforwardProfile(name);
+        MechanismRuntimeConfig.FeedforwardProfile profile = feedforwardProfile(name);
         if (profile != null) {
             double position = mechanism().setpoint() + mechanism().nudge();
             double volts = switch (profile.type()) {
@@ -321,7 +321,7 @@ public interface MechanismControlContext<T extends Mechanism>
         if (!mechanism().feedforwardEnabled()) {
             return 0.0;
         }
-        MechanismConfig.FeedforwardProfile profile = feedforwardProfile(name);
+        MechanismRuntimeConfig.FeedforwardProfile profile = feedforwardProfile(name);
         if (profile != null) {
             double volts = switch (profile.type()) {
                 case ARM -> profile.arm().calculate(setpoint, velocity);
@@ -341,7 +341,7 @@ public interface MechanismControlContext<T extends Mechanism>
         if (!mechanism().feedforwardEnabled()) {
             return 0.0;
         }
-        MechanismConfig.FeedforwardProfile profile = feedforwardProfile(name);
+        MechanismRuntimeConfig.FeedforwardProfile profile = feedforwardProfile(name);
         if (profile != null) {
             double position = mechanism().setpoint() + mechanism().nudge();
             double volts = switch (profile.type()) {
@@ -370,7 +370,7 @@ public interface MechanismControlContext<T extends Mechanism>
         if (!mechanism().feedforwardEnabled()) {
             return 0.0;
         }
-        MechanismConfig.FeedforwardProfile profile = feedforwardProfile(name);
+        MechanismRuntimeConfig.FeedforwardProfile profile = feedforwardProfile(name);
         if (profile != null) {
             double volts = switch (profile.type()) {
                 case ARM -> profile.arm().calculate(setpoint, nextVelocity);

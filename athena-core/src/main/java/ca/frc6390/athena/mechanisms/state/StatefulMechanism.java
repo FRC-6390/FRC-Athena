@@ -21,17 +21,42 @@ import ca.frc6390.athena.core.arcp.ARCP;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 
-public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements StatefulLike<E> {
+public class StatefulMechanism <E> extends Mechanism implements StatefulLike<E> {
         
     private final StatefulMechanismCore<StatefulMechanism<E>, E> stateMachineCore;
 
-    public StatefulMechanism(MechanismConfig<StatefulMechanism<E>> config, E initialState) {
-        super(config);
-        stateMachineCore = StatefulMechanismCore.fromConfig(initialState, this::atSetpoint, config);
+    public StatefulMechanism(
+            MechanismRuntimeConfig<? extends StatefulMechanism<E>> runtimeConfig,
+            E initialState,
+            StatefulMechanismRuntimeConfig<StatefulMechanism<E>, E> stateRuntimeConfig) {
+        this(runtimeConfig, initialState, stateRuntimeConfig, MechanismLifecycleHooks.NONE);
+    }
+
+    protected StatefulMechanism(
+            MechanismRuntimeConfig<? extends StatefulMechanism<E>> runtimeConfig,
+            E initialState,
+            StatefulMechanismRuntimeConfig<StatefulMechanism<E>, E> stateRuntimeConfig,
+            MechanismLifecycleHooks lifecycleHooks) {
+        super(
+                runtimeConfig,
+                runtimeConfig.sourceKey() != null ? runtimeConfig.sourceKey() : runtimeConfig,
+                lifecycleHooks);
+        stateMachineCore = StatefulMechanismCore.fromRuntimeConfig(
+                initialState,
+                this::atSetpoint,
+                stateRuntimeConfig);
         Double initialSetpoint = StateSpecAccess.setpoint(initialState);
         if (initialSetpoint != null) {
             control().setpoint(initialSetpoint);
         }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static <E> StatefulMechanism<E> create(
+            MechanismRuntimeConfig<?> runtimeConfig,
+            E initialState,
+            StatefulMechanismRuntimeConfig<?, E> stateRuntimeConfig) {
+        return new StatefulMechanism((MechanismRuntimeConfig) runtimeConfig, initialState, (StatefulMechanismRuntimeConfig) stateRuntimeConfig);
     }
 
     @Override
@@ -40,7 +65,7 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
     }
 
     @Override
-    protected Enum<?> getActiveState() {
+    protected Object getActiveState() {
         return stateMachineCore.getStateMachine().getGoalState();
     }
 
@@ -69,15 +94,15 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
         super.publishArcp(publisher, rootPath);
     }
 
-    public static class StatefulMechanismCore<T extends Mechanism, E extends Enum<E>> {
+    public static class StatefulMechanismCore<T extends Mechanism, E> {
         private final StateMachine<Double, E> stateMachine;
-        private final Map<Enum<?>, Function<T, Boolean>> stateActions;
-        private final Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> enterStateHooks;
-        private final Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> stateHooks;
-        private final Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> exitStateHooks;
-        private final List<MechanismConfig.TransitionHookBinding<T>> transitionHooks;
-        private final List<MechanismConfig.MechanismBinding<T, ?>> alwaysHooks;
-        private final List<MechanismConfig.MechanismBinding<T, ?>> exitAlwaysHooks;
+        private final Map<Object, Function<T, Boolean>> stateActions;
+        private final Map<Object, List<StatefulMechanismRuntimeConfig.StateHook<T, E>>> enterStateHooks;
+        private final Map<Object, List<StatefulMechanismRuntimeConfig.StateHook<T, E>>> stateHooks;
+        private final Map<Object, List<StatefulMechanismRuntimeConfig.StateHook<T, E>>> exitStateHooks;
+        private final List<StatefulMechanismRuntimeConfig.TransitionHookBinding<T, E>> transitionHooks;
+        private final List<StatefulMechanismRuntimeConfig.StateHook<T, E>> alwaysHooks;
+        private final List<StatefulMechanismRuntimeConfig.StateHook<T, E>> exitAlwaysHooks;
         private final Map<String, BooleanSupplier> inputs;
         private final Map<String, DoubleSupplier> doubleInputs;
         private final Map<String, IntSupplier> intInputs;
@@ -93,16 +118,15 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
         private E previousState;
         private boolean dslManualOverrideActive;
 
-        public static <T extends Mechanism, E extends Enum<E>>
-                StatefulMechanismCore<T, E> fromConfig(
-                        E initialState,
-                        Supplier<Boolean> atSetpointSupplier,
-                        MechanismConfig<T> config) {
+        public static <T extends Mechanism, E> StatefulMechanismCore<T, E> fromRuntimeConfig(
+                E initialState,
+                Supplier<Boolean> atSetpointSupplier,
+                StatefulMechanismRuntimeConfig<T, E> config) {
             Objects.requireNonNull(config, "config");
             return new StatefulMechanismCore<>(
                     initialState,
                     atSetpointSupplier,
-                    config.data().stateMachineDelay(),
+                    config.delay(),
                     config.stateActions(),
                     config.enterStateHooks(),
                     config.stateHooks(),
@@ -117,17 +141,17 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
                     config.pose2dInputs(),
                     config.pose3dInputs(),
                     config.objectInputs(),
-                    config.stateTriggerBindings());
+                    config.stateTriggers());
         }
 
         public StatefulMechanismCore(E initialState, Supplier<Boolean> atSetpointSupplier, double delay,
-                                        Map<Enum<?>, Function<T, Boolean>> stateActions,
-                                        Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> enterStateHooks,
-                                        Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> stateHooks,
-                                        Map<Enum<?>, List<MechanismConfig.MechanismBinding<T, ?>>> exitStateHooks,
-                                        List<MechanismConfig.TransitionHookBinding<T>> transitionHooks,
-                                        List<MechanismConfig.MechanismBinding<T, ?>> alwaysHooks,
-                                        List<MechanismConfig.MechanismBinding<T, ?>> exitAlwaysHooks,
+                                        Map<Object, Function<T, Boolean>> stateActions,
+                                        Map<Object, List<StatefulMechanismRuntimeConfig.StateHook<T, E>>> enterStateHooks,
+                                        Map<Object, List<StatefulMechanismRuntimeConfig.StateHook<T, E>>> stateHooks,
+                                        Map<Object, List<StatefulMechanismRuntimeConfig.StateHook<T, E>>> exitStateHooks,
+                                        List<StatefulMechanismRuntimeConfig.TransitionHookBinding<T, E>> transitionHooks,
+                                        List<StatefulMechanismRuntimeConfig.StateHook<T, E>> alwaysHooks,
+                                        List<StatefulMechanismRuntimeConfig.StateHook<T, E>> exitAlwaysHooks,
                                         Map<String, BooleanSupplier> inputs,
                                         Map<String, DoubleSupplier> doubleInputs,
                                         Map<String, IntSupplier> intInputs,
@@ -135,7 +159,7 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
                                         Map<String, Supplier<Pose2d>> pose2dInputs,
                                         Map<String, Supplier<Pose3d>> pose3dInputs,
                                         Map<String, Supplier<?>> objectInputs,
-                                        List<MechanismConfig.StateTriggerBinding<T>> stateTriggerBindings) {
+                                        List<StatefulMechanismRuntimeConfig.StateTriggerBinding<T, E>> stateTriggerBindings) {
             this.stateMachine = new StateMachine<>(initialState, atSetpointSupplier::get);
             stateMachine.setAtStateDelay(delay);
             this.stateActions = stateActions;
@@ -160,13 +184,13 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
                     : 0.0;
         }
 
-        @SuppressWarnings("unchecked")
-        private List<StateTriggerRunner<T, E>> buildStateTriggers(List<MechanismConfig.StateTriggerBinding<T>> bindings) {
+        private List<StateTriggerRunner<T, E>> buildStateTriggers(
+                List<StatefulMechanismRuntimeConfig.StateTriggerBinding<T, E>> bindings) {
             if (bindings == null || bindings.isEmpty()) {
                 return List.of();
             }
             List<StateTriggerRunner<T, E>> runners = new java.util.ArrayList<>();
-            for (MechanismConfig.StateTriggerBinding<T> binding : bindings) {
+            for (StatefulMechanismRuntimeConfig.StateTriggerBinding<T, E> binding : bindings) {
                 if (binding == null || binding.state() == null || binding.trigger() == null) {
                     continue;
                 }
@@ -176,8 +200,7 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
                 } catch (ClassCastException e) {
                     continue;
                 }
-                MechanismConfig.StateTrigger<T, E> trigger = (MechanismConfig.StateTrigger<T, E>) binding.trigger();
-                runners.add(new StateTriggerRunner<>(state, trigger));
+                runners.add(new StateTriggerRunner<>(state, binding.trigger()));
             }
             return runners;
         }
@@ -385,12 +408,12 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
             queuedSetpoint = queuedSetpoints.poll();
         }
 
-        private static final class StateTriggerRunner<T extends Mechanism, E extends Enum<E>> {
+        private static final class StateTriggerRunner<T extends Mechanism, E> {
             private final E target;
-            private final MechanismConfig.StateTrigger<T, E> trigger;
+            private final StatefulMechanismRuntimeConfig.StateTrigger<T, E> trigger;
             private boolean last;
 
-            private StateTriggerRunner(E target, MechanismConfig.StateTrigger<T, E> trigger) {
+            private StateTriggerRunner(E target, StatefulMechanismRuntimeConfig.StateTrigger<T, E> trigger) {
                 this.target = target;
                 this.trigger = trigger;
             }
@@ -400,28 +423,27 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
             if (state == null) {
                 return;
             }
-            List<MechanismConfig.MechanismBinding<T, ?>> hooks = enterStateHooks.get(state);
+            List<StatefulMechanismRuntimeConfig.StateHook<T, E>> hooks = enterStateHooks.get(state);
             if (hooks == null) {
                 return;
             }
-            for (MechanismConfig.MechanismBinding<T, ?> binding : hooks) {
+            for (StatefulMechanismRuntimeConfig.StateHook<T, E> binding : hooks) {
                 applyHook(binding);
             }
         }
 
-        @SuppressWarnings("unchecked")
         private void applyTransitionHooks(T instance, E from, E to) {
             if (from == null || to == null || transitionHooks == null || transitionHooks.isEmpty()) {
                 return;
             }
-            for (MechanismConfig.TransitionHookBinding<T> hook : transitionHooks) {
+            for (StatefulMechanismRuntimeConfig.TransitionHookBinding<T, E> hook : transitionHooks) {
                 if (hook == null) {
                     continue;
                 }
                 if (!Objects.equals(hook.from(), from) || !Objects.equals(hook.to(), to)) {
                     continue;
                 }
-                ((MechanismConfig.MechanismTransitionBinding<T, E>) hook.binding()).apply(context, from, to);
+                hook.hook().apply(context, from, to);
             }
         }
 
@@ -430,34 +452,33 @@ public class StatefulMechanism <E extends Enum<E>> extends Mechanism implements 
                 return;
             }
             context.update(instance, state, resolveStateSetpoint(state));
-            for (MechanismConfig.MechanismBinding<T, ?> binding : exitAlwaysHooks) {
+            for (StatefulMechanismRuntimeConfig.StateHook<T, E> binding : exitAlwaysHooks) {
                 applyHook(binding);
             }
-            List<MechanismConfig.MechanismBinding<T, ?>> hooks = exitStateHooks.get(state);
+            List<StatefulMechanismRuntimeConfig.StateHook<T, E>> hooks = exitStateHooks.get(state);
             if (hooks == null) {
                 return;
             }
-            for (MechanismConfig.MechanismBinding<T, ?> binding : hooks) {
+            for (StatefulMechanismRuntimeConfig.StateHook<T, E> binding : hooks) {
                 applyHook(binding);
             }
         }
 
         private void applyHooks(E state) {
-            for (MechanismConfig.MechanismBinding<T, ?> binding : alwaysHooks) {
+            for (StatefulMechanismRuntimeConfig.StateHook<T, E> binding : alwaysHooks) {
                 applyHook(binding);
             }
-            List<MechanismConfig.MechanismBinding<T, ?>> hooks = stateHooks.get(state);
+            List<StatefulMechanismRuntimeConfig.StateHook<T, E>> hooks = stateHooks.get(state);
             if (hooks == null) {
                 return;
             }
-            for (MechanismConfig.MechanismBinding<T, ?> binding : hooks) {
+            for (StatefulMechanismRuntimeConfig.StateHook<T, E> binding : hooks) {
                 applyHook(binding);
             }
         }
 
-        @SuppressWarnings("unchecked")
-        private void applyHook(MechanismConfig.MechanismBinding<T, ?> binding) {
-            ((MechanismConfig.MechanismBinding<T, E>) binding).apply(context);
+        private void applyHook(StatefulMechanismRuntimeConfig.StateHook<T, E> binding) {
+            binding.apply(context);
         }
 
         public StateMachine<Double, E> getStateMachine() {

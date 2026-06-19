@@ -2,7 +2,8 @@ package ca.frc6390.athena.mechanisms.examples;
 
 import java.util.function.BooleanSupplier;
 
-import ca.frc6390.athena.mechanisms.MechanismConfig;
+import ca.frc6390.athena.api.mechanism.MechanismDefinitions;
+import ca.frc6390.athena.api.mechanism.Mechanisms;
 import ca.frc6390.athena.mechanisms.StateGraph;
 import ca.frc6390.athena.mechanisms.StateMachine.SetpointProvider;
 import ca.frc6390.athena.mechanisms.StatefulMechanism;
@@ -38,25 +39,25 @@ public final class ExampleSuperstructure {
     }
 
     /**
-     * Builds a {@link MechanismConfig} that wires the example superstructure up with a guarded state
-     * graph. Consumers can call {@link MechanismConfig#build()} to obtain a ready-to-use
+     * Builds a ready-to-use
      * {@link StatefulMechanism} whose internal state machine already knows about the transition
      * requirements.
      *
      * @param armReady condition that reports when the arm is clear of the frame perimeter
      * @param elevatorReady condition that reports when the elevator has cleared its intermediate setpoint
      * @param wristReady condition that reports when the wrist has reached its extension angle
-     * @return configured mechanism builder for the example superstructure
+     * @return configured mechanism for the example superstructure
      */
-    public static MechanismConfig<StatefulMechanism<SuperStructureState>> createConfig(
+    public static StatefulMechanism<SuperStructureState> createMechanism(
             BooleanSupplier armReady,
             BooleanSupplier elevatorReady,
             BooleanSupplier wristReady) {
-
-        return MechanismConfig
-                .stateMachineGeneric(SuperStructureState.STOWED)
-                .stateMachineDelay(0.05)
-                .stateGraph(buildGraph(armReady, elevatorReady, wristReady));
+        @SuppressWarnings("unchecked")
+        StatefulMechanism<SuperStructureState> mechanism =
+                (StatefulMechanism<SuperStructureState>) MechanismDefinitions.build(
+                        Mechanisms.stateful("example-superstructure", SuperStructureState.STOWED).definition());
+        mechanism.stateMachine().graph(buildGraph(armReady, elevatorReady, wristReady));
+        return mechanism;
     }
 
     /**
