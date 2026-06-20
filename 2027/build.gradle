@@ -1,0 +1,1037 @@
+ext {
+    athenaDefaultArtifacts = [
+            'athena-api',
+            'athena-runtime',
+            'athena-hardware',
+            'athena-mechanisms',
+            'athena-commands',
+            'athena-telemetry',
+            'athena-plugin'
+    ]
+    athenaPublishedArtifacts = [
+            'athena-api',
+            'athena-runtime',
+            'athena-hardware',
+            'athena-mechanisms',
+            'athena-superstructure',
+            'athena-drivetrain',
+            'athena-vision',
+            'athena-localization',
+            'athena-auto',
+            'athena-commands',
+            'athena-telemetry',
+            'athena-dashboard',
+            'athena-plugin',
+            'athena-simulation',
+            'athena-wpilib',
+            'athena-vendor-ctre',
+            'athena-vendor-rev',
+            'athena-vendor-studica',
+            'athena-vendor-photonvision',
+            'athena-vendor-limelight',
+            'athena-vendor-pathplanner',
+            'athena-vendor-choreo'
+    ]
+}
+
+subprojects {
+    group = rootProject.findProperty('athenaGroup')
+    version = rootProject.findProperty('athenaVersion')
+
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+
+    java {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        withSourcesJar()
+        withJavadocJar()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.compilerArgs.addAll(['-Xlint:all', '-Werror'])
+    }
+
+    tasks.withType(Javadoc).configureEach {
+        options.encoding = 'UTF-8'
+        options.addStringOption('Xdoclint:none', '-quiet')
+    }
+
+    dependencies {
+        testImplementation "org.junit.jupiter:junit-jupiter-api:${rootProject.findProperty('junitVersion')}"
+        testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${rootProject.findProperty('junitVersion')}"
+    }
+
+    test {
+        useJUnitPlatform()
+    }
+
+    publishing {
+        repositories {
+            maven {
+                name = 'AthenaStaging'
+                url = rootProject.layout.buildDirectory.dir('staging-repo')
+            }
+        }
+
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+
+                pom {
+                    name = project.name
+                    description = "Athena 2027 module ${project.name}"
+                    url = 'https://github.com/FRC-6390/FRC-Athena'
+                    licenses {
+                        license {
+                            name = 'MIT'
+                            url = 'https://opensource.org/license/mit/'
+                        }
+                    }
+                    developers {
+                        developer {
+                            id = 'frc6390'
+                            name = 'FRC 6390'
+                        }
+                    }
+                    scm {
+                        url = 'https://github.com/FRC-6390/FRC-Athena'
+                    }
+                }
+            }
+        }
+    }
+}
+
+project(':athena-runtime') {
+    dependencies {
+        api project(':athena-api')
+    }
+}
+
+project(':athena-hardware') {
+    dependencies {
+        api project(':athena-api')
+        api project(':athena-runtime')
+    }
+}
+
+project(':athena-mechanisms') {
+    dependencies {
+        api project(':athena-api')
+        api project(':athena-runtime')
+        api project(':athena-hardware')
+    }
+}
+
+project(':athena-superstructure') {
+    dependencies {
+        api project(':athena-commands')
+        api project(':athena-mechanisms')
+        testImplementation project(':athena-simulation')
+    }
+}
+
+project(':athena-drivetrain') {
+    dependencies {
+        api project(':athena-hardware')
+        api project(':athena-commands')
+        testImplementation project(':athena-simulation')
+    }
+}
+
+project(':athena-vision') {
+    dependencies {
+        api project(':athena-api')
+        api project(':athena-runtime')
+    }
+}
+
+project(':athena-localization') {
+    dependencies {
+        api project(':athena-runtime')
+        api project(':athena-vision')
+    }
+}
+
+project(':athena-auto') {
+    dependencies {
+        api project(':athena-commands')
+        api project(':athena-runtime')
+    }
+}
+
+project(':athena-commands') {
+    dependencies {
+        api project(':athena-runtime')
+    }
+}
+
+project(':athena-telemetry') {
+    dependencies {
+        api project(':athena-runtime')
+    }
+}
+
+project(':athena-dashboard') {
+    dependencies {
+        api project(':athena-runtime')
+        api project(':athena-telemetry')
+    }
+}
+
+project(':athena-plugin') {
+    apply plugin: 'java-gradle-plugin'
+
+    gradlePlugin {
+        plugins {
+            athena {
+                id = 'ca.frc6390.athena'
+                implementationClass = 'ca.frc6390.athena.plugin.gradle.AthenaGradlePlugin'
+                displayName = 'FRC 6390 Athena'
+                description = 'Selects Athena 2027 feature and vendor artifacts.'
+            }
+        }
+    }
+
+    dependencies {
+        api project(':athena-api')
+        implementation localGroovy()
+    }
+}
+
+project(':athena-simulation') {
+    dependencies {
+        api project(':athena-runtime')
+        api project(':athena-hardware')
+        api project(':athena-mechanisms')
+        api project(':athena-drivetrain')
+        api project(':athena-vision')
+    }
+}
+
+project(':athena-wpilib') {
+    dependencies {
+        api project(':athena-commands')
+        api project(':athena-drivetrain')
+        api project(':athena-localization')
+        api project(':athena-telemetry')
+        api project(':athena-runtime')
+        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        api "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        api "com.fasterxml.jackson.core:jackson-core:2.19.4"
+        api "org.ejml:ejml-simple:0.44.0"
+        api "us.hebi.quickbuf:quickbuf-runtime:1.4"
+    }
+}
+
+project(':athena-vendor-ctre') {
+    dependencies {
+        api project(':athena-hardware')
+        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        api "com.ctre.phoenix6:wpiapi-java:${rootProject.findProperty('ctrePhoenix6Version')}"
+    }
+}
+
+project(':athena-vendor-rev') {
+    dependencies {
+        api project(':athena-hardware')
+        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        api "com.revrobotics.frc:REVLib-java:${rootProject.findProperty('revLibVersion')}"
+    }
+}
+
+project(':athena-vendor-studica') {
+    dependencies {
+        api project(':athena-hardware')
+        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        api "com.studica.frc:Studica-java:${rootProject.findProperty('studicaVersion')}"
+    }
+}
+
+project(':athena-vendor-photonvision') {
+    dependencies {
+        api project(':athena-vision')
+        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        api "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        api "us.hebi.quickbuf:quickbuf-runtime:1.4"
+        api "org.photonvision:photonlib-java:${rootProject.findProperty('photonLibVersion')}"
+        api "org.photonvision:photontargeting-java:${rootProject.findProperty('photonLibVersion')}"
+    }
+}
+
+project(':athena-vendor-limelight') {
+    dependencies {
+        api project(':athena-vision')
+        api "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        api "com.fasterxml.jackson.core:jackson-core:2.19.4"
+    }
+}
+
+project(':athena-vendor-pathplanner') {
+    dependencies {
+        api project(':athena-auto')
+        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
+        api "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        api "com.pathplanner.lib:PathplannerLib-java:${rootProject.findProperty('pathPlannerLibVersion')}"
+    }
+}
+
+project(':athena-vendor-choreo') {
+    dependencies {
+        api project(':athena-auto')
+        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
+        api "com.google.code.gson:gson:2.11.0"
+        api "choreo:ChoreoLib-java:${rootProject.findProperty('choreoLibVersion')}"
+    }
+}
+
+project(':example-project') {
+    dependencies {
+        implementation project(':athena-api')
+        implementation project(':athena-runtime')
+        implementation project(':athena-hardware')
+        implementation project(':athena-mechanisms')
+        implementation project(':athena-superstructure')
+        implementation project(':athena-drivetrain')
+        implementation project(':athena-vision')
+        implementation project(':athena-localization')
+        implementation project(':athena-auto')
+        implementation project(':athena-commands')
+        implementation project(':athena-telemetry')
+        implementation project(':athena-dashboard')
+        implementation project(':athena-simulation')
+        implementation project(':athena-wpilib')
+        implementation project(':athena-vendor-ctre')
+        implementation project(':athena-vendor-rev')
+        implementation project(':athena-vendor-studica')
+        implementation project(':athena-vendor-photonvision')
+        implementation project(':athena-vendor-limelight')
+        implementation project(':athena-vendor-pathplanner')
+        implementation project(':athena-vendor-choreo')
+    }
+}
+
+tasks.register('generateVendordep') {
+    description = 'Generates the single Athena 2027 vendordep from Gradle properties.'
+    group = 'publishing'
+
+    def outputFile = layout.projectDirectory.file('vendordeps/FRC6390-Athena.json')
+    outputs.file(outputFile)
+
+    doLast {
+        def dependencies = rootProject.ext.athenaDefaultArtifacts.collect { artifact ->
+            [
+                    groupId   : rootProject.findProperty('athenaGroup'),
+                    artifactId: artifact,
+                    version   : rootProject.findProperty('athenaVersion')
+            ]
+        }
+        def vendordep = [
+                fileName        : 'FRC6390-Athena.json',
+                name            : 'FRC6390 Athena',
+                version         : rootProject.findProperty('athenaVersion'),
+                frcYear         : rootProject.findProperty('athenaFrcYear'),
+                uuid            : rootProject.findProperty('athenaUuid'),
+                mavenUrls       : [rootProject.findProperty('athenaMavenUrl')],
+                jsonUrl         : rootProject.findProperty('athenaJsonUrl'),
+                javaDependencies: dependencies,
+                jniDependencies : [],
+                cppDependencies : []
+        ]
+        outputFile.asFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(vendordep)) + '\n'
+    }
+}
+
+tasks.register('verifyVendordep') {
+    description = 'Checks that the checked-in vendordep matches generated metadata.'
+    group = 'verification'
+    dependsOn 'generateVendordep'
+
+    doLast {
+        def vendordep = new groovy.json.JsonSlurper().parse(layout.projectDirectory.file('vendordeps/FRC6390-Athena.json').asFile)
+        def expectedArtifacts = rootProject.ext.athenaDefaultArtifacts as Set
+        def actualArtifacts = vendordep.javaDependencies.collect { it.artifactId } as Set
+        if (actualArtifacts != expectedArtifacts) {
+            throw new GradleException("Vendordep default artifacts mismatch. Expected ${expectedArtifacts}, found ${actualArtifacts}.")
+        }
+        if (vendordep.version != rootProject.findProperty('athenaVersion')) {
+            throw new GradleException("Vendordep version ${vendordep.version} does not match athenaVersion.")
+        }
+        if (vendordep.frcYear.toString() != rootProject.findProperty('athenaFrcYear').toString()) {
+            throw new GradleException("Vendordep frcYear ${vendordep.frcYear} does not match athenaFrcYear.")
+        }
+        if (!vendordep.jniDependencies.isEmpty() || !vendordep.cppDependencies.isEmpty()) {
+            throw new GradleException('Athena 2027 vendordep should not publish JNI or C++ dependencies yet.')
+        }
+    }
+}
+
+tasks.register('verifyReleaseMetadata') {
+    description = 'Validates version, UUID, artifact, and publication metadata for a release.'
+    group = 'verification'
+    dependsOn 'verifyVendordep'
+
+    doLast {
+        def version = rootProject.findProperty('athenaVersion')?.toString()
+        if (!(version ==~ /2027\.\d+\.\d+(-[A-Za-z0-9.-]+)?/)) {
+            throw new GradleException("athenaVersion must look like 2027.x.y or 2027.x.y-SNAPSHOT, found ${version}.")
+        }
+        try {
+            java.util.UUID.fromString(rootProject.findProperty('athenaUuid')?.toString())
+        } catch (IllegalArgumentException ex) {
+            throw new GradleException('athenaUuid must be a valid UUID.', ex)
+        }
+        def defaultArtifacts = rootProject.ext.athenaDefaultArtifacts as Set
+        def projectArtifacts = subprojects.collect { it.name } as Set
+        def missingProjects = defaultArtifacts.findAll { !projectArtifacts.contains(it) }
+        if (!missingProjects.isEmpty()) {
+            throw new GradleException("Default vendordep artifacts missing matching projects: ${missingProjects}.")
+        }
+        def optionalArtifacts = [
+                'athena-drivetrain',
+                'athena-superstructure',
+                'athena-simulation',
+                'athena-vision',
+                'athena-localization',
+                'athena-auto',
+                'athena-dashboard',
+                'athena-vendor-ctre',
+                'athena-vendor-rev',
+                'athena-vendor-studica',
+                'athena-vendor-photonvision',
+                'athena-vendor-limelight',
+                'athena-vendor-pathplanner',
+                'athena-vendor-choreo',
+                'athena-wpilib'
+        ] as Set
+        def leakedOptionalArtifacts = defaultArtifacts.intersect(optionalArtifacts)
+        if (!leakedOptionalArtifacts.isEmpty()) {
+            throw new GradleException("Optional artifacts should not be in the default vendordep: ${leakedOptionalArtifacts}.")
+        }
+        subprojects.findAll { rootProject.ext.athenaPublishedArtifacts.contains(it.name) }.each { project ->
+            def publication = project.publishing.publications.findByName('mavenJava')
+            if (publication == null) {
+                throw new GradleException("${project.path} is missing mavenJava publication.")
+            }
+        }
+    }
+}
+
+tasks.register('verifyVendorMetadata') {
+    description = 'Validates Athena vendor metadata resources used by the Gradle plugin.'
+    group = 'verification'
+
+    doLast {
+        def metadataFiles = fileTree('athena-plugin/src/main/resources/META-INF/athena/vendors') {
+            include '*.json'
+        }.files.sort { it.name }
+        if (metadataFiles.isEmpty()) {
+            throw new GradleException('Athena plugin must ship at least one vendor metadata resource.')
+        }
+
+        def features = [] as Set
+        def projectArtifacts = subprojects.collect { it.name } as Set
+        def metadataArtifacts = [] as Set
+        metadataFiles.each { file ->
+            def metadata = new groovy.json.JsonSlurper().parse(file)
+            if (!(metadata.feature instanceof String) || metadata.feature.isBlank()) {
+                throw new GradleException("${file.name} must declare nonblank feature.")
+            }
+            if (!features.add(metadata.feature)) {
+                throw new GradleException("Duplicate vendor feature metadata for ${metadata.feature}.")
+            }
+            if (!(metadata.detect instanceof Map)) {
+                throw new GradleException("${file.name} must declare detect object.")
+            }
+            ['vendordepUuids', 'dependencies'].each { field ->
+                if (!(metadata.detect[field] instanceof List)) {
+                    throw new GradleException("${file.name} detect.${field} must be a list.")
+                }
+                if (!metadata.detect[field].every { it instanceof String && !it.isBlank() }) {
+                    throw new GradleException("${file.name} detect.${field} must contain only nonblank strings.")
+                }
+            }
+            if (!(metadata.artifacts instanceof List) || metadata.artifacts.isEmpty()) {
+                throw new GradleException("${file.name} must declare at least one artifact.")
+            }
+            metadata.artifacts.each { artifact ->
+                if (!(artifact instanceof String) || artifact.isBlank()) {
+                    throw new GradleException("${file.name} artifacts must contain only nonblank strings.")
+                }
+                if (artifact.split(':').length != 2) {
+                    throw new GradleException("${file.name} artifact ${artifact} must be group:artifact without a version.")
+                }
+                def artifactId = artifact.split(':')[1]
+                metadataArtifacts.add(artifactId)
+                if (!projectArtifacts.contains(artifactId)) {
+                    throw new GradleException("${file.name} references missing project artifact ${artifactId}.")
+                }
+            }
+        }
+
+        def vendorProjects = projectArtifacts.findAll { it.startsWith('athena-vendor-') } as Set
+        def missingMetadata = vendorProjects - metadataArtifacts
+        if (!missingMetadata.isEmpty()) {
+            throw new GradleException("Vendor projects missing plugin metadata resources: ${missingMetadata}.")
+        }
+    }
+}
+
+tasks.register('verifyVendorServiceDescriptors') {
+    description = 'Validates ServiceLoader descriptors in vendor adapter modules.'
+    group = 'verification'
+
+    doLast {
+        def expectedDescriptors = [
+                'athena-vendor-ctre'   : [
+                        'ca.frc6390.athena.hardware.backend.MotorBackend':
+                                ['ca.frc6390.athena.vendor.ctre.CtreMotorBackend'],
+                        'ca.frc6390.athena.hardware.backend.EncoderBackend':
+                                ['ca.frc6390.athena.vendor.ctre.CtreEncoderBackend'],
+                        'ca.frc6390.athena.hardware.backend.ImuBackend':
+                                ['ca.frc6390.athena.vendor.ctre.CtreImuBackend']
+                ],
+                'athena-vendor-rev'    : [
+                        'ca.frc6390.athena.hardware.backend.MotorBackend':
+                                ['ca.frc6390.athena.vendor.rev.RevMotorBackend'],
+                        'ca.frc6390.athena.hardware.backend.EncoderBackend':
+                                ['ca.frc6390.athena.vendor.rev.RevEncoderBackend']
+                ],
+                'athena-vendor-studica': [
+                        'ca.frc6390.athena.hardware.backend.ImuBackend':
+                                ['ca.frc6390.athena.vendor.studica.StudicaImuBackend']
+                ]
+        ]
+
+        expectedDescriptors.each { moduleName, descriptors ->
+            descriptors.each { serviceName, implementations ->
+                def descriptor = layout.projectDirectory.file("${moduleName}/src/main/resources/META-INF/services/${serviceName}").asFile
+                if (!descriptor.isFile()) {
+                    throw new GradleException("${moduleName} is missing ServiceLoader descriptor ${serviceName}.")
+                }
+                def actual = descriptor.readLines()
+                        .collect { it.trim() }
+                        .findAll { !it.isBlank() && !it.startsWith('#') }
+                if (actual != implementations) {
+                    throw new GradleException("${moduleName} descriptor ${serviceName} expected ${implementations}, found ${actual}.")
+                }
+                implementations.each { implementation ->
+                    def sourcePath = implementation.replace('.', '/') + '.java'
+                    def source = layout.projectDirectory.file("${moduleName}/src/main/java/${sourcePath}").asFile
+                    if (!source.isFile()) {
+                        throw new GradleException("${moduleName} descriptor ${serviceName} references missing ${implementation}.")
+                    }
+                }
+            }
+        }
+
+        def descriptorFiles = fileTree('.') {
+            include 'athena-vendor-*/src/main/resources/META-INF/services/*'
+        }.files
+        descriptorFiles.each { descriptor ->
+            def moduleName = descriptor.path.split('/').find { it.startsWith('athena-vendor-') }
+            def serviceName = descriptor.name
+            if (!expectedDescriptors.containsKey(moduleName)
+                    || !expectedDescriptors[moduleName].containsKey(serviceName)) {
+                throw new GradleException("Unexpected vendor ServiceLoader descriptor ${descriptor}. Add it to verifyVendorServiceDescriptors.")
+            }
+        }
+    }
+}
+
+tasks.register('verifyArchitectureBoundaries') {
+    description = 'Checks that core artifacts stay free of vendor adapter dependencies and imports.'
+    group = 'verification'
+
+    doLast {
+        def defaultArtifacts = rootProject.ext.athenaDefaultArtifacts as Set
+        def vendorArtifacts = subprojects.collect { it.name }.findAll { it.startsWith('athena-vendor-') } as Set
+        def publishedArtifacts = rootProject.ext.athenaPublishedArtifacts as Set
+        def mainDependencyConfigurations = ['api', 'implementation', 'compileOnly', 'runtimeOnly']
+
+        subprojects.each { project ->
+            if (project.name == 'example-project') {
+                return
+            }
+
+            mainDependencyConfigurations.each { configurationName ->
+                def configuration = project.configurations.findByName(configurationName)
+                if (configuration == null) {
+                    return
+                }
+                configuration.dependencies.withType(ProjectDependency).each { dependency ->
+                    def dependencyName = dependency.dependencyProject.name
+                    if (vendorArtifacts.contains(dependencyName) && !project.name.startsWith('athena-vendor-')) {
+                        throw new GradleException("${project.path} ${configurationName} depends on vendor adapter ${dependencyName}.")
+                    }
+                    if (project.name.startsWith('athena-vendor-') && vendorArtifacts.contains(dependencyName)) {
+                        throw new GradleException("${project.path} ${configurationName} must not depend on another vendor adapter ${dependencyName}.")
+                    }
+                    if (defaultArtifacts.contains(project.name) && !defaultArtifacts.contains(dependencyName)) {
+                        throw new GradleException("Default artifact ${project.name} ${configurationName} depends on non-default artifact ${dependencyName}.")
+                    }
+                }
+            }
+
+            if (!project.name.startsWith('athena-vendor-') && publishedArtifacts.contains(project.name)) {
+                def sourceDir = layout.projectDirectory.dir("${project.name}/src/main/java").asFile
+                if (sourceDir.isDirectory()) {
+                    def vendorImports = fileTree(sourceDir).matching { include '**/*.java' }.files.findAll { file ->
+                        file.text.contains('import ca.frc6390.athena.vendor.')
+                    }
+                    if (!vendorImports.isEmpty()) {
+                        throw new GradleException("${project.path} imports vendor adapter packages: "
+                                + vendorImports.collect { it.path - rootDir.path - '/' }.sort().join(', '))
+                    }
+                }
+            }
+        }
+    }
+}
+
+tasks.register('cleanStagingRepository') {
+    description = 'Deletes the local Maven staging repository.'
+    group = 'publishing'
+
+    doLast {
+        delete layout.buildDirectory.dir('staging-repo')
+    }
+}
+
+subprojects.findAll { rootProject.ext.athenaPublishedArtifacts.contains(it.name) }.each { project ->
+    project.tasks.named('publishMavenJavaPublicationToAthenaStagingRepository').configure {
+        mustRunAfter rootProject.tasks.named('cleanStagingRepository')
+    }
+}
+
+tasks.register('stageMavenPublication') {
+    description = 'Publishes every Athena artifact to build/staging-repo for local release inspection.'
+    group = 'publishing'
+    dependsOn 'cleanStagingRepository'
+    dependsOn subprojects
+            .findAll { rootProject.ext.athenaPublishedArtifacts.contains(it.name) }
+            .collect { it.tasks.named('publishMavenJavaPublicationToAthenaStagingRepository') }
+}
+
+tasks.register('releaseChecklist') {
+    description = 'Runs the build, release metadata checks, and local Maven staging publication.'
+    group = 'publishing'
+    dependsOn 'build'
+    dependsOn 'verifyReleaseMetadata'
+    dependsOn 'verifyVendorMetadata'
+    dependsOn 'stageMavenPublication'
+}
+
+tasks.register('verifyExampleDocs') {
+    description = 'Checks that the example catalog references every example source file.'
+    group = 'verification'
+
+    def catalog = layout.projectDirectory.file('docs/examples.md')
+    def examplesDir = layout.projectDirectory.dir('example-project/src/main/java/ca/frc6390/athena/examples')
+
+    inputs.file(catalog)
+    inputs.dir(examplesDir)
+
+    doLast {
+        def catalogText = catalog.asFile.text
+        def missing = fileTree(examplesDir).matching { include '**/*.java' }.files
+                .collect { it.name }
+                .findAll { !catalogText.contains(it) }
+        if (!missing.isEmpty()) {
+            throw new GradleException("Example catalog is missing entries for: ${missing.join(', ')}")
+        }
+    }
+}
+
+tasks.register('verifyMigrationMatrix') {
+    description = 'Checks that remaining migration roadmap rows are tracked in the migration matrix.'
+    group = 'verification'
+
+    def roadmap = layout.projectDirectory.file('docs/coverage-roadmap.md')
+    def matrix = layout.projectDirectory.file('docs/migration-matrix.md')
+
+    inputs.file(roadmap)
+    inputs.file(matrix)
+
+    doLast {
+        def roadmapText = roadmap.asFile.text
+        def matrixText = matrix.asFile.text
+        def remainingSection = roadmapText.split('## Remaining Major Migrations', 2)
+        if (remainingSection.length != 2) {
+            throw new GradleException('Coverage roadmap must contain Remaining Major Migrations section.')
+        }
+        def missing = []
+        remainingSection[1].readLines()
+                .findAll { it.startsWith('|') && !it.contains('---') && !it.contains('Area | Target Module') }
+                .each { row ->
+                    def cells = row.split('\\|').collect { it.trim() }.findAll { !it.isBlank() }
+                    if (!cells.isEmpty()) {
+                        def area = cells[0]
+                        if (!matrixText.contains(area)) {
+                            missing.add(area)
+                        }
+                    }
+                }
+        if (!missing.isEmpty()) {
+            throw new GradleException("Migration matrix is missing remaining roadmap areas: ${missing.join(', ')}")
+        }
+        ['Implemented', 'Boundary', 'Deferred'].each { status ->
+            if (!matrixText.contains("- `${status}`:")) {
+                throw new GradleException("Migration matrix must document the ${status} status.")
+            }
+        }
+        if (!matrixText.contains('| Implemented |')) {
+            throw new GradleException('Migration matrix must include implemented evidence rows.')
+        }
+    }
+}
+
+tasks.register('verifyV3DirectionBacklog') {
+    description = 'Checks that the accepted V3 direction scope stays synced with the 2027 roadmap.'
+    group = 'verification'
+
+    def v3Direction = layout.projectDirectory.file('docs/api-v3-direction.md')
+    def roadmap = layout.projectDirectory.file('docs/coverage-roadmap.md')
+
+    inputs.file(v3Direction)
+    inputs.file(roadmap)
+
+    doLast {
+        def collectTableAreas = { String text, String sectionName ->
+            def section = text.split("## ${sectionName}", 2)
+            if (section.length != 2) {
+                throw new GradleException("Document must contain ${sectionName} section.")
+            }
+            section[1].split('\\n## ', 2)[0]
+                    .readLines()
+                    .findAll { it.startsWith('|') && !it.contains('---') && !it.contains('Area |') }
+                    .collect { row ->
+                        row.split('\\|').collect { it.trim() }.findAll { !it.isBlank() }[0]
+                    }
+                    .findAll { !it.isBlank() }
+                    .toSet()
+        }
+
+        def directionText = v3Direction.asFile.text
+        def roadmapAreas = collectTableAreas(roadmap.asFile.text, 'Remaining Major Migrations')
+        roadmapAreas.each { area ->
+            if (!directionText.contains(area)) {
+                throw new GradleException("V3 direction scope must mention remaining roadmap area: ${area}.")
+            }
+        }
+        ['Phoenix 5 motor controllers', 'Dashboard layout/UI schema', 'Annotation/state DSL'].each { decision ->
+            if (!directionText.contains(decision)) {
+                throw new GradleException("V3 direction scope must document decision: ${decision}.")
+            }
+        }
+    }
+}
+
+tasks.register('verifyCompletionEvidence') {
+    description = 'Checks that the completion evidence document names the original goal deliverables and verification gates.'
+    group = 'verification'
+
+    def evidence = layout.projectDirectory.file('docs/completion-evidence.md')
+    inputs.file(evidence)
+
+    doLast {
+        def text = evidence.asFile.text
+        [
+                'Frozen legacy root with new replacement workspace',
+                'Clean tiered artifact layout instead of one massive core',
+                'Single human-facing Athena vendordep',
+                'Vendor dependency isolation and conditional selection',
+                'Student-facing Java syntax using `toSpec()`',
+                'Feature migration from frozen examples',
+                'Full example project',
+                'Proper tests for each module',
+                'Proper READMEs for each major artifact',
+                'Public API comments and Javadocs',
+                'Clean release and revision infrastructure',
+                'Annotation/state DSL',
+                'Dashboard layout/UI rendering',
+                'Phoenix 5 motor controllers',
+                'generateVendordep build releaseChecklist'
+        ].each { required ->
+            if (!text.contains(required)) {
+                throw new GradleException("Completion evidence is missing required item: ${required}.")
+            }
+        }
+    }
+}
+
+tasks.register('verifyExampleMigrationMap') {
+    description = 'Checks that every frozen legacy example is accounted for in the 2027 migration map.'
+    group = 'verification'
+
+    def legacyCatalog = layout.projectDirectory.file('../docs/coverage/examples-catalog.md')
+    def legacyExamples = layout.projectDirectory.dir('../athena-examples/src/main/java')
+    def migrationMap = layout.projectDirectory.file('docs/example-migration-map.md')
+
+    inputs.file(legacyCatalog)
+    inputs.dir(legacyExamples)
+    inputs.file(migrationMap)
+
+    doLast {
+        def mapText = migrationMap.asFile.text
+        def catalogExamples = legacyCatalog.asFile.readLines()
+                .findAll { it.startsWith('- `') && it.endsWith('`') }
+                .collect { it.substring(3, it.length() - 1).tokenize('/').last() }
+        def sourceExamples = fileTree(legacyExamples.asFile) {
+            include '**/*.java'
+        }.files.collect { it.name }
+        def missing = (catalogExamples + sourceExamples).unique().sort()
+                .findAll { !mapText.contains("`" + it + "`") }
+        if (!missing.isEmpty()) {
+            throw new GradleException("Example migration map is missing legacy examples: ${missing.join(', ')}")
+        }
+    }
+}
+
+tasks.register('verifyModuleDocs') {
+    description = 'Checks that each 2027 module has a README and focused tests.'
+    group = 'verification'
+
+    def moduleProjects = subprojects.findAll { it.name != 'example-project' }
+    inputs.files(moduleProjects.collect { layout.projectDirectory.file("${it.name}/README.md") })
+    inputs.files(moduleProjects.collect { layout.projectDirectory.dir("${it.name}/src/test/java") })
+
+    doLast {
+        def missingReadmes = moduleProjects.findAll { !layout.projectDirectory.file("${it.name}/README.md").asFile.isFile() }
+                .collect { it.name }
+        if (!missingReadmes.isEmpty()) {
+            throw new GradleException("Modules missing README.md: ${missingReadmes.join(', ')}")
+        }
+
+        def readmesWithoutCurrentSlice = moduleProjects.findAll {
+            !layout.projectDirectory.file("${it.name}/README.md").asFile.text.contains('## Current Slice')
+        }.collect { it.name }
+        if (!readmesWithoutCurrentSlice.isEmpty()) {
+            throw new GradleException("Module READMEs missing Current Slice section: ${readmesWithoutCurrentSlice.join(', ')}")
+        }
+
+        def modulesWithoutTests = moduleProjects.findAll {
+            def testDir = layout.projectDirectory.dir("${it.name}/src/test/java").asFile
+            !testDir.isDirectory() || fileTree(testDir).matching { include '**/*Test.java' }.isEmpty()
+        }.collect { it.name }
+        if (!modulesWithoutTests.isEmpty()) {
+            throw new GradleException("Modules missing focused tests: ${modulesWithoutTests.join(', ')}")
+        }
+    }
+}
+
+tasks.register('verifyReadmeModuleCatalog') {
+    description = 'Checks that the root README module catalog matches Gradle projects.'
+    group = 'verification'
+
+    def rootReadme = layout.projectDirectory.file('README.md')
+    inputs.file(rootReadme)
+    inputs.files(subprojects.collect { layout.projectDirectory.file("${it.name}/README.md") })
+
+    doLast {
+        def readmeText = rootReadme.asFile.text
+        def actualModules = subprojects.collect { it.name } as Set
+        def listedModules = [] as Set
+        readmeText.readLines().each { line ->
+            def matcher = line =~ /^- `(athena-[^`]+|example-project)`:/
+            if (matcher.find()) {
+                listedModules.add(matcher.group(1))
+            }
+        }
+
+        def missing = actualModules - listedModules
+        if (!missing.isEmpty()) {
+            throw new GradleException("Root README module catalog is missing modules: ${missing.sort().join(', ')}")
+        }
+        def unknown = listedModules - actualModules
+        if (!unknown.isEmpty()) {
+            throw new GradleException("Root README module catalog lists unknown modules: ${unknown.sort().join(', ')}")
+        }
+
+        subprojects.each { project ->
+            def readme = layout.projectDirectory.file("${project.name}/README.md").asFile
+            if (!readme.isFile()) {
+                throw new GradleException("${project.path} is missing README.md.")
+            }
+            def firstLine = readme.readLines().find { !it.trim().isEmpty() }
+            if (project.name == 'example-project') {
+                if (firstLine != '# Athena 2027 Example Project') {
+                    throw new GradleException("${project.path} README must start with '# Athena 2027 Example Project', found '${firstLine}'.")
+                }
+                return
+            }
+            if (firstLine != "# ${project.name}") {
+                throw new GradleException("${project.path} README must start with '# ${project.name}', found '${firstLine}'.")
+            }
+        }
+    }
+}
+
+tasks.register('verifyReadmeDependencies') {
+    description = 'Checks that module README dependency sections mention their Gradle project dependencies.'
+    group = 'verification'
+
+    inputs.files(subprojects.collect { layout.projectDirectory.file("${it.name}/README.md") })
+
+    doLast {
+        subprojects.findAll { it.name != 'example-project' }.each { project ->
+            def readme = layout.projectDirectory.file("${project.name}/README.md").asFile
+            def text = readme.text
+            if (!text.contains('## Dependencies')) {
+                throw new GradleException("${project.path} README is missing Dependencies section.")
+            }
+
+            def productionDeps = ['api', 'implementation']
+                    .collectMany { configurationName ->
+                        def configuration = project.configurations.findByName(configurationName)
+                        configuration == null ? [] : configuration.dependencies.withType(ProjectDependency).collect {
+                            it.dependencyProject.name
+                        }
+                    }
+                    .unique()
+                    .sort()
+            def testDeps = ['testImplementation']
+                    .collectMany { configurationName ->
+                        def configuration = project.configurations.findByName(configurationName)
+                        configuration == null ? [] : configuration.dependencies.withType(ProjectDependency).collect {
+                            it.dependencyProject.name
+                        }
+                    }
+                    .unique()
+                    .sort()
+
+            if (productionDeps.isEmpty() && !text.contains('- Production: none.')) {
+                throw new GradleException("${project.path} README must document no production project dependencies.")
+            }
+            productionDeps.each { dependency ->
+                if (!text.contains("`" + dependency + "`")) {
+                    throw new GradleException("${project.path} README Dependencies section is missing production dependency ${dependency}.")
+                }
+            }
+
+            if (testDeps.isEmpty() && !text.contains('- Test-only: none.')) {
+                throw new GradleException("${project.path} README must document no test-only project dependencies.")
+            }
+            testDeps.each { dependency ->
+                if (!text.contains("`" + dependency + "`")) {
+                    throw new GradleException("${project.path} README Dependencies section is missing test-only dependency ${dependency}.")
+                }
+            }
+        }
+    }
+}
+
+tasks.register('verifyPublicApiJavadocs') {
+    description = 'Checks that every public top-level Java API type has class-level Javadocs.'
+    group = 'verification'
+
+    def sourceRoots = subprojects.collect { layout.projectDirectory.dir("${it.name}/src/main/java") }
+    sourceRoots.each { inputs.dir(it) }
+
+    doLast {
+        def undocumented = []
+        sourceRoots.each { sourceRoot ->
+            def rootFile = sourceRoot.asFile
+            if (!rootFile.isDirectory()) {
+                return
+            }
+            fileTree(rootFile).matching { include '**/*.java' }.files.each { source ->
+                def lines = source.readLines()
+                for (int index = 0; index < lines.size(); index++) {
+                    def line = lines[index]
+                    if (!(line ==~ /^\s*public\s+(final\s+|abstract\s+|sealed\s+|non-sealed\s+)?(class|interface|enum|record)\s+.*/)) {
+                        continue
+                    }
+                    int cursor = index - 1
+                    while (cursor >= 0 && lines[cursor].trim().isEmpty()) {
+                        cursor--
+                    }
+                    while (cursor >= 0 && lines[cursor].trim().startsWith('@')) {
+                        cursor--
+                        while (cursor >= 0 && lines[cursor].trim().isEmpty()) {
+                            cursor--
+                        }
+                    }
+                    if (cursor < 0 || lines[cursor].trim() != '*/') {
+                        undocumented.add("${source.path - rootDir.path - '/'}:${index + 1}")
+                        continue
+                    }
+                    boolean hasStart = false
+                    while (cursor >= 0 && !lines[cursor].trim().startsWith('package ')) {
+                        if (lines[cursor].trim().startsWith('/**')) {
+                            hasStart = true
+                            break
+                        }
+                        cursor--
+                    }
+                    if (!hasStart) {
+                        undocumented.add("${source.path - rootDir.path - '/'}:${index + 1}")
+                    }
+                }
+            }
+        }
+        if (!undocumented.isEmpty()) {
+            throw new GradleException("Public API types missing class-level Javadocs: ${undocumented.sort().join(', ')}")
+        }
+    }
+}
+
+tasks.register('check') {
+    description = 'Runs root-level verification tasks.'
+    group = 'verification'
+    dependsOn 'verifyExampleDocs'
+    dependsOn 'verifyExampleMigrationMap'
+    dependsOn 'verifyMigrationMatrix'
+    dependsOn 'verifyV3DirectionBacklog'
+    dependsOn 'verifyCompletionEvidence'
+    dependsOn 'verifyModuleDocs'
+    dependsOn 'verifyReadmeModuleCatalog'
+    dependsOn 'verifyReadmeDependencies'
+    dependsOn 'verifyPublicApiJavadocs'
+    dependsOn 'verifyReleaseMetadata'
+    dependsOn 'verifyVendorMetadata'
+    dependsOn 'verifyVendorServiceDescriptors'
+    dependsOn 'verifyArchitectureBoundaries'
+}
+
+tasks.register('build') {
+    description = 'Builds all 2027 modules and root verification tasks.'
+    group = 'build'
+    dependsOn 'check'
+    dependsOn subprojects.collect { it.tasks.named('build') }
+}

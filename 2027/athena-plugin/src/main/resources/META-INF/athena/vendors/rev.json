@@ -1,0 +1,11 @@
+{
+  "feature": "rev",
+  "displayName": "REVLib",
+  "detect": {
+    "vendordepUuids": [],
+    "dependencies": ["com.revrobotics.frc:REVLib-java"]
+  },
+  "artifacts": [
+    "ca.frc6390.athena:athena-vendor-rev"
+  ]
+}

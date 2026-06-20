@@ -1,0 +1,11 @@
+{
+  "feature": "limelight",
+  "displayName": "Limelight",
+  "detect": {
+    "vendordepUuids": [],
+    "dependencies": ["com.limelightvision:limelightlib-java"]
+  },
+  "artifacts": [
+    "ca.frc6390.athena:athena-vendor-limelight"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "feature": "ctre",
+  "displayName": "CTRE Phoenix 6",
+  "detect": {
+    "vendordepUuids": ["e995de00-2c64-4df5-8831-c1441420ff19"],
+    "dependencies": ["com.ctre.phoenix6:wpiapi-java"]
+  },
+  "artifacts": [
+    "ca.frc6390.athena:athena-vendor-ctre"
+  ]
+}

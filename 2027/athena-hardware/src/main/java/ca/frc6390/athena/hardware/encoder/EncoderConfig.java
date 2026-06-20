@@ -1,0 +1,131 @@
+package ca.frc6390.athena.hardware.encoder;
+
+import java.util.Objects;
+
+import ca.frc6390.athena.api.hardware.EncoderId;
+import ca.frc6390.athena.api.hardware.EncoderKind;
+
+/**
+ * Student-facing encoder declaration.
+ */
+public final class EncoderConfig {
+    private EncoderKind kind;
+    private int id;
+    private String canbus = "rio";
+    private EncoderSignalType signalType = EncoderSignalType.RELATIVE_POSITION;
+    private double gearRatio = 1.0;
+    private double offset;
+
+    private EncoderConfig() {
+    }
+
+    /**
+     * Creates an empty encoder config.
+     *
+     * @return encoder config
+     */
+    public static EncoderConfig create() {
+        return new EncoderConfig();
+    }
+
+    /**
+     * Sets hardware identity.
+     *
+     * @param kind encoder kind
+     * @param id device id or channel
+     * @return this config
+     */
+    public EncoderConfig hardware(EncoderKind kind, int id) {
+        this.kind = Objects.requireNonNull(kind, "kind");
+        this.id = id;
+        return this;
+    }
+
+    /**
+     * Sets hardware identity from a reusable alias.
+     *
+     * @param encoderId encoder identity
+     * @return this config
+     */
+    public EncoderConfig hardware(EncoderId encoderId) {
+        Objects.requireNonNull(encoderId, "encoderId");
+        return hardware(encoderId.kind(), encoderId.id()).canbus(encoderId.canbus());
+    }
+
+    /**
+     * Sets CAN bus.
+     *
+     * @param canbus bus name
+     * @return this config
+     */
+    public EncoderConfig canbus(String canbus) {
+        this.canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
+        return this;
+    }
+
+    /**
+     * Marks this encoder as absolute position.
+     *
+     * @return this config
+     */
+    public EncoderConfig absolutePosition() {
+        signalType = EncoderSignalType.ABSOLUTE_POSITION;
+        return this;
+    }
+
+    /**
+     * Marks this encoder as relative position.
+     *
+     * @return this config
+     */
+    public EncoderConfig relativePosition() {
+        signalType = EncoderSignalType.RELATIVE_POSITION;
+        return this;
+    }
+
+    /**
+     * Marks this encoder as velocity.
+     *
+     * @return this config
+     */
+    public EncoderConfig velocity() {
+        signalType = EncoderSignalType.VELOCITY;
+        return this;
+    }
+
+    /**
+     * Sets gear ratio.
+     *
+     * @param gearRatio mechanism-to-sensor gear ratio
+     * @return this config
+     */
+    public EncoderConfig gearRatio(double gearRatio) {
+        this.gearRatio = gearRatio;
+        return this;
+    }
+
+    /**
+     * Sets offset.
+     *
+     * @param offset offset in mechanism units
+     * @return this config
+     */
+    public EncoderConfig offset(double offset) {
+        this.offset = offset;
+        return this;
+    }
+
+    /**
+     * Lowers this declaration into an immutable spec.
+     *
+     * @param ownerPath owner path
+     * @param name encoder name
+     * @return encoder spec
+     */
+    public EncoderSpec toSpec(String ownerPath, String name) {
+        if (kind == null) {
+            throw new IllegalStateException("Encoder hardware kind is required for " + ownerPath + "." + name);
+        }
+        return new EncoderSpec(ownerPath, name, kind, id, canbus, signalType, gearRatio, offset);
+    }
+}

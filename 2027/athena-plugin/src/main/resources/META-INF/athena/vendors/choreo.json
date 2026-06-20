@@ -1,0 +1,11 @@
+{
+  "feature": "choreo",
+  "displayName": "Choreo",
+  "detect": {
+    "vendordepUuids": [],
+    "dependencies": ["org.choreo:choreo-lib-java"]
+  },
+  "artifacts": [
+    "ca.frc6390.athena:athena-vendor-choreo"
+  ]
+}
