@@ -2,7 +2,6 @@ import org.gradle.accessors.dm.LibrariesForLibs
 
 plugins {
   id 'cpp'
-  id 'java'
   id 'google-test'
   id 'edu.wpi.first.wpilib.repositories.WPILibRepositoriesPlugin' version '2025.0'
   id 'edu.wpi.first.NativeUtils' version '2026.0.1'
@@ -26,11 +25,6 @@ ext.athenaVersions = [
   opencv        : libs.versions.opencv.get(),
 ]
 ext.wpilibVersion = athenaVersions.wpilib
-
-java {
-    sourceCompatibility = "17"
-    targetCompatibility = "17"
-}
 
 
 allprojects {
@@ -95,33 +89,7 @@ allprojects { proj ->
 // Apply C++ configuration
 apply from: 'config.gradle' 
 
-// Apply Java configuration
-dependencies {
-    implementation project(':athena-core')
-    implementation "edu.wpi.first.cscore:cscore-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.cameraserver:cameraserver-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.ntcore:ntcore-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.wpilibj:wpilibj-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.wpiutil:wpiutil-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.wpimath:wpimath-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.apriltag:apriltag-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.wpiunits:wpiunits-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${athenaVersions.wpilib}"
-    implementation "edu.wpi.first.hal:hal-java:${athenaVersions.wpilib}"
-    implementation "org.ejml:ejml-simple:${athenaVersions.ejml}"
-    implementation "com.fasterxml.jackson.core:jackson-annotations:${athenaVersions.jackson}"
-    implementation "com.fasterxml.jackson.core:jackson-core:${athenaVersions.jackson}"
-    implementation "com.fasterxml.jackson.core:jackson-databind:${athenaVersions.jackson}"
-    implementation "edu.wpi.first.thirdparty.frc2025.opencv:opencv-java:${athenaVersions.opencv}"
-
-    implementation "org.photonvision:photonlib-java:${athenaVersions.photonlib}"
-    implementation "org.photonvision:photontargeting-java:${athenaVersions.photontargeting}"
-    implementation "com.ctre.phoenix6:wpiapi-java:${athenaVersions.ctre}"
-    implementation "com.pathplanner.lib:PathplannerLib-java:${athenaVersions.pathplanner}"
-    implementation "com.revrobotics.frc:REVLib-java:${athenaVersions.rev}"
-    implementation "choreo:ChoreoLib-java:${athenaVersions.choreo}"
-    // implementation "com.studica.frc:Studica-java:${athenaVersions.studica}"
-}
+// No Java implementation dependencies are defined at the root.
 
 // Set up exports properly
 nativeUtils {
@@ -213,5 +181,5 @@ model {
 apply from: 'publish.gradle'
 
 wrapper {
-  gradleVersion '8.5'
+  gradleVersion '8.11'
 }
