@@ -1,238 +1,135 @@
-# FRC-Athena
+# FRC Athena
 
-## Vendordep URLs
+This repository is the V3 Athena workspace. The old monolithic Java modules have
+been replaced by tiered artifacts, conditional vendor adapter selection, a broad
+example project, and release checks that run from the repository root.
 
-Athena vendordeps (install these from WPILib vendordep manager):
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Core.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-CTRE.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-REV.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-PhotonVision.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Limelight.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-HeliOS.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Pathplanner.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Choreo.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena-Studica.json
-- https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/Studica-2026.0.0.json
+## Goals
 
-External vendordeps required by Athena modules:
-- https://maven.ctr-electronics.com/release/com/ctre/phoenix6/latest/Phoenix6-frc2026-latest.json
-- https://software-metadata.revrobotics.com/REVLib-2026.json
-- https://maven.photonvision.org/repository/internal/org/photonvision/photonlib-json/1.0/photonlib-json-1.0.json
-- https://raw.githubusercontent.com/Prometheus-Dynamics/PDLib/refs/heads/main/vendordeps/PDLib-2026.json
-- https://3015rangerrobotics.github.io/pathplannerlib/PathplannerLib.json
-- https://choreo.autos/lib/ChoreoLib2026.json
+- One human-facing Athena vendordep: `FRC6390-Athena.json`.
+- Clean tiered artifacts instead of one massive core.
+- Vendor adapters selected by Gradle feature/vendor detection.
+- Student-facing Java APIs that lower through `toSpec()`.
+- Immutable specs, explicit validation, and small backend contracts.
+- Tests, examples, and docs per major artifact.
 
-## First-Time Toolchain Setup (Docker + Rust)
+## Modules
 
-This section is for Athena maintainers and contributors who build/publish ARCP JNI natives (`athena-arcp-java`).
+- `athena-api`: public declarations and common value types.
+- `athena-runtime`: validation, errors, contexts, registries, and lifecycle.
+- `athena-hardware`: generic hardware specs, capabilities, and backend contracts.
+- `athena-mechanisms`: mechanism declarations, lowering to specs, and state runtime application.
+- `athena-superstructure`: multi-mechanism coordination.
+- `athena-drivetrain`: drivetrain declarations.
+- `athena-vision`: generic camera declarations and target observations.
+- `athena-localization`: pose-estimation declarations and field pose aliases.
+- `athena-auto`: autonomous routine registry and selection model.
+- `athena-commands`: command integration boundary.
+- `athena-telemetry`: telemetry registration boundary.
+- `athena-dashboard`: optional TCP dashboard/control transport.
+- `athena-plugin`: Gradle/vendor feature detection model.
+- `athena-simulation`: simulation test helpers and fake backends.
+- `athena-wpilib`: optional WPILib command, lifecycle, controller, localization,
+  and NetworkTables adapter boundary.
+- `athena-vendor-ctre`: CTRE TalonFX/Kraken, CANcoder, Pigeon2, and typed CTRE options.
+- `athena-vendor-rev`: REV Spark and through-bore encoder adapters plus typed
+  REV options.
+- `athena-vendor-studica`: Studica/NavX IMU adapter.
+- `athena-vendor-photonvision`: PhotonVision camera adapter.
+- `athena-vendor-limelight`: Limelight NetworkTables camera adapter.
+- `athena-vendor-pathplanner`: PathPlanner autonomous source and command adapter.
+- `athena-vendor-choreo`: Choreo autonomous source and trajectory adapter.
+- `example-project`: broad student-facing example project.
 
-If you only consume released Athena vendordeps in a robot project, you can skip this section.
+## Build
 
-### 1) Install Docker
+From the repository root:
 
-Recommended path for cross-target JNI bundles is Dockerized cross-build.
-
-- Linux: install Docker Engine from official docs for your distro: https://docs.docker.com/engine/install/
-- macOS/Windows: install Docker Desktop: https://docs.docker.com/desktop/
-
-Linux post-install (so `docker` runs without `sudo`):
-
-```bash
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-Verify:
-
-```bash
-docker --version
-docker run --rm hello-world
-docker info
-```
-
-Windows troubleshooting:
-
-- If you see `failed to connect to Docker API at npipe:////./pipe/...`, Docker Desktop is installed but the engine is not running/reachable.
-- Start Docker Desktop and wait until it reports "Engine running", then retry.
-- ARCP `host` mode on supported Linux/Windows hosts now uses Docker by default.
-- If you need host-native ARCP JNI build, disable Docker cross-build:
-  - `./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=host -ParcpUseDockerCross=false`
-
-### 2) Install Rust (`rustup`, `cargo`, `rustc`)
-
-Install Rust via rustup:
-
-- macOS/Linux:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-- Windows (PowerShell):
-```powershell
-winget install Rustlang.Rustup
-```
-
-Restart terminal, then verify:
-
-```bash
-rustup --version
-rustc --version
-cargo --version
-rustup default stable
-```
-
-### 3) Install Required Rust Targets
-
-ARCP vendor JNI matrix uses these targets:
-
-- `armv7-unknown-linux-gnueabihf`
-- `x86_64-unknown-linux-gnu`
-- `aarch64-unknown-linux-gnu`
-- `x86_64-pc-windows-gnu`
-
-Install all required targets:
-
-```bash
-rustup target add \
-  armv7-unknown-linux-gnueabihf \
-  x86_64-unknown-linux-gnu \
-  aarch64-unknown-linux-gnu \
-  x86_64-pc-windows-gnu
-```
-
-Verify installed targets:
-
-```bash
-rustup target list --installed
-```
-
-### 4) Build Path You Should Use
-
-Recommended (Docker cross-build):
-
-```bash
-./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=vendor -ParcpUseDockerCross=true
-```
-
-Native cross-build (without Docker) requires additional linker toolchains:
-
-- `armv7-unknown-linux-gnueabihf` -> `arm-linux-gnueabihf-gcc`
-- `aarch64-unknown-linux-gnu` -> `aarch64-linux-gnu-gcc`
-- `x86_64-pc-windows-gnu` -> `x86_64-w64-mingw32-gcc` (for direct GNU Windows target builds)
-
-Windows host note: without Docker cross-build, the Windows JNI target falls back to `x86_64-pc-windows-msvc` and still stages to `native/windows-x86_64/arcp_jni.dll`.
-
-Host-mode build (Docker by default on supported Linux/Windows hosts):
-
-```bash
-./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=host
-```
-
-Force host-native build (no Docker):
-
-```bash
-./gradlew :athena-arcp-java:prepareArcpNativeResources -ParcpNativeMode=host -ParcpUseDockerCross=false
-```
-
-## Blank WPILib Project Setup (Required Gradle Changes)
-
-Minimum required for most teams:
-
-Full guide:
-- `docs/core/wpilib-project-setup.md`
-
-- Install Athena vendordep(s).
-- Keep WPILib executable/fat-jar wiring for rio deploy (especially if you edit `jar`):
-```groovy
-def ROBOT_MAIN_CLASS = "frc.robot.Main"
-def deployArtifact = deploy.targets.roborio.artifacts.frcJava
-
-jar {
-    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
-    from sourceSets.main.allSource
-    manifest edu.wpi.first.gradlerio.GradleRIOPlugin.javaManifest(ROBOT_MAIN_CLASS)
-    duplicatesStrategy = DuplicatesStrategy.INCLUDE
-}
-
-deployArtifact.jarTask = jar
-wpi.java.configureExecutableTasks(jar)
-```
-
-Only if using Athena State DSL/compiler-plugin features:
-- add Athena maven to `pluginManagement.repositories` in `settings.gradle`
-- add `athena-plugin` classpath + `apply plugin: "ca.frc6390.athena.plugin"` in `build.gradle`
-
-## Build Commands
-
-Build changed Athena modules and downstream dependents (default `build` behavior):
-```bash
+```shell
 ./gradlew build
 ```
 
-Run the changed-module task directly:
-```bash
-./gradlew buildChangedModules
+## Current Status
+
+The replacement workspace now has tested generic API slices for:
+
+- common hardware keys
+- motor, encoder, IMU, camera, and input configuration
+- mechanism declaration and superstructure coordination/runtime application
+- `toSpec()` lowering
+- validation with default and explicit contexts
+- backend capability checks
+- differential and swerve drivetrain declarations
+- command descriptors and autonomous routine selection
+- telemetry snapshots and NetworkTables-shaped publishing
+- dashboard packet, control-message, and optional TCP transport
+- generic vision observations
+- localization weighting, slip detection, field bounds, and pose aliases
+- stateful simulation helpers
+- WPILib adapter boundary for command, lifecycle, controller, and
+  NetworkTables integration
+- WPILib differential and swerve drive runtime bindings
+- WPILib pose-estimator vision measurement weighting
+- a documented example project with catalog verification
+- generated single-vendordep metadata
+- Gradle plugin feature/vendor selection
+- CTRE and REV motor adapters with typed vendor options
+- CTRE CANcoder and REV through-bore encoder adapters
+- CTRE Pigeon2 and Studica/NavX IMU adapters
+- PhotonVision and Limelight camera adapters
+- PathPlanner autonomous command adapter and Choreo trajectory adapter
+- release metadata and local Maven staging checks
+
+No remaining major migrations are tracked for the fluent Java V3 replacement
+pass. New work should start from a concrete adapter, dashboard workspace,
+annotation DSL, or robot-use-case requirement instead of reopening the accepted
+architecture shape.
+
+Preserved separate workspaces:
+
+- `athena-arcp`: Rust/JNI ARCP runtime and host dashboard work that is not
+  replaced by the lightweight `athena-dashboard` Java bridge.
+- `athena-helios`: HeliOS/PDLib camera adapter pending a dedicated V3 vendor
+  adapter migration.
+- `athena-vscode-extension`: editor tooling, kept outside the robot library
+  artifact graph.
+
+## Release Metadata
+
+Version and vendordep metadata are centralized in `gradle.properties`.
+
+```shell
+./gradlew generateVendordep
 ```
 
-Build changed modules from a specific git base:
-```bash
-./gradlew buildChangedModules -PchangedSince=origin/main
+The generated file is `vendordeps/FRC6390-Athena.json`.
+
+For a release-candidate check with local Maven staging:
+
+```shell
+./gradlew releaseChecklist
 ```
 
-Force build all Athena modules:
-```bash
-./gradlew buildAllModules
-```
+The local staging repository is written to `build/staging-repo`.
 
-Force all modules through root build:
-```bash
-./gradlew build -PbuildAllModules=true
-```
+## Examples
 
-Build each module directly (per dependency module):
-```bash
-./gradlew :athena-core:build
-./gradlew :athena-ctre:build
-./gradlew :athena-rev:build
-./gradlew :athena-photonvision:build
-./gradlew :athena-limelight:build
-./gradlew :athena-helios:build
-./gradlew :athena-pathplanner:build
-./gradlew :athena-choreo:build
-./gradlew :athena-studica:build
-```
+See [Example Catalog](./docs/examples.md) for a walkthrough of the current
+student-facing syntax.
 
-Publish all modules locally to WPILib:
-```bash
-./gradlew publish -PpublishMode=local
-```
+## Roadmap
 
-Publish all modules online:
-```bash
-./gradlew publish -PpublishMode=online
-```
+See [Coverage Roadmap](./docs/coverage-roadmap.md) for implemented slices and
+the current migration status.
 
-Publish a single module locally:
-```bash
-./gradlew :athena-core:publishToMavenLocal
-./gradlew :athena-ctre:publishToMavenLocal
-./gradlew :athena-rev:publishToMavenLocal
-./gradlew :athena-photonvision:publishToMavenLocal
-./gradlew :athena-limelight:publishToMavenLocal
-./gradlew :athena-helios:publishToMavenLocal
-./gradlew :athena-pathplanner:publishToMavenLocal
-./gradlew :athena-choreo:publishToMavenLocal
-./gradlew :athena-studica:publishToMavenLocal
-```
+See [API V3 Direction](./docs/api-v3-direction.md) for the accepted architecture
+shape, artifact split, and scope boundaries.
 
-Set explicit version/FRC year during build or publish:
-```bash
-./gradlew build -Pversion="2026.1.99" -PfrcYear="2026"
-./gradlew publish -PpublishMode=local -Pversion="2026.1.99" -PfrcYear="2026"
-```
+See [Migration Matrix](./docs/migration-matrix.md) for the source-to-root
+tracking table used to keep legacy feature migration explicit.
 
-Online publish credentials:
-```bash
-export MAVEN_USERNAME=<username>
-export MAVEN_PASSWORD=<token-or-password>
-./gradlew publish -PpublishMode=online
-```
+See [Example Migration Map](./docs/example-migration-map.md) for the checked
+mapping from every evicted legacy example file to its replacement coverage.
+
+See [Completion Evidence](./docs/completion-evidence.md) for the requirement to
+evidence map used to audit the replacement workspace against the original goal.

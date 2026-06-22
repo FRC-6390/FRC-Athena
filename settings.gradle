@@ -1,28 +1,82 @@
 pluginManagement {
     repositories {
-        mavenLocal()
         gradlePluginPortal()
-        maven { url 'https://frcmaven.wpi.edu/artifactory/release' }
-        maven { url 'https://frcmaven.wpi.edu/artifactory/development' }
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+        maven {
+            url = uri('https://frcmaven.wpi.edu/artifactory/release')
+            content {
+                includeGroupByRegex('edu\\.wpi\\.first.*')
+                includeGroup('org.wpilib')
+            }
+        }
+        maven {
+            url = uri('https://maven.ctr-electronics.com/release')
+            content {
+                includeGroupByRegex('com\\.ctre\\.phoenix6.*')
+            }
+        }
+        maven {
+            url = uri('https://maven.revrobotics.com/')
+            content {
+                includeGroup('com.revrobotics.frc')
+            }
+        }
+        maven {
+            url = uri('https://dev.studica.com/maven/release/2026/')
+            content {
+                includeGroup('com.studica.frc')
+            }
+        }
+        maven {
+            url = uri('https://maven.photonvision.org/repository/internal')
+            content {
+                includeGroup('org.photonvision')
+            }
+        }
+        maven {
+            url = uri('https://3015rangerrobotics.github.io/pathplannerlib/repo')
+            content {
+                includeGroup('com.pathplanner.lib')
+            }
+        }
+        maven {
+            url = uri('https://frcmaven.wpi.edu/artifactory/sleipnirgroup-mvn-release/')
+            content {
+                includeGroup('choreo')
+            }
+        }
     }
 }
 
 rootProject.name = 'FRC-Athena'
 
-include 'athena-core'
-include 'athena-examples'
-include 'athena-test'
-include 'athena-ctre'
-include 'athena-rev'
-include 'athena-photonvision'
-include 'athena-limelight'
-include 'athena-helios'
-include 'athena-pathplanner'
-include 'athena-choreo'
-include 'athena-studica'
+include 'athena-api'
+include 'athena-runtime'
+include 'athena-hardware'
+include 'athena-mechanisms'
+include 'athena-superstructure'
+include 'athena-drivetrain'
+include 'athena-vision'
+include 'athena-localization'
+include 'athena-auto'
+include 'athena-commands'
+include 'athena-telemetry'
+include 'athena-dashboard'
 include 'athena-plugin'
-include 'athena-arcp-java'
-include 'athena-vscode-extension-jdtls'
-
-project(':athena-arcp-java').projectDir = file('athena-arcp/java')
-project(':athena-vscode-extension-jdtls').projectDir = file('athena-vscode-extension/jdtls')
+include 'athena-simulation'
+include 'athena-wpilib'
+include 'athena-vendor-ctre'
+include 'athena-vendor-rev'
+include 'athena-vendor-studica'
+include 'athena-vendor-photonvision'
+include 'athena-vendor-limelight'
+include 'athena-vendor-pathplanner'
+include 'athena-vendor-choreo'
+include 'example-project'

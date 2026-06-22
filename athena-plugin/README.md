@@ -1,78 +1,79 @@
-# Athena Plugin
+# athena-plugin
 
-Gradle plugin id: `ca.frc6390.athena.plugin`
+Gradle feature and vendor detection implementation for Athena 2027.
 
-Purpose:
-- enables the Athena javac plugin (`-Xplugin:AthenaStateDsl`)
-- auto-wires plugin artifact on `compileOnly`/`annotationProcessor`
-- enables enum DSL boilerplate injection for `@AthenaState`
+The plugin id is:
 
-## Intended Enum Style
+```text
+ca.frc6390.athena
+```
 
-```java
-@AthenaState
-public enum IntakeState {
-    STOW(0),
-    INTAKE(0.85),
-    HOLD,
-    UNJAM_ALT(s -> s.manualPercent(-0.35).then(INTAKE)),
-    UNJAM;
+It detects installed vendor dependencies and adds only the matching
+`athena-vendor-*` artifacts.
 
-    @AthenaStateLogic(UNJAM)
-    static TransitionDirective<IntakeState> unjam(StateCtx<IntakeState> ctx) {
-        if (ctx.timeInState() > 0.25) return TransitionDirective.to(INTAKE);
-        return TransitionDirective.stay();
-    }
+## Current Slice
+
+- `AthenaGradlePlugin` adds selected Athena dependencies to `implementation`.
+- `AthenaExtension` exposes `features(...)`, `vendors(...)`,
+  `vendordepUuids(...)`, `version`, `group`, and `autoDetectVendors`.
+- `AthenaFeature` defines default and optional Athena artifacts.
+- `VendorFeature` defines vendor dependency, vendordep, and adapter artifact
+  metadata.
+- `VendorMetadataLoader` loads built-in metadata from
+  `META-INF/athena/vendors/*.json`.
+- `FeatureSelector` maps explicit features, explicit vendors, detected Gradle
+  dependencies, and detected vendordep UUIDs into dependency coordinates.
+- `META-INF/athena/vendors/*.json` is the resource shape third-party adapters
+  should copy.
+
+## Vendor Metadata
+
+Vendor metadata resources use unversioned adapter coordinates. The plugin adds
+the Athena version when it selects the adapter.
+
+```json
+{
+  "feature": "acme",
+  "displayName": "Acme Robotics",
+  "detect": {
+    "vendordepUuids": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+    "dependencies": ["com.acme.frc:AcmeLib-java"]
+  },
+  "artifacts": [
+    "com.acme.frc:athena-vendor-acme"
+  ]
 }
 ```
 
-`@AthenaStateLogic(UNJAM)` is normalized by the compiler plugin to a string-backed annotation value.
+## Example
 
-## Tuple Setpoint Mode
+```groovy
+plugins {
+    id 'java'
+    id 'ca.frc6390.athena'
+}
 
-```java
-@AthenaState(IntakeTuple.class)
-enum IntakeState {
-    Stowed(IntakeArmState.Stow, IntakeRollerState.Off),
-    Intaking(IntakeArmState.Out, IntakeRollerState.Intaking),
-    Reverse(IntakeArmState.Out, IntakeRollerState.Reversed)
+athena {
+    version = '2027.0.0'
+    features 'drivetrain', 'vision', 'auto', 'localization', 'wpilib', 'dashboard'
+    vendors 'ctre', 'photonvision', 'pathplanner', 'choreo'
 }
 ```
 
-In this mode, the plugin generates `SetpointProvider<IntakeTuple>` and `getSetpoint()`.
+Supported non-default feature names are:
 
-## VS Code IntelliSense
-
-The enum DSL transform is a javac plugin (`-Xplugin:AthenaStateDsl`), so VS Code
-must run the Java language server in javac mode with `jdk.compiler` exports.
-Current `vscode-java` javac-mode support also requires the language server to
-launch on JDK 24 or newer.
-
-When using Athena bootstrap (`athena-bootstrap.gradle`), run:
-
-```bash
-./gradlew athenaConfigureVscode
+```text
+drivetrain
+superstructure
+vision
+auto
+localization
+wpilib
+dashboard
+simulation
 ```
 
-This now maintains:
-- `java.jdt.ls.javac.enabled = "on"`
-- `java.completion.engine = "dom"`
-- `java.import.gradle.annotationProcessing.enabled = false`
-- `java.jdt.ls.vmargs` with Athena's required `jdk.compiler` exports
-- `java.jdt.ls.java.home` set to a detected JDK 24+ when one is available
-- `java.import.gradle.java.home` set to a detected Gradle-compatible JDK
+## Dependencies
 
-`athenaEnableDsl` also applies this automatically.
-
-Athena's DSL does not rely on IDE annotation processing. Keeping that setting on can
-trigger current VS Code Java builder crashes and surface false enum/generic errors.
-
-For local Athena plugin development, publish the plugin to `mavenLocal` and let the
-robot project resolve it normally. Avoid using `includeBuild` for `athena-plugin`
-inside robot-project `settings.gradle`; VS Code/Buildship can resolve that path to a
-partial transformed jar, which breaks the DSL plugin service lookup.
-
-Bootstrap keeps Java 21 / ECJ as the default VS Code path. If you want to
-experiment with the javac/DOM language-server path instead, run with
-`-PathenaVscodeMode=javac` (or `ATHENA_VSCODE_MODE=javac`) and point
-`java.jdt.ls.java.home` at a JDK 24+ install.
+- Production: `athena-api`.
+- Test-only: none.
