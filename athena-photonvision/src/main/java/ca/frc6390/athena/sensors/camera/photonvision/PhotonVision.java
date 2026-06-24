@@ -192,12 +192,15 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         lastCameraRollDegrees = Double.NaN;
 
         Optional<EstimatedRobotPose> visionEst = Optional.empty();
-        List<PhotonTrackedTarget> lastTargets = List.of();
+        List<PhotonTrackedTarget> estimatedTargets = List.of();
+        List<PhotonTrackedTarget> lastDetectionTargets = List.of();
         PhotonTrackedTarget lastBestTarget = null;
         for (PhotonPipelineResult change : results) {
-            visionEst = estimatePose(change);
-            lastTargets = change.getTargets();
+            if (change == null) {
+                continue;
+            }
             if (change.hasTargets()) {
+                lastDetectionTargets = change.getTargets();
                 var bestTarget = change.getBestTarget();
                 if (bestTarget != null) {
                     lastBestTarget = bestTarget;
@@ -211,11 +214,17 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
                     lastPoseAmbiguity = bestTarget.getPoseAmbiguity();
                 }
             }
+
+            Optional<EstimatedRobotPose> candidate = estimatePose(change);
+            if (candidate.isPresent()) {
+                visionEst = candidate;
+                estimatedTargets = change.getTargets();
+            }
         }
 
         if (visionEst.isPresent()) {
             EstimatedRobotPose estimate = visionEst.get();
-            DistanceObservation stats = calculateDistanceStats(estimate, lastTargets);
+            DistanceObservation stats = calculateDistanceStats(estimate, estimatedTargets);
             Rotation3d rotation = estimate.estimatedPose.getRotation();
             lastCameraRollDegrees = Math.toDegrees(rotation.getX());
             lastCameraPitchDegrees = Math.toDegrees(rotation.getY());
@@ -230,7 +239,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
             latestSnapshot = LocalizationSnapshot.empty();
         }
 
-        latestMeasurements = buildTargetMeasurements(lastBestTarget, lastTargets);
+        latestMeasurements = buildTargetMeasurements(lastBestTarget, lastDetectionTargets);
         clearResults();
     }
 
