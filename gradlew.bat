@@ -13,8 +13,11 @@
 @rem See the License for the specific language governing permissions and
 @rem limitations under the License.
 @rem
+@rem SPDX-License-Identifier: Apache-2.0
+@rem
 
 @if "%DEBUG%"=="" @echo off
+@setlocal EnableExtensions EnableDelayedExpansion
 @rem ##########################################################################
 @rem
 @rem  Gradle startup script for Windows
@@ -43,52 +46,52 @@ set JAVA_EXE=java.exe
 %JAVA_EXE% -version >NUL 2>&1
 if %ERRORLEVEL% equ 0 goto checkJavaCompatibility
 
-echo.
-echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
-echo.
-echo Please set the JAVA_HOME variable in your environment to match the
-echo location of your Java installation.
+echo. 1>&2
+echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
+echo. 1>&2
+echo Please set the JAVA_HOME variable in your environment to match the 1>&2
+echo location of your Java installation. 1>&2
 
 goto fail
 
 :findJavaFromJavaHome
 set "JAVA_HOME=%JAVA_HOME:"=%"
-set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+set "JAVA_EXE=%JAVA_HOME%\\bin\\java.exe"
 
 if exist "%JAVA_EXE%" goto checkJavaCompatibility
 
-echo.
-echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME%
-echo.
-echo Please set the JAVA_HOME variable in your environment to match the
-echo location of your Java installation.
+echo. 1>&2
+echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME% 1>&2
+echo. 1>&2
+echo Please set the JAVA_HOME variable in your environment to match the 1>&2
+echo location of your Java installation. 1>&2
 
 goto fail
 
 :checkJavaCompatibility
 call :detectJavaVersion
 if %JAVA_MAJOR% geq 25 goto tryJava21
-goto execute
+goto collectGradleArgs
 
 :tryJava21
 if not defined JAVA21_HOME goto tryJava17
 set "JAVA_HOME=%JAVA21_HOME:"=%"
-set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+set "JAVA_EXE=%JAVA_HOME%\\bin\\java.exe"
 if not exist "%JAVA_EXE%" goto tryJava17
 call :detectJavaVersion
 if %JAVA_MAJOR% geq 25 goto tryJava17
 echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
-goto execute
+goto collectGradleArgs
 
 :tryJava17
 if not defined JAVA17_HOME goto javaTooNew
 set "JAVA_HOME=%JAVA17_HOME:"=%"
-set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+set "JAVA_EXE=%JAVA_HOME%\\bin\\java.exe"
 if not exist "%JAVA_EXE%" goto javaTooNew
 call :detectJavaVersion
 if %JAVA_MAJOR% geq 25 goto javaTooNew
 echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
-goto execute
+goto collectGradleArgs
 
 :javaTooNew
 echo.
@@ -101,7 +104,7 @@ goto fail
 :detectJavaVersion
 set JAVA_VERSION=
 set JAVA_MAJOR=0
-set "JAVA_VERSION_FILE=%TEMP%\gradlew-java-version-%RANDOM%-%RANDOM%.txt"
+set "JAVA_VERSION_FILE=%TEMP%\\gradlew-java-version-%RANDOM%-%RANDOM%.txt"
 "%JAVA_EXE%" -version > "%JAVA_VERSION_FILE%" 2>&1
 for /f "tokens=3" %%v in ('findstr /i " version " "%JAVA_VERSION_FILE%"') do (
   set JAVA_VERSION=%%~v
@@ -116,6 +119,23 @@ for /f "delims=0123456789" %%m in ("%JAVA_MAJOR%") do set JAVA_MAJOR=0
 if "%JAVA_MAJOR%"=="" set JAVA_MAJOR=0
 exit /b 0
 
+:collectGradleArgs
+set "GRADLE_ARGS="
+:scanArgs
+if "%~1"=="" goto execute
+set "ARG=%~1"
+if /i "%ARG:~0,23%"=="-Dorg.gradle.java.home=" (
+    echo Gradle 8.5: ignoring unsupported org.gradle.java.home override: %ARG%
+) else (
+    if defined GRADLE_ARGS (
+        set "GRADLE_ARGS=%GRADLE_ARGS% \"%ARG%\""
+    ) else (
+        set "GRADLE_ARGS=\"%ARG%\""
+    )
+)
+shift
+goto scanArgs
+
 :execute
 @rem Setup the command line
 
@@ -123,7 +143,7 @@ set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
 
 
 @rem Execute Gradle
-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %GRADLE_ARGS%
 
 :end
 @rem End local scope for the variables with windows NT shell
