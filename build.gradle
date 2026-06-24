@@ -97,7 +97,12 @@ subprojects { subproj ->
     }
 
     tasks.withType(JavaCompile).configureEach {
-      options.release = 17
+      // The Gradle compiler-plugin module intentionally uses com.sun.tools.javac internals and
+      // adds javac --add-exports flags. javac rejects --add-exports together with --release, so
+      // keep that module on source/target 17 while using --release for normal Athena libraries.
+      if (subproj.name != 'athena-plugin') {
+        options.release = 17
+      }
     }
   }
 }
