@@ -86,6 +86,22 @@ allprojects { proj ->
   }
 }
 
+subprojects { subproj ->
+  plugins.withId('java') {
+    java {
+      toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+      }
+      sourceCompatibility = JavaVersion.VERSION_17
+      targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+      options.release = 17
+    }
+  }
+}
+
 // Apply C++ configuration
 apply from: 'config.gradle' 
 
@@ -173,7 +189,7 @@ model {
     //         }
     //     }
 
-    //     nativeUtils.useRequiredLibrary(it, "wpilib_executable_shared", "googletest_static")
+    //     nativeUtils.useRequiredLibrary(it, "wpilib_executable_shared")
     // }
   }
 }
