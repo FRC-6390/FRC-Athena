@@ -22,3 +22,11 @@ dependencies {
     implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.athenaVersions.jackson}"
     implementation "org.tomlj:tomlj:1.1.1"
 }
+
+dependencies {
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+}
+
+test {
+    useJUnitPlatform()
+}

@@ -257,7 +257,7 @@ def readAthenaVersionFromRepo = { File athenaRepo ->
     return version
 }
 
-def copyAthenaVendordeps = { File athenaRepo ->
+def copyAthenaVendordeps = { File athenaRepo, boolean includeAllByDefault = false ->
     def sourceDir = new File(athenaRepo, 'vendordeps')
     def targetDir = file("$rootDir/vendordeps")
     if (!sourceDir.isDirectory()) {
@@ -269,11 +269,12 @@ def copyAthenaVendordeps = { File athenaRepo ->
             return false
         }
         return vendordep.name.startsWith(athenaBootstrapConfig.athenaVendorPrefix)
+                || vendordep.name == 'Studica-2026.0.0.json'
     }?.sort { it.name } ?: []
     def athenaByName = allAthenaVendordeps.collectEntries { [(it.name): it] }
 
-    def explicitRaw = project.findProperty(athenaBootstrapConfig.vendordepsProperty)?.toString()?.trim()
     def includeAll = false
+    def explicitRaw = project.findProperty(athenaBootstrapConfig.vendordepsProperty)?.toString()?.trim()
     def selectedNames = new LinkedHashSet<String>()
     if (explicitRaw) {
         explicitRaw.split(',').collect { it.trim() }.findAll { !it.isEmpty() }.each { token ->
@@ -290,15 +291,19 @@ def copyAthenaVendordeps = { File athenaRepo ->
             selectedNames.add(canonical)
         }
     } else {
-        targetDir.mkdirs()
-        def existingAthenaNames = targetDir.listFiles()?.findAll { candidate ->
-            candidate.isFile() && candidate.name.startsWith(athenaBootstrapConfig.athenaVendorPrefix)
-        }?.collect { it.name }?.sort() ?: []
-
-        if (!existingAthenaNames.isEmpty()) {
-            selectedNames.addAll(existingAthenaNames)
+        includeAll = includeAllByDefault
+        if (includeAll) {
+            selectedNames.addAll(allAthenaVendordeps.collect { it.name })
         } else {
-            selectedNames.add(athenaBootstrapConfig.athenaCoreVendordep)
+            targetDir.mkdirs()
+            def existingAthenaNames = targetDir.listFiles()?.findAll { candidate ->
+                candidate.isFile() && candidate.name.startsWith(athenaBootstrapConfig.athenaVendorPrefix)
+            }?.collect { it.name }?.sort() ?: []
+            if (!existingAthenaNames.isEmpty()) {
+                selectedNames.addAll(existingAthenaNames)
+            } else {
+                selectedNames.add(athenaBootstrapConfig.athenaCoreVendordep)
+            }
         }
     }
 
@@ -329,12 +334,6 @@ def copyAthenaVendordeps = { File athenaRepo ->
         into targetDir
     }
 
-    if (vendordepFiles.any { it.name == 'FRC6390-Athena-Studica.json' }) {
-        def legacyStudica = new File(targetDir, 'Studica-2026.0.0.json')
-        if (legacyStudica.isFile()) {
-            legacyStudica.delete()
-        }
-    }
     return vendordepFiles.collect { it.name }
 }
 
@@ -391,9 +390,9 @@ def ensureAthenaPluginPublished = { File athenaRepo, String pluginVersion ->
     )
 }
 
-def syncFromAthenaRepo = { File athenaRepo ->
+def syncFromAthenaRepo = { File athenaRepo, boolean includeAllVendordeps = false ->
     def version = readAthenaVersionFromRepo(athenaRepo)
-    def vendordepNames = copyAthenaVendordeps(athenaRepo)
+    def vendordepNames = copyAthenaVendordeps(athenaRepo, includeAllVendordeps)
     logger.lifecycle("Athena repo: ${athenaRepo}")
     logger.lifecycle("Athena version: ${version}")
     logger.lifecycle("Copied ${vendordepNames.size()} vendordep file(s): ${vendordepNames.join(', ')}")
@@ -1350,7 +1349,7 @@ tasks.register('athenaSync') {
     description = 'Copies Athena vendordep JSON files from local FRC-Athena into this robot project.'
     doLast {
         def repo = resolveAthenaRepoDir(true)
-        syncFromAthenaRepo(repo)
+        syncFromAthenaRepo(repo, true)
         def bootstrapResult = syncAthenaBootstrapScript(repo)
         if (bootstrapResult.supported) {
             logger.lifecycle(
