@@ -2,6 +2,8 @@ plugins {
     id 'java'
 }
 
+import org.gradle.internal.os.OperatingSystem
+
 dependencies {
     // Core stays vendor-free; shared interfaces and bridges live here.
     implementation project(':athena-arcp-java')
@@ -21,12 +23,69 @@ dependencies {
     implementation "com.fasterxml.jackson.core:jackson-core:${rootProject.ext.athenaVersions.jackson}"
     implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.athenaVersions.jackson}"
     implementation "org.tomlj:tomlj:1.1.1"
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+}
+
+configurations {
+    wpilibTestNatives
+}
+
+def hostOs = OperatingSystem.current()
+def normalizedHostArch = ((System.getProperty('os.arch') ?: '').toLowerCase(Locale.ROOT) in ['x86_64', 'amd64'])
+        ? 'x86-64'
+        : (((System.getProperty('os.arch') ?: '').toLowerCase(Locale.ROOT) in ['aarch64', 'arm64']) ? 'arm64' : null)
+
+if (normalizedHostArch == null && !hostOs.isMacOsX()) {
+    throw new GradleException("Unsupported host architecture for WPILib test natives: ${System.getProperty('os.arch')}")
+}
+
+def wpilibNativeClassifier
+def wpilibNativeSharedPath
+def wpilibNativeEnvVar
+if (hostOs.isWindows()) {
+    wpilibNativeClassifier = "windows${normalizedHostArch}"
+    wpilibNativeSharedPath = "windows/${normalizedHostArch}/shared"
+    wpilibNativeEnvVar = 'PATH'
+} else if (hostOs.isLinux()) {
+    wpilibNativeClassifier = "linux${normalizedHostArch}"
+    wpilibNativeSharedPath = "linux/${normalizedHostArch}/shared"
+    wpilibNativeEnvVar = 'LD_LIBRARY_PATH'
+} else if (hostOs.isMacOsX()) {
+    wpilibNativeClassifier = 'osxuniversal'
+    wpilibNativeSharedPath = 'osx/universal/shared'
+    wpilibNativeEnvVar = 'DYLD_LIBRARY_PATH'
+} else {
+    throw new GradleException("Unsupported host OS for WPILib test natives: ${System.getProperty('os.name')}")
 }
 
 dependencies {
-    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    wpilibTestNatives "edu.wpi.first.hal:hal-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.wpinet:wpinet-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.ntcore:ntcore-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.cscore:cscore-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+    wpilibTestNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.ext.wpilibVersion}:${wpilibNativeClassifier}@zip"
+}
+
+def extractedWpilibNativesDir = layout.buildDirectory.dir('wpilib-test-natives')
+
+tasks.register('extractWpilibTestNatives', Copy) {
+    from {
+        configurations.wpilibTestNatives.collect { zipTree(it) }
+    }
+    include "${wpilibNativeSharedPath}/*"
+    into extractedWpilibNativesDir
 }
 
 test {
     useJUnitPlatform()
+    maxParallelForks = 1
+    maxHeapSize = '1g'
+    jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED'
+    jvmArgs '-Xms512m', '-Xmx1g'
+    dependsOn tasks.named('extractWpilibTestNatives')
+    def nativePath = extractedWpilibNativesDir.get().file(wpilibNativeSharedPath).asFile.absolutePath
+    systemProperty 'java.library.path', nativePath
+    def existingNativePath = System.getenv(wpilibNativeEnvVar)
+    environment wpilibNativeEnvVar, existingNativePath ? "${nativePath}${File.pathSeparator}${existingNativePath}" : nativePath
 }
