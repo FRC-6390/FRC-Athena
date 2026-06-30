@@ -195,10 +195,18 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         List<PhotonTrackedTarget> lastTargets = List.of();
         PhotonTrackedTarget lastBestTarget = null;
         for (PhotonPipelineResult change : results) {
-            visionEst = estimatePose(change);
-            lastTargets = change.getTargets();
-            if (change.hasTargets()) {
-                var bestTarget = change.getBestTarget();
+            PhotonPipelineResult filtered = filterResult(change);
+            if (filtered == null) {
+                continue;
+            }
+            Optional<EstimatedRobotPose> estimate = estimatePose(filtered);
+            List<PhotonTrackedTarget> targets = filtered.getTargets();
+            if (estimate.isPresent()) {
+                visionEst = estimate;
+                lastTargets = targets;
+            }
+            if (filtered.hasTargets()) {
+                var bestTarget = filtered.getBestTarget();
                 if (bestTarget != null) {
                     lastBestTarget = bestTarget;
                     lastTargetId = bestTarget.getFiducialId();
@@ -216,14 +224,14 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
         if (visionEst.isPresent()) {
             EstimatedRobotPose estimate = visionEst.get();
             DistanceObservation stats = calculateDistanceStats(estimate, lastTargets);
-            Rotation3d rotation = estimate.estimatedPose.getRotation();
-            lastCameraRollDegrees = Math.toDegrees(rotation.getX());
-            lastCameraPitchDegrees = Math.toDegrees(rotation.getY());
+            Rotation3d cameraRotation = config.cameraRobotSpace().getRotation();
+            lastCameraRollDegrees = Math.toDegrees(cameraRotation.getX());
+            lastCameraPitchDegrees = Math.toDegrees(cameraRotation.getY());
             latestSnapshot =
                     new LocalizationSnapshot(
                             estimate.estimatedPose.toPose2d(),
                             estimate.estimatedPose,
-                            estimate.timestampSeconds,
+                            latencySecondsFromTimestamp(estimate.timestampSeconds),
                             stats.tagCount(),
                             stats.totalDistanceMeters());
         } else {
@@ -232,6 +240,19 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
 
         latestMeasurements = buildTargetMeasurements(lastBestTarget, lastTargets);
         clearResults();
+    }
+
+    private PhotonPipelineResult filterResult(PhotonPipelineResult result) {
+        if (result == null || config.filteredTags().isEmpty()) {
+            return result;
+        }
+        List<PhotonTrackedTarget> filteredTargets = result.getTargets().stream()
+                .filter(target -> target != null && config.filteredTags().contains(target.getFiducialId()))
+                .toList();
+        if (filteredTargets.size() == result.getTargets().size()) {
+            return result;
+        }
+        return new PhotonPipelineResult(result.metadata, filteredTargets, Optional.empty());
     }
 
     private List<VisionCamera.TargetMeasurement> buildTargetMeasurements(
@@ -325,6 +346,17 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
 
     private double supplyLocalizationLatency() {
         return latestSnapshot.latencySeconds();
+    }
+
+    private double latencySecondsFromTimestamp(double timestampSeconds) {
+        if (!Double.isFinite(timestampSeconds)) {
+            return Double.NaN;
+        }
+        double latencySeconds = Timer.getFPGATimestamp() - timestampSeconds;
+        if (!Double.isFinite(latencySeconds)) {
+            return Double.NaN;
+        }
+        return Math.max(0.0, latencySeconds);
     }
 
     private int supplyVisibleTargets() {

@@ -71,7 +71,7 @@ goto fail
 :checkJavaCompatibility
 call :detectJavaVersion
 if %JAVA_MAJOR% geq 25 goto tryJava21
-goto collectGradleArgs
+goto execute
 
 :tryJava21
 if not defined JAVA21_HOME goto tryJava17
@@ -81,7 +81,7 @@ if not exist "%JAVA_EXE%" goto tryJava17
 call :detectJavaVersion
 if %JAVA_MAJOR% geq 25 goto tryJava17
 echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
-goto collectGradleArgs
+goto execute
 
 :tryJava17
 if not defined JAVA17_HOME goto javaTooNew
@@ -91,7 +91,7 @@ if not exist "%JAVA_EXE%" goto javaTooNew
 call :detectJavaVersion
 if %JAVA_MAJOR% geq 25 goto javaTooNew
 echo Gradle 8.5 detected Java %JAVA_VERSION%; using compatible JAVA_HOME=%JAVA_HOME%.
-goto collectGradleArgs
+goto execute
 
 :javaTooNew
 echo.
@@ -119,23 +119,6 @@ for /f "delims=0123456789" %%m in ("%JAVA_MAJOR%") do set JAVA_MAJOR=0
 if "%JAVA_MAJOR%"=="" set JAVA_MAJOR=0
 exit /b 0
 
-:collectGradleArgs
-set "GRADLE_ARGS="
-:scanArgs
-if "%~1"=="" goto execute
-set "ARG=%~1"
-if /i "%ARG:~0,23%"=="-Dorg.gradle.java.home=" (
-    echo Gradle 8.5: ignoring unsupported org.gradle.java.home override: %ARG%
-) else (
-    if defined GRADLE_ARGS (
-        set "GRADLE_ARGS=%GRADLE_ARGS% \"%ARG%\""
-    ) else (
-        set "GRADLE_ARGS=\"%ARG%\""
-    )
-)
-shift
-goto scanArgs
-
 :execute
 @rem Setup the command line
 
@@ -143,7 +126,7 @@ set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
 
 
 @rem Execute Gradle
-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %GRADLE_ARGS%
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
 
 :end
 @rem End local scope for the variables with windows NT shell

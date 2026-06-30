@@ -176,7 +176,7 @@ public record PhotonVisionConfig(
     }
     
     public PhotonVision create(){
-        return new PhotonVision(table, cameraRobotSpace);
+        return new PhotonVision(this);
     }
 
     private static EnumSet<CameraRole> copyRoles(EnumSet<CameraRole> roles) {
