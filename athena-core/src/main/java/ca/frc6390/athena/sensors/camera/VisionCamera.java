@@ -476,11 +476,10 @@ public class VisionCamera {
         if (numTags > 1) {
             return multiStdDevs;
         }
-        if (distance > trustDistance) {
-            return VecBuilder.fill(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE);
-        }
-
         double scale = 1 + (distance * distance / 30.0);
+        if (distance > trustDistance && trustDistance > 0.0) {
+            scale *= Math.max(1.0, distance / trustDistance);
+        }
         return singleStdDevs.times(scale);
     }
 

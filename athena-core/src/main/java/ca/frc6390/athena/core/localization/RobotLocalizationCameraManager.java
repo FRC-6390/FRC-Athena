@@ -143,7 +143,7 @@ final class RobotVisionCameraManager {
         NetworkTableEntry multiStdThetaDegEntry = initIfAbsent(cfg.entry("MultiStdDevTheta_Deg"), multiStdThetaDeg);
 
         FieldObject2d cameraPoseObject = visionField.getObject("CameraPose/" + key);
-        FieldObject2d estimatedPoseObject = field.getObject("CameraEstimate/" + key);
+        FieldObject2d estimatedPoseObject = visionField.getObject("CameraEstimate/" + key);
         FieldObject2d tagLineObject = visionField.getObject("CameraTagLine/" + key);
         cameraPoseObject.setPoses(EMPTY_POSES);
         estimatedPoseObject.setPoses(EMPTY_POSES);

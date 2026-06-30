@@ -55,15 +55,15 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
     private static final class LocalizationSnapshot {
         private final Pose2d pose;
         private final Pose3d pose3d;
-        private final double latencySeconds;
+        private final double timestampSeconds;
         private final int visibleTargets;
         private final double totalDistanceMeters;
 
         private LocalizationSnapshot(
-                Pose2d pose, Pose3d pose3d, double latencySeconds, int visibleTargets, double totalDistanceMeters) {
+                Pose2d pose, Pose3d pose3d, double timestampSeconds, int visibleTargets, double totalDistanceMeters) {
             this.pose = pose;
             this.pose3d = pose3d;
-            this.latencySeconds = latencySeconds;
+            this.timestampSeconds = timestampSeconds;
             this.visibleTargets = visibleTargets;
             this.totalDistanceMeters = totalDistanceMeters;
         }
@@ -80,8 +80,8 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
             return pose3d;
         }
 
-        double latencySeconds() {
-            return latencySeconds;
+        double timestampSeconds() {
+            return timestampSeconds;
         }
 
         int visibleTargets() {
@@ -231,11 +231,9 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
                     new LocalizationSnapshot(
                             estimate.estimatedPose.toPose2d(),
                             estimate.estimatedPose,
-                            latencySecondsFromTimestamp(estimate.timestampSeconds),
+                            estimate.timestampSeconds,
                             stats.tagCount(),
                             stats.totalDistanceMeters());
-        } else {
-            latestSnapshot = LocalizationSnapshot.empty();
         }
 
         latestMeasurements = buildTargetMeasurements(lastBestTarget, lastTargets);
@@ -345,18 +343,7 @@ public class PhotonVision extends PhotonCamera implements PhotonVisionCamera, Lo
     }
 
     private double supplyLocalizationLatency() {
-        return latestSnapshot.latencySeconds();
-    }
-
-    private double latencySecondsFromTimestamp(double timestampSeconds) {
-        if (!Double.isFinite(timestampSeconds)) {
-            return Double.NaN;
-        }
-        double latencySeconds = Timer.getFPGATimestamp() - timestampSeconds;
-        if (!Double.isFinite(latencySeconds)) {
-            return Double.NaN;
-        }
-        return Math.max(0.0, latencySeconds);
+        return latestSnapshot.timestampSeconds();
     }
 
     private int supplyVisibleTargets() {

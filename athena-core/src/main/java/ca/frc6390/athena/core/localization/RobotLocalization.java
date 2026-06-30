@@ -3182,7 +3182,8 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
         Pose2d measurementPose = measurement.pose2d();
         Pose2d referencePose = state.pose2d != null ? state.pose2d : ZERO_POSE_2D;
-        if (!passesPoseJumpGuard(state, referencePose, measurementPose, false, backend, nowSeconds)) {
+        if (state.hasAcceptedVisionMeasurement
+                && !passesPoseJumpGuard(state, referencePose, measurementPose, false, backend, nowSeconds)) {
             recordVisionSample(config, false);
             return false;
         }
@@ -3366,7 +3367,7 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 sumY / sumWeight,
                 new Rotation2d(Math.atan2(sumSin / sumWeight, sumCos / sumWeight)));
         Pose2d basePose = referencePose != null ? referencePose : new Pose2d();
-        if (!passesPoseJumpGuard(
+        if (state.hasAcceptedVisionMeasurement && !passesPoseJumpGuard(
                 state,
                 basePose,
                 fusedPose,
