@@ -10,6 +10,8 @@ import ca.frc6390.athena.hardware.encoder.EncoderConfig;
 import ca.frc6390.athena.hardware.encoder.EncoderSpec;
 import ca.frc6390.athena.hardware.input.InputConfig;
 import ca.frc6390.athena.hardware.input.InputSpec;
+import ca.frc6390.athena.hardware.ref.EncoderRef;
+import ca.frc6390.athena.hardware.ref.MotorRef;
 import ca.frc6390.athena.hardware.spec.MotorSpec;
 import ca.frc6390.athena.mechanism.spec.ControlSpec;
 import ca.frc6390.athena.mechanism.spec.MechanismStateSpec;
@@ -49,6 +51,29 @@ public final class MechanismConfig {
     }
 
     /**
+     * Adds a referenced motor using its stable default name.
+     *
+     * @param motor motor reference
+     * @return this config
+     */
+    public MechanismConfig motor(MotorRef motor) {
+        Objects.requireNonNull(motor, "motor");
+        return motor(motor.defaultName(), motor);
+    }
+
+    /**
+     * Adds a referenced motor.
+     *
+     * @param name motor name
+     * @param motor motor reference
+     * @return this config
+     */
+    public MechanismConfig motor(String name, MotorRef motor) {
+        Objects.requireNonNull(motor, "motor");
+        return motor(name, config -> config.hardware(motor));
+    }
+
+    /**
      * Adds an input to this mechanism.
      *
      * @param name input name
@@ -81,6 +106,29 @@ public final class MechanismConfig {
     }
 
     /**
+     * Adds a referenced encoder using its stable default name.
+     *
+     * @param encoder encoder reference
+     * @return this config
+     */
+    public MechanismConfig encoder(EncoderRef encoder) {
+        Objects.requireNonNull(encoder, "encoder");
+        return encoder(encoder.defaultName(), encoder);
+    }
+
+    /**
+     * Adds a referenced encoder.
+     *
+     * @param name encoder name
+     * @param encoder encoder reference
+     * @return this config
+     */
+    public MechanismConfig encoder(String name, EncoderRef encoder) {
+        Objects.requireNonNull(encoder, "encoder");
+        return encoder(name, config -> config.hardware(encoder));
+    }
+
+    /**
      * Selects a named encoder as the position source.
      *
      * @param encoderName encoder name
@@ -92,6 +140,18 @@ public final class MechanismConfig {
     }
 
     /**
+     * Selects a referenced encoder as the position source.
+     *
+     * @param encoder encoder reference
+     * @return this config
+     */
+    public MechanismConfig positionSource(EncoderRef encoder) {
+        Objects.requireNonNull(encoder, "encoder");
+        positionSource = encoder.defaultName();
+        return this;
+    }
+
+    /**
      * Selects a named encoder as the velocity source.
      *
      * @param encoderName encoder name
@@ -99,6 +159,18 @@ public final class MechanismConfig {
      */
     public MechanismConfig velocitySource(String encoderName) {
         velocitySource = encoderName;
+        return this;
+    }
+
+    /**
+     * Selects a referenced encoder as the velocity source.
+     *
+     * @param encoder encoder reference
+     * @return this config
+     */
+    public MechanismConfig velocitySource(EncoderRef encoder) {
+        Objects.requireNonNull(encoder, "encoder");
+        velocitySource = encoder.defaultName();
         return this;
     }
 

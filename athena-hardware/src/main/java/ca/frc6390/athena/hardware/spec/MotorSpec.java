@@ -12,6 +12,7 @@ import ca.frc6390.athena.api.hardware.MotorKind;
  * @param kind Athena motor kind
  * @param id device id
  * @param canbus CAN bus name
+ * @param inverted true when motor output should be inverted
  * @param neutralMode desired neutral mode
  * @param currentLimitAmps current limit in amps
  * @param integratedEncoder true when the integrated encoder is requested
@@ -23,6 +24,7 @@ public record MotorSpec(
         MotorKind kind,
         int id,
         String canbus,
+        boolean inverted,
         NeutralMode neutralMode,
         int currentLimitAmps,
         boolean integratedEncoder,
@@ -56,6 +58,41 @@ public record MotorSpec(
             String canbus,
             NeutralMode neutralMode,
             int currentLimitAmps,
+            boolean integratedEncoder,
+            VendorOptions vendorOptions) {
+        this(
+                ownerPath,
+                name,
+                kind,
+                id,
+                canbus,
+                false,
+                neutralMode,
+                currentLimitAmps,
+                integratedEncoder,
+                vendorOptions);
+    }
+
+    /**
+     * Creates a spec without vendor options.
+     *
+     * @param ownerPath owning mechanism or subsystem path
+     * @param name motor name inside the owner
+     * @param kind Athena motor kind
+     * @param id device id
+     * @param canbus CAN bus name
+     * @param neutralMode desired neutral mode
+     * @param currentLimitAmps current limit in amps
+     * @param integratedEncoder true when the integrated encoder is requested
+     */
+    public MotorSpec(
+            String ownerPath,
+            String name,
+            MotorKind kind,
+            int id,
+            String canbus,
+            NeutralMode neutralMode,
+            int currentLimitAmps,
             boolean integratedEncoder) {
         this(
                 ownerPath,
@@ -63,6 +100,7 @@ public record MotorSpec(
                 kind,
                 id,
                 canbus,
+                false,
                 neutralMode,
                 currentLimitAmps,
                 integratedEncoder,

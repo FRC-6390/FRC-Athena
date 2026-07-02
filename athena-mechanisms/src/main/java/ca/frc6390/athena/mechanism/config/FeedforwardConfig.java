@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.config;
 
 import ca.frc6390.athena.mechanism.spec.FeedforwardSpec;
+import ca.frc6390.athena.mechanism.ref.FeedforwardRef;
 
 /**
  * Student-facing feedforward gain builder.
@@ -40,6 +41,19 @@ public final class FeedforwardConfig {
      */
     public FeedforwardConfig gravity(double gain) {
         gravityGain = gain;
+        return this;
+    }
+
+    /**
+     * Applies a reusable feedforward reference.
+     *
+     * @param feedforward feedforward reference
+     * @return this config
+     */
+    public FeedforwardConfig apply(FeedforwardRef feedforward) {
+        staticGain = feedforward.staticGain();
+        velocityGain = feedforward.velocityGain();
+        gravityGain = feedforward.gravityGain();
         return this;
     }
 

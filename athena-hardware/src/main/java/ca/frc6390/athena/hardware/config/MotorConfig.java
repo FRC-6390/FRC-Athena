@@ -5,6 +5,7 @@ import java.util.function.Consumer;
 
 import ca.frc6390.athena.api.hardware.MotorId;
 import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.hardware.ref.MotorRef;
 import ca.frc6390.athena.hardware.spec.MotorSpec;
 import ca.frc6390.athena.hardware.spec.NeutralMode;
 import ca.frc6390.athena.hardware.spec.VendorOptions;
@@ -19,6 +20,7 @@ public final class MotorConfig {
     private MotorKind kind;
     private int id;
     private String canbus = "rio";
+    private boolean inverted;
     private NeutralMode neutralMode = NeutralMode.COAST;
     private int currentLimitAmps = 40;
     private boolean integratedEncoder;
@@ -61,6 +63,25 @@ public final class MotorConfig {
     }
 
     /**
+     * Sets hardware and common configuration from a reusable motor reference.
+     *
+     * @param motor motor reference
+     * @return this config
+     */
+    public MotorConfig hardware(MotorRef motor) {
+        Objects.requireNonNull(motor, "motor");
+        kind = motor.kind();
+        id = motor.id();
+        canbus = motor.canbus();
+        inverted = motor.isInverted();
+        neutralMode = motor.neutralMode();
+        currentLimitAmps = motor.currentLimitAmps();
+        integratedEncoder = motor.hasIntegratedEncoder();
+        vendorOptions = motor.vendorOptions();
+        return this;
+    }
+
+    /**
      * Sets the CAN bus.
      *
      * @param canbus CAN bus name
@@ -69,6 +90,26 @@ public final class MotorConfig {
     public MotorConfig canbus(String canbus) {
         this.canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
         return this;
+    }
+
+    /**
+     * Sets motor inversion.
+     *
+     * @param inverted true to invert output
+     * @return this config
+     */
+    public MotorConfig inverted(boolean inverted) {
+        this.inverted = inverted;
+        return this;
+    }
+
+    /**
+     * Inverts motor output.
+     *
+     * @return this config
+     */
+    public MotorConfig inverted() {
+        return inverted(true);
     }
 
     /**
@@ -155,6 +196,7 @@ public final class MotorConfig {
                 kind,
                 id,
                 canbus,
+                inverted,
                 neutralMode,
                 currentLimitAmps,
                 integratedEncoder,

@@ -2,8 +2,10 @@ package ca.frc6390.athena.mechanism.config;
 
 import java.util.function.Consumer;
 
-import ca.frc6390.athena.mechanism.spec.ControlSpec;
+import ca.frc6390.athena.mechanism.ref.FeedforwardRef;
+import ca.frc6390.athena.mechanism.ref.PidRef;
 import ca.frc6390.athena.mechanism.spec.ControlMode;
+import ca.frc6390.athena.mechanism.spec.ControlSpec;
 
 /**
  * Student-facing control declaration for a mechanism.
@@ -46,6 +48,18 @@ public final class ControlConfig {
     }
 
     /**
+     * Requests position closed-loop control with reusable PID gains.
+     *
+     * @param pid PID reference
+     * @return this config
+     */
+    public ControlConfig position(PidRef pid) {
+        position();
+        pid(pid);
+        return this;
+    }
+
+    /**
      * Requests velocity closed-loop control.
      *
      * @return this config
@@ -68,6 +82,18 @@ public final class ControlConfig {
     }
 
     /**
+     * Requests velocity closed-loop control with reusable PID gains.
+     *
+     * @param pid PID reference
+     * @return this config
+     */
+    public ControlConfig velocity(PidRef pid) {
+        velocity();
+        pid(pid);
+        return this;
+    }
+
+    /**
      * Configures PID gains for the selected control mode.
      *
      * @param configure PID configuration callback
@@ -82,6 +108,17 @@ public final class ControlConfig {
     }
 
     /**
+     * Configures PID gains from a reusable reference.
+     *
+     * @param pid PID reference
+     * @return this config
+     */
+    public ControlConfig pid(PidRef pid) {
+        this.pid = new PidConfig().apply(pid);
+        return this;
+    }
+
+    /**
      * Configures feedforward gains.
      *
      * @param configure feedforward configuration callback
@@ -92,6 +129,17 @@ public final class ControlConfig {
         if (configure != null) {
             configure.accept(feedforward);
         }
+        return this;
+    }
+
+    /**
+     * Configures feedforward gains from a reusable reference.
+     *
+     * @param feedforward feedforward reference
+     * @return this config
+     */
+    public ControlConfig feedforward(FeedforwardRef feedforward) {
+        this.feedforward = new FeedforwardConfig().apply(feedforward);
         return this;
     }
 

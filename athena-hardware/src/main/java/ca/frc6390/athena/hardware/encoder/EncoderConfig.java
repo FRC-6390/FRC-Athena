@@ -4,6 +4,7 @@ import java.util.Objects;
 
 import ca.frc6390.athena.api.hardware.EncoderId;
 import ca.frc6390.athena.api.hardware.EncoderKind;
+import ca.frc6390.athena.hardware.ref.EncoderRef;
 
 /**
  * Student-facing encoder declaration.
@@ -13,7 +14,9 @@ public final class EncoderConfig {
     private int id;
     private String canbus = "rio";
     private EncoderSignalType signalType = EncoderSignalType.RELATIVE_POSITION;
+    private boolean inverted;
     private double gearRatio = 1.0;
+    private double conversion = 1.0;
     private double offset;
 
     private EncoderConfig() {
@@ -50,6 +53,25 @@ public final class EncoderConfig {
     public EncoderConfig hardware(EncoderId encoderId) {
         Objects.requireNonNull(encoderId, "encoderId");
         return hardware(encoderId.kind(), encoderId.id()).canbus(encoderId.canbus());
+    }
+
+    /**
+     * Sets hardware and common configuration from a reusable encoder reference.
+     *
+     * @param encoder encoder reference
+     * @return this config
+     */
+    public EncoderConfig hardware(EncoderRef encoder) {
+        Objects.requireNonNull(encoder, "encoder");
+        kind = encoder.kind();
+        id = encoder.id();
+        canbus = encoder.canbus();
+        signalType = encoder.signalType();
+        inverted = encoder.isInverted();
+        gearRatio = encoder.gearRatio();
+        conversion = encoder.conversion();
+        offset = encoder.offset();
+        return this;
     }
 
     /**
@@ -94,6 +116,26 @@ public final class EncoderConfig {
     }
 
     /**
+     * Sets encoder inversion.
+     *
+     * @param inverted true to invert the sensor direction
+     * @return this config
+     */
+    public EncoderConfig inverted(boolean inverted) {
+        this.inverted = inverted;
+        return this;
+    }
+
+    /**
+     * Inverts the encoder direction.
+     *
+     * @return this config
+     */
+    public EncoderConfig inverted() {
+        return inverted(true);
+    }
+
+    /**
      * Sets gear ratio.
      *
      * @param gearRatio mechanism-to-sensor gear ratio
@@ -101,6 +143,17 @@ public final class EncoderConfig {
      */
     public EncoderConfig gearRatio(double gearRatio) {
         this.gearRatio = gearRatio;
+        return this;
+    }
+
+    /**
+     * Sets mechanism-unit conversion applied after gear ratio.
+     *
+     * @param conversion conversion factor
+     * @return this config
+     */
+    public EncoderConfig conversion(double conversion) {
+        this.conversion = conversion;
         return this;
     }
 
@@ -126,6 +179,6 @@ public final class EncoderConfig {
         if (kind == null) {
             throw new IllegalStateException("Encoder hardware kind is required for " + ownerPath + "." + name);
         }
-        return new EncoderSpec(ownerPath, name, kind, id, canbus, signalType, gearRatio, offset);
+        return new EncoderSpec(ownerPath, name, kind, id, canbus, signalType, inverted, gearRatio, conversion, offset);
     }
 }

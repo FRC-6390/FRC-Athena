@@ -140,6 +140,9 @@ public record MechanismSpec(
         if (!Double.isFinite(encoder.gearRatio()) || encoder.gearRatio() <= 0.0) {
             report.error("encoder.invalid-gear-ratio", encoder.path(), "Encoder gear ratio must be positive.");
         }
+        if (!Double.isFinite(encoder.conversion()) || encoder.conversion() <= 0.0) {
+            report.error("encoder.invalid-conversion", encoder.path(), "Encoder conversion must be positive.");
+        }
         if (!Double.isFinite(encoder.offset())) {
             report.error("encoder.invalid-offset", encoder.path(), "Encoder offset must be finite.");
         }
