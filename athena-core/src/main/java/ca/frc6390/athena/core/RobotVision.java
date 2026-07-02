@@ -362,7 +362,7 @@ public class RobotVision implements RobotSendableSystem {
          CoordinateSpace space, Pose2d robotPose, Function<Integer, Pose2d> tagPoseLookup) {
       VisionCamera.TargetObservation best = null;
       for (VisionCamera camera : cameraIterable) {
-         Optional<VisionCamera.TargetObservation> baseObservation = camera.getLatestObservation(CoordinateSpace.CAMERA, robotPose, null);
+         Optional<VisionCamera.TargetObservation> baseObservation = camera.getLatestObservation(space, robotPose, null);
          if (baseObservation.isEmpty()) continue;
 
          VisionCamera.TargetObservation base = baseObservation.get();

@@ -2449,9 +2449,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
             health.putDouble("slipScore", slipScore);
         }
 
-        if (vision != null && !visionFieldPublished) {
+        boolean visionWidgetsEnabled = nt != null && nt.enabled(RobotNetworkTables.Flag.VISION_CAMERA_WIDGETS);
+        if (visionWidgetsEnabled && vision != null && !visionFieldPublished) {
             SmartDashboard.putData("Athena Vision Field2d", cameraManager.getVisionField());
             visionFieldPublished = true;
+        } else if (!visionWidgetsEnabled) {
+            visionFieldPublished = false;
         }
 
         return node;
@@ -2760,11 +2763,12 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
         }
 
         boolean updatedEstimator = false;
-        if (config.continuousInputs().contains(PoseInput.ODOMETRY)
-                || config.continuousInputs().contains(PoseInput.IMU_YAW)) {
+        boolean hasEstimatorInputs = hasContinuousEstimatorInputs(config);
+        if (hasEstimatorInputs) {
             updatedEstimator = updateEstimator(state, backend, now);
         } else if (appliedVision) {
-            updatedEstimator = refreshPoseFromEstimator(state, now);
+            onPoseUpdated(state, now);
+            updatedEstimator = true;
         }
 
         if (updatedEstimator || appliedVision) {
@@ -3225,9 +3229,21 @@ public class RobotLocalization<T> extends SubsystemBase implements RobotSendable
                 estimator.addVisionMeasurement(measurementPose, timestampSeconds);
             }
         }
+        if (!hasContinuousEstimatorInputs(config)) {
+            state.pose2d = measurementPose;
+            state.pose3d = measurement.pose3d() != null
+                    ? measurement.pose3d()
+                    : new Pose3d(measurementPose);
+        }
         accepted = true;
         recordVisionSample(config, true);
         return true;
+    }
+
+    private static boolean hasContinuousEstimatorInputs(PoseConfig config) {
+        return config != null
+                && (config.continuousInputs().contains(PoseInput.ODOMETRY)
+                        || config.continuousInputs().contains(PoseInput.IMU_YAW));
     }
 
     private boolean passesPoseJumpGuard(

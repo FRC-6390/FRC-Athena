@@ -30,6 +30,7 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.DifferentialDriveKinematics;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelPositions;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.util.Units;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.math.numbers.N4;
@@ -214,6 +215,22 @@ final class RobotLocalizationVisionFusionTest {
                 "vision estimate should move the robot pose off the origin");
         assertTrue(fusedPose.getX() < 4.2);
         assertTrue(fusedPose.getY() > 0.0 && fusedPose.getY() < 1.0);
+    }
+
+    @Test
+    void oversizedVisionRotationStdDevKeepsTranslationMeasurement() {
+        double rotationLimit = Units.degreesToRadians(120.0);
+
+        Matrix<N3, N1> sanitized = RobotLocalizationVisionUtil.sanitizeVisionStdDevs(
+                VecBuilder.fill(0.3, 0.3, Units.degreesToRadians(9999.0)),
+                5.0,
+                rotationLimit,
+                1e-5);
+
+        assertTrue(sanitized != null, "large heading uncertainty should not drop valid translation data");
+        assertEquals(0.3, sanitized.get(0, 0), 1e-9);
+        assertEquals(0.3, sanitized.get(1, 0), 1e-9);
+        assertTrue(sanitized.get(2, 0) < rotationLimit);
     }
 
     private static RobotVision createRobotVision(

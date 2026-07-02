@@ -37,7 +37,7 @@ final class RobotLocalizationVisionUtil {
             return Double.NaN;
         }
         if (maxValue > 0.0 && sanitized >= maxValue) {
-            return Double.NaN;
+            return Math.max(stdEpsilon, Math.nextDown(maxValue));
         }
         return sanitized;
     }
