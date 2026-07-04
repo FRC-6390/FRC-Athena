@@ -19,8 +19,8 @@ public record MotorRef(
         boolean isInverted,
         NeutralMode neutralMode,
         int currentLimitAmps,
-        boolean hasIntegratedEncoder,
-        VendorOptions vendorOptions) {
+        VendorOptions vendorOptions,
+        MotorFollowerRef follower) {
     /**
      * Creates a motor ref on the default roboRIO CAN bus.
      *
@@ -29,7 +29,7 @@ public record MotorRef(
      * @return motor ref
      */
     public static MotorRef of(MotorKind kind, int id) {
-        return new MotorRef(kind, id, "rio", false, NeutralMode.COAST, 40, false, VendorOptions.empty());
+        return new MotorRef(kind, id, "rio", false, NeutralMode.COAST, 40, VendorOptions.empty(), null);
     }
 
     /**
@@ -66,7 +66,8 @@ public record MotorRef(
      * @return updated ref
      */
     public MotorRef canbus(String canbus) {
-        return new MotorRef(kind, id, canbus, isInverted, neutralMode, currentLimitAmps, hasIntegratedEncoder, vendorOptions);
+        return new MotorRef(
+                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower);
     }
 
     /**
@@ -76,7 +77,8 @@ public record MotorRef(
      * @return updated ref
      */
     public MotorRef inverted(boolean inverted) {
-        return new MotorRef(kind, id, canbus, inverted, neutralMode, currentLimitAmps, hasIntegratedEncoder, vendorOptions);
+        return new MotorRef(
+                kind, id, canbus, inverted, neutralMode, currentLimitAmps, vendorOptions, follower);
     }
 
     /**
@@ -113,7 +115,8 @@ public record MotorRef(
      * @return updated ref
      */
     public MotorRef neutralMode(NeutralMode neutralMode) {
-        return new MotorRef(kind, id, canbus, isInverted, neutralMode, currentLimitAmps, hasIntegratedEncoder, vendorOptions);
+        return new MotorRef(
+                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower);
     }
 
     /**
@@ -123,25 +126,25 @@ public record MotorRef(
      * @return updated ref
      */
     public MotorRef currentLimit(int amps) {
-        return new MotorRef(kind, id, canbus, isInverted, neutralMode, amps, hasIntegratedEncoder, vendorOptions);
+        return new MotorRef(kind, id, canbus, isInverted, neutralMode, amps, vendorOptions, follower);
     }
 
     /**
-     * Requests the integrated motor encoder.
+     * Makes this motor follow a leader motor.
      *
+     * @param leader leader motor
      * @return updated ref
      */
-    public MotorRef withIntegratedEncoder() {
-        return new MotorRef(kind, id, canbus, isInverted, neutralMode, currentLimitAmps, true, vendorOptions);
-    }
-
-    /**
-     * Creates an encoder ref for this motor's integrated encoder.
-     *
-     * @return integrated encoder ref
-     */
-    public EncoderRef integratedEncoder() {
-        return EncoderRef.integrated(this);
+    public MotorRef follow(MotorRef leader) {
+        return new MotorRef(
+                kind,
+                id,
+                canbus,
+                isInverted,
+                neutralMode,
+                currentLimitAmps,
+                vendorOptions,
+                new MotorFollowerRef(leader));
     }
 
     public String defaultName() {
@@ -169,8 +172,8 @@ public record MotorRef(
                       isInverted,
                       neutralMode,
                       currentLimitAmps,
-                      hasIntegratedEncoder,
-                      vendorOptions.with(optionType, options));
+                      vendorOptions.with(optionType, options),
+                      follower);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalArgumentException(
                     "Vendor option type must expose a no-argument constructor: " + optionType.getName(),

@@ -7,8 +7,13 @@ import ca.frc6390.athena.hardware.ref.ButtonRef;
 import ca.frc6390.athena.hardware.ref.ControllerRef;
 import ca.frc6390.athena.hardware.ref.DigitalInputRef;
 import ca.frc6390.athena.hardware.ref.EncoderRef;
+import ca.frc6390.athena.hardware.ref.GearRatioRef;
 import ca.frc6390.athena.hardware.ref.MotorRef;
 import ca.frc6390.athena.hardware.ref.NumberRef;
+import ca.frc6390.athena.hardware.ref.RangeRef;
+import ca.frc6390.athena.hardware.ref.SimRef;
+import ca.frc6390.athena.mechanism.ref.FeedforwardRef;
+import ca.frc6390.athena.mechanism.ref.PidRef;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.LinkedHashMap;
@@ -110,7 +115,13 @@ public final class MechanismIntrospector {
                 || value instanceof BooleanRef
                 || value instanceof ControllerRef
                 || value instanceof AxisRef
-                || value instanceof ButtonRef;
+                || value instanceof ButtonRef
+                || value instanceof RangeRef
+                || value instanceof GearRatioRef
+                || value instanceof PidRef
+                || value instanceof FeedforwardRef
+                || value instanceof ControlRef
+                || value instanceof SimRef;
     }
 
     private static String defaultName(Class<?> type) {

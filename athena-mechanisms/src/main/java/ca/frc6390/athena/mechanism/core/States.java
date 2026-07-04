@@ -1,6 +1,5 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.ref.EncoderRef;
 import ca.frc6390.athena.hardware.ref.MotorRef;
 import ca.frc6390.athena.hardware.ref.RangeRef;
 import java.util.ArrayList;
@@ -27,16 +26,6 @@ public final class States {
     }
 
     /**
-     * Creates a percent-output state.
-     *
-     * @param percent percent output
-     * @return percent state
-     */
-    public static MechanismState percent(double percent) {
-        return new Percent(percent);
-    }
-
-    /**
      * Creates a percent-output state for a specific motor.
      *
      * @param motor motor target
@@ -44,73 +33,40 @@ public final class States {
      * @return targeted percent state
      */
     public static MechanismState percent(MotorRef motor, double percent) {
-        return new TargetedPercent(motor, percent);
+        return new MotorPercent(motor, percent);
     }
 
     /**
-     * Creates a position state.
+     * Creates a percent-output state for a specific control binding.
      *
+     * @param control control binding
+     * @param percent percent output
+     * @return controlled percent state
+     */
+    public static MechanismState percent(ControlRef control, double percent) {
+        return new ControlledPercent(control, percent);
+    }
+
+    /**
+     * Creates a position state for a specific control binding.
+     *
+     * @param control control binding
      * @param position position target
-     * @return position state
+     * @return controlled position state
      */
-    public static MechanismState position(double position) {
-        return new Position(position);
+    public static MechanismState position(ControlRef control, double position) {
+        return new ControlledPosition(control, position);
     }
 
     /**
-     * Creates a position state for a specific encoder source.
+     * Creates a velocity state for a specific control binding.
      *
-     * @param encoder encoder source
-     * @param position position target
-     * @return targeted position state
-     */
-    public static MechanismState position(EncoderRef encoder, double position) {
-        return new TargetedPosition(null, encoder, position);
-    }
-
-    /**
-     * Creates a position state for a specific motor and encoder source.
-     *
-     * @param motor motor target
-     * @param encoder encoder source
-     * @param position position target
-     * @return targeted position state
-     */
-    public static MechanismState position(MotorRef motor, EncoderRef encoder, double position) {
-        return new TargetedPosition(motor, encoder, position);
-    }
-
-    /**
-     * Creates a velocity state.
-     *
+     * @param control control binding
      * @param velocity velocity target
-     * @return velocity state
+     * @return controlled velocity state
      */
-    public static MechanismState velocity(double velocity) {
-        return new Velocity(velocity);
-    }
-
-    /**
-     * Creates a velocity state for a specific encoder source.
-     *
-     * @param encoder encoder source
-     * @param velocity velocity target
-     * @return targeted velocity state
-     */
-    public static MechanismState velocity(EncoderRef encoder, double velocity) {
-        return new TargetedVelocity(null, encoder, velocity);
-    }
-
-    /**
-     * Creates a velocity state for a specific motor and encoder source.
-     *
-     * @param motor motor target
-     * @param encoder encoder source
-     * @param velocity velocity target
-     * @return targeted velocity state
-     */
-    public static MechanismState velocity(MotorRef motor, EncoderRef encoder, double velocity) {
-        return new TargetedVelocity(motor, encoder, velocity);
+    public static MechanismState velocity(ControlRef control, double velocity) {
+        return new ControlledVelocity(control, velocity);
     }
 
     /**
@@ -227,32 +183,29 @@ public final class States {
     public record Neutral() implements MechanismState, Output.Neutral {
     }
 
-    public record Percent(double percent) implements MechanismState, Output.Percent {
-    }
-
-    public record Position(double position) implements MechanismState, Output.Position {
-    }
-
-    public record Velocity(double velocity) implements MechanismState, Output.Velocity {
-    }
-
-    public record TargetedPercent(MotorRef motor, double percent) implements MechanismState, Output.Percent {
-        public TargetedPercent {
+    public record MotorPercent(MotorRef motor, double percent) implements MechanismState, Output.Percent {
+        public MotorPercent {
             Objects.requireNonNull(motor, "motor");
         }
     }
 
-    public record TargetedPosition(MotorRef motor, EncoderRef encoder, double position)
-            implements MechanismState, Output.Position {
-        public TargetedPosition {
-            Objects.requireNonNull(encoder, "encoder");
+    public record ControlledPercent(ControlRef control, double percent) implements MechanismState, Output.Percent {
+        public ControlledPercent {
+            Objects.requireNonNull(control, "control");
         }
     }
 
-    public record TargetedVelocity(MotorRef motor, EncoderRef encoder, double velocity)
+    public record ControlledPosition(ControlRef control, double position)
+            implements MechanismState, Output.Position {
+        public ControlledPosition {
+            Objects.requireNonNull(control, "control");
+        }
+    }
+
+    public record ControlledVelocity(ControlRef control, double velocity)
             implements MechanismState, Output.Velocity {
-        public TargetedVelocity {
-            Objects.requireNonNull(encoder, "encoder");
+        public ControlledVelocity {
+            Objects.requireNonNull(control, "control");
         }
     }
 

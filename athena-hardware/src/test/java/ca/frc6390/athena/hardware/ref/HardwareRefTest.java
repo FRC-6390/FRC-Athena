@@ -59,4 +59,32 @@ class HardwareRefTest {
         assertEquals(40.0, range.clamp(50.0), 1.0e-9);
         assertEquals(0.25, ratio.ratio(), 1.0e-9);
     }
+
+    @Test
+    void simRefsBindSharedSimulationModelsToHardware() {
+        MotorRef left = MotorRef.of(ca.frc6390.athena.api.hardware.AthenaMotor.SIM, 1);
+        MotorRef right = MotorRef.of(ca.frc6390.athena.api.hardware.AthenaMotor.SIM, 2)
+                .inverted()
+                .follow(left);
+        SimRef simulation = Sim.flywheel(left, right).moi(0.02);
+
+        assertEquals(SimProfile.Kind.FLYWHEEL, simulation.kind());
+        assertEquals(0.02, simulation.moi().orElseThrow(), 1.0e-9);
+        assertEquals(left, simulation.motors().get(0));
+        assertEquals(right, simulation.motors().get(1));
+        assertFalse(simulation.simulatesGravity());
+    }
+
+    @Test
+    void motorRefsCanDeclareFollowers() {
+        MotorRef leader = MotorRef.of(ca.frc6390.athena.api.hardware.AthenaMotor.SIM, 1);
+        MotorRef follower = MotorRef.of(ca.frc6390.athena.api.hardware.AthenaMotor.SIM, 2)
+                .inverted()
+                .follow(leader)
+                .currentLimit(30);
+
+        assertEquals(leader, follower.follower().leader());
+        assertTrue(follower.isInverted());
+        assertEquals(30, follower.currentLimitAmps());
+    }
 }

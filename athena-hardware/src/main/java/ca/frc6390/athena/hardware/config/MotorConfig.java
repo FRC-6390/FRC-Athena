@@ -76,7 +76,7 @@ public final class MotorConfig {
         inverted = motor.isInverted();
         neutralMode = motor.neutralMode();
         currentLimitAmps = motor.currentLimitAmps();
-        integratedEncoder = motor.hasIntegratedEncoder();
+        integratedEncoder = false;
         vendorOptions = motor.vendorOptions();
         return this;
     }
