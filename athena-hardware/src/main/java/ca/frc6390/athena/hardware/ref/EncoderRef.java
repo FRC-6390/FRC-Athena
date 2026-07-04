@@ -114,6 +114,11 @@ public record EncoderRef(
         return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset);
     }
 
+    public EncoderRef gearRatio(GearRatioRef gearRatio) {
+        Objects.requireNonNull(gearRatio, "gearRatio");
+        return gearRatio(gearRatio.ratio());
+    }
+
     public EncoderRef conversion(double conversion) {
         return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset);
     }
