@@ -3,7 +3,6 @@ package ca.frc6390.athena.hardware.ref;
 import java.util.Objects;
 
 import ca.frc6390.athena.api.hardware.EncoderKind;
-import ca.frc6390.athena.api.hardware.ImuId;
 import ca.frc6390.athena.api.hardware.ImuKind;
 import ca.frc6390.athena.api.hardware.MotorKind;
 
@@ -33,8 +32,8 @@ public record HardwareBus(String name) {
         return EncoderRef.of(kind, id).canbus(name);
     }
 
-    public ImuId imu(ImuKind kind, int id) {
+    public ImuRef imu(ImuKind kind, int id) {
         Objects.requireNonNull(kind, "kind");
-        return ImuId.of(kind, id).canbus(name);
+        return ImuRef.of(kind, id).canbus(name);
     }
 }

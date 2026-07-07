@@ -1,9 +1,9 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.ref.AnalogInputRef;
-import ca.frc6390.athena.hardware.ref.AxisRef;
 import ca.frc6390.athena.hardware.ref.BooleanRef;
 import ca.frc6390.athena.hardware.ref.ButtonRef;
+import ca.frc6390.athena.hardware.ref.ControllerAxisRef;
 import ca.frc6390.athena.hardware.ref.ControllerRef;
 import ca.frc6390.athena.hardware.ref.DigitalInputRef;
 import ca.frc6390.athena.hardware.ref.EncoderRef;
@@ -51,6 +51,8 @@ public final class MechanismIntrospector {
         Map<String, Mechanism> children = new LinkedHashMap<>();
         Map<String, MechanismState> states = new LinkedHashMap<>();
         Map<String, Object> refs = new LinkedHashMap<>();
+        Map<String, HookRef> hooks = new LinkedHashMap<>();
+        Map<String, RuleRef> rules = new LinkedHashMap<>();
         String initialStateName = "";
         MechanismState initialState = null;
 
@@ -65,6 +67,8 @@ public final class MechanismIntrospector {
             String fieldName = field.getName();
             if (value instanceof Mechanism child && !Modifier.isStatic(field.getModifiers())) {
                 children.put(fieldName, child);
+            } else if (value instanceof PathRef) {
+                refs.put(fieldName, value);
             } else if (value instanceof MechanismState state) {
                 states.put(fieldName, state);
                 if (field.isAnnotationPresent(InitialState.class)) {
@@ -75,12 +79,16 @@ public final class MechanismIntrospector {
                     initialStateName = fieldName;
                     initialState = state;
                 }
+            } else if (value instanceof HookRef hook) {
+                hooks.put(fieldName, hook);
+            } else if (value instanceof RuleRef rule) {
+                rules.put(fieldName, rule);
             } else if (isRef(value)) {
                 refs.put(fieldName, value);
             }
         }
 
-        return new MechanismDefinition(name, mechanism, children, states, initialStateName, initialState, refs);
+        return new MechanismDefinition(name, mechanism, children, states, initialStateName, initialState, refs, hooks, rules);
     }
 
     private static Field[] fields(Class<?> type) {
@@ -114,13 +122,16 @@ public final class MechanismIntrospector {
                 || value instanceof NumberRef
                 || value instanceof BooleanRef
                 || value instanceof ControllerRef
-                || value instanceof AxisRef
+                || value instanceof ControllerAxisRef
                 || value instanceof ButtonRef
                 || value instanceof RangeRef
                 || value instanceof GearRatioRef
                 || value instanceof PidRef
                 || value instanceof FeedforwardRef
+                || value instanceof AxisRef
                 || value instanceof ControlRef
+                || value instanceof PathRef
+                || value instanceof ConstraintRef
                 || value instanceof SimRef;
     }
 

@@ -2,6 +2,8 @@ package ca.frc6390.athena.vendor.pathplanner;
 
 import ca.frc6390.athena.auto.AutoSource;
 import ca.frc6390.athena.commands.CommandSpec;
+import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.wpilib.commands.WpilibCommandPathRuntime;
 import com.pathplanner.lib.auto.AutoBuilder;
 import edu.wpi.first.wpilibj2.command.Command;
 import java.util.List;
@@ -43,6 +45,15 @@ public final class PathPlannerAutoSource implements AutoSource {
      */
     public Command loadCommand(String routinePath) {
         return client.buildAuto(normalize(routinePath));
+    }
+
+    /**
+     * Creates an Athena path runtime that runs PathPlanner autos by path name.
+     *
+     * @return path runtime
+     */
+    public PathRuntime runtime() {
+        return WpilibCommandPathRuntime.of(path -> loadCommand(path.name()));
     }
 
     /**

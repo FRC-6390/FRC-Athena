@@ -7,6 +7,7 @@ import ca.frc6390.athena.api.hardware.AthenaEncoder;
 import ca.frc6390.athena.api.hardware.EncoderId;
 import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.hardware.encoder.EncoderSignalType;
+import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 
 /**
  * Reusable encoder declaration for robot constants.
@@ -17,7 +18,8 @@ public record EncoderRef(
         boolean isInverted,
         double gearRatio,
         double conversion,
-        double offset) {
+        double offset,
+        EncoderUnit units) {
     public static EncoderRef of(EncoderKind kind, int id) {
         return new EncoderRef(
                 new EncoderSource.Standalone(kind, id, "rio"),
@@ -25,7 +27,8 @@ public record EncoderRef(
                 false,
                 1.0,
                 1.0,
-                0.0);
+                0.0,
+                EncoderUnit.RAW);
     }
 
     public static EncoderRef of(EncoderId id) {
@@ -33,19 +36,30 @@ public record EncoderRef(
         return of(id.kind(), id.id()).canbus(id.canbus());
     }
 
-    public static EncoderRef integrated(MotorRef motor) {
+    static EncoderRef integratedMotor(MotorRef motor) {
         return new EncoderRef(
                 new EncoderSource.IntegratedMotor(Objects.requireNonNull(motor, "motor")),
                 EncoderSignalType.RELATIVE_POSITION,
                 false,
                 1.0,
                 1.0,
-                0.0);
+                0.0,
+                EncoderUnit.RAW);
     }
 
     public EncoderRef {
         Objects.requireNonNull(source, "source");
         signalType = signalType == null ? EncoderSignalType.RELATIVE_POSITION : signalType;
+        if (!Double.isFinite(gearRatio) || gearRatio <= 0.0) {
+            throw new IllegalArgumentException("Encoder gear ratio must be positive.");
+        }
+        if (!Double.isFinite(conversion) || conversion <= 0.0) {
+            throw new IllegalArgumentException("Encoder conversion must be positive.");
+        }
+        if (!Double.isFinite(offset)) {
+            throw new IllegalArgumentException("Encoder offset must be finite.");
+        }
+        units = units == null ? EncoderUnit.RAW : units;
     }
 
     public EncoderKind kind() {
@@ -77,7 +91,8 @@ public record EncoderRef(
                     isInverted,
                     gearRatio,
                     conversion,
-                    offset);
+                    offset,
+                    units);
         }
         return this;
     }
@@ -99,7 +114,7 @@ public record EncoderRef(
     }
 
     public EncoderRef signalType(EncoderSignalType signalType) {
-        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset);
+        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset, units);
     }
 
     public EncoderRef inverted() {
@@ -107,11 +122,11 @@ public record EncoderRef(
     }
 
     public EncoderRef inverted(boolean inverted) {
-        return new EncoderRef(source, signalType, inverted, gearRatio, conversion, offset);
+        return new EncoderRef(source, signalType, inverted, gearRatio, conversion, offset, units);
     }
 
     public EncoderRef gearRatio(double gearRatio) {
-        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset);
+        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset, units);
     }
 
     public EncoderRef gearRatio(GearRatioRef gearRatio) {
@@ -120,11 +135,26 @@ public record EncoderRef(
     }
 
     public EncoderRef conversion(double conversion) {
-        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset);
+        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset, units);
+    }
+
+    public EncoderRef wheelDiameterMeters(double diameterMeters) {
+        if (!Double.isFinite(diameterMeters) || diameterMeters <= 0.0) {
+            throw new IllegalArgumentException("Wheel diameter must be positive.");
+        }
+        return conversion(Math.PI * diameterMeters);
+    }
+
+    public EncoderRef wheelDiameterInches(double diameterInches) {
+        return wheelDiameterMeters(diameterInches * 0.0254);
+    }
+
+    public EncoderRef units(EncoderUnit units) {
+        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset, units);
     }
 
     public EncoderRef offset(double offset) {
-        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset);
+        return new EncoderRef(source, signalType, isInverted, gearRatio, conversion, offset, units);
     }
 
     public String defaultName() {

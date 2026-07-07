@@ -3,11 +3,14 @@ package ca.frc6390.athena.hardware.ref;
 import java.util.Objects;
 import java.util.Locale;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.api.hardware.MotorId;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.spec.NeutralMode;
 import ca.frc6390.athena.hardware.spec.VendorOptions;
+import ca.frc6390.athena.mechanism.core.MechanismState;
+import ca.frc6390.athena.mechanism.core.Output;
 
 /**
  * Reusable motor declaration for robot constants.
@@ -57,6 +60,75 @@ public record MotorRef(
      */
     public MotorId idRef() {
         return new MotorId(kind, id, canbus);
+    }
+
+    /**
+     * Returns this motor's integrated encoder.
+     *
+     * @return integrated encoder ref
+     */
+    public EncoderRef encoder() {
+        return EncoderRef.integratedMotor(this);
+    }
+
+    /**
+     * Creates a percent-output state targeting this motor.
+     *
+     * @param percent percent output
+     * @return motor state
+     */
+    public MechanismState percent(double percent) {
+        return new PercentState(this, percent);
+    }
+
+    /**
+     * Creates a dynamic percent-output state targeting this motor.
+     *
+     * @param percent percent supplier
+     * @return motor state
+     */
+    public MechanismState percent(DoubleSupplier percent) {
+        return new DynamicPercentState(this, percent);
+    }
+
+    /**
+     * Alias for {@link #percent(double)}.
+     *
+     * @param percentage percent output
+     * @return motor state
+     */
+    public MechanismState percentage(double percentage) {
+        return percent(percentage);
+    }
+
+    /**
+     * Alias for {@link #percent(DoubleSupplier)}.
+     *
+     * @param percentage percent supplier
+     * @return motor state
+     */
+    public MechanismState percentage(DoubleSupplier percentage) {
+        return percent(percentage);
+    }
+
+    /**
+     * Creates a voltage state targeting this motor.
+     *
+     * @param volts voltage output
+     * @return motor state
+     */
+    public MechanismState voltage(double volts) {
+        return new VoltageState(this, volts);
+    }
+
+    /**
+     * Creates a dynamic voltage state targeting this motor.
+     *
+     * @param volts voltage supplier
+     * @return motor state
+     */
+    public MechanismState voltage(DoubleSupplier volts) {
+        return new DynamicVoltageState(this, volts);
     }
 
     /**
@@ -183,5 +255,79 @@ public record MotorRef(
 
     private static String sanitize(String key) {
         return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
+    }
+
+    /**
+     * State that directly targets a motor ref.
+     */
+    public interface MotorState extends MechanismState {
+        /**
+         * Returns the target motor.
+         *
+         * @return motor
+         */
+        MotorRef motor();
+    }
+
+    /**
+     * Direct motor percent-output state.
+     *
+     * @param motor target motor
+     * @param percent percent output
+     */
+    public record PercentState(MotorRef motor, double percent) implements MotorState, Output.Percent {
+        public PercentState {
+            Objects.requireNonNull(motor, "motor");
+        }
+    }
+
+    /**
+     * Dynamic direct motor percent-output state.
+     *
+     * @param motor target motor
+     * @param percentSupplier percent supplier
+     */
+    public record DynamicPercentState(MotorRef motor, DoubleSupplier percentSupplier)
+            implements MotorState, Output.Percent {
+        public DynamicPercentState {
+            Objects.requireNonNull(motor, "motor");
+            Objects.requireNonNull(percentSupplier, "percentSupplier");
+        }
+
+        @Override
+        public double percent() {
+            return percentSupplier.getAsDouble();
+        }
+    }
+
+    /**
+     * Direct motor voltage state.
+     *
+     * @param motor target motor
+     * @param volts voltage output
+     */
+    public record VoltageState(MotorRef motor, double volts) implements MotorState, Output.Voltage {
+        public VoltageState {
+            Objects.requireNonNull(motor, "motor");
+        }
+    }
+
+    /**
+     * Dynamic direct motor voltage state.
+     *
+     * @param motor target motor
+     * @param voltsSupplier voltage supplier
+     */
+    public record DynamicVoltageState(MotorRef motor, DoubleSupplier voltsSupplier)
+            implements MotorState, Output.Voltage {
+        public DynamicVoltageState {
+            Objects.requireNonNull(motor, "motor");
+            Objects.requireNonNull(voltsSupplier, "voltsSupplier");
+        }
+
+        @Override
+        public double volts() {
+            return voltsSupplier.getAsDouble();
+        }
     }
 }

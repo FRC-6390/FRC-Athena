@@ -17,6 +17,7 @@ import ca.frc6390.athena.api.hardware.EncoderKind;
  * @param gearRatio mechanism-to-sensor gear ratio
  * @param conversion mechanism-unit conversion factor
  * @param offset offset in mechanism units
+ * @param units configured encoder units
  */
 public record EncoderSpec(
         String ownerPath,
@@ -28,13 +29,29 @@ public record EncoderSpec(
         boolean inverted,
         double gearRatio,
         double conversion,
-        double offset) {
+        double offset,
+        EncoderUnit units) {
     public EncoderSpec {
         ownerPath = ownerPath == null || ownerPath.isBlank() ? "robot" : ownerPath;
         name = name == null || name.isBlank() ? "encoder" : name;
         Objects.requireNonNull(kind, "kind");
         canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
         signalType = signalType == null ? EncoderSignalType.RELATIVE_POSITION : signalType;
+        units = units == null ? EncoderUnit.RAW : units;
+    }
+
+    public EncoderSpec(
+            String ownerPath,
+            String name,
+            EncoderKind kind,
+            int id,
+            String canbus,
+            EncoderSignalType signalType,
+            boolean inverted,
+            double gearRatio,
+            double conversion,
+            double offset) {
+        this(ownerPath, name, kind, id, canbus, signalType, inverted, gearRatio, conversion, offset, EncoderUnit.RAW);
     }
 
     /**

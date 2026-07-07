@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.mechanism.spec.MechanismSpec;
+import java.util.List;
 
 /**
  * Robot-facing mechanism contract.
@@ -45,6 +46,18 @@ public interface Mechanism {
      * @param state requested state
      */
     default void set(MechanismState state) {
+    }
+
+    /**
+     * Resolves a requested state through this mechanism's rules.
+     *
+     * @param state requested state
+     * @param ctx mechanism runtime context
+     * @param axisStates live axis state lookup
+     * @return resolved outputs
+     */
+    default List<ResolvedOutput> resolve(MechanismState state, MechanismContext ctx, AxisStateSource axisStates) {
+        return OutputResolver.empty().resolve(this, state, ctx, axisStates);
     }
 
     /**

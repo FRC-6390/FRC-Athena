@@ -101,14 +101,13 @@ goto fail
 :detectJavaVersion
 set JAVA_VERSION=
 set JAVA_MAJOR=0
-for /f "tokens=3" %%v in ('"%JAVA_EXE%" -version 2^>^&1 ^| findstr /i " version "') do (
-  set JAVA_VERSION=%%~v
+for /f "tokens=2" %%v in ('"%JAVA_EXE%" --version 2^>NUL') do (
+  set "JAVA_VERSION=%%~v"
   goto detectJavaVersionDone
 )
 :detectJavaVersionDone
-set JAVA_VERSION=%JAVA_VERSION:"=%
-for /f "tokens=1 delims=." %%m in ("%JAVA_VERSION%") do set JAVA_MAJOR=%%~m
-if "%JAVA_MAJOR%"=="1" for /f "tokens=2 delims=." %%m in ("%JAVA_VERSION%") do set JAVA_MAJOR=%%~m
+for /f "tokens=1 delims=." %%m in ("%JAVA_VERSION%") do set "JAVA_MAJOR=%%~m"
+if "%JAVA_MAJOR%"=="1" for /f "tokens=2 delims=." %%m in ("%JAVA_VERSION%") do set "JAVA_MAJOR=%%~m"
 for /f "delims=0123456789" %%m in ("%JAVA_MAJOR%") do set JAVA_MAJOR=0
 if "%JAVA_MAJOR%"=="" set JAVA_MAJOR=0
 exit /b 0

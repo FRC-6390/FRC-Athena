@@ -4,6 +4,7 @@ import java.util.Objects;
 
 import ca.frc6390.athena.api.hardware.ImuId;
 import ca.frc6390.athena.api.hardware.ImuKind;
+import ca.frc6390.athena.hardware.ref.ImuRef;
 
 /**
  * Student-facing IMU declaration.
@@ -48,6 +49,19 @@ public final class ImuConfig {
     public ImuConfig hardware(ImuId imuId) {
         Objects.requireNonNull(imuId, "imuId");
         return hardware(imuId.kind(), imuId.id()).canbus(imuId.canbus());
+    }
+
+    /**
+     * Sets hardware identity from an IMU ref.
+     *
+     * @param imu IMU ref
+     * @return this config
+     */
+    public ImuConfig hardware(ImuRef imu) {
+        Objects.requireNonNull(imu, "imu");
+        return hardware(imu.kind(), imu.id())
+                .canbus(imu.canbus())
+                .mountPose(imu.mountPose().yawDegrees(), imu.mountPose().pitchDegrees(), imu.mountPose().rollDegrees());
     }
 
     /**

@@ -15,6 +15,8 @@ import java.util.Objects;
  * @param initialStateName initial state field name
  * @param initialState initial state
  * @param refs hardware and signal refs keyed by field name
+ * @param hooks event hooks keyed by field name
+ * @param rules mechanism rules keyed by field name
  */
 public record MechanismDefinition(
         String name,
@@ -23,7 +25,9 @@ public record MechanismDefinition(
         Map<String, MechanismState> states,
         String initialStateName,
         MechanismState initialState,
-        Map<String, Object> refs) {
+        Map<String, Object> refs,
+        Map<String, HookRef> hooks,
+        Map<String, RuleRef> rules) {
     public MechanismDefinition {
         name = name == null || name.isBlank() ? "mechanism" : name;
         Objects.requireNonNull(mechanism, "mechanism");
@@ -36,5 +40,7 @@ public record MechanismDefinition(
         states = Collections.unmodifiableMap(new LinkedHashMap<>(states));
         initialStateName = initialStateName == null ? "" : initialStateName;
         refs = Collections.unmodifiableMap(new LinkedHashMap<>(refs));
+        hooks = Collections.unmodifiableMap(new LinkedHashMap<>(hooks));
+        rules = Collections.unmodifiableMap(new LinkedHashMap<>(rules));
     }
 }

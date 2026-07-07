@@ -39,6 +39,7 @@ class AthenaHardwareKeyTest {
     void cameraKeysAreStableAndNamespaced() {
         assertEquals("photonvision:camera", AthenaCamera.PHOTONVISION.key());
         assertEquals("limelight:camera", AthenaCamera.LIMELIGHT.key());
+        assertEquals("helios:camera", AthenaCamera.HELIOS.key());
         assertEquals("sim:camera", AthenaCamera.SIM.key());
         assertInstanceOf(CameraKind.class, AthenaCamera.PHOTONVISION);
         assertInstanceOf(HardwareKind.class, AthenaCamera.PHOTONVISION);

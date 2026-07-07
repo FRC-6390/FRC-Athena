@@ -366,7 +366,7 @@ class ExampleProjectTest {
     }
 
     @Test
-    void dashboardBridgeExamplePublishesSnapshotsAndHandlesControls() {
+    void dashboardBridgeExamplePublishesSnapshotsAndHandlesAxes() {
         var packets = DashboardBridgeExample.publishSnapshot();
 
         assertEquals(1, packets.size());

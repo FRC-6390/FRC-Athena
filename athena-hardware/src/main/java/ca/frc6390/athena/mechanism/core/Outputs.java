@@ -27,6 +27,16 @@ public final class Outputs {
     }
 
     /**
+     * Creates a voltage output.
+     *
+     * @param volts voltage output
+     * @return voltage output
+     */
+    public static Output voltage(double volts) {
+        return new Voltage(volts);
+    }
+
+    /**
      * Creates a position output.
      *
      * @param position position target
@@ -60,6 +70,9 @@ public final class Outputs {
     }
 
     private record Percent(double percent) implements Output.Percent {
+    }
+
+    private record Voltage(double volts) implements Output.Voltage {
     }
 
     private record Position(double position) implements Output.Position {

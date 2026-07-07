@@ -6,12 +6,16 @@ import ca.frc6390.athena.hardware.input.InputType;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.function.BooleanSupplier;
 
 /**
  * Reusable boolean software signal declaration.
  */
 public record BooleanRef(String name, Optional<Boolean> defaultValue, BooleanSupplier reader) {
+    private static final ConcurrentMap<BooleanRef, BooleanSupplier> RUNTIME_READERS = new ConcurrentHashMap<>();
+
     /**
      * Creates a named boolean signal.
      *
@@ -33,6 +37,16 @@ public record BooleanRef(String name, Optional<Boolean> defaultValue, BooleanSup
         return new BooleanRef(name, Optional.of(defaultValue), null);
     }
 
+    /**
+     * Creates an unnamed boolean signal with a default value.
+     *
+     * @param defaultValue default value
+     * @return boolean ref
+     */
+    public static BooleanRef value(boolean defaultValue) {
+        return new BooleanRef("boolean", Optional.of(defaultValue), null);
+    }
+
     public BooleanRef {
         name = name == null || name.isBlank() ? "boolean" : name;
         defaultValue = defaultValue == null ? Optional.empty() : defaultValue;
@@ -49,6 +63,16 @@ public record BooleanRef(String name, Optional<Boolean> defaultValue, BooleanSup
     }
 
     /**
+     * Binds a runtime reader to an existing ref instance.
+     *
+     * @param ref boolean ref
+     * @param reader runtime reader
+     */
+    public static void bindRuntime(BooleanRef ref, BooleanSupplier reader) {
+        RUNTIME_READERS.put(Objects.requireNonNull(ref, "ref"), Objects.requireNonNull(reader, "reader"));
+    }
+
+    /**
      * Reads this signal.
      *
      * @return value
@@ -56,6 +80,10 @@ public record BooleanRef(String name, Optional<Boolean> defaultValue, BooleanSup
     public boolean active() {
         if (reader != null) {
             return reader.getAsBoolean();
+        }
+        BooleanSupplier runtimeReader = RUNTIME_READERS.get(this);
+        if (runtimeReader != null) {
+            return runtimeReader.getAsBoolean();
         }
         if (defaultValue.isPresent()) {
             return defaultValue.get();

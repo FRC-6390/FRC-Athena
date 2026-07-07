@@ -22,13 +22,13 @@ public record ControllerRef(String kind, int port) {
     }
 
     /**
-     * Creates an axis child ref.
+     * Creates an controller axis child ref.
      *
      * @param name axis name
-     * @return axis ref
+     * @return controller axis ref
      */
-    public AxisRef axis(String name) {
-        return AxisRef.of(this, name);
+    public ControllerAxisRef axis(String name) {
+        return ControllerAxisRef.of(this, name);
     }
 
     /**
@@ -41,27 +41,27 @@ public record ControllerRef(String kind, int port) {
         return ButtonRef.of(this, name);
     }
 
-    public AxisRef leftX() {
+    public ControllerAxisRef leftX() {
         return axis("leftX");
     }
 
-    public AxisRef leftY() {
+    public ControllerAxisRef leftY() {
         return axis("leftY");
     }
 
-    public AxisRef rightX() {
+    public ControllerAxisRef rightX() {
         return axis("rightX");
     }
 
-    public AxisRef rightY() {
+    public ControllerAxisRef rightY() {
         return axis("rightY");
     }
 
-    public AxisRef leftTrigger() {
+    public ControllerAxisRef leftTrigger() {
         return axis("leftTrigger");
     }
 
-    public AxisRef rightTrigger() {
+    public ControllerAxisRef rightTrigger() {
         return axis("rightTrigger");
     }
 
@@ -96,7 +96,7 @@ public record ControllerRef(String kind, int port) {
      * @param threshold active threshold
      * @return button ref
      */
-    public ButtonRef threshold(AxisRef axis, double threshold) {
+    public ButtonRef threshold(ControllerAxisRef axis, double threshold) {
         Objects.requireNonNull(axis, "axis");
         return ButtonRef.of(this, axis.name() + "At" + threshold).bind(() -> axis.value() >= threshold);
     }

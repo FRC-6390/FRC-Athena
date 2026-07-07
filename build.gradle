@@ -4,6 +4,7 @@ ext {
             'athena-runtime',
             'athena-hardware',
             'athena-mechanisms',
+            'athena-drivetrain',
             'athena-commands',
             'athena-telemetry',
             'athena-plugin'
@@ -137,6 +138,7 @@ project(':athena-drivetrain') {
     dependencies {
         api project(':athena-hardware')
         api project(':athena-commands')
+        api project(':athena-mechanisms')
         testImplementation project(':athena-simulation')
     }
 }
@@ -151,6 +153,7 @@ project(':athena-vision') {
 project(':athena-localization') {
     dependencies {
         api project(':athena-runtime')
+        api project(':athena-hardware')
         api project(':athena-vision')
     }
 }
@@ -198,6 +201,13 @@ project(':athena-plugin') {
     dependencies {
         api project(':athena-api')
         implementation localGroovy()
+    }
+
+    afterEvaluate {
+        publishing.publications.remove(publishing.publications.mavenJava)
+        tasks.matching { it.name.startsWith('publishMavenJavaPublicationTo') }.configureEach {
+            enabled = false
+        }
     }
 }
 
@@ -293,6 +303,8 @@ project(':athena-vendor-limelight') {
 project(':athena-vendor-pathplanner') {
     dependencies {
         api project(':athena-auto')
+        api project(':athena-mechanisms')
+        api project(':athena-wpilib')
         api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
         api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
         api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
@@ -308,6 +320,8 @@ project(':athena-vendor-pathplanner') {
 project(':athena-vendor-choreo') {
     dependencies {
         api project(':athena-auto')
+        api project(':athena-mechanisms')
+        api project(':athena-wpilib')
         api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
         api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
         api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
@@ -423,7 +437,6 @@ tasks.register('verifyReleaseMetadata') {
             throw new GradleException("Default vendordep artifacts missing matching projects: ${missingProjects}.")
         }
         def optionalArtifacts = [
-                'athena-drivetrain',
                 'athena-superstructure',
                 'athena-simulation',
                 'athena-vision',
@@ -444,9 +457,10 @@ tasks.register('verifyReleaseMetadata') {
             throw new GradleException("Optional artifacts should not be in the default vendordep: ${leakedOptionalArtifacts}.")
         }
         subprojects.findAll { rootProject.ext.athenaPublishedArtifacts.contains(it.name) }.each { project ->
-            def publication = project.publishing.publications.findByName('mavenJava')
+            def publicationName = project.name == 'athena-plugin' ? 'pluginMaven' : 'mavenJava'
+            def publication = project.publishing.publications.findByName(publicationName)
             if (publication == null) {
-                throw new GradleException("${project.path} is missing mavenJava publication.")
+                throw new GradleException("${project.path} is missing ${publicationName} publication.")
             }
         }
     }
@@ -634,8 +648,13 @@ tasks.register('cleanStagingRepository') {
 }
 
 subprojects.findAll { rootProject.ext.athenaPublishedArtifacts.contains(it.name) }.each { project ->
-    project.tasks.named('publishMavenJavaPublicationToAthenaStagingRepository').configure {
-        mustRunAfter rootProject.tasks.named('cleanStagingRepository')
+    def publicationTaskName = project.name == 'athena-plugin'
+            ? 'publishPluginMavenPublicationToAthenaStagingRepository'
+            : 'publishMavenJavaPublicationToAthenaStagingRepository'
+    project.afterEvaluate {
+        project.tasks.named(publicationTaskName).configure {
+            mustRunAfter rootProject.tasks.named('cleanStagingRepository')
+        }
     }
 }
 
@@ -645,7 +664,12 @@ tasks.register('stageMavenPublication') {
     dependsOn 'cleanStagingRepository'
     dependsOn subprojects
             .findAll { rootProject.ext.athenaPublishedArtifacts.contains(it.name) }
-            .collect { it.tasks.named('publishMavenJavaPublicationToAthenaStagingRepository') }
+            .collect {
+                def publicationTaskName = it.name == 'athena-plugin'
+                        ? 'publishPluginMavenPublicationToAthenaStagingRepository'
+                        : 'publishMavenJavaPublicationToAthenaStagingRepository'
+                "${it.path}:${publicationTaskName}"
+            }
 }
 
 tasks.register('releaseChecklist') {

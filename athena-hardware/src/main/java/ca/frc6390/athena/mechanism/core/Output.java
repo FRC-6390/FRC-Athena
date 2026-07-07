@@ -17,6 +17,18 @@ public interface Output {
     }
 
     /**
+     * Voltage output command.
+     */
+    interface Voltage extends Output {
+        /**
+         * Returns requested voltage.
+         *
+         * @return voltage output
+         */
+        double volts();
+    }
+
+    /**
      * Position command.
      */
     interface Position extends Output {

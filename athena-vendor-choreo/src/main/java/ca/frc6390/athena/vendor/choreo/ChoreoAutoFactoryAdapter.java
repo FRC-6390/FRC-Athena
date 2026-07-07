@@ -1,5 +1,7 @@
 package ca.frc6390.athena.vendor.choreo;
 
+import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.wpilib.commands.WpilibCommandPathRuntime;
 import choreo.auto.AutoFactory;
 import edu.wpi.first.wpilibj2.command.Command;
 import java.util.Objects;
@@ -36,6 +38,15 @@ public final class ChoreoAutoFactoryAdapter {
      */
     public Command trajectoryCommand(String trajectoryName) {
         return client.trajectoryCommand(normalize(trajectoryName));
+    }
+
+    /**
+     * Creates an Athena path runtime that runs Choreo trajectories by path name.
+     *
+     * @return path runtime
+     */
+    public PathRuntime trajectoryRuntime() {
+        return WpilibCommandPathRuntime.of(path -> trajectoryCommand(path.name()));
     }
 
     /**
@@ -78,6 +89,15 @@ public final class ChoreoAutoFactoryAdapter {
      */
     public Command routineCommand(String routineName) {
         return client.routineCommand(normalize(routineName));
+    }
+
+    /**
+     * Creates an Athena path runtime that runs Choreo routines by path name.
+     *
+     * @return path runtime
+     */
+    public PathRuntime routineRuntime() {
+        return WpilibCommandPathRuntime.of(path -> routineCommand(path.name()));
     }
 
     /**

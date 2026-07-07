@@ -17,14 +17,4 @@ public final class DigitalInputs {
         return DigitalInputRef.rio(channel);
     }
 
-    /**
-     * Creates a named roboRIO digital input.
-     *
-     * @param name input name
-     * @param channel DIO channel
-     * @return input ref
-     */
-    public static DigitalInputRef rio(String name, int channel) {
-        return DigitalInputRef.named(name, channel);
-    }
 }

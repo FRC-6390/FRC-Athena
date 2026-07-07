@@ -21,4 +21,16 @@ public record WheelBase(double meters) {
     public static WheelBase meters(double meters) {
         return new WheelBase(meters);
     }
+
+    public static WheelBase inches(double inches) {
+        return meters(inches * 0.0254);
+    }
+
+    public static WheelBase feet(double feet) {
+        return inches(feet * 12.0);
+    }
+
+    public static WheelBase centimeters(double centimeters) {
+        return meters(centimeters / 100.0);
+    }
 }

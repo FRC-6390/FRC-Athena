@@ -1,53 +1,53 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.ref.DigitalInputRef;
 import ca.frc6390.athena.hardware.ref.EncoderRef;
 import ca.frc6390.athena.hardware.ref.GearRatioRef;
 import ca.frc6390.athena.hardware.ref.MotorRef;
-import ca.frc6390.athena.hardware.ref.RangeRef;
+import ca.frc6390.athena.mechanism.ref.CrtRef;
 import ca.frc6390.athena.mechanism.ref.FeedforwardRef;
 import ca.frc6390.athena.mechanism.ref.PidRef;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.DoubleSupplier;
 
 /**
- * Explicit commandable binding between hardware refs, feedback refs, and a control method.
+ * Command binding for one controller mode over one actuator group.
  */
 public record ControlRef(
-        ControlKind kind,
-        List<MotorRef> motors,
+        ControlMode mode,
+        MotorRef output,
+        List<MotorRef> followers,
         List<EncoderRef> feedback,
-        List<DigitalInputRef> sensors,
         List<Object> refs,
-        RangeRef range,
-        GearRatioRef gearRatio,
-        List<ControlMethod> methods) {
+        List<ControlLoopRef> loops,
+        List<RuleRef> rules,
+        ConstraintRef constraints) {
     public ControlRef {
-        kind = kind == null ? ControlKind.CUSTOM : kind;
-        motors = motors == null ? List.of() : List.copyOf(motors);
+        mode = mode == null ? ControlMode.POSITION : mode;
+        followers = followers == null ? List.of() : List.copyOf(followers);
         feedback = feedback == null ? List.of() : List.copyOf(feedback);
-        sensors = sensors == null ? List.of() : List.copyOf(sensors);
         refs = refs == null ? List.of() : List.copyOf(refs);
-        methods = methods == null ? List.of() : List.copyOf(methods);
+        loops = loops == null ? List.of() : List.copyOf(loops);
+        rules = rules == null ? List.of() : List.copyOf(rules);
+        constraints = constraints == null ? ConstraintRef.none() : constraints;
     }
 
-    public static ControlRef of(ControlKind kind) {
-        return new ControlRef(kind, List.of(), List.of(), List.of(), List.of(), null, null, List.of());
+    public ControlRef output(MotorRef output) {
+        return new ControlRef(mode, Objects.requireNonNull(output, "output"), followers, feedback, refs, loops, rules, constraints);
     }
 
-    public ControlRef motor(MotorRef motor) {
-        Objects.requireNonNull(motor, "motor");
-        List<MotorRef> updated = new ArrayList<>(motors);
-        updated.add(motor);
-        return withMotors(updated);
+    public ControlRef follower(MotorRef follower) {
+        Objects.requireNonNull(follower, "follower");
+        List<MotorRef> updated = new ArrayList<>(followers);
+        updated.add(follower);
+        return new ControlRef(mode, output, updated, feedback, refs, loops, rules, constraints);
     }
 
-    public ControlRef motors(MotorRef... motors) {
+    public ControlRef followers(MotorRef... followers) {
         ControlRef updated = this;
-        for (MotorRef motor : motors) {
-            updated = updated.motor(motor);
+        for (MotorRef follower : followers) {
+            updated = updated.follower(follower);
         }
         return updated;
     }
@@ -56,21 +56,22 @@ public record ControlRef(
         Objects.requireNonNull(encoder, "encoder");
         List<EncoderRef> updated = new ArrayList<>(feedback);
         updated.add(encoder);
-        return withFeedback(updated);
+        return new ControlRef(mode, output, followers, updated, refs, loops, rules, constraints);
     }
 
-    public ControlRef sensor(DigitalInputRef sensor) {
-        Objects.requireNonNull(sensor, "sensor");
-        List<DigitalInputRef> updated = new ArrayList<>(sensors);
-        updated.add(sensor);
-        return withSensors(updated);
+    public ControlRef feedback(EncoderRef... encoders) {
+        ControlRef updated = this;
+        for (EncoderRef encoder : encoders) {
+            updated = updated.feedback(encoder);
+        }
+        return updated;
     }
 
     public ControlRef ref(Object ref) {
         Objects.requireNonNull(ref, "ref");
         List<Object> updated = new ArrayList<>(refs);
         updated.add(ref);
-        return withRefs(updated);
+        return new ControlRef(mode, output, followers, feedback, updated, loops, rules, constraints);
     }
 
     public ControlRef refs(Object... refs) {
@@ -81,70 +82,113 @@ public record ControlRef(
         return updated;
     }
 
-    public ControlRef range(RangeRef range) {
-        return new ControlRef(kind, motors, feedback, sensors, refs, Objects.requireNonNull(range, "range"), gearRatio, methods);
-    }
-
-    public ControlRef gearRatio(GearRatioRef gearRatio) {
-        return new ControlRef(kind, motors, feedback, sensors, refs, range, Objects.requireNonNull(gearRatio, "gearRatio"), methods);
-    }
-
-    public ControlRef using(ControlMethod... methods) {
+    public ControlRef loops(ControlLoopRef... loops) {
         ControlRef updated = this;
-        for (ControlMethod method : methods) {
-            updated = updated.method(method);
+        for (ControlLoopRef loop : loops) {
+            updated = updated.loop(loop);
         }
         return updated;
     }
 
-    public ControlRef method(ControlMethod method) {
-        Objects.requireNonNull(method, "method");
-        List<ControlMethod> updated = new ArrayList<>(methods);
-        updated.add(method);
-        return withMethods(updated);
+    public ControlRef loop(ControlLoopRef loop) {
+        Objects.requireNonNull(loop, "loop");
+        List<ControlLoopRef> updated = new ArrayList<>(loops);
+        updated.add(loop);
+        return new ControlRef(mode, output, followers, feedback, refs, updated, rules, constraints);
+    }
+
+    public ControlRef rule(RuleRef rule) {
+        Objects.requireNonNull(rule, "rule");
+        List<RuleRef> updated = new ArrayList<>(rules);
+        updated.add(rule);
+        return new ControlRef(mode, output, followers, feedback, refs, loops, updated, constraints);
+    }
+
+    public ControlRef rules(RuleRef... rules) {
+        ControlRef updated = this;
+        for (RuleRef rule : rules) {
+            updated = updated.rule(rule);
+        }
+        return updated;
     }
 
     public ControlRef pid(double p, double i, double d) {
-        return method(ControlMethods.pid(p, i, d));
+        return loop(PidRef.of(p, i, d));
     }
 
     public ControlRef pid(PidRef pid) {
-        return method(ControlMethods.pid(pid));
+        return loop(pid);
     }
 
     public ControlRef ff(double staticGain, double velocityGain, double gravityGain) {
-        return method(ControlMethods.ff(staticGain, velocityGain, gravityGain));
+        return feedforward(FeedforwardRef.of(staticGain, velocityGain, gravityGain));
     }
 
     public ControlRef feedforward(FeedforwardRef feedforward) {
-        return method(ControlMethods.feedforward(feedforward));
+        return loop(feedforward);
     }
 
     public ControlRef crt(EncoderRef coarse, EncoderRef fine, GearRatioRef ratio) {
-        return method(ControlMethods.crt(coarse, fine, ratio));
+        return loop(new CrtRef(coarse, fine, ratio));
     }
 
-    public ControlRef custom(String kind, Object... refs) {
-        return method(ControlMethods.custom(kind, Arrays.copyOf(refs, refs.length)));
+    public ControlRef constraints(ConstraintRef constraints) {
+        return new ControlRef(mode, output, followers, feedback, refs, loops, rules, Objects.requireNonNull(constraints, "constraints"));
     }
 
-    private ControlRef withMotors(List<MotorRef> motors) {
-        return new ControlRef(kind, motors, feedback, sensors, refs, range, gearRatio, methods);
+    public List<MotorRef> motors() {
+        if (output == null) {
+            return followers;
+        }
+        List<MotorRef> motors = new ArrayList<>();
+        motors.add(output);
+        motors.addAll(followers);
+        return List.copyOf(motors);
     }
 
-    private ControlRef withFeedback(List<EncoderRef> feedback) {
-        return new ControlRef(kind, motors, feedback, sensors, refs, range, gearRatio, methods);
+    public MechanismState set(double target) {
+        if (mode == ControlMode.VELOCITY) {
+            return velocity(target);
+        }
+        return position(target);
     }
 
-    private ControlRef withSensors(List<DigitalInputRef> sensors) {
-        return new ControlRef(kind, motors, feedback, sensors, refs, range, gearRatio, methods);
+    public MechanismState set(DoubleSupplier target) {
+        if (mode == ControlMode.VELOCITY) {
+            return velocity(target);
+        }
+        return position(target);
     }
 
-    private ControlRef withRefs(List<Object> refs) {
-        return new ControlRef(kind, motors, feedback, sensors, refs, range, gearRatio, methods);
+    public MechanismState percent(double percent) {
+        return States.percent(this, percent);
     }
 
-    private ControlRef withMethods(List<ControlMethod> methods) {
-        return new ControlRef(kind, motors, feedback, sensors, refs, range, gearRatio, methods);
+    public MechanismState percent(DoubleSupplier percent) {
+        return States.percent(this, percent);
+    }
+
+    public MechanismState voltage(double volts) {
+        return States.voltage(this, volts);
+    }
+
+    public MechanismState voltage(DoubleSupplier volts) {
+        return States.voltage(this, volts);
+    }
+
+    public MechanismState position(double position) {
+        return States.position(this, position);
+    }
+
+    public MechanismState position(DoubleSupplier position) {
+        return States.position(this, position);
+    }
+
+    public MechanismState velocity(double velocity) {
+        return States.velocity(this, velocity);
+    }
+
+    public MechanismState velocity(DoubleSupplier velocity) {
+        return States.velocity(this, velocity);
     }
 }

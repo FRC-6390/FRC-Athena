@@ -21,4 +21,16 @@ public record TrackWidth(double meters) {
     public static TrackWidth meters(double meters) {
         return new TrackWidth(meters);
     }
+
+    public static TrackWidth inches(double inches) {
+        return meters(inches * 0.0254);
+    }
+
+    public static TrackWidth feet(double feet) {
+        return inches(feet * 12.0);
+    }
+
+    public static TrackWidth centimeters(double centimeters) {
+        return meters(centimeters / 100.0);
+    }
 }

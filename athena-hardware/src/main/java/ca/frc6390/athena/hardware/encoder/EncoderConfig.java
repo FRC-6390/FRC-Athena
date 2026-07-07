@@ -18,6 +18,7 @@ public final class EncoderConfig {
     private double gearRatio = 1.0;
     private double conversion = 1.0;
     private double offset;
+    private EncoderUnit units = EncoderUnit.RAW;
 
     private EncoderConfig() {
     }
@@ -71,6 +72,7 @@ public final class EncoderConfig {
         gearRatio = encoder.gearRatio();
         conversion = encoder.conversion();
         offset = encoder.offset();
+        units = encoder.units();
         return this;
     }
 
@@ -157,6 +159,22 @@ public final class EncoderConfig {
         return this;
     }
 
+    public EncoderConfig wheelDiameterMeters(double diameterMeters) {
+        if (!Double.isFinite(diameterMeters) || diameterMeters <= 0.0) {
+            throw new IllegalArgumentException("Wheel diameter must be positive.");
+        }
+        return conversion(Math.PI * diameterMeters);
+    }
+
+    public EncoderConfig wheelDiameterInches(double diameterInches) {
+        return wheelDiameterMeters(diameterInches * 0.0254);
+    }
+
+    public EncoderConfig units(EncoderUnit units) {
+        this.units = units == null ? EncoderUnit.RAW : units;
+        return this;
+    }
+
     /**
      * Sets offset.
      *
@@ -179,6 +197,6 @@ public final class EncoderConfig {
         if (kind == null) {
             throw new IllegalStateException("Encoder hardware kind is required for " + ownerPath + "." + name);
         }
-        return new EncoderSpec(ownerPath, name, kind, id, canbus, signalType, inverted, gearRatio, conversion, offset);
+        return new EncoderSpec(ownerPath, name, kind, id, canbus, signalType, inverted, gearRatio, conversion, offset, units);
     }
 }

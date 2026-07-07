@@ -61,7 +61,8 @@ The build enforces:
   dashboard, WPILib, simulation, auto, PhotonVision, Limelight, PathPlanner,
   Choreo, and other vendor adapters must not leak into the default
   student-facing vendordep.
-- every publishable Athena artifact must expose a `mavenJava` publication.
+- every publishable Athena artifact must expose its expected publication
+  (`mavenJava` for Java modules, `pluginMaven` for `athena-plugin`).
 - every shipped vendor metadata resource must declare valid detection fields
   and unversioned adapter artifact coordinates.
 - every vendor metadata artifact coordinate must map to a real Gradle project.

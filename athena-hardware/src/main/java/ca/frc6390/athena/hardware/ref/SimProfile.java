@@ -6,20 +6,20 @@ import java.util.OptionalDouble;
  * Hardware-linked simulation metadata.
  *
  * @param kind simulation model kind
- * @param moi moment of inertia, when applicable
+ * @param momentOfInertia moment of inertia, when applicable
  * @param lengthMeters mechanism length, when applicable
  * @param gearRatio gear ratio, when applicable
  * @param simulatesGravity true when gravity should be modeled
  */
 public record SimProfile(
         Kind kind,
-        OptionalDouble moi,
+        OptionalDouble momentOfInertia,
         OptionalDouble lengthMeters,
         GearRatioRef gearRatio,
         boolean simulatesGravity) {
     public SimProfile {
         kind = kind == null ? Kind.MOTOR : kind;
-        moi = moi == null ? OptionalDouble.empty() : moi;
+        momentOfInertia = momentOfInertia == null ? OptionalDouble.empty() : momentOfInertia;
         lengthMeters = lengthMeters == null ? OptionalDouble.empty() : lengthMeters;
     }
 
@@ -35,11 +35,11 @@ public record SimProfile(
     /**
      * Returns a copy with moment of inertia.
      *
-     * @param moi moment of inertia
+     * @param momentOfInertia moment of inertia
      * @return updated profile
      */
-    public SimProfile moi(double moi) {
-        return new SimProfile(kind, OptionalDouble.of(moi), lengthMeters, gearRatio, simulatesGravity);
+    public SimProfile momentOfInertia(double momentOfInertia) {
+        return new SimProfile(kind, OptionalDouble.of(momentOfInertia), lengthMeters, gearRatio, simulatesGravity);
     }
 
     /**
@@ -49,7 +49,7 @@ public record SimProfile(
      * @return updated profile
      */
     public SimProfile lengthMeters(double lengthMeters) {
-        return new SimProfile(kind, moi, OptionalDouble.of(lengthMeters), gearRatio, simulatesGravity);
+        return new SimProfile(kind, momentOfInertia, OptionalDouble.of(lengthMeters), gearRatio, simulatesGravity);
     }
 
     /**
@@ -59,7 +59,7 @@ public record SimProfile(
      * @return updated profile
      */
     public SimProfile gearRatio(GearRatioRef gearRatio) {
-        return new SimProfile(kind, moi, lengthMeters, gearRatio, simulatesGravity);
+        return new SimProfile(kind, momentOfInertia, lengthMeters, gearRatio, simulatesGravity);
     }
 
     /**
@@ -69,6 +69,6 @@ public record SimProfile(
      * @return updated profile
      */
     public SimProfile gravity(boolean simulatesGravity) {
-        return new SimProfile(kind, moi, lengthMeters, gearRatio, simulatesGravity);
+        return new SimProfile(kind, momentOfInertia, lengthMeters, gearRatio, simulatesGravity);
     }
 }

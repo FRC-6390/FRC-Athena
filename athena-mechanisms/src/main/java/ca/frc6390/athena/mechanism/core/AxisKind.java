@@ -1,10 +1,11 @@
 package ca.frc6390.athena.mechanism.core;
 
 /**
- * High-level command shape for a control binding.
+ * High-level command shape for an axis binding.
  */
-public enum ControlKind {
+public enum AxisKind {
     PERCENT,
+    VOLTAGE,
     POSITION,
     VELOCITY,
     CUSTOM

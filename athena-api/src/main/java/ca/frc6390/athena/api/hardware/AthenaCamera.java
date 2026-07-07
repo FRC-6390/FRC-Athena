@@ -10,6 +10,9 @@ public enum AthenaCamera implements CameraKind {
     /** Limelight camera pipeline. */
     LIMELIGHT("limelight:camera"),
 
+    /** HeliOS camera pipeline. */
+    HELIOS("helios:camera"),
+
     /** Simulation-only camera source. */
     SIM("sim:camera");
 

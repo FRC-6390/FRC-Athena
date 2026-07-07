@@ -7,19 +7,19 @@ import java.util.function.DoubleSupplier;
 /**
  * Controller axis child ref.
  */
-public record AxisRef(ControllerRef controller, String name, DoubleSupplier reader) {
+public record ControllerAxisRef(ControllerRef controller, String name, DoubleSupplier reader) {
     /**
-     * Creates an axis ref.
+     * Creates a controller axis ref.
      *
      * @param controller controller
      * @param name axis name
-     * @return axis ref
+     * @return controller axis ref
      */
-    public static AxisRef of(ControllerRef controller, String name) {
-        return new AxisRef(controller, name, null);
+    public static ControllerAxisRef of(ControllerRef controller, String name) {
+        return new ControllerAxisRef(controller, name, null);
     }
 
-    public AxisRef {
+    public ControllerAxisRef {
         Objects.requireNonNull(controller, "controller");
         name = name == null || name.isBlank() ? "axis" : name;
     }
@@ -30,8 +30,8 @@ public record AxisRef(ControllerRef controller, String name, DoubleSupplier read
      * @param reader reader
      * @return bound ref
      */
-    public AxisRef bind(DoubleSupplier reader) {
-        return new AxisRef(controller, name, Objects.requireNonNull(reader, "reader"));
+    public ControllerAxisRef bind(DoubleSupplier reader) {
+        return new ControllerAxisRef(controller, name, Objects.requireNonNull(reader, "reader"));
     }
 
     /**

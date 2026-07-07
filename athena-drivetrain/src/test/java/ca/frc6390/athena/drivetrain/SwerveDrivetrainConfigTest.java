@@ -43,6 +43,13 @@ class SwerveDrivetrainConfigTest {
     }
 
     @Test
+    void geometryRefsCanUseCommonDistanceUnits() {
+        assertEquals(0.5715, TrackWidth.inches(22.5).meters(), 1.0e-9);
+        assertEquals(0.3048, WheelBase.feet(1.0).meters(), 1.0e-9);
+        assertEquals(0.42, TrackWidth.centimeters(42.0).meters(), 1.0e-9);
+    }
+
+    @Test
     void moduleInversionOverridesDrivetrainDefault() {
         var module = Drivetrains.swerve("drive")
                 .driveInverted(true)

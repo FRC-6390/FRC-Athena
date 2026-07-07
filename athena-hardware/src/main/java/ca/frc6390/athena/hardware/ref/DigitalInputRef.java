@@ -5,12 +5,16 @@ import ca.frc6390.athena.hardware.input.InputSpec;
 import ca.frc6390.athena.hardware.input.InputType;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.function.BooleanSupplier;
 
 /**
  * Reusable digital input declaration.
  */
 public record DigitalInputRef(String name, int channel, boolean isInverted, BooleanSupplier reader) {
+    private static final ConcurrentMap<DigitalInputRef, BooleanSupplier> RUNTIME_READERS = new ConcurrentHashMap<>();
+
     /**
      * Creates a roboRIO digital input declaration.
      *
@@ -18,18 +22,7 @@ public record DigitalInputRef(String name, int channel, boolean isInverted, Bool
      * @return digital input ref
      */
     public static DigitalInputRef rio(int channel) {
-        return named("dio" + channel, channel);
-    }
-
-    /**
-     * Creates a named roboRIO digital input declaration.
-     *
-     * @param name input name
-     * @param channel DIO channel
-     * @return digital input ref
-     */
-    public static DigitalInputRef named(String name, int channel) {
-        return new DigitalInputRef(name, channel, false, null);
+        return new DigitalInputRef("dio" + channel, channel, false, null);
     }
 
     public DigitalInputRef {
@@ -66,13 +59,27 @@ public record DigitalInputRef(String name, int channel, boolean isInverted, Bool
     }
 
     /**
+     * Binds a runtime reader to an existing ref instance.
+     *
+     * @param ref input ref
+     * @param reader runtime reader
+     */
+    public static void bindRuntime(DigitalInputRef ref, BooleanSupplier reader) {
+        RUNTIME_READERS.put(Objects.requireNonNull(ref, "ref"), Objects.requireNonNull(reader, "reader"));
+    }
+
+    /**
      * Reads the raw digital value.
      *
      * @return raw value
      */
     public boolean raw() {
         if (reader == null) {
-            throw new IllegalStateException("Digital input " + defaultName() + " is not runtime-bound.");
+            BooleanSupplier runtimeReader = RUNTIME_READERS.get(this);
+            if (runtimeReader == null) {
+                throw new IllegalStateException("Digital input " + defaultName() + " is not runtime-bound.");
+            }
+            return runtimeReader.getAsBoolean();
         }
         return reader.getAsBoolean();
     }

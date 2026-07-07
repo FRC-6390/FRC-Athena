@@ -12,12 +12,17 @@ import org.junit.jupiter.api.Test;
 
 import ca.frc6390.athena.commands.CommandSpec;
 import ca.frc6390.athena.localization.config.Localizations;
+import ca.frc6390.athena.mechanism.core.MechanismContext;
+import ca.frc6390.athena.mechanism.core.PathRef;
+import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.mechanism.core.Paths;
 import ca.frc6390.athena.runtime.control.ManualClock;
 import ca.frc6390.athena.runtime.control.RobotSpeeds;
 import ca.frc6390.athena.telemetry.TelemetryKey;
 import ca.frc6390.athena.telemetry.TelemetryRegistry;
 import ca.frc6390.athena.telemetry.networktables.NetworkTablesTelemetrySink;
 import ca.frc6390.athena.wpilib.commands.WpilibCommandAdapter;
+import ca.frc6390.athena.wpilib.commands.WpilibCommandPathRuntime;
 import ca.frc6390.athena.wpilib.commands.WpilibCommandScheduler;
 import ca.frc6390.athena.wpilib.commands.WpilibTriggerBindings;
 import ca.frc6390.athena.wpilib.controllers.WpilibControllerBindings;
@@ -60,6 +65,25 @@ class WpilibAdapterBoundaryTest {
         assertEquals("score", wpilibCommand.getName());
         assertEquals(3, events.get());
         assertTrue(wpilibCommand.getRequirements().contains(shooter));
+    }
+
+    @Test
+    void commandPathRuntimeRunsWpilibCommandLifecycle() {
+        RecordingPathCommand command = new RecordingPathCommand();
+        PathRef path = Paths.choreo("leave");
+        PathRuntime runtime = WpilibCommandPathRuntime.of(ignored -> command);
+
+        runtime.initialize(path, MechanismContext.empty());
+        runtime.execute(path, MechanismContext.empty());
+        assertFalse(runtime.isFinished(path, MechanismContext.empty()));
+        command.finished = true;
+        assertTrue(runtime.isFinished(path, MechanismContext.empty()));
+        runtime.end(path, MechanismContext.empty(), false);
+
+        assertEquals(1, command.initialized);
+        assertEquals(1, command.executed);
+        assertEquals(1, command.ended);
+        assertFalse(command.interrupted);
     }
 
     @Test
@@ -317,6 +341,35 @@ class WpilibAdapterBoundaryTest {
     }
 
     private static final class RecordingSubsystem implements Subsystem {
+    }
+
+    private static final class RecordingPathCommand extends Command {
+        private int initialized;
+        private int executed;
+        private int ended;
+        private boolean finished;
+        private boolean interrupted;
+
+        @Override
+        public void initialize() {
+            initialized++;
+        }
+
+        @Override
+        public void execute() {
+            executed++;
+        }
+
+        @Override
+        public boolean isFinished() {
+            return finished;
+        }
+
+        @Override
+        public void end(boolean interrupted) {
+            ended++;
+            this.interrupted = interrupted;
+        }
     }
 
     private static final class RecordingSchedulerClient implements WpilibCommandScheduler.SchedulerClient {
