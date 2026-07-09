@@ -1,28 +1,38 @@
 package ca.frc6390.athena.vendor.limelight;
 
-import ca.frc6390.athena.api.hardware.AthenaCamera;
-import ca.frc6390.athena.api.hardware.CameraKind;
-import ca.frc6390.athena.vision.spec.CameraSpec;
-import ca.frc6390.athena.vision.spec.VisionFrame;
-import edu.wpi.first.networktables.NetworkTable;
-import edu.wpi.first.networktables.NetworkTableInstance;
+import java.util.List;
 import java.util.Objects;
 
+import ca.frc6390.athena.api.hardware.CameraKind;
+import ca.frc6390.athena.api.hardware.CameraKinds;
+import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import ca.frc6390.athena.runtime.measurement.Measurement;
+import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
+import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
+import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
+import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.ref.LimelightDevice;
+import ca.frc6390.athena.vision.ref.PoseSignal;
+import ca.frc6390.athena.vision.ref.TargetSignal;
+import ca.frc6390.athena.vision.runtime.CameraAdapter;
+import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableInstance;
+
 /**
- * Limelight camera adapter backed by Limelight NetworkTables values.
+ * Limelight NetworkTables adapter for Athena camera devices and signals.
  */
-public final class LimelightCameraAdapter {
+public final class LimelightCameraAdapter implements CameraAdapter {
     private static final String DEFAULT_TABLE_NAME = "limelight";
     private static final double[] EMPTY_POSE = new double[0];
 
     private final LimelightClient client;
 
     /**
-     * Creates an adapter backed by the default NetworkTables instance and the
-     * default Limelight table name.
+     * Creates an adapter backed by the default NetworkTables instance and table.
      */
     public LimelightCameraAdapter() {
-        this(NetworkTableInstance.getDefault(), DEFAULT_TABLE_NAME);
+        this.client = null;
     }
 
     /**
@@ -55,54 +65,162 @@ public final class LimelightCameraAdapter {
      * @return true if supported
      */
     public boolean supports(CameraKind kind) {
-        return kind == AthenaCamera.LIMELIGHT || kind.key().equals("limelight:camera");
+        return kind == CameraKinds.LIMELIGHT || kind != null && kind.key().equals("limelight:camera");
     }
 
     /**
-     * Returns true when a camera spec is handled by this adapter.
+     * Returns true when a camera device is handled by this adapter.
      *
-     * @param spec camera spec
+     * @param device camera device
      * @return true if supported
      */
-    public boolean supports(CameraSpec spec) {
-        return spec != null && supports(spec.kind());
+    public boolean supports(CameraDevice device) {
+        return device instanceof LimelightDevice || device != null && supports(device.kind());
     }
 
-    /**
-     * Converts a Limelight-shaped target into Athena's generic frame model.
-     *
-     * @param target target values
-     * @return vision frame
-     */
-    public VisionFrame frame(LimelightTarget target) {
-        return frameFromTarget(target);
-    }
-
-    /**
-     * Reads the latest Limelight NetworkTables values and converts them to an
-     * Athena vision frame.
-     *
-     * @return latest vision frame
-     */
-    public VisionFrame latestFrame() {
-        return frame(client.latestTarget());
-    }
-
-    /**
-     * Converts a Limelight-shaped target into Athena's generic frame model.
-     *
-     * @param target target values
-     * @return vision frame
-     */
-    public static VisionFrame frameFromTarget(LimelightTarget target) {
-        if (target == null || !target.hasTarget()) {
-            return VisionFrame.noTarget();
+    @Override
+    public CameraDevice bind(CameraDevice camera) {
+        if (camera instanceof LimelightDevice limelight) {
+            return bind(limelight);
         }
-        return VisionFrame.of(target.toObservation());
+        throw new IllegalArgumentException("Limelight adapter cannot bind camera " + camera.name());
+    }
+
+    /**
+     * Binds this adapter's signals to a Limelight device declaration.
+     *
+     * @param device Limelight declaration
+     * @return updated device declaration
+     */
+    public LimelightDevice bind(LimelightDevice device) {
+        Objects.requireNonNull(device, "device");
+        LimelightFrameSignal signal = new LimelightFrameSignal(device, client());
+        return device
+                .bindPose(signal::poseMeasurements)
+                .bindTargets(signal::targetMeasurements);
+    }
+
+    /**
+     * Creates a pose signal for a Limelight device.
+     *
+     * @param device Limelight declaration
+     * @return pose signal
+     */
+    public PoseSignal poseSignal(LimelightDevice device) {
+        return new LimelightPoseNetworkTablesSignal(device, client());
+    }
+
+    /**
+     * Creates a target signal for a Limelight device.
+     *
+     * @param device Limelight declaration
+     * @return target signal
+     */
+    public TargetSignal targetSignal(LimelightDevice device) {
+        return new LimelightTargetNetworkTablesSignal(device, client());
+    }
+
+    private LimelightClient client() {
+        return client == null ? new NetworkTablesLimelightClient(NetworkTableInstance.getDefault(), DEFAULT_TABLE_NAME) : client;
     }
 
     interface LimelightClient {
-        LimelightTarget latestTarget();
+        LimelightFrame latestFrame();
+    }
+
+    record LimelightFrame(LimelightTarget target, double[] botPoseBlue) {
+        LimelightFrame {
+            target = target == null ? LimelightTarget.noTarget() : target;
+            botPoseBlue = botPoseBlue == null ? EMPTY_POSE : botPoseBlue.clone();
+        }
+    }
+
+    private static final class LimelightFrameSignal {
+        private final LimelightDevice camera;
+        private final LimelightClient client;
+        private LimelightFrame latest = new LimelightFrame(LimelightTarget.noTarget(), EMPTY_POSE);
+        private boolean poseFramePendingTarget;
+
+        private LimelightFrameSignal(LimelightDevice camera, LimelightClient client) {
+            this.camera = Objects.requireNonNull(camera, "camera");
+            this.client = Objects.requireNonNull(client, "client");
+        }
+
+        private List<Measurement> poseMeasurements() {
+            latest = client.latestFrame();
+            poseFramePendingTarget = true;
+            return measurementsFromPose(camera, latest);
+        }
+
+        private List<Measurement> targetMeasurements() {
+            if (!poseFramePendingTarget) {
+                latest = client.latestFrame();
+            }
+            poseFramePendingTarget = false;
+            return measurementsFromTarget(camera, latest);
+        }
+    }
+
+    private static final class LimelightPoseNetworkTablesSignal implements PoseSignal {
+        private final LimelightDevice camera;
+        private final LimelightClient client;
+
+        private LimelightPoseNetworkTablesSignal(LimelightDevice camera, LimelightClient client) {
+            this.camera = Objects.requireNonNull(camera, "camera");
+            this.client = Objects.requireNonNull(client, "client");
+        }
+
+        @Override
+        public LimelightDevice camera() {
+            return camera;
+        }
+
+        @Override
+        public List<Measurement> measurements() {
+            return measurementsFromPose(camera, client.latestFrame());
+        }
+    }
+
+    private static final class LimelightTargetNetworkTablesSignal implements TargetSignal {
+        private final LimelightDevice camera;
+        private final LimelightClient client;
+
+        private LimelightTargetNetworkTablesSignal(LimelightDevice camera, LimelightClient client) {
+            this.camera = Objects.requireNonNull(camera, "camera");
+            this.client = Objects.requireNonNull(client, "client");
+        }
+
+        @Override
+        public LimelightDevice camera() {
+            return camera;
+        }
+
+        @Override
+        public List<Measurement> measurements() {
+            return measurementsFromTarget(camera, client.latestFrame());
+        }
+    }
+
+    private record LimelightPoseMeasurement(
+            PoseSnapshot pose,
+            RobotVelocity speeds,
+            double timestampSeconds,
+            double latencySeconds,
+            double ambiguity,
+            int targetCount,
+            MeasurementStdDevs stdDevs,
+            Object source) implements PoseMeasurementSample {
+    }
+
+    private record LimelightTargetMeasurement(
+            int targetId,
+            double yawDegrees,
+            double pitchDegrees,
+            double distanceMeters,
+            double confidence,
+            double timestampSeconds,
+            double latencySeconds,
+            Object source) implements TargetMeasurementSample {
     }
 
     private static final class NetworkTablesLimelightClient implements LimelightClient {
@@ -114,18 +232,18 @@ public final class LimelightCameraAdapter {
         }
 
         @Override
-        public LimelightTarget latestTarget() {
+        public LimelightFrame latestFrame() {
             boolean hasTarget = table.getEntry("tv").getDouble(0.0) >= 1.0;
-            if (!hasTarget) {
-                return LimelightTarget.noTarget();
-            }
             double[] targetPose = table.getEntry("targetpose_cameraspace").getDoubleArray(EMPTY_POSE);
-            return LimelightTarget.aprilTag(
-                    (int) Math.round(table.getEntry("tid").getDouble(-1.0)),
-                    table.getEntry("tx").getDouble(0.0),
-                    table.getEntry("ty").getDouble(0.0),
-                    distanceMeters(targetPose),
-                    table.getEntry("ta").getDouble(0.0));
+            LimelightTarget target = hasTarget
+                    ? LimelightTarget.aprilTag(
+                            (int) Math.round(table.getEntry("tid").getDouble(-1.0)),
+                            table.getEntry("tx").getDouble(0.0),
+                            table.getEntry("ty").getDouble(0.0),
+                            distanceMeters(targetPose),
+                            table.getEntry("ta").getDouble(0.0))
+                    : LimelightTarget.noTarget();
+            return new LimelightFrame(target, table.getEntry("botpose_wpiblue").getDoubleArray(EMPTY_POSE));
         }
 
         private static String normalizeTableName(String tableName) {
@@ -138,5 +256,42 @@ public final class LimelightCameraAdapter {
             }
             return Math.hypot(Math.hypot(targetPose[0], targetPose[1]), targetPose[2]);
         }
+    }
+
+    private static double finiteOrZero(double value) {
+        return Double.isFinite(value) ? value : 0.0;
+    }
+
+    static List<Measurement> measurementsFromPose(Object source, LimelightFrame frame) {
+        double[] pose = frame.botPoseBlue();
+        if (pose.length < 6) {
+            return List.of();
+        }
+        double latencySeconds = pose.length > 6 ? Math.max(0.0, finiteOrZero(pose[6]) / 1000.0) : 0.0;
+        int targetCount = frame.target().hasTarget() ? 1 : 0;
+        return List.of(new LimelightPoseMeasurement(
+                new PoseSnapshot(finiteOrZero(pose[0]), finiteOrZero(pose[1]), Math.toRadians(finiteOrZero(pose[5]))),
+                RobotVelocity.zero(),
+                0.0,
+                latencySeconds,
+                0.0,
+                targetCount,
+                MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
+                source));
+    }
+
+    static List<Measurement> measurementsFromTarget(Object source, LimelightFrame frame) {
+        LimelightTarget target = frame.target();
+        return target.hasTarget()
+                ? List.of(new LimelightTargetMeasurement(
+                        target.tagId(),
+                        target.txDegrees(),
+                        target.tyDegrees(),
+                        target.distanceMeters(),
+                        target.targetArea(),
+                        0.0,
+                        0.0,
+                        source))
+                : List.of();
     }
 }

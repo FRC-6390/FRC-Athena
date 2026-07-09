@@ -13,7 +13,7 @@ import ca.frc6390.athena.api.hardware.MotorKind;
  * Registry of installed hardware backends.
  */
 public final class BackendRegistry {
-    private static volatile BackendRegistry global = discover();
+    private static volatile BackendRegistry global;
 
     private final List<MotorBackend> motorBackends;
     private final List<EncoderBackend> encoderBackends;
@@ -101,16 +101,26 @@ public final class BackendRegistry {
      * @return global registry
      */
     public static BackendRegistry global() {
-        return global;
+        BackendRegistry registry = global;
+        if (registry == null) {
+            synchronized (BackendRegistry.class) {
+                registry = global;
+                if (registry == null) {
+                    registry = discover();
+                    global = registry;
+                }
+            }
+        }
+        return registry;
     }
 
     /**
-     * Replaces the global registry. Intended for tests and bootstrap code.
+     * Replaces the global registry. Passing null clears the override so the next global lookup discovers lazily.
      *
      * @param registry new registry
      */
     public static void setGlobal(BackendRegistry registry) {
-        global = registry == null ? discover() : registry;
+        global = registry;
     }
 
     /**

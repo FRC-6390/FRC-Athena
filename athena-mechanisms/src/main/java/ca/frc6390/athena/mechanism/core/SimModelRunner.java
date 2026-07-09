@@ -1,12 +1,11 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.ref.DigitalInputRef;
-import ca.frc6390.athena.hardware.ref.EncoderRef;
-import ca.frc6390.athena.hardware.ref.MotorRef;
-import ca.frc6390.athena.hardware.ref.RangeRef;
-import ca.frc6390.athena.hardware.ref.RuntimeBoolean;
-import ca.frc6390.athena.hardware.ref.SimLimitRef;
-import ca.frc6390.athena.hardware.ref.SimRef;
+import ca.frc6390.athena.hardware.device.DigitalInputDevice;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.Range;
+import ca.frc6390.athena.hardware.sim.SimLimit;
+import ca.frc6390.athena.hardware.sim.SimModel;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.IdentityHashMap;
@@ -17,29 +16,29 @@ import java.util.Objects;
 import java.util.Set;
 
 final class SimModelRunner {
-    private final Map<SimRef, ModelState> states = new IdentityHashMap<>();
+    private final Map<SimModel, ModelState> states = new IdentityHashMap<>();
 
     void step(
-            Collection<SimRef> simulations,
-            Map<MotorRef, SimMotor> motors,
-            Map<EncoderRef, SimEncoder> encoders,
-            Map<DigitalInputRef, RuntimeBoolean> digitalInputs,
+            Collection<SimModel> simulations,
+            Map<MotorDevice, SimMotor> motors,
+            Map<EncoderDevice, SimEncoder> encoders,
+            Map<DigitalInputDevice, SimDigitalInput> digitalInputs,
             double dtSeconds) {
         if (dtSeconds <= 0.0 || simulations.isEmpty()) {
             return;
         }
-        for (SimRef simulation : simulations) {
+        for (SimModel simulation : simulations) {
             step(simulation, motors, encoders, digitalInputs, dtSeconds);
         }
     }
 
     private void step(
-            SimRef simulation,
-            Map<MotorRef, SimMotor> motors,
-            Map<EncoderRef, SimEncoder> encoders,
-            Map<DigitalInputRef, RuntimeBoolean> digitalInputs,
+            SimModel simulation,
+            Map<MotorDevice, SimMotor> motors,
+            Map<EncoderDevice, SimEncoder> encoders,
+            Map<DigitalInputDevice, SimDigitalInput> digitalInputs,
             double dtSeconds) {
-        List<EncoderRef> linkedEncoders = linkedEncoders(simulation);
+        List<EncoderDevice> linkedEncoders = linkedEncoders(simulation);
         if (simulation.motors().isEmpty() || linkedEncoders.isEmpty()) {
             return;
         }
@@ -51,7 +50,7 @@ final class SimModelRunner {
         state.velocity += (targetVelocity - state.velocity) * blend;
 
         double nextPosition = state.position + state.velocity * dtSeconds;
-        RangeRef range = range(simulation);
+        Range range = range(simulation);
         if (range != null) {
             double clamped = range.clamp(nextPosition);
             if (clamped != nextPosition) {
@@ -61,16 +60,16 @@ final class SimModelRunner {
         }
         state.position = nextPosition;
 
-        for (EncoderRef encoderRef : linkedEncoders) {
-            SimEncoder encoder = encoders.get(encoderRef);
+        for (EncoderDevice EncoderDevice : linkedEncoders) {
+            SimEncoder encoder = encoders.get(EncoderDevice);
             if (encoder != null) {
                 encoder.set(state.position);
                 encoder.setVelocity(state.velocity);
             }
         }
 
-        for (SimLimitRef limit : limits(simulation)) {
-            RuntimeBoolean input = digitalInputs.get(limit.sensor());
+        for (SimLimit limit : limits(simulation)) {
+            SimDigitalInput input = digitalInputs.get(limit.sensor());
             if (input != null) {
                 boolean active = Math.abs(state.position - limit.position()) <= limit.tolerance();
                 input.set(limit.sensor().isInverted() ? !active : active);
@@ -78,19 +77,19 @@ final class SimModelRunner {
         }
     }
 
-    private static ModelState initialState(List<EncoderRef> linkedEncoders, Map<EncoderRef, SimEncoder> encoders) {
-        for (EncoderRef encoderRef : linkedEncoders) {
-            SimEncoder encoder = encoders.get(encoderRef);
+    private static ModelState initialState(List<EncoderDevice> linkedEncoders, Map<EncoderDevice, SimEncoder> encoders) {
+        for (EncoderDevice EncoderDevice : linkedEncoders) {
+            SimEncoder encoder = encoders.get(EncoderDevice);
             if (encoder != null) {
-                return new ModelState(encoder.position(), encoder.velocity());
+                return new ModelState(encoder.positionRotations(), encoder.velocityRotationsPerSecond());
             }
         }
         return new ModelState(0.0, 0.0);
     }
 
-    private static double targetVelocity(SimRef simulation, Map<MotorRef, SimMotor> motors, double position) {
+    private static double targetVelocity(SimModel simulation, Map<MotorDevice, SimMotor> motors, double position) {
         List<MotorCommand> commands = new ArrayList<>();
-        for (MotorRef motor : simulation.motors()) {
+        for (MotorDevice motor : simulation.motors()) {
             MotorCommand command = command(motor, motors);
             if (command != null) {
                 commands.add(command);
@@ -113,7 +112,7 @@ final class SimModelRunner {
         return sum / commands.size();
     }
 
-    private static MotorCommand command(MotorRef motor, Map<MotorRef, SimMotor> motors) {
+    private static MotorCommand command(MotorDevice motor, Map<MotorDevice, SimMotor> motors) {
         Objects.requireNonNull(motor, "motor");
         SimMotor runtime = motors.get(motor);
         if (runtime != null && runtime.commandKind() != SimMotor.CommandKind.NEUTRAL) {
@@ -138,7 +137,7 @@ final class SimModelRunner {
         return null;
     }
 
-    private static double freeSpeed(SimRef simulation) {
+    private static double freeSpeed(SimModel simulation) {
         double speed = switch (simulation.kind()) {
             case ARM -> 120.0;
             case FLYWHEEL -> 120.0;
@@ -150,7 +149,7 @@ final class SimModelRunner {
         return Math.max(1.0, speed);
     }
 
-    private static double closedLoopGain(SimRef simulation) {
+    private static double closedLoopGain(SimModel simulation) {
         return switch (simulation.kind()) {
             case ARM -> 8.0;
             case FLYWHEEL -> 12.0;
@@ -158,7 +157,7 @@ final class SimModelRunner {
         };
     }
 
-    private static double responseTime(SimRef simulation) {
+    private static double responseTime(SimModel simulation) {
         double base = switch (simulation.kind()) {
             case ARM -> 0.22;
             case FLYWHEEL -> 0.16;
@@ -167,36 +166,32 @@ final class SimModelRunner {
         return base + simulation.momentOfInertia().orElse(0.0) * 2.0;
     }
 
-    private static List<EncoderRef> linkedEncoders(SimRef simulation) {
-        Set<EncoderRef> refs = new LinkedHashSet<>(simulation.encoders());
-        for (MotorRef motor : simulation.motors()) {
-            refs.add(motor.encoder());
+    private static List<EncoderDevice> linkedEncoders(SimModel simulation) {
+        Set<EncoderDevice> encoders = new LinkedHashSet<>(simulation.encoders());
+        for (MotorDevice motor : simulation.motors()) {
+            encoders.add(motor.encoder());
         }
-        for (Object ref : simulation.refs()) {
-            if (ref instanceof EncoderRef encoder) {
-                refs.add(encoder);
-            } else if (ref instanceof AxisRef axis) {
-                refs.addAll(axis.encoders());
+        for (Object dependency : simulation.dependencies()) {
+            if (dependency instanceof EncoderDevice encoder) {
+                encoders.add(encoder);
             }
         }
-        return List.copyOf(refs);
+        return List.copyOf(encoders);
     }
 
-    private static RangeRef range(SimRef simulation) {
-        for (Object ref : simulation.refs()) {
-            if (ref instanceof RangeRef range) {
+    private static Range range(SimModel simulation) {
+        for (Object dependency : simulation.dependencies()) {
+            if (dependency instanceof Range range) {
                 return range;
-            } else if (ref instanceof AxisRef axis && axis.range() != null) {
-                return axis.range();
             }
         }
         return null;
     }
 
-    private static List<SimLimitRef> limits(SimRef simulation) {
-        List<SimLimitRef> limits = new ArrayList<>();
-        for (Object ref : simulation.refs()) {
-            if (ref instanceof SimLimitRef limit) {
+    private static List<SimLimit> limits(SimModel simulation) {
+        List<SimLimit> limits = new ArrayList<>();
+        for (Object dependency : simulation.dependencies()) {
+            if (dependency instanceof SimLimit limit) {
                 limits.add(limit);
             }
         }

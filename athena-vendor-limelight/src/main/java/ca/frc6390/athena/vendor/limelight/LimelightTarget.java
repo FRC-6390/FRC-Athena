@@ -1,7 +1,5 @@
 package ca.frc6390.athena.vendor.limelight;
 
-import ca.frc6390.athena.vision.spec.VisionObservation;
-
 /**
  * Limelight target values needed by Athena.
  *
@@ -12,7 +10,7 @@ import ca.frc6390.athena.vision.spec.VisionObservation;
  * @param distanceMeters estimated distance
  * @param targetArea target area percentage
  */
-public record LimelightTarget(
+record LimelightTarget(
         boolean hasTarget,
         int tagId,
         double txDegrees,
@@ -47,13 +45,14 @@ public record LimelightTarget(
         return new LimelightTarget(false, -1, 0.0, 0.0, 0.0, 0.0);
     }
 
-    /**
-     * Converts this target to Athena's generic observation model.
-     *
-     * @return vision observation
-     */
-    public VisionObservation toObservation() {
-        double confidence = Double.isFinite(targetArea) ? Math.max(0.0, targetArea) : 0.0;
-        return VisionObservation.tag(tagId, txDegrees, tyDegrees, distanceMeters, confidence);
+    public LimelightTarget {
+        txDegrees = finiteOrZero(txDegrees);
+        tyDegrees = finiteOrZero(tyDegrees);
+        distanceMeters = Math.max(0.0, finiteOrZero(distanceMeters));
+        targetArea = Math.max(0.0, finiteOrZero(targetArea));
+    }
+
+    private static double finiteOrZero(double value) {
+        return Double.isFinite(value) ? value : 0.0;
     }
 }

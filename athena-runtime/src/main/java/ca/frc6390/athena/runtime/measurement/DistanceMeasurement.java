@@ -8,7 +8,7 @@ package ca.frc6390.athena.runtime.measurement;
  * @param latencySeconds latency
  * @param source source object
  */
-public record DistanceMeasurement(
+record DistanceMeasurement(
         double distanceMeters,
         double timestampSeconds,
         double latencySeconds,

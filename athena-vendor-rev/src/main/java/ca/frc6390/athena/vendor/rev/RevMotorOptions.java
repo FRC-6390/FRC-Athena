@@ -1,7 +1,7 @@
 package ca.frc6390.athena.vendor.rev;
 
 /**
- * REV-specific motor options stored in Athena motor specs.
+ * REV-specific motor options stored in Athena motor declarations.
  */
 public final class RevMotorOptions {
     private int smartCurrentLimitAmps;

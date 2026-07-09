@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Single runtime measurement sample.
  */
-public interface Measurement extends MeasurementRef {
+public interface Measurement extends MeasurementSignal {
     /**
      * Returns the measurement timestamp.
      *

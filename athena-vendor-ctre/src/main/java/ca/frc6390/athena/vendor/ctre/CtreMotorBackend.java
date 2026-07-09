@@ -1,12 +1,10 @@
 package ca.frc6390.athena.vendor.ctre;
 
-import ca.frc6390.athena.api.hardware.AthenaMotor;
 import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.backend.MotorBackend;
-import ca.frc6390.athena.hardware.backend.MotorDevice;
-import ca.frc6390.athena.hardware.capability.CapabilitySet;
-import ca.frc6390.athena.hardware.capability.MotorCapability;
-import ca.frc6390.athena.hardware.spec.MotorSpec;
+import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.device.MotorDevice;
 
 /**
  * CTRE motor backend boundary.
@@ -14,28 +12,17 @@ import ca.frc6390.athena.hardware.spec.MotorSpec;
 public final class CtreMotorBackend implements MotorBackend {
     @Override
     public boolean supports(MotorKind kind) {
-        return kind == AthenaMotor.TALON_FX
-                || kind == AthenaMotor.KRAKEN_X60
-                || kind == AthenaMotor.KRAKEN_X44
+        return kind == MotorKinds.TALON_FX
+                || kind == MotorKinds.KRAKEN_X60
+                || kind == MotorKinds.KRAKEN_X44
                 || kind.key().equals("ctre:talon-fx")
                 || kind.key().equals("ctre:kraken-x60")
                 || kind.key().equals("ctre:kraken-x44");
     }
 
     @Override
-    public CapabilitySet capabilities(MotorKind kind) {
-        return CapabilitySet.of(
-                MotorCapability.PERCENT_OUTPUT,
-                MotorCapability.VOLTAGE_OUTPUT,
-                MotorCapability.POSITION_CLOSED_LOOP,
-                MotorCapability.VELOCITY_CLOSED_LOOP,
-                MotorCapability.CURRENT_LIMIT,
-                MotorCapability.NEUTRAL_MODE,
-                MotorCapability.INTEGRATED_ENCODER);
-    }
-
-    @Override
-    public MotorDevice create(MotorSpec spec) {
-        return new CtreMotorDevice(spec, spec.vendorOptions().find(CtreMotorOptions.class).orElse(new CtreMotorOptions()));
+    public MotorHandle create(MotorDevice device) {
+        return new CtreMotorHandle(
+                device, device.vendorOptions().find(CtreMotorOptions.class).orElse(new CtreMotorOptions()));
     }
 }

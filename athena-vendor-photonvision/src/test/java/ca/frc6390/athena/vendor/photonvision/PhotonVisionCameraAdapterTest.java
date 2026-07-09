@@ -1,127 +1,167 @@
 package ca.frc6390.athena.vendor.photonvision;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import edu.wpi.first.math.geometry.Transform3d;
 import java.util.List;
 import java.util.Optional;
-
 import org.junit.jupiter.api.Test;
 
-import ca.frc6390.athena.api.hardware.AthenaCamera;
+import ca.frc6390.athena.api.hardware.CameraKinds;
+import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import ca.frc6390.athena.runtime.measurement.Measurement;
+import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
+import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
 import ca.frc6390.athena.vision.config.Cameras;
-import org.photonvision.targeting.PhotonPipelineResult;
-import org.photonvision.targeting.PhotonTrackedTarget;
-import org.photonvision.targeting.TargetCorner;
+import ca.frc6390.athena.vision.ref.PhotonVisionDevice;
+import ca.frc6390.athena.vision.ref.PhotonVisionPoseSignal;
 
 class PhotonVisionCameraAdapterTest {
-    private final PhotonVisionCameraAdapter adapter = new PhotonVisionCameraAdapter();
-
     @Test
-    void supportsPhotonVisionCamerasOnly() {
-        var photon = Cameras.camera("front", camera -> camera.hardware(AthenaCamera.PHOTONVISION, "frontCam"));
-        var limelight = Cameras.camera("front", camera -> camera.hardware(AthenaCamera.LIMELIGHT, "limelight"));
+    void poseSignalMetadataRecordsConfiguredStrategy() {
+        PhotonVisionDevice device = Cameras.photonVision("front");
 
-        assertTrue(adapter.supports(photon));
-        assertFalse(adapter.supports(limelight));
+        PhotonVisionPoseSignal defaultSignal = device.pose();
+        PhotonVisionPoseSignal multiTag = defaultSignal.multiTagOnCoprocessor();
+        PhotonVisionPoseSignal lowestAmbiguity = defaultSignal.lowestAmbiguity();
+
+        assertTrue(defaultSignal.metadata().isEmpty());
+        assertEquals("multi-tag-coprocessor", multiTag.strategy());
+        assertEquals("multi-tag-coprocessor", multiTag.metadata().get("strategy"));
+        assertEquals("lowest-ambiguity", lowestAmbiguity.strategy());
+        assertEquals("lowest-ambiguity", lowestAmbiguity.metadata().get("strategy"));
     }
 
     @Test
-    void convertsTargetsIntoVisionFrame() {
-        var frame = adapter.frame(List.of(
-                PhotonVisionTarget.aprilTag(3, 8.5, -2.0, 4.1, 0.4),
-                PhotonVisionTarget.aprilTag(7, -3.2, -1.5, 2.4, 0.08)));
+    void targetValuesConvertToTargetMeasurements() {
+        Object source = new Object();
+        List<Measurement> measurements = PhotonVisionCameraAdapter.measurementsFromTargets(
+                List.of(
+                        PhotonVisionTarget.aprilTag(7, 12.5, -3.0, 4.25, 0.2),
+                        PhotonVisionTarget.aprilTag(8, -2.0, 1.0, 1.5, Double.POSITIVE_INFINITY)),
+                source);
 
-        assertEquals(7, frame.tagId().orElseThrow());
-        assertEquals(0.92, frame.bestTarget().orElseThrow().confidence(), 1.0e-9);
+        assertEquals(2, measurements.size());
+        TargetMeasurementSample first = (TargetMeasurementSample) measurements.get(0);
+        TargetMeasurementSample second = (TargetMeasurementSample) measurements.get(1);
+
+        assertEquals(7, first.targetId());
+        assertEquals(12.5, first.yawDegrees(), 1.0e-9);
+        assertEquals(-3.0, first.pitchDegrees(), 1.0e-9);
+        assertEquals(4.25, first.distanceMeters(), 1.0e-9);
+        assertEquals(0.8, first.confidence(), 1.0e-9);
+        assertEquals(source, first.source());
+        assertEquals(8, second.targetId());
+        assertEquals(0.0, second.confidence(), 1.0e-9);
     }
 
     @Test
-    void emptyTargetListCreatesNoTargetFrame() {
-        assertFalse(PhotonVisionCameraAdapter.frameFromTargets(List.of()).hasValidTarget());
+    void emptyOrNullTargetsConvertToNoMeasurements() {
+        assertTrue(PhotonVisionCameraAdapter.measurementsFromTargets(null, this).isEmpty());
+        assertTrue(PhotonVisionCameraAdapter.measurementsFromTargets(List.of(), this).isEmpty());
     }
 
     @Test
-    void convertsRealPhotonPipelineResultIntoVisionFrame() {
-        var target = new PhotonTrackedTarget(
-                5.0,
-                -1.5,
-                12.0,
-                0.0,
-                4,
-                -1,
-                0.0f,
-                new Transform3d(3.0, 4.0, 0.0, edu.wpi.first.math.geometry.Rotation3d.kZero),
-                new Transform3d(),
-                0.25,
-                corners(),
-                corners());
-        var result = new PhotonPipelineResult(0L, 0L, 0L, 0L, List.of(target), Optional.empty());
+    void resultTimestampsPropagateThroughFakeableResultSeam() {
+        Object source = new Object();
+        PhotonVisionCameraAdapter.PhotonVisionResult result = new PhotonVisionCameraAdapter.PhotonVisionResult(
+                42.25,
+                0.035,
+                List.of(PhotonVisionTarget.aprilTag(7, 12.5, -3.0, 4.25, 0.2)),
+                Optional.of(new PhotonVisionCameraAdapter.PhotonVisionPoseEstimate(
+                        new PoseSnapshot(2.0, 3.0, 0.5),
+                        42.25,
+                        0.2,
+                        2)));
 
-        var frame = PhotonVisionCameraAdapter.frameFromResult(result);
+        TargetMeasurementSample target =
+                (TargetMeasurementSample) PhotonVisionCameraAdapter.targetMeasurementsFromResult(result, source).get(0);
+        PoseMeasurementSample pose =
+                (PoseMeasurementSample) PhotonVisionCameraAdapter.poseMeasurementsFromResult(result, source).get(0);
 
-        assertTrue(frame.hasValidTarget());
-        assertEquals(4, frame.tagId().orElseThrow());
-        assertEquals(5.0, frame.yawDegrees().orElseThrow(), 1.0e-9);
-        assertEquals(-1.5, frame.pitchDegrees().orElseThrow(), 1.0e-9);
-        assertEquals(5.0, frame.distanceMeters().orElseThrow(), 1.0e-9);
-        assertEquals(0.75, frame.bestTarget().orElseThrow().confidence(), 1.0e-9);
+        assertEquals(42.25, target.timestampSeconds(), 1.0e-9);
+        assertEquals(0.035, target.latencySeconds(), 1.0e-9);
+        assertEquals(42.25, pose.timestampSeconds(), 1.0e-9);
+        assertEquals(0.035, pose.latencySeconds(), 1.0e-9);
+        assertEquals(2.0, pose.pose().xMeters(), 1.0e-9);
+        assertEquals(3.0, pose.pose().yMeters(), 1.0e-9);
+        assertEquals(0.5, pose.pose().headingRadians(), 1.0e-9);
+        assertEquals(0.2, pose.ambiguity(), 1.0e-9);
+        assertEquals(2, pose.targetCount());
+        assertEquals(source, pose.source());
     }
 
     @Test
-    void readsLatestFrameThroughPhotonClient() {
-        var spec = Cameras.camera("front", camera -> camera.hardware(AthenaCamera.PHOTONVISION, "frontCam"));
-        var target = new PhotonTrackedTarget(
-                -2.0,
-                1.0,
-                9.0,
-                0.0,
-                8,
-                -1,
-                0.0f,
-                new Transform3d(1.0, 2.0, 2.0, edu.wpi.first.math.geometry.Rotation3d.kZero),
-                new Transform3d(),
-                0.1,
-                corners(),
-                corners());
-        var client = new RecordingPhotonClient(new PhotonPipelineResult(0L, 0L, 0L, 0L, List.of(target), Optional.empty()));
-        var adapter = new PhotonVisionCameraAdapter(spec, client);
+    void poseSignalUsesLatestUnreadEstimatedPose() {
+        PhotonVisionDevice device = Cameras.photonVision("front");
+        FakePhotonClient client = new FakePhotonClient(List.of(
+                new PhotonVisionCameraAdapter.PhotonVisionResult(
+                        1.0,
+                        0.010,
+                        List.of(),
+                        Optional.of(new PhotonVisionCameraAdapter.PhotonVisionPoseEstimate(
+                                new PoseSnapshot(1.0, 2.0, 0.25),
+                                1.0,
+                                0.4,
+                                1))),
+                new PhotonVisionCameraAdapter.PhotonVisionResult(
+                        2.0,
+                        0.020,
+                        List.of(),
+                        Optional.of(new PhotonVisionCameraAdapter.PhotonVisionPoseEstimate(
+                                new PoseSnapshot(3.0, 4.0, 0.75),
+                                2.0,
+                                0.1,
+                                3)))));
+        PhotonVisionCameraAdapter adapter = new PhotonVisionCameraAdapter(device, client, result -> Optional.empty());
 
-        var frame = adapter.latestFrame();
-        adapter.close();
+        List<Measurement> measurements = adapter.poseSignal().measurements();
 
-        assertEquals(spec, adapter.spec());
-        assertEquals(8, frame.tagId().orElseThrow());
-        assertEquals(3.0, frame.distanceMeters().orElseThrow(), 1.0e-9);
-        assertTrue(client.closed);
+        assertEquals(1, measurements.size());
+        PoseMeasurementSample pose = (PoseMeasurementSample) measurements.get(0);
+        assertEquals(3.0, pose.pose().xMeters(), 1.0e-9);
+        assertEquals(4.0, pose.pose().yMeters(), 1.0e-9);
+        assertEquals(0.75, pose.pose().headingRadians(), 1.0e-9);
+        assertEquals(2.0, pose.timestampSeconds(), 1.0e-9);
+        assertEquals(0.020, pose.latencySeconds(), 1.0e-9);
+        assertEquals(0.1, pose.ambiguity(), 1.0e-9);
+        assertEquals(3, pose.targetCount());
+        assertEquals(device, pose.source());
     }
 
-    private static final class RecordingPhotonClient implements PhotonVisionCameraAdapter.PhotonClient {
-        private final PhotonPipelineResult result;
-        private boolean closed;
+    @Test
+    void supportAndUnconfiguredAdapterBehaviorAreExplicit() {
+        PhotonVisionCameraAdapter adapter = new PhotonVisionCameraAdapter();
 
-        private RecordingPhotonClient(PhotonPipelineResult result) {
-            this.result = result;
-        }
+        assertTrue(adapter.supports(CameraKinds.PHOTONVISION));
+        assertTrue(adapter.supports(Cameras.photonVision("front")));
+        assertThrows(IllegalStateException.class, adapter::latestTargets);
+        assertThrows(IllegalStateException.class, adapter::targetSignal);
+        assertThrows(IllegalStateException.class, adapter::latestPoses);
+        assertThrows(IllegalStateException.class, adapter::poseSignal);
+    }
 
+    @Test
+    void poseSignalRequiresPoseEstimatorConfiguration() {
+        PhotonVisionCameraAdapter adapter = new PhotonVisionCameraAdapter(
+                Cameras.photonVision("front"),
+                new FakePhotonClient(List.of()));
+
+        assertThrows(IllegalStateException.class, adapter::latestPoses);
+        assertThrows(IllegalStateException.class, adapter::poseSignal);
+    }
+
+    private record FakePhotonClient(List<PhotonVisionCameraAdapter.PhotonVisionResult> results)
+            implements PhotonVisionCameraAdapter.PhotonClient {
         @Override
-        public List<PhotonPipelineResult> unreadResults() {
-            return List.of(result);
+        public List<PhotonVisionCameraAdapter.PhotonVisionResult> unreadResults(
+                PhotonVisionCameraAdapter.PhotonPoseClient poseClient) {
+            return results;
         }
 
         @Override
         public void close() {
-            closed = true;
         }
-    }
-
-    private static List<TargetCorner> corners() {
-        return List.of(
-                new TargetCorner(0.0, 0.0),
-                new TargetCorner(1.0, 0.0),
-                new TargetCorner(1.0, 1.0),
-                new TargetCorner(0.0, 1.0));
     }
 }

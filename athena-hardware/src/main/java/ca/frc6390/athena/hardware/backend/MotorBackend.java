@@ -1,8 +1,7 @@
 package ca.frc6390.athena.hardware.backend;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
-import ca.frc6390.athena.hardware.capability.CapabilitySet;
-import ca.frc6390.athena.hardware.spec.MotorSpec;
+import ca.frc6390.athena.hardware.device.MotorDevice;
 
 /**
  * Backend contract implemented by vendor motor adapters.
@@ -17,18 +16,10 @@ public interface MotorBackend {
     boolean supports(MotorKind kind);
 
     /**
-     * Returns capabilities for a supported motor kind.
+     * Creates a runtime motor handle from a declaration.
      *
-     * @param kind motor kind
-     * @return capability set
-     */
-    CapabilitySet capabilities(MotorKind kind);
-
-    /**
-     * Creates a runtime motor device from a validated spec.
-     *
-     * @param spec motor spec
+     * @param device motor declaration
      * @return runtime motor
      */
-    MotorDevice create(MotorSpec spec);
+    MotorHandle create(MotorDevice device);
 }

@@ -2,43 +2,86 @@ package ca.frc6390.athena.vendor.photonvision;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
-import ca.frc6390.athena.api.hardware.AthenaCamera;
 import ca.frc6390.athena.api.hardware.CameraKind;
-import ca.frc6390.athena.vision.spec.CameraSpec;
-import ca.frc6390.athena.vision.spec.VisionFrame;
-import ca.frc6390.athena.vision.spec.VisionObservation;
+import ca.frc6390.athena.api.hardware.CameraKinds;
+import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import ca.frc6390.athena.runtime.measurement.Measurement;
+import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
+import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
+import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
+import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.ref.PhotonVisionDevice;
+import ca.frc6390.athena.vision.ref.PoseSignal;
+import ca.frc6390.athena.vision.ref.TargetSignal;
+import ca.frc6390.athena.vision.runtime.CameraAdapter;
+import edu.wpi.first.math.geometry.Pose3d;
 import org.photonvision.PhotonCamera;
+import org.photonvision.PhotonPoseEstimator;
 import org.photonvision.targeting.PhotonPipelineResult;
 import org.photonvision.targeting.PhotonTrackedTarget;
 
 /**
  * PhotonVision camera adapter backed by PhotonLib.
  */
-public final class PhotonVisionCameraAdapter implements AutoCloseable {
-    private final CameraSpec spec;
+public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoCloseable {
+    private final PhotonVisionDevice device;
     private final PhotonClient client;
+    private final PhotonPoseClient poseClient;
 
     /**
      * Creates an adapter for support checks and static target conversion only.
      */
     public PhotonVisionCameraAdapter() {
-        spec = null;
+        device = null;
         client = null;
+        poseClient = null;
     }
 
     /**
      * Creates an adapter using a real PhotonLib camera.
      *
-     * @param spec camera spec
+     * @param device PhotonVision camera device
      */
-    public PhotonVisionCameraAdapter(CameraSpec spec) {
-        this(spec, new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(spec, "spec").cameraName())));
+    public PhotonVisionCameraAdapter(PhotonVisionDevice device) {
+        this(device, new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())), null);
     }
 
-    PhotonVisionCameraAdapter(CameraSpec spec, PhotonClient client) {
-        this.spec = Objects.requireNonNull(spec, "spec");
+    /**
+     * Creates an adapter using a real PhotonLib camera and pose estimator.
+     *
+     * @param device PhotonVision camera device
+     * @param poseEstimator PhotonLib pose estimator
+     */
+    public PhotonVisionCameraAdapter(PhotonVisionDevice device, PhotonPoseEstimator poseEstimator) {
+        this(device, poseEstimator, PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR);
+    }
+
+    /**
+     * Creates an adapter using a real PhotonLib camera and pose estimator.
+     *
+     * @param device PhotonVision camera device
+     * @param poseEstimator PhotonLib pose estimator
+     * @param poseStrategy pose strategy to use when reading estimates
+     */
+    public PhotonVisionCameraAdapter(
+            PhotonVisionDevice device, PhotonPoseEstimator poseEstimator, PhotonPoseEstimator.PoseStrategy poseStrategy) {
+        this(
+                device,
+                new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
+                new PhotonPoseEstimatorClient(poseEstimator, poseStrategy));
+    }
+
+    PhotonVisionCameraAdapter(PhotonVisionDevice device, PhotonClient client) {
+        this(device, client, null);
+    }
+
+    PhotonVisionCameraAdapter(PhotonVisionDevice device, PhotonClient client, PhotonPoseClient poseClient) {
+        this.device = Objects.requireNonNull(device, "device");
         this.client = Objects.requireNonNull(client, "client");
+        this.poseClient = poseClient;
     }
 
     /**
@@ -48,106 +91,207 @@ public final class PhotonVisionCameraAdapter implements AutoCloseable {
      * @return true if supported
      */
     public boolean supports(CameraKind kind) {
-        return kind == AthenaCamera.PHOTONVISION || kind.key().equals("photonvision:camera");
+        return kind == CameraKinds.PHOTONVISION || kind.key().equals(CameraKinds.PHOTONVISION.key());
     }
 
     /**
-     * Returns true when a camera spec is handled by this adapter.
+     * Returns true when a camera device is handled by this adapter.
      *
-     * @param spec camera spec
+     * @param device camera device
      * @return true if supported
      */
-    public boolean supports(CameraSpec spec) {
-        return spec != null && supports(spec.kind());
+    public boolean supports(PhotonVisionDevice device) {
+        return device != null && supports(device.kind());
+    }
+
+    @Override
+    public boolean supports(CameraDevice camera) {
+        return camera instanceof PhotonVisionDevice photon && supports(photon);
+    }
+
+    @Override
+    public CameraDevice bind(CameraDevice camera) {
+        if (camera instanceof PhotonVisionDevice photon) {
+            return new PhotonVisionCameraAdapter(photon).bind();
+        }
+        throw new IllegalArgumentException("PhotonVision adapter cannot bind camera " + camera.name());
     }
 
     /**
-     * Returns the latest unread PhotonVision frame from the configured camera.
+     * Returns a target signal backed by this adapter.
      *
-     * @return latest vision frame
+     * @return target signal
      */
-    public VisionFrame latestFrame() {
-        if (client == null) {
-            throw new IllegalStateException("PhotonVision camera adapter was created without a camera spec.");
-        }
-        List<PhotonPipelineResult> results = client.unreadResults();
+    public TargetSignal targetSignal() {
+        ensureConfigured();
+        return device.bindTargets(new PhotonVisionMeasurementBuffer(device, client, poseClient)::targetMeasurements).targets();
+    }
+
+    /**
+     * Returns a pose signal backed by this adapter.
+     *
+     * @return pose signal
+     */
+    public PoseSignal poseSignal() {
+        ensureConfigured();
+        ensurePoseConfigured();
+        return device.bindPose(new PhotonVisionMeasurementBuffer(device, client, poseClient)::poseMeasurements).pose();
+    }
+
+    /**
+     * Binds this adapter's configured signals to its camera declaration.
+     *
+     * @return updated device declaration
+     */
+    public PhotonVisionDevice bind() {
+        ensureConfigured();
+        PhotonVisionMeasurementBuffer buffer = new PhotonVisionMeasurementBuffer(device, client, poseClient);
+        PhotonVisionDevice bound = device.bindTargets(buffer::targetMeasurements);
+        return poseClient == null ? bound : bound.bindPose(buffer::poseMeasurements);
+    }
+
+    /**
+     * Returns latest unread target measurements from the configured camera.
+     *
+     * @return target measurements
+     */
+    public List<Measurement> latestTargets() {
+        ensureConfigured();
+        List<PhotonVisionResult> results = client.unreadResults(null);
         if (results.isEmpty()) {
-            return VisionFrame.noTarget();
+            return List.of();
         }
-        return frameFromResult(results.get(results.size() - 1));
+        return targetMeasurementsFromResult(results.get(results.size() - 1), device);
     }
 
     /**
-     * Returns the camera spec used by this adapter.
+     * Returns latest unread pose measurements from the configured camera.
      *
-     * @return camera spec
+     * @return pose measurements
      */
-    public CameraSpec spec() {
-        return spec;
+    public List<Measurement> latestPoses() {
+        ensureConfigured();
+        ensurePoseConfigured();
+        List<PhotonVisionResult> results = client.unreadResults(poseClient);
+        if (results.isEmpty()) {
+            return List.of();
+        }
+        return poseMeasurementsFromResult(results.get(results.size() - 1), device);
     }
 
     /**
-     * Converts PhotonVision-shaped targets into Athena's generic frame model.
+     * Returns the camera device used by this adapter.
      *
-     * @param targets target values
-     * @return vision frame
+     * @return camera device
      */
-    public VisionFrame frame(List<PhotonVisionTarget> targets) {
-        return frameFromTargets(targets);
+    public PhotonVisionDevice device() {
+        return device;
     }
 
-    /**
-     * Converts PhotonVision-shaped targets into Athena's generic frame model.
-     *
-     * @param targets target values
-     * @return vision frame
-     */
-    public static VisionFrame frameFromTargets(List<PhotonVisionTarget> targets) {
+    static List<Measurement> measurementsFromTargets(List<PhotonVisionTarget> targets, Object source) {
         if (targets == null || targets.isEmpty()) {
-            return VisionFrame.noTarget();
+            return List.of();
         }
-        return new VisionFrame(targets.stream()
-                .map(PhotonVisionTarget::toObservation)
-                .toList());
+        return targets.stream()
+                .filter(Objects::nonNull)
+                .map(target -> targetMeasurement(target, 0.0, 0.0, source))
+                .map(Measurement.class::cast)
+                .toList();
     }
 
     /**
-     * Converts a real PhotonLib pipeline result into Athena's generic frame model.
+     * Converts a real PhotonLib pipeline result into measurement samples.
      *
      * @param result PhotonLib pipeline result
-     * @return vision frame
+     * @param source measurement source
+     * @return measurements
      */
-    public static VisionFrame frameFromResult(PhotonPipelineResult result) {
+    public static List<Measurement> measurementsFromResult(PhotonPipelineResult result, Object source) {
+        return targetMeasurementsFromResult(PhotonVisionResult.fromPhoton(result, null), source);
+    }
+
+    static List<Measurement> targetMeasurementsFromResult(PhotonVisionResult result, Object source) {
         if (result == null || !result.hasTargets()) {
-            return VisionFrame.noTarget();
+            return List.of();
         }
-        return new VisionFrame(result.getTargets().stream()
-                .map(PhotonVisionCameraAdapter::observationFromTarget)
-                .toList());
+        return result.targets().stream()
+                .map(target -> targetMeasurement(target, result.timestampSeconds(), result.latencySeconds(), source))
+                .map(Measurement.class::cast)
+                .toList();
+    }
+
+    static List<Measurement> poseMeasurementsFromResult(PhotonVisionResult result, Object source) {
+        if (result == null || result.pose().isEmpty()) {
+            return List.of();
+        }
+        PhotonVisionPoseEstimate pose = result.pose().get();
+        return List.of(new PhotonVisionPoseMeasurement(
+                pose.pose(),
+                RobotVelocity.zero(),
+                pose.timestampSeconds(),
+                result.latencySeconds(),
+                pose.ambiguity(),
+                pose.targetCount(),
+                MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
+                source));
     }
 
     /**
-     * Converts a real PhotonLib tracked target into Athena's observation model.
+     * Converts a real PhotonLib tracked target into a vendor target value.
      *
      * @param target PhotonLib target
-     * @return vision observation
+     * @return target value
      */
-    public static VisionObservation observationFromTarget(PhotonTrackedTarget target) {
+    static PhotonVisionTarget targetFromPhoton(PhotonTrackedTarget target) {
         Objects.requireNonNull(target, "target");
         var transform = target.getBestCameraToTarget();
         var translation = transform.getTranslation();
-        double distance = translation.getNorm();
-        double confidence = Double.isFinite(target.getPoseAmbiguity())
-                ? Math.max(0.0, 1.0 - target.getPoseAmbiguity())
-                : 0.0;
-        return new VisionObservation(
+        return new PhotonVisionTarget(
                 target.getFiducialId(),
                 target.getYaw(),
                 target.getPitch(),
-                distance,
-                translation.getX(),
-                translation.getY(),
-                confidence);
+                translation.getNorm(),
+                target.getPoseAmbiguity());
+    }
+
+    private void ensureConfigured() {
+        if (client == null) {
+            throw new IllegalStateException("PhotonVision camera adapter was created without a camera device.");
+        }
+    }
+
+    private void ensurePoseConfigured() {
+        if (poseClient == null) {
+            throw new IllegalStateException("PhotonVision pose estimation requires a PhotonPoseEstimator.");
+        }
+    }
+
+    private static double latencySeconds(PhotonPipelineResult result) {
+        if (result == null || result.metadata == null) {
+            return 0.0;
+        }
+        return Math.max(0.0, finiteOrZero(result.metadata.getLatencyMillis()) / 1000.0);
+    }
+
+    private static double finiteOrZero(double value) {
+        return Double.isFinite(value) ? value : 0.0;
+    }
+
+    private static PhotonVisionTargetMeasurement targetMeasurement(
+            PhotonVisionTarget target,
+            double timestampSeconds,
+            double latencySeconds,
+            Object source) {
+        return new PhotonVisionTargetMeasurement(
+                target.fiducialId(),
+                target.yawDegrees(),
+                target.pitchDegrees(),
+                target.distanceMeters(),
+                target.poseAmbiguity(),
+                target.confidence(),
+                timestampSeconds,
+                latencySeconds,
+                source);
     }
 
     @Override
@@ -158,10 +302,14 @@ public final class PhotonVisionCameraAdapter implements AutoCloseable {
     }
 
     interface PhotonClient extends AutoCloseable {
-        List<PhotonPipelineResult> unreadResults();
+        List<PhotonVisionResult> unreadResults(PhotonPoseClient poseClient);
 
         @Override
         void close();
+    }
+
+    interface PhotonPoseClient {
+        Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result);
     }
 
     private static final class PhotonCameraClient implements PhotonClient {
@@ -172,13 +320,163 @@ public final class PhotonVisionCameraAdapter implements AutoCloseable {
         }
 
         @Override
-        public List<PhotonPipelineResult> unreadResults() {
-            return camera.getAllUnreadResults();
+        public List<PhotonVisionResult> unreadResults(PhotonPoseClient poseClient) {
+            return camera.getAllUnreadResults().stream()
+                    .map(result -> PhotonVisionResult.fromPhoton(result, poseClient))
+                    .toList();
         }
 
         @Override
         public void close() {
             camera.close();
         }
+    }
+
+    private static final class PhotonPoseEstimatorClient implements PhotonPoseClient {
+        private final PhotonPoseEstimator estimator;
+        private final PhotonPoseEstimator.PoseStrategy strategy;
+
+        private PhotonPoseEstimatorClient(PhotonPoseEstimator estimator, PhotonPoseEstimator.PoseStrategy strategy) {
+            this.estimator = Objects.requireNonNull(estimator, "estimator");
+            this.strategy = strategy == null
+                    ? PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR
+                    : strategy;
+        }
+
+        @Override
+        public Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result) {
+            return estimateWithConfiguredStrategy(result).map(estimate -> {
+                Pose3d pose3d = estimate.estimatedPose;
+                var pose2d = pose3d.toPose2d();
+                return new PhotonVisionPoseEstimate(
+                        new PoseSnapshot(pose2d.getX(), pose2d.getY(), pose2d.getRotation().getRadians()),
+                        estimate.timestampSeconds,
+                        ambiguity(estimate.targetsUsed),
+                        estimate.targetsUsed == null ? 0 : estimate.targetsUsed.size());
+            });
+        }
+
+        private Optional<org.photonvision.EstimatedRobotPose> estimateWithConfiguredStrategy(
+                PhotonPipelineResult result) {
+            return switch (strategy) {
+                case LOWEST_AMBIGUITY -> estimator.estimateLowestAmbiguityPose(result);
+                case CLOSEST_TO_CAMERA_HEIGHT -> estimator.estimateClosestToCameraHeightPose(result);
+                case CLOSEST_TO_REFERENCE_POSE -> estimator.estimateClosestToReferencePose(
+                        result, Pose3d.kZero);
+                case AVERAGE_BEST_TARGETS -> estimator.estimateAverageBestTargetsPose(result);
+                case MULTI_TAG_PNP_ON_COPROCESSOR -> estimator.estimateCoprocMultiTagPose(result);
+                case PNP_DISTANCE_TRIG_SOLVE -> estimator.estimatePnpDistanceTrigSolvePose(result);
+                default -> estimator.estimateCoprocMultiTagPose(result)
+                        .or(() -> estimator.estimateLowestAmbiguityPose(result));
+            };
+        }
+
+        private static double ambiguity(List<PhotonTrackedTarget> targets) {
+            if (targets == null || targets.isEmpty()) {
+                return 0.0;
+            }
+            return targets.stream()
+                    .filter(Objects::nonNull)
+                    .mapToDouble(PhotonTrackedTarget::getPoseAmbiguity)
+                    .filter(Double::isFinite)
+                    .min()
+                    .orElse(0.0);
+        }
+    }
+
+    static record PhotonVisionResult(
+            double timestampSeconds,
+            double latencySeconds,
+            List<PhotonVisionTarget> targets,
+            Optional<PhotonVisionPoseEstimate> pose) {
+        PhotonVisionResult {
+            timestampSeconds = finiteOrZero(timestampSeconds);
+            latencySeconds = Math.max(0.0, finiteOrZero(latencySeconds));
+            targets = targets == null ? List.of() : List.copyOf(targets);
+            pose = pose == null ? Optional.empty() : pose;
+        }
+
+        boolean hasTargets() {
+            return !targets.isEmpty();
+        }
+
+        static PhotonVisionResult fromPhoton(PhotonPipelineResult result, PhotonPoseClient poseClient) {
+            if (result == null) {
+                return new PhotonVisionResult(0.0, 0.0, List.of(), Optional.empty());
+            }
+            Optional<PhotonVisionPoseEstimate> pose = poseClient == null ? Optional.empty() : poseClient.estimate(result);
+            List<PhotonVisionTarget> targets = result.hasTargets()
+                    ? result.getTargets().stream().map(PhotonVisionCameraAdapter::targetFromPhoton).toList()
+                    : List.of();
+            return new PhotonVisionResult(
+                    result.getTimestampSeconds(), PhotonVisionCameraAdapter.latencySeconds(result), targets, pose);
+        }
+    }
+
+    static record PhotonVisionPoseEstimate(
+            PoseSnapshot pose,
+            double timestampSeconds,
+            double ambiguity,
+            int targetCount) {
+        PhotonVisionPoseEstimate {
+            pose = Objects.requireNonNull(pose, "pose");
+            timestampSeconds = finiteOrZero(timestampSeconds);
+            ambiguity = Math.max(0.0, finiteOrZero(ambiguity));
+            targetCount = Math.max(0, targetCount);
+        }
+    }
+
+    private static final class PhotonVisionMeasurementBuffer {
+        private final Object source;
+        private final PhotonClient client;
+        private final PhotonPoseClient poseClient;
+        private PhotonVisionResult latest = new PhotonVisionResult(0.0, 0.0, List.of(), Optional.empty());
+
+        private PhotonVisionMeasurementBuffer(Object source, PhotonClient client, PhotonPoseClient poseClient) {
+            this.source = source;
+            this.client = Objects.requireNonNull(client, "client");
+            this.poseClient = poseClient;
+        }
+
+        private List<Measurement> targetMeasurements() {
+            refresh();
+            return targetMeasurementsFromResult(latest, source);
+        }
+
+        private List<Measurement> poseMeasurements() {
+            refresh();
+            return poseMeasurementsFromResult(latest, source);
+        }
+
+        private void refresh() {
+            List<PhotonVisionResult> results = client.unreadResults(poseClient);
+            if (!results.isEmpty()) {
+                latest = results.get(results.size() - 1);
+            }
+        }
+    }
+
+    private record PhotonVisionPoseMeasurement(
+            PoseSnapshot pose,
+            RobotVelocity speeds,
+            double timestampSeconds,
+            double latencySeconds,
+            double ambiguity,
+            int targetCount,
+            MeasurementStdDevs stdDevs,
+            Object source) implements PoseMeasurementSample {
+    }
+
+    private record PhotonVisionTargetMeasurement(
+            int targetId,
+            double yawDegrees,
+            double pitchDegrees,
+            double distanceMeters,
+            double poseAmbiguity,
+            double confidence,
+            double timestampSeconds,
+            double latencySeconds,
+            Object source)
+            implements TargetMeasurementSample {
     }
 }

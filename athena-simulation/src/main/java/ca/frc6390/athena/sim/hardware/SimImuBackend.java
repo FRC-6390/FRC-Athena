@@ -2,8 +2,8 @@ package ca.frc6390.athena.sim.hardware;
 
 import ca.frc6390.athena.api.hardware.ImuKind;
 import ca.frc6390.athena.hardware.backend.ImuBackend;
-import ca.frc6390.athena.hardware.backend.ImuDevice;
-import ca.frc6390.athena.hardware.imu.ImuSpec;
+import ca.frc6390.athena.hardware.backend.ImuHandle;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 
 /**
  * Simulation IMU backend used by tests and examples.
@@ -15,7 +15,7 @@ public final class SimImuBackend implements ImuBackend {
     }
 
     @Override
-    public ImuDevice create(ImuSpec spec) {
-        return new SimImuDevice(spec, 0.0);
+    public ImuHandle create(ImuDevice device) {
+        return new SimImuHandle(device);
     }
 }

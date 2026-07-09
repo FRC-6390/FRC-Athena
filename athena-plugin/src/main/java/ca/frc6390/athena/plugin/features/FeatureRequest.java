@@ -5,13 +5,13 @@ import java.util.Set;
 /**
  * Inputs used by Athena's Gradle plugin to select dependencies.
  *
- * @param explicitFeatures explicitly requested Athena features
+ * @param explicitModules explicitly requested Athena modules
  * @param explicitVendors explicitly requested vendor adapter names
  * @param detectedDependencyCoordinates dependency coordinates already present
  * @param detectedVendordepUuids vendor dependency UUIDs already present
  */
 public record FeatureRequest(
-        Set<AthenaFeature> explicitFeatures,
+        Set<String> explicitModules,
         Set<String> explicitVendors,
         Set<String> detectedDependencyCoordinates,
         Set<String> detectedVendordepUuids) {
@@ -25,7 +25,7 @@ public record FeatureRequest(
     }
 
     public FeatureRequest {
-        explicitFeatures = Set.copyOf(explicitFeatures);
+        explicitModules = Set.copyOf(explicitModules);
         explicitVendors = Set.copyOf(explicitVendors);
         detectedDependencyCoordinates = Set.copyOf(detectedDependencyCoordinates);
         detectedVendordepUuids = Set.copyOf(detectedVendordepUuids);

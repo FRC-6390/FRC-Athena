@@ -1,8 +1,8 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.ref.ActionContext;
-import ca.frc6390.athena.hardware.ref.MotorRef;
-import ca.frc6390.athena.hardware.ref.RuntimeMotor;
+import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.backend.MotorHandle;
 import java.util.List;
 import java.util.Objects;
 
@@ -29,17 +29,14 @@ public final class OutputApplier {
 
     public void apply(ResolvedOutput output) {
         Objects.requireNonNull(output, "output");
-        for (MotorRef motor : motors(output.request())) {
+        for (MotorDevice motor : motors(output.request())) {
             apply(context.motor(motor), output.output());
         }
     }
 
-    private static List<MotorRef> motors(OutputRequest request) {
+    private static List<MotorDevice> motors(OutputRequest request) {
         if (request.control() != null) {
             return request.control().motors();
-        }
-        if (request.axis() != null) {
-            return request.axis().motors();
         }
         if (request.motor() != null) {
             return List.of(request.motor());
@@ -47,15 +44,15 @@ public final class OutputApplier {
         return List.of();
     }
 
-    private static void apply(RuntimeMotor motor, Output output) {
+    private static void apply(MotorHandle motor, Output output) {
         if (output instanceof Output.Percent percent) {
-            motor.percent(percent.percent());
+            motor.setPercentOutput(percent.percent());
         } else if (output instanceof Output.Voltage voltage) {
-            motor.voltage(voltage.volts());
+            motor.setVoltage(voltage.volts());
         } else if (output instanceof Output.Position position) {
-            motor.position(position.position());
+            motor.setPositionTargetRotations(position.position());
         } else if (output instanceof Output.Velocity velocity) {
-            motor.velocity(velocity.velocity());
+            motor.setVelocityTargetRotationsPerSecond(velocity.velocity());
         } else if (output instanceof Output.Neutral || output instanceof Output.Fault) {
             motor.stop();
         }

@@ -1,51 +1,47 @@
 package ca.frc6390.athena.wpilib.localization;
 
-import ca.frc6390.athena.localization.spec.LocalizationSpec;
-import ca.frc6390.athena.localization.spec.VisionWeightSpec;
+import java.util.Objects;
+
+import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.estimator.PoseEstimator;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-import java.util.Objects;
 
 /**
  * Applies Athena localization vision weights to WPILib pose estimators.
  */
-public final class WpilibPoseEstimatorAdapter {
-    private final LocalizationSpec spec;
+final class WpilibPoseEstimatorAdapter {
     private final VisionMeasurementSink sink;
 
     /**
      * Creates an adapter for a WPILib pose estimator.
      *
-     * @param spec localization spec
      * @param estimator WPILib pose estimator
      */
-    public WpilibPoseEstimatorAdapter(LocalizationSpec spec, PoseEstimator<?> estimator) {
-        this(spec, Objects.requireNonNull(estimator, "estimator")::addVisionMeasurement);
+    WpilibPoseEstimatorAdapter(PoseEstimator<?> estimator) {
+        this(Objects.requireNonNull(estimator, "estimator")::addVisionMeasurement);
     }
 
     /**
      * Creates an adapter for a custom estimator-compatible sink.
      *
-     * @param spec localization spec
      * @param sink measurement sink
      */
-    public WpilibPoseEstimatorAdapter(LocalizationSpec spec, VisionMeasurementSink sink) {
-        this.spec = Objects.requireNonNull(spec, "spec");
+    WpilibPoseEstimatorAdapter(VisionMeasurementSink sink) {
         this.sink = Objects.requireNonNull(sink, "sink");
     }
 
     /**
-     * Returns the WPILib standard-deviation vector for the provided tag count.
+     * Returns the WPILib standard-deviation vector for Athena measurement weights.
      *
-     * @param tagCount number of tags in the measurement
+     * @param stdDevs Athena standard deviations
      * @return standard deviation vector
      */
-    public Matrix<N3, N1> standardDeviations(int tagCount) {
-        return standardDeviations(spec.visionWeight().forTagCount(tagCount));
+    Matrix<N3, N1> standardDeviations(MeasurementStdDevs stdDevs) {
+        return standardDeviationsOrDefault(stdDevs);
     }
 
     /**
@@ -53,20 +49,23 @@ public final class WpilibPoseEstimatorAdapter {
      *
      * @param pose measured field pose
      * @param timestampSeconds measurement timestamp
-     * @param tagCount number of tags in the measurement
+     * @param stdDevs Athena standard deviations
      */
-    public void addVisionMeasurement(Pose2d pose, double timestampSeconds, int tagCount) {
+    void addVisionMeasurement(Pose2d pose, double timestampSeconds, MeasurementStdDevs stdDevs) {
         sink.addVisionMeasurement(
                 Objects.requireNonNull(pose, "pose"),
                 finiteOrZero(timestampSeconds),
-                standardDeviations(tagCount));
+                standardDeviations(stdDevs));
     }
 
-    private static Matrix<N3, N1> standardDeviations(VisionWeightSpec weight) {
+    private static Matrix<N3, N1> standardDeviationsOrDefault(MeasurementStdDevs stdDevs) {
+        MeasurementStdDevs safeStdDevs = stdDevs == null
+                ? MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY)
+                : stdDevs;
         return VecBuilder.fill(
-                weight.xStdDevMeters(),
-                weight.yStdDevMeters(),
-                weight.headingStdDevRadians());
+                safeStdDevs.xMeters(),
+                safeStdDevs.yMeters(),
+                safeStdDevs.headingRadians());
     }
 
     private static double finiteOrZero(double value) {
@@ -77,7 +76,7 @@ public final class WpilibPoseEstimatorAdapter {
      * Estimator-compatible vision measurement sink.
      */
     @FunctionalInterface
-    public interface VisionMeasurementSink {
+    interface VisionMeasurementSink {
         /**
          * Adds a vision measurement.
          *

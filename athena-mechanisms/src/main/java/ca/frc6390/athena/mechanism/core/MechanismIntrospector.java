@@ -1,60 +1,41 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.ref.AnalogInputRef;
-import ca.frc6390.athena.hardware.ref.BooleanRef;
-import ca.frc6390.athena.hardware.ref.ButtonRef;
-import ca.frc6390.athena.hardware.ref.ControllerAxisRef;
-import ca.frc6390.athena.hardware.ref.ControllerRef;
-import ca.frc6390.athena.hardware.ref.DigitalInputRef;
-import ca.frc6390.athena.hardware.ref.EncoderRef;
-import ca.frc6390.athena.hardware.ref.GearRatioRef;
-import ca.frc6390.athena.hardware.ref.MotorRef;
-import ca.frc6390.athena.hardware.ref.NumberRef;
-import ca.frc6390.athena.hardware.ref.RangeRef;
-import ca.frc6390.athena.hardware.ref.SimRef;
-import ca.frc6390.athena.mechanism.ref.FeedforwardRef;
-import ca.frc6390.athena.mechanism.ref.PidRef;
+import ca.frc6390.athena.hardware.device.DigitalInputDevice;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.GearRatio;
+import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.Range;
+import ca.frc6390.athena.hardware.sim.SimModel;
+import ca.frc6390.athena.mechanism.ref.FeedforwardGains;
+import ca.frc6390.athena.mechanism.ref.PidGains;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Discovers mechanism structure from already-constructed mechanism instances.
  */
 public final class MechanismIntrospector {
+    private static final Map<Class<?>, Field[]> FIELDS_BY_TYPE = new ConcurrentHashMap<>();
+
     private MechanismIntrospector() {
     }
 
-    /**
-     * Inspects a mechanism using its class name as the root name.
-     *
-     * @param mechanism mechanism instance
-     * @return mechanism definition
-     */
-    public static MechanismDefinition inspect(Mechanism mechanism) {
+    public static MechanismNode inspect(Mechanism mechanism) {
         Objects.requireNonNull(mechanism, "mechanism");
         return inspect(defaultName(mechanism.getClass()), mechanism);
     }
 
-    /**
-     * Inspects a mechanism.
-     *
-     * @param name root name
-     * @param mechanism mechanism instance
-     * @return mechanism definition
-     */
-    public static MechanismDefinition inspect(String name, Mechanism mechanism) {
+    public static MechanismNode inspect(String name, Mechanism mechanism) {
         Objects.requireNonNull(mechanism, "mechanism");
         Map<String, Mechanism> children = new LinkedHashMap<>();
-        Map<String, MechanismState> states = new LinkedHashMap<>();
-        Map<String, Object> refs = new LinkedHashMap<>();
-        Map<String, HookRef> hooks = new LinkedHashMap<>();
-        Map<String, RuleRef> rules = new LinkedHashMap<>();
-        String initialStateName = "";
-        MechanismState initialState = null;
+        Map<String, State> states = new LinkedHashMap<>();
+        Map<String, Object> declarations = new LinkedHashMap<>();
+        Map<String, HookBinding> hooks = new LinkedHashMap<>();
 
         for (Field field : fields(mechanism.getClass())) {
             if (field.isSynthetic()) {
@@ -67,31 +48,23 @@ public final class MechanismIntrospector {
             String fieldName = field.getName();
             if (value instanceof Mechanism child && !Modifier.isStatic(field.getModifiers())) {
                 children.put(fieldName, child);
-            } else if (value instanceof PathRef) {
-                refs.put(fieldName, value);
-            } else if (value instanceof MechanismState state) {
+            } else if (value instanceof State state) {
                 states.put(fieldName, state);
-                if (field.isAnnotationPresent(InitialState.class)) {
-                    if (initialState != null) {
-                        throw new IllegalStateException(
-                                "Mechanism " + name + " declares more than one @InitialState field.");
-                    }
-                    initialStateName = fieldName;
-                    initialState = state;
-                }
-            } else if (value instanceof HookRef hook) {
+            } else if (value instanceof HookBinding hook) {
                 hooks.put(fieldName, hook);
-            } else if (value instanceof RuleRef rule) {
-                rules.put(fieldName, rule);
-            } else if (isRef(value)) {
-                refs.put(fieldName, value);
+            } else if (isDeclaration(value)) {
+                declarations.put(fieldName, value);
             }
         }
 
-        return new MechanismDefinition(name, mechanism, children, states, initialStateName, initialState, refs, hooks, rules);
+        return new MechanismNode(name, mechanism, children, states, declarations, hooks);
     }
 
     private static Field[] fields(Class<?> type) {
+        return FIELDS_BY_TYPE.computeIfAbsent(type, MechanismIntrospector::discoverFields);
+    }
+
+    private static Field[] discoverFields(Class<?> type) {
         Map<String, Field> fields = new LinkedHashMap<>();
         Class<?> current = type;
         while (current != null && current != Object.class) {
@@ -114,25 +87,17 @@ public final class MechanismIntrospector {
         }
     }
 
-    private static boolean isRef(Object value) {
-        return value instanceof MotorRef
-                || value instanceof EncoderRef
-                || value instanceof DigitalInputRef
-                || value instanceof AnalogInputRef
-                || value instanceof NumberRef
-                || value instanceof BooleanRef
-                || value instanceof ControllerRef
-                || value instanceof ControllerAxisRef
-                || value instanceof ButtonRef
-                || value instanceof RangeRef
-                || value instanceof GearRatioRef
-                || value instanceof PidRef
-                || value instanceof FeedforwardRef
-                || value instanceof AxisRef
-                || value instanceof ControlRef
-                || value instanceof PathRef
-                || value instanceof ConstraintRef
-                || value instanceof SimRef;
+    private static boolean isDeclaration(Object value) {
+        return value instanceof MotorDevice
+                || value instanceof EncoderDevice
+                || value instanceof DigitalInputDevice
+                || value instanceof Range
+                || value instanceof GearRatio
+                || value instanceof PidGains
+                || value instanceof FeedforwardGains
+                || value instanceof ControlBinding
+                || value instanceof PathState
+                || value instanceof SimModel;
     }
 
     private static String defaultName(Class<?> type) {

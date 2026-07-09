@@ -1,7 +1,7 @@
 package ca.frc6390.athena.hardware.backend;
 
 import ca.frc6390.athena.api.hardware.ImuKind;
-import ca.frc6390.athena.hardware.imu.ImuSpec;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 
 /**
  * Backend contract implemented by vendor IMU adapters.
@@ -16,10 +16,10 @@ public interface ImuBackend {
     boolean supports(ImuKind kind);
 
     /**
-     * Creates a runtime IMU from a validated spec.
+     * Creates a runtime IMU handle from a declaration.
      *
-     * @param spec IMU spec
+     * @param device IMU declaration
      * @return runtime IMU
      */
-    ImuDevice create(ImuSpec spec);
+    ImuHandle create(ImuDevice device);
 }

@@ -9,11 +9,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Discovers hooks from arbitrary already-constructed robot objects.
  */
 public final class HookIntrospector {
+    private static final Map<Class<?>, Field[]> FIELDS_BY_TYPE = new ConcurrentHashMap<>();
+
     private HookIntrospector() {
     }
 
@@ -21,9 +24,9 @@ public final class HookIntrospector {
      * Inspects an object graph using the root class name as the root path.
      *
      * @param root root object
-     * @return hook refs keyed by field path
+     * @return hook bindings keyed by field path
      */
-    public static Map<String, HookRef> inspect(Object root) {
+    public static Map<String, HookBinding> inspect(Object root) {
         Objects.requireNonNull(root, "root");
         return inspect(defaultName(root.getClass()), root);
     }
@@ -33,11 +36,11 @@ public final class HookIntrospector {
      *
      * @param rootName root path name
      * @param root root object
-     * @return hook refs keyed by field path
+     * @return hook bindings keyed by field path
      */
-    public static Map<String, HookRef> inspect(String rootName, Object root) {
+    public static Map<String, HookBinding> inspect(String rootName, Object root) {
         Objects.requireNonNull(root, "root");
-        Map<String, HookRef> hooks = new LinkedHashMap<>();
+        Map<String, HookBinding> hooks = new LinkedHashMap<>();
         Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         inspectInto(rootName == null || rootName.isBlank() ? "root" : rootName, root, hooks, visited);
         return Collections.unmodifiableMap(hooks);
@@ -46,7 +49,7 @@ public final class HookIntrospector {
     private static void inspectInto(
             String path,
             Object instance,
-            Map<String, HookRef> hooks,
+            Map<String, HookBinding> hooks,
             Set<Object> visited) {
         if (instance == null || visited.contains(instance) || !shouldDescend(instance)) {
             return;
@@ -61,7 +64,7 @@ public final class HookIntrospector {
                 continue;
             }
             String fieldPath = path + "." + field.getName();
-            if (value instanceof HookRef hook) {
+            if (value instanceof HookBinding hook) {
                 hooks.put(fieldPath, hook);
             } else {
                 inspectInto(fieldPath, value, hooks, visited);
@@ -70,6 +73,10 @@ public final class HookIntrospector {
     }
 
     private static Field[] fields(Class<?> type) {
+        return FIELDS_BY_TYPE.computeIfAbsent(type, HookIntrospector::discoverFields);
+    }
+
+    private static Field[] discoverFields(Class<?> type) {
         Map<String, Field> fields = new LinkedHashMap<>();
         Class<?> current = type;
         while (current != null && current != Object.class) {
@@ -102,9 +109,9 @@ public final class HookIntrospector {
                 || value instanceof Boolean
                 || value instanceof Character
                 || value instanceof Runnable
-                || value instanceof HookRef
-                || value instanceof EventRef
-                || value instanceof MechanismState) {
+                || value instanceof HookBinding
+                || value instanceof EventBinding
+                || value instanceof State) {
             return false;
         }
         Package typePackage = type.getPackage();

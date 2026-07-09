@@ -2,94 +2,75 @@ package ca.frc6390.athena.plugin.gradle;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.List;
-
-import org.gradle.api.Project;
-import org.gradle.testfixtures.ProjectBuilder;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.gradle.testkit.runner.GradleRunner;
 import org.junit.jupiter.api.Test;
-
-import ca.frc6390.athena.plugin.features.AthenaFeature;
+import org.junit.jupiter.api.io.TempDir;
 
 class AthenaGradlePluginTest {
-    @Test
-    void pluginAddsDefaultAthenaDependencies() {
-        Project project = projectWithJava();
-
-        project.getPluginManager().apply(AthenaGradlePlugin.class);
-        evaluate(project);
-
-        List<String> dependencies = implementationCoordinates(project);
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-api:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-mechanisms:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-plugin:2027.0.0-SNAPSHOT"));
-    }
+    @TempDir
+    private Path projectDir;
 
     @Test
-    void extensionCanEnableOptionalFeatures() {
-        Project project = projectWithJava();
+    void pluginAddsSelectedAthenaAndVendorDependencies() throws IOException {
+        Files.writeString(projectDir.resolve("settings.gradle"), "rootProject.name = 'athena-plugin-test'\n");
+        Files.writeString(projectDir.resolve("build.gradle"), """
+                plugins {
+                    id 'java'
+                    id 'ca.frc6390.athena'
+                }
 
-        project.getPluginManager().apply(AthenaGradlePlugin.class);
-        project.getExtensions().configure(AthenaExtension.class, extension -> {
-            extension.features(AthenaFeature.SIMULATION);
-            extension.features(AthenaFeature.LOCALIZATION);
-            extension.features("vision", "auto", "wpilib", "dashboard");
-        });
-        evaluate(project);
+                athena {
+                    setGroup('test.group')
+                    setVersion('1.2.3')
+                    setAutoDetectVendors(false)
+                    features 'vision'
+                    vendors 'pathplanner'
+                }
 
-        List<String> dependencies = implementationCoordinates(project);
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-simulation:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-vision:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-auto:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-localization:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-wpilib:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-dashboard:2027.0.0-SNAPSHOT"));
-    }
+                tasks.register('printImplementationDependencies') {
+                    doLast {
+                        configurations.implementation.dependencies.each {
+                            println "${it.group}:${it.name}:${it.version}"
+                        }
+                    }
+                }
+                """);
 
-    @Test
-    void extensionCanEnableExplicitVendor() {
-        Project project = projectWithJava();
+        String output = GradleRunner.create()
+                .withProjectDir(projectDir.toFile())
+                .withPluginClasspath()
+                .withArguments("printImplementationDependencies", "--stacktrace")
+                .build()
+                .getOutput();
 
-        project.getPluginManager().apply(AthenaGradlePlugin.class);
-        project.getExtensions().configure(AthenaExtension.class, extension ->
-                extension.vendors("ctre", "photonvision", "limelight", "pathplanner", "choreo"));
-        evaluate(project);
-
-        List<String> dependencies = implementationCoordinates(project);
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-vendor-ctre:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-vendor-photonvision:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-vendor-limelight:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-vendor-pathplanner:2027.0.0-SNAPSHOT"));
-        assertTrue(dependencies.contains("ca.frc6390.athena:athena-vendor-choreo:2027.0.0-SNAPSHOT"));
+        assertTrue(output.contains("test.group:athena-vision:1.2.3"));
+        assertTrue(output.contains("ca.frc6390.athena:athena-vendor-pathplanner:1.2.3"));
+        assertTrue(output.contains("BUILD SUCCESSFUL"));
     }
 
     @Test
-    void pluginDetectsVendorDependencyCoordinate() {
-        Project project = projectWithJava();
-        project.getDependencies().add("implementation", "com.revrobotics.frc:REVLib-java:2027.0.0");
+    void pluginFailsForUnknownFeatureRequests() throws IOException {
+        Files.writeString(projectDir.resolve("settings.gradle"), "rootProject.name = 'athena-plugin-test'\n");
+        Files.writeString(projectDir.resolve("build.gradle"), """
+                plugins {
+                    id 'java'
+                    id 'ca.frc6390.athena'
+                }
 
-        project.getPluginManager().apply(AthenaGradlePlugin.class);
-        evaluate(project);
+                athena {
+                    features 'missing-feature'
+                }
+                """);
 
-        assertTrue(implementationCoordinates(project).contains(
-                "ca.frc6390.athena:athena-vendor-rev:2027.0.0-SNAPSHOT"));
-    }
+        var result = GradleRunner.create()
+                .withProjectDir(projectDir.toFile())
+                .withPluginClasspath()
+                .withArguments("tasks", "--stacktrace")
+                .buildAndFail();
 
-    private Project projectWithJava() {
-        Project project = ProjectBuilder.builder().build();
-        project.getPluginManager().apply("java");
-        return project;
-    }
-
-    private void evaluate(Project project) {
-        ((org.gradle.api.internal.project.ProjectInternal) project).evaluate();
-    }
-
-    private List<String> implementationCoordinates(Project project) {
-        return project.getConfigurations()
-                .getByName("implementation")
-                .getDependencies()
-                .stream()
-                .map(dependency -> dependency.getGroup() + ":" + dependency.getName() + ":" + dependency.getVersion())
-                .toList();
+        assertTrue(result.getOutput().contains("Unknown Athena module 'missing-feature'."));
     }
 }

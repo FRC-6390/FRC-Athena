@@ -1,48 +1,45 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.ref.RuntimeEncoder;
+import ca.frc6390.athena.hardware.backend.EncoderHandle;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
 import java.util.Objects;
 
-final class SimEncoder implements RuntimeEncoder {
-    private final RuntimeEncoder delegate;
+final class SimEncoder implements EncoderHandle {
+    private final EncoderHandle delegate;
     private double position;
     private double velocity;
 
-    SimEncoder(RuntimeEncoder delegate) {
+    SimEncoder(EncoderHandle delegate) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
-        this.position = delegate.position();
-        this.velocity = delegate.velocity();
+        this.position = delegate.positionRotations();
+        this.velocity = delegate.velocityRotationsPerSecond();
     }
 
     @Override
-    public double position() {
+    public EncoderDevice device() {
+        return delegate.device();
+    }
+
+    @Override
+    public double positionRotations() {
         return position;
     }
 
     @Override
-    public double absolutePosition() {
+    public double absolutePositionRotations() {
         return position;
     }
 
     @Override
-    public double velocity() {
+    public double velocityRotationsPerSecond() {
         return velocity;
     }
 
-    @Override
-    public void set(double position) {
+    void set(double position) {
         this.position = position;
-        delegate.set(position);
     }
 
-    @Override
-    public void setVelocity(double velocity) {
+    void setVelocity(double velocity) {
         this.velocity = velocity;
-        delegate.setVelocity(velocity);
-    }
-
-    @Override
-    public void syncTo(RuntimeEncoder source) {
-        RuntimeEncoder.super.syncTo(source);
     }
 }

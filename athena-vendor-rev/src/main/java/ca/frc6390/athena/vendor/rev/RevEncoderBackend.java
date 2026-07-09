@@ -1,10 +1,10 @@
 package ca.frc6390.athena.vendor.rev;
 
-import ca.frc6390.athena.api.hardware.AthenaEncoder;
 import ca.frc6390.athena.api.hardware.EncoderKind;
+import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.hardware.backend.EncoderBackend;
-import ca.frc6390.athena.hardware.backend.EncoderDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderSpec;
+import ca.frc6390.athena.hardware.backend.EncoderHandle;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
 
 /**
  * REV encoder backend for standalone through-bore encoders.
@@ -12,11 +12,11 @@ import ca.frc6390.athena.hardware.encoder.EncoderSpec;
 public final class RevEncoderBackend implements EncoderBackend {
     @Override
     public boolean supports(EncoderKind kind) {
-        return kind == AthenaEncoder.REV_THROUGH_BORE || kind.key().equals("rev:through-bore");
+        return kind == EncoderKinds.REV_THROUGH_BORE || kind.key().equals("rev:through-bore");
     }
 
     @Override
-    public EncoderDevice create(EncoderSpec spec) {
-        return new RevThroughBoreEncoderDevice(spec);
+    public EncoderHandle create(EncoderDevice device) {
+        return new RevThroughBoreEncoderHandle(device);
     }
 }

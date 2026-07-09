@@ -9,7 +9,7 @@ package ca.frc6390.athena.runtime.measurement;
  * @param latencySeconds latency
  * @param source source object
  */
-public record BearingMeasurement(
+record BearingMeasurement(
         double yawDegrees,
         double pitchDegrees,
         double timestampSeconds,

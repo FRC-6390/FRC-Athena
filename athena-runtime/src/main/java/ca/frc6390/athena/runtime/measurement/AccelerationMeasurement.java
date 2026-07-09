@@ -10,7 +10,7 @@ package ca.frc6390.athena.runtime.measurement;
  * @param latencySeconds latency
  * @param source source object
  */
-public record AccelerationMeasurement(
+record AccelerationMeasurement(
         double xMetersPerSecondSquared,
         double yMetersPerSecondSquared,
         double angularRadiansPerSecondSquared,

@@ -1,7 +1,7 @@
 package ca.frc6390.athena.hardware.backend;
 
 import ca.frc6390.athena.api.hardware.EncoderKind;
-import ca.frc6390.athena.hardware.encoder.EncoderSpec;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
 
 /**
  * Backend contract implemented by vendor encoder adapters.
@@ -16,10 +16,10 @@ public interface EncoderBackend {
     boolean supports(EncoderKind kind);
 
     /**
-     * Creates a runtime encoder from a validated spec.
+     * Creates a runtime encoder handle from a declaration.
      *
-     * @param spec encoder spec
+     * @param device encoder declaration
      * @return runtime encoder
      */
-    EncoderDevice create(EncoderSpec spec);
+    EncoderHandle create(EncoderDevice device);
 }

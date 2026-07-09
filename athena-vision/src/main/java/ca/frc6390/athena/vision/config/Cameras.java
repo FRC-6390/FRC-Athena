@@ -1,18 +1,12 @@
 package ca.frc6390.athena.vision.config;
 
-import java.util.function.Consumer;
-
-import ca.frc6390.athena.api.hardware.AthenaCamera;
 import ca.frc6390.athena.api.hardware.CameraKind;
-import ca.frc6390.athena.vision.ref.CameraRef;
-import ca.frc6390.athena.vision.ref.GenericCameraRef;
-import ca.frc6390.athena.vision.ref.HeliOS;
-import ca.frc6390.athena.vision.ref.HeliOSRef;
-import ca.frc6390.athena.vision.ref.Limelight;
-import ca.frc6390.athena.vision.ref.LimelightRef;
-import ca.frc6390.athena.vision.ref.Photon;
-import ca.frc6390.athena.vision.ref.PhotonRef;
-import ca.frc6390.athena.vision.spec.CameraSpec;
+import ca.frc6390.athena.api.hardware.CameraKinds;
+import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.ref.GenericCameraDevice;
+import ca.frc6390.athena.vision.ref.HeliosDevice;
+import ca.frc6390.athena.vision.ref.LimelightDevice;
+import ca.frc6390.athena.vision.ref.PhotonVisionDevice;
 
 /**
  * Entry points for camera declarations.
@@ -22,68 +16,53 @@ public final class Cameras {
     }
 
     /**
-     * Creates and lowers a single named camera declaration.
-     *
-     * @param name camera name in the robot model
-     * @param configure camera configuration
-     * @return camera spec
-     */
-    public static CameraSpec camera(String name, Consumer<CameraConfig> configure) {
-        CameraConfig config = CameraConfig.create();
-        if (configure != null) {
-            configure.accept(config);
-        }
-        return config.toSpec("vision", name);
-    }
-
-    /**
-     * Creates a generic camera ref.
+     * Creates a camera declaration.
      *
      * @param kind camera kind
      * @param name camera name
-     * @return camera ref
+     * @return camera device
      */
-    public static CameraRef camera(CameraKind kind, String name) {
-        return new GenericCameraRef(kind, name);
+    public static CameraDevice camera(CameraKind kind, String name) {
+        return new GenericCameraDevice(kind, name);
     }
 
     /**
-     * Creates a Limelight camera ref.
+     * Creates a Limelight camera declaration.
      *
      * @param name camera name
-     * @return Limelight ref
+     * @return Limelight device
      */
-    public static LimelightRef limelight(String name) {
-        return Limelight.camera(name);
+    public static LimelightDevice limelight(String name) {
+        return new LimelightDevice(name);
     }
 
     /**
-     * Creates a PhotonVision camera ref.
+     * Creates a PhotonVision camera declaration.
      *
      * @param name camera name
-     * @return Photon ref
+     * @return PhotonVision device
      */
-    public static PhotonRef photon(String name) {
-        return Photon.camera(name);
+    public static PhotonVisionDevice photonVision(String name) {
+        return new PhotonVisionDevice(name);
     }
 
     /**
-     * Creates a HeliOS camera ref.
+     * Creates a HeliOS camera declaration.
      *
      * @param address camera name or address
-     * @return HeliOS ref
+     * @return HeliOS device
      */
-    public static HeliOSRef helios(String address) {
-        return HeliOS.camera(address);
+    public static HeliosDevice helios(String address) {
+        return new HeliosDevice(address);
     }
 
     /**
-     * Creates a simulation camera ref.
+     * Creates a simulation camera declaration.
      *
      * @param name camera name
-     * @return camera ref
+     * @return camera device
      */
-    public static CameraRef sim(String name) {
-        return camera(AthenaCamera.SIM, name);
+    public static CameraDevice sim(String name) {
+        return camera(CameraKinds.SIM, name);
     }
 }

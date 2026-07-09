@@ -1,17 +1,15 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.ref.MotorRef;
+import ca.frc6390.athena.hardware.device.MotorDevice;
 import java.util.Objects;
 
 /**
- * Output request being evaluated by rules.
+ * Output request emitted by a state before it is applied to hardware.
  */
 public interface OutputRequest {
-    ControlRef control();
+    ControlBinding control();
 
-    AxisRef axis();
-
-    MotorRef motor();
+    MotorDevice motor();
 
     Output output();
 
@@ -21,14 +19,6 @@ public interface OutputRequest {
 
     default boolean closedLoop() {
         return output() instanceof Output.Position || output() instanceof Output.Velocity;
-    }
-
-    default boolean positive() {
-        return value() > 0.0;
-    }
-
-    default boolean negative() {
-        return value() < 0.0;
     }
 
     default double value() {
@@ -48,19 +38,15 @@ public interface OutputRequest {
         return 0.0;
     }
 
-    static OutputRequest of(AxisRef axis, Output output) {
-        return new Basic(null, axis, null, output);
+    static OutputRequest of(MotorDevice motor, Output output) {
+        return new Basic(null, motor, output);
     }
 
-    static OutputRequest of(MotorRef motor, Output output) {
-        return new Basic(null, null, motor, output);
+    static OutputRequest of(ControlBinding control, Output output) {
+        return new Basic(control, null, output);
     }
 
-    static OutputRequest of(ControlRef control, Output output) {
-        return new Basic(control, null, null, output);
-    }
-
-    record Basic(ControlRef control, AxisRef axis, MotorRef motor, Output output) implements OutputRequest {
+    record Basic(ControlBinding control, MotorDevice motor, Output output) implements OutputRequest {
         public Basic {
             Objects.requireNonNull(output, "output");
         }

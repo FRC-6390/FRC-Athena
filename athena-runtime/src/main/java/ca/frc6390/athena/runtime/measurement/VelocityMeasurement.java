@@ -10,7 +10,7 @@ import ca.frc6390.athena.runtime.control.RobotVelocity;
  * @param latencySeconds latency
  * @param source source object
  */
-public record VelocityMeasurement(
+record VelocityMeasurement(
         RobotVelocity speeds,
         double timestampSeconds,
         double latencySeconds,

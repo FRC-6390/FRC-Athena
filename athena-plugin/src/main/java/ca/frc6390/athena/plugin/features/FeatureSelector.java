@@ -2,7 +2,6 @@ package ca.frc6390.athena.plugin.features;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
@@ -46,17 +45,19 @@ public final class FeatureSelector {
      * @return selected dependencies
      */
     public FeatureSelection select(FeatureRequest request) {
-        Set<AthenaFeature> selectedFeatures = EnumSet.noneOf(AthenaFeature.class);
-        for (AthenaFeature feature : AthenaFeature.values()) {
-            if (feature.defaultEnabled()) {
-                selectedFeatures.add(feature);
+        Set<ModuleArtifact> selectedModules = new java.util.LinkedHashSet<>();
+        for (ModuleArtifact module : ModuleArtifact.values()) {
+            if (module.defaultEnabled()) {
+                selectedModules.add(module);
             }
         }
-        selectedFeatures.addAll(request.explicitFeatures());
+        request.explicitModules().stream()
+                .map(ModuleArtifact::fromRequestName)
+                .forEach(selectedModules::add);
 
-        List<String> athena = selectedFeatures.stream()
-                .sorted(Comparator.comparing(AthenaFeature::artifactId))
-                .map(feature -> feature.coordinate(group, version))
+        List<String> athena = selectedModules.stream()
+                .sorted(Comparator.comparing(ModuleArtifact::artifactId))
+                .map(module -> module.coordinate(group, version))
                 .toList();
 
         List<String> vendorArtifacts = new ArrayList<>();

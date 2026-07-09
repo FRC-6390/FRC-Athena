@@ -14,7 +14,7 @@ package ca.frc6390.athena.runtime.measurement;
  * @param latencySeconds latency
  * @param source source object
  */
-public record TargetMeasurement(
+record TargetMeasurement(
         int targetId,
         double yawDegrees,
         double pitchDegrees,
@@ -24,7 +24,7 @@ public record TargetMeasurement(
         double confidence,
         double timestampSeconds,
         double latencySeconds,
-        Object source) implements Measurement {
+        Object source) implements TargetMeasurementSample {
     public TargetMeasurement {
         targetId = Math.max(-1, targetId);
         yawDegrees = finiteOrZero(yawDegrees);

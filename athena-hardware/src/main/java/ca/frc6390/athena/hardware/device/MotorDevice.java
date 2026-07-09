@@ -1,0 +1,183 @@
+package ca.frc6390.athena.hardware.device;
+
+import java.util.Objects;
+import java.util.Locale;
+import java.util.function.Consumer;
+
+import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.hardware.vendor.VendorOptions;
+
+/**
+ * Reusable motor declaration for robot constants.
+ */
+public record MotorDevice(
+        MotorKind kind,
+        int id,
+        String canbus,
+        boolean isInverted,
+        MotorNeutralMode neutralMode,
+        int currentLimitAmps,
+        VendorOptions vendorOptions,
+        MotorFollowerBinding follower) {
+    /**
+     * Creates a motor ref on the default roboRIO CAN bus.
+     *
+     * @param kind motor kind
+     * @param id device id
+     * @return motor ref
+     */
+    public static MotorDevice of(MotorKind kind, int id) {
+        return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST, 40, VendorOptions.empty(), null);
+    }
+
+    public MotorDevice {
+        Objects.requireNonNull(kind, "kind");
+        canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
+        neutralMode = neutralMode == null ? MotorNeutralMode.COAST : neutralMode;
+        vendorOptions = vendorOptions == null ? VendorOptions.empty() : vendorOptions;
+    }
+
+    /**
+     * Returns this motor's integrated encoder.
+     *
+     * @return integrated encoder ref
+     */
+    public EncoderDevice encoder() {
+        return EncoderDevice.integratedMotor(this);
+    }
+
+    /**
+     * Returns a motor-controller attached absolute encoder.
+     *
+     * @return absolute encoder declaration
+     */
+    public EncoderDevice absoluteEncoder() {
+        return EncoderDevice.motorAbsolute(this);
+    }
+
+    /**
+     * Moves this motor to another CAN bus.
+     *
+     * @param canbus CAN bus name
+     * @return updated ref
+     */
+    public MotorDevice canbus(String canbus) {
+        return new MotorDevice(
+                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower);
+    }
+
+    /**
+     * Sets inversion.
+     *
+     * @param inverted true if inverted
+     * @return updated ref
+     */
+    public MotorDevice inverted(boolean inverted) {
+        return new MotorDevice(
+                kind, id, canbus, inverted, neutralMode, currentLimitAmps, vendorOptions, follower);
+    }
+
+    /**
+     * Marks this motor as inverted.
+     *
+     * @return updated ref
+     */
+    public MotorDevice inverted() {
+        return inverted(true);
+    }
+
+    /**
+     * Uses brake neutral mode.
+     *
+     * @return updated ref
+     */
+    public MotorDevice brake() {
+        return neutralMode(MotorNeutralMode.BRAKE);
+    }
+
+    /**
+     * Uses coast neutral mode.
+     *
+     * @return updated ref
+     */
+    public MotorDevice coast() {
+        return neutralMode(MotorNeutralMode.COAST);
+    }
+
+    /**
+     * Sets neutral mode.
+     *
+     * @param neutralMode neutral mode
+     * @return updated ref
+     */
+    public MotorDevice neutralMode(MotorNeutralMode neutralMode) {
+        return new MotorDevice(
+                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower);
+    }
+
+    /**
+     * Sets current limit.
+     *
+     * @param amps current limit in amps
+     * @return updated ref
+     */
+    public MotorDevice currentLimit(int amps) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, amps, vendorOptions, follower);
+    }
+
+    /**
+     * Makes this motor follow a leader motor.
+     *
+     * @param leader leader motor
+     * @return updated ref
+     */
+    public MotorDevice follow(MotorDevice leader) {
+        return new MotorDevice(
+                kind,
+                id,
+                canbus,
+                isInverted,
+                neutralMode,
+                currentLimitAmps,
+                vendorOptions,
+                new MotorFollowerBinding(leader));
+    }
+
+    public String defaultName() {
+        return sanitize(kind.key()) + "_" + id;
+    }
+
+    /**
+     * Adds typed vendor-specific options.
+     *
+     * @param optionType option class
+     * @param configure option configuration callback
+     * @param <T> option type
+     * @return updated ref
+     */
+    public <T> MotorDevice vendor(Class<T> optionType, Consumer<T> configure) {
+        Objects.requireNonNull(optionType, "optionType");
+        Objects.requireNonNull(configure, "configure");
+        try {
+            T options = optionType.getDeclaredConstructor().newInstance();
+            configure.accept(options);
+            return new MotorDevice(
+                    kind,
+                    id,
+                    canbus,
+                    isInverted,
+                    neutralMode,
+                    currentLimitAmps,
+                    vendorOptions.with(optionType, options),
+                    follower);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalArgumentException(
+                    "Vendor option type must expose a no-argument constructor: " + optionType.getName(),
+                    exception);
+        }
+    }
+
+    private static String sanitize(String key) {
+        return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
+    }
+}

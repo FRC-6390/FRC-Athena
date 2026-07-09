@@ -4,80 +4,107 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.io.StringReader;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
-
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class VendorMetadataLoaderTest {
-    private final VendorMetadataLoader loader = new VendorMetadataLoader(getClass().getClassLoader());
+    @TempDir
+    private Path tempDir;
 
     @Test
-    void loadsBuiltInVendorMetadataFromResources() {
-        List<VendorFeature> vendors = loader.loadBuiltIns();
+    void parseNormalizesFeatureAndTrimsStringLists() {
+        VendorMetadataLoader loader = new VendorMetadataLoader(getClass().getClassLoader());
 
-        assertTrue(vendors.stream().anyMatch(vendor -> vendor.name().equals("ctre")));
-        assertTrue(vendors.stream().anyMatch(vendor -> vendor.name().equals("rev")));
-        assertTrue(vendors.stream().anyMatch(vendor -> vendor.name().equals("photonvision")));
-        assertTrue(vendors.stream().anyMatch(vendor -> vendor.name().equals("limelight")));
-        assertTrue(vendors.stream().anyMatch(vendor -> vendor.name().equals("pathplanner")));
-        assertTrue(vendors.stream().anyMatch(vendor -> vendor.name().equals("choreo")));
-        assertTrue(vendors.stream().anyMatch(vendor -> vendor.name().equals("studica")));
-        assertTrue(vendors.stream()
-                .flatMap(vendor -> vendor.athenaArtifacts().stream())
-                .anyMatch("ca.frc6390.athena:athena-vendor-ctre"::equals));
-        assertTrue(vendors.stream()
-                .flatMap(vendor -> vendor.athenaArtifacts().stream())
-                .anyMatch("ca.frc6390.athena:athena-vendor-photonvision"::equals));
-        assertTrue(vendors.stream()
-                .flatMap(vendor -> vendor.athenaArtifacts().stream())
-                .anyMatch("ca.frc6390.athena:athena-vendor-pathplanner"::equals));
-        assertTrue(vendors.stream()
-                .flatMap(vendor -> vendor.athenaArtifacts().stream())
-                .anyMatch("ca.frc6390.athena:athena-vendor-studica"::equals));
-    }
-
-    @Test
-    void parsesThirdPartyVendorMetadata() {
-        VendorFeature vendor = loader.parse(new StringReader("""
+        VendorFeature feature = loader.parse(new StringReader("""
                 {
-                  "feature": "acme",
-                  "displayName": "Acme Robotics",
+                  "feature": " Demo ",
+                  "displayName": " Demo Vendor ",
                   "detect": {
-                    "vendordepUuids": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
-                    "dependencies": ["com.acme.frc:AcmeLib-java"]
+                    "vendordepUuids": [" uuid "],
+                    "dependencies": [" group:artifact "]
                   },
-                  "artifacts": [
-                    "com.acme.frc:athena-vendor-acme",
-                    "com.acme.frc:athena-vendor-acme-extra"
-                  ]
+                  "artifacts": [" ca.frc6390.athena:athena-vendor-demo "]
                 }
-                """), "acme.json");
+                """), "demo.json");
 
-        assertEquals("acme", vendor.name());
-        assertEquals("Acme Robotics", vendor.displayName());
-        assertEquals(List.of("com.acme.frc:AcmeLib-java"), vendor.dependencyCoordinates());
-        assertEquals(List.of("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), vendor.vendordepUuids());
-        assertEquals(List.of(
-                "com.acme.frc:athena-vendor-acme:2027.0.0",
-                "com.acme.frc:athena-vendor-acme-extra:2027.0.0"), vendor.artifactsWithVersion("2027.0.0"));
+        assertEquals("demo", feature.name());
+        assertEquals("Demo Vendor", feature.displayName());
+        assertEquals(List.of("group:artifact"), feature.dependencyCoordinates());
+        assertEquals(List.of("uuid"), feature.vendordepUuids());
+        assertEquals(List.of("ca.frc6390.athena:athena-vendor-demo"), feature.athenaArtifacts());
     }
 
     @Test
-    void rejectsMetadataWithoutArtifacts() {
-        VendorMetadataException exception = assertThrows(VendorMetadataException.class, () -> loader.parse(
-                new StringReader("""
+    void parseRejectsMalformedMetadata() {
+        VendorMetadataLoader loader = new VendorMetadataLoader(getClass().getClassLoader());
+
+        VendorMetadataException error = assertThrows(VendorMetadataException.class,
+                () -> loader.parse(new StringReader("""
                         {
-                          "feature": "empty",
-                          "detect": {
-                            "vendordepUuids": [],
-                            "dependencies": []
-                          },
+                          "feature": "demo",
+                          "detect": {"vendordepUuids": [], "dependencies": []},
                           "artifacts": []
                         }
-                        """),
-                "empty.json"));
+                        """), "bad.json"));
 
-        assertTrue(exception.getMessage().contains("at least one artifact"));
+        assertEquals("bad.json must declare at least one artifact.", error.getMessage());
+    }
+
+    @Test
+    void loadResourcesRejectsMissingResources() {
+        VendorMetadataLoader loader = new VendorMetadataLoader(getClass().getClassLoader());
+
+        VendorMetadataException error = assertThrows(VendorMetadataException.class,
+                () -> loader.loadResources(List.of("META-INF/athena/vendors/missing-test-resource.json")));
+
+        assertTrue(error.getMessage().contains("Missing Athena vendor metadata resource"));
+    }
+
+    @Test
+    void loadResourcesRejectsConflictingDuplicateFeatureKeys() throws IOException {
+        Path firstRoot = Files.createDirectories(tempDir.resolve("first"));
+        Path secondRoot = Files.createDirectories(tempDir.resolve("second"));
+        writeVendorMetadata(firstRoot, "demo", "ca.frc6390.athena:athena-vendor-demo");
+        writeVendorMetadata(secondRoot, "demo", "ca.frc6390.athena:athena-vendor-other");
+
+        try (URLClassLoader classLoader = new URLClassLoader(new URL[] {
+                firstRoot.toUri().toURL(),
+                secondRoot.toUri().toURL()
+        }, null)) {
+            VendorMetadataLoader loader = new VendorMetadataLoader(classLoader);
+
+            VendorMetadataException error = assertThrows(VendorMetadataException.class,
+                    () -> loader.loadResources(List.of(VendorMetadataLoader.RESOURCE_PREFIX + "demo.json")));
+
+            assertTrue(error.getMessage().contains("Conflicting Athena vendor metadata for feature demo"));
+        }
+    }
+
+    @Test
+    void builtInResourcesIncludePathPlannerAndChoreo() {
+        List<String> names = new VendorMetadataLoader(getClass().getClassLoader()).loadBuiltIns().stream()
+                .map(VendorFeature::name)
+                .toList();
+
+        assertTrue(names.contains("pathplanner"));
+        assertTrue(names.contains("choreo"));
+    }
+
+    private static void writeVendorMetadata(Path root, String feature, String artifact) throws IOException {
+        Path directory = Files.createDirectories(root.resolve(VendorMetadataLoader.RESOURCE_PREFIX));
+        Files.writeString(directory.resolve(feature + ".json"), """
+                {
+                  "feature": "%s",
+                  "detect": {"vendordepUuids": [], "dependencies": []},
+                  "artifacts": ["%s"]
+                }
+                """.formatted(feature, artifact));
     }
 }

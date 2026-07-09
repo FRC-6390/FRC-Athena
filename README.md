@@ -1,135 +1,156 @@
-# FRC Athena
+# FRC Athena 2027
 
-This repository is the V3 Athena workspace. The old monolithic Java modules have
-been replaced by tiered artifacts, conditional vendor adapter selection, a broad
-example project, and release checks that run from the repository root.
+Athena is split into small Java artifacts for robot code, hardware declarations, mechanisms, drivetrain helpers, vision, localization, autonomous paths, simulation, WPILib lifecycle integration, and vendor adapters.
 
-## Goals
+This branch is the 2027 rebuild. The API is not a 1:1 port of older Athena internals; the goal is feature coverage with cleaner boundaries.
 
-- One human-facing Athena vendordep: `FRC6390-Athena.json`.
-- Clean tiered artifacts instead of one massive core.
-- Vendor adapters selected by Gradle feature/vendor detection.
-- Student-facing Java APIs that lower through `toSpec()`.
-- Immutable specs, explicit validation, and small backend contracts.
-- Tests, examples, and docs per major artifact.
+## Requirements
 
-## Modules
+- JDK 17
+- Gradle wrapper from this repository
+- WPILib/FRC vendor repositories from `settings.gradle`
 
-- `athena-api`: public declarations and common value types.
-- `athena-runtime`: validation, errors, contexts, registries, and lifecycle.
-- `athena-hardware`: generic hardware specs, capabilities, and backend contracts.
-- `athena-mechanisms`: mechanism declarations, lowering to specs, and state runtime application.
-- `athena-superstructure`: multi-mechanism coordination.
-- `athena-drivetrain`: drivetrain declarations.
-- `athena-vision`: generic camera declarations and target observations.
-- `athena-localization`: pose-estimation declarations and field pose aliases.
-- `athena-auto`: autonomous routine registry and selection model.
-- `athena-commands`: command integration boundary.
-- `athena-telemetry`: telemetry registration boundary.
-- `athena-dashboard`: optional TCP dashboard/control transport.
-- `athena-plugin`: Gradle/vendor feature detection model.
-- `athena-simulation`: simulation test helpers and fake backends.
-- `athena-wpilib`: optional WPILib command, lifecycle, controller, localization,
-  and NetworkTables adapter boundary.
-- `athena-vendor-ctre`: CTRE TalonFX/Kraken, CANcoder, Pigeon2, and typed CTRE options.
-- `athena-vendor-rev`: REV Spark and through-bore encoder adapters plus typed
-  REV options.
-- `athena-vendor-studica`: Studica/NavX IMU adapter.
-- `athena-vendor-photonvision`: PhotonVision camera adapter.
-- `athena-vendor-limelight`: Limelight NetworkTables camera adapter.
-- `athena-vendor-pathplanner`: PathPlanner autonomous source and command adapter.
-- `athena-vendor-choreo`: Choreo autonomous source and trajectory adapter.
-- `example-project`: broad student-facing example project.
+Use the wrapper from the repo root:
 
-## Build
+```powershell
+.\gradlew.bat test
+.\gradlew.bat check
+.\gradlew.bat build
+```
 
-From the repository root:
+On macOS/Linux:
 
-```shell
+```bash
+./gradlew test
+./gradlew check
 ./gradlew build
 ```
 
-## Current Status
+`test` runs unit tests. `check` runs verification and tests. `build` compiles, checks, and packages every module.
 
-The replacement workspace now has tested generic API slices for:
+## Local Development
 
-- common hardware keys
-- motor, encoder, IMU, camera, and input configuration
-- mechanism declaration and superstructure coordination/runtime application
-- `toSpec()` lowering
-- validation with default and explicit contexts
-- backend capability checks
-- differential and swerve drivetrain declarations
-- command descriptors and autonomous routine selection
-- telemetry snapshots and NetworkTables-shaped publishing
-- dashboard packet, control-message, and optional TCP transport
-- generic vision observations
-- localization weighting, slip detection, field bounds, and pose aliases
-- stateful simulation helpers
-- WPILib adapter boundary for command, lifecycle, controller, and
-  NetworkTables integration
-- WPILib differential and swerve drive runtime bindings
-- WPILib pose-estimator vision measurement weighting
-- a documented example project with catalog verification
-- generated single-vendordep metadata
-- Gradle plugin feature/vendor selection
-- CTRE and REV motor adapters with typed vendor options
-- CTRE CANcoder and REV through-bore encoder adapters
-- CTRE Pigeon2 and Studica/NavX IMU adapters
-- PhotonVision and Limelight camera adapters
-- PathPlanner autonomous command adapter and Choreo trajectory adapter
-- release metadata and local Maven staging checks
+Publish local snapshots to Maven Local when testing Athena from a robot project on the same machine:
 
-No remaining major migrations are tracked for the fluent Java V3 replacement
-pass. New work should start from a concrete adapter, dashboard workspace,
-annotation DSL, or robot-use-case requirement instead of reopening the accepted
-architecture shape.
-
-Preserved separate workspaces:
-
-- `athena-arcp`: Rust/JNI ARCP runtime and host dashboard work that is not
-  replaced by the lightweight `athena-dashboard` Java bridge.
-- `athena-helios`: HeliOS/PDLib camera adapter pending a dedicated V3 vendor
-  adapter migration.
-- `athena-vscode-extension`: editor tooling, kept outside the robot library
-  artifact graph.
-
-## Release Metadata
-
-Version and vendordep metadata are centralized in `gradle.properties`.
-
-```shell
-./gradlew generateVendordep
+```powershell
+.\gradlew.bat publishToMavenLocal
 ```
 
-The generated file is `vendordeps/FRC6390-Athena.json`.
+Then add `mavenLocal()` to the consuming robot project's repositories while testing local snapshots.
 
-For a release-candidate check with local Maven staging:
+Do not use old root release helper commands such as `releaseChecklist`, `stageMavenPublication`, or `generateVendordep`. This repo now uses standard Gradle lifecycle and publishing tasks.
 
-```shell
-./gradlew releaseChecklist
+## Adding Athena To A Robot Project
+
+The checked-in vendordep is:
+
+```text
+vendordeps/FRC6390-Athena.json
 ```
 
-The local staging repository is written to `build/staging-repo`.
+Published JSON URL:
 
-## Examples
+```text
+https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena.json
+```
 
-See [Example Catalog](./docs/examples.md) for a walkthrough of the current
-student-facing syntax.
+The vendordep provides the default Athena modules:
 
-## Roadmap
+- `athena-api`
+- `athena-runtime`
+- `athena-hardware`
+- `athena-mechanisms`
+- `athena-drivetrain`
+- `athena-commands`
 
-See [Coverage Roadmap](./docs/coverage-roadmap.md) for implemented slices and
-the current migration status.
+Most robot projects should also add the runtime host explicitly:
 
-See [API V3 Direction](./docs/api-v3-direction.md) for the accepted architecture
-shape, artifact split, and scope boundaries.
+```groovy
+dependencies {
+    implementation "ca.frc6390.athena:athena-robot:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-wpilib:2027.0.0-SNAPSHOT"
+}
+```
 
-See [Migration Matrix](./docs/migration-matrix.md) for the source-to-root
-tracking table used to keep legacy feature migration explicit.
+Add optional modules only when used:
 
-See [Example Migration Map](./docs/example-migration-map.md) for the checked
-mapping from every evicted legacy example file to its replacement coverage.
+```groovy
+dependencies {
+    implementation "ca.frc6390.athena:athena-vision:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-localization:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-auto:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-simulation:2027.0.0-SNAPSHOT"
+}
+```
 
-See [Completion Evidence](./docs/completion-evidence.md) for the requirement to
-evidence map used to audit the replacement workspace against the original goal.
+Add vendor adapters that match installed hardware/vendor libraries:
+
+```groovy
+dependencies {
+    implementation "ca.frc6390.athena:athena-vendor-ctre:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-vendor-rev:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-vendor-studica:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-vendor-limelight:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-vendor-photonvision:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-vendor-pathplanner:2027.0.0-SNAPSHOT"
+    implementation "ca.frc6390.athena:athena-vendor-choreo:2027.0.0-SNAPSHOT"
+}
+```
+
+## Athena Gradle Plugin
+
+The Athena Gradle plugin is build tooling, not a robot runtime dependency. It should not be added through the vendordep. When the plugin is available to the consuming build, it can add modules and vendor adapters for you:
+
+```groovy
+plugins {
+    id "java"
+    id "ca.frc6390.athena" version "2027.0.0-SNAPSHOT"
+}
+
+athena {
+    setVersion("2027.0.0-SNAPSHOT")
+    features "drivetrain", "vision", "localization", "auto", "wpilib", "simulation"
+    vendors "ctre", "rev", "limelight", "photonvision", "pathplanner", "choreo"
+}
+```
+
+Supported feature names:
+
+- `drivetrain`
+- `vision`
+- `localization`
+- `auto`
+- `wpilib`
+- `simulation`
+
+Supported vendor names:
+
+- `ctre`
+- `rev`
+- `studica`
+- `limelight`
+- `photonvision`
+- `pathplanner`
+- `choreo`
+
+## Module Guide
+
+- `athena-api`: shared kind catalogs such as motor, encoder, IMU, and camera kinds.
+- `athena-runtime`: common runtime values, measurements, signals, and control helpers.
+- `athena-hardware`: hardware declarations, backend SPI, hardware graph, and simulation declarations.
+- `athena-mechanisms`: mechanism/state/output/control/event model.
+- `athena-drivetrain`: drivetrain helper values and swerve module presets.
+- `athena-commands`: command-style state lifecycle.
+- `athena-auto`: autonomous routines, path providers, and marker graphs.
+- `athena-vision`: camera declarations, pose/target signals, and camera adapter runtime.
+- `athena-localization`: localization pipelines, filters, and estimators.
+- `athena-simulation`: in-memory simulated hardware runtime.
+- `athena-robot`: root Athena robot runtime.
+- `athena-wpilib`: WPILib `TimedRobot` lifecycle bridge.
+- `athena-vendor-*`: optional vendor backends/adapters.
+
+## Current Architecture Notes
+
+Mechanisms are the main robot behavior abstraction. Swerve is not a special runtime graph anymore: a drivetrain should be a normal `Mechanism`, and swerve modules are normal mechanism components. Hardware declarations resolve through `HardwareGraph`; vendor modules provide backend implementations through service loading.
+
+Simulation currently supports in-memory hardware handles and simple model stepping. More WPILib-backed physics simulation is still a planned addition.

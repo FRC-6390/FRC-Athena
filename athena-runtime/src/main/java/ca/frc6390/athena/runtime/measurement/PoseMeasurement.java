@@ -17,7 +17,7 @@ import ca.frc6390.athena.runtime.filter.PoseSnapshot;
  * @param stdDevs standard deviations
  * @param source source object
  */
-public record PoseMeasurement(
+record PoseMeasurement(
         PoseSnapshot pose,
         RobotVelocity speeds,
         double timestampSeconds,
@@ -25,7 +25,7 @@ public record PoseMeasurement(
         double ambiguity,
         int targetCount,
         MeasurementStdDevs stdDevs,
-        Object source) implements Measurement {
+        Object source) implements PoseMeasurementSample {
     public PoseMeasurement {
         Objects.requireNonNull(pose, "pose");
         speeds = speeds == null ? RobotVelocity.zero() : speeds;

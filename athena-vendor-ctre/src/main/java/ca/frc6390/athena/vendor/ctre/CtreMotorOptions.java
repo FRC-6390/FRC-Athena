@@ -1,7 +1,7 @@
 package ca.frc6390.athena.vendor.ctre;
 
 /**
- * CTRE-specific motor options stored in Athena motor specs.
+ * CTRE-specific motor options stored in Athena motor declarations.
  */
 public final class CtreMotorOptions {
     private int supplyCurrentLimitAmps;

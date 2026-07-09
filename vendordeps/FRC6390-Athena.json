@@ -38,16 +38,6 @@
             "groupId": "ca.frc6390.athena",
             "artifactId": "athena-commands",
             "version": "2027.0.0-SNAPSHOT"
-        },
-        {
-            "groupId": "ca.frc6390.athena",
-            "artifactId": "athena-telemetry",
-            "version": "2027.0.0-SNAPSHOT"
-        },
-        {
-            "groupId": "ca.frc6390.athena",
-            "artifactId": "athena-plugin",
-            "version": "2027.0.0-SNAPSHOT"
         }
     ],
     "jniDependencies": [

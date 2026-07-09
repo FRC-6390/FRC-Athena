@@ -11,7 +11,7 @@ import java.util.Map;
  * @param latencySeconds latency
  * @param source source object
  */
-public record CustomMeasurement(
+record CustomMeasurement(
         Object value,
         Map<String, Object> metadata,
         double timestampSeconds,

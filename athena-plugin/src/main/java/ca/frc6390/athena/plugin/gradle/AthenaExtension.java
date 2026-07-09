@@ -4,8 +4,6 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
 
-import ca.frc6390.athena.plugin.features.AthenaFeature;
-
 /**
  * Gradle extension for Athena dependency selection.
  */
@@ -13,7 +11,7 @@ public class AthenaExtension {
     private String group = "ca.frc6390.athena";
     private String version = "2027.0.0-SNAPSHOT";
     private boolean autoDetectVendors = true;
-    private final Set<AthenaFeature> features = new LinkedHashSet<>();
+    private final Set<String> features = new LinkedHashSet<>();
     private final Set<String> vendors = new LinkedHashSet<>();
     private final Set<String> vendordepUuids = new LinkedHashSet<>();
 
@@ -72,23 +70,7 @@ public class AthenaExtension {
     }
 
     /**
-     * Enables optional Athena features by enum.
-     *
-     * @param requestedFeatures requested features
-     */
-    public void features(AthenaFeature... requestedFeatures) {
-        if (requestedFeatures == null) {
-            return;
-        }
-        for (AthenaFeature feature : requestedFeatures) {
-            if (feature != null) {
-                features.add(feature);
-            }
-        }
-    }
-
-    /**
-     * Enables optional Athena features by lower-case name.
+     * Enables optional Athena modules by lower-case name.
      *
      * @param requestedFeatures feature names
      */
@@ -98,7 +80,7 @@ public class AthenaExtension {
         }
         for (String feature : requestedFeatures) {
             if (feature != null && !feature.isBlank()) {
-                features.add(AthenaFeature.valueOf(feature.trim().replace('-', '_').toUpperCase(Locale.ROOT)));
+                features.add(feature.trim().replace('_', '-').toLowerCase(Locale.ROOT));
             }
         }
     }
@@ -135,7 +117,7 @@ public class AthenaExtension {
         }
     }
 
-    Set<AthenaFeature> features() {
+    Set<String> features() {
         return Set.copyOf(features);
     }
 

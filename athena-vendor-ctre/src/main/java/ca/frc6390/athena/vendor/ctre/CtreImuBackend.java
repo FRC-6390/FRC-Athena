@@ -1,10 +1,10 @@
 package ca.frc6390.athena.vendor.ctre;
 
-import ca.frc6390.athena.api.hardware.AthenaImu;
 import ca.frc6390.athena.api.hardware.ImuKind;
+import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.hardware.backend.ImuBackend;
-import ca.frc6390.athena.hardware.backend.ImuDevice;
-import ca.frc6390.athena.hardware.imu.ImuSpec;
+import ca.frc6390.athena.hardware.backend.ImuHandle;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 
 /**
  * CTRE IMU backend for Pigeon2 devices.
@@ -12,11 +12,11 @@ import ca.frc6390.athena.hardware.imu.ImuSpec;
 public final class CtreImuBackend implements ImuBackend {
     @Override
     public boolean supports(ImuKind kind) {
-        return kind == AthenaImu.PIGEON_2 || kind.key().equals("ctre:pigeon-2");
+        return kind == ImuKinds.PIGEON_2 || kind.key().equals("ctre:pigeon-2");
     }
 
     @Override
-    public ImuDevice create(ImuSpec spec) {
-        return new CtrePigeon2Device(spec);
+    public ImuHandle create(ImuDevice device) {
+        return new CtrePigeon2Handle(device);
     }
 }

@@ -14,8 +14,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-import groovy.json.JsonSlurper;
-
 /**
  * Loads vendor adapter metadata from classpath resources.
  */
@@ -80,7 +78,7 @@ public final class VendorMetadataLoader {
      * @return parsed vendor feature
      */
     public VendorFeature parse(Reader reader, String source) {
-        Object value = new JsonSlurper().parse(reader);
+        Object value = SimpleJson.parse(reader, source);
         if (!(value instanceof Map<?, ?> map)) {
             throw new VendorMetadataException(source + " must contain a JSON object.");
         }

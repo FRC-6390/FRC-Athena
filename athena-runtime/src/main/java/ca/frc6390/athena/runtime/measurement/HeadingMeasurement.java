@@ -8,7 +8,7 @@ package ca.frc6390.athena.runtime.measurement;
  * @param latencySeconds latency
  * @param source source object
  */
-public record HeadingMeasurement(
+record HeadingMeasurement(
         double headingRadians,
         double timestampSeconds,
         double latencySeconds,
