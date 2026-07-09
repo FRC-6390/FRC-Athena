@@ -11,15 +11,13 @@ public final class DriveTrain implements Mechanism {
     private double turn;
 
     public final MotorDevice leftLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 1);
-    public final MotorDevice leftFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 2);
+    public final MotorDevice leftFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 2).follow(leftLeader);
     public final MotorDevice rightLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 3).inverted();
-    public final MotorDevice rightFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 4).inverted();
+    public final MotorDevice rightFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 4).follow(rightLeader);
 
     public final Action drive = Actions.parallel(
             leftLeader.percent(this::leftPercent),
-            leftFollower.percent(this::leftPercent),
-            rightLeader.percent(this::rightPercent),
-            rightFollower.percent(this::rightPercent));
+            rightLeader.percent(this::rightPercent));
 
     public void arcade(double forward, double turn) {
         this.forward = clamp(forward);

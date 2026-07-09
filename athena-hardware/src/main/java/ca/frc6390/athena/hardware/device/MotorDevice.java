@@ -149,6 +149,13 @@ public record MotorDevice(
      * @return updated ref
      */
     public MotorDevice follow(MotorDevice leader) {
+        Objects.requireNonNull(leader, "leader");
+        if (id == leader.id() && canbus.equals(leader.canbus())) {
+            throw new IllegalArgumentException("A motor cannot follow itself.");
+        }
+        if (!canbus.equals(leader.canbus())) {
+            throw new IllegalArgumentException("A motor and its leader must use the same CAN bus.");
+        }
         return new MotorDevice(
                 kind,
                 id,

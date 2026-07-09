@@ -87,6 +87,15 @@ public final class RevMotorHandle implements MotorHandle {
     }
 
     @Override
+    public void follow(MotorHandle leader, boolean inverted) {
+        if (!(leader instanceof RevMotorHandle revLeader)) {
+            throw new IllegalArgumentException("REV motor " + device.defaultName()
+                    + " can only follow another REV motor.");
+        }
+        controller.follow(revLeader.device.id(), inverted);
+    }
+
+    @Override
     public void setPercentOutput(double percent) {
         controller.setPercent(clamp(percent));
     }
@@ -227,6 +236,10 @@ public final class RevMotorHandle implements MotorHandle {
                 MotorClosedLoopConfig closedLoopConfig) {
         }
 
+        default void follow(int leaderId, boolean inverted) {
+            throw new UnsupportedOperationException("Hardware following is unavailable.");
+        }
+
         void stop();
 
         double positionRotations();
@@ -251,6 +264,7 @@ public final class RevMotorHandle implements MotorHandle {
         public void configure(MotorDevice device, RevMotorOptions options) {
             SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
             config.idleMode(device.neutralMode() == MotorNeutralMode.BRAKE ? IdleMode.kBrake : IdleMode.kCoast);
+            config.inverted(device.isInverted());
             int currentLimit = options.smartCurrentLimitAmps() > 0
                     ? options.smartCurrentLimitAmps()
                     : device.currentLimitAmps();
@@ -321,6 +335,13 @@ public final class RevMotorHandle implements MotorHandle {
                     .kS(closedLoopConfig.staticFeedforward(), slot)
                     .kV(closedLoopConfig.velocityFeedforward(), slot)
                     .kG(closedLoopConfig.gravityFeedforward(), slot);
+            spark.configure(config, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters);
+        }
+
+        @Override
+        public void follow(int leaderId, boolean inverted) {
+            SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
+            config.follow(leaderId, inverted);
             spark.configure(config, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters);
         }
 

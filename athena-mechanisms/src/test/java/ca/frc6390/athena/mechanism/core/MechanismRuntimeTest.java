@@ -279,6 +279,24 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void registeringAnAlreadyDiscoveredChildDoesNotCreateAmbiguousOwnership() {
+        RecordingActionContext actions = new RecordingActionContext(CHILD_MOTOR);
+        TestMechanism child = new TestMechanism(CHILD_MOTOR.percent(0.1));
+        Action requested = CHILD_MOTOR.percent(0.9);
+        child.secondary = requested;
+        ParentMechanism parent = new ParentMechanism(child);
+        MechanismScheduler runtime = MechanismScheduler.create(actions)
+                .register(parent)
+                .register(child);
+
+        runtime.request(requested);
+        runtime.robotPeriodic(1.0, 0.02);
+
+        assertEquals(1, runtime.mechanisms().size());
+        assertEquals(0.9, actions.motor(CHILD_MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
     void robotRuntimeRequestsExternalActionByTargetDeclarationOwnership() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         DeviceMechanism mechanism = new DeviceMechanism();

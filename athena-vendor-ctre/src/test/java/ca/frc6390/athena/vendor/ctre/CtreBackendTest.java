@@ -70,7 +70,7 @@ class CtreBackendTest {
     void motorConfigurationRunsDuringActivationOnlyOnce() {
         RecordingTalonController controller = new RecordingTalonController();
         CtreMotorHandle handle = new CtreMotorHandle(
-                MotorDevice.of(MotorKinds.TALON_FX, 1).neutralMode(MotorNeutralMode.BRAKE),
+                MotorDevice.of(MotorKinds.TALON_FX, 1).neutralMode(MotorNeutralMode.BRAKE).inverted(),
                 new CtreMotorOptions(),
                 controller);
 
@@ -81,6 +81,22 @@ class CtreBackendTest {
 
         assertEquals(1, controller.neutralModeCalls);
         assertTrue(controller.brake);
+        assertTrue(controller.inverted);
+    }
+
+    @Test
+    void motorFollowerUsesLeaderCanIdAndRequestedDirection() {
+        RecordingTalonController leaderController = new RecordingTalonController();
+        RecordingTalonController followerController = new RecordingTalonController();
+        CtreMotorHandle leader = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 1), null, leaderController);
+        CtreMotorHandle follower = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 2), null, followerController);
+
+        follower.follow(leader, true);
+
+        assertEquals(1, followerController.followLeaderId);
+        assertTrue(followerController.followInverted);
     }
 
     @Test
@@ -172,6 +188,9 @@ class CtreBackendTest {
         private double positionTarget;
         private double feedforwardVolts;
         private MotorClosedLoopConfig config;
+        private int followLeaderId = -1;
+        private boolean followInverted;
+        private boolean inverted;
 
         @Override
         public void setPercent(double percent) {}
@@ -212,12 +231,23 @@ class CtreBackendTest {
         }
 
         @Override
+        public void follow(int leaderId, boolean inverted) {
+            followLeaderId = leaderId;
+            followInverted = inverted;
+        }
+
+        @Override
         public void stop() {}
 
         @Override
         public void setNeutralMode(boolean brake) {
             neutralModeCalls++;
             this.brake = brake;
+        }
+
+        @Override
+        public void setInverted(boolean inverted) {
+            this.inverted = inverted;
         }
 
         @Override

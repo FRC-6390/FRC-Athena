@@ -2,6 +2,7 @@ package ca.frc6390.athena.robot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.auto.AutoRuntime;
@@ -242,6 +243,18 @@ class RobotRuntimeTest {
     }
 
     @Test
+    void registrationActivatesFollowerThatIsNotTargetedByAnAction() {
+        FollowerMotorBackend backend = new FollowerMotorBackend();
+        FollowerMechanism mechanism = new FollowerMechanism();
+
+        RobotRuntime.using(HardwareGraph.using(BackendRegistry.of(backend)))
+                .register(mechanism);
+
+        assertEquals(2, backend.created);
+        assertSame(backend.leader, backend.follower.followLeader);
+    }
+
+    @Test
     void genericSimulationPeriodicStepsSimulationSessionOnce() {
         MotorMechanism mechanism = new MotorMechanism();
         SimulationSession simulation = SimulationSession.create();
@@ -447,6 +460,56 @@ class RobotRuntimeTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 42);
         @SuppressWarnings("unused")
         private final Action initial = motor.percent(1.0);
+    }
+
+    private static final class FollowerMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 45);
+        @SuppressWarnings("unused")
+        private final MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 46).follow(leader);
+        @SuppressWarnings("unused")
+        private final Action drive = leader.percent(0.5);
+    }
+
+    private static final class FollowerMotorBackend implements MotorBackend {
+        private int created;
+        private FollowerMotorHandle leader;
+        private FollowerMotorHandle follower;
+
+        @Override
+        public boolean supports(MotorKind kind) {
+            return kind == MotorKinds.KRAKEN_X60;
+        }
+
+        @Override
+        public MotorHandle create(MotorDevice device) {
+            created++;
+            FollowerMotorHandle handle = new FollowerMotorHandle(device);
+            if (device.follower() == null) {
+                leader = handle;
+            } else {
+                follower = handle;
+            }
+            return handle;
+        }
+    }
+
+    private static final class FollowerMotorHandle implements MotorHandle {
+        private final MotorDevice device;
+        private MotorHandle followLeader;
+
+        private FollowerMotorHandle(MotorDevice device) {
+            this.device = device;
+        }
+
+        @Override
+        public MotorDevice device() {
+            return device;
+        }
+
+        @Override
+        public void follow(MotorHandle leader, boolean inverted) {
+            followLeader = leader;
+        }
     }
 
     private static final class CountingOutputMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {

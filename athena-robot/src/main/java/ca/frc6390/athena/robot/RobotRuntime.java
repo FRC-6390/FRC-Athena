@@ -187,6 +187,7 @@ public final class RobotRuntime {
      */
     public RobotRuntime register(Mechanism mechanism) {
         mechanisms.register(mechanism);
+        mechanisms.followerMotors().forEach(hardwareGraph::motor);
         if (simulationSession != null) {
             registerSimulationModels();
             mechanisms.bindInMemoryRuntime();

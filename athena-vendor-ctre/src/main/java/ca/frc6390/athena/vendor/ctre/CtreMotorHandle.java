@@ -10,9 +10,13 @@ import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.SlotConfigs;
+import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
+import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.MotorAlignmentValue;
+import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 import edu.wpi.first.units.Units;
 import java.util.Objects;
@@ -65,6 +69,9 @@ public final class CtreMotorHandle implements MotorHandle {
     public void activate() {
         if (!activated) {
             controller.setNeutralMode(device.neutralMode() == MotorNeutralMode.BRAKE);
+            if (device.follower() == null) {
+                controller.setInverted(device.isInverted());
+            }
             activated = true;
         }
     }
@@ -74,6 +81,15 @@ public final class CtreMotorHandle implements MotorHandle {
         positionRotations = controller.positionRotations();
         velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
         inputsFresh = true;
+    }
+
+    @Override
+    public void follow(MotorHandle leader, boolean inverted) {
+        if (!(leader instanceof CtreMotorHandle ctreLeader)) {
+            throw new IllegalArgumentException("CTRE motor " + device.defaultName()
+                    + " can only follow another CTRE motor.");
+        }
+        controller.follow(ctreLeader.device.id(), inverted);
     }
 
     @Override
@@ -233,9 +249,16 @@ public final class CtreMotorHandle implements MotorHandle {
         default void configureSlot(MotorClosedLoopConfig config) {
         }
 
+        default void follow(int leaderId, boolean inverted) {
+            throw new UnsupportedOperationException("Hardware following is unavailable.");
+        }
+
         void stop();
 
         void setNeutralMode(boolean brake);
+
+        default void setInverted(boolean inverted) {
+        }
 
         double positionRotations();
 
@@ -309,6 +332,13 @@ public final class CtreMotorHandle implements MotorHandle {
         }
 
         @Override
+        public void follow(int leaderId, boolean inverted) {
+            talon.setControl(new Follower(
+                    leaderId,
+                    inverted ? MotorAlignmentValue.Opposed : MotorAlignmentValue.Aligned));
+        }
+
+        @Override
         public void stop() {
             talon.stopMotor();
         }
@@ -316,6 +346,12 @@ public final class CtreMotorHandle implements MotorHandle {
         @Override
         public void setNeutralMode(boolean brake) {
             talon.setNeutralMode(brake ? NeutralModeValue.Brake : NeutralModeValue.Coast);
+        }
+
+        @Override
+        public void setInverted(boolean inverted) {
+            talon.getConfigurator().apply(new MotorOutputConfigs().withInverted(
+                    inverted ? InvertedValue.Clockwise_Positive : InvertedValue.CounterClockwise_Positive));
         }
 
         @Override

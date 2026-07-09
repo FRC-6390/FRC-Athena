@@ -21,6 +21,17 @@ final class RobotGraph {
                 MechanismIntrospector::inspect);
     }
 
+    boolean contains(Collection<Mechanism> roots, Mechanism target) {
+        Objects.requireNonNull(target, "target");
+        Set<Mechanism> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Mechanism root : roots) {
+            if (contains(root, target, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     Set<Object> declarations(Collection<Mechanism> mechanisms) {
         Set<Mechanism> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<Object> declarations = new HashSet<>();
@@ -54,6 +65,21 @@ final class RobotGraph {
         for (Mechanism child : node.children().values()) {
             collectDeclarations(child, visited, declarations);
         }
+    }
+
+    private boolean contains(Mechanism mechanism, Mechanism target, Set<Mechanism> visited) {
+        if (mechanism == target) {
+            return true;
+        }
+        if (!visited.add(mechanism)) {
+            return false;
+        }
+        for (Mechanism child : node(mechanism).children().values()) {
+            if (contains(child, target, visited)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void collectControlDeclarations(ControlBinding control, Set<Object> declarations) {

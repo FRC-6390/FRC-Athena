@@ -8,7 +8,6 @@ import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ActionRequests;
-import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.wpilib.controls.Controls;
 import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
@@ -23,8 +22,6 @@ import java.util.Objects;
  * Subclassable WPILib robot host backed by Athena mechanisms.
  */
 public abstract class AthenaRobot extends TimedRobot implements Mechanism {
-    @SuppressWarnings("unused")
-    public final Action initial = Actions.neutral();
     private RobotRuntime runtime;
     private double lastTimestampSeconds;
     private double lastSimulationTimestampSeconds;
@@ -47,8 +44,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     protected final void register(Mechanism mechanism) {
-        Objects.requireNonNull(mechanism, "mechanism");
-        athena().register(new RegisteredMechanism(mechanism));
+        athena().register(Objects.requireNonNull(mechanism, "mechanism"));
     }
 
     public final void set(Action Action) {
@@ -181,18 +177,4 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         return RobotRuntime.simulated(SimulationSession.create().physicsEngine(new WpilibSimPhysicsEngine()));
     }
 
-    private static final class RegisteredMechanism implements Mechanism {
-        @SuppressWarnings("unused")
-        public final Action initial = Actions.neutral();
-        private final Mechanism mechanism;
-
-        private RegisteredMechanism(Mechanism mechanism) {
-            this.mechanism = Objects.requireNonNull(mechanism, "mechanism");
-        }
-
-        @SuppressWarnings("unused")
-        public Mechanism mechanism() {
-            return mechanism;
-        }
-    }
 }

@@ -28,6 +28,16 @@ public interface MotorHandle {
     }
 
     /**
+     * Configures this controller to follow another runtime motor controller.
+     *
+     * @param leader leader motor handle
+     * @param inverted true to oppose the leader direction
+     */
+    default void follow(MotorHandle leader, boolean inverted) {
+        throw new UnsupportedOperationException("Hardware following is not implemented by " + device().defaultName());
+    }
+
+    /**
      * Sets open-loop output.
      *
      * @param percent output from -1 to 1

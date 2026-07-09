@@ -29,6 +29,8 @@ public final class SimMotorHandle implements MotorHandle {
     private double positionRotations;
     private double velocityRotationsPerSecond;
     private MotorClosedLoopRequest closedLoopRequest;
+    private SimMotorHandle leader;
+    private boolean followerInverted;
 
     /**
      * Creates a simulation motor handle.
@@ -42,6 +44,15 @@ public final class SimMotorHandle implements MotorHandle {
     @Override
     public MotorDevice device() {
         return device;
+    }
+
+    @Override
+    public void follow(MotorHandle leader, boolean inverted) {
+        if (!(leader instanceof SimMotorHandle simLeader)) {
+            throw new IllegalArgumentException("Simulated motor can only follow another simulated motor.");
+        }
+        this.leader = simLeader;
+        followerInverted = inverted;
     }
 
     @Override
@@ -121,7 +132,7 @@ public final class SimMotorHandle implements MotorHandle {
      * @return command kind
      */
     public CommandKind commandKind() {
-        return commandKind;
+        return leader == null ? commandKind : leader.commandKind();
     }
 
     /**
@@ -130,7 +141,7 @@ public final class SimMotorHandle implements MotorHandle {
      * @return command value
      */
     public double commandValue() {
-        return commandValue;
+        return leader == null ? commandValue : direction() * leader.commandValue();
     }
 
     /**
@@ -139,7 +150,7 @@ public final class SimMotorHandle implements MotorHandle {
      * @return closed-loop request, or null when the last command was not offloaded
      */
     public MotorClosedLoopRequest closedLoopRequest() {
-        return closedLoopRequest;
+        return leader == null ? closedLoopRequest : leader.closedLoopRequest();
     }
 
     /**
@@ -175,5 +186,9 @@ public final class SimMotorHandle implements MotorHandle {
 
     private static double finiteOrZero(double value) {
         return Double.isFinite(value) ? value : 0.0;
+    }
+
+    private double direction() {
+        return followerInverted ? -1.0 : 1.0;
     }
 }

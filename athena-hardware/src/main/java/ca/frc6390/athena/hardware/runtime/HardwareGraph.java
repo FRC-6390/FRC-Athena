@@ -57,14 +57,22 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     @Override
     public synchronized MotorHandle motor(MotorDevice device) {
         Objects.requireNonNull(device, "device");
-        return motors.computeIfAbsent(HardwareIdentity.motor(device), ignored -> {
-            MotorHandle handle = backends
-                    .motorBackendFor(device.kind())
-                    .orElseThrow(() -> new IllegalStateException("No motor backend for " + device.kind().key()))
-                    .create(device);
-            handle.activate();
-            return handle;
-        });
+        HardwareIdentity identity = HardwareIdentity.motor(device);
+        MotorHandle existing = motors.get(identity);
+        if (existing != null) {
+            return existing;
+        }
+        MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());
+        MotorHandle handle = backends
+                .motorBackendFor(device.kind())
+                .orElseThrow(() -> new IllegalStateException("No motor backend for " + device.kind().key()))
+                .create(device);
+        handle.activate();
+        if (leader != null) {
+            handle.follow(leader, device.isInverted());
+        }
+        motors.put(identity, handle);
+        return handle;
     }
 
     @Override

@@ -92,6 +92,21 @@ class RevBackendTest {
     }
 
     @Test
+    void motorFollowerUsesLeaderCanIdAndRequestedDirection() {
+        RecordingSparkController leaderController = new RecordingSparkController();
+        RecordingSparkController followerController = new RecordingSparkController();
+        RevMotorHandle leader = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 1), null, leaderController);
+        RevMotorHandle follower = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2), null, followerController);
+
+        follower.follow(leader, true);
+
+        assertEquals(1, followerController.followLeaderId);
+        assertTrue(followerController.followInverted);
+    }
+
+    @Test
     void motorSensorReadsAreSnapshottedUntilRefresh() {
         RecordingSparkController controller = new RecordingSparkController();
         RevMotorHandle handle = new RevMotorHandle(
@@ -177,6 +192,8 @@ class RevBackendTest {
         private double arbitraryFeedforwardVolts;
         private int slot;
         private MotorClosedLoopConfig closedLoopConfig;
+        private int followLeaderId = -1;
+        private boolean followInverted;
 
         @Override
         public void configure(MotorDevice device, RevMotorOptions options) {
@@ -211,6 +228,12 @@ class RevBackendTest {
                 MotorClosedLoopConfig closedLoopConfig) {
             configureClosedLoopCalls++;
             this.closedLoopConfig = closedLoopConfig;
+        }
+
+        @Override
+        public void follow(int leaderId, boolean inverted) {
+            followLeaderId = leaderId;
+            followInverted = inverted;
         }
 
         @Override

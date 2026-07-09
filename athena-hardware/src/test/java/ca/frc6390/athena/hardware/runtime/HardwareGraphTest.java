@@ -81,6 +81,21 @@ class HardwareGraphTest {
     }
 
     @Test
+    void graphConfiguresDeclaredHardwareFollowerAgainstCachedLeader() {
+        FakeMotorBackend backend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(backend));
+        MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
+        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2).follow(leader).inverted();
+
+        FakeMotorHandle followerHandle = assertInstanceOf(FakeMotorHandle.class, graph.motor(follower));
+        FakeMotorHandle leaderHandle = assertInstanceOf(FakeMotorHandle.class, graph.motor(leader));
+
+        assertEquals(2, backend.created);
+        assertSame(leaderHandle, followerHandle.followLeader);
+        assertEquals(true, followerHandle.followInverted);
+    }
+
+    @Test
     void refreshInputsRecordsFailuresAndContinuesRefreshingOtherHandles() {
         FakeMotorBackend motorBackend = new FakeMotorBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));
@@ -313,6 +328,8 @@ class HardwareGraphTest {
         private int closeCalls;
         private int refreshCalls;
         private boolean failRefresh;
+        private MotorHandle followLeader;
+        private boolean followInverted;
 
         private FakeMotorHandle(MotorDevice device) {
             this.device = device;
@@ -334,6 +351,12 @@ class HardwareGraphTest {
             if (failRefresh) {
                 throw new IllegalStateException("refresh failed");
             }
+        }
+
+        @Override
+        public void follow(MotorHandle leader, boolean inverted) {
+            followLeader = leader;
+            followInverted = inverted;
         }
 
         @Override

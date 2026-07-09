@@ -68,6 +68,24 @@ class SimulationSessionTest {
     }
 
     @Test
+    void hardwareFollowerMirrorsLeaderCommandsAndDirection() {
+        SimulationSession session = SimulationSession.create();
+        MotorDevice leaderDevice = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
+        MotorDevice followerDevice = MotorDevice.of(MotorKinds.KRAKEN_X60, 2)
+                .follow(leaderDevice)
+                .inverted();
+        SimMotorHandle follower = assertInstanceOf(
+                SimMotorHandle.class,
+                session.hardwareGraph().motor(followerDevice));
+        SimMotorHandle leader = session.motor(leaderDevice);
+
+        leader.setPercentOutput(0.6);
+
+        assertEquals(SimMotorHandle.CommandKind.PERCENT, follower.commandKind());
+        assertEquals(-0.6, follower.commandValue(), 1.0e-9);
+    }
+
+    @Test
     void nonFiniteTimestepsDoNotReachPhysicsEngine() {
         AtomicInteger calls = new AtomicInteger();
         SimulationSession session = SimulationSession.create()

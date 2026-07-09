@@ -76,6 +76,9 @@ public final class MechanismScheduler {
 
     public MechanismScheduler register(Mechanism mechanism) {
         Objects.requireNonNull(mechanism, "mechanism");
+        if (graph.contains(runtimes.keySet(), mechanism)) {
+            return this;
+        }
         graph.node(mechanism);
         runtimes.computeIfAbsent(mechanism, this::runtime);
         indexActionTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
@@ -168,6 +171,21 @@ public final class MechanismScheduler {
      */
     public Set<SimModel> simulationModels() {
         return graph.simulations(runtimes.keySet());
+    }
+
+    /**
+     * Returns declared motors that require hardware follower activation.
+     *
+     * @return follower motor declarations
+     */
+    public Set<MotorDevice> followerMotors() {
+        Set<MotorDevice> followers = new LinkedHashSet<>();
+        for (Object declaration : graph.declarations(runtimes.keySet())) {
+            if (declaration instanceof MotorDevice motor && motor.follower() != null) {
+                followers.add(motor);
+            }
+        }
+        return Set.copyOf(followers);
     }
 
     private MechanismScheduler set(Mechanism mechanism, Action action) {
