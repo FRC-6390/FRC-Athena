@@ -1,7 +1,14 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ca.frc6390.athena.api.hardware.EncoderKinds;
+import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.hardware.device.HardwareBus;
+import ca.frc6390.athena.hardware.sim.SimModel;
 import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -58,6 +65,59 @@ class SwerveModulesTest {
         }
     }
 
+    @Test
+    void presetsAreMechanismTemplateModulesFilledThroughGenericSlots() {
+        HardwareBus canivore = HardwareBus.can("canivore");
+        SwerveModule module = new SwerveModules.SDS.MK5N.R3();
+
+        assertThrows(IllegalStateException.class, () -> module.target(new SwerveModuleTarget(1.0, 0.25)));
+
+        module.drive.fill(canivore.motor(MotorKinds.KRAKEN_X60, 1))
+                .steer.fill(canivore.motor(MotorKinds.KRAKEN_X44, 2))
+                .angle.fill(canivore.encoder(EncoderKinds.CANCODER, 3));
+
+        assertNotNull(module.driveVelocity);
+        assertNotNull(module.steerPosition);
+        assertDoesNotThrow(() -> module.target(new SwerveModuleTarget(1.0, 0.25)));
+    }
+
+    @Test
+    void filledModulesExposeDriveAndSteerSimulationModels() {
+        HardwareBus canivore = HardwareBus.can("canivore");
+        SwerveModule module = new SwerveModules.SDS.MK5N.R3();
+        module.drive.fill(canivore.motor(MotorKinds.KRAKEN_X60, 1))
+                .steer.fill(canivore.motor(MotorKinds.KRAKEN_X44, 2))
+                .angle.fill(canivore.encoder(EncoderKinds.CANCODER, 3));
+
+        List<SimModel> models = SwerveSimModels.module(module);
+
+        assertEquals(2, models.size());
+        assertEquals(module.drive.get(), models.get(0).motors().get(0));
+        assertEquals(module.drive.get().encoder(), models.get(0).encoders().get(0));
+        assertEquals(1.0 / module.model().driveReduction(), models.get(0).gearRatio().ratio(), 1.0e-9);
+        assertEquals(module.steer.get(), models.get(1).motors().get(0));
+        assertEquals(module.angle.get(), models.get(1).encoders().get(0));
+        assertEquals(1.0 / module.model().steerReduction(), models.get(1).gearRatio().ratio(), 1.0e-9);
+    }
+
+    @Test
+    void rectangularDriveSimulationIncludesModuleModelsAndPoseDescriptor() {
+        SwerveModule frontLeft = module(1, 2, 11);
+        SwerveModule frontRight = module(3, 4, 12);
+        SwerveModule backLeft = module(5, 6, 13);
+        SwerveModule backRight = module(7, 8, 14);
+
+        List<SimModel> models = SwerveSimModels.drive(0.6, 0.5, 4.5, frontLeft, frontRight, backLeft, backRight);
+
+        assertEquals(9, models.size());
+        assertEquals(1, models.get(8).dependencies().size());
+        SwerveDriveSimModel drive = (SwerveDriveSimModel) models.get(8).dependencies().get(0);
+        assertEquals(4, drive.modules().size());
+        assertEquals(4.5, drive.maxSpeedMetersPerSecond(), 1.0e-9);
+        assertEquals(0.3, drive.modules().get(0).xMeters(), 1.0e-9);
+        assertEquals(0.25, drive.modules().get(0).yMeters(), 1.0e-9);
+    }
+
     private static ExpectedPreset preset(
             String vendor,
             String name,
@@ -66,6 +126,14 @@ class SwerveModulesTest {
             double steerReduction,
             double wheelDiameterMeters) {
         return new ExpectedPreset(vendor, name, factory, driveReduction, steerReduction, wheelDiameterMeters);
+    }
+
+    private static SwerveModule module(int driveMotorId, int steerMotorId, int encoderId) {
+        HardwareBus canivore = HardwareBus.can("canivore");
+        return new SwerveModules.SDS.MK5N.R3()
+                .drive.fill(canivore.motor(MotorKinds.KRAKEN_X60, driveMotorId))
+                .steer.fill(canivore.motor(MotorKinds.KRAKEN_X44, steerMotorId))
+                .angle.fill(canivore.encoder(EncoderKinds.CANCODER, encoderId));
     }
 
     private record ExpectedPreset(
@@ -77,3 +145,4 @@ class SwerveModulesTest {
             double wheelDiameterMeters) {
     }
 }
+

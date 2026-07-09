@@ -1,6 +1,6 @@
 package ca.frc6390.athena.auto;
 
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -9,13 +9,13 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
- * Named autonomous routine that creates the command state selected by auto runtime.
+ * Named autonomous routine that creates the command Action selected by auto runtime.
  *
  * @param name routine name
- * @param stateFactory factory for a fresh command state
+ * @param stateFactory factory for a fresh command Action
  * @param markers marker command bindings keyed by marker name
  */
-public record AutoRoutine(String name, Supplier<CommandState> stateFactory, List<PathMarkerBinding> markers) {
+public record AutoRoutine(String name, Supplier<CommandAction> stateFactory, List<PathMarkerBinding> markers) {
     public AutoRoutine {
         name = name == null || name.isBlank() ? "auto" : name.trim();
         Objects.requireNonNull(stateFactory, "stateFactory");
@@ -26,18 +26,18 @@ public record AutoRoutine(String name, Supplier<CommandState> stateFactory, List
      * Creates an autonomous routine without marker bindings.
      *
      * @param name routine name
-     * @param stateFactory factory for a fresh command state
+     * @param stateFactory factory for a fresh command Action
      */
-    public AutoRoutine(String name, Supplier<CommandState> stateFactory) {
+    public AutoRoutine(String name, Supplier<CommandAction> stateFactory) {
         this(name, stateFactory, List.of());
     }
 
     /**
-     * Creates the routine state.
+     * Creates the routine Action.
      *
-     * @return command state
+     * @return command Action
      */
-    public CommandState state() {
+    public CommandAction Action() {
         return Objects.requireNonNull(stateFactory.get(), "stateFactory returned null");
     }
 

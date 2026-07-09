@@ -9,7 +9,20 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
  * In-memory simulation motor handle.
  */
 public final class SimMotorHandle implements MotorHandle {
+    /**
+     * Last command mode applied to this motor.
+     */
+    public enum CommandKind {
+        NEUTRAL,
+        PERCENT,
+        VOLTAGE,
+        POSITION,
+        VELOCITY
+    }
+
     private final MotorDevice device;
+    private CommandKind commandKind = CommandKind.NEUTRAL;
+    private double commandValue;
     private double percentOutput;
     private double positionRotations;
     private double velocityRotationsPerSecond;
@@ -29,25 +42,45 @@ public final class SimMotorHandle implements MotorHandle {
     }
 
     @Override
+    public void stop() {
+        commandKind = CommandKind.NEUTRAL;
+        commandValue = 0.0;
+        percentOutput = 0.0;
+        velocityRotationsPerSecond = 0.0;
+    }
+
+    @Override
     public void setPercentOutput(double percent) {
         percentOutput = clamp(percent, -1.0, 1.0);
+        commandKind = CommandKind.PERCENT;
+        commandValue = percentOutput;
         velocityRotationsPerSecond = percentOutput;
     }
 
     @Override
     public void setVoltage(double volts) {
-        setPercentOutput(volts / 12.0);
+        double safeVolts = finiteOrZero(volts);
+        percentOutput = clamp(safeVolts / 12.0, -1.0, 1.0);
+        commandKind = CommandKind.VOLTAGE;
+        commandValue = safeVolts;
+        velocityRotationsPerSecond = percentOutput;
     }
 
     @Override
     public void setPositionTargetRotations(double rotations) {
-        positionRotations = finiteOrZero(rotations);
+        double safeRotations = finiteOrZero(rotations);
+        commandKind = CommandKind.POSITION;
+        commandValue = safeRotations;
+        positionRotations = safeRotations;
         velocityRotationsPerSecond = 0.0;
     }
 
     @Override
     public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
-        velocityRotationsPerSecond = finiteOrZero(rotationsPerSecond);
+        double safeVelocity = finiteOrZero(rotationsPerSecond);
+        commandKind = CommandKind.VELOCITY;
+        commandValue = safeVelocity;
+        velocityRotationsPerSecond = safeVelocity;
     }
 
     @Override
@@ -58,6 +91,37 @@ public final class SimMotorHandle implements MotorHandle {
     @Override
     public double integratedVelocityRotationsPerSecond() {
         return velocityRotationsPerSecond;
+    }
+
+    /**
+     * Returns the last command kind applied to this handle.
+     *
+     * @return command kind
+     */
+    public CommandKind commandKind() {
+        return commandKind;
+    }
+
+    /**
+     * Returns the last command value applied to this handle.
+     *
+     * @return command value
+     */
+    public double commandValue() {
+        return commandValue;
+    }
+
+    /**
+     * Sets simulated sensor state without changing the active command.
+     *
+     * @param positionRotations position in rotations
+     * @param velocityRotationsPerSecond velocity in rotations per second
+     * @return this handle
+     */
+    public SimMotorHandle state(double positionRotations, double velocityRotationsPerSecond) {
+        this.positionRotations = finiteOrZero(positionRotations);
+        this.velocityRotationsPerSecond = finiteOrZero(velocityRotationsPerSecond);
+        return this;
     }
 
     /**

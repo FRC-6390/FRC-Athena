@@ -1,6 +1,6 @@
 # Athena 2027 API Landscape
 
-This document is the pruning map for the 2027 API. Rebuilt 2027 is the main usage proof, not the only feature whitelist. API is removed when it is an old concept, duplicate wiring, a V3 migration artifact, and unsupported by the new architecture. Adjacent feature implementations stay when they fit the final API with the same shape as a used feature.
+This document is the pruning map for the 2027 API. Rebuilt 2027 is the main usage proof, not the only feature whitelist. API is removed when it is an old concept, duplicate wiring, unreleased V3 cleanup, and unsupported by the new architecture. Adjacent feature implementations stay when they fit the final API with the same shape as a used feature.
 
 Status words:
 
@@ -20,7 +20,7 @@ Status words:
 | `Handle` | Runtime-bound live hardware object. |
 | `Signal` | Typed readable stream that emits one kind of value. |
 | `Binding` | Relationship between declarations, triggers, controls, hooks, and followers. |
-| `State` | Behavior request passed to a runtime. |
+| `Action` | Behavior request passed to a runtime. |
 | `Config` | Removed V3 builder shape. |
 | `Graph` | Internal lowered robot structure built from declarations. |
 | `Runtime` | Executor that owns mutation, scheduling, simulation, and estimation. |
@@ -29,22 +29,22 @@ Status words:
 | `Adapter` | Bridge to WPILib and vendor frameworks. |
 | `Source` | External input boundary. |
 | `Sink` | External output boundary. |
-| `Catalog` | Static user entry point that creates declarations and states. |
+| `Catalog` | Static user entry point that creates declarations and Actions. |
 
 ## Rebuilt 2027 Used Public Surface
 
 This is the current public API Rebuilt actually imports.
 
-- Hardware kinds: `AthenaMotor`, `AthenaEncoder`, `AthenaImu`.
-- Hardware declarations: `MotorRef`, `EncoderRef`, `ImuRef`, `DigitalInputRef`, `DigitalInputs`, `HardwareBus`.
-- Hardware values: `GearRatioRef`, `RangeRef`, `EncoderUnit`.
-- Simulation declarations: `Sim`, `SimRef`.
-- Mechanisms: `Mechanism`, `MechanismState`, `States`, `Events`, `HookRef`, `HookRunner`, `EventContext`, `LifecycleMode`, `LifecyclePhase`, `MechanismRegistry`, `PathRef`, `Paths`.
-- Control values: `PidRef`, `FeedforwardRef`.
-- Runtime helpers: `ModifiedAxis`, `RobotVelocity`, `PoseSnapshot`, `MeasurementRef`, `Measurements`, `MeasurementStdDevs`.
-- Localization: `Localizations`, `FieldBounds`, `LocalizationFilters`, `LocalizationRef`.
-- Vision: `Cameras`, `HeliOSRef`, `LimelightRef`, `CameraMountPose`.
-- Commands: `CommandSpec`.
+- Hardware kinds: `MotorKinds`, `EncoderKinds`, `ImuKinds`, `CameraKinds`.
+- Hardware declarations: `MotorDevice`, `EncoderDevice`, `ImuDevice`, `DigitalInputDevice`, `HardwareBus`.
+- Hardware values: `GearRatio`, `Range`, `EncoderUnit`.
+- Simulation declarations: `SimModel`, `SimModels`, `SimulationSession`.
+- Mechanisms: `Mechanism`, `Action`, `Actions`, `Events`, `HookBinding`, `EventContext`, `LifecycleMode`, `LifecyclePhase`, `RobotRuntime`, `PathAction`, `Paths`.
+- Control values: `ControlBinding`, `PidGains`, `FeedforwardGains`.
+- Runtime helpers: `ModifiedAxis`, `RobotVelocity`, `PoseSnapshot`, `Measurement`, `Measurements`, `MeasurementStdDevs`.
+- Localization: `Localizations`, `FieldBounds`, `LocalizationFilters`, `LocalizationPipeline`.
+- Vision: `Cameras`, `HeliosDevice`, `LimelightDevice`, `PhotonVisionDevice`, `CameraMountPose`.
+- Commands: `CommandAction`.
 - Drivetrain geometry: `WheelBase`, `TrackWidth`.
 
 Everything else is required implementation behind these APIs. Old public surface is deleted.
@@ -58,7 +58,7 @@ flowchart TD
     Devices["Device declarations"]
     Signals["Signals"]
     Bindings["Bindings"]
-    States["States"]
+    Actions["Actions"]
     Graph["Runtime graph"]
     Runtime["RobotRuntime"]
     Handles["Handles"]
@@ -69,12 +69,12 @@ flowchart TD
     Robot --> Devices
     Robot --> Signals
     Robot --> Bindings
-    Robot --> States
+    Robot --> Actions
     Devices --> Graph
     Signals --> Graph
     Bindings --> Graph
     Graph --> Runtime
-    States --> Runtime
+    Actions --> Runtime
     Runtime --> Handles
     Backend --> Handles
     Runtime --> Adapter
@@ -115,7 +115,6 @@ flowchart TD
 | `RobotMode` | removed | REMOVE | `LifecycleMode` is the final lifecycle enum. |
 | `TelemetryType` | removed | REMOVE | Public telemetry API is not used by Rebuilt. |
 | `DiagnosticLevel` | removed | REMOVE | No public diagnostics API yet. |
-| `AthenaFeature` | removed | REMOVE | Old public plugin feature surface. |
 
 ## Devices And Handles
 
@@ -206,7 +205,7 @@ Plain values stay public only when robot code uses them. Declaration-critical va
 | `ImuMountPose` | removed | REMOVE | Not used by Rebuilt. |
 | `PoseSnapshot` | `PoseSnapshot` | KEEP | Rebuilt localization uses it. |
 | `RobotVelocity` | `RobotVelocity` | KEEP | Rebuilt localization uses it. |
-| `RobotSpeeds` | removed | REMOVE | Rebuilt uses WPILib `ChassisSpeeds`; public Athena drive runtime will define its own state. |
+| `RobotSpeeds` | removed | REMOVE | Rebuilt uses WPILib `ChassisSpeeds`; public Athena drive runtime will define its own Action. |
 | `MotionLimits` | removed | REMOVE | Not used by Rebuilt. |
 | `FilteredPose` | removed | REMOVE | Not used by Rebuilt. |
 | `FilteredValue` | removed | REMOVE | Not used by Rebuilt. |
@@ -230,11 +229,11 @@ Bindings connect robot declarations to runtime behavior.
 | `Events` | `Events` | KEEP | Rebuilt uses event catalog. |
 | `HookRunner` | removed | REMOVE | Final robot code should use `RobotRuntime`; do not preserve the prototype runner API. |
 | `EventContext` | `EventContext` | KEEP | Hook callbacks need context. |
-| `PathRef` | `PathState` | RENAME | Rebuilt uses paths as mechanism states. |
-| `Paths` | `Paths` | KEEP | Rebuilt uses path state catalog. |
+| `PathRef` | `PathAction` | RENAME | Rebuilt uses paths as mechanism Actions. |
+| `Paths` | `Paths` | KEEP | Rebuilt uses path Action catalog. |
 | missing path provider binding | `PathProvider` | ADD | Common provider interface for PathPlanner, Choreo, and inline/test paths. |
-| missing path marker binding | `PathMarkerBinding` | ADD | Marker-to-state/action binding for path following. |
-| `ActionRef` | `ActionBinding` | RENAME | Used by `States.doOnce` and `States.run`; keep if those states stay. |
+| missing path marker binding | `PathMarkerBinding` | ADD | Marker-to-Action/action binding for path following. |
+| `ActionRef` | `ActionBinding` | RENAME | Used by `Actions.doOnce` and `Actions.run`; keep if those Actions stay. |
 | `MotorFollowerRef` | `MotorFollowerBinding` | RENAME | Follower behavior is a hardware relationship. |
 | `ControlRef` | `ControlBinding` | RENAME | Needed for drivetrain composite controls. |
 | `Control` | `Controls` | RENAME | Public catalog for `ControlBinding`. |
@@ -245,30 +244,46 @@ Bindings connect robot declarations to runtime behavior.
 | `Rules` | removed | REMOVE | Not used by Rebuilt. |
 | `OutputTarget` | removed | REMOVE | Old resolver public surface. |
 | `SwerveModuleOrder` | removed | REMOVE | Runtime graph construction should not depend on public annotation API. |
-| `InitialState` | removed | REMOVE | Rebuilt declares states directly. |
+| `InitialState` | removed | REMOVE | Rebuilt declares Actions directly. |
 
-## States
+## Actions
 
-States are the main public behavior API and stay public.
+Actions are the main public behavior API and stay public.
+
+Robot-facing code should request an Action directly with `action.request()` or through the one-argument robot helper. The runtime infers ownership from registered mechanism Action fields. Explicit `set(mechanism, action)` routing is compatibility/internal plumbing, not the preferred call-site shape.
+
+Control Actions execute through the same output path as motor Actions. `ControlBinding` loop runtimes reset on first use and when the requested output kind or target changes. Multiple loop outputs compose additively; mixed percent/voltage outputs promote percent to nominal 12V voltage so PID plus feedforward produces one applied voltage request.
 
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |
-| `MechanismState` | `State` | RENAME | Public behavior request type. |
-| `States` | `States` | KEEP | Rebuilt uses it heavily. |
-| nested records in `States` | removed | REMOVE | Keep factory methods public; remove public nested record classes. |
-| nested records in `MotorRef` | removed | REMOVE | Device declarations must not own state classes. |
+| `MechanismState` | `Action` | RENAME | Public behavior request type. |
+| `Actions` | `Actions` | KEEP | Rebuilt uses it heavily. |
+| nested records in `Actions` | nested Action implementations | KEEP INTERNAL | Current factories return them directly; hide later only if a stable facade replaces every public return type. |
+| nested records in `MotorRef` | removed | REMOVE | Device declarations must not own Action classes. |
 | `AxisState` | removed | REMOVE | Rebuilt does not use public axis API. |
 | `AxisStateSource` | removed | REMOVE | Rebuilt does not use public axis API. |
 | `MechanismStateSpec` | removed | REMOVE | Old spec path, not used by Rebuilt. |
 | `SuperstructureStateSpec` | removed | REMOVE | Superstructure API is not used by Rebuilt. |
-| `SimMotorState` | removed | REMOVE | Sim state should be owned by `SimRuntime`, not public. |
-| `SimImuState` | removed | REMOVE | Sim state should be owned by `SimRuntime`, not public. |
+| `SimMotorState` | removed | REMOVE | Sim behavior is backend/session state, not public Actions. |
+| `SimImuState` | removed | REMOVE | Sim behavior is backend/session state, not public Actions. |
 | `SuperstructureTransitionPlan` | removed | REMOVE | Superstructure API is not used by Rebuilt. |
 | `SuperstructureMechanismTarget` | removed | REMOVE | Superstructure API is not used by Rebuilt. |
 
+## Mechanism Templates And Slots
+
+`MechanismTemplate` is the supported replacement concept for reusable mechanism blueprints. It is not a swerve-only API and it is not a revived `Spec` layer. A template is still a `Mechanism`; it can expose typed `Slot` fields for required devices or values that robot code must fill before runtime use.
+
+Slots live in `athena-mechanisms` because they describe mechanism composition, not physical hardware ownership. Hardware devices are one common slot value, but the boundary is generic: the template declares what it needs, robot code fills those slots, then normal mechanism introspection sees the filled declarations and controls.
+
+| Current API | Final API | Status | Reason |
+| --- | --- | --- | --- |
+| missing template marker | `MechanismTemplate` | ADDED | Marks reusable mechanism blueprints without bringing back public specs. |
+| missing fillable requirement API | `Slot`, `Slots`, typed slot classes | ADDED | Lets any mechanism template expose required fill-ins. |
+| `SwerveModuleSpec` preset path | `SwerveModules.*` template classes | REPLACE | Swerve presets are one consumer of the generic mechanism-template pattern. |
+
 ## Removed DTO And Builder Layer
 
-The old DTO/builder layer is not a 2027 API category. Rebuilt uses declarations and states, not config builders.
+The old DTO/builder layer is not a 2027 API category. Rebuilt uses declarations and Actions, not config builders.
 
 `Spec` does not survive as an Athena 2027 architecture layer. Current `*Spec` types do mechanical work in the old code: they hold normalized data, run validation, and feed a few backends, WPILib adapters, and sim helpers. That behavior moves into `Device`, `RobotGraph`, `RobotRuntime`, backend handles, and focused value types. Public `*Spec` records are deleted.
 
@@ -282,22 +297,22 @@ The old DTO/builder layer is not a 2027 API category. Rebuilt uses declarations 
 | `SwerveModuleSpec` | removed | REMOVE | Replace with swerve graph/runtime. |
 | `SwerveDrivetrainSpec` | removed | REMOVE | Replace with swerve graph/runtime. |
 | `DifferentialDrivetrainSpec` | removed | REMOVE | Rebuilt is swerve-only. |
-| `CommandSpec` | `CommandState` | RENAME | Rebuilt experimental controls import it as command behavior descriptor. |
+| `CommandSpec` | `CommandAction` | RENAME | Rebuilt experimental controls import it as command behavior descriptor. |
 | `AutoChooserSpec` | removed | REMOVE | Old chooser DTO. |
-| `AutoRoutineSpec` | removed | REMOVE | Old routine DTO; final autos are named `State` factories. |
+| `AutoRoutineSpec` | removed | REMOVE | Old routine DTO; final autos use `AutoRoutine`/`AutoRuntime` around command/action behavior, not specs. |
 | `RobotLifecycleSpec` | removed | REMOVE | `AthenaRobot` and `RobotRuntime` own lifecycle. |
 | all `*Config` builders | removed | REMOVE | Old V3 builder public API, not used by Rebuilt. |
 | `HeliOSConfig` | removed | REMOVE | Use `Cameras.helios` and `HeliosDevice` declarations. |
 
 ## Runtime Graph
 
-`Definition` as a public-facing concept is out of date. The final system needs an internal runtime graph built from declarations, signals, bindings, states, controls, camera devices, path providers, and sim models. Robot code should not author `Definition` objects.
+`Definition` as a public-facing concept is out of date. The final system needs an internal runtime graph built from declarations, signals, bindings, Actions, controls, camera devices, path providers, and sim models. Robot code should not author `Definition` objects.
 
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |
 | `MechanismDefinition` | `MechanismNode` | RENAME | Internal graph node behind `RobotRuntime`. |
 | Old swerve drive/module definition API | removed | REMOVE | Swerve is mechanism composition, not an inspected graph. |
-| missing root graph | `RobotGraph` | ADD | Internal root graph for mechanisms, drivetrain, controls, localization, autos, sim, and hardware. |
+| missing root graph | removed | REMOVE | Root `RobotRuntime` owns cross-module composition directly; `RobotGraph` is mechanism-internal graph lowering. |
 | missing hardware graph | `HardwareGraph` | ADD | Internal graph that binds device declarations to handles. |
 | missing vision graph | `VisionGraph` | ADD | Internal graph for `CameraDevice` declarations and pose/target signals. |
 | missing path graph | `PathGraph` | ADDED | Runtime marker graph for validated autonomous marker bindings. |
@@ -312,20 +327,21 @@ Runtimes execute. Robot code should touch one public runtime host, not a collect
 | `MechanismRuntime` | `MechanismRuntime` | KEEP INTERNAL | Execution detail required by `RobotRuntime`. |
 | `MechanismController` | removed | REMOVE | Not used by Rebuilt. |
 | `ControlLoopRuntime` | `ControlLoopRuntime` | KEEP INTERNAL | Execution detail required by `ControlLoop`. |
-| `PathRuntime` | `PathRuntime` | KEEP INTERNAL | Execution detail required by `PathState`. |
+| missing worker policy | `RuntimeWorker`, `RuntimeWorkers` | ADD | Optional root-owned worker configuration for snapshot tasks; default runtime stays single-threaded. |
+| `PathRuntime` | `PathRuntime` | KEEP INTERNAL | Execution detail required by `PathAction`. |
 | `AthenaTimedRobot` | `AthenaRobot` | RENAME | WPILib runtime host should own lifecycle and `RobotRuntime`. |
 | `CommandRunner` | removed | REMOVE | Old command execution surface. |
 | `WpilibCommandScheduler` | removed | REMOVE | Rebuilt controls use WPILib commands directly. |
-| `AutoExecution` | `AutoRuntime` | IMPLEMENT | Needed for selected `State` autos, but old chooser/spec execution is removed. |
+| `AutoExecution` | `AutoRuntime` | IMPLEMENT | Needed for selected autos, but old chooser/spec execution is removed. |
 | `AutoRegistry` | removed | REMOVE | Old global registry. |
 | `AutoInputStore` | removed | REMOVE | Old auto input store. |
 | `AutoInputScope` | removed | REMOVE | Old auto input scope. |
 | `VisionPoseEstimator` | `VisionPoseEstimator` | KEEP INTERNAL | Estimator implementation behind `LocalizationPipeline`. |
 | `VisionTurnAssist` | removed | REMOVE | Not used by Rebuilt. |
-| superstructure runtimes | removed | REMOVE | Rebuilt uses state composition instead of superstructure module. |
-| `SimWorld` | `SimRuntime` | RENAME | Simulation runtime root. |
-| `SimMechanism` | removed | REMOVE | Replace with `SimRuntime` model execution. |
-| `SimModelRunner` | `SimModelRunner` | KEEP INTERNAL | Required by `SimRuntime` until replaced. |
+| superstructure runtimes | removed | REMOVE | Rebuilt uses Action composition instead of superstructure module. |
+| `SimWorld` | `SimulationSession` | RENAME | Public simulation coordinator for backend state, physics, pose, and test readback. |
+| `SimMechanism` | removed | REMOVE | Replace with session-coordinated model execution through normal device handles. |
+| `SimModelRunner` | `SimModelRunner` | KEEP INTERNAL | Internal model stepping behind `SimulationSession`. |
 | Temporary swerve sim bridge | removed | REMOVE | Temporary bridge duplicated mechanism behavior and direct target mutation. |
 | `SimDifferentialDrive` | removed | REMOVE | Rebuilt is swerve-only. |
 | `SimVisionCamera` | removed | REMOVE | Rebuilt does not use vision simulation. |
@@ -346,7 +362,7 @@ Contexts are runtime plumbing. Only event context stays public.
 | `EventContext` | `EventContext` | KEEP | Rebuilt hook callbacks use it. |
 | `ActionContext` | `ActionContext` | KEEP INTERNAL | Runtime hardware surface required by `RobotRuntime`. |
 | `MappedActionContext` | `MappedActionContext` | KEEP INTERNAL | Runtime implementation required by tests and sim. |
-| `MechanismContext` | removed | REMOVE | Replace with `RobotRuntime` context and move behavior off hardware. |
+| `MechanismContext` | `MechanismContext` | KEEP INTERNAL | Runtime tick facts used by Actions, scheduling, controls, and tests. |
 | `ControlLoopContext` | `ControlLoopContext` | KEEP INTERNAL | Required by `ControlLoopRuntime`. |
 | `RuleContext` | removed | REMOVE | Rules public API is removed. |
 | `LocalizationFilterContext` | removed | REMOVE | Filters should receive typed pose/measurement data directly. |
@@ -363,8 +379,8 @@ Backends stay implementation-facing. They should not shape robot code.
 | `MotorBackend` | `MotorBackend` | KEEP INTERNAL | Vendor adapter SPI required by motor handles. |
 | `EncoderBackend` | `EncoderBackend` | KEEP INTERNAL | Vendor adapter SPI required by encoder handles. |
 | `ImuBackend` | `ImuBackend` | KEEP INTERNAL | Vendor adapter SPI required by IMU handles. |
-| `SimMotorBackend` | `SimMotorBackend` | KEEP INTERNAL | Sim adapter required by `SimRuntime`. |
-| `SimImuBackend` | `SimImuBackend` | KEEP INTERNAL | Sim adapter required by `SimRuntime`. |
+| `SimMotorBackend` | `SimMotorBackend` | KEEP INTERNAL | Sim adapter selected by `SimulationSession`/`HardwareGraph`. |
+| `SimImuBackend` | `SimImuBackend` | KEEP INTERNAL | Sim adapter selected by `SimulationSession`/`HardwareGraph`. |
 | `CtreMotorBackend` | `CtreMotorBackend` | KEEP INTERNAL | Vendor adapter required by CTRE motors. |
 | `CtreEncoderBackend` | `CtreEncoderBackend` | KEEP INTERNAL | Vendor adapter required by CTRE encoders. |
 | `CtreImuBackend` | `CtreImuBackend` | KEEP INTERNAL | Vendor adapter required by CTRE IMUs. |
@@ -389,8 +405,8 @@ Only adapters needed by Rebuilt stay public. Most source/sink APIs are not curre
 | `WpilibNetworkTableWriter` | removed | REMOVE | Telemetry not used by Rebuilt. |
 | `WpilibNetworkTableSink` | removed | REMOVE | Telemetry not used by Rebuilt. |
 | `AutoSource` | `PathProvider` | RENAME | Provider concept stays, auto/source naming goes away. |
-| `ChoreoAutoSource` | `ChoreoPathProvider` | RENAME | Choreo support stays behind `PathState`. |
-| `PathPlannerAutoSource` | `PathPlannerPathProvider` | RENAME | PathPlanner support stays behind `PathState`. |
+| `ChoreoAutoSource` | `ChoreoPathProvider` | RENAME | Choreo support stays behind `PathAction`. |
+| `PathPlannerAutoSource` | `PathPlannerPathProvider` | RENAME | PathPlanner support stays behind `PathAction`. |
 | `ChoreoAutoFactoryAdapter` | `ChoreoPathAdapter` | RENAME | Choreo adapter rebuilt for `PathProvider`. |
 | `ChoreoAutos` | removed | REMOVE | Old catalog name. Use `Paths.choreo`. |
 | `PathPlannerAutos` | removed | REMOVE | Old catalog name. Use `Paths.pathPlanner`. |
@@ -413,7 +429,7 @@ Catalogs are public only when they create the kept robot API.
 | --- | --- | --- | --- |
 | `DigitalInputs` | `DigitalInputs` | KEEP | Rebuilt uses it. |
 | `Sim` | `SimModels` | RENAME | Rebuilt uses sim declarations. |
-| `States` | `States` | KEEP | Rebuilt uses it heavily. |
+| `Actions` | `Actions` | KEEP | Rebuilt uses it heavily. |
 | `Events` | `Events` | KEEP | Rebuilt uses it. |
 | `Paths` | `Paths` | KEEP | Rebuilt autos use it. |
 | `Cameras` | `Cameras` | KEEP | Rebuilt localization uses it. |
@@ -431,30 +447,29 @@ Catalogs are public only when they create the kept robot API.
 | `Hooks` | removed | REMOVE | Rebuilt uses `Events` directly. |
 | `Mechanisms` | removed | REMOVE | Old config catalog. |
 | `Drivetrains` | removed | REMOVE | Rebuilt uses direct swerve module declarations. |
-| `SwerveModules` | `SwerveModules` | KEEP | Public module catalog must be expanded. |
+| `SwerveModules` | `SwerveModules` | KEEP | Public module catalog stays as preset `MechanismTemplate` classes with generic fillable slots. |
 | `Photon` | removed | REMOVE | Old standalone catalog. Use `Cameras.photonVision`. |
 | `Limelight` | removed | REMOVE | `Cameras.limelight` is the public entry point. |
 | `HeliOS` | removed | REMOVE | `Cameras.helios` is the public entry point. |
-| `Autos` | `Autos` | IMPLEMENT | Final catalog creates named auto `State` routines, not specs/registries. |
+| `Autos` | `Autos` | IMPLEMENT | Final catalog should create named auto routines without the old spec/registry layer. |
 | `CommandGroups` | removed | REMOVE | Not used by Rebuilt. |
 | `RobotDriveCommands` | removed | REMOVE | Not used by Rebuilt. |
-| `Superstructures` | removed | REMOVE | Rebuilt uses state composition. |
+| `Superstructures` | removed | REMOVE | Rebuilt uses Action composition. |
 
 ## Whole Modules Needing Public API Pruning
 
 These modules need old public surface removed. Feature support stays when it can be expressed through the final API.
 
-- `athena-superstructure`: remove public API. Rebuilt composes subsystem states directly with `States.set`.
+- `athena-superstructure`: remove public API. Rebuilt composes subsystem Actions directly with `Actions.set`.
 - `athena-dashboard`: remove public API. Rebuilt does not use dashboard transport.
 - `athena-telemetry`: remove public API. Rebuilt does not publish through Athena telemetry yet.
 - `athena-arcp`: keep source only as isolated tooling/transport. It is absent from `settings.gradle`, `athenaPublishedArtifacts`, and the vendordep, so ARCP is not part of the active 2027 library deliverable. Reintroduce only as an optional transport behind a final `Signal`/`Sink` extension point.
-- `athena-auto`: remove public chooser/spec/registry API. Add named auto `State` routines and selected-auto runtime support.
-- `athena-commands`: keep only the renamed `CommandState` concept if the local controls wrapper still needs it.
+- `athena-auto`: remove public chooser/spec/registry API. Add named auto `Action` routines and selected-auto runtime support.
+- `athena-commands`: keep only the renamed `CommandAction` concept if the local controls wrapper still needs it.
 - `athena-vendor-photonvision`: keep camera backend support behind `PhotonVisionDevice`.
 - `athena-vendor-pathplanner`: keep path provider support behind `Paths.pathPlanner`.
 - `athena-vendor-choreo`: keep path provider support behind `Paths.choreo`.
-- `athena-plugin`: move public classes internal to Gradle plugin implementation.
-- `example-project`: keep absent from the build. Future examples should return as final API acceptance fixtures, not as compatibility examples for removed V3/spec/ref APIs.
+- `example-projects`: keep as a standalone GradleRIO acceptance workspace. Current examples are `blank`, `tank-drive`, and `swerve-drive`; they should stay focused on final API usage and avoid removed V3/spec/ref APIs.
 
 ## Current Package Boundaries
 
@@ -465,23 +480,16 @@ These modules need old public surface removed. Feature support stays when it can
 
 ## Additions Needed Before Robot Testing
 
-- `RobotRuntime`: root runtime in `athena-robot` that owns cross-module lifecycle composition for hardware context binding, mechanisms, drivetrain, vision refresh, localization evaluation, autos, path markers, commands, and simulation.
 - `AthenaRobot`: WPILib-facing runtime host that wraps `RobotRuntime`.
-- `HardwareGraph`: lowered hardware graph from device declarations.
-- `RobotGraph`: root runtime graph for mechanisms, drivetrain, controls, localization, sim, and autos.
-- `VisionGraph`: camera device and signal graph.
-- `PathGraph`: path marker graph for validated autonomous marker bindings.
-- Swerve control is owned by mechanisms and normal state/output resolution, matching the Rebuilt 2027 pattern.
-- `ControlBinding`: library-owned version of the Rebuilt local `experimental.controls.ControlRef`.
-- `SimRuntime`: runs `SimModel` updates through the same device handles as real hardware.
-- `PathProvider`: common provider interface for PathPlanner, Choreo, and inline/test paths.
-- `AutoRuntime`: selected-auto state execution without the old chooser/spec registry.
+- Broader tests for root runtime behavior, especially controls, simulation, localization, hooks, and autos.
+- Remaining `AutoRuntime` work: selected-auto execution without the old chooser/spec registry.
+- Remaining vision simulation work: testable PhotonVision provider seam without constructing vendor sim objects in root runtime tests.
 
 ## First Removal Order
 
 1. Remove public config/spec builders from student-facing docs and examples.
 2. Rename kind catalogs from `Athena*` to `*Kinds`.
-3. Rename used refs to `Device`, `Signal`, `Binding`, `State`, and value names.
+3. Rename used refs to `Device`, `Signal`, `Binding`, `Action`, and value names.
 4. Move runtime handles and backend interfaces out of the public declaration surface.
 5. Remove unused catalogs: analog inputs, booleans, numbers, sensors, axes, rules, hooks, drivetrain configs, command groups, superstructure, dashboard, telemetry, and old auto registry.
 6. Move mechanism runtime primitives out of `athena-hardware`.

@@ -111,7 +111,7 @@ public final class HookIntrospector {
                 || value instanceof Runnable
                 || value instanceof HookBinding
                 || value instanceof EventBinding
-                || value instanceof State) {
+                || value instanceof Action) {
             return false;
         }
         Package typePackage = type.getPackage();

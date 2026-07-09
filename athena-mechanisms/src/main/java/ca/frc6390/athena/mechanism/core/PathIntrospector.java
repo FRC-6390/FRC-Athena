@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
 /**
- * Discovers path states from autonomous declaration objects.
+ * Discovers path Actions from autonomous declaration objects.
  */
 public final class PathIntrospector {
     private static final Map<Class<?>, List<Field>> FIELDS_BY_TYPE = new ConcurrentHashMap<>();
@@ -21,29 +21,29 @@ public final class PathIntrospector {
     }
 
     /**
-     * Finds every {@link PathState} reachable from a declaration root.
+     * Finds every {@link PathAction} reachable from a declaration root.
      *
      * @param root autonomous declaration root
-     * @return discovered path states in declaration order
+     * @return discovered path Actions in declaration order
      */
-    public static List<PathState> inspect(Object root) {
+    public static List<PathAction> inspect(Object root) {
         Objects.requireNonNull(root, "root");
-        List<PathState> paths = new ArrayList<>();
+        List<PathAction> paths = new ArrayList<>();
         Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         collect(root, paths, visited);
         return List.copyOf(paths);
     }
 
-    private static void collect(Object value, List<PathState> paths, Set<Object> visited) {
+    private static void collect(Object value, List<PathAction> paths, Set<Object> visited) {
         if (value == null || !visited.add(value)) {
             return;
         }
-        if (value instanceof PathState path) {
+        if (value instanceof PathAction path) {
             paths.add(path);
             return;
         }
         Class<?> type = value.getClass();
-        if (shouldNotRecurse(type) || value instanceof Mechanism || value instanceof State) {
+        if (shouldNotRecurse(type) || value instanceof Mechanism || value instanceof Action) {
             return;
         }
         for (Field field : fields(type)) {

@@ -18,13 +18,25 @@ public record ControlBinding(
         List<MotorDevice> followers,
         List<EncoderDevice> feedback,
         List<Object> dependencies,
-        List<ControlLoop> loops) {
+        List<ControlLoop> loops,
+        List<MotorDevice> motors) {
     public ControlBinding {
         mode = mode == null ? ControlMode.POSITION : mode;
         followers = followers == null ? List.of() : List.copyOf(followers);
         feedback = feedback == null ? List.of() : List.copyOf(feedback);
         dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
         loops = loops == null ? List.of() : List.copyOf(loops);
+        motors = motors == null ? motorList(output, followers) : List.copyOf(motors);
+    }
+
+    public ControlBinding(
+            ControlMode mode,
+            MotorDevice output,
+            List<MotorDevice> followers,
+            List<EncoderDevice> feedback,
+            List<Object> dependencies,
+            List<ControlLoop> loops) {
+        this(mode, output, followers, feedback, dependencies, loops, null);
     }
 
     public ControlBinding output(MotorDevice output) {
@@ -108,52 +120,55 @@ public record ControlBinding(
     }
 
     public List<MotorDevice> motors() {
-        if (output == null) {
-            return followers;
-        }
+        return motors;
+    }
+
+    private static List<MotorDevice> motorList(MotorDevice output, List<MotorDevice> followers) {
         List<MotorDevice> motors = new ArrayList<>();
-        motors.add(output);
-        motors.addAll(followers);
+        if (output != null) {
+            motors.add(output);
+        }
+        motors.addAll(followers == null ? List.of() : followers);
         return List.copyOf(motors);
     }
 
-    public State set(double target) {
+    public Action set(double target) {
         return mode == ControlMode.VELOCITY ? velocity(target) : position(target);
     }
 
-    public State set(DoubleSupplier target) {
+    public Action set(DoubleSupplier target) {
         return mode == ControlMode.VELOCITY ? velocity(target) : position(target);
     }
 
-    public State percent(double percent) {
-        return States.percent(this, percent);
+    public Action percent(double percent) {
+        return Actions.percent(this, percent);
     }
 
-    public State percent(DoubleSupplier percent) {
-        return States.percent(this, percent);
+    public Action percent(DoubleSupplier percent) {
+        return Actions.percent(this, percent);
     }
 
-    public State voltage(double volts) {
-        return States.voltage(this, volts);
+    public Action voltage(double volts) {
+        return Actions.voltage(this, volts);
     }
 
-    public State voltage(DoubleSupplier volts) {
-        return States.voltage(this, volts);
+    public Action voltage(DoubleSupplier volts) {
+        return Actions.voltage(this, volts);
     }
 
-    public State position(double position) {
-        return States.position(this, position);
+    public Action position(double position) {
+        return Actions.position(this, position);
     }
 
-    public State position(DoubleSupplier position) {
-        return States.position(this, position);
+    public Action position(DoubleSupplier position) {
+        return Actions.position(this, position);
     }
 
-    public State velocity(double velocity) {
-        return States.velocity(this, velocity);
+    public Action velocity(double velocity) {
+        return Actions.velocity(this, velocity);
     }
 
-    public State velocity(DoubleSupplier velocity) {
-        return States.velocity(this, velocity);
+    public Action velocity(DoubleSupplier velocity) {
+        return Actions.velocity(this, velocity);
     }
 }

@@ -27,6 +27,11 @@ public final class RevMotorHandle implements MotorHandle {
     private final RevMotorOptions options;
     private final SparkController controller;
     private boolean activated;
+    private boolean inputsFresh;
+    private double positionRotations;
+    private double velocityRotationsPerSecond;
+    private double absolutePositionRotations;
+    private double absoluteVelocityRotationsPerSecond;
 
     /**
      * Creates a REV motor handle using real REVLib Spark controllers.
@@ -67,6 +72,15 @@ public final class RevMotorHandle implements MotorHandle {
     }
 
     @Override
+    public void refreshInputs() {
+        positionRotations = controller.positionRotations();
+        velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
+        absolutePositionRotations = controller.absolutePositionRotations();
+        absoluteVelocityRotationsPerSecond = controller.absoluteVelocityRotationsPerSecond();
+        inputsFresh = true;
+    }
+
+    @Override
     public void setPercentOutput(double percent) {
         controller.setPercent(clamp(percent));
     }
@@ -93,22 +107,32 @@ public final class RevMotorHandle implements MotorHandle {
 
     @Override
     public double integratedPositionRotations() {
-        return controller.positionRotations();
+        ensureInputsFresh();
+        return positionRotations;
     }
 
     @Override
     public double integratedVelocityRotationsPerSecond() {
-        return controller.velocityRotationsPerSecond();
+        ensureInputsFresh();
+        return velocityRotationsPerSecond;
     }
 
     @Override
     public double absolutePositionRotations() {
-        return controller.absolutePositionRotations();
+        ensureInputsFresh();
+        return absolutePositionRotations;
     }
 
     @Override
     public double absoluteVelocityRotationsPerSecond() {
-        return controller.absoluteVelocityRotationsPerSecond();
+        ensureInputsFresh();
+        return absoluteVelocityRotationsPerSecond;
+    }
+
+    private void ensureInputsFresh() {
+        if (!inputsFresh) {
+            refreshInputs();
+        }
     }
 
     private static SparkController createController(MotorDevice device) {

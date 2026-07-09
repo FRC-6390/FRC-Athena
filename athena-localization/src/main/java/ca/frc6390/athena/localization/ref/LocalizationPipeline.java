@@ -22,10 +22,10 @@ public final class LocalizationPipeline implements MeasurementSignal {
     private final List<LocalizationFilter> filters;
     private final String debugName;
     private final boolean publishNetworkTables;
-    private final State state;
+    private final Action Action;
 
     LocalizationPipeline(String estimatorName, LocalizationEstimator estimator) {
-        this(estimatorName, estimator, List.of(), List.of(), "", false, new State());
+        this(estimatorName, estimator, List.of(), List.of(), "", false, new Action());
     }
 
     private LocalizationPipeline(
@@ -35,14 +35,14 @@ public final class LocalizationPipeline implements MeasurementSignal {
             List<LocalizationFilter> filters,
             String debugName,
             boolean publishNetworkTables,
-            State state) {
+            Action Action) {
         this.estimatorName = estimatorName == null || estimatorName.isBlank() ? "custom" : estimatorName;
         this.estimator = Objects.requireNonNull(estimator, "estimator");
         this.inputs = List.copyOf(inputs == null ? List.of() : inputs);
         this.filters = List.copyOf(filters == null ? List.of() : filters);
         this.debugName = debugName == null ? "" : debugName;
         this.publishNetworkTables = publishNetworkTables;
-        this.state = Objects.requireNonNull(state, "state");
+        this.Action = Objects.requireNonNull(Action, "Action");
     }
 
     public LocalizationPipeline input(MeasurementSignal input) {
@@ -80,7 +80,7 @@ public final class LocalizationPipeline implements MeasurementSignal {
     }
 
     public LocalizationPipeline name(String name) {
-        return new LocalizationPipeline(estimatorName, estimator, inputs, filters, name, publishNetworkTables, state);
+        return new LocalizationPipeline(estimatorName, estimator, inputs, filters, name, publishNetworkTables, Action);
     }
 
     public LocalizationPipeline publishNetworkTables() {
@@ -88,7 +88,7 @@ public final class LocalizationPipeline implements MeasurementSignal {
     }
 
     public LocalizationPipeline publishNetworkTables(boolean enabled) {
-        return new LocalizationPipeline(estimatorName, estimator, inputs, filters, debugName, enabled, state);
+        return new LocalizationPipeline(estimatorName, estimator, inputs, filters, debugName, enabled, Action);
     }
 
     public PoseSnapshot pose() {
@@ -128,24 +128,24 @@ public final class LocalizationPipeline implements MeasurementSignal {
                 acceptedResults,
                 acceptedMeasurements,
                 rejectedMeasurements,
-                Optional.ofNullable(state.latest));
+                Optional.ofNullable(Action.latest));
         Optional<LocalizationResult> estimated = estimator.estimate(estimate)
                 .filter(result -> accept(null, result.pose()))
                 .map(result -> result.withRejected(rejectedMeasurements));
-        estimated.ifPresent(result -> state.latest = result);
-        return estimated.or(() -> Optional.ofNullable(state.latest));
+        estimated.ifPresent(result -> Action.latest = result);
+        return estimated.or(() -> Optional.ofNullable(Action.latest));
     }
 
     @Override
     public List<Measurement> measurements() {
         return latest()
-                .map(result -> List.of(Measurements.poseAndSpeeds(result.pose(), result.speeds())))
+                .map(result -> List.<Measurement>of(Measurements.poseAndSpeeds(result.pose(), result.speeds())))
                 .orElseGet(List::of);
     }
 
     public ActionBinding reset(PoseSnapshot pose) {
         Objects.requireNonNull(pose, "pose");
-        return context -> state.latest = LocalizationResult.of(pose);
+        return context -> Action.latest = LocalizationResult.of(pose);
     }
 
     public ActionBinding reset(double xMeters, double yMeters, double headingRadians) {
@@ -154,7 +154,7 @@ public final class LocalizationPipeline implements MeasurementSignal {
 
     public ActionBinding resetTo(LocalizationPipeline other) {
         Objects.requireNonNull(other, "other");
-        return context -> state.latest = LocalizationResult.of(other.pose());
+        return context -> Action.latest = LocalizationResult.of(other.pose());
     }
 
     public String estimatorName() {
@@ -178,18 +178,18 @@ public final class LocalizationPipeline implements MeasurementSignal {
     }
 
     private LocalizationPipeline withInputs(List<MeasurementSignal> inputs) {
-        return new LocalizationPipeline(estimatorName, estimator, inputs, filters, debugName, publishNetworkTables, state);
+        return new LocalizationPipeline(estimatorName, estimator, inputs, filters, debugName, publishNetworkTables, Action);
     }
 
     private LocalizationPipeline withFilters(List<LocalizationFilter> filters) {
-        return new LocalizationPipeline(estimatorName, estimator, inputs, filters, debugName, publishNetworkTables, state);
+        return new LocalizationPipeline(estimatorName, estimator, inputs, filters, debugName, publishNetworkTables, Action);
     }
 
     private boolean accept(Measurement measurement, PoseSnapshot pose) {
         return filters.stream().allMatch(filter -> filter.accept(this, measurement, pose));
     }
 
-    private static final class State {
+    private static final class Action {
         private LocalizationResult latest;
     }
 }

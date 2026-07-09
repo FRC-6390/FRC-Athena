@@ -60,6 +60,11 @@ public final class LimelightDevice implements CameraDevice {
         return camera.targets();
     }
 
+    @Override
+    public boolean hasBoundSignals() {
+        return camera.hasBoundSignals();
+    }
+
     /**
      * Returns this declaration as a generic camera device.
      *

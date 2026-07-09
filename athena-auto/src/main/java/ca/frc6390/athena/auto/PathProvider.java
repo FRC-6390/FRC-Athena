@@ -1,31 +1,31 @@
 package ca.frc6390.athena.auto;
 
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
-import ca.frc6390.athena.mechanism.core.PathState;
+import ca.frc6390.athena.mechanism.core.PathAction;
 
 /**
- * External provider for path-backed autonomous states and mechanism path runtimes.
+ * External provider for path-backed autonomous Actions and mechanism path runtimes.
  */
 public interface PathProvider {
     /**
-     * Creates a path state for the provider.
+     * Creates a path Action for the provider.
      *
      * @param pathName provider-specific path name
-     * @return path state
+     * @return path Action
      */
-    PathState path(String pathName);
+    PathAction path(String pathName);
 
     /**
-     * Loads a path as a command state.
+     * Loads a path as a command Action.
      *
      * @param pathName provider-specific path name
-     * @return command state for the path
+     * @return command Action for the path
      */
-    CommandState load(String pathName);
+    CommandAction load(String pathName);
 
     /**
-     * Creates the mechanism path runtime that executes provider path states.
+     * Creates the mechanism path runtime that executes provider path Actions.
      *
      * @return path runtime
      */

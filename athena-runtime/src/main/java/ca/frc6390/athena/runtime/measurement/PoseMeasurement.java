@@ -44,7 +44,7 @@ record PoseMeasurement(
      * @param stdDevs standard deviations
      * @return updated measurement
      */
-    public PoseMeasurement stdDevs(MeasurementStdDevs stdDevs) {
+    public PoseMeasurementSample stdDevs(MeasurementStdDevs stdDevs) {
         return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount, stdDevs, source);
     }
 
@@ -55,7 +55,7 @@ record PoseMeasurement(
      * @param latencySeconds latency
      * @return updated measurement
      */
-    public PoseMeasurement timing(double timestampSeconds, double latencySeconds) {
+    public PoseMeasurementSample timing(double timestampSeconds, double latencySeconds) {
         return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount, stdDevs, source);
     }
 
@@ -66,7 +66,7 @@ record PoseMeasurement(
      * @param targetCount target count
      * @return updated measurement
      */
-    public PoseMeasurement visionMetadata(double ambiguity, int targetCount) {
+    public PoseMeasurementSample visionMetadata(double ambiguity, int targetCount) {
         return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount, stdDevs, source);
     }
 
@@ -76,7 +76,7 @@ record PoseMeasurement(
      * @param source source object
      * @return updated measurement
      */
-    public PoseMeasurement source(Object source) {
+    public PoseMeasurementSample source(Object source) {
         return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount, stdDevs, source);
     }
 

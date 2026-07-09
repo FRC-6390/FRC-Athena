@@ -36,13 +36,13 @@ import ca.frc6390.athena.hardware.sim.SimModels;
 class HardwareGraphTest {
     @Test
     void hardwareIdentityIncludesCategoryKindBusIdAndIntegratedDetail() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.SIM, 7).canbus("CANivore A");
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 7).canbus("CANivore A");
         EncoderDevice encoder = motor.encoder();
 
-        assertEquals("motor:sim_motor:canivore_a:7", HardwareIdentity.motor(motor).key());
+        assertEquals("motor:ctre_kraken_x60:canivore_a:7", HardwareIdentity.motor(motor).key());
         assertEquals("encoder:athena_integrated_motor:canivore_a:7:integrated", HardwareIdentity.encoder(encoder).key());
         assertEquals("encoder:athena_integrated_motor:canivore_a:7:absolute", HardwareIdentity.encoder(motor.absoluteEncoder()).key());
-        assertEquals("imu:sim_imu:rio:2", HardwareIdentity.imu(ImuDevice.of(ImuKinds.SIM, 2)).key());
+        assertEquals("imu:ctre_pigeon_2:rio:2", HardwareIdentity.imu(ImuDevice.of(ImuKinds.PIGEON_2, 2)).key());
     }
 
     @Test
@@ -54,9 +54,9 @@ class HardwareGraphTest {
                 List.of(motorBackend),
                 List.of(encoderBackend),
                 List.of(imuBackend)));
-        MotorDevice motor = MotorDevice.of(MotorKinds.SIM, 1);
-        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.SIM, 2);
-        ImuDevice imu = ImuDevice.of(ImuKinds.SIM, 3);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2);
+        ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 3);
 
         assertSame(graph.motor(motor), graph.motor(motor));
         assertSame(graph.encoder(encoder), graph.encoder(encoder));
@@ -76,10 +76,26 @@ class HardwareGraphTest {
     }
 
     @Test
+    void refreshInputsRecordsFailuresAndContinuesRefreshingOtherHandles() {
+        FakeMotorBackend motorBackend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));
+        FakeMotorHandle first = assertInstanceOf(FakeMotorHandle.class, graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 1)));
+        FakeMotorHandle second = assertInstanceOf(FakeMotorHandle.class, graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 2)));
+        first.failRefresh = true;
+
+        graph.refreshInputs();
+
+        assertEquals(1, first.refreshCalls);
+        assertEquals(1, second.refreshCalls);
+        assertEquals(1, graph.refreshFailures().size());
+        assertEquals(HardwareIdentity.motor(first.device()), graph.refreshFailures().get(0).identity());
+    }
+
+    @Test
     void integratedEncoderHandleReadsThroughCachedMotorHandle() {
         FakeMotorBackend motorBackend = new FakeMotorBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));
-        MotorDevice motor = MotorDevice.of(MotorKinds.SIM, 4);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 4);
         FakeMotorHandle motorHandle = assertInstanceOf(FakeMotorHandle.class, graph.motor(motor));
         motorHandle.position = 12.5;
         motorHandle.velocity = 3.25;
@@ -96,7 +112,7 @@ class HardwareGraphTest {
     void motorAbsoluteEncoderHandleReadsThroughCachedMotorHandle() {
         FakeMotorBackend motorBackend = new FakeMotorBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));
-        MotorDevice motor = MotorDevice.of(MotorKinds.SIM, 5);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
         FakeMotorHandle motorHandle = assertInstanceOf(FakeMotorHandle.class, graph.motor(motor));
         motorHandle.absolutePosition = 0.25;
         motorHandle.absoluteVelocity = 1.5;
@@ -114,20 +130,20 @@ class HardwareGraphTest {
     void missingBackendsAndDefaultHandleMethodsFailFast() {
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(), List.of(), List.of()));
 
-        assertThrows(IllegalStateException.class, () -> graph.motor(MotorDevice.of(MotorKinds.SIM, 1)));
-        assertThrows(IllegalStateException.class, () -> graph.encoder(EncoderDevice.of(EncoderKinds.SIM, 1)));
-        assertThrows(IllegalStateException.class, () -> graph.imu(ImuDevice.of(ImuKinds.SIM, 1)));
+        assertThrows(IllegalStateException.class, () -> graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 1)));
+        assertThrows(IllegalStateException.class, () -> graph.encoder(EncoderDevice.of(EncoderKinds.CANCODER, 1)));
+        assertThrows(IllegalStateException.class, () -> graph.imu(ImuDevice.of(ImuKinds.PIGEON_2, 1)));
 
         MotorHandle defaultMotor = new MotorHandle() {
             @Override
             public MotorDevice device() {
-                return MotorDevice.of(MotorKinds.SIM, 9);
+                return MotorDevice.of(MotorKinds.KRAKEN_X60, 9);
             }
         };
         EncoderHandle defaultEncoder = new EncoderHandle() {
             @Override
             public EncoderDevice device() {
-                return EncoderDevice.of(EncoderKinds.SIM, 9);
+                return EncoderDevice.of(EncoderKinds.CANCODER, 9);
             }
         };
 
@@ -140,9 +156,9 @@ class HardwareGraphTest {
         assertThrows(NullPointerException.class, () -> MotorDevice.of(null, 1));
         assertThrows(NullPointerException.class, () -> EncoderDevice.of(null, 1));
         assertThrows(NullPointerException.class, () -> ImuDevice.of(null, 1));
-        assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.SIM, 1).gearRatio(0.0));
-        assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.SIM, 1).conversion(Double.NaN));
-        assertEquals(2, EncoderDevice.of(EncoderKinds.SIM, 2).dioChannel());
+        assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).gearRatio(0.0));
+        assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).conversion(Double.NaN));
+        assertEquals(2, EncoderDevice.of(EncoderKinds.CANCODER, 2).dioChannel());
         assertThrows(IllegalStateException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 3).canbus("canivore").dioChannel());
     }
 
@@ -167,8 +183,8 @@ class HardwareGraphTest {
 
     @Test
     void simModelsComposeMotorsEncodersRangesLimitsAndDependencies() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.SIM, 11);
-        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.SIM, 12);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 11);
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
         DigitalInputDevice limit = DigitalInputDevice.rio(4);
         Range range = Range.of(-2.0, 2.0);
         SimModel model = SimModels.arm(motor)
@@ -194,7 +210,7 @@ class HardwareGraphTest {
 
         @Override
         public boolean supports(MotorKind kind) {
-            return kind == MotorKinds.SIM;
+            return kind == MotorKinds.KRAKEN_X60;
         }
 
         @Override
@@ -211,7 +227,7 @@ class HardwareGraphTest {
 
         @Override
         public boolean supports(EncoderKind kind) {
-            return kind == EncoderKinds.SIM;
+            return kind == EncoderKinds.CANCODER;
         }
 
         @Override
@@ -228,7 +244,7 @@ class HardwareGraphTest {
 
         @Override
         public boolean supports(ImuKind kind) {
-            return kind == ImuKinds.SIM;
+            return kind == ImuKinds.PIGEON_2;
         }
 
         @Override
@@ -247,6 +263,8 @@ class HardwareGraphTest {
         private double absoluteVelocity;
         private int activateCalls;
         private int closeCalls;
+        private int refreshCalls;
+        private boolean failRefresh;
 
         private FakeMotorHandle(MotorDevice device) {
             this.device = device;
@@ -260,6 +278,14 @@ class HardwareGraphTest {
         @Override
         public void activate() {
             activateCalls++;
+        }
+
+        @Override
+        public void refreshInputs() {
+            refreshCalls++;
+            if (failRefresh) {
+                throw new IllegalStateException("refresh failed");
+            }
         }
 
         @Override

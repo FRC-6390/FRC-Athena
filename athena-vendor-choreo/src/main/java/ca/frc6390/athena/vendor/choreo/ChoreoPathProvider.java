@@ -11,8 +11,8 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import ca.frc6390.athena.auto.PathMarkerBinding;
-import ca.frc6390.athena.commands.CommandState;
-import ca.frc6390.athena.mechanism.core.PathState;
+import ca.frc6390.athena.commands.CommandAction;
+import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.Paths;
 import choreo.Choreo;
 import choreo.trajectory.EventMarker;
@@ -20,16 +20,16 @@ import choreo.trajectory.Trajectory;
 import choreo.trajectory.TrajectorySample;
 
 /**
- * Choreo-backed provider for Athena path states and trajectories.
+ * Choreo-backed provider for Athena path Actions and trajectories.
  */
 public final class ChoreoPathProvider {
     /**
-     * Source key used by Choreo path states.
+     * Source key used by Choreo path Actions.
      */
     public static final String KEY = "choreo";
 
     private final ChoreoClient client;
-    private final Map<String, PathState> pathCache = new ConcurrentHashMap<>();
+    private final Map<String, PathAction> pathCache = new ConcurrentHashMap<>();
     private final Map<String, Optional<Trajectory<? extends TrajectorySample<?>>>> trajectoryCache =
             new ConcurrentHashMap<>();
     private volatile List<String> pathNameCache;
@@ -46,12 +46,12 @@ public final class ChoreoPathProvider {
     }
 
     /**
-     * Creates a Choreo path state.
+     * Creates a Choreo path Action.
      *
      * @param pathName Choreo trajectory name
-     * @return path state
+     * @return path Action
      */
-    public PathState path(String pathName) {
+    public PathAction path(String pathName) {
         return pathCache.computeIfAbsent(normalize(pathName), Paths::choreo);
     }
 
@@ -95,16 +95,16 @@ public final class ChoreoPathProvider {
      * Converts Choreo trajectory markers into Athena marker bindings.
      *
      * @param pathName Choreo trajectory name
-     * @param commandsByMarker command states keyed by marker name
+     * @param commandsByMarker command Actions keyed by marker name
      * @return marker bindings in trajectory order, or an empty list when the trajectory is missing
      */
-    public List<PathMarkerBinding> markerBindings(String pathName, Map<String, CommandState> commandsByMarker) {
+    public List<PathMarkerBinding> markerBindings(String pathName, Map<String, CommandAction> commandsByMarker) {
         Objects.requireNonNull(commandsByMarker, "commandsByMarker");
-        Map<String, CommandState> normalizedCommands = new LinkedHashMap<>();
-        for (Map.Entry<String, CommandState> entry : commandsByMarker.entrySet()) {
+        Map<String, CommandAction> normalizedCommands = new LinkedHashMap<>();
+        for (Map.Entry<String, CommandAction> entry : commandsByMarker.entrySet()) {
             String marker = normalizeMarker(entry.getKey());
-            CommandState command = Objects.requireNonNull(entry.getValue(), "marker command");
-            CommandState previous = normalizedCommands.putIfAbsent(marker, command);
+            CommandAction command = Objects.requireNonNull(entry.getValue(), "marker command");
+            CommandAction previous = normalizedCommands.putIfAbsent(marker, command);
             if (previous != null) {
                 throw new IllegalArgumentException("Duplicate path marker command '" + marker + "'.");
             }
@@ -112,7 +112,7 @@ public final class ChoreoPathProvider {
 
         List<PathMarkerBinding> bindings = new ArrayList<>();
         for (String marker : markerNames(pathName)) {
-            CommandState command = normalizedCommands.get(marker);
+            CommandAction command = normalizedCommands.get(marker);
             if (command == null) {
                 throw new IllegalArgumentException("Missing command for Choreo marker '" + marker + "'.");
             }

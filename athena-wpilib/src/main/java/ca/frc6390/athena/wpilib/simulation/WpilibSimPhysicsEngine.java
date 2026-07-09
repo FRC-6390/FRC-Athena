@@ -1,0 +1,416 @@
+package ca.frc6390.athena.wpilib.simulation;
+
+import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.drivetrain.swerve.SwerveDriveSimModel;
+import ca.frc6390.athena.hardware.device.DigitalInputDevice;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.Range;
+import ca.frc6390.athena.hardware.sim.SimLimit;
+import ca.frc6390.athena.hardware.sim.SimModel;
+import ca.frc6390.athena.sim.hardware.SimDigitalInputHandle;
+import ca.frc6390.athena.sim.hardware.SimEncoderHandle;
+import ca.frc6390.athena.sim.hardware.SimMotorHandle;
+import ca.frc6390.athena.sim.runtime.SimPhysicsEngine;
+import ca.frc6390.athena.sim.runtime.SimulationSession;
+import edu.wpi.first.math.system.plant.DCMotor;
+import edu.wpi.first.math.system.plant.LinearSystemId;
+import edu.wpi.first.math.util.Units;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
+import edu.wpi.first.math.kinematics.SwerveModuleState;
+import edu.wpi.first.wpilibj.simulation.BatterySim;
+import edu.wpi.first.wpilibj.simulation.DCMotorSim;
+import edu.wpi.first.wpilibj.simulation.ElevatorSim;
+import edu.wpi.first.wpilibj.simulation.FlywheelSim;
+import edu.wpi.first.wpilibj.simulation.SingleJointedArmSim;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.DoubleConsumer;
+
+/**
+ * WPILib-backed physics engine for Athena simulation models.
+ */
+public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
+    private static final double DEFAULT_MOI = 0.01;
+    private static final double DEFAULT_ARM_LENGTH_METERS = 0.5;
+    private static final double DEFAULT_ELEVATOR_MASS_KG = 4.0;
+    private static final double DEFAULT_ELEVATOR_DRUM_RADIUS_METERS = 0.025;
+
+    private final Map<SimModel, ModelAdapter> adapters = new IdentityHashMap<>();
+    private final DoubleConsumer batteryVoltageSink;
+    private double estimatedBatteryVoltage = 12.0;
+
+    /**
+     * Creates a WPILib-backed physics engine without publishing battery voltage to HAL.
+     */
+    public WpilibSimPhysicsEngine() {
+        this(null);
+    }
+
+    /**
+     * Creates a WPILib-backed physics engine.
+     *
+     * @param batteryVoltageSink optional sink for estimated battery voltage
+     */
+    public WpilibSimPhysicsEngine(DoubleConsumer batteryVoltageSink) {
+        this.batteryVoltageSink = batteryVoltageSink;
+    }
+
+    @Override
+    public void step(Collection<SimModel> models, SimulationSession session, double seconds) {
+        if (!Double.isFinite(seconds) || seconds <= 0.0 || models == null || models.isEmpty()) {
+            return;
+        }
+        double currentDrawAmps = 0.0;
+        for (SimModel model : models) {
+            stepSwerveDriveModels(model, session, seconds);
+            if (model == null || model.motors().isEmpty()) {
+                continue;
+            }
+            ModelAdapter adapter = adapters.computeIfAbsent(model, this::createAdapter);
+            currentDrawAmps += adapter.step(model, session, seconds);
+        }
+        updateBatteryVoltage(currentDrawAmps);
+    }
+
+    private static void stepSwerveDriveModels(SimModel model, SimulationSession session, double seconds) {
+        if (model == null) {
+            return;
+        }
+        for (Object dependency : model.dependencies()) {
+            if (dependency instanceof SwerveDriveSimModel swerveDrive) {
+                stepSwerveDrive(swerveDrive, session, seconds);
+            }
+        }
+    }
+
+    private static void stepSwerveDrive(SwerveDriveSimModel model, SimulationSession session, double seconds) {
+        Translation2d[] locations = new Translation2d[model.modules().size()];
+        SwerveModuleState[] states = new SwerveModuleState[model.modules().size()];
+        for (int index = 0; index < model.modules().size(); index++) {
+            SwerveDriveSimModel.Module module = model.modules().get(index);
+            locations[index] = new Translation2d(module.xMeters(), module.yMeters());
+            states[index] = new SwerveModuleState(
+                    moduleSpeedMetersPerSecond(module, session, model.maxSpeedMetersPerSecond()),
+                    Rotation2d.fromRotations(moduleAngleRotations(module, session)));
+        }
+        ChassisSpeeds speeds = new SwerveDriveKinematics(locations).toChassisSpeeds(states);
+        session.drivePose(
+                speeds.vxMetersPerSecond,
+                speeds.vyMetersPerSecond,
+                speeds.omegaRadiansPerSecond,
+                seconds);
+    }
+
+    private static double moduleSpeedMetersPerSecond(
+            SwerveDriveSimModel.Module module,
+            SimulationSession session,
+            double maxSpeedMetersPerSecond) {
+        SimMotorHandle drive = session.motor(module.module().drive.get());
+        return switch (drive.commandKind()) {
+            case VELOCITY -> drive.commandValue();
+            case PERCENT -> drive.commandValue() * maxSpeedMetersPerSecond;
+            case VOLTAGE -> drive.commandValue() / 12.0 * maxSpeedMetersPerSecond;
+            case POSITION, NEUTRAL -> drive.integratedVelocityRotationsPerSecond()
+                    * Math.PI
+                    * module.module().model().wheelDiameterMeters();
+        };
+    }
+
+    private static double moduleAngleRotations(SwerveDriveSimModel.Module module, SimulationSession session) {
+        SimMotorHandle steer = session.motor(module.module().steer.get());
+        if (steer.commandKind() == SimMotorHandle.CommandKind.POSITION) {
+            return steer.commandValue();
+        }
+        return session.encoder(module.module().angle.get()).absolutePositionRotations();
+    }
+
+    double estimatedBatteryVoltage() {
+        return estimatedBatteryVoltage;
+    }
+
+    private void updateBatteryVoltage(double currentDrawAmps) {
+        estimatedBatteryVoltage = BatterySim.calculateDefaultBatteryLoadedVoltage(Math.max(0.0, currentDrawAmps));
+        if (batteryVoltageSink != null) {
+            batteryVoltageSink.accept(estimatedBatteryVoltage);
+        }
+    }
+
+    private ModelAdapter createAdapter(SimModel model) {
+        return switch (model.kind()) {
+            case ARM -> new ArmAdapter(model);
+            case ELEVATOR -> new ElevatorAdapter(model);
+            case FLYWHEEL -> new FlywheelAdapter(model);
+            case MOTOR -> new MotorAdapter(model);
+        };
+    }
+
+    private static double commandVoltage(SimModel model, SimulationSession session, double position) {
+        List<MotorCommand> commands = new ArrayList<>();
+        for (MotorDevice motor : model.motors()) {
+            MotorCommand command = command(motor, session);
+            if (command != null) {
+                commands.add(command);
+            }
+        }
+        if (commands.isEmpty()) {
+            return 0.0;
+        }
+
+        double volts = 0.0;
+        for (MotorCommand command : commands) {
+            volts += switch (command.kind()) {
+                case NEUTRAL -> 0.0;
+                case PERCENT -> command.value() * 12.0;
+                case VOLTAGE -> command.value();
+                case POSITION -> (command.value() - position) * 12.0;
+                case VELOCITY -> (command.value() - averageVelocity(model, session)) * 6.0;
+            };
+        }
+        return clamp(volts / commands.size(), -12.0, 12.0);
+    }
+
+    private static MotorCommand command(MotorDevice motor, SimulationSession session) {
+        SimMotorHandle handle = session.motor(motor);
+        if (handle.commandKind() != SimMotorHandle.CommandKind.NEUTRAL) {
+            return new MotorCommand(handle.commandKind(), handle.commandValue());
+        }
+        if (motor.follower() != null) {
+            MotorCommand leader = command(motor.follower().leader(), session);
+            if (leader == null) {
+                return null;
+            }
+            if (motor.isInverted()
+                    && (leader.kind() == SimMotorHandle.CommandKind.PERCENT
+                    || leader.kind() == SimMotorHandle.CommandKind.VOLTAGE
+                    || leader.kind() == SimMotorHandle.CommandKind.VELOCITY)) {
+                return new MotorCommand(leader.kind(), -leader.value());
+            }
+            return leader;
+        }
+        return new MotorCommand(handle.commandKind(), handle.commandValue());
+    }
+
+    private static double averageVelocity(SimModel model, SimulationSession session) {
+        double sum = 0.0;
+        int count = 0;
+        for (MotorDevice motor : model.motors()) {
+            sum += session.motor(motor).integratedVelocityRotationsPerSecond();
+            count++;
+        }
+        return count == 0 ? 0.0 : sum / count;
+    }
+
+    private static DCMotor gearbox(SimModel model) {
+        MotorDevice first = model.motors().get(0);
+        int count = Math.max(1, model.motors().size());
+        if (first.kind() == MotorKinds.KRAKEN_X60) {
+            return DCMotor.getKrakenX60(count);
+        }
+        if (first.kind() == MotorKinds.KRAKEN_X44) {
+            return DCMotor.getKrakenX44(count);
+        }
+        if (first.kind() == MotorKinds.TALON_FX) {
+            return DCMotor.getFalcon500(count);
+        }
+        if (first.kind() == MotorKinds.SPARK_FLEX_BRUSHLESS) {
+            return DCMotor.getNeoVortex(count);
+        }
+        if (first.kind() == MotorKinds.SPARK_MAX_BRUSHLESS) {
+            return DCMotor.getNEO(count);
+        }
+        if (first.kind() == MotorKinds.SPARK_MAX_BRUSHED || first.kind() == MotorKinds.SPARK_FLEX_BRUSHED) {
+            return DCMotor.getCIM(count);
+        }
+        return DCMotor.getCIM(count);
+    }
+
+    private static double gearing(SimModel model) {
+        if (model.gearRatio() == null) {
+            return 1.0;
+        }
+        return 1.0 / Math.abs(model.gearRatio().ratio());
+    }
+
+    private static double momentOfInertia(SimModel model) {
+        return Math.max(1.0e-6, model.momentOfInertia().orElse(DEFAULT_MOI));
+    }
+
+    private static Range range(SimModel model, Range fallback) {
+        for (Object dependency : model.dependencies()) {
+            if (dependency instanceof Range range) {
+                return range;
+            }
+        }
+        return fallback;
+    }
+
+    private static List<EncoderDevice> linkedEncoders(SimModel model) {
+        Set<EncoderDevice> encoders = new LinkedHashSet<>(model.encoders());
+        for (MotorDevice motor : model.motors()) {
+            encoders.add(motor.encoder());
+        }
+        for (Object dependency : model.dependencies()) {
+            if (dependency instanceof EncoderDevice encoder) {
+                encoders.add(encoder);
+            }
+        }
+        return List.copyOf(encoders);
+    }
+
+    private static List<SimLimit> limits(SimModel model) {
+        List<SimLimit> limits = new ArrayList<>();
+        for (Object dependency : model.dependencies()) {
+            if (dependency instanceof SimLimit limit) {
+                limits.add(limit);
+            }
+        }
+        return limits;
+    }
+
+    private static void publish(
+            SimModel model,
+            SimulationSession session,
+            double positionRotations,
+            double velocityRotationsPerSecond) {
+        for (MotorDevice motor : model.motors()) {
+            session.motor(motor).state(positionRotations, velocityRotationsPerSecond);
+        }
+        for (EncoderDevice encoderDevice : linkedEncoders(model)) {
+            SimEncoderHandle encoder = session.encoder(encoderDevice);
+            encoder.positionRotations(positionRotations)
+                    .absolutePositionRotations(positionRotations)
+                    .velocityRotationsPerSecond(velocityRotationsPerSecond);
+        }
+        for (SimLimit limit : limits(model)) {
+            SimDigitalInputHandle input = session.digitalInput(limit.sensor());
+            boolean active = Math.abs(positionRotations - limit.position()) <= limit.tolerance();
+            input.raw(limit.sensor().isInverted() ? !active : active);
+        }
+    }
+
+    private static double rotationsToRadians(double rotations) {
+        return Units.rotationsToRadians(rotations);
+    }
+
+    private static double radiansToRotations(double radians) {
+        return Units.radiansToRotations(radians);
+    }
+
+    private static double clamp(double value, double minimum, double maximum) {
+        if (!Double.isFinite(value)) {
+            return 0.0;
+        }
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    private interface ModelAdapter {
+        double step(SimModel model, SimulationSession session, double seconds);
+    }
+
+    private static final class MotorAdapter implements ModelAdapter {
+        private final DCMotorSim sim;
+
+        private MotorAdapter(SimModel model) {
+            DCMotor gearbox = gearbox(model);
+            double gearing = gearing(model);
+            sim = new DCMotorSim(
+                    LinearSystemId.createDCMotorSystem(gearbox, momentOfInertia(model), gearing),
+                    gearbox);
+        }
+
+        @Override
+        public double step(SimModel model, SimulationSession session, double seconds) {
+            sim.setInput(commandVoltage(model, session, sim.getAngularPositionRotations()));
+            sim.update(seconds);
+            publish(model, session, sim.getAngularPositionRotations(), sim.getAngularVelocityRPM() / 60.0);
+            return sim.getCurrentDrawAmps();
+        }
+    }
+
+    private static final class FlywheelAdapter implements ModelAdapter {
+        private final FlywheelSim sim;
+        private double positionRotations;
+
+        private FlywheelAdapter(SimModel model) {
+            DCMotor gearbox = gearbox(model);
+            double gearing = gearing(model);
+            sim = new FlywheelSim(
+                    LinearSystemId.createFlywheelSystem(gearbox, momentOfInertia(model), gearing),
+                    gearbox);
+        }
+
+        @Override
+        public double step(SimModel model, SimulationSession session, double seconds) {
+            sim.setInput(commandVoltage(model, session, positionRotations));
+            sim.update(seconds);
+            double velocity = sim.getAngularVelocityRPM() / 60.0;
+            positionRotations += velocity * seconds;
+            publish(model, session, positionRotations, velocity);
+            return sim.getCurrentDrawAmps();
+        }
+    }
+
+    private static final class ArmAdapter implements ModelAdapter {
+        private final SingleJointedArmSim sim;
+
+        private ArmAdapter(SimModel model) {
+            Range range = range(model, Range.rotations(-0.5, 0.5));
+            DCMotor gearbox = gearbox(model);
+            sim = new SingleJointedArmSim(
+                    gearbox,
+                    gearing(model),
+                    momentOfInertia(model),
+                    model.lengthMeters().orElse(DEFAULT_ARM_LENGTH_METERS),
+                    rotationsToRadians(range.minimum()),
+                    rotationsToRadians(range.maximum()),
+                    model.simulatesGravity(),
+                    rotationsToRadians(range.clamp(0.0)));
+        }
+
+        @Override
+        public double step(SimModel model, SimulationSession session, double seconds) {
+            double position = radiansToRotations(sim.getAngleRads());
+            sim.setInput(commandVoltage(model, session, position));
+            sim.update(seconds);
+            publish(model, session, radiansToRotations(sim.getAngleRads()), radiansToRotations(sim.getVelocityRadPerSec()));
+            return sim.getCurrentDrawAmps();
+        }
+    }
+
+    private static final class ElevatorAdapter implements ModelAdapter {
+        private final ElevatorSim sim;
+
+        private ElevatorAdapter(SimModel model) {
+            Range range = range(model, Range.of(0.0, 1.0));
+            sim = new ElevatorSim(
+                    gearbox(model),
+                    gearing(model),
+                    DEFAULT_ELEVATOR_MASS_KG,
+                    DEFAULT_ELEVATOR_DRUM_RADIUS_METERS,
+                    range.minimum(),
+                    range.maximum(),
+                    model.simulatesGravity(),
+                    range.clamp(0.0));
+        }
+
+        @Override
+        public double step(SimModel model, SimulationSession session, double seconds) {
+            sim.setInput(commandVoltage(model, session, sim.getPositionMeters()));
+            sim.update(seconds);
+            publish(model, session, sim.getPositionMeters(), sim.getVelocityMetersPerSecond());
+            return sim.getCurrentDrawAmps();
+        }
+    }
+
+    private record MotorCommand(SimMotorHandle.CommandKind kind, double value) {
+    }
+}

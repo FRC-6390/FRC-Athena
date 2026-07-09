@@ -51,7 +51,7 @@ public interface ImuHandle {
     }
 
     /**
-     * Resets accumulated IMU state.
+     * Resets accumulated IMU Action.
      */
     default void reset() {
         throw new UnsupportedOperationException("IMU reset is not supported by this handle.");

@@ -1,6 +1,8 @@
 package ca.frc6390.athena.hardware.runtime;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -22,6 +24,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final Map<HardwareIdentity, MotorHandle> motors = new LinkedHashMap<>();
     private final Map<HardwareIdentity, EncoderHandle> encoders = new LinkedHashMap<>();
     private final Map<HardwareIdentity, ImuHandle> imus = new LinkedHashMap<>();
+    private final Map<HardwareIdentity, RuntimeException> refreshFailures = new LinkedHashMap<>();
 
     /**
      * Creates a graph using the global backend registry.
@@ -52,7 +55,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     @Override
-    public MotorHandle motor(MotorDevice device) {
+    public synchronized MotorHandle motor(MotorDevice device) {
         Objects.requireNonNull(device, "device");
         return motors.computeIfAbsent(HardwareIdentity.motor(device), ignored -> {
             MotorHandle handle = backends
@@ -65,7 +68,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     @Override
-    public EncoderHandle encoder(EncoderDevice device) {
+    public synchronized EncoderHandle encoder(EncoderDevice device) {
         Objects.requireNonNull(device, "device");
         if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated) {
             return encoders.computeIfAbsent(
@@ -93,7 +96,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      * @param device IMU declaration
      * @return runtime IMU
      */
-    public ImuHandle imu(ImuDevice device) {
+    public synchronized ImuHandle imu(ImuDevice device) {
         Objects.requireNonNull(device, "device");
         return imus.computeIfAbsent(HardwareIdentity.imu(device), ignored -> {
             ImuHandle handle = backends
@@ -109,13 +112,45 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      * Refreshes all cached hardware input snapshots once for the current runtime cycle.
      */
     public void refreshInputs() {
-        motors.values().forEach(MotorHandle::refreshInputs);
-        encoders.values().forEach(EncoderHandle::refreshInputs);
-        imus.values().forEach(ImuHandle::refreshInputs);
+        List<RefreshTask> tasks;
+        synchronized (this) {
+            tasks = new ArrayList<>(motors.size() + encoders.size() + imus.size());
+            motors.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle::refreshInputs)));
+            encoders.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle::refreshInputs)));
+            imus.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle::refreshInputs)));
+        }
+        Map<HardwareIdentity, RuntimeException> failures = new LinkedHashMap<>();
+        tasks.forEach(task -> refresh(task.identity(), task.refresh(), failures));
+        synchronized (this) {
+            refreshFailures.clear();
+            refreshFailures.putAll(failures);
+        }
+    }
+
+    /**
+     * Returns failures recorded during the latest input refresh.
+     *
+     * @return refresh failures
+     */
+    public synchronized List<RefreshFailure> refreshFailures() {
+        return refreshFailures.entrySet().stream()
+                .map(entry -> new RefreshFailure(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    private static void refresh(
+            HardwareIdentity identity,
+            Runnable refresh,
+            Map<HardwareIdentity, RuntimeException> failures) {
+        try {
+            refresh.run();
+        } catch (RuntimeException exception) {
+            failures.put(identity, exception);
+        }
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         closeAll(imus);
         closeAll(encoders);
         closeAll(motors);
@@ -130,6 +165,19 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                     throw new IllegalStateException("Failed to close hardware handle.", exception);
                 }
             }
+        }
+    }
+
+    /**
+     * A handle refresh failure captured without aborting the rest of the runtime refresh.
+     *
+     * @param identity hardware identity
+     * @param exception thrown exception
+     */
+    public record RefreshFailure(HardwareIdentity identity, RuntimeException exception) {
+        public RefreshFailure {
+            Objects.requireNonNull(identity, "identity");
+            Objects.requireNonNull(exception, "exception");
         }
     }
 
@@ -159,6 +207,13 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         @Override
         public double velocityRotationsPerSecond() {
             return motor.absoluteVelocityRotationsPerSecond();
+        }
+    }
+
+    private record RefreshTask(HardwareIdentity identity, Runnable refresh) {
+        private RefreshTask {
+            Objects.requireNonNull(identity, "identity");
+            Objects.requireNonNull(refresh, "refresh");
         }
     }
 }

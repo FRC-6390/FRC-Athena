@@ -5,10 +5,10 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import ca.frc6390.athena.auto.PathProvider;
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
-import ca.frc6390.athena.mechanism.core.PathState;
+import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.Paths;
 import choreo.auto.AutoFactory;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -18,7 +18,7 @@ import edu.wpi.first.wpilibj2.command.Command;
  */
 public final class ChoreoPathAdapter implements PathProvider {
     /**
-     * Source key used by Choreo path states.
+     * Source key used by Choreo path Actions.
      */
     public static final String KEY = "choreo";
 
@@ -53,15 +53,15 @@ public final class ChoreoPathAdapter implements PathProvider {
     }
 
     @Override
-    public PathState path(String pathName) {
+    public PathAction path(String pathName) {
         return Paths.choreo(normalize(pathName));
     }
 
     @Override
-    public CommandState load(String pathName) {
+    public CommandAction load(String pathName) {
         String normalized = normalize(pathName);
         Command command = trajectoryCommand(normalized);
-        return CommandState.create(KEY + ":" + normalized)
+        return CommandAction.create(KEY + ":" + normalized)
                 .onInitialize(command::initialize)
                 .onExecute(command::execute)
                 .until(command::isFinished)
@@ -202,7 +202,7 @@ public final class ChoreoPathAdapter implements PathProvider {
     }
 
     private interface CommandFactory {
-        Command command(PathState path);
+        Command command(PathAction path);
     }
 
     private static final class CommandPathRuntime implements PathRuntime {
@@ -214,31 +214,31 @@ public final class ChoreoPathAdapter implements PathProvider {
         }
 
         @Override
-        public void initialize(PathState path, MechanismContext context) {
+        public void initialize(PathAction path, MechanismContext context) {
             Command command = commandFactory.command(path);
             activeCommands.put(path.key(), command);
             command.initialize();
         }
 
         @Override
-        public void execute(PathState path, MechanismContext context) {
+        public void execute(PathAction path, MechanismContext context) {
             activeCommand(path).execute();
         }
 
         @Override
-        public boolean isFinished(PathState path, MechanismContext context) {
+        public boolean isFinished(PathAction path, MechanismContext context) {
             return activeCommand(path).isFinished();
         }
 
         @Override
-        public void end(PathState path, MechanismContext context, boolean interrupted) {
+        public void end(PathAction path, MechanismContext context, boolean interrupted) {
             Command command = activeCommands.remove(path.key());
             if (command != null) {
                 command.end(interrupted);
             }
         }
 
-        private Command activeCommand(PathState path) {
+        private Command activeCommand(PathAction path) {
             return activeCommands.computeIfAbsent(path.key(), key -> commandFactory.command(path));
         }
     }

@@ -2,13 +2,15 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
-import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
-import ca.frc6390.athena.hardware.runtime.MappedActionContext;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
+import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.hardware.runtime.MappedActionContext;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -26,13 +28,13 @@ public final class RobotRuntime {
     private final MappedActionContext registeredHandles = new MappedActionContext();
     private final ActionContext actionContext;
     private final Map<Mechanism, MechanismRuntime> runtimes = new IdentityHashMap<>();
+    private final Map<Action, RequestTarget> actionTargets = new IdentityHashMap<>();
+    private final Set<Action> ambiguousActionTargets = Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Map<Object, RequestTarget> declarationTargets = new LinkedHashMap<>();
+    private final Set<Object> ambiguousDeclarationTargets = new LinkedHashSet<>();
+    private final Set<DigitalInputDevice> digitalInputs = new LinkedHashSet<>();
     private final RobotGraph graph = new RobotGraph();
-    private final Map<MotorDevice, SimMotor> simMotors = new LinkedHashMap<>();
-    private final Map<EncoderDevice, SimEncoder> simEncoders = new LinkedHashMap<>();
-    private final Map<DigitalInputDevice, SimDigitalInput> digitalInputs = new LinkedHashMap<>();
-    private final Map<PathState, PathRuntime> pathRuntimes = new LinkedHashMap<>();
-    private final Set<SimModel> simulations = new LinkedHashSet<>();
-    private final SimModelRunner simModelRunner = new SimModelRunner();
+    private final Map<PathAction, PathRuntime> pathRuntimes = new LinkedHashMap<>();
     private final OutputResolver resolver;
     private Runnable simulationStep = () -> {
     };
@@ -76,22 +78,20 @@ public final class RobotRuntime {
         Objects.requireNonNull(mechanism, "mechanism");
         graph.node(mechanism);
         runtimes.computeIfAbsent(mechanism, this::runtime);
-        refreshSimulations();
+        indexActionTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
+        indexDeclarationTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
+        refreshDigitalInputs();
         return this;
     }
 
     public RobotRuntime motor(MotorDevice device, MotorHandle motor) {
         MotorDevice safeDevice = Objects.requireNonNull(device, "device");
-        SimMotor simulated = new SimMotor(motor);
-        simMotors.put(safeDevice, simulated);
-        registeredHandles.motor(safeDevice, simulated);
+        registeredHandles.motor(safeDevice, Objects.requireNonNull(motor, "motor"));
         return this;
     }
 
     public RobotRuntime encoder(EncoderDevice device, EncoderHandle encoder) {
-        SimEncoder simulated = new SimEncoder(encoder);
-        simEncoders.put(Objects.requireNonNull(device, "device"), simulated);
-        registeredHandles.encoder(device, simulated);
+        registeredHandles.encoder(Objects.requireNonNull(device, "device"), Objects.requireNonNull(encoder, "encoder"));
         return this;
     }
 
@@ -101,26 +101,20 @@ public final class RobotRuntime {
         return this;
     }
 
-    private RobotRuntime simulatedDigitalInput(DigitalInputDevice device, SimDigitalInput value) {
-        digitalInputs.put(Objects.requireNonNull(device, "device"), Objects.requireNonNull(value, "value"));
-        DigitalInputDevice.bindRuntime(device, value::get);
-        return this;
-    }
-
-    public RobotRuntime path(PathState path, PathRuntime runtime) {
+    public RobotRuntime path(PathAction path, PathRuntime runtime) {
         pathRuntimes.put(Objects.requireNonNull(path, "path"), Objects.requireNonNull(runtime, "runtime"));
         return this;
     }
 
-    public RobotRuntime paths(Object root, Function<PathState, PathRuntime> runtimeFactory) {
+    public RobotRuntime paths(Object root, Function<PathAction, PathRuntime> runtimeFactory) {
         Objects.requireNonNull(runtimeFactory, "runtimeFactory");
-        for (PathState path : PathIntrospector.inspect(root)) {
+        for (PathAction path : PathIntrospector.inspect(root)) {
             path(path, runtimeFactory.apply(path));
         }
         return this;
     }
 
-    public RobotRuntime path(PathState path, double seconds) {
+    public RobotRuntime path(PathAction path, double seconds) {
         return path(path, PathRuntime.timed(seconds));
     }
 
@@ -142,11 +136,10 @@ public final class RobotRuntime {
             } else if (declaration instanceof EncoderDevice encoder && !canResolveEncoder(encoder)) {
                 MemoryEncoder memory = new MemoryEncoder(encoder);
                 encoder(encoder, memory);
-            } else if (declaration instanceof DigitalInputDevice digital && !digitalInputs.containsKey(digital)) {
-                simulatedDigitalInput(digital, new SimDigitalInput());
+            } else if (declaration instanceof DigitalInputDevice digital) {
+                DigitalInputDevice.bindRuntime(digital, () -> false);
             }
         }
-        refreshSimulations();
         return this;
     }
 
@@ -154,29 +147,67 @@ public final class RobotRuntime {
         return actionContext;
     }
 
+    /**
+     * Samples declared signal inputs once for the current runtime cycle.
+     *
+     * @return this runtime
+     */
+    public RobotRuntime sampleSignals() {
+        digitalInputs.forEach(DigitalInputDevice::sample);
+        return this;
+    }
+
     public List<Mechanism> mechanisms() {
         return List.copyOf(runtimes.keySet());
     }
 
-    public RobotRuntime set(Mechanism mechanism, State state) {
-        runtimeFor(mechanism).set(state);
+    /**
+     * Returns simulation models declared by registered mechanisms.
+     *
+     * @return simulation models
+     */
+    public Set<SimModel> simulationModels() {
+        return graph.simulations(runtimes.keySet());
+    }
+
+    public RobotRuntime set(Mechanism mechanism, Action action) {
+        runtimeFor(mechanism).set(action);
         return this;
     }
 
-    public State state(Mechanism mechanism) {
-        return runtimeFor(mechanism).state();
+    public RobotRuntime request(Action action) {
+        RequestTarget target = targetFor(Objects.requireNonNull(action, "action"));
+        if (target == null) {
+            throw new IllegalArgumentException("Action is not owned by a registered mechanism and does not target "
+                    + "a declaration owned by one.");
+        }
+        Action routed = target.owner() == target.root()
+                ? action
+                : Actions.set().set(target.owner(), action);
+        return set(target.root(), routed);
+    }
+
+    public Action action(Mechanism mechanism) {
+        return runtimeFor(mechanism).action();
     }
 
     public List<ResolvedOutput> periodic(MechanismContext mechanismContext, EventContext eventContext) {
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
+        sampleSignals();
         List<ResolvedOutput> outputs = new ArrayList<>();
         for (MechanismRuntime runtime : runtimes.values()) {
             outputs.addAll(runtime.periodic(safeMechanismContext, eventContext));
         }
-        if (safeMechanismContext.simulation()) {
-            simModelRunner.step(simulations, simMotors, simEncoders, digitalInputs, safeMechanismContext.dtSeconds());
-        }
         return outputs;
+    }
+
+    private void refreshDigitalInputs() {
+        digitalInputs.clear();
+        for (Object declaration : graph.declarations(runtimes.keySet())) {
+            if (declaration instanceof DigitalInputDevice digitalInput) {
+                digitalInputs.add(digitalInput);
+            }
+        }
     }
 
     public List<ResolvedOutput> robotPeriodic(double nowSeconds, double dtSeconds) {
@@ -222,9 +253,183 @@ public final class RobotRuntime {
         return runtime;
     }
 
-    private void refreshSimulations() {
-        simulations.clear();
-        simulations.addAll(graph.simulations(runtimes.keySet()));
+    private void indexActionTargets(Mechanism root, Mechanism mechanism, Set<Mechanism> visited) {
+        if (!visited.add(mechanism)) {
+            return;
+        }
+        MechanismNode node = graph.node(mechanism);
+        for (Action action : node.Actions().values()) {
+            if (ambiguousActionTargets.contains(action)) {
+                continue;
+            }
+            RequestTarget existing = actionTargets.get(action);
+            RequestTarget target = new RequestTarget(root, mechanism);
+            if (existing != null && !existing.equals(target)) {
+                actionTargets.remove(action);
+                ambiguousActionTargets.add(action);
+                continue;
+            }
+            actionTargets.put(action, target);
+        }
+        for (Mechanism child : node.children().values()) {
+            indexActionTargets(root, child, visited);
+        }
+    }
+
+    private void indexDeclarationTargets(Mechanism root, Mechanism mechanism, Set<Mechanism> visited) {
+        if (!visited.add(mechanism)) {
+            return;
+        }
+        MechanismNode node = graph.node(mechanism);
+        RequestTarget target = new RequestTarget(root, mechanism);
+        for (Object declaration : node.declarations().values()) {
+            indexDeclarationTarget(declaration, target);
+        }
+        for (Mechanism child : node.children().values()) {
+            indexDeclarationTargets(root, child, visited);
+        }
+    }
+
+    private void indexDeclarationTarget(Object declaration, RequestTarget target) {
+        if (declaration == null) {
+            return;
+        }
+        if (ambiguousDeclarationTargets.contains(declaration)) {
+            return;
+        }
+        RequestTarget existing = declarationTargets.get(declaration);
+        if (existing != null && !existing.equals(target)) {
+            declarationTargets.remove(declaration);
+            ambiguousDeclarationTargets.add(declaration);
+            return;
+        }
+        declarationTargets.put(declaration, target);
+        if (declaration instanceof ControlBinding control) {
+            for (Object dependency : controlDeclarations(control)) {
+                indexDeclarationTarget(dependency, target);
+            }
+        }
+    }
+
+    private RequestTarget targetFor(Action action) {
+        RequestTarget direct = ambiguousActionTargets.contains(action) ? null : actionTargets.get(action);
+        if (direct != null) {
+            return direct;
+        }
+        Set<RequestTarget> targets = new HashSet<>();
+        for (Object declaration : actionDeclarations(action)) {
+            RequestTarget target = declarationTargets.get(declaration);
+            if (target != null) {
+                targets.add(target);
+            }
+        }
+        if (targets.size() > 1) {
+            throw new IllegalArgumentException("Action targets declarations owned by multiple registered mechanisms.");
+        }
+        return targets.isEmpty() ? null : targets.iterator().next();
+    }
+
+    private static Set<Object> actionDeclarations(Action action) {
+        Set<Object> declarations = new LinkedHashSet<>();
+        collectActionDeclarations(action, declarations);
+        return declarations;
+    }
+
+    private static void collectActionDeclarations(Action action, Set<Object> declarations) {
+        if (action == null) {
+            return;
+        }
+        if (action instanceof Actions.ChildSet childSet) {
+            for (Actions.ChildTarget target : childSet.targets()) {
+                collectActionDeclarations(target.action(), declarations);
+            }
+        } else if (action instanceof Actions.Parallel parallel) {
+            parallel.Actions().forEach(child -> collectActionDeclarations(child, declarations));
+        } else if (action instanceof Actions.Race race) {
+            race.Actions().forEach(child -> collectActionDeclarations(child, declarations));
+        } else if (action instanceof Actions.Deadline deadline) {
+            deadline.Actions().forEach(child -> collectActionDeclarations(child, declarations));
+        } else if (action instanceof Actions.Sequence sequence) {
+            sequence.steps().forEach(step -> collectActionDeclarations(step.action(), declarations));
+            collectActionDeclarations(sequence.next(), declarations);
+        } else if (action instanceof Actions.Cycle cycle) {
+            cycle.steps().forEach(step -> collectActionDeclarations(step.action(), declarations));
+        } else if (action instanceof Actions.Choice choice) {
+            collectActionDeclarations(choice.active(), declarations);
+            collectActionDeclarations(choice.inactive(), declarations);
+        } else if (action instanceof Actions.WhenBranch branch) {
+            collectActionDeclarations(branch.active(), declarations);
+        } else if (action instanceof Actions.Timeout timeout) {
+            collectActionDeclarations(timeout.action(), declarations);
+        } else if (action instanceof Actions.Conditional conditional) {
+            collectActionDeclarations(conditional.action(), declarations);
+            collectActionDeclarations(conditional.next(), declarations);
+        } else if (action instanceof Action.Conditional conditional) {
+            collectActionDeclarations(conditional.action(), declarations);
+            collectActionDeclarations(conditional.next(), declarations);
+        } else if (action instanceof Actions.Then then) {
+            collectActionDeclarations(then.action(), declarations);
+            collectActionDeclarations(then.next(), declarations);
+        } else if (action instanceof Action.Then then) {
+            collectActionDeclarations(then.action(), declarations);
+            collectActionDeclarations(then.next(), declarations);
+        } else if (action instanceof Actions.Clamped clamped) {
+            collectActionDeclarations(clamped.action(), declarations);
+        } else if (action instanceof Action.Clamped clamped) {
+            collectActionDeclarations(clamped.action(), declarations);
+        } else if (action instanceof PathAction path) {
+            declarations.add(path);
+        } else if (action instanceof Actions.MotorPercent motor) {
+            declarations.add(motor.motor());
+        } else if (action instanceof Actions.DynamicMotorPercent motor) {
+            declarations.add(motor.motor());
+        } else if (action instanceof Actions.MotorVoltage motor) {
+            declarations.add(motor.motor());
+        } else if (action instanceof Actions.DynamicMotorVoltage motor) {
+            declarations.add(motor.motor());
+        } else if (control(action) != null) {
+            declarations.add(control(action));
+            declarations.addAll(controlDeclarations(control(action)));
+        }
+    }
+
+    private static Set<Object> controlDeclarations(ControlBinding control) {
+        Set<Object> declarations = new LinkedHashSet<>();
+        declarations.addAll(control.motors());
+        declarations.addAll(control.feedback());
+        declarations.addAll(control.dependencies());
+        for (ControlLoop loop : control.loops()) {
+            declarations.addAll(loop.dependencies());
+        }
+        return declarations;
+    }
+
+    private static ControlBinding control(Action action) {
+        if (action instanceof Actions.ControlPercent control) {
+            return control.control();
+        }
+        if (action instanceof Actions.DynamicControlPercent control) {
+            return control.control();
+        }
+        if (action instanceof Actions.ControlVoltage control) {
+            return control.control();
+        }
+        if (action instanceof Actions.DynamicControlVoltage control) {
+            return control.control();
+        }
+        if (action instanceof Actions.ControlPosition control) {
+            return control.control();
+        }
+        if (action instanceof Actions.DynamicControlPosition control) {
+            return control.control();
+        }
+        if (action instanceof Actions.ControlVelocity control) {
+            return control.control();
+        }
+        if (action instanceof Actions.DynamicControlVelocity control) {
+            return control.control();
+        }
+        return null;
     }
 
     private boolean canResolveMotor(MotorDevice device) {
@@ -265,6 +470,13 @@ public final class RobotRuntime {
                 return registered.motor(ref);
             }
             return fallback.motor(ref);
+        }
+    }
+
+    private record RequestTarget(Mechanism root, Mechanism owner) {
+        private RequestTarget {
+            root = Objects.requireNonNull(root, "root");
+            owner = Objects.requireNonNull(owner, "owner");
         }
     }
 

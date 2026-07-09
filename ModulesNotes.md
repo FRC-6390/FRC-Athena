@@ -24,7 +24,7 @@
   - [x] Focused stale-name scan found no deleted runtime names in `athena-runtime/src/main/java`.
 - [x] Architecture: `athena-runtime` is now the low-level value/signal layer; the root runtime lives in `athena-robot` instead of this module.
   - [x] Final ownership converges through `athena-robot`, which composes mechanism runtime, hardware graph, drivetrain runtime, localization scheduling, paths, autos, command graph, and sim graph.
-  - [x] `RobotRuntime` can now be constructed with a runtime-owned `ActionContext` such as `HardwareGraph`, so mechanism state dispatch can resolve hardware through the graph boundary.
+  - [x] `RobotRuntime` can now be constructed with a runtime-owned `ActionContext` such as `HardwareGraph`, so mechanism Action dispatch can resolve hardware through the graph boundary.
 
 ## athena-hardware
 
@@ -34,6 +34,7 @@
 - [x] Runtime ownership: added `HardwareGraph` as the runtime-owned resolver/cache for motor, encoder, and IMU handles.
 - [x] Handle identity: added `HardwareIdentity` so runtime and simulation maps include category, kind, bus, id, and integrated-encoder detail instead of relying on display/default names.
 - [x] Backend discovery: `BackendRegistry.global()` now discovers lazily, and `setGlobal(null)` clears the override without eager `ServiceLoader` work.
+  - [x] Service discovery skips unavailable provider classes so the single Athena vendordep can include dormant vendor adapter jars without requiring every real vendor library.
 - [x] Integrated encoder behavior: `HardwareGraph` resolves integrated motor encoders through a cached encoder-handle facade backed by the motor handle.
 - [x] Test surfaces needed: device validation defaults, integrated encoder behavior, digital input inversion/binding, sim model composition, backend lookup, and default handle exception behavior are covered by `HardwareGraphTest`.
   - [x] `HardwareGraphTest` covers `HardwareIdentity`, graph handle caching/backend lookup, integrated motor encoder facade behavior, missing-backend failures, default handle exceptions, basic device validation failures, digital input binding/inversion, and `SimModel` composition.
@@ -43,35 +44,42 @@
 
 ## athena-mechanisms
 
-- [x] Overall task: make `athena-mechanisms` the mechanism graph/state execution slice of the final robot runtime.
+- [x] Overall task: make `athena-mechanisms` the mechanism graph/Action execution slice of the final robot runtime.
 - [x] Code optimization: moved mechanism graph discovery into an internal `RobotGraph` and made `MechanismRuntime` consume a prebuilt `MechanismNode`.
   - [x] Add internal `RobotGraph` for mechanism node caching, declaration collection, and sim model discovery.
   - [x] Use cached `MechanismNode` when constructing `MechanismRuntime`.
   - [x] Cache class field lists in `MechanismIntrospector`, `HookIntrospector`, and `PathIntrospector`.
-  - [x] Cache per-node `PathRuntime` resolution after first path-state entry.
-  - [x] Lower `StateScheduler` into a cached scheduler-node tree so static child state nodes are built once and runtime state no longer uses generated string path keys.
+  - [x] Cache per-node `PathRuntime` resolution after first path-Action entry.
+  - [x] Lower `StateScheduler` into a cached scheduler-node tree so static child Action nodes are built once and runtime Action no longer uses generated string path keys.
 - [x] Runtime optimization: hook discovery is no longer performed every periodic tick.
   - [x] Capture hook bindings from `MechanismNode` at runtime construction.
   - [x] Reuse graph-owned declaration/simulation discovery in `RobotRuntime.bindInMemoryRuntime()` and simulation refresh.
   - [x] Rename old `HookRunner` plumbing to package-private `HookRuntime`.
-- [x] Test surfaces needed: state sequencing, timeout and conditional behavior, hook edge behavior, path runtime lifecycle, child mechanism output routing, sim model stepping, and control output application to `MotorHandle` are covered by `MechanismRuntimeTest`.
+- [x] Test surfaces needed: Action sequencing, timeout and conditional behavior, hook edge behavior, path runtime lifecycle, child mechanism output routing, sim model stepping, and control output application to `MotorHandle` are covered by `MechanismRuntimeTest`.
   - [x] Added focused `MechanismRuntimeTest` coverage for sequence timing, timeout/conditional transitions, rising-edge hook behavior, path runtime lifecycle, child mechanism output routing, output application through fake `MotorHandle`s, `RobotRuntime` dispatch through a `HardwareGraph`, and in-memory sim model stepping.
   - [x] Cover lowered scheduler subtree reset behavior with nested sequence coverage.
-- [x] Upkeep: `State`, `Output`, and `MechanismContext` now live in this module, and current Java sources are moved off old mechanism names.
+  - [x] Cover `Action.request()` dispatch and registered child-mechanism owner inference.
+- [x] Upkeep: `Action`, `Output`, and `MechanismContext` now live in this module, and current Java sources are moved off old mechanism names.
   - [x] Removed `HookRunner` from the mechanism source/API surface.
 - [x] Architecture: the mechanism `RobotRuntime` is backed by an internal mechanism `RobotGraph` and is now composed by the final `athena-robot` root.
   - [x] Add graph ownership for mechanism nodes, declarations, and sim model discovery.
-  - [x] Keep lifecycle/state dispatch in `RobotRuntime` instead of separate runners.
+  - [x] Keep lifecycle/Action dispatch in `RobotRuntime` instead of separate runners.
   - [x] Allow `RobotRuntime` to use a graph-backed hardware context while preserving explicit registered test handles.
+  - [x] Add request dispatch so robot code can call `action.request()` while runtime routing remains graph-owned.
+  - [x] Expand collection-valued declarations in the graph, so helpers such as `SwerveSimModels.drive(...)` can expose `List<SimModel>` directly.
+  - [x] Shared action instances across child mechanisms now become ambiguous direct request targets instead of blocking registration; declaration-targeted requests still route normally.
   - [x] Final cross-module root ownership moved to `athena-robot`.
   - [x] Replace public `MutableBoolean` with package-private `SimDigitalInput`; public digital input binding now accepts `BooleanSupplier`.
 
 ## athena-drivetrain
 
-- [x] Architecture correction: removed the swerve reflection/introspection path. Swerve follows the Rebuilt model: drive code is a `Mechanism`, modules are mechanisms, and drivetrain behavior composes normal states instead of mounting a separate drive runtime.
-- [x] Runtime cleanup: removed the separate swerve runtime, module node graph, root drivetrain mount, and direct `MotorHandle` write path. Swerve control belongs in mechanism state composition.
+- [x] Architecture correction: removed the swerve reflection/introspection path. Swerve follows the Rebuilt model: drive code is a `Mechanism`, modules are mechanisms, and drivetrain behavior composes normal Actions instead of mounting a separate drive runtime.
+- [x] Runtime cleanup: removed the separate swerve runtime, module node graph, root drivetrain mount, and direct `MotorHandle` write path. Swerve control belongs in mechanism Action composition.
+- [x] Template API: restored reusable module presets through generic mechanism-core `MechanismTemplate` and `Slot` APIs. `SwerveModules` now consumes that pattern, but slots are not a drivetrain-only concept.
 - [x] Test surfaces needed: production surfaces now exist for drivetrain behavior tests to target after the repo-wide test reset.
   - [x] `TrackWidth`, `WheelBase`, and `SwerveModuleModel` validate finite/positive conversion inputs.
+  - [x] `SwerveModulesTest` covers preset availability and filling template slots into runtime controls.
+  - [x] WPILib sim tests cover a root-registered swerve mechanism exposing `List<SimModel>` from `SwerveSimModels.drive(...)` and moving `SimulationSession.pose()` through `RobotRuntime.simulationPeriodic(...)`.
   - [x] Runtime graph/introspection tests were removed with the deleted runtime path.
 - [x] Upkeep: the old module location ref, swerve drive marker/definition/node API, `SwerveModuleOrder`, `Drivetrains`, all drivetrain `*Config`, all drivetrain `*Spec`, and differential drivetrain public API were removed. The module dropped its stale Gradle API dependency on `athena-commands`.
 
@@ -91,6 +99,7 @@
   - [x] Add pose/target signal metadata hooks for vendor strategy/runtime policy.
   - [x] Graph mounting is covered through `RobotRuntime.vision(...)` and `RobotRuntime.cameras(...)`.
   - [x] Add `CameraAdapter`/`CameraAdapters` ServiceLoader SPI for opt-in automatic vendor camera binding; Limelight and PhotonVision publish descriptors and root tests verify discovery.
+  - [x] Camera adapter discovery skips unavailable provider classes so absent PhotonVision/Limelight runtime libraries do not break projects that only installed the Athena vendordep.
 
 ## athena-localization
 
@@ -112,12 +121,14 @@
 
 - [x] Overall: finish simulation runtime integration with the final hardware graph.
 - [x] Code optimization: sim handles are small mutable live objects and the old public sim DTO layer remains removed.
-- [x] Runtime identity: `SimRuntime` now keys motor and IMU handle reuse by `HardwareIdentity`, so CAN bus/category/kind/id collisions do not collapse into default-name lookups.
-- [x] Runtime handle reuse: `SimRuntime.motor(...)` and `SimRuntime.imu(...)` continue to return cached handles for the same stable identity.
-- [x] HardwareGraph integration: `SimRuntime.hardwareGraph()` exposes a `HardwareGraph` backed by the same simulated handles that `SimRuntime.step(...)` advances.
-- [x] Test surfaces needed: motor percent/voltage/position/velocity behavior, timestep integration, IMU yaw-rate stepping, backend kind matching, and runtime handle reuse are covered by `SimRuntimeTest`.
-  - [x] `SimRuntimeTest` covers runtime handle reuse, registered model materialization, motor percent/voltage/position/velocity behavior, timestep integration, IMU yaw-rate stepping, backend kind matching through `HardwareGraph`, and graph-backed integrated encoder reads.
-- [x] Upkeep: standalone sim backend classes remain public ServiceLoader SPI entries for explicit simulation backend registration. Runtime-owned simulation uses private nested backends through `SimRuntime.hardwareGraph()`.
+- [x] Runtime identity: simulated handles key motor and IMU reuse by `HardwareIdentity`, so CAN bus/category/kind/id collisions do not collapse into default-name lookups.
+- [x] Runtime handle reuse: `SimulationSession` coordinates cached handles for the same stable identity.
+- [x] HardwareGraph integration: `SimulationSession` supplies a `HardwareGraph` backed by the same simulated handles that model stepping advances.
+- [x] Test surfaces needed: motor percent/voltage/position/velocity behavior, timestep integration, IMU yaw-rate stepping, backend kind matching, and runtime handle reuse are covered by simulation tests.
+  - [x] Simulation tests cover runtime handle reuse, registered model materialization, motor percent/voltage/position/velocity behavior, timestep integration, IMU yaw-rate stepping, backend kind matching through `HardwareGraph`, and graph-backed integrated encoder reads.
+  - [x] `SimulationSessionTest` verifies every supported real sim motor, encoder, and IMU kind resolves through `SimulationSession.hardwareGraph()` with no public `SIM` kind.
+  - [x] Root runtime tests verify mechanism-declared `SimModel` fields are registered into `SimulationSession` and stepped through `RobotRuntime.simulationPeriodic(...)`.
+- [x] Upkeep: standalone sim backend classes remain ServiceLoader SPI entries for explicit simulation backend registration. Session-owned simulation uses private nested backends through the simulation hardware graph.
 - [x] Architecture: narrowed `athena-simulation` Gradle dependencies by removing unused direct dependencies on `athena-mechanisms` and `athena-vision`.
 
 ## athena-vendor-ctre
@@ -162,16 +173,22 @@
 - [x] Upkeep: NavX port selection now has `StudicaNavxPort` and `StudicaImus.navx(...)` helpers instead of requiring raw numeric ids.
 - [x] Architecture: common IMU extras are represented on the generic `ImuHandle` contract (`angleDegrees`, `zeroYaw`, `reset`) and Studica implements them through that contract.
 
+## vendor dependency model
+
+- [x] The single `FRC6390-Athena.json` vendordep includes the core Athena stack and all Athena vendor adapter artifacts.
+- [x] Athena vendor adapter artifacts declare third-party vendor libraries as compile-only, so Athena does not transitively install CTRE, REV, PhotonVision, PathPlanner, Choreo, Studica, or Limelight runtime libraries.
+- [x] Teams keep using the normal third-party vendordeps for hardware/tools they actually use; Athena adapter discovery activates only when those libraries are present.
+
 ## athena-commands
 
-- [x] Code optimization: the module is now two small immutable behavior-declaration types, `CommandState` and `CommandStateBuilder`; the deleted drive helpers and command grouping utilities no longer carry duplicated command composition logic.
+- [x] Code optimization: the module is now two small immutable behavior-declaration types, `CommandAction` and `CommandActionBuilder`; the deleted drive helpers and command grouping utilities no longer carry duplicated command composition logic.
 - [x] Runtime optimization: command execution is centralized in `CommandGraph`, so lifecycle and requirement checks are owned by one small graph instead of repeated by each adapter.
-- [x] Test surfaces needed: command descriptor behavior and local requirement arbitration are covered by `CommandStateTest`.
+- [x] Test surfaces needed: command descriptor behavior and local requirement arbitration are covered by `CommandActionTest`.
   - [x] Cover default callback behavior.
   - [x] Cover requirement de-duplication and trimming.
   - [x] Cover finish condition behavior and null handling.
   - [x] Cover `CommandGraph` lifecycle ownership, command replacement, conflict cancellation, finish cleanup, and requirement release.
-- [x] Upkeep: current Java sources are moved off `CommandSpec`, `CommandGroups`, and `RobotDriveCommands`. Rebuilt examples should use `CommandState` plus `CommandGraph` only where Athena needs behavior descriptors and local arbitration.
+- [x] Upkeep: current Java sources are moved off `CommandSpec`, `CommandGroups`, and `RobotDriveCommands`. Rebuilt examples should use `CommandAction` plus `CommandGraph` only where Athena needs behavior descriptors and local arbitration.
 - [x] Architecture: `athena-commands` now exposes small behavior descriptors plus a requirement-arbitration graph. It does not own drivetrain command helpers or WPILib adapter semantics.
 
 ## athena-auto
@@ -179,7 +196,7 @@
 - [x] Code optimization: the module is now a small indexed routine set instead of the old chooser/config/registry chain; this removes global lookup and duplicate DTO construction.
   - [x] Keep routine indexing normalized and duplicate-checked in `AutoRuntime`.
   - [x] Keep path-backed routine creation lazy through `Autos.path(...)`.
-- [x] Runtime optimization: `AutoRuntime` creates the selected `CommandState` lazily and reuses it until selection/reset, and `athena-robot` mounts it into the root lifecycle.
+- [x] Runtime optimization: `AutoRuntime` creates the selected `CommandAction` lazily and reuses it until selection/reset, and `athena-robot` mounts it into the root lifecycle.
   - [x] Add lifecycle ownership methods: `initialize()`, `execute()`, `periodic()`, `isFinished()`, `end(...)`, and `reset()`.
   - [x] End the active command when selection/reset interrupts the current routine.
   - [x] Add `PathGraph` marker-command lifecycle ownership for path events.
@@ -189,9 +206,9 @@
   - [x] Added `AutoRuntimeTest` coverage for routine normalization, duplicate detection, first-routine selection, provider-backed routine loading/reset, marker validation, local command lifecycle dispatch, `PathGraph` marker dispatch, duplicate marker rejection across routines, and active marker ending.
   - [x] `athena-robot` adds integrated root scheduling coverage for autos and command cancellation.
 - [x] Upkeep: old `AutoChooserConfig`, `AutoChooserSpec`, `AutoRoutineConfig`, `AutoRoutineSpec`, `AutoRegistry`, `AutoSource`, `AutoExecution`, input store/scope, and missing-source exception surfaces are gone from disk. Vendor path modules now use `PathProvider` and `Paths.*` entry points.
-- [x] Architecture: autos now express selected autonomous work as named command states, path providers, validated marker metadata, and root-mounted runtime lifecycle.
+- [x] Architecture: autos now express selected autonomous work as named command Actions, path providers, validated marker metadata, and root-mounted runtime lifecycle.
   - [x] Add `PathMarkerBinding` validation through `AutoRoutine`.
-  - [x] Widen `PathProvider` so providers expose `PathState`, `CommandState`, and `PathRuntime` from one boundary.
+  - [x] Widen `PathProvider` so providers expose `PathAction`, `CommandAction`, and `PathRuntime` from one boundary.
   - [x] Add `PathGraph` as the executable marker-dispatch boundary for routine marker bindings.
   - [x] `AutoRuntime` is mounted into the final root `RobotRuntime` in `athena-robot`.
 
@@ -215,14 +232,22 @@
 
 ## athena-superstructure
 
-- [x] Code optimization: removed the public superstructure config/spec/controller/planner stack. That eliminates duplicated state planning over mechanisms while `States` and `RobotRuntime` become the composition model.
-- [x] Runtime optimization: no superstructure planner/runtime work remains. Coordinated behavior should become state composition inside the runtime graph rather than a second scheduler.
+- [x] Code optimization: removed the public superstructure config/spec/controller/planner stack. That eliminates duplicated Action planning over mechanisms while `Actions` and `RobotRuntime` become the composition model.
+- [x] Runtime optimization: no superstructure planner/runtime work remains. Coordinated behavior should become Action composition inside the runtime graph rather than a second scheduler.
 - [x] Test surfaces needed: no superstructure tests are needed for the deleted API.
-  - [x] Future replacement coverage belongs around composed `State` execution, path/state sequencing, and runtime conflict resolution after the runtime graph is final.
-- [x] Upkeep: old superstructure examples are deleted. Rebuild coordination examples through composed `State` behavior only.
-- [x] Architecture: superstructure is no longer a module-level public API. Rebuilt-style subsystem coordination should be expressed through `States`, bindings, and the future `RobotRuntime`.
+  - [x] Future replacement coverage belongs around composed `Action` execution, path/Action sequencing, and runtime conflict resolution after the runtime graph is final.
+- [x] Upkeep: old superstructure examples are deleted. Rebuild coordination examples through composed `Action` behavior only.
+- [x] Architecture: superstructure is no longer a module-level public API. Rebuilt-style subsystem coordination should be expressed through `Actions`, bindings, and the future `RobotRuntime`.
 
 ## athena-robot
+
+- [x] Worker boundary: `RobotRuntime` now has optional `RuntimeWorker` / `RuntimeWorkers` configuration. The default path starts no background work; inline workers run from the main periodic loop and async workers require a caller-owned scheduler.
+- [x] Signal sampling: mechanism runtimes now cache declared digital inputs and sample them once before hook evaluation. Manual `sampleSignals()` can be used by a faster worker to latch short pulses between normal periodic ticks.
+- [x] Control execution: `ControlBinding` loop runtimes execute through the normal Action output path, receive runtime `dtSeconds`, reset on first use and target changes, and compose PID/feedforward outputs into one applied request.
+- [x] Hardware fault visibility: `RobotRuntime.hardwareRefreshFailures()` exposes the latest `HardwareGraph` refresh failures so root-level tests and robot code can observe vendor read faults without aborting the runtime loop.
+- [x] Vision sim field metadata: `SimulationSession.visionField(...)` now feeds discovered vision simulation providers through Athena-owned `VisionSimulationField` / `VisionSimulationTarget` declarations, and PhotonVision simulation binds both target and pose measurements without exposing WPILib or Photon classes to robot code.
+- [x] Runtime safety: simulation stepping rejects non-finite or non-positive timesteps before physics engines run, worker failure callbacks run outside the worker lock, and hardware refresh snapshots handles before vendor calls so graph mutation is not blocked by slow I/O.
+- [x] Naming cleanup: public command/path behavior declarations are now `CommandAction` and `PathAction`; the previous public state-named command/path declarations were removed.
 
 - [x] Code optimization: added the root `RobotRuntime` as a thin composition layer instead of forcing cross-module ownership into `athena-mechanisms`.
 - [x] Runtime optimization: root periodic owns vision refresh, localization evaluation, command graph scheduling, autonomous lifecycle dispatch, disabled cancellation, and simulation stepping.
@@ -274,16 +299,16 @@
 ## athena-vendor-pathplanner
 
 - [x] Code optimization: the old `PathPlannerAutoSource`/`PathPlannerAutos` public surface has been replaced by `PathPlannerPathProvider`, which implements the widened `PathProvider`.
-  - [x] Cache normalized `PathState` objects by provider path name.
+  - [x] Cache normalized `PathAction` objects by provider path name.
   - [x] Cache discovered PathPlanner auto names after the first vendor query.
-- [x] Runtime optimization: the provider caches active WPILib commands inside its path runtime by `PathState.key()`.
-  - [x] Keep command creation scoped to command state/runtime lifecycle instead of a global auto registry.
-  - [x] Keep active runtime commands keyed by `PathState.key()`.
+- [x] Runtime optimization: the provider caches active WPILib commands inside its path runtime by `PathAction.key()`.
+  - [x] Keep command creation scoped to command Action/runtime lifecycle instead of a global auto registry.
+  - [x] Keep active runtime commands keyed by `PathAction.key()`.
   - [x] Added focused fake-command coverage proving `runtime()` reuses the active command until `end(...)`.
   - [x] Remaining lifecycle ownership is now tracked under the final root `RobotRuntime` mounting item rather than this provider-local cache.
-- [x] Test surfaces needed: missing path handling, provider name normalization, `Paths.pathPlanner` conversion, `CommandState` lifecycle wrapping, marker bindings, and interaction with `PathRuntime`.
+- [x] Test surfaces needed: missing path handling, provider name normalization, `Paths.pathPlanner` conversion, `CommandAction` lifecycle wrapping, marker bindings, and interaction with `PathRuntime`.
   - [x] `athena-auto` provider-backed routine tests cover the shared `PathProvider` routine boundary and `Paths.pathPlanner` conversion through a fake provider.
-  - [x] `PathPlannerPathProviderTest` covers provider name normalization, path-state caching, PathPlanner name discovery caching, missing-path failure propagation, `CommandState` lifecycle wrapping, provider-backed marker bindings through `PathGraph`, and `PathRuntime` fake-command interaction through a fake `PathPlannerClient`.
+  - [x] `PathPlannerPathProviderTest` covers provider name normalization, path-Action caching, PathPlanner name discovery caching, missing-path failure propagation, `CommandAction` lifecycle wrapping, provider-backed marker bindings through `PathGraph`, and `PathRuntime` fake-command interaction through a fake `PathPlannerClient`.
   - [x] Real PathPlannerLib missing-file behavior is intentionally delegated to `AutoBuilder.buildAuto`; the provider boundary is covered for propagation, and executable marker ownership is covered at `PathGraph`.
 - [x] Upkeep: the old lowercase `Paths.pathplanner` entry point was removed; downstream code must use `Paths.pathPlanner`.
 - [x] Architecture: PathPlanner is a `PathProvider` adapter. It does not own autonomous registry or chooser semantics.
@@ -293,36 +318,22 @@
 ## athena-vendor-choreo
 
 - [x] Code optimization: the old Choreo auto source/catalog/factory names are replaced by `ChoreoPathProvider` and `ChoreoPathAdapter`.
-  - [x] Cache normalized `PathState` objects by provider path name.
+  - [x] Cache normalized `PathAction` objects by provider path name.
   - [x] Cache trajectory lookup results and discovered trajectory names in `ChoreoPathProvider`.
-- [x] Runtime optimization: `ChoreoPathAdapter` caches active WPILib commands inside its path runtime by `PathState.key()`.
+- [x] Runtime optimization: `ChoreoPathAdapter` caches active WPILib commands inside its path runtime by `PathAction.key()`.
   - [x] `ChoreoPathAdapter` now implements the widened `PathProvider` through `path(...)`, `load(...)`, and `runtime()`.
   - [x] Keep trajectory command runtime and routine command runtime separate.
   - [x] Added focused fake-command coverage proving trajectory and routine runtimes reuse active commands until `end(...)`.
   - [x] Remaining marker extraction is a vendor-fixture test gate; executable marker dispatch is owned by `PathGraph`.
-- [x] Test surfaces needed: trajectory lookup, marker conversion, missing trajectory behavior, command lifecycle, split trajectory delegation, routine command delegation, and path state integration.
+- [x] Test surfaces needed: trajectory lookup, marker conversion, missing trajectory behavior, command lifecycle, split trajectory delegation, routine command delegation, and path Action integration.
   - [x] Focused compile verification covers the widened provider contract against current ChoreoLib/WPILib APIs.
-  - [x] `ChoreoPathProviderTest` covers provider path normalization/caching, trajectory lookup caching, discovered-name caching, marker extraction/conversion into `PathMarkerBinding`, missing trajectory marker behavior, fake `FactoryClient` delegation for split trajectory/reset/routine/warmup commands, `CommandState` wrapping, and path runtime behavior.
-  - [x] Marker command dispatch stays owned by `PathGraph`; Choreo conversion only extracts trajectory event names and binds supplied command states.
+  - [x] `ChoreoPathProviderTest` covers provider path normalization/caching, trajectory lookup caching, discovered-name caching, marker extraction/conversion into `PathMarkerBinding`, missing trajectory marker behavior, fake `FactoryClient` delegation for split trajectory/reset/routine/warmup commands, `CommandAction` wrapping, and path runtime behavior.
+  - [x] Marker command dispatch stays owned by `PathGraph`; Choreo conversion only extracts trajectory event names and binds supplied command Actions.
   - [x] Real Choreo filesystem-loader missing-path coverage is not kept in the unit suite because it crashes the Gradle test worker in this environment; provider-boundary missing behavior is covered with the injectable client.
 - [x] Upkeep: the old `ChoreoAutos` public catalog is gone; entry points run through `Paths.choreo` and the provider/adapter pair.
 - [x] Architecture: Choreo support is a provider/adapter behind the final path API, not an autonomous subsystem.
   - [x] Executable Choreo paths now use the common `PathProvider` boundary.
   - [x] Pose reset and marker extraction remain provider contract details; marker command dispatch is owned by `PathGraph`.
-
-## athena-plugin
-
-- [x] Code optimization: removed the public `AthenaFeature` enum and replaced it with an internal `ModuleArtifact` catalog. The Gradle extension now requests Athena modules by string names.
-- [x] Runtime optimization: no robot runtime code exists here. Plugin cost is Gradle configuration and metadata loading only.
-- [x] Test surfaces needed: plugin selection, vendor metadata parsing, and lightweight Gradle TestKit behavior are covered by focused tests.
-  - [x] Cover string module normalization.
-  - [x] Cover unknown module errors and failure messages.
-  - [x] Cover default module set.
-  - [x] Cover vendor auto-detection and generated dependency coordinates.
-  - [x] Cover vendor metadata resource parsing, malformed metadata, missing resources, conflicting duplicate metadata, and built-in PathPlanner/Choreo metadata presence.
-  - [x] Cover Gradle TestKit plugin application for selected Athena/vendor dependencies and unknown feature failure.
-- [x] Upkeep: plugin has focused selector, metadata loader, and Gradle TestKit coverage again.
-- [x] Architecture: plugin concerns should stay build-time only. They no longer define robot runtime API concepts like `AthenaFeature`.
 
 ## athena-helios
 
@@ -340,13 +351,13 @@
 - [x] Upkeep: Markdown docs were removed from the active tree. Do not rebuild ARCP docs for the 2027 library deliverable unless ARCP is intentionally reintroduced as a published optional tooling artifact.
 - [x] Architecture: ARCP is isolated tooling/transport, not a student-facing robot API layer. It should stay outside `RobotRuntime` until the final runtime exposes a deliberate external sink/transport extension point.
 
-## example-project
+## example-projects
 
 - [x] Code optimization: old example Java sources were removed because they preserved deleted V3/spec/ref APIs.
-- [x] Runtime optimization: no example runtime remains active.
-- [x] Gradle status: `example-project` is removed from `settings.gradle` and its dependency block is removed from the root build.
-- [x] Test surfaces needed: do not restore `example-project` as a Gradle module for the current pass. Future examples should be acceptance fixtures for the final API, added only after `RobotRuntime`, drivetrain, localization, paths, autos, and sim are coherent enough to exercise real robot-style flows.
-- [x] Upkeep: keep this module absent until the new API is stable enough for real examples.
+- [x] Runtime optimization: examples now run as a standalone GradleRIO workspace instead of an Athena root submodule.
+- [x] Gradle status: `example-projects` contains `blank`, `tank-drive`, and `swerve-drive`.
+- [x] Test surfaces needed: `./gradlew.bat -p example-projects build` compiles the example workspace against the published local Athena snapshot.
+- [x] Upkeep: keep examples focused on current final API usage.
 - [x] Architecture: examples should demonstrate final API usage, not act as a compatibility layer for removed concepts.
 
 ## Overall API Issues
@@ -362,17 +373,17 @@
   - [x] Split the old `hardware.ref` package into `hardware.device`, `hardware.runtime`, and `hardware.sim`.
 - [x] Runtime ownership: cross-module runtime ownership now has a root in `athena-robot`.
   - [x] Mechanism slice now has an internal `RobotGraph` and cached `MechanismNode` ownership.
-  - [x] Mechanism lifecycle/state dispatch stays behind `RobotRuntime`.
+  - [x] Mechanism lifecycle/Action dispatch stays behind `RobotRuntime`.
   - [x] Vision slice now has a `VisionGraph` cache boundary and typed pose/target sample contracts for localization/vendor adapters.
   - [x] `athena-robot` binds hardware graph, drivetrain runtime, localization scheduling, paths, autos, commands, sim, and lifecycle together.
 - [x] Reflection/discovery: reflection remains the declaration discovery mechanism, but periodic loops are not discovery-heavy.
   - [x] Mechanism and hook reflection results are cached at runtime/graph construction.
   - [x] Field-list reflection is cached for mechanism, hook, and path introspection.
   - [x] Localization pose extraction no longer uses reflection.
-  - [x] Mechanism `StateScheduler` now lowers state trees into cached scheduler nodes and no longer uses generated string path keys for runtime node identity.
+  - [x] Mechanism `StateScheduler` now lowers Action trees into cached scheduler nodes and no longer uses generated string path keys for runtime node identity.
 - [x] Path, command, and auto integration has a working local boundary and root graph ownership.
-  - [x] `PathProvider` now exposes path state creation, command-state loading, and path runtime creation from one boundary.
-  - [x] `AutoRuntime` owns selected command-state lifecycle locally.
+  - [x] `PathProvider` now exposes path Action creation, command-Action loading, and path runtime creation from one boundary.
+  - [x] `AutoRuntime` owns selected command-Action lifecycle locally.
   - [x] `PathGraph` owns executable marker-command dispatch for validated routine marker bindings.
   - [x] PathPlanner and executable Choreo adapters implement the common provider boundary.
   - [x] Auto routines validate marker binding metadata.
@@ -382,5 +393,5 @@
   - [x] Added focused mechanism runtime, drivetrain fake-handle/runtime-construction, and WPILib pose-estimator adapter behavior tests.
   - [x] Added stable declaration/kind tests, graph lowering tests, fake-handle runtime behavior tests, vendor adapter contract tests, root `RobotRuntime` integration tests, and WPILib lifecycle host tests.
 - [x] The remaining cleanup risk is rebuilding enough real behavior on top of the cleaned surface.
-  - [x] `athena-helios` and old examples are removed from the active build; future examples are explicitly scoped as final API acceptance fixtures instead of compatibility layers.
+  - [x] `athena-helios` is removed from the active build; `example-projects` is a separate acceptance workspace instead of a compatibility layer.
   - [x] Full `./gradlew.bat check` covers architecture boundaries, legacy eviction, public API Javadocs, vendordep/release metadata, vendor metadata, vendor ServiceLoader descriptors, and all active module tests.

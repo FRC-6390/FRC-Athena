@@ -68,6 +68,96 @@ subprojects {
     }
 }
 
+def localWpilibYear = rootProject.findProperty('athenaFrcYear')?.toString() ?: '2027'
+def defaultLocalWpilibHome = {
+    String osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+    if (osName.contains('win')) {
+        return file("C:/Users/Public/wpilib/${localWpilibYear}")
+    }
+    if (osName.contains('mac')) {
+        return file("/Users/Shared/wpilib/${localWpilibYear}")
+    }
+    return file("${System.getProperty('user.home')}/wpilib/${localWpilibYear}")
+}()
+def localWpilibHome = rootProject.findProperty('athenaWpilibHome')
+        ? file(rootProject.findProperty('athenaWpilibHome').toString())
+        : defaultLocalWpilibHome
+def localWpilibMavenDir = file("${localWpilibHome}/maven")
+def localWpilibVendordepsDir = file("${localWpilibHome}/vendordeps")
+def localMavenAthenaGroupDir = file("${System.getProperty('user.home')}/.m2/repository/${rootProject.findProperty('athenaGroup').toString().replace('.', '/')}")
+def localWpilibAthenaGroupDir = file("${localWpilibMavenDir}/${rootProject.findProperty('athenaGroup').toString().replace('.', '/')}")
+def athenaVendordepFile = file("${rootDir}/vendordeps/FRC6390-Athena.json")
+
+tasks.register('installLocalWpilibVendordep') {
+    group = 'Publishing'
+    description = 'Installs the Athena vendordep JSON into the local WPILib vendordeps folder.'
+    inputs.file athenaVendordepFile
+    inputs.property('athenaVersion', rootProject.findProperty('athenaVersion'))
+    inputs.property('athenaFrcYear', localWpilibYear)
+    inputs.property('athenaMavenUrl', rootProject.findProperty('athenaMavenUrl'))
+    outputs.file file("${localWpilibVendordepsDir}/${athenaVendordepFile.name}")
+
+    doLast {
+        localWpilibVendordepsDir.mkdirs()
+        def json = new groovy.json.JsonSlurper().parse(athenaVendordepFile)
+        json.version = rootProject.findProperty('athenaVersion').toString()
+        json.frcYear = localWpilibYear
+        json.mavenUrls = [
+                localWpilibMavenDir.toURI().toString(),
+                rootProject.findProperty('athenaMavenUrl').toString()
+        ]
+        def outputFile = file("${localWpilibVendordepsDir}/${athenaVendordepFile.name}")
+        outputFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json)) + System.lineSeparator()
+        logger.lifecycle("Installed Athena vendordep to ${outputFile}")
+    }
+}
+
+tasks.register('copyMavenLocalToWpilib', Sync) {
+    group = 'Publishing'
+    description = 'Copies Athena artifacts from Maven Local into the local WPILib Maven folder.'
+    dependsOn subprojects.collect { it.tasks.named('publishToMavenLocal') }
+    from localMavenAthenaGroupDir
+    into localWpilibAthenaGroupDir
+
+    doFirst {
+        if (!localMavenAthenaGroupDir.exists()) {
+            throw new GradleException("Athena artifacts were not found in Maven Local at ${localMavenAthenaGroupDir}.")
+        }
+        localWpilibMavenDir.mkdirs()
+        logger.lifecycle("Copying Athena Maven artifacts to ${localWpilibAthenaGroupDir}")
+    }
+}
+
+tasks.register('publishToLocalWpilib') {
+    group = 'Publishing'
+    description = 'Publishes Athena locally and installs artifacts plus vendordep JSON into the local WPILib folder.'
+    dependsOn tasks.named('copyMavenLocalToWpilib')
+    dependsOn tasks.named('installLocalWpilibVendordep')
+}
+
+def exampleProjects = ['blank', 'tank-drive', 'swerve-drive']
+def exampleGradleCommand = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('win')
+        ? 'gradlew.bat'
+        : './gradlew'
+
+exampleProjects.each { exampleName ->
+    tasks.register("compile${exampleName.split('-').collect { it.capitalize() }.join('')}Example", Exec) {
+        group = 'Verification'
+        description = "Compiles the ${exampleName} example project against locally published Athena artifacts."
+        dependsOn subprojects.collect { it.tasks.named('publishToMavenLocal') }
+        workingDir = file("${rootDir}/example-projects/${exampleName}")
+        commandLine exampleGradleCommand, 'compileJava'
+    }
+}
+
+tasks.register('compileExamples') {
+    group = 'Verification'
+    description = 'Compiles all standalone example robot projects against locally published Athena artifacts.'
+    dependsOn exampleProjects.collect { exampleName ->
+        tasks.named("compile${exampleName.split('-').collect { it.capitalize() }.join('')}Example")
+    }
+}
+
 project(':athena-runtime') {
     dependencies {
         api project(':athena-api')
@@ -86,6 +176,7 @@ project(':athena-mechanisms') {
         api project(':athena-api')
         api project(':athena-runtime')
         api project(':athena-hardware')
+        testImplementation project(':athena-simulation')
     }
 }
 
@@ -125,29 +216,30 @@ project(':athena-commands') {
     }
 }
 
-project(':athena-plugin') {
-    apply plugin: 'java-gradle-plugin'
-
-    gradlePlugin {
-        plugins {
-            athena {
-                id = 'ca.frc6390.athena'
-                implementationClass = 'ca.frc6390.athena.plugin.gradle.AthenaGradlePlugin'
-                displayName = 'FRC 6390 Athena'
-                description = 'Selects Athena V3 feature and vendor artifacts.'
-            }
-        }
-    }
-
+project(':athena-benchmarks') {
     dependencies {
-        api project(':athena-api')
+        implementation project(':athena-mechanisms')
+        implementation project(':athena-hardware')
+        implementation project(':athena-simulation')
+        implementation project(':athena-robot')
+        implementation "org.openjdk.jmh:jmh-core:1.37"
+        annotationProcessor "org.openjdk.jmh:jmh-generator-annprocess:1.37"
     }
 
-    afterEvaluate {
-        publishing.publications.remove(publishing.publications.mavenJava)
-        tasks.matching { it.name.startsWith('publishMavenJavaPublicationTo') }.configureEach {
-            enabled = false
-        }
+    tasks.register('jmh', JavaExec) {
+        group = 'Verification'
+        description = 'Runs Athena JMH benchmarks.'
+        dependsOn tasks.named('classes')
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'org.openjdk.jmh.Main'
+    }
+
+    tasks.withType(PublishToMavenRepository).configureEach {
+        enabled = false
+    }
+
+    tasks.withType(PublishToMavenLocal).configureEach {
+        enabled = false
     }
 }
 
@@ -155,6 +247,7 @@ project(':athena-simulation') {
     dependencies {
         api project(':athena-runtime')
         api project(':athena-hardware')
+        api project(':athena-vision')
     }
 }
 
@@ -172,10 +265,29 @@ project(':athena-robot') {
         testRuntimeOnly project(':athena-vendor-studica')
         testRuntimeOnly project(':athena-vendor-limelight')
         testRuntimeOnly project(':athena-vendor-photonvision')
+        testRuntimeOnly "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        testRuntimeOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        testRuntimeOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        testRuntimeOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        testRuntimeOnly "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        testRuntimeOnly "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        testRuntimeOnly "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        testRuntimeOnly "com.ctre.phoenix6:wpiapi-java:${rootProject.findProperty('ctrePhoenix6Version')}"
+        testRuntimeOnly "com.revrobotics.frc:REVLib-java:${rootProject.findProperty('revLibVersion')}"
+        testRuntimeOnly "com.studica.frc:Studica-java:${rootProject.findProperty('studicaVersion')}"
+        testRuntimeOnly "com.fasterxml.jackson.core:jackson-core:2.19.4"
+        testRuntimeOnly "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        testRuntimeOnly "us.hebi.quickbuf:quickbuf-runtime:1.4"
+        testRuntimeOnly "org.photonvision:photonlib-java:${rootProject.findProperty('photonLibVersion')}"
+        testRuntimeOnly "org.photonvision:photontargeting-java:${rootProject.findProperty('photonLibVersion')}"
     }
 }
 
 project(':athena-wpilib') {
+    configurations {
+        wpilibTestNatives
+    }
+
     dependencies {
         api project(':athena-robot')
         api project(':athena-commands')
@@ -196,63 +308,107 @@ project(':athena-wpilib') {
         api "com.fasterxml.jackson.core:jackson-core:2.19.4"
         api "org.ejml:ejml-simple:0.44.0"
         api "us.hebi.quickbuf:quickbuf-runtime:1.4"
+        wpilibTestNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.findProperty('wpilibVersion')}:windowsx86-64@zip"
+        wpilibTestNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.findProperty('wpilibVersion')}:windowsx86-64@zip"
+    }
+
+    tasks.register('extractWpilibTestNatives', Sync) {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        from { configurations.wpilibTestNatives.collect { zipTree(it) } }
+        into layout.buildDirectory.dir('wpilib-test-natives')
+    }
+
+    test {
+        dependsOn tasks.named('extractWpilibTestNatives')
+        systemProperty(
+                'java.library.path',
+                layout.buildDirectory.dir('wpilib-test-natives/windows/x86-64/shared').get().asFile.absolutePath)
     }
 }
 
 project(':athena-vendor-ctre') {
     dependencies {
         api project(':athena-hardware')
-        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
-        api "com.ctre.phoenix6:wpiapi-java:${rootProject.findProperty('ctrePhoenix6Version')}"
+        compileOnly "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.ctre.phoenix6:wpiapi-java:${rootProject.findProperty('ctrePhoenix6Version')}"
+        testImplementation "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "com.ctre.phoenix6:wpiapi-java:${rootProject.findProperty('ctrePhoenix6Version')}"
     }
 }
 
 project(':athena-vendor-rev') {
     dependencies {
         api project(':athena-hardware')
-        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
-        api "com.revrobotics.frc:REVLib-java:${rootProject.findProperty('revLibVersion')}"
+        compileOnly "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.revrobotics.frc:REVLib-java:${rootProject.findProperty('revLibVersion')}"
+        testImplementation "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "com.revrobotics.frc:REVLib-java:${rootProject.findProperty('revLibVersion')}"
     }
 }
 
 project(':athena-vendor-studica') {
     dependencies {
         api project(':athena-hardware')
-        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
-        api "com.studica.frc:Studica-java:${rootProject.findProperty('studicaVersion')}"
+        compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.studica.frc:Studica-java:${rootProject.findProperty('studicaVersion')}"
+        testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "com.studica.frc:Studica-java:${rootProject.findProperty('studicaVersion')}"
     }
 }
 
 project(':athena-vendor-photonvision') {
     dependencies {
         api project(':athena-vision')
-        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
-        api "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
-        api "us.hebi.quickbuf:quickbuf-runtime:1.4"
-        api "org.photonvision:photonlib-java:${rootProject.findProperty('photonLibVersion')}"
-        api "org.photonvision:photontargeting-java:${rootProject.findProperty('photonLibVersion')}"
+        compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.fasterxml.jackson.core:jackson-core:2.19.4"
+        compileOnly "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        compileOnly "us.hebi.quickbuf:quickbuf-runtime:1.4"
+        compileOnly "org.photonvision:photonlib-java:${rootProject.findProperty('photonLibVersion')}"
+        compileOnly "org.photonvision:photontargeting-java:${rootProject.findProperty('photonLibVersion')}"
+        testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "com.fasterxml.jackson.core:jackson-core:2.19.4"
+        testImplementation "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        testImplementation "us.hebi.quickbuf:quickbuf-runtime:1.4"
+        testImplementation "org.photonvision:photonlib-java:${rootProject.findProperty('photonLibVersion')}"
+        testImplementation "org.photonvision:photontargeting-java:${rootProject.findProperty('photonLibVersion')}"
     }
 }
 
 project(':athena-vendor-limelight') {
     dependencies {
         api project(':athena-vision')
-        api "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
-        api "com.fasterxml.jackson.core:jackson-core:2.19.4"
+        compileOnly "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.fasterxml.jackson.core:jackson-core:2.19.4"
+        testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "com.fasterxml.jackson.core:jackson-core:2.19.4"
     }
 }
 
@@ -261,15 +417,24 @@ project(':athena-vendor-pathplanner') {
         api project(':athena-auto')
         api project(':athena-mechanisms')
         api project(':athena-wpilib')
-        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
-        api "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
-        api "com.pathplanner.lib:PathplannerLib-java:${rootProject.findProperty('pathPlannerLibVersion')}"
+        compileOnly "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        compileOnly "com.pathplanner.lib:PathplannerLib-java:${rootProject.findProperty('pathPlannerLibVersion')}"
+        testImplementation "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        testImplementation "com.pathplanner.lib:PathplannerLib-java:${rootProject.findProperty('pathPlannerLibVersion')}"
     }
 }
 
@@ -278,14 +443,23 @@ project(':athena-vendor-choreo') {
         api project(':athena-auto')
         api project(':athena-mechanisms')
         api project(':athena-wpilib')
-        api "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
-        api "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
-        api "com.google.code.gson:gson:2.11.0"
-        api "choreo:ChoreoLib-java:${rootProject.findProperty('choreoLibVersion')}"
+        compileOnly "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.google.code.gson:gson:2.11.0"
+        compileOnly "choreo:ChoreoLib-java:${rootProject.findProperty('choreoLibVersion')}"
+        testImplementation "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "com.google.code.gson:gson:2.11.0"
+        testImplementation "choreo:ChoreoLib-java:${rootProject.findProperty('choreoLibVersion')}"
     }
 }

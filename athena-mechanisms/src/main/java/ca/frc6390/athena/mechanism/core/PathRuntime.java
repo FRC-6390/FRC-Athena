@@ -1,18 +1,18 @@
 package ca.frc6390.athena.mechanism.core;
 
 /**
- * Runtime path executor used by the mechanism state scheduler.
+ * Runtime path executor used by the mechanism Action scheduler.
  */
 public interface PathRuntime {
-    default void initialize(PathState path, MechanismContext context) {
+    default void initialize(PathAction path, MechanismContext context) {
     }
 
-    default void execute(PathState path, MechanismContext context) {
+    default void execute(PathAction path, MechanismContext context) {
     }
 
-    boolean isFinished(PathState path, MechanismContext context);
+    boolean isFinished(PathAction path, MechanismContext context);
 
-    default void end(PathState path, MechanismContext context, boolean interrupted) {
+    default void end(PathAction path, MechanismContext context, boolean interrupted) {
     }
 
     static PathRuntime timed(double seconds) {

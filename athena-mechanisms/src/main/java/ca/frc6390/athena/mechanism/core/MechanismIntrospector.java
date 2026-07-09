@@ -11,6 +11,8 @@ import ca.frc6390.athena.mechanism.ref.PidGains;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -33,7 +35,7 @@ public final class MechanismIntrospector {
     public static MechanismNode inspect(String name, Mechanism mechanism) {
         Objects.requireNonNull(mechanism, "mechanism");
         Map<String, Mechanism> children = new LinkedHashMap<>();
-        Map<String, State> states = new LinkedHashMap<>();
+        Map<String, Action> actions = new LinkedHashMap<>();
         Map<String, Object> declarations = new LinkedHashMap<>();
         Map<String, HookBinding> hooks = new LinkedHashMap<>();
 
@@ -48,16 +50,19 @@ public final class MechanismIntrospector {
             String fieldName = field.getName();
             if (value instanceof Mechanism child && !Modifier.isStatic(field.getModifiers())) {
                 children.put(fieldName, child);
-            } else if (value instanceof State state) {
-                states.put(fieldName, state);
+            } else if (value instanceof Action action) {
+                actions.put(fieldName, action);
             } else if (value instanceof HookBinding hook) {
                 hooks.put(fieldName, hook);
-            } else if (isDeclaration(value)) {
-                declarations.put(fieldName, value);
+            } else {
+                Object declaration = declaration(value);
+                if (declaration != null) {
+                    declarations.put(fieldName, declaration);
+                }
             }
         }
 
-        return new MechanismNode(name, mechanism, children, states, declarations, hooks);
+        return new MechanismNode(name, mechanism, children, actions, declarations, hooks);
     }
 
     private static Field[] fields(Class<?> type) {
@@ -87,6 +92,23 @@ public final class MechanismIntrospector {
         }
     }
 
+    private static Object declaration(Object value) {
+        if (value instanceof Slot<?, ?> slot) {
+            return slot.filled() ? declaration(slot.get()) : null;
+        }
+        if (value instanceof Iterable<?> values) {
+            List<Object> declarations = new ArrayList<>();
+            for (Object element : values) {
+                Object declaration = declaration(element);
+                if (declaration != null) {
+                    declarations.add(declaration);
+                }
+            }
+            return declarations.isEmpty() ? null : List.copyOf(declarations);
+        }
+        return isDeclaration(value) ? value : null;
+    }
+
     private static boolean isDeclaration(Object value) {
         return value instanceof MotorDevice
                 || value instanceof EncoderDevice
@@ -96,7 +118,7 @@ public final class MechanismIntrospector {
                 || value instanceof PidGains
                 || value instanceof FeedforwardGains
                 || value instanceof ControlBinding
-                || value instanceof PathState
+                || value instanceof PathAction
                 || value instanceof SimModel;
     }
 

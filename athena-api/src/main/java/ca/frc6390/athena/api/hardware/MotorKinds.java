@@ -27,10 +27,7 @@ public enum MotorKinds implements MotorKind {
     SPARK_FLEX_BRUSHLESS("rev:spark-flex-brushless"),
 
     /** REV Spark Flex controlling a brushed motor. */
-    SPARK_FLEX_BRUSHED("rev:spark-flex-brushed"),
-
-    /** Simulation-only motor backend. */
-    SIM("sim:motor");
+    SPARK_FLEX_BRUSHED("rev:spark-flex-brushed");
 
     private final String key;
 

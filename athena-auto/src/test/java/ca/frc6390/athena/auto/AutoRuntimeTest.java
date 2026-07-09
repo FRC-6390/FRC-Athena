@@ -5,10 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
-import ca.frc6390.athena.mechanism.core.PathState;
+import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.Paths;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -17,15 +17,15 @@ import org.junit.jupiter.api.Test;
 class AutoRuntimeTest {
     @Test
     void indexesNormalizedRoutineNamesAndRejectsDuplicates() {
-        CommandState state = CommandState.create("score").build();
+        CommandAction Action = CommandAction.create("score").build();
 
-        AutoRuntime runtime = Autos.runtime(Autos.routine(" score ", state), Autos.routine("leave", state));
+        AutoRuntime runtime = Autos.runtime(Autos.routine(" score ", Action), Autos.routine("leave", Action));
 
         assertEquals(List.of("score", "leave"), List.copyOf(runtime.routineNames()));
         assertTrue(runtime.find("score").isPresent());
         assertEquals("score", runtime.selectedName());
         assertThrows(IllegalArgumentException.class,
-                () -> Autos.runtime(Autos.routine("score", state), Autos.routine(" score ", state)));
+                () -> Autos.runtime(Autos.routine("score", Action), Autos.routine(" score ", Action)));
     }
 
     @Test
@@ -34,10 +34,10 @@ class AutoRuntimeTest {
         AutoRoutine routine = Autos.path("drive", provider, " taxi ");
         AutoRuntime runtime = Autos.runtime(routine);
 
-        CommandState first = runtime.selectedState();
-        CommandState second = runtime.selectedState();
+        CommandAction first = runtime.selectedState();
+        CommandAction second = runtime.selectedState();
         runtime.reset();
-        CommandState third = runtime.selectedState();
+        CommandAction third = runtime.selectedState();
 
         assertSame(first, second);
         assertEquals("pathplanner:taxi", first.name());
@@ -48,11 +48,11 @@ class AutoRuntimeTest {
 
     @Test
     void markerBindingsAreValidatedByRoutine() {
-        CommandState markerState = CommandState.create("shoot").build();
+        CommandAction markerState = CommandAction.create("shoot").build();
 
         AutoRoutine routine = Autos.routine(
                 "score",
-                CommandState.create("score").build(),
+                CommandAction.create("score").build(),
                 Autos.marker(" shoot ", markerState),
                 Autos.marker("intake", markerState));
 
@@ -60,7 +60,7 @@ class AutoRuntimeTest {
         assertThrows(IllegalArgumentException.class,
                 () -> Autos.routine(
                         "bad",
-                        CommandState.create("bad").build(),
+                        CommandAction.create("bad").build(),
                         Autos.marker("same", markerState),
                         Autos.marker(" same ", markerState)));
     }
@@ -71,7 +71,7 @@ class AutoRuntimeTest {
         AtomicInteger execute = new AtomicInteger();
         AtomicInteger end = new AtomicInteger();
         AtomicInteger finishedChecks = new AtomicInteger();
-        CommandState markerState = CommandState.create("shoot")
+        CommandAction markerState = CommandAction.create("shoot")
                 .onInitialize(initialize::incrementAndGet)
                 .onExecute(execute::incrementAndGet)
                 .until(() -> finishedChecks.incrementAndGet() >= 2)
@@ -79,7 +79,7 @@ class AutoRuntimeTest {
                 .build();
         PathGraph graph = PathGraph.of(Autos.routine(
                 "score",
-                CommandState.create("score").build(),
+                CommandAction.create("score").build(),
                 Autos.marker(" shoot ", markerState)));
 
         assertEquals(List.of("shoot"), List.copyOf(graph.markerNames()));
@@ -96,13 +96,13 @@ class AutoRuntimeTest {
     @Test
     void pathGraphRejectsDuplicateMarkersAcrossRoutinesAndEndsActiveMarkers() {
         AtomicInteger end = new AtomicInteger();
-        CommandState markerState = CommandState.create("hold")
+        CommandAction markerState = CommandAction.create("hold")
                 .onEnd(end::incrementAndGet)
                 .build();
 
         PathGraph graph = PathGraph.of(Autos.routine(
                 "one",
-                CommandState.create("one").build(),
+                CommandAction.create("one").build(),
                 Autos.marker("hold", markerState)));
 
         graph.trigger("hold");
@@ -111,8 +111,8 @@ class AutoRuntimeTest {
         assertEquals(1, end.get());
         assertThrows(IllegalArgumentException.class,
                 () -> PathGraph.of(
-                        Autos.routine("one", CommandState.create("one").build(), Autos.marker("same", markerState)),
-                        Autos.routine("two", CommandState.create("two").build(), Autos.marker(" same ", markerState))));
+                        Autos.routine("one", CommandAction.create("one").build(), Autos.marker("same", markerState)),
+                        Autos.routine("two", CommandAction.create("two").build(), Autos.marker(" same ", markerState))));
     }
 
     @Test
@@ -121,13 +121,13 @@ class AutoRuntimeTest {
         AtomicInteger execute = new AtomicInteger();
         AtomicInteger end = new AtomicInteger();
         AtomicInteger finishedChecks = new AtomicInteger();
-        CommandState state = CommandState.create("two-cycle")
+        CommandAction Action = CommandAction.create("two-cycle")
                 .onInitialize(initialize::incrementAndGet)
                 .onExecute(execute::incrementAndGet)
                 .until(() -> finishedChecks.incrementAndGet() >= 2)
                 .onEnd(end::incrementAndGet)
                 .build();
-        AutoRuntime runtime = Autos.runtime(Autos.routine("auto", state));
+        AutoRuntime runtime = Autos.runtime(Autos.routine("auto", Action));
 
         assertEquals(false, runtime.periodic());
         assertEquals(true, runtime.periodic());
@@ -143,21 +143,21 @@ class AutoRuntimeTest {
         private final AtomicInteger loads = new AtomicInteger();
 
         @Override
-        public PathState path(String pathName) {
+        public PathAction path(String pathName) {
             return Paths.pathPlanner(pathName);
         }
 
         @Override
-        public CommandState load(String pathName) {
+        public CommandAction load(String pathName) {
             loads.incrementAndGet();
-            return CommandState.create(path(pathName).key()).build();
+            return CommandAction.create(path(pathName).key()).build();
         }
 
         @Override
         public PathRuntime runtime() {
             return new PathRuntime() {
                 @Override
-                public boolean isFinished(PathState path, MechanismContext context) {
+                public boolean isFinished(PathAction path, MechanismContext context) {
                     return true;
                 }
             };

@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.vision.ref.CameraDevice;
@@ -16,9 +17,15 @@ import ca.frc6390.athena.vision.ref.TargetSignal;
  */
 public final class VisionGraph {
     private final Map<String, CameraRuntime> cameras;
+    private final List<CameraRuntime> cameraList;
+    private List<Measurement> poseMeasurements = List.of();
+    private List<Measurement> targetMeasurements = List.of();
+    private boolean aggregateDirty;
 
     private VisionGraph(Map<String, CameraRuntime> cameras) {
         this.cameras = Map.copyOf(cameras);
+        this.cameraList = List.copyOf(this.cameras.values());
+        this.cameraList.forEach(camera -> camera.owner = this);
     }
 
     /**
@@ -41,10 +48,37 @@ public final class VisionGraph {
     }
 
     /**
+     * Returns a graph using the same camera declarations transformed by the supplied binder.
+     *
+     * @param binder camera binder
+     * @return rebound graph
+     */
+    public VisionGraph bind(UnaryOperator<CameraDevice> binder) {
+        Objects.requireNonNull(binder, "binder");
+        CameraDevice[] rebound = cameraList.stream()
+                .map(CameraRuntime::camera)
+                .map(camera -> {
+                    CameraDevice bound = binder.apply(camera);
+                    return bound == null ? camera : bound;
+                })
+                .toArray(CameraDevice[]::new);
+        return of(rebound);
+    }
+
+    /**
      * Refreshes cached measurements for every camera.
      */
     public void refresh() {
-        cameras.values().forEach(CameraRuntime::refresh);
+        List<Measurement> poses = new ArrayList<>();
+        List<Measurement> targets = new ArrayList<>();
+        for (CameraRuntime camera : cameraList) {
+            camera.refresh();
+            poses.addAll(camera.poseMeasurements());
+            targets.addAll(camera.targetMeasurements());
+        }
+        poseMeasurements = poses.isEmpty() ? List.of() : List.copyOf(poses);
+        targetMeasurements = targets.isEmpty() ? List.of() : List.copyOf(targets);
+        aggregateDirty = false;
     }
 
     /**
@@ -53,7 +87,7 @@ public final class VisionGraph {
      * @return camera runtimes
      */
     public List<CameraRuntime> cameras() {
-        return List.copyOf(cameras.values());
+        return cameraList;
     }
 
     /**
@@ -77,9 +111,8 @@ public final class VisionGraph {
      * @return pose measurements
      */
     public List<Measurement> poseMeasurements() {
-        List<Measurement> values = new ArrayList<>();
-        cameras.values().forEach(camera -> values.addAll(camera.poseMeasurements()));
-        return List.copyOf(values);
+        refreshAggregatesIfDirty();
+        return poseMeasurements;
     }
 
     /**
@@ -88,9 +121,23 @@ public final class VisionGraph {
      * @return target measurements
      */
     public List<Measurement> targetMeasurements() {
-        List<Measurement> values = new ArrayList<>();
-        cameras.values().forEach(camera -> values.addAll(camera.targetMeasurements()));
-        return List.copyOf(values);
+        refreshAggregatesIfDirty();
+        return targetMeasurements;
+    }
+
+    private void refreshAggregatesIfDirty() {
+        if (!aggregateDirty) {
+            return;
+        }
+        List<Measurement> poses = new ArrayList<>();
+        List<Measurement> targets = new ArrayList<>();
+        for (CameraRuntime camera : cameraList) {
+            poses.addAll(camera.poseMeasurements());
+            targets.addAll(camera.targetMeasurements());
+        }
+        poseMeasurements = poses.isEmpty() ? List.of() : List.copyOf(poses);
+        targetMeasurements = targets.isEmpty() ? List.of() : List.copyOf(targets);
+        aggregateDirty = false;
     }
 
     private static String key(CameraDevice camera) {
@@ -101,9 +148,12 @@ public final class VisionGraph {
      * Runtime cache for one camera declaration.
      */
     public static final class CameraRuntime {
+        private VisionGraph owner;
         private final CameraDevice camera;
         private final PoseSignal poseSignal;
         private final TargetSignal targetSignal;
+        private final PoseSignal cachedPoseSignal;
+        private final TargetSignal cachedTargetSignal;
         private List<Measurement> poseMeasurements = List.of();
         private List<Measurement> targetMeasurements = List.of();
 
@@ -111,6 +161,8 @@ public final class VisionGraph {
             this.camera = Objects.requireNonNull(camera, "camera");
             poseSignal = camera.pose();
             targetSignal = camera.targets();
+            cachedPoseSignal = new CachedPoseSignal(this);
+            cachedTargetSignal = new CachedTargetSignal(this);
         }
 
         /**
@@ -119,6 +171,9 @@ public final class VisionGraph {
         public void refresh() {
             poseMeasurements = snapshot(poseSignal.measurements());
             targetMeasurements = snapshot(targetSignal.measurements());
+            if (owner != null) {
+                owner.aggregateDirty = true;
+            }
         }
 
         /**
@@ -136,7 +191,7 @@ public final class VisionGraph {
          * @return cached pose signal
          */
         public PoseSignal poseSignal() {
-            return new CachedPoseSignal(this);
+            return cachedPoseSignal;
         }
 
         /**
@@ -145,7 +200,7 @@ public final class VisionGraph {
          * @return cached target signal
          */
         public TargetSignal targetSignal() {
-            return new CachedTargetSignal(this);
+            return cachedTargetSignal;
         }
 
         /**

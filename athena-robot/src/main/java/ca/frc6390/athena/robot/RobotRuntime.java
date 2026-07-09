@@ -3,8 +3,9 @@ package ca.frc6390.athena.robot;
 import ca.frc6390.athena.auto.AutoRuntime;
 import ca.frc6390.athena.auto.PathGraph;
 import ca.frc6390.athena.commands.CommandGraph;
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
+import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.localization.ref.LocalizationPipeline;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
@@ -12,23 +13,29 @@ import ca.frc6390.athena.mechanism.core.LifecyclePhase;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
-import ca.frc6390.athena.mechanism.core.State;
+import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
 import ca.frc6390.athena.runtime.measurement.MeasurementSnapshot;
-import ca.frc6390.athena.sim.runtime.SimRuntime;
+import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.vision.ref.CameraDevice;
 import ca.frc6390.athena.vision.runtime.VisionGraph;
+import ca.frc6390.athena.vision.runtime.VisionSimulation;
+import ca.frc6390.athena.vision.runtime.VisionSimulations;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Root Athena runtime that composes hardware, mechanisms, drivetrain, vision, localization, autos, commands, and sim.
  */
 public final class RobotRuntime {
     private final HardwareGraph hardwareGraph;
-    private final SimRuntime simRuntime;
+    private final SimulationSession simulationSession;
     private final ca.frc6390.athena.mechanism.core.RobotRuntime mechanisms;
     private final CommandGraph commands = new CommandGraph();
     private final List<AutoRuntime> autos = new ArrayList<>();
@@ -36,12 +43,14 @@ public final class RobotRuntime {
     private final List<VisionGraph> visionGraphs = new ArrayList<>();
     private final List<LocalizationPipeline> localizations = new ArrayList<>();
     private final List<MeasurementSnapshot> localizationSnapshots = new ArrayList<>();
+    private final Set<SimModel> registeredSimulationModels = new LinkedHashSet<>();
+    private RuntimeWorkers workers = RuntimeWorkers.none();
     private double localizationMaxAgeSeconds = Double.POSITIVE_INFINITY;
     private boolean localizationRefreshWhileDisabled;
 
-    private RobotRuntime(HardwareGraph hardwareGraph, SimRuntime simRuntime) {
+    private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
         this.hardwareGraph = Objects.requireNonNull(hardwareGraph, "hardwareGraph");
-        this.simRuntime = simRuntime;
+        this.simulationSession = simulationSession;
         mechanisms = ca.frc6390.athena.mechanism.core.RobotRuntime.create(hardwareGraph);
     }
 
@@ -65,14 +74,14 @@ public final class RobotRuntime {
     }
 
     /**
-     * Creates a robot runtime backed by simulation handles.
+     * Creates a normal robot runtime backed by a simulation session.
      *
-     * @param simRuntime simulation runtime
+     * @param simulationSession simulation session
      * @return robot runtime
      */
-    public static RobotRuntime simulated(SimRuntime simRuntime) {
-        SimRuntime safeRuntime = simRuntime == null ? new SimRuntime() : simRuntime;
-        return new RobotRuntime(safeRuntime.hardwareGraph(), safeRuntime);
+    public static RobotRuntime simulated(SimulationSession simulationSession) {
+        SimulationSession safeSession = simulationSession == null ? SimulationSession.create() : simulationSession;
+        return new RobotRuntime(safeSession.hardwareGraph(), safeSession);
     }
 
     /**
@@ -85,12 +94,79 @@ public final class RobotRuntime {
     }
 
     /**
-     * Returns the simulation runtime, if this root is simulation-backed.
+     * Returns hardware refresh failures recorded during the latest runtime cycle.
      *
-     * @return simulation runtime or null
+     * @return latest hardware refresh failures
      */
-    public SimRuntime simRuntime() {
-        return simRuntime;
+    public List<HardwareGraph.RefreshFailure> hardwareRefreshFailures() {
+        return hardwareGraph.refreshFailures();
+    }
+
+    /**
+     * Returns the simulation session, if this root is simulation-backed.
+     *
+     * @return simulation session or null
+     */
+    public SimulationSession simulationSession() {
+        return simulationSession;
+    }
+
+    /**
+     * Configures optional runtime workers. No workers run unless configured.
+     *
+     * @param workers worker group
+     * @return this runtime
+     */
+    public RobotRuntime workers(RuntimeWorkers workers) {
+        this.workers.close();
+        this.workers = workers == null ? RuntimeWorkers.none() : workers;
+        return this;
+    }
+
+    /**
+     * Starts configured async workers.
+     *
+     * @return this runtime
+     */
+    public RobotRuntime startWorkers() {
+        workers.start();
+        return this;
+    }
+
+    /**
+     * Stops configured async workers.
+     *
+     * @return this runtime
+     */
+    public RobotRuntime stopWorkers() {
+        workers.close();
+        return this;
+    }
+
+    /**
+     * Samples declared signal inputs from the main runtime loop on the requested period.
+     *
+     * @param periodSeconds period in seconds
+     * @return this runtime
+     */
+    public RobotRuntime fastSignalSampling(double periodSeconds) {
+        return workers(RuntimeWorkers.inline(RuntimeWorker.every(
+                "signals",
+                periodSeconds,
+                mechanisms::sampleSignals)));
+    }
+
+    /**
+     * Samples declared signal inputs from a caller-owned scheduler.
+     *
+     * @param periodSeconds period in seconds
+     * @param executor scheduler
+     * @return this runtime
+     */
+    public RobotRuntime fastSignalSampling(double periodSeconds, ScheduledExecutorService executor) {
+        return workers(RuntimeWorkers.async(
+                executor,
+                RuntimeWorker.every("signals", periodSeconds, mechanisms::sampleSignals))).startWorkers();
     }
 
     /**
@@ -110,10 +186,19 @@ public final class RobotRuntime {
      */
     public RobotRuntime register(Mechanism mechanism) {
         mechanisms.register(mechanism);
-        if (simRuntime != null) {
+        if (simulationSession != null) {
+            registerSimulationModels();
             mechanisms.bindInMemoryRuntime();
         }
         return this;
+    }
+
+    private void registerSimulationModels() {
+        for (SimModel model : mechanisms.simulationModels()) {
+            if (registeredSimulationModels.add(model)) {
+                simulationSession.model("mechanism-" + registeredSimulationModels.size(), model);
+            }
+        }
     }
 
     /**
@@ -123,7 +208,12 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime cameras(CameraDevice... cameras) {
-        visionGraphs.add(VisionGraph.of(cameras));
+        VisionSimulation simulation = discoverVisionSimulation(cameras);
+        VisionGraph graph = VisionGraph.of(bindSimulatedCameras(simulation, cameras));
+        visionGraphs.add(graph);
+        if (simulation != null) {
+            simulationSession.vision(simulation);
+        }
         return this;
     }
 
@@ -134,8 +224,46 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime vision(VisionGraph visionGraph) {
-        visionGraphs.add(Objects.requireNonNull(visionGraph, "visionGraph"));
+        VisionGraph safeGraph = bindVisionGraphForSimulation(Objects.requireNonNull(visionGraph, "visionGraph"));
+        visionGraphs.add(safeGraph);
         return this;
+    }
+
+    private VisionGraph bindVisionGraphForSimulation(VisionGraph visionGraph) {
+        VisionSimulation simulation = discoverVisionSimulation(visionGraph.cameras().stream()
+                .map(VisionGraph.CameraRuntime::camera)
+                .toArray(CameraDevice[]::new));
+        if (simulation != null) {
+            simulationSession.vision(simulation);
+            return visionGraph.bind(camera -> camera.hasBoundSignals() ? camera : simulation.bind(camera));
+        }
+        return visionGraph;
+    }
+
+    private VisionSimulation discoverVisionSimulation(CameraDevice... cameras) {
+        if (simulationSession == null) {
+            return null;
+        }
+        List<CameraDevice> unboundCameras = cameras == null ? List.of() : Arrays.stream(cameras)
+                .filter(Objects::nonNull)
+                .filter(camera -> !camera.hasBoundSignals())
+                .toList();
+        if (unboundCameras.isEmpty()) {
+            return null;
+        }
+        return VisionSimulations.createDiscovered(unboundCameras, simulationSession.visionField()).orElse(null);
+    }
+
+    private static CameraDevice[] bindSimulatedCameras(VisionSimulation simulation, CameraDevice... cameras) {
+        if (cameras == null || cameras.length == 0 || simulation == null) {
+            return cameras;
+        }
+        CameraDevice[] bound = new CameraDevice[cameras.length];
+        for (int i = 0; i < cameras.length; i++) {
+            CameraDevice camera = cameras[i];
+            bound[i] = camera == null || camera.hasBoundSignals() ? camera : simulation.bind(camera);
+        }
+        return bound;
     }
 
     /**
@@ -205,25 +333,36 @@ public final class RobotRuntime {
     }
 
     /**
-     * Schedules a command state.
+     * Schedules a command Action.
      *
-     * @param state command state
+     * @param Action command Action
      * @return this runtime
      */
-    public RobotRuntime schedule(CommandState state) {
-        commands.schedule(state);
+    public RobotRuntime schedule(CommandAction Action) {
+        commands.schedule(Action);
         return this;
     }
 
     /**
-     * Sets a mechanism state.
+     * Sets a mechanism Action.
      *
      * @param mechanism mechanism
-     * @param state state
+     * @param Action Action
      * @return this runtime
      */
-    public RobotRuntime set(Mechanism mechanism, State state) {
-        mechanisms.set(mechanism, state);
+    public RobotRuntime set(Mechanism mechanism, Action Action) {
+        mechanisms.set(mechanism, Action);
+        return this;
+    }
+
+    /**
+     * Requests an Action owned by a registered mechanism.
+     *
+     * @param Action Action
+     * @return this runtime
+     */
+    public RobotRuntime request(Action Action) {
+        mechanisms.request(Action);
         return this;
     }
 
@@ -257,8 +396,15 @@ public final class RobotRuntime {
      * @return mechanism outputs
      */
     public List<ResolvedOutput> autoPeriodic(double nowSeconds, double dtSeconds) {
-        autos.forEach(AutoRuntime::periodic);
-        return periodic(nowSeconds, dtSeconds, LifecycleMode.AUTONOMOUS, true, true, false);
+        return periodic(
+                new MechanismContext(nowSeconds, 0.0, dtSeconds, true, true, false),
+                new EventContext(
+                        nowSeconds,
+                        dtSeconds,
+                        LifecycleMode.AUTONOMOUS,
+                        LifecyclePhase.PERIODIC,
+                        true,
+                        false));
     }
 
     /**
@@ -284,9 +430,7 @@ public final class RobotRuntime {
      */
     public List<ResolvedOutput> simulationPeriodic(double nowSeconds, double dtSeconds) {
         List<ResolvedOutput> outputs = periodic(nowSeconds, dtSeconds, LifecycleMode.SIMULATION, true, false, true);
-        if (simRuntime != null) {
-            simRuntime.step(dtSeconds);
-        }
+        publishSimulationStep(nowSeconds, dtSeconds, true, false);
         return outputs;
     }
 
@@ -302,6 +446,7 @@ public final class RobotRuntime {
                 ? MechanismContext.empty()
                 : mechanismContext;
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
+        workers.runDue(safeMechanismContext.nowSeconds());
         hardwareGraph.refreshInputs();
         visionGraphs.forEach(VisionGraph::refresh);
         refreshLocalizations(safeMechanismContext);
@@ -316,9 +461,13 @@ public final class RobotRuntime {
         } else {
             commands.periodic();
         }
-        List<ResolvedOutput> outputs = mechanisms.periodic(safeMechanismContext, safeEventContext);
-        if (safeMechanismContext.simulation() && simRuntime != null) {
-            simRuntime.step(safeMechanismContext.dtSeconds());
+        List<ResolvedOutput> outputs = runMechanisms(safeMechanismContext, safeEventContext);
+        if (safeMechanismContext.simulation() && simulationSession != null) {
+            publishSimulationStep(
+                    safeMechanismContext.nowSeconds(),
+                    safeMechanismContext.dtSeconds(),
+                    safeMechanismContext.enabled(),
+                    safeMechanismContext.autonomous());
         }
         return outputs;
     }
@@ -331,8 +480,9 @@ public final class RobotRuntime {
             boolean autonomous,
             boolean simulation) {
         MechanismContext mechanismContext = new MechanismContext(nowSeconds, 0.0, dtSeconds, enabled, autonomous, simulation);
-        visionGraphs.forEach(VisionGraph::refresh);
+        workers.runDue(nowSeconds);
         hardwareGraph.refreshInputs();
+        visionGraphs.forEach(VisionGraph::refresh);
         refreshLocalizations(mechanismContext);
         commands.periodic();
         EventContext eventContext = new EventContext(
@@ -342,6 +492,29 @@ public final class RobotRuntime {
                 LifecyclePhase.PERIODIC,
                 enabled,
                 simulation);
+        return runMechanisms(mechanismContext, eventContext);
+    }
+
+    private void publishSimulationStep(double nowSeconds, double dtSeconds, boolean enabled, boolean autonomous) {
+        if (simulationSession == null) {
+            return;
+        }
+        simulationSession.step(dtSeconds);
+        hardwareGraph.refreshInputs();
+        visionGraphs.forEach(VisionGraph::refresh);
+        refreshLocalizations(new MechanismContext(
+                nowSeconds + dtSeconds,
+                0.0,
+                dtSeconds,
+                enabled,
+                autonomous,
+                true));
+    }
+
+    private List<ResolvedOutput> runMechanisms(MechanismContext mechanismContext, EventContext eventContext) {
+        if (simulationSession != null) {
+            return simulationSession.withDigitalInputs(() -> mechanisms.periodic(mechanismContext, eventContext));
+        }
         return mechanisms.periodic(mechanismContext, eventContext);
     }
 

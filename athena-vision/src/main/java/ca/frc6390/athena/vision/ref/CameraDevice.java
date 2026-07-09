@@ -88,4 +88,13 @@ public interface CameraDevice {
      * @return target signal
      */
     TargetSignal targets();
+
+    /**
+     * Returns whether this declaration has explicit pose or target signal bindings.
+     *
+     * @return true when signals are externally supplied
+     */
+    default boolean hasBoundSignals() {
+        return false;
+    }
 }

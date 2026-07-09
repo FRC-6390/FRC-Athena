@@ -36,7 +36,72 @@
         },
         {
             "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vision",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-localization",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-auto",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
             "artifactId": "athena-commands",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-robot",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-simulation",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-wpilib",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-ctre",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-rev",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-studica",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-limelight",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-photonvision",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-pathplanner",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-choreo",
             "version": "2027.0.0-SNAPSHOT"
         }
     ],

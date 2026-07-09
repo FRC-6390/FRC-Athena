@@ -1,6 +1,6 @@
 package ca.frc6390.athena.auto;
 
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -9,12 +9,12 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Selects and owns the active autonomous command state.
+ * Selects and owns the active autonomous command Action.
  */
 public final class AutoRuntime {
     private final Map<String, AutoRoutine> routines;
     private String selectedName;
-    private CommandState activeState;
+    private CommandAction activeState;
     private boolean activeInitialized;
 
     /**
@@ -89,19 +89,19 @@ public final class AutoRuntime {
     }
 
     /**
-     * Returns the selected command state, creating it lazily once per selection.
+     * Returns the selected command Action, creating it lazily once per selection.
      *
-     * @return selected command state
+     * @return selected command Action
      */
-    public CommandState selectedState() {
+    public CommandAction selectedState() {
         if (activeState == null) {
-            activeState = selectedRoutine().state();
+            activeState = selectedRoutine().Action();
         }
         return activeState;
     }
 
     /**
-     * Initializes the selected autonomous command state once.
+     * Initializes the selected autonomous command Action once.
      *
      * @return this runtime
      */
@@ -114,7 +114,7 @@ public final class AutoRuntime {
     }
 
     /**
-     * Executes one cycle of the selected autonomous command state.
+     * Executes one cycle of the selected autonomous command Action.
      *
      * @return this runtime
      */
@@ -125,7 +125,7 @@ public final class AutoRuntime {
     }
 
     /**
-     * Returns whether the selected autonomous command state is finished.
+     * Returns whether the selected autonomous command Action is finished.
      *
      * @return true when finished
      */
@@ -134,7 +134,7 @@ public final class AutoRuntime {
     }
 
     /**
-     * Ends the selected autonomous command state if it has been initialized.
+     * Ends the selected autonomous command Action if it has been initialized.
      *
      * @param interrupted true when the runtime is ending because of interruption
      * @return this runtime
@@ -148,9 +148,9 @@ public final class AutoRuntime {
     }
 
     /**
-     * Executes one cycle and ends the command state when its finish condition is met.
+     * Executes one cycle and ends the command Action when its finish condition is met.
      *
-     * @return true when the command state finished during or before this cycle
+     * @return true when the command Action finished during or before this cycle
      */
     public boolean periodic() {
         execute();
@@ -162,7 +162,7 @@ public final class AutoRuntime {
     }
 
     /**
-     * Clears the active command state so the selected routine can create a fresh one.
+     * Clears the active command Action so the selected routine can create a fresh one.
      *
      * @return this runtime
      */

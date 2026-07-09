@@ -1,7 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 /**
- * Runtime facts visible while mechanism states are evaluated.
+ * Runtime facts visible while mechanism Actions are evaluated.
  */
 public record MechanismContext(
         double nowSeconds,

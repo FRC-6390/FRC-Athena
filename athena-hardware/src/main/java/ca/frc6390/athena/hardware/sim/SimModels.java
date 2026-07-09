@@ -66,4 +66,23 @@ public final class SimModels {
     public static SimModel flywheel(MotorDevice... motors) {
         return flywheel().motors(motors);
     }
+
+    /**
+     * Creates an elevator simulation profile.
+     *
+     * @return sim profile
+     */
+    public static SimModel elevator() {
+        return SimModel.of(SimProfile.Kind.ELEVATOR).gravity(true);
+    }
+
+    /**
+     * Creates an elevator simulation model bound to motors.
+     *
+     * @param motors simulated motors
+     * @return sim ref
+     */
+    public static SimModel elevator(MotorDevice... motors) {
+        return elevator().motors(motors);
+    }
 }

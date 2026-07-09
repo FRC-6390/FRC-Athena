@@ -41,4 +41,46 @@ public interface PoseMeasurementSample extends Measurement {
      * @return standard deviations
      */
     MeasurementStdDevs stdDevs();
+
+    /**
+     * Returns a copy with standard deviations.
+     *
+     * @param stdDevs standard deviations
+     * @return updated sample
+     */
+    default PoseMeasurementSample stdDevs(MeasurementStdDevs stdDevs) {
+        return this;
+    }
+
+    /**
+     * Returns a copy with timing metadata.
+     *
+     * @param timestampSeconds timestamp
+     * @param latencySeconds latency
+     * @return updated sample
+     */
+    default PoseMeasurementSample timing(double timestampSeconds, double latencySeconds) {
+        return this;
+    }
+
+    /**
+     * Returns a copy with vision-style metadata.
+     *
+     * @param ambiguity ambiguity
+     * @param targetCount target count
+     * @return updated sample
+     */
+    default PoseMeasurementSample visionMetadata(double ambiguity, int targetCount) {
+        return this;
+    }
+
+    /**
+     * Returns a copy with source metadata.
+     *
+     * @param source source object
+     * @return updated sample
+     */
+    default PoseMeasurementSample source(Object source) {
+        return this;
+    }
 }

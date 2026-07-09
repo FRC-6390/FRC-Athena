@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
@@ -12,12 +13,12 @@ public final class Events {
     }
 
     public static SignalBuilder when(BooleanSupplier source) {
-        return new SignalBuilder("signal", source);
+        return new SignalBuilder("signal", source, null);
     }
 
     public static SignalBuilder when(DigitalInputDevice input) {
         Objects.requireNonNull(input, "input");
-        return new SignalBuilder(input.defaultName(), input::active);
+        return new SignalBuilder(input.defaultName(), input::sampledActive, input);
     }
 
     public static EventBinding robotInit() { return lifecycle("robotInit", LifecycleMode.ROBOT, LifecyclePhase.INIT); }
@@ -55,22 +56,28 @@ public final class Events {
     public static final class SignalBuilder {
         private final String name;
         private final BooleanSupplier source;
+        private final DigitalInputDevice input;
 
-        private SignalBuilder(String name, BooleanSupplier source) {
+        private SignalBuilder(String name, BooleanSupplier source, DigitalInputDevice input) {
             this.name = name == null || name.isBlank() ? "signal" : name;
             this.source = Objects.requireNonNull(source, "source");
+            this.input = input;
         }
 
         public EventBinding active() {
-            return new SignalEvent(name, source, Edge.LEVEL);
+            return event(Edge.LEVEL);
         }
 
         public EventBinding rising() {
-            return new SignalEvent(name, source, Edge.RISING);
+            return event(Edge.RISING);
         }
 
         public EventBinding falling() {
-            return new SignalEvent(name, source, Edge.FALLING);
+            return event(Edge.FALLING);
+        }
+
+        private EventBinding event(Edge edge) {
+            return input == null ? new SignalEvent(name, source, edge) : new DigitalInputEvent(name, input, edge);
         }
     }
 
@@ -90,7 +97,12 @@ public final class Events {
 
         @Override
         public boolean active(EventContext context, boolean previousSourceActive) {
-            boolean active = sourceActive(context);
+            return active(context, previousSourceActive, sourceActive(context));
+        }
+
+        @Override
+        public boolean active(EventContext context, boolean previousSourceActive, boolean currentSourceActive) {
+            boolean active = currentSourceActive;
             return switch (edge) {
                 case LEVEL -> active;
                 case RISING -> active && !previousSourceActive;
@@ -101,6 +113,49 @@ public final class Events {
         @Override
         public boolean pulse() {
             return edge != Edge.LEVEL;
+        }
+    }
+
+    public record DigitalInputEvent(String name, DigitalInputDevice input, Edge edge) implements EventBinding {
+        public DigitalInputEvent {
+            name = name == null || name.isBlank() ? "digitalInput" : name;
+            Objects.requireNonNull(input, "input");
+            edge = edge == null ? Edge.LEVEL : edge;
+        }
+
+        @Override
+        public boolean sourceActive(EventContext context) {
+            return input.sampledActive();
+        }
+
+        @Override
+        public boolean active(EventContext context, boolean previousSourceActive) {
+            return active(context, previousSourceActive, sourceActive(context));
+        }
+
+        @Override
+        public boolean active(EventContext context, boolean previousSourceActive, boolean currentSourceActive) {
+            boolean active = currentSourceActive;
+            return switch (edge) {
+                case LEVEL -> active;
+                case RISING -> input.risingLatched() || active && !previousSourceActive;
+                case FALLING -> input.fallingLatched() || !active && previousSourceActive;
+            };
+        }
+
+        @Override
+        public boolean pulse() {
+            return edge != Edge.LEVEL;
+        }
+
+        @Override
+        public void afterRun(EventContext context) {
+            input.clearLatchedEdges();
+        }
+
+        @Override
+        public List<Object> declarations() {
+            return List.of(input);
         }
     }
 

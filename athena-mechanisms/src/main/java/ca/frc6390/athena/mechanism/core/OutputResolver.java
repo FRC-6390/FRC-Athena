@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Resolves requested mechanism states into hardware output requests.
+ * Resolves requested mechanism Actions into hardware output requests.
  */
 public final class OutputResolver {
     private OutputResolver() {
@@ -21,91 +21,119 @@ public final class OutputResolver {
         return new ResolvedOutput(request, request.output());
     }
 
-    public List<ResolvedOutput> resolve(Mechanism mechanism, State state) {
-        return resolve(mechanism, state, MechanismContext.empty());
+    public List<ResolvedOutput> resolve(Mechanism mechanism, Action action) {
+        return resolve(mechanism, action, MechanismContext.empty());
     }
 
-    public List<ResolvedOutput> resolve(Mechanism mechanism, State state, MechanismContext context) {
+    public List<ResolvedOutput> resolve(Mechanism mechanism, Action action, MechanismContext context) {
         Objects.requireNonNull(mechanism, "mechanism");
-        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(action, "action");
         Objects.requireNonNull(context, "context");
-        return resolveState(state, context);
-    }
-
-    private List<ResolvedOutput> resolveState(State state, MechanismContext context) {
-        if (state instanceof States.ChildSet childSet) {
-            List<ResolvedOutput> outputs = new ArrayList<>();
-            for (States.ChildTarget target : childSet.targets()) {
-                outputs.addAll(resolveState(target.state(), context));
-            }
-            return outputs;
-        }
-        if (state instanceof States.Clamped clamped) {
-            return resolveState(clamped.state(), context);
-        }
-        if (state instanceof State.Clamped clamped) {
-            return resolveState(clamped.state(), context);
-        }
-        if (state instanceof States.Conditional conditional) {
-            return resolveState(conditional.state(), context);
-        }
-        if (state instanceof State.Conditional conditional) {
-            return resolveState(conditional.state(), context);
-        }
-        if (state instanceof States.Then then) {
-            return resolveState(then.state(), context);
-        }
-        if (state instanceof State.Then then) {
-            return resolveState(then.state(), context);
-        }
-        if (state instanceof States.Timeout timeout) {
-            return timeout.expired(context) ? List.of() : resolveState(timeout.state(), context);
-        }
-        if (state instanceof States.Choice choice) {
-            return resolveState(choice.choose(context), context);
-        }
-        if (state instanceof States.WhenBranch branch) {
-            return resolveState(branch.choose(context), context);
-        }
-        if (state instanceof States.Parallel parallel) {
-            return resolveStates(parallel.states(), context);
-        }
-        if (state instanceof States.Race race) {
-            return resolveStates(race.states(), context);
-        }
-        if (state instanceof States.Deadline deadline) {
-            return resolveStates(deadline.states(), context);
-        }
-        if (state instanceof States.Sequence sequence) {
-            if (context.timeInStateSeconds() >= sequence.timeoutSeconds()) {
-                return List.of();
-            }
-            if (!sequence.steps().isEmpty()) {
-                return resolveState(sequence.steps().get(0).state(), context);
-            }
-            return sequence.next() == null ? List.of() : resolveState(sequence.next(), context);
-        }
-        if (state instanceof States.Action || state instanceof States.DoOnce
-                || state instanceof States.WaitSeconds || state instanceof States.WaitUntil
-                || state instanceof PathState) {
-            return List.of();
-        }
-        if (state instanceof States.DynamicOutput dynamic) {
-            return resolveRequest(outputRequest(null, null, dynamic.output().apply(context)));
-        }
-        return resolveRequest(outputRequest(control(state), motor(state), output(state)));
-    }
-
-    private List<ResolvedOutput> resolveStates(List<State> states, MechanismContext context) {
         List<ResolvedOutput> outputs = new ArrayList<>();
-        for (State state : states) {
-            outputs.addAll(resolveState(state, context));
-        }
+        resolveState(action, context, outputs);
         return outputs;
     }
 
-    private List<ResolvedOutput> resolveRequest(OutputRequest request) {
-        return request == null ? List.of() : List.of(resolve(request));
+    void resolveInto(Mechanism mechanism, Action action, MechanismContext context, List<ResolvedOutput> outputs) {
+        Objects.requireNonNull(mechanism, "mechanism");
+        Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(outputs, "outputs");
+        resolveState(action, context, outputs);
+    }
+
+    private void resolveState(Action action, MechanismContext context, List<ResolvedOutput> outputs) {
+        if (action instanceof Actions.ChildSet childSet) {
+            for (Actions.ChildTarget target : childSet.targets()) {
+                resolveState(target.action(), context, outputs);
+            }
+            return;
+        }
+        if (action instanceof Actions.Clamped clamped) {
+            resolveState(clamped.action(), context, outputs);
+            return;
+        }
+        if (action instanceof Action.Clamped clamped) {
+            resolveState(clamped.action(), context, outputs);
+            return;
+        }
+        if (action instanceof Actions.Conditional conditional) {
+            resolveState(conditional.action(), context, outputs);
+            return;
+        }
+        if (action instanceof Action.Conditional conditional) {
+            resolveState(conditional.action(), context, outputs);
+            return;
+        }
+        if (action instanceof Actions.Then then) {
+            resolveState(then.action(), context, outputs);
+            return;
+        }
+        if (action instanceof Action.Then then) {
+            resolveState(then.action(), context, outputs);
+            return;
+        }
+        if (action instanceof Actions.Timeout timeout) {
+            if (!timeout.expired(context)) {
+                resolveState(timeout.action(), context, outputs);
+            }
+            return;
+        }
+        if (action instanceof Actions.Choice choice) {
+            resolveState(choice.choose(context), context, outputs);
+            return;
+        }
+        if (action instanceof Actions.WhenBranch branch) {
+            resolveState(branch.choose(context), context, outputs);
+            return;
+        }
+        if (action instanceof Actions.Parallel parallel) {
+            resolveStates(parallel.Actions(), context, outputs);
+            return;
+        }
+        if (action instanceof Actions.Race race) {
+            resolveStates(race.Actions(), context, outputs);
+            return;
+        }
+        if (action instanceof Actions.Deadline deadline) {
+            resolveStates(deadline.Actions(), context, outputs);
+            return;
+        }
+        if (action instanceof Actions.Sequence sequence) {
+            if (context.timeInStateSeconds() >= sequence.timeoutSeconds()) {
+                return;
+            }
+            if (!sequence.steps().isEmpty()) {
+                resolveState(sequence.steps().get(0).action(), context, outputs);
+                return;
+            }
+            if (sequence.next() != null) {
+                resolveState(sequence.next(), context, outputs);
+            }
+            return;
+        }
+        if (action instanceof Actions.RuntimeAction || action instanceof Actions.DoOnce
+                || action instanceof Actions.WaitSeconds || action instanceof Actions.WaitUntil
+                || action instanceof PathAction) {
+            return;
+        }
+        if (action instanceof Actions.DynamicOutput dynamic) {
+            resolveRequest(outputRequest(null, null, dynamic.output().apply(context)), outputs);
+            return;
+        }
+        resolveRequest(outputRequest(control(action), motor(action), output(action)), outputs);
+    }
+
+    private void resolveStates(List<Action> actions, MechanismContext context, List<ResolvedOutput> outputs) {
+        for (Action action : actions) {
+            resolveState(action, context, outputs);
+        }
+    }
+
+    private void resolveRequest(OutputRequest request, List<ResolvedOutput> outputs) {
+        if (request != null) {
+            outputs.add(resolve(request));
+        }
     }
 
     private static OutputRequest outputRequest(ControlBinding control, MotorDevice motor, Output output) {
@@ -121,51 +149,51 @@ public final class OutputResolver {
         return null;
     }
 
-    private static ControlBinding control(State state) {
-        if (state instanceof States.ControlPercent controlState) {
+    private static ControlBinding control(Action action) {
+        if (action instanceof Actions.ControlPercent controlState) {
             return controlState.control();
         }
-        if (state instanceof States.DynamicControlPercent controlState) {
+        if (action instanceof Actions.DynamicControlPercent controlState) {
             return controlState.control();
         }
-        if (state instanceof States.ControlVoltage controlState) {
+        if (action instanceof Actions.ControlVoltage controlState) {
             return controlState.control();
         }
-        if (state instanceof States.DynamicControlVoltage controlState) {
+        if (action instanceof Actions.DynamicControlVoltage controlState) {
             return controlState.control();
         }
-        if (state instanceof States.ControlPosition controlState) {
+        if (action instanceof Actions.ControlPosition controlState) {
             return controlState.control();
         }
-        if (state instanceof States.DynamicControlPosition controlState) {
+        if (action instanceof Actions.DynamicControlPosition controlState) {
             return controlState.control();
         }
-        if (state instanceof States.ControlVelocity controlState) {
+        if (action instanceof Actions.ControlVelocity controlState) {
             return controlState.control();
         }
-        if (state instanceof States.DynamicControlVelocity controlState) {
+        if (action instanceof Actions.DynamicControlVelocity controlState) {
             return controlState.control();
         }
         return null;
     }
 
-    private static MotorDevice motor(State state) {
-        if (state instanceof States.MotorPercent motorState) {
+    private static MotorDevice motor(Action action) {
+        if (action instanceof Actions.MotorPercent motorState) {
             return motorState.motor();
         }
-        if (state instanceof States.DynamicMotorPercent motorState) {
+        if (action instanceof Actions.DynamicMotorPercent motorState) {
             return motorState.motor();
         }
-        if (state instanceof States.MotorVoltage motorState) {
+        if (action instanceof Actions.MotorVoltage motorState) {
             return motorState.motor();
         }
-        if (state instanceof States.DynamicMotorVoltage motorState) {
+        if (action instanceof Actions.DynamicMotorVoltage motorState) {
             return motorState.motor();
         }
         return null;
     }
 
-    private static Output output(State state) {
-        return state instanceof Output output ? output : null;
+    private static Output output(Action action) {
+        return action instanceof Output output ? output : null;
     }
 }

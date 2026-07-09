@@ -1,0 +1,623 @@
+package ca.frc6390.athena.mechanism.core;
+
+import ca.frc6390.athena.hardware.runtime.ActionBinding;
+import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.Range;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
+import java.util.function.DoubleSupplier;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
+/**
+ * Factories for common mechanism Actions.
+ */
+public final class Actions {
+    private static final Action NEUTRAL = new Neutral();
+
+    private Actions() {
+    }
+
+    public static Action neutral() {
+        return NEUTRAL;
+    }
+
+    static Action percent(MotorDevice motor, double percent) {
+        return new MotorPercent(motor, percent);
+    }
+
+    static Action percent(MotorDevice motor, DoubleSupplier percent) {
+        return new DynamicMotorPercent(motor, percent);
+    }
+
+    static Action percent(ControlBinding control, double percent) {
+        return new ControlPercent(control, percent);
+    }
+
+    static Action percent(ControlBinding control, DoubleSupplier percent) {
+        return new DynamicControlPercent(control, percent);
+    }
+
+    static Action voltage(MotorDevice motor, double volts) {
+        return new MotorVoltage(motor, volts);
+    }
+
+    static Action voltage(MotorDevice motor, DoubleSupplier volts) {
+        return new DynamicMotorVoltage(motor, volts);
+    }
+
+    static Action voltage(ControlBinding control, double volts) {
+        return new ControlVoltage(control, volts);
+    }
+
+    static Action voltage(ControlBinding control, DoubleSupplier volts) {
+        return new DynamicControlVoltage(control, volts);
+    }
+
+    public static Action position(ControlBinding control, double position) {
+        return new ControlPosition(control, position);
+    }
+
+    public static Action position(ControlBinding control, DoubleSupplier position) {
+        return new DynamicControlPosition(control, position);
+    }
+
+    public static Action velocity(ControlBinding control, double velocity) {
+        return new ControlVelocity(control, velocity);
+    }
+
+    public static Action velocity(ControlBinding control, DoubleSupplier velocity) {
+        return new DynamicControlVelocity(control, velocity);
+    }
+
+    public static Action fault(String reason) {
+        return new Fault(reason);
+    }
+
+    public static ChildSet set() {
+        return new ChildSet();
+    }
+
+    public static ChildSet from(ChildSet action) {
+        Objects.requireNonNull(action, "action");
+        ChildSet copy = set();
+        for (ChildTarget target : action.targets()) {
+            copy.set(target.mechanism(), target.action());
+        }
+        return copy;
+    }
+
+    public static Action dynamic(Supplier<Output> output) {
+        Objects.requireNonNull(output, "output");
+        return dynamic(ctx -> output.get());
+    }
+
+    public static Action dynamic(Function<MechanismContext, Output> output) {
+        return new DynamicOutput(output);
+    }
+
+    public static Action doOnce(Runnable action) {
+        return new DoOnce(action);
+    }
+
+    public static Action doOnce(ActionBinding action) {
+        return new RuntimeAction(action);
+    }
+
+    public static Action run(Runnable action) {
+        return doOnce(action);
+    }
+
+    public static Action run(ActionBinding action) {
+        return doOnce(action);
+    }
+
+    public static Action waitSeconds(double seconds) {
+        return new WaitSeconds(seconds);
+    }
+
+    public static Action waitUntil(ActionCondition condition) {
+        return new WaitUntil(condition);
+    }
+
+    public static Action waitUntil(BooleanSupplier condition) {
+        Objects.requireNonNull(condition, "condition");
+        return waitUntil(ctx -> condition.getAsBoolean());
+    }
+
+    public static Action timeout(Action action, double seconds) {
+        return new Timeout(action, seconds);
+    }
+
+    public static When when(ActionCondition condition) {
+        return new When(condition);
+    }
+
+    public static When when(BooleanSupplier condition) {
+        Objects.requireNonNull(condition, "condition");
+        return when(ctx -> condition.getAsBoolean());
+    }
+
+    public static Parallel parallel(Action... actions) {
+        return new Parallel(List.of(actions));
+    }
+
+    public static Race race(Action... actions) {
+        return new Race(List.of(actions));
+    }
+
+    public static Deadline deadline(Action primary, Action... others) {
+        return new Deadline(primary, List.of(others));
+    }
+
+    public static Sequence sequence() {
+        return new Sequence();
+    }
+
+    public static Cycle cycle() {
+        return new Cycle();
+    }
+
+    public static Action until(ActionCondition condition, Action action) {
+        return new Conditional(action, condition, null);
+    }
+
+    public static Action until(BooleanSupplier condition, Action action) {
+        Objects.requireNonNull(condition, "condition");
+        return until(ctx -> condition.getAsBoolean(), action);
+    }
+
+    public static Action then(Action action, Action next) {
+        Objects.requireNonNull(next, "next");
+        if (action instanceof Action.Conditional conditional) {
+            return new Action.Conditional(conditional.action(), conditional.condition(), next);
+        }
+        if (action instanceof Conditional conditional) {
+            return new Conditional(conditional.action(), conditional.condition(), next);
+        }
+        if (action instanceof Sequence sequence) {
+            return sequence.then(next);
+        }
+        return new Then(action, next);
+    }
+
+    public static Action clamp(Action action, Range range) {
+        return new Clamped(action, range);
+    }
+
+    public record Neutral() implements Action, Output.Neutral {
+    }
+
+    public record MotorPercent(MotorDevice motor, double percent) implements Action, Output.Percent {
+        public MotorPercent {
+            Objects.requireNonNull(motor, "motor");
+        }
+    }
+
+    public record DynamicMotorPercent(MotorDevice motor, DoubleSupplier percentSupplier) implements Action, Output.Percent {
+        public DynamicMotorPercent {
+            Objects.requireNonNull(motor, "motor");
+            Objects.requireNonNull(percentSupplier, "percentSupplier");
+        }
+
+        @Override
+        public double percent() {
+            return percentSupplier.getAsDouble();
+        }
+    }
+
+    public record MotorVoltage(MotorDevice motor, double volts) implements Action, Output.Voltage {
+        public MotorVoltage {
+            Objects.requireNonNull(motor, "motor");
+        }
+    }
+
+    public record DynamicMotorVoltage(MotorDevice motor, DoubleSupplier voltsSupplier) implements Action, Output.Voltage {
+        public DynamicMotorVoltage {
+            Objects.requireNonNull(motor, "motor");
+            Objects.requireNonNull(voltsSupplier, "voltsSupplier");
+        }
+
+        @Override
+        public double volts() {
+            return voltsSupplier.getAsDouble();
+        }
+    }
+
+    public record ControlPercent(ControlBinding control, double percent) implements Action, Output.Percent {
+        public ControlPercent {
+            Objects.requireNonNull(control, "control");
+        }
+    }
+
+    public record DynamicControlPercent(ControlBinding control, DoubleSupplier percentSupplier) implements Action, Output.Percent {
+        public DynamicControlPercent {
+            Objects.requireNonNull(control, "control");
+            Objects.requireNonNull(percentSupplier, "percentSupplier");
+        }
+
+        @Override
+        public double percent() {
+            return percentSupplier.getAsDouble();
+        }
+    }
+
+    public record ControlVoltage(ControlBinding control, double volts) implements Action, Output.Voltage {
+        public ControlVoltage {
+            Objects.requireNonNull(control, "control");
+        }
+    }
+
+    public record DynamicControlVoltage(ControlBinding control, DoubleSupplier voltsSupplier) implements Action, Output.Voltage {
+        public DynamicControlVoltage {
+            Objects.requireNonNull(control, "control");
+            Objects.requireNonNull(voltsSupplier, "voltsSupplier");
+        }
+
+        @Override
+        public double volts() {
+            return voltsSupplier.getAsDouble();
+        }
+    }
+
+    public record ControlPosition(ControlBinding control, double position) implements Action, Output.Position {
+        public ControlPosition {
+            Objects.requireNonNull(control, "control");
+        }
+    }
+
+    public record DynamicControlPosition(ControlBinding control, DoubleSupplier positionSupplier) implements Action, Output.Position {
+        public DynamicControlPosition {
+            Objects.requireNonNull(control, "control");
+            Objects.requireNonNull(positionSupplier, "positionSupplier");
+        }
+
+        @Override
+        public double position() {
+            return positionSupplier.getAsDouble();
+        }
+    }
+
+    public record ControlVelocity(ControlBinding control, double velocity) implements Action, Output.Velocity {
+        public ControlVelocity {
+            Objects.requireNonNull(control, "control");
+        }
+    }
+
+    public record DynamicControlVelocity(ControlBinding control, DoubleSupplier velocitySupplier) implements Action, Output.Velocity {
+        public DynamicControlVelocity {
+            Objects.requireNonNull(control, "control");
+            Objects.requireNonNull(velocitySupplier, "velocitySupplier");
+        }
+
+        @Override
+        public double velocity() {
+            return velocitySupplier.getAsDouble();
+        }
+    }
+
+    public record Fault(String reason) implements Action, Output.Fault {
+        public Fault {
+            reason = reason == null ? "" : reason;
+        }
+    }
+
+    public record DoOnce(Runnable action) implements Action {
+        public DoOnce {
+            Objects.requireNonNull(action, "action");
+        }
+    }
+
+    public record RuntimeAction(ActionBinding action) implements Action {
+        public RuntimeAction {
+            Objects.requireNonNull(action, "action");
+        }
+    }
+
+    public record WaitSeconds(double seconds) implements Action {
+        public boolean complete(MechanismContext ctx) {
+            return ctx.timeInStateSeconds() >= seconds;
+        }
+    }
+
+    public record WaitUntil(ActionCondition condition) implements Action {
+        public WaitUntil {
+            Objects.requireNonNull(condition, "condition");
+        }
+
+        public boolean complete(MechanismContext ctx) {
+            return condition.test(ctx);
+        }
+    }
+
+    public record Timeout(Action action, double seconds) implements Action {
+        public Timeout {
+            Objects.requireNonNull(action, "action");
+        }
+
+        public boolean expired(MechanismContext ctx) {
+            return ctx.timeInStateSeconds() >= seconds;
+        }
+    }
+
+    public record Choice(ActionCondition condition, Action active, Action inactive) implements Action {
+        public Choice {
+            Objects.requireNonNull(condition, "condition");
+            Objects.requireNonNull(active, "active");
+            Objects.requireNonNull(inactive, "inactive");
+        }
+
+        public Action choose(MechanismContext ctx) {
+            return condition.test(ctx) ? active : inactive;
+        }
+    }
+
+    public record WhenBranch(ActionCondition condition, Action active) implements Action {
+        public WhenBranch {
+            Objects.requireNonNull(condition, "condition");
+            Objects.requireNonNull(active, "active");
+        }
+
+        public Choice otherwise(Action inactive) {
+            return new Choice(condition, active, inactive);
+        }
+
+        public Action choose(MechanismContext ctx) {
+            return condition.test(ctx) ? active : neutral();
+        }
+    }
+
+    public record Parallel(List<Action> Actions) implements Action {
+        public Parallel {
+            Actions = copyStates(Actions);
+        }
+    }
+
+    public record Race(List<Action> Actions) implements Action {
+        public Race {
+            Actions = copyStates(Actions);
+        }
+    }
+
+    public static final class Deadline implements Action {
+        private final Action primary;
+        private final List<Action> others;
+        private final List<Action> actions;
+
+        public Deadline(Action primary, List<Action> others) {
+            this.primary = Objects.requireNonNull(primary, "primary");
+            this.others = copyStates(others);
+            this.actions = new DeadlineActions(this.primary, this.others);
+        }
+
+        public Action primary() {
+            return primary;
+        }
+
+        public List<Action> others() {
+            return others;
+        }
+
+        public List<Action> Actions() {
+            return actions;
+        }
+    }
+
+    public record DynamicOutput(Function<MechanismContext, Output> output) implements Action {
+        public DynamicOutput {
+            Objects.requireNonNull(output, "output");
+        }
+    }
+
+    public record Conditional(Action action, ActionCondition condition, Action next) implements Action {
+        public Conditional {
+            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(condition, "condition");
+        }
+    }
+
+    public record Then(Action action, Action next) implements Action {
+        public Then {
+            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(next, "next");
+        }
+    }
+
+    public record Clamped(Action action, Range range) implements Action {
+        public Clamped {
+            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(range, "range");
+        }
+    }
+
+    public static final class ChildSet implements Action {
+        private final List<ChildTarget> targets = new ArrayList<>();
+        private final List<ChildTarget> targetView = Collections.unmodifiableList(targets);
+
+        public ChildSet set(Mechanism mechanism, Action action) {
+            targets.add(new ChildTarget(mechanism, action));
+            return this;
+        }
+
+        public List<ChildTarget> targets() {
+            return targetView;
+        }
+    }
+
+    public record ChildTarget(Mechanism mechanism, Action action) {
+        public ChildTarget {
+            Objects.requireNonNull(mechanism, "mechanism");
+            Objects.requireNonNull(action, "action");
+        }
+    }
+
+    public static final class Sequence implements Action {
+        private final List<SequenceStep> steps = new ArrayList<>();
+        private final List<SequenceStep> stepView = Collections.unmodifiableList(steps);
+        private Action next;
+        private double timeoutSeconds = Double.POSITIVE_INFINITY;
+
+        private Sequence() {
+        }
+
+        public Sequence run(Action action) {
+            steps.add(new SequenceStep(action, ctx -> false));
+            return this;
+        }
+
+        public Sequence forTime(double seconds, Action action) {
+            steps.add(new SequenceStep(action, ctx -> ctx.timeInStateSeconds() >= seconds));
+            return this;
+        }
+
+        public Sequence until(ActionCondition condition, Action action) {
+            steps.add(new SequenceStep(action, condition));
+            return this;
+        }
+
+        public Sequence until(BooleanSupplier condition, Action action) {
+            Objects.requireNonNull(condition, "condition");
+            return until(ctx -> condition.getAsBoolean(), action);
+        }
+
+        public Sequence doOnce(Runnable action) {
+            steps.add(new SequenceStep(Actions.doOnce(action), ctx -> true));
+            return this;
+        }
+
+        public Sequence doOnce(ActionBinding action) {
+            steps.add(new SequenceStep(Actions.doOnce(action), ctx -> true));
+            return this;
+        }
+
+        public Sequence waitSeconds(double seconds) {
+            steps.add(new SequenceStep(Actions.waitSeconds(seconds), ctx -> ctx.timeInStateSeconds() >= seconds));
+            return this;
+        }
+
+        public Sequence waitUntil(ActionCondition condition) {
+            steps.add(new SequenceStep(Actions.waitUntil(condition), condition));
+            return this;
+        }
+
+        public Sequence waitUntil(BooleanSupplier condition) {
+            Objects.requireNonNull(condition, "condition");
+            return waitUntil(ctx -> condition.getAsBoolean());
+        }
+
+        public Sequence timeout(double seconds) {
+            timeoutSeconds = seconds;
+            return this;
+        }
+
+        @Override
+        public Sequence then(Action action) {
+            next = Objects.requireNonNull(action, "action");
+            return this;
+        }
+
+        public List<SequenceStep> steps() {
+            return stepView;
+        }
+
+        public Action next() {
+            return next;
+        }
+
+        public double timeoutSeconds() {
+            return timeoutSeconds;
+        }
+    }
+
+    public static final class When {
+        private final ActionCondition condition;
+
+        private When(ActionCondition condition) {
+            this.condition = Objects.requireNonNull(condition, "condition");
+        }
+
+        public WhenBranch run(Action action) {
+            return new WhenBranch(condition, action);
+        }
+
+        public WhenBranch then(Action action) {
+            return run(action);
+        }
+    }
+
+    public static final class Cycle implements Action {
+        private final List<CycleStep> steps = new ArrayList<>();
+        private final List<CycleStep> stepView = Collections.unmodifiableList(steps);
+
+        private Cycle() {
+        }
+
+        public Cycle forTime(double seconds, Action action) {
+            steps.add(new CycleStep(action, ctx -> ctx.timeInStateSeconds() >= seconds));
+            return this;
+        }
+
+        public Cycle until(ActionCondition condition, Action action) {
+            steps.add(new CycleStep(action, condition));
+            return this;
+        }
+
+        public Cycle until(BooleanSupplier condition, Action action) {
+            Objects.requireNonNull(condition, "condition");
+            return until(ctx -> condition.getAsBoolean(), action);
+        }
+
+        public List<CycleStep> steps() {
+            return stepView;
+        }
+    }
+
+    public record CycleStep(Action action, ActionCondition advance) {
+        public CycleStep {
+            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(advance, "advance");
+        }
+    }
+
+    public record SequenceStep(Action action, ActionCondition complete) {
+        public SequenceStep {
+            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(complete, "complete");
+        }
+    }
+
+    private static List<Action> copyStates(List<Action> Actions) {
+        Objects.requireNonNull(Actions, "Actions");
+        List<Action> copy = new ArrayList<>();
+        for (Action action : Actions) {
+            copy.add(Objects.requireNonNull(action, "action"));
+        }
+        return List.copyOf(copy);
+    }
+
+    private static final class DeadlineActions extends java.util.AbstractList<Action> {
+        private final Action primary;
+        private final List<Action> others;
+
+        private DeadlineActions(Action primary, List<Action> others) {
+            this.primary = primary;
+            this.others = others;
+        }
+
+        @Override
+        public Action get(int index) {
+            if (index == 0) {
+                return primary;
+            }
+            return others.get(index - 1);
+        }
+
+        @Override
+        public int size() {
+            return others.size() + 1;
+        }
+    }
+}

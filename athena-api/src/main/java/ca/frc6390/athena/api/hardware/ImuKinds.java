@@ -8,10 +8,7 @@ public enum ImuKinds implements ImuKind {
     PIGEON_2("ctre:pigeon-2"),
 
     /** Studica NavX IMU. */
-    NAVX("studica:navx"),
-
-    /** Simulation-only IMU backend. */
-    SIM("sim:imu");
+    NAVX("studica:navx");
 
     private final String key;
 

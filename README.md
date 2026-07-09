@@ -38,9 +38,33 @@ Publish local snapshots to Maven Local when testing Athena from a robot project 
 
 Then add `mavenLocal()` to the consuming robot project's repositories while testing local snapshots.
 
+To install the local snapshot through WPILib's local vendordep flow, use:
+
+```powershell
+.\gradlew.bat publishToLocalWpilib
+```
+
+That publishes Athena to Maven Local, mirrors the Athena artifacts into the local WPILib Maven folder, and installs `FRC6390-Athena.json` into the local WPILib vendordeps folder. By default it targets the WPILib year from `athenaFrcYear`. Override the install folder when needed:
+
+```powershell
+.\gradlew.bat publishToLocalWpilib -PathenaWpilibHome=C:\Users\Public\wpilib\2027
+```
+
 Do not use old root release helper commands such as `releaseChecklist`, `stageMavenPublication`, or `generateVendordep`. This repo now uses standard Gradle lifecycle and publishing tasks.
 
 ## Adding Athena To A Robot Project
+
+The low-friction path is:
+
+1. Install the Athena vendordep.
+2. Keep the normal vendor vendordeps for the hardware and tools your robot actually uses.
+
+```groovy
+plugins {
+    id "java"
+    id "edu.wpi.first.GradleRIO" version "2027.x.x"
+}
+```
 
 The checked-in vendordep is:
 
@@ -48,103 +72,50 @@ The checked-in vendordep is:
 vendordeps/FRC6390-Athena.json
 ```
 
+The checked-in `example-projects` are currently pinned to the WPILib/GradleRIO 2026 project layout so they can compile against the available local toolchain while Athena 2027 API work continues. Treat those projects as API examples, not final 2027 WPILib release metadata.
+
 Published JSON URL:
 
 ```text
 https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena.json
 ```
 
-The vendordep provides the default Athena modules:
+The vendordep provides the standard Athena robot stack for teams using WPILib's vendordep flow:
 
 - `athena-api`
 - `athena-runtime`
 - `athena-hardware`
 - `athena-mechanisms`
 - `athena-drivetrain`
+- `athena-vision`
+- `athena-localization`
+- `athena-auto`
 - `athena-commands`
+- `athena-robot`
+- `athena-simulation`
+- `athena-wpilib`
+- `athena-vendor-ctre`
+- `athena-vendor-rev`
+- `athena-vendor-studica`
+- `athena-vendor-limelight`
+- `athena-vendor-photonvision`
+- `athena-vendor-pathplanner`
+- `athena-vendor-choreo`
 
-Most robot projects should also add the runtime host explicitly:
-
-```groovy
-dependencies {
-    implementation "ca.frc6390.athena:athena-robot:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-wpilib:2027.0.0-SNAPSHOT"
-}
-```
-
-Add optional modules only when used:
-
-```groovy
-dependencies {
-    implementation "ca.frc6390.athena:athena-vision:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-localization:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-auto:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-simulation:2027.0.0-SNAPSHOT"
-}
-```
-
-Add vendor adapters that match installed hardware/vendor libraries:
-
-```groovy
-dependencies {
-    implementation "ca.frc6390.athena:athena-vendor-ctre:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-vendor-rev:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-vendor-studica:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-vendor-limelight:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-vendor-photonvision:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-vendor-pathplanner:2027.0.0-SNAPSHOT"
-    implementation "ca.frc6390.athena:athena-vendor-choreo:2027.0.0-SNAPSHOT"
-}
-```
-
-## Athena Gradle Plugin
-
-The Athena Gradle plugin is build tooling, not a robot runtime dependency. It should not be added through the vendordep. When the plugin is available to the consuming build, it can add modules and vendor adapters for you:
-
-```groovy
-plugins {
-    id "java"
-    id "ca.frc6390.athena" version "2027.0.0-SNAPSHOT"
-}
-
-athena {
-    setVersion("2027.0.0-SNAPSHOT")
-    features "drivetrain", "vision", "localization", "auto", "wpilib", "simulation"
-    vendors "ctre", "rev", "limelight", "photonvision", "pathplanner", "choreo"
-}
-```
-
-Supported feature names:
-
-- `drivetrain`
-- `vision`
-- `localization`
-- `auto`
-- `wpilib`
-- `simulation`
-
-Supported vendor names:
-
-- `ctre`
-- `rev`
-- `studica`
-- `limelight`
-- `photonvision`
-- `pathplanner`
-- `choreo`
+The Athena vendor adapter artifacts are included by the single Athena vendordep, but they do not bring the real third-party vendor libraries with them. A robot that uses CTRE hardware still installs CTRE's vendordep, a robot that uses REV still installs REV's vendordep, and so on. If a matching third-party library is not present, Athena skips that adapter during service discovery.
 
 ## Module Guide
 
 - `athena-api`: shared kind catalogs such as motor, encoder, IMU, and camera kinds.
 - `athena-runtime`: common runtime values, measurements, signals, and control helpers.
 - `athena-hardware`: hardware declarations, backend SPI, hardware graph, and simulation declarations.
-- `athena-mechanisms`: mechanism/state/output/control/event model.
+- `athena-mechanisms`: mechanism/Action/output/control/event model.
 - `athena-drivetrain`: drivetrain helper values and swerve module presets.
-- `athena-commands`: command-style state lifecycle.
+- `athena-commands`: command-style Action lifecycle.
 - `athena-auto`: autonomous routines, path providers, and marker graphs.
 - `athena-vision`: camera declarations, pose/target signals, and camera adapter runtime.
 - `athena-localization`: localization pipelines, filters, and estimators.
-- `athena-simulation`: in-memory simulated hardware runtime.
+- `athena-simulation`: simulation session, in-memory simulated hardware handles, and model stepping.
 - `athena-robot`: root Athena robot runtime.
 - `athena-wpilib`: WPILib `TimedRobot` lifecycle bridge.
 - `athena-vendor-*`: optional vendor backends/adapters.
@@ -153,4 +124,4 @@ Supported vendor names:
 
 Mechanisms are the main robot behavior abstraction. Swerve is not a special runtime graph anymore: a drivetrain should be a normal `Mechanism`, and swerve modules are normal mechanism components. Hardware declarations resolve through `HardwareGraph`; vendor modules provide backend implementations through service loading.
 
-Simulation currently supports in-memory hardware handles and simple model stepping. More WPILib-backed physics simulation is still a planned addition.
+Simulation runs through the normal `RobotRuntime` with `SimulationSession` selecting simulated hardware backends. The in-memory runner covers basic handle/model stepping, and `athena-wpilib` provides WPILib-backed motor, flywheel, arm, elevator, battery, and swerve pose simulation without leaking WPILib sim classes into robot mechanisms.

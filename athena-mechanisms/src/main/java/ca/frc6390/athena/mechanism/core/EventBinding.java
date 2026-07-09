@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
+import java.util.List;
 
 /**
  * Declarative event source for hooks.
@@ -14,8 +15,19 @@ public interface EventBinding {
         return sourceActive(context);
     }
 
+    default boolean active(EventContext context, boolean previousSourceActive, boolean currentSourceActive) {
+        return currentSourceActive;
+    }
+
     default boolean pulse() {
         return false;
+    }
+
+    default void afterRun(EventContext context) {
+    }
+
+    default List<Object> declarations() {
+        return List.of();
     }
 
     default HookBinding onStart(Runnable action) {

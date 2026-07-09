@@ -1,6 +1,6 @@
 package ca.frc6390.athena.auto;
 
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -13,10 +13,10 @@ import java.util.Optional;
  * Runtime marker graph for autonomous path events.
  */
 public final class PathGraph {
-    private final Map<String, CommandState> markers;
+    private final Map<String, CommandAction> markers;
     private final Map<String, ActiveMarker> activeMarkers = new LinkedHashMap<>();
 
-    private PathGraph(Map<String, CommandState> markers) {
+    private PathGraph(Map<String, CommandAction> markers) {
         this.markers = Collections.unmodifiableMap(new LinkedHashMap<>(markers));
     }
 
@@ -37,12 +37,12 @@ public final class PathGraph {
      * @return path graph
      */
     public static PathGraph of(Collection<AutoRoutine> routines) {
-        Map<String, CommandState> indexed = new LinkedHashMap<>();
+        Map<String, CommandAction> indexed = new LinkedHashMap<>();
         if (routines != null) {
             for (AutoRoutine routine : routines) {
                 Objects.requireNonNull(routine, "routine");
                 for (PathMarkerBinding binding : routine.markers()) {
-                    CommandState previous = indexed.putIfAbsent(binding.marker(), binding.state());
+                    CommandAction previous = indexed.putIfAbsent(binding.marker(), binding.Action());
                     if (previous != null) {
                         throw new IllegalArgumentException("Duplicate path marker '" + binding.marker() + "'.");
                     }
@@ -65,9 +65,9 @@ public final class PathGraph {
      * Finds a marker command by name.
      *
      * @param marker marker name
-     * @return command state if present
+     * @return command Action if present
      */
-    public Optional<CommandState> marker(String marker) {
+    public Optional<CommandAction> marker(String marker) {
         return Optional.ofNullable(markers.get(normalize(marker)));
     }
 
@@ -79,11 +79,11 @@ public final class PathGraph {
      */
     public boolean trigger(String marker) {
         String key = normalize(marker);
-        CommandState state = markers.get(key);
-        if (state == null) {
+        CommandAction Action = markers.get(key);
+        if (Action == null) {
             throw new IllegalArgumentException("Unknown path marker '" + key + "'.");
         }
-        ActiveMarker active = activeMarkers.computeIfAbsent(key, ignored -> new ActiveMarker(state));
+        ActiveMarker active = activeMarkers.computeIfAbsent(key, ignored -> new ActiveMarker(Action));
         boolean finished = active.execute();
         if (finished) {
             activeMarkers.remove(key);
@@ -110,20 +110,20 @@ public final class PathGraph {
     }
 
     private static final class ActiveMarker {
-        private final CommandState state;
+        private final CommandAction Action;
         private boolean initialized;
 
-        private ActiveMarker(CommandState state) {
-            this.state = Objects.requireNonNull(state, "state");
+        private ActiveMarker(CommandAction Action) {
+            this.Action = Objects.requireNonNull(Action, "Action");
         }
 
         private boolean execute() {
             if (!initialized) {
-                state.onInitialize().run();
+                Action.onInitialize().run();
                 initialized = true;
             }
-            state.onExecute().run();
-            if (state.isFinished().getAsBoolean()) {
+            Action.onExecute().run();
+            if (Action.isFinished().getAsBoolean()) {
                 end(false);
                 return true;
             }
@@ -132,7 +132,7 @@ public final class PathGraph {
 
         private void end(boolean interrupted) {
             if (initialized) {
-                state.onEnd().run();
+                Action.onEnd().run();
                 initialized = false;
             }
         }

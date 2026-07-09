@@ -1,6 +1,6 @@
 package ca.frc6390.athena.auto;
 
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -15,50 +15,50 @@ public final class Autos {
     }
 
     /**
-     * Creates a named routine from a command state.
+     * Creates a named routine from a command Action.
      *
      * @param name routine name
-     * @param state command state
+     * @param Action command Action
      * @return auto routine
      */
-    public static AutoRoutine routine(String name, CommandState state) {
-        Objects.requireNonNull(state, "state");
-        return routine(name, () -> state);
+    public static AutoRoutine routine(String name, CommandAction Action) {
+        Objects.requireNonNull(Action, "Action");
+        return routine(name, () -> Action);
     }
 
     /**
-     * Creates a named routine from a command state and marker bindings.
+     * Creates a named routine from a command Action and marker bindings.
      *
      * @param name routine name
-     * @param state command state
+     * @param Action command Action
      * @param markers path marker bindings
      * @return auto routine
      */
-    public static AutoRoutine routine(String name, CommandState state, PathMarkerBinding... markers) {
-        Objects.requireNonNull(state, "state");
-        return routine(name, () -> state, markers);
+    public static AutoRoutine routine(String name, CommandAction Action, PathMarkerBinding... markers) {
+        Objects.requireNonNull(Action, "Action");
+        return routine(name, () -> Action, markers);
     }
 
     /**
-     * Creates a named routine from a command state factory.
+     * Creates a named routine from a command Action factory.
      *
      * @param name routine name
-     * @param stateFactory command state factory
+     * @param stateFactory command Action factory
      * @return auto routine
      */
-    public static AutoRoutine routine(String name, Supplier<CommandState> stateFactory) {
+    public static AutoRoutine routine(String name, Supplier<CommandAction> stateFactory) {
         return new AutoRoutine(name, stateFactory);
     }
 
     /**
-     * Creates a named routine from a command state factory and marker bindings.
+     * Creates a named routine from a command Action factory and marker bindings.
      *
      * @param name routine name
-     * @param stateFactory command state factory
+     * @param stateFactory command Action factory
      * @param markers path marker bindings
      * @return auto routine
      */
-    public static AutoRoutine routine(String name, Supplier<CommandState> stateFactory, PathMarkerBinding... markers) {
+    public static AutoRoutine routine(String name, Supplier<CommandAction> stateFactory, PathMarkerBinding... markers) {
         return new AutoRoutine(name, stateFactory, markers == null ? List.of() : Arrays.asList(markers));
     }
 
@@ -66,11 +66,11 @@ public final class Autos {
      * Creates a path marker binding.
      *
      * @param marker marker name
-     * @param state command state
+     * @param Action command Action
      * @return marker binding
      */
-    public static PathMarkerBinding marker(String marker, CommandState state) {
-        return new PathMarkerBinding(marker, state);
+    public static PathMarkerBinding marker(String marker, CommandAction Action) {
+        return new PathMarkerBinding(marker, Action);
     }
 
     /**

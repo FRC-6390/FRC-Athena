@@ -1,105 +1,208 @@
 package ca.frc6390.athena.wpilib.lifecycle;
 
-import java.util.Objects;
-
+import ca.frc6390.athena.commands.CommandAction;
+import ca.frc6390.athena.mechanism.core.EventContext;
+import ca.frc6390.athena.mechanism.core.LifecycleMode;
+import ca.frc6390.athena.mechanism.core.LifecyclePhase;
+import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.core.MechanismContext;
+import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.ActionRequests;
+import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.robot.RobotRuntime;
+import ca.frc6390.athena.wpilib.controls.Controls;
+import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
+import ca.frc6390.athena.sim.runtime.SimulationSession;
+import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.Objects;
 
 /**
- * WPILib robot host backed by Athena's robot runtime.
+ * Subclassable WPILib robot host backed by Athena mechanisms.
  */
-public class AthenaRobot extends TimedRobot {
-    private final RobotRuntime runtime;
-    private final AthenaRobotLifecycle lifecycle;
+public abstract class AthenaRobot extends TimedRobot implements Mechanism {
+    @SuppressWarnings("unused")
+    public final Action initial = Actions.neutral();
+    private final Map<Mechanism, Mechanism> registeredRoots = new IdentityHashMap<>();
+    private RobotRuntime runtime;
+    private double lastTimestampSeconds;
 
     /**
-     * Creates a robot with a new Athena runtime.
+     * Registers mechanisms, bindings, and robot controls.
      */
-    public AthenaRobot() {
-        this(RobotRuntime.create());
-    }
+    protected abstract void configure();
 
     /**
-     * Creates a robot backed by an existing Athena runtime.
+     * Returns the owned Athena mechanism runtime.
      *
-     * @param runtime robot runtime
+     * @return runtime
      */
-    public AthenaRobot(RobotRuntime runtime) {
-        this.runtime = Objects.requireNonNull(runtime, "runtime");
-        this.lifecycle = new AthenaRobotLifecycle(AthenaRobot::timestampSeconds, runtime::periodic);
-    }
-
-    /**
-     * Returns the runtime owned by this robot host.
-     *
-     * @return robot runtime
-     */
-    public final RobotRuntime runtime() {
+    public final RobotRuntime athena() {
+        if (runtime == null) {
+            throw new IllegalStateException("Athena has not been created yet.");
+        }
         return runtime;
     }
 
-    @Override
-    public void robotInit() {
-        lifecycle.robotInit();
+    protected final void register(Mechanism mechanism) {
+        Objects.requireNonNull(mechanism, "mechanism");
+        Mechanism root = new RegisteredMechanism(mechanism);
+        registeredRoots.put(mechanism, root);
+        athena().register(root);
+    }
+
+    public final void set(Mechanism mechanism, Action Action) {
+        Objects.requireNonNull(mechanism, "mechanism");
+        Objects.requireNonNull(Action, "Action");
+        Mechanism root = registeredRoots.get(mechanism);
+        if (root == null) {
+            throw new IllegalArgumentException("Mechanism is not registered: " + mechanism.getClass().getName());
+        }
+        athena().set(root, Actions.set().set(mechanism, Action));
+    }
+
+    public final void set(Action Action) {
+        athena().request(Objects.requireNonNull(Action, "Action"));
+    }
+
+    public final CommandAction Action(Mechanism mechanism, Action Action) {
+        return Controls.run("Action:" + mechanism.getClass().getSimpleName(), () -> set(mechanism, Action));
+    }
+
+    public final CommandAction Action(Action Action) {
+        return Controls.run("Action:robot", () -> set(Action));
     }
 
     @Override
-    public void robotPeriodic() {
-        lifecycle.robotPeriodic();
+    public final void robotInit() {
+        lastTimestampSeconds = timestampSeconds();
+        runtime = createRuntime(RobotBase.isSimulation());
+        ActionRequests.bind(runtime::request);
+        runtime.register(this);
+        configure();
+        run(LifecycleMode.ROBOT, LifecyclePhase.INIT, true, false);
     }
 
     @Override
-    public void disabledInit() {
-        lifecycle.disabledInit();
+    public final void robotPeriodic() {
+        CommandScheduler.getInstance().run();
+        run(LifecycleMode.ROBOT, LifecyclePhase.PERIODIC, true, false);
     }
 
     @Override
-    public void disabledPeriodic() {
-        lifecycle.disabledPeriodic();
+    public final void disabledInit() {
+        run(LifecycleMode.DISABLED, LifecyclePhase.INIT, false, false);
     }
 
     @Override
-    public void autonomousInit() {
-        lifecycle.autonomousInit();
+    public final void disabledPeriodic() {
+        run(LifecycleMode.DISABLED, LifecyclePhase.PERIODIC, false, false);
     }
 
     @Override
-    public void autonomousPeriodic() {
-        lifecycle.autonomousPeriodic();
+    public final void disabledExit() {
+        run(LifecycleMode.DISABLED, LifecyclePhase.EXIT, false, false);
     }
 
     @Override
-    public void teleopInit() {
-        lifecycle.teleopInit();
+    public final void autonomousInit() {
+        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.INIT, true, false);
     }
 
     @Override
-    public void teleopPeriodic() {
-        lifecycle.teleopPeriodic();
+    public final void autonomousPeriodic() {
+        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.PERIODIC, true, false);
     }
 
     @Override
-    public void testInit() {
-        lifecycle.testInit();
+    public final void autonomousExit() {
+        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.EXIT, true, false);
     }
 
     @Override
-    public void testPeriodic() {
-        lifecycle.testPeriodic();
+    public final void teleopInit() {
+        CommandScheduler.getInstance().cancelAll();
+        run(LifecycleMode.TELEOP, LifecyclePhase.INIT, true, false);
     }
 
     @Override
-    public void simulationInit() {
-        lifecycle.simulationInit();
+    public final void teleopPeriodic() {
+        run(LifecycleMode.TELEOP, LifecyclePhase.PERIODIC, true, false);
     }
 
     @Override
-    public void simulationPeriodic() {
-        lifecycle.simulationPeriodic();
+    public final void teleopExit() {
+        run(LifecycleMode.TELEOP, LifecyclePhase.EXIT, true, false);
+    }
+
+    @Override
+    public final void testInit() {
+        CommandScheduler.getInstance().cancelAll();
+        run(LifecycleMode.TEST, LifecyclePhase.INIT, true, false);
+    }
+
+    @Override
+    public final void testPeriodic() {
+        run(LifecycleMode.TEST, LifecyclePhase.PERIODIC, true, false);
+    }
+
+    @Override
+    public final void testExit() {
+        run(LifecycleMode.TEST, LifecyclePhase.EXIT, true, false);
+    }
+
+    @Override
+    public final void simulationInit() {
+        run(LifecycleMode.SIMULATION, LifecyclePhase.INIT, true, true);
+    }
+
+    @Override
+    public final void simulationPeriodic() {
+        run(LifecycleMode.SIMULATION, LifecyclePhase.PERIODIC, true, true);
+    }
+
+    private void run(LifecycleMode mode, LifecyclePhase phase, boolean enabled, boolean simulation) {
+        double timestamp = timestampSeconds();
+        double dtSeconds = elapsed(timestamp);
+        EventContext eventContext = new EventContext(timestamp, dtSeconds, mode, phase, enabled, simulation);
+        athena().periodic(
+                new MechanismContext(timestamp, 0.0, dtSeconds, enabled, mode == LifecycleMode.AUTONOMOUS, simulation),
+                eventContext);
+    }
+
+    private double elapsed(double timestampSeconds) {
+        double dtSeconds = timestampSeconds - lastTimestampSeconds;
+        lastTimestampSeconds = timestampSeconds;
+        return Double.isFinite(dtSeconds) && dtSeconds >= 0.0 ? dtSeconds : 0.0;
     }
 
     private static double timestampSeconds() {
         return Timer.getFPGATimestamp();
+    }
+
+    static RobotRuntime createRuntime(boolean simulation) {
+        if (!simulation) {
+            return RobotRuntime.create();
+        }
+        return RobotRuntime.simulated(SimulationSession.create().physicsEngine(new WpilibSimPhysicsEngine()));
+    }
+
+    private static final class RegisteredMechanism implements Mechanism {
+        @SuppressWarnings("unused")
+        public final Action initial = Actions.neutral();
+        private final Mechanism mechanism;
+
+        private RegisteredMechanism(Mechanism mechanism) {
+            this.mechanism = Objects.requireNonNull(mechanism, "mechanism");
+        }
+
+        @SuppressWarnings("unused")
+        public Mechanism mechanism() {
+            return mechanism;
+        }
     }
 }

@@ -15,9 +15,9 @@ import java.util.Optional;
 import ca.frc6390.athena.auto.AutoRoutine;
 import ca.frc6390.athena.auto.PathGraph;
 import ca.frc6390.athena.auto.PathMarkerBinding;
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
-import ca.frc6390.athena.mechanism.core.PathState;
+import ca.frc6390.athena.mechanism.core.PathAction;
 import choreo.trajectory.EventMarker;
 import choreo.trajectory.Trajectory;
 import choreo.trajectory.TrajectorySample;
@@ -32,8 +32,8 @@ class ChoreoPathProviderTest {
         FakeChoreoClient client = new FakeChoreoClient(List.of("Score", "Leave"));
         ChoreoPathProvider provider = new ChoreoPathProvider(client);
 
-        PathState first = provider.path("  Score  ");
-        PathState second = provider.path("Score");
+        PathAction first = provider.path("  Score  ");
+        PathAction second = provider.path("Score");
 
         assertSame(first, second);
         assertEquals("choreo", first.source());
@@ -61,8 +61,8 @@ class ChoreoPathProviderTest {
         shootCommand.finished = true;
         FakeCommand intakeCommand = new FakeCommand();
         intakeCommand.finished = true;
-        CommandState shootState = commandState("shoot", shootCommand);
-        CommandState intakeState = commandState("intake", intakeCommand);
+        CommandAction shootState = commandState("shoot", shootCommand);
+        CommandAction intakeState = commandState("intake", intakeCommand);
         FakeChoreoClient client = new FakeChoreoClient(
                 List.of("Score"),
                 Map.of("Score", trajectory("Score",
@@ -76,7 +76,7 @@ class ChoreoPathProviderTest {
                 orderedCommands(Map.entry(" shoot ", shootState), Map.entry("intake", intakeState)));
         PathGraph graph = PathGraph.of(new AutoRoutine(
                 "score",
-                () -> CommandState.create("score").build(),
+                () -> CommandAction.create("score").build(),
                 bindings));
 
         assertEquals(List.of("shoot", "intake"), provider.markerNames("Score"));
@@ -126,15 +126,15 @@ class ChoreoPathProviderTest {
         FakeFactoryClient client = new FakeFactoryClient();
         ChoreoPathAdapter adapter = new ChoreoPathAdapter(client);
 
-        CommandState state = adapter.load("  Main  ");
-        state.onInitialize().run();
-        state.onExecute().run();
-        assertFalse(state.isFinished().getAsBoolean());
+        CommandAction Action = adapter.load("  Main  ");
+        Action.onInitialize().run();
+        Action.onExecute().run();
+        assertFalse(Action.isFinished().getAsBoolean());
         client.trajectoryCommand.finished = true;
-        assertEquals(true, state.isFinished().getAsBoolean());
-        state.onEnd().run();
+        assertEquals(true, Action.isFinished().getAsBoolean());
+        Action.onEnd().run();
 
-        assertEquals("choreo:Main", state.name());
+        assertEquals("choreo:Main", Action.name());
         assertEquals(List.of("trajectory:Main"), client.calls);
         assertEquals(List.of("initialize", "execute", "isFinished", "isFinished", "end:false"),
                 client.trajectoryCommand.events);
@@ -146,7 +146,7 @@ class ChoreoPathProviderTest {
         ChoreoPathAdapter adapter = new ChoreoPathAdapter(client);
         PathRuntime trajectoryRuntime = adapter.trajectoryRuntime();
         PathRuntime routineRuntime = adapter.routineRuntime();
-        PathState path = adapter.path("Main");
+        PathAction path = adapter.path("Main");
 
         trajectoryRuntime.initialize(path, null);
         trajectoryRuntime.execute(path, null);
@@ -160,8 +160,8 @@ class ChoreoPathProviderTest {
         assertEquals(List.of("initialize", "execute", "end:false"), client.routineCommand.events);
     }
 
-    private static CommandState commandState(String name, FakeCommand command) {
-        return CommandState.create(name)
+    private static CommandAction commandState(String name, FakeCommand command) {
+        return CommandAction.create(name)
                 .onInitialize(command::initialize)
                 .onExecute(command::execute)
                 .until(command::isFinished)
@@ -170,9 +170,9 @@ class ChoreoPathProviderTest {
     }
 
     @SafeVarargs
-    private static Map<String, CommandState> orderedCommands(Map.Entry<String, CommandState>... entries) {
-        Map<String, CommandState> commands = new LinkedHashMap<>();
-        for (Map.Entry<String, CommandState> entry : entries) {
+    private static Map<String, CommandAction> orderedCommands(Map.Entry<String, CommandAction>... entries) {
+        Map<String, CommandAction> commands = new LinkedHashMap<>();
+        for (Map.Entry<String, CommandAction> entry : entries) {
             commands.put(entry.getKey(), entry.getValue());
         }
         return commands;

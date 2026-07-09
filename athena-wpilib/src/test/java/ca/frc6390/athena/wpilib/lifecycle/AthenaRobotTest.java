@@ -2,6 +2,8 @@ package ca.frc6390.athena.wpilib.lifecycle;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.mechanism.core.EventContext;
@@ -50,6 +52,12 @@ class AthenaRobotTest {
         assertEquals(0.0, calls.get(0).mechanismContext.dtSeconds());
         assertEquals(0.0, calls.get(1).mechanismContext.dtSeconds());
         assertEquals(0.0, calls.get(1).eventContext.dtSeconds());
+    }
+
+    @Test
+    void createsSimulationRuntimeOnlyWhenWpilibReportsSimulation() {
+        assertNotNull(AthenaRobot.createRuntime(true).simulationSession());
+        assertNull(AthenaRobot.createRuntime(false).simulationSession());
     }
 
     private static AthenaRobotLifecycle lifecycle(ManualClock clock, List<Call> calls) {

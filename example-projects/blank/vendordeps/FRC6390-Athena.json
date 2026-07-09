@@ -1,0 +1,113 @@
+{
+    "fileName": "FRC6390-Athena.json",
+    "name": "FRC6390 Athena",
+    "version": "2027.0.0-SNAPSHOT",
+    "frcYear": "2026",
+    "uuid": "d2f7f475-5689-461d-a3d3-33a0e4b67327",
+    "mavenUrls": [
+        "file:/C:/Users/Public/wpilib/2026/maven/",
+        "https://maven.frc6390.ca/FRC-6390/FRC-Athena"
+    ],
+    "jsonUrl": "https://raw.githubusercontent.com/FRC-6390/FRC-Athena/refs/heads/main/vendordeps/FRC6390-Athena.json",
+    "javaDependencies": [
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-api",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-runtime",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-hardware",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-mechanisms",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-drivetrain",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vision",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-localization",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-auto",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-commands",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-robot",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-simulation",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-wpilib",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-ctre",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-rev",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-studica",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-limelight",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-photonvision",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-pathplanner",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-vendor-choreo",
+            "version": "2027.0.0-SNAPSHOT"
+        }
+    ],
+    "jniDependencies": [
+    ],
+    "cppDependencies": [
+    ]
+}

@@ -1,7 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 /**
- * Typed output request produced by a mechanism state.
+ * Typed output request produced by a mechanism Action.
  */
 public interface Output {
     interface Neutral extends Output {

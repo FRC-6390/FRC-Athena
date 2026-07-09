@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.device;
 import java.util.Objects;
 import java.util.Locale;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.vendor.VendorOptions;
@@ -53,6 +54,22 @@ public record MotorDevice(
      */
     public EncoderDevice absoluteEncoder() {
         return EncoderDevice.motorAbsolute(this);
+    }
+
+    public <T> T percent(double percent) {
+        return action("percent", new Class<?>[] {MotorDevice.class, double.class}, this, percent);
+    }
+
+    public <T> T percent(DoubleSupplier percent) {
+        return action("percent", new Class<?>[] {MotorDevice.class, DoubleSupplier.class}, this, percent);
+    }
+
+    public <T> T voltage(double volts) {
+        return action("voltage", new Class<?>[] {MotorDevice.class, double.class}, this, volts);
+    }
+
+    public <T> T voltage(DoubleSupplier volts) {
+        return action("voltage", new Class<?>[] {MotorDevice.class, DoubleSupplier.class}, this, volts);
     }
 
     /**
@@ -179,5 +196,19 @@ public record MotorDevice(
 
     private static String sanitize(String key) {
         return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T action(String method, Class<?>[] parameterTypes, Object... args) {
+        try {
+            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
+            var factory = actions.getDeclaredMethod(method, parameterTypes);
+            if (!factory.canAccess(null)) {
+                factory.setAccessible(true);
+            }
+            return (T) factory.invoke(null, args);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Motor action factories require athena-mechanisms on the classpath.", exception);
+        }
     }
 }

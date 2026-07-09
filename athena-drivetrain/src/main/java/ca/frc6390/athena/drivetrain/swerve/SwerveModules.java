@@ -1,7 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 /**
- * Catalog of known swerve module base classes.
+ * Catalog of mechanism templates.
  */
 public final class SwerveModules {
     private static final double THREE_INCH_WHEEL_METERS = inches(3.0);
@@ -10,9 +10,6 @@ public final class SwerveModules {
     private SwerveModules() {
     }
 
-    /**
-     * Custom module base when no catalog module matches.
-     */
     public static class Custom extends SwerveModule {
         public Custom() {
             super(SwerveModuleModel.custom(1.0, 1.0, FOUR_INCH_WHEEL_METERS));
@@ -23,16 +20,10 @@ public final class SwerveModules {
         }
     }
 
-    /**
-     * Swerve Drive Specialties modules.
-     */
     public static final class SDS {
         private SDS() {
         }
 
-        /**
-         * SDS MK3 modules.
-         */
         public static final class MK3 {
             private MK3() {
             }
@@ -50,9 +41,6 @@ public final class SwerveModules {
             }
         }
 
-        /**
-         * SDS MK4 modules.
-         */
         public static final class MK4 {
             private MK4() {
             }
@@ -82,9 +70,6 @@ public final class SwerveModules {
             }
         }
 
-        /**
-         * SDS MK4i modules.
-         */
         public static final class MK4I {
             private MK4I() {
             }
@@ -126,9 +111,6 @@ public final class SwerveModules {
             }
         }
 
-        /**
-         * SDS MK4n modules.
-         */
         public static final class MK4N {
             private MK4N() {
             }
@@ -152,9 +134,6 @@ public final class SwerveModules {
             }
         }
 
-        /**
-         * SDS MK4c modules.
-         */
         public static final class MK4C {
             private MK4C() {
             }
@@ -178,9 +157,6 @@ public final class SwerveModules {
             }
         }
 
-        /**
-         * SDS MK5n modules.
-         */
         public static final class MK5N {
             private MK5N() {
             }
@@ -204,9 +180,6 @@ public final class SwerveModules {
             }
         }
 
-        /**
-         * SDS MK5i modules.
-         */
         public static final class MK5I {
             private MK5I() {
             }
@@ -231,16 +204,10 @@ public final class SwerveModules {
         }
     }
 
-    /**
-     * REV Robotics modules.
-     */
     public static final class REV {
         private REV() {
         }
 
-        /**
-         * REV 3 inch MAXSwerve module speed options.
-         */
         public static final class MAXSWERVE_3IN {
             private MAXSWERVE_3IN() {
             }
@@ -294,9 +261,6 @@ public final class SwerveModules {
             }
         }
 
-        /**
-         * REV 4 inch EasySwerve module presets.
-         */
         public static final class EASYSWERVE_4IN {
             private EASYSWERVE_4IN() {
             }
@@ -322,3 +286,4 @@ public final class SwerveModules {
         return inches * 0.0254;
     }
 }
+

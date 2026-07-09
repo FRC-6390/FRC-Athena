@@ -46,12 +46,10 @@ final class RobotGraph {
         }
         MechanismNode node = node(mechanism);
         for (Object declaration : node.declarations().values()) {
-            declarations.add(declaration);
-            if (declaration instanceof ControlBinding control) {
-                collectControlDeclarations(control, declarations);
-            } else if (declaration instanceof SimModel simulation) {
-                collectSimDeclarations(simulation, declarations);
-            }
+            collectDeclaration(declaration, declarations);
+        }
+        for (HookBinding hook : node.hooks().values()) {
+            declarations.addAll(hook.event().declarations());
         }
         for (Mechanism child : node.children().values()) {
             collectDeclarations(child, visited, declarations);
@@ -64,6 +62,24 @@ final class RobotGraph {
         declarations.addAll(control.dependencies());
         for (ControlLoop loop : control.loops()) {
             declarations.addAll(loop.dependencies());
+        }
+    }
+
+    private static void collectDeclaration(Object declaration, Set<Object> declarations) {
+        if (declaration == null) {
+            return;
+        }
+        if (declaration instanceof Iterable<?> values) {
+            for (Object value : values) {
+                collectDeclaration(value, declarations);
+            }
+            return;
+        }
+        declarations.add(declaration);
+        if (declaration instanceof ControlBinding control) {
+            collectControlDeclarations(control, declarations);
+        } else if (declaration instanceof SimModel simulation) {
+            collectSimDeclarations(simulation, declarations);
         }
     }
 

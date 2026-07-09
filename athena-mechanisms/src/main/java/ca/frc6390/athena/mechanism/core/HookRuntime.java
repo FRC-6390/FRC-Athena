@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Executes hooks against sampled event state.
+ * Executes hooks against sampled event Action.
  */
 final class HookRuntime {
     private final Map<HookBinding, Boolean> previousEventActive = new IdentityHashMap<>();
@@ -24,8 +24,15 @@ final class HookRuntime {
         Objects.requireNonNull(actionContext, "actionContext");
         Objects.requireNonNull(hooks, "hooks");
         EventContext safeContext = context == null ? EventContext.empty() : context;
+        Map<EventBinding, Boolean> consumedEvents = new IdentityHashMap<>();
+        Map<EventBinding, Boolean> sourceSamples = new IdentityHashMap<>();
         for (HookBinding hook : hooks) {
-            run(safeContext, actionContext, hook);
+            runOne(safeContext, actionContext, hook, sourceSamples);
+            consumedEvents.put(hook.event(), Boolean.TRUE);
+        }
+        for (EventBinding event : consumedEvents.keySet()) {
+            previousSourceActive.put(event, sourceSamples.getOrDefault(event, false));
+            event.afterRun(safeContext);
         }
     }
 
@@ -40,9 +47,21 @@ final class HookRuntime {
         Objects.requireNonNull(actionContext, "actionContext");
         Objects.requireNonNull(hook, "hook");
         EventContext safeContext = context == null ? EventContext.empty() : context;
+        Map<EventBinding, Boolean> sourceSamples = new IdentityHashMap<>();
+        runOne(safeContext, actionContext, hook, sourceSamples);
+        previousSourceActive.put(hook.event(), sourceSamples.getOrDefault(hook.event(), false));
+        hook.event().afterRun(safeContext);
+    }
+
+    private void runOne(
+            EventContext safeContext,
+            ActionContext actionContext,
+            HookBinding hook,
+            Map<EventBinding, Boolean> sourceSamples) {
         EventBinding event = hook.event();
         boolean previousSource = previousSourceActive.getOrDefault(event, false);
-        boolean active = event.active(safeContext, previousSource);
+        boolean currentSource = sourceSamples.computeIfAbsent(event, value -> value.sourceActive(safeContext));
+        boolean active = event.active(safeContext, previousSource, currentSource);
         boolean wasActive = previousEventActive.getOrDefault(hook, false);
 
         for (HookBinding.HookAction binding : hook.actions()) {
@@ -51,12 +70,11 @@ final class HookRuntime {
             }
         }
 
-        previousSourceActive.put(event, event.sourceActive(safeContext));
         previousEventActive.put(hook, active);
     }
 
     /**
-     * Clears remembered event state.
+     * Clears remembered event Action.
      */
     public void reset() {
         previousEventActive.clear();

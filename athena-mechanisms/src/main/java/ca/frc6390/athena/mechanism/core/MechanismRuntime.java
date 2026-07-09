@@ -19,17 +19,17 @@ public final class MechanismRuntime {
     private final HookRuntime hookRuntime = new HookRuntime();
     private final List<HookBinding> hookBindings;
     private final StateScheduler scheduler;
-    private final Map<PathState, PathRuntime> pathRuntimes;
+    private final Map<PathAction, PathRuntime> pathRuntimes;
     private Runnable simulationStep = () -> {
     };
-    private State state;
+    private Action action;
     private double stateStartSeconds = Double.NaN;
 
     private MechanismRuntime(
             MechanismNode node,
             ActionContext actionContext,
             OutputResolver resolver,
-            Map<PathState, PathRuntime> pathRuntimes) {
+            Map<PathAction, PathRuntime> pathRuntimes) {
         this.node = Objects.requireNonNull(node, "node");
         this.mechanism = Objects.requireNonNull(node.mechanism(), "mechanism");
         this.actionContext = Objects.requireNonNull(actionContext, "actionContext");
@@ -40,9 +40,9 @@ public final class MechanismRuntime {
         this.scheduler = new StateScheduler(actionContext, pathRuntimes);
         if (node.initialState() == null) {
             throw new IllegalStateException(
-                    "Mechanism " + mechanism.getClass().getName() + " does not declare any State fields.");
+                    "Mechanism " + mechanism.getClass().getName() + " does not declare any Action fields.");
         }
-        this.state = node.initialState();
+        this.action = node.initialState();
     }
 
     public static MechanismRuntime of(Mechanism mechanism, ActionContext actionContext) {
@@ -64,7 +64,7 @@ public final class MechanismRuntime {
             Mechanism mechanism,
             ActionContext actionContext,
             OutputResolver resolver,
-            Map<PathState, PathRuntime> pathRuntimes) {
+            Map<PathAction, PathRuntime> pathRuntimes) {
         return new MechanismRuntime(MechanismIntrospector.inspect(mechanism), actionContext, resolver, pathRuntimes);
     }
 
@@ -72,11 +72,11 @@ public final class MechanismRuntime {
             MechanismNode node,
             ActionContext actionContext,
             OutputResolver resolver,
-            Map<PathState, PathRuntime> pathRuntimes) {
+            Map<PathAction, PathRuntime> pathRuntimes) {
         return new MechanismRuntime(node, actionContext, resolver, pathRuntimes);
     }
 
-    public MechanismRuntime path(PathState ref, PathRuntime runtime) {
+    public MechanismRuntime path(PathAction ref, PathRuntime runtime) {
         pathRuntimes.put(Objects.requireNonNull(ref, "ref"), Objects.requireNonNull(runtime, "runtime"));
         return this;
     }
@@ -87,12 +87,12 @@ public final class MechanismRuntime {
         return this;
     }
 
-    public State state() {
-        return state;
+    public Action action() {
+        return action;
     }
 
-    public void set(State state) {
-        this.state = Objects.requireNonNull(state, "state");
+    public void set(Action action) {
+        this.action = Objects.requireNonNull(action, "action");
         this.stateStartSeconds = Double.NaN;
         this.scheduler.reset();
     }
@@ -106,16 +106,16 @@ public final class MechanismRuntime {
         MechanismContext timedContext = withTimeInState(
                 safeMechanismContext,
                 safeMechanismContext.nowSeconds() - stateStartSeconds);
-        State updated = mechanism.update(state, timedContext);
-        if (updated != state) {
-            state = Objects.requireNonNull(updated, "updated");
+        Action updated = mechanism.update(action, timedContext);
+        if (updated != action) {
+            action = Objects.requireNonNull(updated, "updated");
             stateStartSeconds = safeMechanismContext.nowSeconds();
             scheduler.reset();
             timedContext = withTimeInState(safeMechanismContext, 0.0);
         }
-        StateScheduler.Result active = scheduler.evaluate(state, timedContext);
-        List<ResolvedOutput> outputs = resolver.resolve(mechanism, active.state(), active.context());
-        applier.applyAll(outputs);
+        StateScheduler.Result active = scheduler.evaluate(action, timedContext);
+        List<ResolvedOutput> outputs = resolver.resolve(mechanism, active.action(), active.context());
+        applier.applyAll(outputs, active.context());
         hookRuntime.run(safeEventContext, actionContext, hookBindings);
         simulationStep.run();
         return outputs;
@@ -133,10 +133,11 @@ public final class MechanismRuntime {
 
     private static final class StateScheduler {
         private final ActionContext actionContext;
-        private final Map<PathState, PathRuntime> pathRuntimes;
+        private final Map<PathAction, PathRuntime> pathRuntimes;
+        private final Result result = new Result();
         private SchedulerNode root;
 
-        private StateScheduler(ActionContext actionContext, Map<PathState, PathRuntime> pathRuntimes) {
+        private StateScheduler(ActionContext actionContext, Map<PathAction, PathRuntime> pathRuntimes) {
             this.actionContext = Objects.requireNonNull(actionContext, "actionContext");
             this.pathRuntimes = Objects.requireNonNull(pathRuntimes, "pathRuntimes");
         }
@@ -147,117 +148,119 @@ public final class MechanismRuntime {
             }
         }
 
-        Result evaluate(State state, MechanismContext context) {
-            if (root == null || root.state() != state) {
-                root = SchedulerNode.lower(state);
+        Result evaluate(Action action, MechanismContext context) {
+            if (root == null || root.action() != action) {
+                root = SchedulerNode.lower(action);
             }
             Evaluation evaluation = evaluate(root, context);
-            return new Result(evaluation.output() == null ? States.neutral() : evaluation.output(), evaluation.context());
+            return result.set(
+                    evaluation.output() == null ? Actions.neutral() : evaluation.output(),
+                    evaluation.context());
         }
 
         private Evaluation evaluate(SchedulerNode schedule, MechanismContext context) {
             Objects.requireNonNull(schedule, "schedule");
-            State state = schedule.state();
+            Action action = schedule.action();
             Node node = schedule.runtime(context);
             MechanismContext local = withTimeInState(context, context.nowSeconds() - node.startSeconds);
 
-            if (state instanceof States.ChildSet childSet) {
-                States.ChildSet output = States.set();
+            if (action instanceof Actions.ChildSet childSet) {
+                Actions.ChildSet output = Actions.set();
                 boolean complete = !childSet.targets().isEmpty();
                 int index = 0;
-                for (States.ChildTarget target : childSet.targets()) {
-                    Evaluation child = evaluate(schedule.indexed(index, target.state()), context);
+                for (Actions.ChildTarget target : childSet.targets()) {
+                    Evaluation child = evaluate(schedule.indexed(index, target.action()), context);
                     if (child.output() != null) {
                         output.set(target.mechanism(), child.output());
                     }
                     complete &= child.complete();
                     index++;
                 }
-                return new Evaluation(output.targets().isEmpty() ? null : output, complete, local);
+                return schedule.result(output.targets().isEmpty() ? null : output, complete, local);
             }
-            if (state instanceof States.Sequence sequence) {
+            if (action instanceof Actions.Sequence sequence) {
                 return evaluateSequence(sequence, schedule, context, local, node);
             }
-            if (state instanceof States.Cycle cycle) {
+            if (action instanceof Actions.Cycle cycle) {
                 return evaluateCycle(cycle, schedule, context, node);
             }
-            if (state instanceof States.Parallel parallel) {
-                return evaluateGroup(parallel.states(), schedule, context, GroupMode.PARALLEL, -1);
+            if (action instanceof Actions.Parallel parallel) {
+                return evaluateGroup(parallel.Actions(), schedule, context, GroupMode.PARALLEL, -1);
             }
-            if (state instanceof States.Race race) {
-                return evaluateGroup(race.states(), schedule, context, GroupMode.RACE, -1);
+            if (action instanceof Actions.Race race) {
+                return evaluateGroup(race.Actions(), schedule, context, GroupMode.RACE, -1);
             }
-            if (state instanceof States.Deadline deadline) {
-                return evaluateGroup(deadline.states(), schedule, context, GroupMode.DEADLINE, 0);
+            if (action instanceof Actions.Deadline deadline) {
+                return evaluateGroup(deadline.Actions(), schedule, context, GroupMode.DEADLINE, 0);
             }
-            if (state instanceof States.Choice choice) {
+            if (action instanceof Actions.Choice choice) {
                 return evaluate(schedule.named("choice", choice.choose(local)), context);
             }
-            if (state instanceof States.WhenBranch branch) {
+            if (action instanceof Actions.WhenBranch branch) {
                 return evaluate(schedule.named("when", branch.choose(local)), context);
             }
-            if (state instanceof States.Timeout timeout) {
+            if (action instanceof Actions.Timeout timeout) {
                 if (timeout.expired(local)) {
-                    return new Evaluation(null, true, local);
+                    return schedule.result(null, true, local);
                 }
-                Evaluation child = evaluate(schedule.named("timeout", timeout.state()), context);
-                return new Evaluation(child.output(), child.complete(), child.context());
+                Evaluation child = evaluate(schedule.named("timeout", timeout.action()), context);
+                return schedule.result(child.output(), child.complete(), child.context());
             }
-            if (state instanceof States.Conditional conditional) {
+            if (action instanceof Actions.Conditional conditional) {
                 return evaluateConditional(
-                        conditional.state(),
+                        conditional.action(),
                         conditional.condition(),
                         conditional.next(),
                         schedule,
                         context,
                         local);
             }
-            if (state instanceof State.Conditional conditional) {
+            if (action instanceof Action.Conditional conditional) {
                 return evaluateConditional(
-                        conditional.state(),
+                        conditional.action(),
                         conditional.condition(),
                         conditional.next(),
                         schedule,
                         context,
                         local);
             }
-            if (state instanceof States.Then then) {
-                return evaluateThen(then.state(), then.next(), schedule, context);
+            if (action instanceof Actions.Then then) {
+                return evaluateThen(then.action(), then.next(), schedule, context);
             }
-            if (state instanceof State.Then then) {
-                return evaluateThen(then.state(), then.next(), schedule, context);
+            if (action instanceof Action.Then then) {
+                return evaluateThen(then.action(), then.next(), schedule, context);
             }
-            if (state instanceof States.Clamped clamped) {
-                Evaluation child = evaluate(schedule.named("clamped", clamped.state()), context);
-                return new Evaluation(child.output() == null ? null : States.clamp(child.output(), clamped.range()),
+            if (action instanceof Actions.Clamped clamped) {
+                Evaluation child = evaluate(schedule.named("clamped", clamped.action()), context);
+                return schedule.result(child.output() == null ? null : Actions.clamp(child.output(), clamped.range()),
                         child.complete(), child.context());
             }
-            if (state instanceof State.Clamped clamped) {
-                Evaluation child = evaluate(schedule.named("clamped", clamped.state()), context);
-                return new Evaluation(child.output() == null ? null : States.clamp(child.output(), clamped.range()),
+            if (action instanceof Action.Clamped clamped) {
+                Evaluation child = evaluate(schedule.named("clamped", clamped.action()), context);
+                return schedule.result(child.output() == null ? null : Actions.clamp(child.output(), clamped.range()),
                         child.complete(), child.context());
             }
-            if (state instanceof States.Action action) {
+            if (action instanceof Actions.RuntimeAction runtimeAction) {
                 if (!node.entered) {
-                    action.action().apply(actionContext);
+                    runtimeAction.action().apply(actionContext);
                     node.entered = true;
                 }
-                return new Evaluation(null, true, local);
+                return schedule.result(null, true, local);
             }
-            if (state instanceof States.DoOnce action) {
+            if (action instanceof Actions.DoOnce doOnce) {
                 if (!node.entered) {
-                    action.action().run();
+                    doOnce.action().run();
                     node.entered = true;
                 }
-                return new Evaluation(null, true, local);
+                return schedule.result(null, true, local);
             }
-            if (state instanceof States.WaitSeconds wait) {
-                return new Evaluation(null, wait.complete(local), local);
+            if (action instanceof Actions.WaitSeconds wait) {
+                return schedule.result(null, wait.complete(local), local);
             }
-            if (state instanceof States.WaitUntil wait) {
-                return new Evaluation(null, wait.complete(local), local);
+            if (action instanceof Actions.WaitUntil wait) {
+                return schedule.result(null, wait.complete(local), local);
             }
-            if (state instanceof PathState pathState) {
+            if (action instanceof PathAction pathState) {
                 if (node.pathRuntime == null || node.pathState != pathState) {
                     node.pathState = pathState;
                     node.pathRuntime = pathRuntimes.get(pathState);
@@ -273,28 +276,28 @@ public final class MechanismRuntime {
                 runtime.execute(pathState, local);
                 if (runtime.isFinished(pathState, local)) {
                     runtime.end(pathState, local, false);
-                    return new Evaluation(null, true, local);
+                    return schedule.result(null, true, local);
                 }
-                return new Evaluation(null, false, local);
+                return schedule.result(null, false, local);
             }
-            return new Evaluation(state, false, local);
+            return schedule.result(action, false, local);
         }
 
         private Evaluation evaluateSequence(
-                States.Sequence sequence,
+                Actions.Sequence sequence,
                 SchedulerNode schedule,
                 MechanismContext context,
                 MechanismContext local,
                 Node node) {
             if (local.timeInStateSeconds() >= sequence.timeoutSeconds()) {
                 return sequence.next() == null
-                        ? new Evaluation(null, true, local)
+                        ? schedule.result(null, true, local)
                         : evaluate(schedule.named("next", sequence.next()), context);
             }
-            List<States.SequenceStep> steps = sequence.steps();
+            List<Actions.SequenceStep> steps = sequence.steps();
             while (node.index < steps.size()) {
-                States.SequenceStep step = steps.get(node.index);
-                SchedulerNode stepNode = schedule.indexed(node.index, step.state());
+                Actions.SequenceStep step = steps.get(node.index);
+                SchedulerNode stepNode = schedule.indexed(node.index, step.action());
                 Evaluation child = evaluate(stepNode, context);
                 if (child.complete() || step.complete().test(child.context())) {
                     stepNode.reset();
@@ -306,24 +309,24 @@ public final class MechanismRuntime {
             if (sequence.next() != null) {
                 return evaluate(schedule.named("next", sequence.next()), context);
             }
-            return new Evaluation(null, true, local);
+            return schedule.result(null, true, local);
         }
 
         private Evaluation evaluateCycle(
-                States.Cycle cycle,
+                Actions.Cycle cycle,
                 SchedulerNode schedule,
                 MechanismContext context,
                 Node node) {
-            List<States.CycleStep> steps = cycle.steps();
+            List<Actions.CycleStep> steps = cycle.steps();
             if (steps.isEmpty()) {
-                return new Evaluation(null, false, context);
+                return schedule.result(null, false, context);
             }
             if (node.index >= steps.size()) {
                 node.index = 0;
             }
             for (int attempts = 0; attempts < steps.size(); attempts++) {
-                States.CycleStep step = steps.get(node.index);
-                SchedulerNode stepNode = schedule.indexed(node.index, step.state());
+                Actions.CycleStep step = steps.get(node.index);
+                SchedulerNode stepNode = schedule.indexed(node.index, step.action());
                 Evaluation child = evaluate(stepNode, context);
                 if (child.complete() || step.advance().test(child.context())) {
                     stepNode.reset();
@@ -332,47 +335,47 @@ public final class MechanismRuntime {
                 }
                 return child;
             }
-            return new Evaluation(null, false, context);
+            return schedule.result(null, false, context);
         }
 
         private Evaluation evaluateGroup(
-                List<State> states,
+                List<Action> actions,
                 SchedulerNode schedule,
                 MechanismContext context,
                 GroupMode mode,
                 int deadlineIndex) {
-            List<State> outputs = new ArrayList<>();
+            List<Action> outputs = new ArrayList<>();
             boolean anyComplete = false;
-            boolean allComplete = !states.isEmpty();
-            for (int i = 0; i < states.size(); i++) {
-                Evaluation child = evaluate(schedule.indexed(i, states.get(i)), context);
+            boolean allComplete = !actions.isEmpty();
+            for (int i = 0; i < actions.size(); i++) {
+                Evaluation child = evaluate(schedule.indexed(i, actions.get(i)), context);
                 anyComplete |= child.complete();
                 allComplete &= child.complete();
                 if (mode == GroupMode.DEADLINE && i == deadlineIndex && child.complete()) {
-                    return new Evaluation(null, true, child.context());
+                    return schedule.result(null, true, child.context());
                 }
                 if (child.output() != null) {
                     outputs.add(child.output());
                 }
             }
             if (mode == GroupMode.RACE && anyComplete) {
-                return new Evaluation(null, true, context);
+                return schedule.result(null, true, context);
             }
             if (mode == GroupMode.PARALLEL && allComplete) {
-                return new Evaluation(null, true, context);
+                return schedule.result(null, true, context);
             }
-            return new Evaluation(groupOutput(outputs), false, context);
+            return schedule.result(groupOutput(outputs), false, context);
         }
 
         private Evaluation evaluateConditional(
-                State wrapped,
-                StateCondition condition,
-                State next,
+                Action wrapped,
+                ActionCondition condition,
+                Action next,
                 SchedulerNode schedule,
                 MechanismContext context,
                 MechanismContext local) {
             if (condition.test(local)) {
-                return next == null ? new Evaluation(null, true, local) : evaluate(schedule.named("next", next), context);
+                return next == null ? schedule.result(null, true, local) : evaluate(schedule.named("next", next), context);
             }
             Evaluation child = evaluate(schedule.named("conditional", wrapped), context);
             if (child.complete()) {
@@ -382,8 +385,8 @@ public final class MechanismRuntime {
         }
 
         private Evaluation evaluateThen(
-                State wrapped,
-                State next,
+                Action wrapped,
+                Action next,
                 SchedulerNode schedule,
                 MechanismContext context) {
             Evaluation child = evaluate(schedule.named("thenState", wrapped), context);
@@ -393,14 +396,14 @@ public final class MechanismRuntime {
             return child;
         }
 
-        private static State groupOutput(List<State> states) {
-            if (states.isEmpty()) {
+        private static Action groupOutput(List<Action> actions) {
+            if (actions.isEmpty()) {
                 return null;
             }
-            if (states.size() == 1) {
-                return states.get(0);
+            if (actions.size() == 1) {
+                return actions.get(0);
             }
-            return new States.Parallel(states);
+            return new Actions.Parallel(actions);
         }
 
         private enum GroupMode {
@@ -409,17 +412,55 @@ public final class MechanismRuntime {
             DEADLINE
         }
 
-        private record Evaluation(State output, boolean complete, MechanismContext context) {
+        private static final class Evaluation {
+            private Action output;
+            private boolean complete;
+            private MechanismContext context;
+
+            private Evaluation set(Action output, boolean complete, MechanismContext context) {
+                this.output = output;
+                this.complete = complete;
+                this.context = context;
+                return this;
+            }
+
+            private Action output() {
+                return output;
+            }
+
+            private boolean complete() {
+                return complete;
+            }
+
+            private MechanismContext context() {
+                return context;
+            }
         }
 
-        private record Result(State state, MechanismContext context) {
+        private static final class Result {
+            private Action action;
+            private MechanismContext context;
+
+            private Result set(Action action, MechanismContext context) {
+                this.action = action;
+                this.context = context;
+                return this;
+            }
+
+            private Action action() {
+                return action;
+            }
+
+            private MechanismContext context() {
+                return context;
+            }
         }
 
         private static final class Node {
             private final double startSeconds;
             private boolean entered;
             private int index;
-            private PathState pathState;
+            private PathAction pathState;
             private PathRuntime pathRuntime;
 
             private Node(double startSeconds) {
@@ -428,22 +469,23 @@ public final class MechanismRuntime {
         }
 
         private static final class SchedulerNode {
-            private final State state;
+            private final Action action;
             private final List<SchedulerNode> indexedChildren = new ArrayList<>();
             private final Map<String, SchedulerNode> namedChildren = new HashMap<>();
+            private final Evaluation evaluation = new Evaluation();
             private Node runtime;
 
-            private SchedulerNode(State state) {
-                this.state = Objects.requireNonNull(state, "state");
+            private SchedulerNode(Action action) {
+                this.action = Objects.requireNonNull(action, "action");
                 lowerKnownChildren();
             }
 
-            private static SchedulerNode lower(State state) {
-                return new SchedulerNode(state);
+            private static SchedulerNode lower(Action action) {
+                return new SchedulerNode(action);
             }
 
-            private State state() {
-                return state;
+            private Action action() {
+                return action;
             }
 
             private Node runtime(MechanismContext context) {
@@ -453,21 +495,21 @@ public final class MechanismRuntime {
                 return runtime;
             }
 
-            private SchedulerNode indexed(int index, State childState) {
+            private SchedulerNode indexed(int index, Action childState) {
                 while (indexedChildren.size() <= index) {
                     indexedChildren.add(null);
                 }
                 SchedulerNode child = indexedChildren.get(index);
-                if (child == null || child.state() != childState) {
+                if (child == null || child.action() != childState) {
                     child = lower(childState);
                     indexedChildren.set(index, child);
                 }
                 return child;
             }
 
-            private SchedulerNode named(String name, State childState) {
+            private SchedulerNode named(String name, Action childState) {
                 SchedulerNode child = namedChildren.get(name);
-                if (child == null || child.state() != childState) {
+                if (child == null || child.action() != childState) {
                     child = lower(childState);
                     namedChildren.put(name, child);
                 }
@@ -484,62 +526,66 @@ public final class MechanismRuntime {
                 namedChildren.values().forEach(SchedulerNode::reset);
             }
 
+            private Evaluation result(Action output, boolean complete, MechanismContext context) {
+                return evaluation.set(output, complete, context);
+            }
+
             private void lowerKnownChildren() {
-                if (state instanceof States.ChildSet childSet) {
+                if (action instanceof Actions.ChildSet childSet) {
                     int index = 0;
-                    for (States.ChildTarget target : childSet.targets()) {
-                        indexed(index++, target.state());
+                    for (Actions.ChildTarget target : childSet.targets()) {
+                        indexed(index++, target.action());
                     }
-                } else if (state instanceof States.Sequence sequence) {
+                } else if (action instanceof Actions.Sequence sequence) {
                     int index = 0;
-                    for (States.SequenceStep step : sequence.steps()) {
-                        indexed(index++, step.state());
+                    for (Actions.SequenceStep step : sequence.steps()) {
+                        indexed(index++, step.action());
                     }
                     if (sequence.next() != null) {
                         named("next", sequence.next());
                     }
-                } else if (state instanceof States.Cycle cycle) {
+                } else if (action instanceof Actions.Cycle cycle) {
                     int index = 0;
-                    for (States.CycleStep step : cycle.steps()) {
-                        indexed(index++, step.state());
+                    for (Actions.CycleStep step : cycle.steps()) {
+                        indexed(index++, step.action());
                     }
-                } else if (state instanceof States.Parallel parallel) {
-                    lowerIndexed(parallel.states());
-                } else if (state instanceof States.Race race) {
-                    lowerIndexed(race.states());
-                } else if (state instanceof States.Deadline deadline) {
-                    lowerIndexed(deadline.states());
-                } else if (state instanceof States.Timeout timeout) {
-                    named("timeout", timeout.state());
-                } else if (state instanceof States.Conditional conditional) {
-                    lowerConditional(conditional.state(), conditional.next());
-                } else if (state instanceof State.Conditional conditional) {
-                    lowerConditional(conditional.state(), conditional.next());
-                } else if (state instanceof States.Then then) {
-                    lowerThen(then.state(), then.next());
-                } else if (state instanceof State.Then then) {
-                    lowerThen(then.state(), then.next());
-                } else if (state instanceof States.Clamped clamped) {
-                    named("clamped", clamped.state());
-                } else if (state instanceof State.Clamped clamped) {
-                    named("clamped", clamped.state());
+                } else if (action instanceof Actions.Parallel parallel) {
+                    lowerIndexed(parallel.Actions());
+                } else if (action instanceof Actions.Race race) {
+                    lowerIndexed(race.Actions());
+                } else if (action instanceof Actions.Deadline deadline) {
+                    lowerIndexed(deadline.Actions());
+                } else if (action instanceof Actions.Timeout timeout) {
+                    named("timeout", timeout.action());
+                } else if (action instanceof Actions.Conditional conditional) {
+                    lowerConditional(conditional.action(), conditional.next());
+                } else if (action instanceof Action.Conditional conditional) {
+                    lowerConditional(conditional.action(), conditional.next());
+                } else if (action instanceof Actions.Then then) {
+                    lowerThen(then.action(), then.next());
+                } else if (action instanceof Action.Then then) {
+                    lowerThen(then.action(), then.next());
+                } else if (action instanceof Actions.Clamped clamped) {
+                    named("clamped", clamped.action());
+                } else if (action instanceof Action.Clamped clamped) {
+                    named("clamped", clamped.action());
                 }
             }
 
-            private void lowerIndexed(List<State> states) {
-                for (int i = 0; i < states.size(); i++) {
-                    indexed(i, states.get(i));
+            private void lowerIndexed(List<Action> actions) {
+                for (int i = 0; i < actions.size(); i++) {
+                    indexed(i, actions.get(i));
                 }
             }
 
-            private void lowerConditional(State wrapped, State next) {
+            private void lowerConditional(Action wrapped, Action next) {
                 named("conditional", wrapped);
                 if (next != null) {
                     named("next", next);
                 }
             }
 
-            private void lowerThen(State wrapped, State next) {
+            private void lowerThen(Action wrapped, Action next) {
                 named("thenState", wrapped);
                 named("thenNext", next);
             }

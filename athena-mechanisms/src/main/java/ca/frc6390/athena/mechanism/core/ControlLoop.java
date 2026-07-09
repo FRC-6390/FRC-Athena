@@ -7,7 +7,7 @@ import java.util.List;
  */
 public interface ControlLoop {
     /**
-     * Creates runtime loop state for one bound control.
+     * Creates runtime loop Action for one bound control.
      *
      * @param binding control binding
      * @return runtime loop

@@ -21,7 +21,7 @@ public final class Measurements {
      * @param pose pose
      * @return measurement
      */
-    public static Measurement pose(PoseSnapshot pose) {
+    public static PoseMeasurementSample pose(PoseSnapshot pose) {
         return new PoseMeasurement(pose, RobotVelocity.zero(), 0.0, 0.0, 0.0, 0, null, null);
     }
 
@@ -32,8 +32,37 @@ public final class Measurements {
      * @param speeds speeds
      * @return measurement
      */
-    public static Measurement poseAndSpeeds(PoseSnapshot pose, RobotVelocity speeds) {
+    public static PoseMeasurementSample poseAndSpeeds(PoseSnapshot pose, RobotVelocity speeds) {
         return new PoseMeasurement(pose, speeds, 0.0, 0.0, 0.0, 0, null, null);
+    }
+
+    /**
+     * Creates a camera-relative target measurement sample.
+     *
+     * @param targetId target id, or {@code -1} when unavailable
+     * @param yawDegrees target yaw
+     * @param pitchDegrees target pitch
+     * @param distanceMeters estimated distance
+     * @param confidence target confidence where higher is better
+     * @return measurement
+     */
+    public static TargetMeasurementSample target(
+            int targetId,
+            double yawDegrees,
+            double pitchDegrees,
+            double distanceMeters,
+            double confidence) {
+        return new TargetMeasurement(
+                targetId,
+                yawDegrees,
+                pitchDegrees,
+                distanceMeters,
+                0.0,
+                0.0,
+                confidence,
+                0.0,
+                0.0,
+                null);
     }
 
     /**

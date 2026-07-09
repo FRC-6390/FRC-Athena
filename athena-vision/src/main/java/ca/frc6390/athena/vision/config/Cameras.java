@@ -56,13 +56,4 @@ public final class Cameras {
         return new HeliosDevice(address);
     }
 
-    /**
-     * Creates a simulation camera declaration.
-     *
-     * @param name camera name
-     * @return camera device
-     */
-    public static CameraDevice sim(String name) {
-        return camera(CameraKinds.SIM, name);
-    }
 }

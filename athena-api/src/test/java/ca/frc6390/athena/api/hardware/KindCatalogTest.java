@@ -31,10 +31,10 @@ class KindCatalogTest {
 
     @Test
     void builtInCatalogsImplementKindContracts() {
-        assertInstanceOf(MotorKind.class, MotorKinds.SIM);
-        assertInstanceOf(EncoderKind.class, EncoderKinds.SIM);
-        assertInstanceOf(ImuKind.class, ImuKinds.SIM);
-        assertInstanceOf(CameraKind.class, CameraKinds.SIM);
+        assertInstanceOf(MotorKind.class, MotorKinds.KRAKEN_X60);
+        assertInstanceOf(EncoderKind.class, EncoderKinds.CANCODER);
+        assertInstanceOf(ImuKind.class, ImuKinds.PIGEON_2);
+        assertInstanceOf(CameraKind.class, CameraKinds.PHOTONVISION);
     }
 
     private static void assertUnique(Set<String> keys, int expectedSize) {

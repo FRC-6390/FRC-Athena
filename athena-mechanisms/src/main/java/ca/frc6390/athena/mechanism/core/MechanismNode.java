@@ -12,36 +12,36 @@ public record MechanismNode(
         String name,
         Mechanism mechanism,
         Map<String, Mechanism> children,
-        Map<String, State> states,
+        Map<String, Action> Actions,
         String initialStateName,
-        State initialState,
+        Action initialState,
         Map<String, Object> declarations,
         Map<String, HookBinding> hooks) {
     public MechanismNode(
             String name,
             Mechanism mechanism,
             Map<String, Mechanism> children,
-            Map<String, State> states,
+            Map<String, Action> Actions,
             Map<String, Object> declarations,
             Map<String, HookBinding> hooks) {
-        this(name, mechanism, children, states, firstStateName(states), firstState(states), declarations, hooks);
+        this(name, mechanism, children, Actions, firstStateName(Actions), firstState(Actions), declarations, hooks);
     }
 
     public MechanismNode {
         name = name == null || name.isBlank() ? "mechanism" : name;
         Objects.requireNonNull(mechanism, "mechanism");
         children = Collections.unmodifiableMap(new LinkedHashMap<>(children));
-        states = Collections.unmodifiableMap(new LinkedHashMap<>(states));
+        Actions = Collections.unmodifiableMap(new LinkedHashMap<>(Actions));
         initialStateName = initialStateName == null ? "" : initialStateName;
         declarations = Collections.unmodifiableMap(new LinkedHashMap<>(declarations));
         hooks = Collections.unmodifiableMap(new LinkedHashMap<>(hooks));
     }
 
-    private static String firstStateName(Map<String, State> states) {
-        return states.isEmpty() ? "" : states.keySet().iterator().next();
+    private static String firstStateName(Map<String, Action> Actions) {
+        return Actions.isEmpty() ? "" : Actions.keySet().iterator().next();
     }
 
-    private static State firstState(Map<String, State> states) {
-        return states.isEmpty() ? null : states.values().iterator().next();
+    private static Action firstState(Map<String, Action> Actions) {
+        return Actions.isEmpty() ? null : Actions.values().iterator().next();
     }
 }

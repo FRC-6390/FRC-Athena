@@ -12,9 +12,9 @@ import java.util.List;
 import ca.frc6390.athena.auto.AutoRoutine;
 import ca.frc6390.athena.auto.Autos;
 import ca.frc6390.athena.auto.PathGraph;
-import ca.frc6390.athena.commands.CommandState;
+import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
-import ca.frc6390.athena.mechanism.core.PathState;
+import ca.frc6390.athena.mechanism.core.PathAction;
 import edu.wpi.first.wpilibj2.command.Command;
 import org.junit.jupiter.api.Test;
 
@@ -34,9 +34,9 @@ class PathPlannerPathProviderTest {
     void pathNamesAreNormalizedAndCached() {
         PathPlannerPathProvider provider = new PathPlannerPathProvider(new FakeClient(List.of()));
 
-        PathState first = provider.path("  Blue Auto  ");
-        PathState second = provider.path("Blue Auto");
-        PathState defaultPath = provider.path(" ");
+        PathAction first = provider.path("  Blue Auto  ");
+        PathAction second = provider.path("Blue Auto");
+        PathAction defaultPath = provider.path(" ");
 
         assertSame(first, second);
         assertEquals("pathplanner", first.source());
@@ -50,15 +50,15 @@ class PathPlannerPathProviderTest {
         FakeClient client = new FakeClient(List.of());
         PathPlannerPathProvider provider = new PathPlannerPathProvider(client);
 
-        CommandState state = provider.load("  Auto A  ");
-        state.onInitialize().run();
-        state.onExecute().run();
-        assertFalse(state.isFinished().getAsBoolean());
+        CommandAction Action = provider.load("  Auto A  ");
+        Action.onInitialize().run();
+        Action.onExecute().run();
+        assertFalse(Action.isFinished().getAsBoolean());
         client.lastCommand.finished = true;
-        assertEquals(true, state.isFinished().getAsBoolean());
-        state.onEnd().run();
+        assertEquals(true, Action.isFinished().getAsBoolean());
+        Action.onEnd().run();
 
-        assertEquals("pathplanner:Auto A", state.name());
+        assertEquals("pathplanner:Auto A", Action.name());
         assertEquals(List.of("Auto A"), client.buildAutoNames);
         assertEquals(List.of("initialize", "execute", "isFinished", "isFinished", "end:false"),
                 client.lastCommand.events);
@@ -86,7 +86,7 @@ class PathPlannerPathProviderTest {
         PathPlannerPathProvider provider = new PathPlannerPathProvider(client);
         FakeCommand markerCommand = new FakeCommand();
         markerCommand.finished = true;
-        CommandState markerState = CommandState.create("shoot")
+        CommandAction markerState = CommandAction.create("shoot")
                 .onInitialize(markerCommand::initialize)
                 .onExecute(markerCommand::execute)
                 .until(markerCommand::isFinished)
@@ -107,7 +107,7 @@ class PathPlannerPathProviderTest {
         FakeClient client = new FakeClient(List.of());
         PathPlannerPathProvider provider = new PathPlannerPathProvider(client);
         PathRuntime runtime = provider.runtime();
-        PathState path = provider.path("Drive Out");
+        PathAction path = provider.path("Drive Out");
 
         runtime.initialize(path, null);
         runtime.execute(path, null);

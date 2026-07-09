@@ -1,8 +1,10 @@
 package ca.frc6390.athena.hardware.backend;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 
 import ca.frc6390.athena.api.hardware.EncoderKind;
@@ -37,10 +39,24 @@ public final class BackendRegistry {
         List<MotorBackend> motors = new ArrayList<>();
         List<EncoderBackend> encoders = new ArrayList<>();
         List<ImuBackend> imus = new ArrayList<>();
-        ServiceLoader.load(MotorBackend.class).forEach(motors::add);
-        ServiceLoader.load(EncoderBackend.class).forEach(encoders::add);
-        ServiceLoader.load(ImuBackend.class).forEach(imus::add);
+        load(MotorBackend.class, motors);
+        load(EncoderBackend.class, encoders);
+        load(ImuBackend.class, imus);
         return new BackendRegistry(motors, encoders, imus);
+    }
+
+    private static <T> void load(Class<T> type, List<T> services) {
+        Iterator<T> iterator = ServiceLoader.load(type).iterator();
+        while (true) {
+            try {
+                if (!iterator.hasNext()) {
+                    return;
+                }
+                services.add(iterator.next());
+            } catch (ServiceConfigurationError error) {
+                // Adapter jars may be present while their real vendor libraries are not.
+            }
+        }
     }
 
     /**

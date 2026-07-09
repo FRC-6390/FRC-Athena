@@ -4,7 +4,7 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import java.util.Objects;
 
 /**
- * Output request emitted by a state before it is applied to hardware.
+ * Output request emitted by a Action before it is applied to hardware.
  */
 public interface OutputRequest {
     ControlBinding control();

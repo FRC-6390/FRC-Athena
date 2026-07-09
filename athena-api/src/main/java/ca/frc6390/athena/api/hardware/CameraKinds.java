@@ -11,10 +11,7 @@ public enum CameraKinds implements CameraKind {
     LIMELIGHT("limelight:camera"),
 
     /** HeliOS camera pipeline. */
-    HELIOS("helios:camera"),
-
-    /** Simulation-only camera source. */
-    SIM("sim:camera");
+    HELIOS("helios:camera");
 
     private final String key;
 

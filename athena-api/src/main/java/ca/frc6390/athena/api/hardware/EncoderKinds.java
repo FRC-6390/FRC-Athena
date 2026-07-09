@@ -11,10 +11,7 @@ public enum EncoderKinds implements EncoderKind {
     REV_THROUGH_BORE("rev:through-bore"),
 
     /** Encoder integrated into the selected motor controller. */
-    INTEGRATED_MOTOR("athena:integrated-motor"),
-
-    /** Simulation-only encoder backend. */
-    SIM("sim:encoder");
+    INTEGRATED_MOTOR("athena:integrated-motor");
 
     private final String key;
 

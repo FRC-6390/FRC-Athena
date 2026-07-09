@@ -84,10 +84,66 @@ class RevBackendTest {
         assertEquals(MotorNeutralMode.BRAKE, controller.device.neutralMode());
     }
 
+    @Test
+    void motorSensorReadsAreSnapshottedUntilRefresh() {
+        RecordingSparkController controller = new RecordingSparkController();
+        RevMotorHandle handle = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2),
+                new RevMotorOptions(),
+                controller);
+
+        controller.position = 1.0;
+        controller.velocity = 2.0;
+        controller.absolutePosition = 0.25;
+        controller.absoluteVelocity = 0.5;
+
+        assertEquals(1.0, handle.integratedPositionRotations(), 1.0e-9);
+        assertEquals(2.0, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(0.25, handle.absolutePositionRotations(), 1.0e-9);
+        assertEquals(0.5, handle.absoluteVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(1, controller.positionReads);
+        assertEquals(1, controller.velocityReads);
+        assertEquals(1, controller.absolutePositionReads);
+        assertEquals(1, controller.absoluteVelocityReads);
+
+        controller.position = 3.0;
+        controller.velocity = 4.0;
+        controller.absolutePosition = 0.75;
+        controller.absoluteVelocity = 1.5;
+
+        assertEquals(1.0, handle.integratedPositionRotations(), 1.0e-9);
+        assertEquals(2.0, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(0.25, handle.absolutePositionRotations(), 1.0e-9);
+        assertEquals(0.5, handle.absoluteVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(1, controller.positionReads);
+        assertEquals(1, controller.velocityReads);
+        assertEquals(1, controller.absolutePositionReads);
+        assertEquals(1, controller.absoluteVelocityReads);
+
+        handle.refreshInputs();
+
+        assertEquals(3.0, handle.integratedPositionRotations(), 1.0e-9);
+        assertEquals(4.0, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(0.75, handle.absolutePositionRotations(), 1.0e-9);
+        assertEquals(1.5, handle.absoluteVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(2, controller.positionReads);
+        assertEquals(2, controller.velocityReads);
+        assertEquals(2, controller.absolutePositionReads);
+        assertEquals(2, controller.absoluteVelocityReads);
+    }
+
     private static final class RecordingSparkController implements RevMotorHandle.SparkController {
         private int configureCalls;
         private MotorDevice device;
         private RevMotorOptions options;
+        private int positionReads;
+        private int velocityReads;
+        private int absolutePositionReads;
+        private int absoluteVelocityReads;
+        private double position;
+        private double velocity;
+        private double absolutePosition;
+        private double absoluteVelocity;
 
         @Override
         public void configure(MotorDevice device, RevMotorOptions options) {
@@ -113,22 +169,26 @@ class RevBackendTest {
 
         @Override
         public double positionRotations() {
-            return 0.0;
+            positionReads++;
+            return position;
         }
 
         @Override
         public double velocityRotationsPerSecond() {
-            return 0.0;
+            velocityReads++;
+            return velocity;
         }
 
         @Override
         public double absolutePositionRotations() {
-            return 0.0;
+            absolutePositionReads++;
+            return absolutePosition;
         }
 
         @Override
         public double absoluteVelocityRotationsPerSecond() {
-            return 0.0;
+            absoluteVelocityReads++;
+            return absoluteVelocity;
         }
     }
 }

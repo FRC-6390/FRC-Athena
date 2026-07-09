@@ -30,7 +30,8 @@ public record SimProfile(
     public enum Kind {
         MOTOR,
         ARM,
-        FLYWHEEL
+        FLYWHEEL,
+        ELEVATOR
     }
 
     /**

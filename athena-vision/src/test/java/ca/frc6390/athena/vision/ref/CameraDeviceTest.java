@@ -18,16 +18,16 @@ import ca.frc6390.athena.vision.runtime.VisionGraph;
 class CameraDeviceTest {
     @Test
     void defaultsNameToKindKeyAndUsesIdentityMount() {
-        CameraDevice camera = Cameras.camera(CameraKinds.SIM, " ");
+        CameraDevice camera = Cameras.camera(CameraKinds.LIMELIGHT, " ");
 
-        assertEquals(CameraKinds.SIM, camera.kind());
-        assertEquals(CameraKinds.SIM.key(), camera.name());
+        assertEquals(CameraKinds.LIMELIGHT, camera.kind());
+        assertEquals(CameraKinds.LIMELIGHT.key(), camera.name());
         assertEquals(CameraMountPose.identity(), camera.mountPose());
     }
 
     @Test
     void mountAndBindingsReturnCopiesWithoutChangingOriginal() {
-        CameraDevice original = Cameras.sim("front");
+        CameraDevice original = Cameras.photonVision("front");
         CameraMountPose mount = new CameraMountPose(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
         Measurement pose = Measurements.pose(new PoseSnapshot(2.0, 3.0, 0.5));
 
@@ -44,8 +44,8 @@ class CameraDeviceTest {
 
     @Test
     void nullSuppliersAndNullSupplierResultsReadAsEmpty() {
-        CameraDevice nullSuppliers = Cameras.sim("sim").bindPose(null).bindTargets(null);
-        CameraDevice nullResults = Cameras.sim("sim")
+        CameraDevice nullSuppliers = Cameras.photonVision("front").bindPose(null).bindTargets(null);
+        CameraDevice nullResults = Cameras.photonVision("rear")
                 .bindPose(() -> null)
                 .bindTargets(() -> null);
 
@@ -63,30 +63,37 @@ class CameraDeviceTest {
         Measurement secondPose = Measurements.pose(new PoseSnapshot(2.0, 0.0, 0.0));
         Measurement firstTarget = Measurements.custom("target-1", null);
         Measurement secondTarget = Measurements.custom("target-2", null);
-        CameraDevice camera = Cameras.sim("cache")
+        CameraDevice camera = Cameras.photonVision("cache")
                 .bindPose(() -> List.of(poseReads.incrementAndGet() == 1 ? firstPose : secondPose))
                 .bindTargets(() -> List.of(targetReads.incrementAndGet() == 1 ? firstTarget : secondTarget));
         VisionGraph graph = VisionGraph.of(camera);
         VisionGraph.CameraRuntime runtime = graph.camera(camera);
+        PoseSignal cachedPoseSignal = runtime.poseSignal();
+        TargetSignal cachedTargetSignal = runtime.targetSignal();
 
-        assertTrue(runtime.poseSignal().measurements().isEmpty());
-        assertTrue(runtime.targetSignal().measurements().isEmpty());
+        assertSame(graph.cameras(), graph.cameras());
+        assertSame(cachedPoseSignal, runtime.poseSignal());
+        assertSame(cachedTargetSignal, runtime.targetSignal());
+        assertTrue(cachedPoseSignal.measurements().isEmpty());
+        assertTrue(cachedTargetSignal.measurements().isEmpty());
 
         graph.refresh();
-        assertEquals(List.of(firstPose), runtime.poseSignal().measurements());
-        assertEquals(List.of(firstTarget), graph.targetMeasurements());
+        List<Measurement> graphTargets = graph.targetMeasurements();
+        assertEquals(List.of(firstPose), cachedPoseSignal.measurements());
+        assertEquals(List.of(firstTarget), graphTargets);
+        assertSame(graphTargets, graph.targetMeasurements());
         assertEquals(1, poseReads.get());
         assertEquals(1, targetReads.get());
 
-        assertEquals(List.of(firstPose), runtime.poseSignal().measurements());
-        assertEquals(List.of(firstTarget), runtime.targetSignal().measurements());
+        assertEquals(List.of(firstPose), cachedPoseSignal.measurements());
+        assertEquals(List.of(firstTarget), cachedTargetSignal.measurements());
         assertEquals(1, poseReads.get());
         assertEquals(1, targetReads.get());
 
         runtime.refresh();
         assertEquals(List.of(secondPose), graph.poseMeasurements());
-        assertEquals(List.of(secondTarget), runtime.targetSignal().measurements());
-        assertSame(camera, runtime.poseSignal().camera());
-        assertSame(camera, runtime.targetSignal().camera());
+        assertEquals(List.of(secondTarget), cachedTargetSignal.measurements());
+        assertSame(camera, cachedPoseSignal.camera());
+        assertSame(camera, cachedTargetSignal.camera());
     }
 }

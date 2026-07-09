@@ -1,11 +1,11 @@
 package ca.frc6390.athena.mechanism.core;
 
 /**
- * Runtime state and calculation for a bound control loop.
+ * Runtime Action and calculation for a bound control loop.
  */
 public interface ControlLoopRuntime {
     /**
-     * Resets runtime loop state.
+     * Resets runtime loop Action.
      *
      * @param context current context
      */
