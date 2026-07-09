@@ -10,6 +10,8 @@ import java.util.ServiceLoader;
 import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.ImuKind;
 import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 
 /**
  * Registry of installed hardware backends.
@@ -164,6 +166,18 @@ public final class BackendRegistry {
     }
 
     /**
+     * Finds an encoder backend for a complete physical declaration.
+     *
+     * @param device encoder declaration
+     * @return backend if installed
+     */
+    public Optional<EncoderBackend> encoderBackendFor(EncoderDevice device) {
+        return encoderBackends.stream()
+                .filter(backend -> backend.supports(device))
+                .findFirst();
+    }
+
+    /**
      * Finds an IMU backend.
      *
      * @param kind IMU kind
@@ -172,6 +186,18 @@ public final class BackendRegistry {
     public Optional<ImuBackend> imuBackendFor(ImuKind kind) {
         return imuBackends.stream()
                 .filter(backend -> backend.supports(kind))
+                .findFirst();
+    }
+
+    /**
+     * Finds an IMU backend for a complete physical declaration.
+     *
+     * @param device IMU declaration
+     * @return backend if installed
+     */
+    public Optional<ImuBackend> imuBackendFor(ImuDevice device) {
+        return imuBackends.stream()
+                .filter(backend -> backend.supports(device))
                 .findFirst();
     }
 }

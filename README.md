@@ -110,6 +110,28 @@ The vendordep provides the standard Athena robot stack for teams using WPILib's 
 
 The Athena vendor adapter artifacts are included by the single Athena vendordep, but they do not bring the real third-party vendor libraries with them. A robot that uses CTRE hardware still installs CTRE's vendordep, a robot that uses REV still installs REV's vendordep, and so on. If a matching third-party library is not present, Athena skips that adapter during service discovery.
 
+## Hardware Connections
+
+`HardwareBus` is the unified entry point for hardware declarations. Integer device IDs remain CAN shorthand. Non-CAN devices use an explicit `HardwarePort` so the same encoder or IMU declaration can represent its real physical connection.
+
+```java
+HardwareBus RIO = HardwareBus.rio();
+HardwareBus CANIVORE = HardwareBus.can("canivore");
+
+MotorDevice drive = CANIVORE.motor(MotorKinds.KRAKEN_X60, 1);
+EncoderDevice angle = CANIVORE.encoder(EncoderKinds.CANCODER, 9);
+ImuDevice pigeon = RIO.imu(ImuKinds.PIGEON_2, 0);
+
+EncoderDevice throughBore = RIO.encoder(
+        EncoderKinds.REV_THROUGH_BORE,
+        HardwarePort.dio(2));
+ImuDevice navx = RIO.imu(
+        ImuKinds.NAVX,
+        HardwarePort.spi(SpiPort.MXP));
+```
+
+The roboRIO bus exposes CAN, DIO, analog, SPI, I2C, serial, and USB. Named CAN buses expose CAN only. Requesting an unavailable interface, such as DIO from a CANivore, fails when the declaration is created. Vendor backends then validate that the selected device kind supports that connection.
+
 ## Module Guide
 
 - `athena-api`: shared kind catalogs such as motor, encoder, IMU, and camera kinds.

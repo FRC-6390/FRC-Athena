@@ -2,6 +2,7 @@ package ca.frc6390.athena.vendor.studica;
 
 import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.ImuDevice;
+import ca.frc6390.athena.hardware.device.HardwarePort;
 import com.studica.frc.AHRS;
 import java.util.Objects;
 
@@ -66,13 +67,23 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     }
 
     private static AHRS.NavXComType comType(ImuDevice device) {
-        return switch (device.id()) {
-            case 1 -> AHRS.NavXComType.kMXP_UART;
-            case 2 -> AHRS.NavXComType.kUSB1;
-            case 3 -> AHRS.NavXComType.kUSB2;
-            case 4 -> AHRS.NavXComType.kI2C;
-            default -> AHRS.NavXComType.kMXP_SPI;
-        };
+        HardwarePort port = device.port();
+        if (port instanceof HardwarePort.Spi) {
+            return AHRS.NavXComType.kMXP_SPI;
+        }
+        if (port instanceof HardwarePort.Serial) {
+            return AHRS.NavXComType.kMXP_UART;
+        }
+        if (port instanceof HardwarePort.I2c) {
+            return AHRS.NavXComType.kI2C;
+        }
+        if (port instanceof HardwarePort.Usb usb && usb.port() == 1) {
+            return AHRS.NavXComType.kUSB1;
+        }
+        if (port instanceof HardwarePort.Usb usb && usb.port() == 2) {
+            return AHRS.NavXComType.kUSB2;
+        }
+        throw new IllegalArgumentException("NavX does not support " + port.identity() + ".");
     }
 
     interface NavxController extends AutoCloseable {

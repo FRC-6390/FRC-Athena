@@ -55,7 +55,14 @@ public record HardwareIdentity(String category, String kindKey, String bus, int 
             MotorDevice motor = absolute.motor();
             return new HardwareIdentity("encoder", device.kind().key(), motor.canbus(), motor.id(), "absolute");
         }
-        return new HardwareIdentity("encoder", device.kind().key(), device.canbus(), device.id(), "");
+        return new HardwareIdentity(
+                "encoder",
+                device.kind().key(),
+                device.bus(),
+                device.port().primaryAddress(),
+                device.port() instanceof ca.frc6390.athena.hardware.device.HardwarePort.Can
+                        ? ""
+                        : device.port().identity());
     }
 
     /**
@@ -66,7 +73,14 @@ public record HardwareIdentity(String category, String kindKey, String bus, int 
      */
     public static HardwareIdentity imu(ImuDevice device) {
         Objects.requireNonNull(device, "device");
-        return new HardwareIdentity("imu", device.kind().key(), device.canbus(), device.id(), "");
+        return new HardwareIdentity(
+                "imu",
+                device.kind().key(),
+                device.bus(),
+                device.port().primaryAddress(),
+                device.port() instanceof ca.frc6390.athena.hardware.device.HardwarePort.Can
+                        ? ""
+                        : device.port().identity());
     }
 
     private static String normalize(String value, String fallback) {

@@ -15,6 +15,8 @@ import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
+import ca.frc6390.athena.hardware.device.HardwareBus;
+import ca.frc6390.athena.hardware.device.HardwarePort;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import org.junit.jupiter.api.Test;
@@ -36,6 +38,8 @@ class CtreBackendTest {
         assertTrue(backend.supports(EncoderKinds.CANCODER));
         assertTrue(backend.supports((EncoderKind) () -> "ctre:cancoder"));
         assertFalse(backend.supports((EncoderKind) () -> "rev:through-bore"));
+        assertTrue(backend.supports(EncoderDevice.of(EncoderKinds.CANCODER, 1)));
+        assertFalse(backend.supports(HardwareBus.rio().encoder(EncoderKinds.CANCODER, HardwarePort.dio(1))));
     }
 
     @Test
@@ -45,6 +49,9 @@ class CtreBackendTest {
         assertTrue(backend.supports(ImuKinds.PIGEON_2));
         assertTrue(backend.supports((ImuKind) () -> "ctre:pigeon-2"));
         assertFalse(backend.supports((ImuKind) () -> "studica:navx"));
+        assertTrue(backend.supports(ImuDevice.of(ImuKinds.PIGEON_2, 1)));
+        assertFalse(backend.supports(HardwareBus.rio().imu(ImuKinds.PIGEON_2, HardwarePort.spi(
+                ca.frc6390.athena.hardware.device.SpiPort.MXP))));
     }
 
     @Test

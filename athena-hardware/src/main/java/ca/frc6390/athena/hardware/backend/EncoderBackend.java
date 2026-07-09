@@ -16,6 +16,16 @@ public interface EncoderBackend {
     boolean supports(EncoderKind kind);
 
     /**
+     * Returns whether this backend supports the kind and physical connection in a declaration.
+     *
+     * @param device encoder declaration
+     * @return true if supported
+     */
+    default boolean supports(EncoderDevice device) {
+        return supports(device.kind());
+    }
+
+    /**
      * Creates a runtime encoder handle from a declaration.
      *
      * @param device encoder declaration

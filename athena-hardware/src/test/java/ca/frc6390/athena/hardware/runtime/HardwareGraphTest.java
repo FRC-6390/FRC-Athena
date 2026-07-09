@@ -26,9 +26,14 @@ import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
+import ca.frc6390.athena.hardware.device.HardwareBus;
+import ca.frc6390.athena.hardware.device.HardwareInterface;
+import ca.frc6390.athena.hardware.device.HardwarePort;
+import ca.frc6390.athena.hardware.device.I2cPort;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
+import ca.frc6390.athena.hardware.device.SpiPort;
 import ca.frc6390.athena.hardware.sim.SimLimit;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.hardware.sim.SimModels;
@@ -158,8 +163,30 @@ class HardwareGraphTest {
         assertThrows(NullPointerException.class, () -> ImuDevice.of(null, 1));
         assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).gearRatio(0.0));
         assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).conversion(Double.NaN));
-        assertEquals(2, EncoderDevice.of(EncoderKinds.CANCODER, 2).dioChannel());
-        assertThrows(IllegalStateException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 3).canbus("canivore").dioChannel());
+        EncoderDevice dioEncoder = HardwareBus.rio()
+                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(2));
+        assertThrows(IllegalStateException.class, dioEncoder::id);
+        assertThrows(IllegalStateException.class, dioEncoder::canbus);
+    }
+
+    @Test
+    void unifiedHardwareBusValidatesPhysicalInterfacesAtDeclarationTime() {
+        HardwareBus rio = HardwareBus.rio();
+        HardwareBus canivore = HardwareBus.can("canivore");
+
+        EncoderDevice throughBore = rio.encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(2));
+        ImuDevice navx = rio.imu(ImuKinds.NAVX, HardwarePort.spi(SpiPort.MXP));
+
+        assertInstanceOf(HardwarePort.Dio.class, throughBore.port());
+        assertInstanceOf(HardwarePort.Spi.class, navx.port());
+        assertEquals("encoder:rev_through_bore:rio:2:dio", HardwareIdentity.encoder(throughBore).key());
+        assertEquals("imu:studica_navx:rio:4:spi:mxp", HardwareIdentity.imu(navx).key());
+        assertEquals(true, rio.supports(HardwareInterface.DIO));
+        assertEquals(false, canivore.supports(HardwareInterface.DIO));
+        assertThrows(IllegalArgumentException.class,
+                () -> canivore.encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(0)));
+        assertThrows(IllegalArgumentException.class,
+                () -> canivore.imu(ImuKinds.NAVX, HardwarePort.i2c(I2cPort.MXP)));
     }
 
     @Test

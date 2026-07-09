@@ -16,6 +16,16 @@ public interface ImuBackend {
     boolean supports(ImuKind kind);
 
     /**
+     * Returns whether this backend supports the kind and physical connection in a declaration.
+     *
+     * @param device IMU declaration
+     * @return true if supported
+     */
+    default boolean supports(ImuDevice device) {
+        return supports(device.kind());
+    }
+
+    /**
      * Creates a runtime IMU handle from a declaration.
      *
      * @param device IMU declaration

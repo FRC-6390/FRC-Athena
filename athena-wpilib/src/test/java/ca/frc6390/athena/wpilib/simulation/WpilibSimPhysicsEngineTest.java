@@ -12,6 +12,7 @@ import ca.frc6390.athena.drivetrain.swerve.SwerveModuleTarget;
 import ca.frc6390.athena.drivetrain.swerve.SwerveSimModels;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.HardwareBus;
+import ca.frc6390.athena.hardware.device.HardwarePort;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
@@ -62,7 +63,8 @@ class WpilibSimPhysicsEngineTest {
     @Test
     void flywheelModelPublishesVelocityBackToAthenaHandles() {
         MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2);
-        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.REV_THROUGH_BORE, 2);
+        EncoderDevice encoder = HardwareBus.rio()
+                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(2));
         SimulationSession session = sessionWith("flywheel", SimModels.flywheel(motor)
                 .encoder(encoder)
                 .momentOfInertia(0.004));
@@ -111,7 +113,8 @@ class WpilibSimPhysicsEngineTest {
     @Test
     void elevatorModelUsesWpilibElevatorSimulationAndRange() {
         MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_FLEX_BRUSHLESS, 4);
-        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.REV_THROUGH_BORE, 4);
+        EncoderDevice encoder = HardwareBus.rio()
+                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(4));
         SimulationSession session = sessionWith("elevator", SimModels.elevator(motor)
                 .encoder(encoder)
                 .range(Range.of(0.0, 1.0)));
@@ -242,7 +245,8 @@ class WpilibSimPhysicsEngineTest {
 
     private static final class FlywheelMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 70);
-        private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.REV_THROUGH_BORE, 70);
+        private final EncoderDevice encoder = HardwareBus.rio()
+                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(7));
         @SuppressWarnings("unused")
         private final SimModel simulation = SimModels.flywheel(motor)
                 .encoder(encoder)

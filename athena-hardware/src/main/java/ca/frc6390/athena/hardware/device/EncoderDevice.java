@@ -18,8 +18,12 @@ public record EncoderDevice(
         double offset,
         EncoderUnit units) {
     public static EncoderDevice of(EncoderKind kind, int id) {
+        return connected(kind, "rio", HardwarePort.can(id));
+    }
+
+    static EncoderDevice connected(EncoderKind kind, String bus, HardwarePort port) {
         return new EncoderDevice(
-                new EncoderSource.Standalone(kind, id, "rio"),
+                new EncoderSource.Standalone(kind, bus, port),
                 false,
                 1.0,
                 1.0,
@@ -70,34 +74,38 @@ public record EncoderDevice(
 
     public int id() {
         if (source instanceof EncoderSource.Standalone standalone) {
-            return standalone.id();
+            return requireCan(standalone).id();
         }
         return motorSource().id();
     }
 
-    /**
-     * Returns this standalone encoder's roboRIO DIO channel.
-     *
-     * @return DIO channel
-     */
-    public int dioChannel() {
-        if (source instanceof EncoderSource.Standalone standalone && standalone.canbus().equals("rio")) {
-            return standalone.id();
+    public HardwarePort port() {
+        if (source instanceof EncoderSource.Standalone standalone) {
+            return standalone.port();
         }
-        throw new IllegalStateException("Encoder " + defaultName() + " is not a roboRIO DIO encoder.");
+        throw new IllegalStateException("Motor-integrated encoder " + defaultName() + " does not have a standalone port.");
+    }
+
+    public String bus() {
+        if (source instanceof EncoderSource.Standalone standalone) {
+            return standalone.bus();
+        }
+        return motorSource().canbus();
     }
 
     public String canbus() {
         if (source instanceof EncoderSource.Standalone standalone) {
-            return standalone.canbus();
+            requireCan(standalone);
+            return standalone.bus();
         }
         return motorSource().canbus();
     }
 
     public EncoderDevice canbus(String canbus) {
         if (source instanceof EncoderSource.Standalone standalone) {
+            requireCan(standalone);
             return new EncoderDevice(
-                    new EncoderSource.Standalone(standalone.kind(), standalone.id(), canbus),
+                    new EncoderSource.Standalone(standalone.kind(), canbus, standalone.port()),
                     isInverted,
                     gearRatio,
                     conversion,
@@ -148,7 +156,11 @@ public record EncoderDevice(
     }
 
     public String defaultName() {
-        return sanitize(kind().key()) + "_" + id();
+        if (source instanceof EncoderSource.Standalone standalone) {
+            return sanitize(kind().key()) + "_" + sanitize(standalone.port().identity()) + "_"
+                    + standalone.port().primaryAddress();
+        }
+        return sanitize(kind().key()) + "_" + motorSource().id();
     }
 
     private static String sanitize(String key) {
@@ -157,10 +169,11 @@ public record EncoderDevice(
 
     public sealed interface EncoderSource
             permits EncoderSource.Standalone, EncoderSource.IntegratedMotor, EncoderSource.MotorAbsolute {
-        record Standalone(EncoderKind kind, int id, String canbus) implements EncoderSource {
+        record Standalone(EncoderKind kind, String bus, HardwarePort port) implements EncoderSource {
             public Standalone {
                 Objects.requireNonNull(kind, "kind");
-                canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
+                bus = bus == null || bus.isBlank() ? "rio" : bus;
+                Objects.requireNonNull(port, "port");
             }
         }
 
@@ -182,5 +195,12 @@ public record EncoderDevice(
             return integrated.motor();
         }
         return ((EncoderSource.MotorAbsolute) source).motor();
+    }
+
+    private static HardwarePort.Can requireCan(EncoderSource.Standalone standalone) {
+        if (standalone.port() instanceof HardwarePort.Can can) {
+            return can;
+        }
+        throw new IllegalStateException("Encoder " + standalone.kind().key() + " is not connected over CAN.");
     }
 }

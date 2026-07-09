@@ -10,26 +10,48 @@ import ca.frc6390.athena.api.hardware.ImuKind;
  */
 public record ImuDevice(
         ImuKind kind,
-        int id,
-        String canbus) {
+        String bus,
+        HardwarePort port) {
     public static ImuDevice of(ImuKind kind, int id) {
-        return new ImuDevice(kind, id, "rio");
+        return connected(kind, "rio", HardwarePort.can(id));
+    }
+
+    static ImuDevice connected(ImuKind kind, String bus, HardwarePort port) {
+        return new ImuDevice(kind, bus, port);
     }
 
     public ImuDevice {
         Objects.requireNonNull(kind, "kind");
-        canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
+        bus = bus == null || bus.isBlank() ? "rio" : bus;
+        Objects.requireNonNull(port, "port");
+    }
+
+    public int id() {
+        return requireCan().id();
+    }
+
+    public String canbus() {
+        requireCan();
+        return bus;
     }
 
     public ImuDevice canbus(String canbus) {
-        return new ImuDevice(kind, id, canbus);
+        requireCan();
+        return new ImuDevice(kind, canbus, port);
     }
 
     public String defaultName() {
-        return sanitize(kind.key()) + "_" + id;
+        return sanitize(kind.key()) + "_" + sanitize(port.identity()) + "_" + port.primaryAddress();
     }
 
     private static String sanitize(String key) {
         return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
+    }
+
+    private HardwarePort.Can requireCan() {
+        if (port instanceof HardwarePort.Can can) {
+            return can;
+        }
+        throw new IllegalStateException("IMU " + kind.key() + " is not connected over CAN.");
     }
 }

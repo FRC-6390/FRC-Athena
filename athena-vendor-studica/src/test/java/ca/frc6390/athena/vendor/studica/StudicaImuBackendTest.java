@@ -9,6 +9,7 @@ import ca.frc6390.athena.api.hardware.ImuKind;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.ImuDevice;
+import ca.frc6390.athena.hardware.device.HardwarePort;
 import org.junit.jupiter.api.Test;
 
 class StudicaImuBackendTest {
@@ -19,11 +20,16 @@ class StudicaImuBackendTest {
         assertTrue(backend.supports(ImuKinds.NAVX));
         assertTrue(backend.supports((ImuKind) () -> "studica:navx"));
         assertFalse(backend.supports((ImuKind) () -> "ctre:pigeon-2"));
+        assertTrue(backend.supports(StudicaImus.navx(StudicaNavxPort.MXP_SPI)));
+        assertTrue(backend.supports(StudicaImus.navx(StudicaNavxPort.MXP_UART)));
+        assertTrue(backend.supports(StudicaImus.navx(StudicaNavxPort.USB1)));
+        assertTrue(backend.supports(StudicaImus.navx(StudicaNavxPort.I2C)));
+        assertFalse(backend.supports(ImuDevice.of(ImuKinds.NAVX, 0)));
     }
 
     @Test
     void createUsesInjectedHandleFactory() {
-        ImuDevice device = ImuDevice.of(ImuKinds.NAVX, 0);
+        ImuDevice device = StudicaImus.navx(StudicaNavxPort.MXP_SPI);
         NoopImuHandle handle = new NoopImuHandle(device);
         StudicaImuBackend backend = new StudicaImuBackend(ignored -> handle);
 
@@ -32,11 +38,11 @@ class StudicaImuBackendTest {
 
     @Test
     void namedNavxPortsCreateClearDeclarations() {
-        assertEquals(0, StudicaImus.navx(StudicaNavxPort.MXP_SPI).id());
-        assertEquals(1, StudicaImus.navx(StudicaNavxPort.MXP_UART).id());
-        assertEquals(2, StudicaImus.navx(StudicaNavxPort.USB1).id());
-        assertEquals(3, StudicaImus.navx(StudicaNavxPort.USB2).id());
-        assertEquals(4, StudicaImus.navx(StudicaNavxPort.I2C).id());
+        assertTrue(StudicaImus.navx(StudicaNavxPort.MXP_SPI).port() instanceof HardwarePort.Spi);
+        assertTrue(StudicaImus.navx(StudicaNavxPort.MXP_UART).port() instanceof HardwarePort.Serial);
+        assertEquals(1, ((HardwarePort.Usb) StudicaImus.navx(StudicaNavxPort.USB1).port()).port());
+        assertEquals(2, ((HardwarePort.Usb) StudicaImus.navx(StudicaNavxPort.USB2).port()).port());
+        assertTrue(StudicaImus.navx(StudicaNavxPort.I2C).port() instanceof HardwarePort.I2c);
         assertEquals(ImuKinds.NAVX, StudicaImus.navx(null).kind());
     }
 
