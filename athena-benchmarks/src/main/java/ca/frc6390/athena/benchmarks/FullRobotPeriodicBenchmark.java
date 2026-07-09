@@ -52,7 +52,9 @@ public class FullRobotPeriodicBenchmark {
         public void setup() {
             runtime = RobotRuntime.simulated(SimulationSession.create());
             for (int i = 0; i < 12; i++) {
-                runtime.register(new MotorMechanism(i * 4));
+                MotorMechanism mechanism = new MotorMechanism(i * 4);
+                runtime.register(mechanism);
+                runtime.request(mechanism.drive);
             }
             ca.frc6390.athena.runtime.measurement.Measurement target = Measurements.custom("target", null);
             CameraDevice camera = Cameras.photonVision("front").bindTargets(() -> List.of(target));
@@ -80,18 +82,12 @@ public class FullRobotPeriodicBenchmark {
     private static final class MotorMechanism implements Mechanism {
         private final MotorDevice a;
         private final MotorDevice b;
-        @SuppressWarnings("unused")
         private final Action drive;
 
         private MotorMechanism(int baseId) {
             a = MotorDevice.of(MotorKinds.KRAKEN_X60, baseId + 1);
             b = MotorDevice.of(MotorKinds.KRAKEN_X60, baseId + 2);
             drive = Actions.parallel(a.percent(0.25), b.percent(-0.25));
-        }
-
-        @Override
-        public Action initialState() {
-            return drive;
         }
     }
 }

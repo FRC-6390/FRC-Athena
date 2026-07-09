@@ -1,0 +1,7 @@
+.gradle/
+build/
+*.log
+
+# WPILib deploy/output artifacts
+src/main/deploy/*
+!src/main/deploy/.gitkeep

@@ -38,11 +38,7 @@ final class MechanismRuntime {
         this.hookBindings = List.copyOf(node.hooks().values());
         this.pathRuntimes = Objects.requireNonNull(pathRuntimes, "pathRuntimes");
         this.scheduler = new StateScheduler(actionContext, pathRuntimes);
-        if (node.initialState() == null) {
-            throw new IllegalStateException(
-                    "Mechanism " + mechanism.getClass().getName() + " does not declare any Action fields.");
-        }
-        this.action = node.initialState();
+        this.action = Actions.neutral();
     }
 
     static MechanismRuntime of(Mechanism mechanism, ActionContext actionContext) {

@@ -81,6 +81,7 @@ class WpilibSimPhysicsEngineTest {
                 .physicsEngine(new WpilibSimPhysicsEngine());
         RobotRuntime runtime = RobotRuntime.simulated(session).register(mechanism);
 
+        runtime.request(mechanism.initial);
         runtime.robotPeriodic(0.0, 0.02);
         runtime.simulationPeriodic(0.02, 0.2);
 
@@ -171,6 +172,7 @@ class WpilibSimPhysicsEngineTest {
                 .physicsEngine(new WpilibSimPhysicsEngine());
         RobotRuntime runtime = RobotRuntime.simulated(session).register(drive);
 
+        runtime.request(drive.initial);
         runtime.robotPeriodic(0.0, 0.02);
         runtime.simulationPeriodic(0.02, 1.0);
 
@@ -190,6 +192,7 @@ class WpilibSimPhysicsEngineTest {
                 .register(drive)
                 .localization(localization);
 
+        runtime.request(drive.initial);
         runtime.robotPeriodic(0.0, 0.02);
         runtime.simulationPeriodic(0.02, 1.0);
 

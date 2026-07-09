@@ -232,6 +232,7 @@ class RobotRuntimeTest {
         RobotRuntime runtime = RobotRuntime.using(HardwareGraph.using(BackendRegistry.of(backend)))
                 .register(mechanism);
 
+        runtime.request(mechanism.initial);
         runtime.robotPeriodic(0.0, 0.02);
         backend.handle.failRefresh = true;
         runtime.robotPeriodic(0.02, 0.02);
@@ -246,6 +247,7 @@ class RobotRuntimeTest {
         SimulationSession simulation = SimulationSession.create();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
+        runtime.request(mechanism.initial);
         runtime.periodic(
                 new ca.frc6390.athena.mechanism.core.MechanismContext(0.0, 0.0, 0.5, true, false, true),
                 new ca.frc6390.athena.mechanism.core.EventContext(
@@ -267,6 +269,7 @@ class RobotRuntimeTest {
         SimulationSession simulation = SimulationSession.create();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
+        runtime.request(mechanism.initial);
         runtime.robotPeriodic(0.0, 0.02);
         runtime.simulationPeriodic(0.02, 0.5);
 
@@ -281,6 +284,7 @@ class RobotRuntimeTest {
         CountingOutputMechanism mechanism = new CountingOutputMechanism(evaluations);
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
 
+        runtime.request(mechanism.initial);
         runtime.robotPeriodic(0.0, 0.02);
         runtime.simulationPeriodic(0.02, 0.02);
 
@@ -293,6 +297,7 @@ class RobotRuntimeTest {
         SimulationSession simulation = SimulationSession.create();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
+        runtime.request(mechanism.initial);
         runtime.robotPeriodic(0.0, 0.02);
         runtime.simulationPeriodic(0.02, 0.2);
 

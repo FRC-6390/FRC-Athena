@@ -39,6 +39,7 @@ class MechanismRuntimeTest {
                         .forTime(0.5, MOTOR.percent(0.25))
                         .then(MOTOR.voltage(6.0)));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         assertEquals(0.25, actions.motor(MOTOR).percent, 1.0e-9);
@@ -58,6 +59,7 @@ class MechanismRuntimeTest {
                         .then(Actions.until(ctx -> ctx.nowSeconds() >= 1.0, MOTOR.percent(0.6))
                                 .then(MOTOR.voltage(7.0))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         assertEquals(0.4, actions.motor(MOTOR).percent, 1.0e-9);
@@ -196,6 +198,7 @@ class MechanismRuntimeTest {
         TestMechanism mechanism = new TestMechanism(path.then(MOTOR.percent(0.9)));
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions).path(path, pathRuntime);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         runtime.periodic(contextAt(0.02), EventContext.empty());
@@ -217,6 +220,7 @@ class MechanismRuntimeTest {
                         .doOnce(() -> actions.events++)
                         .then(MOTOR.percent(0.8))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         runtime.periodic(contextAt(0.02), EventContext.empty());
@@ -231,8 +235,9 @@ class MechanismRuntimeTest {
     void childSetRoutesChildMechanismOutputToChildMotorHandle() {
         RecordingActionContext actions = new RecordingActionContext(CHILD_MOTOR);
         TestMechanism child = new TestMechanism(CHILD_MOTOR.percent(0.7));
-        TestMechanism parent = new TestMechanism(Actions.set().set(child, child.initialState()));
+        TestMechanism parent = new TestMechanism(Actions.set().set(child, child.initial));
         MechanismRuntime runtime = MechanismRuntime.of(parent, actions);
+        runtime.set(parent.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
@@ -295,9 +300,11 @@ class MechanismRuntimeTest {
     void robotRuntimeCanUseHardwareGraphAsRuntimeActionContext() {
         RecordingMotorBackend backend = new RecordingMotorBackend();
         HardwareGraph hardware = HardwareGraph.using(BackendRegistry.of(backend));
+        TestMechanism mechanism = new TestMechanism(MOTOR.percent(0.55));
         MechanismScheduler runtime = MechanismScheduler.create(hardware)
-                .register(new TestMechanism(MOTOR.percent(0.55)));
+                .register(mechanism);
 
+        runtime.request(mechanism.initial);
         runtime.robotPeriodic(1.0, 0.02);
 
         assertEquals(0.55, backend.handle.percent, 1.0e-9);
@@ -313,6 +320,7 @@ class MechanismRuntimeTest {
                 .pid(0.2, 0.0, 0.0);
         TestMechanism mechanism = new TestMechanism(control.position(2.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
@@ -326,6 +334,7 @@ class MechanismRuntimeTest {
                 .ff(0.5, 2.0, 1.0);
         TestMechanism mechanism = new TestMechanism(control.velocity(3.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
@@ -339,6 +348,7 @@ class MechanismRuntimeTest {
                 .loop(binding -> context -> ControlOutput.percent(context.dtSeconds()));
         TestMechanism mechanism = new TestMechanism(control.position(1.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(new MechanismContext(0.0, 0.0, 0.1, true, false, false), EventContext.empty());
 
@@ -353,6 +363,7 @@ class MechanismRuntimeTest {
                 .loop(binding -> context -> ControlOutput.voltage(2.0));
         TestMechanism mechanism = new TestMechanism(control.velocity(1.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
@@ -366,6 +377,7 @@ class MechanismRuntimeTest {
         ControlBinding control = Controls.position(MOTOR).loop(loop);
         TestMechanism mechanism = new TestMechanism(control.position(1.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         runtime.periodic(contextAt(0.02), EventContext.empty());
@@ -385,6 +397,7 @@ class MechanismRuntimeTest {
                 .pid(0.2, 0.0, 0.0);
         TestMechanism mechanism = new TestMechanism(control.position(2.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
@@ -403,6 +416,7 @@ class MechanismRuntimeTest {
                 .pid(0.2, 0.0, 0.0);
         TestMechanism mechanism = new TestMechanism(control.position(2.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
@@ -420,6 +434,7 @@ class MechanismRuntimeTest {
                 .loop(ControlLoops.arbitraryFeedforward(binding -> context -> ControlOutput.voltage(1.5)));
         TestMechanism mechanism = new TestMechanism(control.velocity(3.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
@@ -437,6 +452,7 @@ class MechanismRuntimeTest {
                 .loop(binding -> context -> ControlOutput.percent(0.25));
         TestMechanism mechanism = new TestMechanism(control.position(2.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
@@ -457,6 +473,7 @@ class MechanismRuntimeTest {
                 .pid(0.1, 0.0, 0.0);
         TestMechanism mechanism = new TestMechanism(hybrid.velocity(3.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         runtime.set(deviceOnly.velocity(3.0));
@@ -474,6 +491,7 @@ class MechanismRuntimeTest {
         MechanismScheduler runtime = MechanismScheduler.create(session.hardwareGraph())
                 .register(mechanism);
 
+        runtime.request(mechanism.initial);
         runtime.simulationPeriodic(0.0, 0.2);
         session.step(0.2);
 

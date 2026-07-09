@@ -135,7 +135,15 @@ tasks.register('publishToLocalWpilib') {
     dependsOn tasks.named('installLocalWpilibVendordep')
 }
 
-def exampleProjects = ['blank', 'tank-drive', 'swerve-drive']
+def exampleProjects = [
+        'tank-drive',
+        'swerve-drive',
+        'auto-following',
+        'localization-setups',
+        'mechanism-examples',
+        'rule-examples',
+        'custom-controls'
+]
 def exampleGradleCommand = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('win')
         ? 'gradlew.bat'
         : './gradlew'

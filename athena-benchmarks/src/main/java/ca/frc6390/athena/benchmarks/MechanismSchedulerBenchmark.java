@@ -49,7 +49,9 @@ public class MechanismSchedulerBenchmark {
             SimulationSession session = SimulationSession.create();
             runtime = MechanismScheduler.create(session.hardwareGraph());
             for (int i = 0; i < 32; i++) {
-                runtime.register(new MotorMechanism(i * 8));
+                MotorMechanism mechanism = new MotorMechanism(i * 8);
+                runtime.register(mechanism);
+                runtime.request(mechanism.drive);
             }
             runtime.robotPeriodic(0.0, 0.02);
         }
@@ -73,7 +75,6 @@ public class MechanismSchedulerBenchmark {
         private final MotorDevice b;
         private final MotorDevice c;
         private final MotorDevice d;
-        @SuppressWarnings("unused")
         public final Action drive;
 
         private MotorMechanism(int baseId) {
@@ -86,11 +87,6 @@ public class MechanismSchedulerBenchmark {
                     b.percent(0.35),
                     c.percent(-0.35),
                     d.percent(-0.35));
-        }
-
-        @Override
-        public Action initialState() {
-            return drive;
         }
     }
 }

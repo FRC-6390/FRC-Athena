@@ -25,8 +25,6 @@ public final class DriveTrain implements Mechanism {
     public final SwerveModule backLeft = module(5, 6, 13);
     public final SwerveModule backRight = module(7, 8, 14);
 
-    public final Action idle = Actions.neutral();
-
     public Action drive(double forward, double strafe, double rotation) {
         SwerveModuleState[] states = kinematics().toSwerveModuleStates(new ChassisSpeeds(
                 clamp(forward) * MAX_SPEED_METERS_PER_SECOND,
@@ -39,11 +37,6 @@ public final class DriveTrain implements Mechanism {
                 .set(frontRight, frontRight.target(target(states[1])))
                 .set(backLeft, backLeft.target(target(states[2])))
                 .set(backRight, backRight.target(target(states[3])));
-    }
-
-    @Override
-    public Action initialState() {
-        return idle;
     }
 
     private static SwerveModule module(int driveMotorId, int steerMotorId, int encoderId) {

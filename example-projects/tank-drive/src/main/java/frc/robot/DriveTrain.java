@@ -15,7 +15,6 @@ public final class DriveTrain implements Mechanism {
     public final MotorDevice rightLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 3).inverted();
     public final MotorDevice rightFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 4).inverted();
 
-    public final Action idle = Actions.neutral();
     public final Action drive = Actions.parallel(
             leftLeader.percent(this::leftPercent),
             leftFollower.percent(this::leftPercent),
@@ -25,11 +24,6 @@ public final class DriveTrain implements Mechanism {
     public void arcade(double forward, double turn) {
         this.forward = clamp(forward);
         this.turn = clamp(turn);
-    }
-
-    @Override
-    public Action initialState() {
-        return idle;
     }
 
     private double leftPercent() {

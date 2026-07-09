@@ -17,7 +17,6 @@ import java.util.Objects;
  */
 public abstract class SwerveModule implements MechanismTemplate {
     private final SwerveModuleModel model;
-    private final Action idle = Actions.neutral();
     public final MotorSlot<SwerveModule> drive = Slots.motor(this, "drive", this::configureIfReady);
     public final MotorSlot<SwerveModule> steer = Slots.motor(this, "steer", this::configureIfReady);
     public final EncoderSlot<SwerveModule> angle = Slots.encoder(this, "angle", this::configureIfReady);
@@ -56,10 +55,5 @@ public abstract class SwerveModule implements MechanismTemplate {
         return Actions.parallel(
                 driveVelocity.velocity(target.speedMetersPerSecond()),
                 steerPosition.position(target.angleRotations()));
-    }
-
-    @Override
-    public Action initialState() {
-        return idle;
     }
 }
