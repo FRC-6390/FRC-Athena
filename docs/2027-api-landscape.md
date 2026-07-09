@@ -250,7 +250,7 @@ Bindings connect robot declarations to runtime behavior.
 
 Actions are the main public behavior API and stay public.
 
-Robot-facing code should request an Action directly with `action.request()` or through the one-argument robot helper. The runtime infers ownership from registered mechanism Action fields. Explicit `set(mechanism, action)` routing is compatibility/internal plumbing, not the preferred call-site shape.
+Robot-facing code should request an Action directly with `action.request()` or through the one-argument robot helper. The runtime infers ownership from registered mechanism Action fields.
 
 Control Actions execute through the same output path as motor Actions. `ControlBinding` loop runtimes reset on first use and when the requested output kind or target changes. Multiple loop outputs compose additively; mixed percent/voltage outputs promote percent to nominal 12V voltage so PID plus feedforward produces one applied voltage request.
 
@@ -324,7 +324,7 @@ Runtimes execute. Robot code should touch one public runtime host, not a collect
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |
 | `MechanismRegistry` | `RobotRuntime` | RENAME | Rebuilt wraps it as `AthenaRobot`; make that library-owned. |
-| `MechanismRuntime` | `MechanismRuntime` | KEEP INTERNAL | Execution detail required by `RobotRuntime`. |
+| `MechanismRuntime` | package-private `MechanismRuntime` | INTERNAL | Execution detail required by root `RobotRuntime`; not public API. |
 | `MechanismController` | removed | REMOVE | Not used by Rebuilt. |
 | `ControlLoopRuntime` | `ControlLoopRuntime` | KEEP INTERNAL | Execution detail required by `ControlLoop`. |
 | missing worker policy | `RuntimeWorker`, `RuntimeWorkers` | ADD | Optional root-owned worker configuration for snapshot tasks; default runtime stays single-threaded. |

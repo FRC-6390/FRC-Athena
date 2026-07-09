@@ -264,11 +264,21 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
         private boolean active;
         private boolean risingLatched;
         private boolean fallingLatched;
+        private long risingGeneration;
+        private long fallingGeneration;
+        private long observedRisingGeneration;
+        private long observedFallingGeneration;
 
         private synchronized void sample(boolean nextActive) {
             if (sampled) {
-                risingLatched |= !active && nextActive;
-                fallingLatched |= active && !nextActive;
+                if (!active && nextActive) {
+                    risingLatched = true;
+                    risingGeneration++;
+                }
+                if (active && !nextActive) {
+                    fallingLatched = true;
+                    fallingGeneration++;
+                }
             }
             active = nextActive;
             sampled = true;
@@ -283,16 +293,26 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
         }
 
         private synchronized boolean risingLatched() {
+            if (risingLatched) {
+                observedRisingGeneration = risingGeneration;
+            }
             return risingLatched;
         }
 
         private synchronized boolean fallingLatched() {
+            if (fallingLatched) {
+                observedFallingGeneration = fallingGeneration;
+            }
             return fallingLatched;
         }
 
         private synchronized void clearLatchedEdges() {
-            risingLatched = false;
-            fallingLatched = false;
+            if (observedRisingGeneration >= risingGeneration) {
+                risingLatched = false;
+            }
+            if (observedFallingGeneration >= fallingGeneration) {
+                fallingLatched = false;
+            }
         }
     }
 }

@@ -2,11 +2,11 @@ package ca.frc6390.athena.vision.config;
 
 import ca.frc6390.athena.api.hardware.CameraKind;
 import ca.frc6390.athena.api.hardware.CameraKinds;
-import ca.frc6390.athena.vision.ref.CameraDevice;
-import ca.frc6390.athena.vision.ref.GenericCameraDevice;
-import ca.frc6390.athena.vision.ref.HeliosDevice;
-import ca.frc6390.athena.vision.ref.LimelightDevice;
-import ca.frc6390.athena.vision.ref.PhotonVisionDevice;
+import ca.frc6390.athena.vision.device.CameraDevice;
+import ca.frc6390.athena.vision.device.GenericCameraDevice;
+import ca.frc6390.athena.vision.device.HeliosDevice;
+import ca.frc6390.athena.vision.device.LimelightDevice;
+import ca.frc6390.athena.vision.device.PhotonVisionDevice;
 
 /**
  * Entry points for camera declarations.

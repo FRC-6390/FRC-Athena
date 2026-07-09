@@ -1,7 +1,7 @@
 package ca.frc6390.athena.vision.runtime;
 
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
-import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.device.CameraDevice;
 
 /**
  * Optional vision simulation bridge backed by a vendor implementation.

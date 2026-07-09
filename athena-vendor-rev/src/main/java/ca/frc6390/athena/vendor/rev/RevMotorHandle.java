@@ -1,5 +1,8 @@
 package ca.frc6390.athena.vendor.rev;
 
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
+import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -8,8 +11,10 @@ import com.revrobotics.AbsoluteEncoder;
 import com.revrobotics.PersistMode;
 import com.revrobotics.RelativeEncoder;
 import com.revrobotics.ResetMode;
+import com.revrobotics.spark.ClosedLoopSlot;
 import com.revrobotics.spark.SparkBase;
 import com.revrobotics.spark.SparkBase.ControlType;
+import com.revrobotics.spark.SparkClosedLoopController.ArbFFUnits;
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
@@ -32,6 +37,7 @@ public final class RevMotorHandle implements MotorHandle {
     private double velocityRotationsPerSecond;
     private double absolutePositionRotations;
     private double absoluteVelocityRotationsPerSecond;
+    private MotorClosedLoopConfig appliedClosedLoopConfig;
 
     /**
      * Creates a REV motor handle using real REVLib Spark controllers.
@@ -96,8 +102,35 @@ public final class RevMotorHandle implements MotorHandle {
     }
 
     @Override
+    public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
+        MotorClosedLoopRequest safeRequest = safeRequest(request);
+        applyClosedLoopConfig(safeRequest.config());
+        controller.setPositionTarget(
+                finiteOrZero(rotations),
+                safeRequest.config().slot(),
+                finiteOrZero(safeRequest.arbitraryFeedforwardVolts()));
+    }
+
+    @Override
     public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
         controller.setVelocityTarget(finiteOrZero(rotationsPerSecond));
+    }
+
+    @Override
+    public void setVelocityTargetRotationsPerSecond(
+            double rotationsPerSecond,
+            MotorClosedLoopRequest request) {
+        MotorClosedLoopRequest safeRequest = safeRequest(request);
+        applyClosedLoopConfig(safeRequest.config());
+        controller.setVelocityTarget(
+                finiteOrZero(rotationsPerSecond),
+                safeRequest.config().slot(),
+                finiteOrZero(safeRequest.arbitraryFeedforwardVolts()));
+    }
+
+    @Override
+    public MotorControlCapabilities controlCapabilities() {
+        return new MotorControlCapabilities(true, true, true, true, false, false, 4);
     }
 
     @Override
@@ -135,6 +168,18 @@ public final class RevMotorHandle implements MotorHandle {
         }
     }
 
+    private MotorClosedLoopRequest safeRequest(MotorClosedLoopRequest request) {
+        return request == null ? MotorClosedLoopRequest.device(MotorClosedLoopConfig.empty()) : request;
+    }
+
+    private void applyClosedLoopConfig(MotorClosedLoopConfig config) {
+        if (config.equals(appliedClosedLoopConfig)) {
+            return;
+        }
+        controller.configureClosedLoop(device, options, config);
+        appliedClosedLoopConfig = config;
+    }
+
     private static SparkController createController(MotorDevice device) {
         boolean brushless = device.kind() == MotorKinds.SPARK_MAX_BRUSHLESS
                 || device.kind() == MotorKinds.SPARK_FLEX_BRUSHLESS
@@ -167,6 +212,20 @@ public final class RevMotorHandle implements MotorHandle {
         void setPositionTarget(double rotations);
 
         void setVelocityTarget(double rotationsPerSecond);
+
+        default void setPositionTarget(double rotations, int slot, double arbitraryFeedforwardVolts) {
+            setPositionTarget(rotations);
+        }
+
+        default void setVelocityTarget(double rotationsPerSecond, int slot, double arbitraryFeedforwardVolts) {
+            setVelocityTarget(rotationsPerSecond);
+        }
+
+        default void configureClosedLoop(
+                MotorDevice device,
+                RevMotorOptions options,
+                MotorClosedLoopConfig closedLoopConfig) {
+        }
 
         void stop();
 
@@ -228,6 +287,44 @@ public final class RevMotorHandle implements MotorHandle {
         }
 
         @Override
+        public void setPositionTarget(double rotations, int slot, double arbitraryFeedforwardVolts) {
+            spark.getClosedLoopController().setSetpoint(
+                    rotations,
+                    ControlType.kPosition,
+                    closedLoopSlot(slot),
+                    arbitraryFeedforwardVolts,
+                    ArbFFUnits.kVoltage);
+        }
+
+        @Override
+        public void setVelocityTarget(double rotationsPerSecond, int slot, double arbitraryFeedforwardVolts) {
+            spark.getClosedLoopController().setSetpoint(
+                    rotationsPerSecond * 60.0,
+                    ControlType.kVelocity,
+                    closedLoopSlot(slot),
+                    arbitraryFeedforwardVolts,
+                    ArbFFUnits.kVoltage);
+        }
+
+        @Override
+        public void configureClosedLoop(
+                MotorDevice device,
+                RevMotorOptions options,
+                MotorClosedLoopConfig closedLoopConfig) {
+            SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
+            ClosedLoopSlot slot = closedLoopSlot(closedLoopConfig.slot());
+            config.closedLoop
+                    .pid(closedLoopConfig.p(), closedLoopConfig.i(), closedLoopConfig.d(), slot)
+                    .iZone(closedLoopConfig.iZone(), slot)
+                    .allowedClosedLoopError(closedLoopConfig.tolerance(), slot);
+            config.closedLoop.feedForward
+                    .kS(closedLoopConfig.staticFeedforward(), slot)
+                    .kV(closedLoopConfig.velocityFeedforward(), slot)
+                    .kG(closedLoopConfig.gravityFeedforward(), slot);
+            spark.configure(config, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters);
+        }
+
+        @Override
         public void stop() {
             spark.stopMotor();
         }
@@ -258,6 +355,10 @@ public final class RevMotorHandle implements MotorHandle {
 
         private AbsoluteEncoder absoluteEncoder() {
             return spark.getAbsoluteEncoder();
+        }
+
+        private static ClosedLoopSlot closedLoopSlot(int slot) {
+            return ClosedLoopSlot.fromInt(Math.max(0, Math.min(3, slot)));
         }
     }
 }

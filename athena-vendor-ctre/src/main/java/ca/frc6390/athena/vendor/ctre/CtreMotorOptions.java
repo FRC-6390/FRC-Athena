@@ -1,5 +1,7 @@
 package ca.frc6390.athena.vendor.ctre;
 
+import ca.frc6390.athena.hardware.backend.FocPolicy;
+
 /**
  * CTRE-specific motor options stored in Athena motor declarations.
  */
@@ -7,6 +9,7 @@ public final class CtreMotorOptions {
     private int supplyCurrentLimitAmps;
     private int statorCurrentLimitAmps;
     private int torqueCurrentLimitAmps;
+    private FocPolicy focPolicy = FocPolicy.DISABLED;
 
     /**
      * Sets supply current limit.
@@ -42,6 +45,17 @@ public final class CtreMotorOptions {
     }
 
     /**
+     * Sets desired FOC behavior for voltage closed-loop requests.
+     *
+     * @param policy FOC policy
+     * @return this options object
+     */
+    public CtreMotorOptions foc(FocPolicy policy) {
+        focPolicy = policy == null ? FocPolicy.DISABLED : policy;
+        return this;
+    }
+
+    /**
      * Returns supply current limit.
      *
      * @return amps, or zero when unset
@@ -66,6 +80,15 @@ public final class CtreMotorOptions {
      */
     public int torqueCurrentLimitAmps() {
         return torqueCurrentLimitAmps;
+    }
+
+    /**
+     * Returns configured FOC policy.
+     *
+     * @return FOC policy
+     */
+    public FocPolicy focPolicy() {
+        return focPolicy;
     }
 
     private int sanitize(int amps) {

@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.Measurements;
 import ca.frc6390.athena.vision.config.Cameras;
-import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.device.CameraDevice;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

@@ -28,6 +28,12 @@ On macOS/Linux:
 
 `test` runs unit tests. `check` runs verification and tests. `build` compiles, checks, and packages every module.
 
+For runtime performance work, run the JMH benchmarks with GC allocation profiling:
+
+```powershell
+.\gradlew.bat :athena-benchmarks:jmhGc
+```
+
 ## Local Development
 
 Publish local snapshots to Maven Local when testing Athena from a robot project on the same machine:
@@ -124,4 +130,4 @@ The Athena vendor adapter artifacts are included by the single Athena vendordep,
 
 Mechanisms are the main robot behavior abstraction. Swerve is not a special runtime graph anymore: a drivetrain should be a normal `Mechanism`, and swerve modules are normal mechanism components. Hardware declarations resolve through `HardwareGraph`; vendor modules provide backend implementations through service loading.
 
-Simulation runs through the normal `RobotRuntime` with `SimulationSession` selecting simulated hardware backends. The in-memory runner covers basic handle/model stepping, and `athena-wpilib` provides WPILib-backed motor, flywheel, arm, elevator, battery, and swerve pose simulation without leaking WPILib sim classes into robot mechanisms.
+Simulation runs through the normal `RobotRuntime` with `SimulationSession` selecting simulated hardware backends. The in-memory runner covers basic handle/model stepping, and `athena-wpilib` provides WPILib-backed motor, flywheel, arm, elevator, battery, and swerve pose simulation without leaking WPILib sim classes into robot mechanisms. Robot actions are evaluated by the normal runtime tick; simulation periodic advances physics from the already-applied hardware commands.

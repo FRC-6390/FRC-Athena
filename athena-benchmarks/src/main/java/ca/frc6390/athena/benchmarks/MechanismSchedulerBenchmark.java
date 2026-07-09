@@ -20,8 +20,8 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.core.MechanismScheduler;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
-import ca.frc6390.athena.mechanism.core.RobotRuntime;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 
 /**
@@ -38,7 +38,7 @@ public class MechanismSchedulerBenchmark {
      */
     @State(Scope.Thread)
     public static class RuntimeState {
-        private RobotRuntime runtime;
+        private MechanismScheduler runtime;
         private double nowSeconds;
 
         /**
@@ -47,7 +47,7 @@ public class MechanismSchedulerBenchmark {
         @Setup
         public void setup() {
             SimulationSession session = SimulationSession.create();
-            runtime = RobotRuntime.create(session.hardwareGraph());
+            runtime = MechanismScheduler.create(session.hardwareGraph());
             for (int i = 0; i < 32; i++) {
                 runtime.register(new MotorMechanism(i * 8));
             }

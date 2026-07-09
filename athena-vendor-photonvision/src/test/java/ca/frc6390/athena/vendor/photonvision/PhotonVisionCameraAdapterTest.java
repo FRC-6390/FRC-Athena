@@ -14,8 +14,8 @@ import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
 import ca.frc6390.athena.vision.config.Cameras;
-import ca.frc6390.athena.vision.ref.PhotonVisionDevice;
-import ca.frc6390.athena.vision.ref.PhotonVisionPoseSignal;
+import ca.frc6390.athena.vision.device.PhotonVisionDevice;
+import ca.frc6390.athena.vision.signal.PhotonVisionPoseSignal;
 
 class PhotonVisionCameraAdapterTest {
     @Test

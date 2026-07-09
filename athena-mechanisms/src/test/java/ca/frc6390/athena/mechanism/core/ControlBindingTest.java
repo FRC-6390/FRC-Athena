@@ -24,4 +24,19 @@ class ControlBindingTest {
         assertEquals(List.of(leader, follower), motors);
         assertThrows(UnsupportedOperationException.class, () -> motors.add(MotorDevice.of(MotorKinds.KRAKEN_X60, 3)));
     }
+
+    @Test
+    void slotIsClampedAndPreservedAcrossBindingUpdates() {
+        MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
+        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
+
+        ControlBinding control = Controls.position(leader)
+                .slot(-1)
+                .follower(follower)
+                .slot(3)
+                .pid(0.1, 0.0, 0.0);
+
+        assertEquals(3, control.slot());
+        assertEquals(List.of(leader, follower), control.motors());
+    }
 }

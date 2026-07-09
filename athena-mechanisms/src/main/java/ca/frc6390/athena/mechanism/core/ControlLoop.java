@@ -15,6 +15,15 @@ public interface ControlLoop {
     ControlLoopRuntime bind(ControlLoopBinding binding);
 
     /**
+     * Returns how this loop can be routed.
+     *
+     * @return control loop role
+     */
+    default ControlLoopRole role() {
+        return ControlLoopRole.SOFTWARE_OUTPUT;
+    }
+
+    /**
      * Returns declarations this loop depends on.
      *
      * @return dependent declarations

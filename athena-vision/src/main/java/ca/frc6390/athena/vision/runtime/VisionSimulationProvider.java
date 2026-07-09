@@ -1,6 +1,6 @@
 package ca.frc6390.athena.vision.runtime;
 
-import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.device.CameraDevice;
 import java.util.List;
 
 /**

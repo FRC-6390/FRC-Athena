@@ -9,6 +9,8 @@ import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
@@ -132,6 +134,27 @@ class RevBackendTest {
         assertEquals(2, controller.absoluteVelocityReads);
     }
 
+    @Test
+    void motorClosedLoopConfigIsAppliedOnlyWhenChanged() {
+        RecordingSparkController controller = new RecordingSparkController();
+        RevMotorHandle handle = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2),
+                new RevMotorOptions(),
+                controller);
+        MotorClosedLoopConfig config = new MotorClosedLoopConfig(
+                1, 0.2, 0.0, 0.01, 0.0, 0.0, 0.1, 0.2, 0.3, null);
+        MotorClosedLoopRequest request = MotorClosedLoopRequest.hybrid(config, 1.5);
+
+        handle.setVelocityTargetRotationsPerSecond(2.0, request);
+        handle.setVelocityTargetRotationsPerSecond(3.0, request);
+
+        assertEquals(1, controller.configureClosedLoopCalls);
+        assertEquals(config, controller.closedLoopConfig);
+        assertEquals(3.0, controller.velocityTarget, 1.0e-9);
+        assertEquals(1, controller.slot);
+        assertEquals(1.5, controller.arbitraryFeedforwardVolts, 1.0e-9);
+    }
+
     private static final class RecordingSparkController implements RevMotorHandle.SparkController {
         private int configureCalls;
         private MotorDevice device;
@@ -140,10 +163,15 @@ class RevBackendTest {
         private int velocityReads;
         private int absolutePositionReads;
         private int absoluteVelocityReads;
+        private int configureClosedLoopCalls;
         private double position;
         private double velocity;
         private double absolutePosition;
         private double absoluteVelocity;
+        private double velocityTarget;
+        private double arbitraryFeedforwardVolts;
+        private int slot;
+        private MotorClosedLoopConfig closedLoopConfig;
 
         @Override
         public void configure(MotorDevice device, RevMotorOptions options) {
@@ -163,6 +191,22 @@ class RevBackendTest {
 
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {}
+
+        @Override
+        public void setVelocityTarget(double rotationsPerSecond, int slot, double arbitraryFeedforwardVolts) {
+            velocityTarget = rotationsPerSecond;
+            this.slot = slot;
+            this.arbitraryFeedforwardVolts = arbitraryFeedforwardVolts;
+        }
+
+        @Override
+        public void configureClosedLoop(
+                MotorDevice device,
+                RevMotorOptions options,
+                MotorClosedLoopConfig closedLoopConfig) {
+            configureClosedLoopCalls++;
+            this.closedLoopConfig = closedLoopConfig;
+        }
 
         @Override
         public void stop() {}

@@ -6,19 +6,20 @@ import ca.frc6390.athena.commands.CommandGraph;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.localization.ref.LocalizationPipeline;
+import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import ca.frc6390.athena.mechanism.core.LifecyclePhase;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
+import ca.frc6390.athena.mechanism.core.MechanismScheduler;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
 import ca.frc6390.athena.runtime.measurement.MeasurementSnapshot;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
-import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.runtime.VisionGraph;
 import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulations;
@@ -36,7 +37,7 @@ import java.util.concurrent.ScheduledExecutorService;
 public final class RobotRuntime {
     private final HardwareGraph hardwareGraph;
     private final SimulationSession simulationSession;
-    private final ca.frc6390.athena.mechanism.core.RobotRuntime mechanisms;
+    private final MechanismScheduler mechanisms;
     private final CommandGraph commands = new CommandGraph();
     private final List<AutoRuntime> autos = new ArrayList<>();
     private final List<PathGraph> pathGraphs = new ArrayList<>();
@@ -51,7 +52,7 @@ public final class RobotRuntime {
     private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
         this.hardwareGraph = Objects.requireNonNull(hardwareGraph, "hardwareGraph");
         this.simulationSession = simulationSession;
-        mechanisms = ca.frc6390.athena.mechanism.core.RobotRuntime.create(hardwareGraph);
+        mechanisms = MechanismScheduler.create(hardwareGraph);
     }
 
     /**
@@ -344,18 +345,6 @@ public final class RobotRuntime {
     }
 
     /**
-     * Sets a mechanism Action.
-     *
-     * @param mechanism mechanism
-     * @param Action Action
-     * @return this runtime
-     */
-    public RobotRuntime set(Mechanism mechanism, Action Action) {
-        mechanisms.set(mechanism, Action);
-        return this;
-    }
-
-    /**
      * Requests an Action owned by a registered mechanism.
      *
      * @param Action Action
@@ -422,16 +411,15 @@ public final class RobotRuntime {
     }
 
     /**
-     * Runs simulation periodic.
+     * Steps the simulation session without running robot mechanisms again.
      *
      * @param nowSeconds timestamp
      * @param dtSeconds timestep
-     * @return mechanism outputs
+     * @return no mechanism outputs
      */
     public List<ResolvedOutput> simulationPeriodic(double nowSeconds, double dtSeconds) {
-        List<ResolvedOutput> outputs = periodic(nowSeconds, dtSeconds, LifecycleMode.SIMULATION, true, false, true);
         publishSimulationStep(nowSeconds, dtSeconds, true, false);
-        return outputs;
+        return List.of();
     }
 
     /**

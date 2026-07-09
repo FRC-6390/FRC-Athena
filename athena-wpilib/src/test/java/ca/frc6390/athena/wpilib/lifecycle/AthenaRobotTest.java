@@ -31,11 +31,10 @@ class AthenaRobotTest {
         clock.set(10.10);
         lifecycle.simulationPeriodic();
 
-        assertEquals(4, calls.size());
+        assertEquals(3, calls.size());
         assertCall(calls.get(0), LifecycleMode.ROBOT, LifecyclePhase.INIT, true, false, false, 0.02);
         assertCall(calls.get(1), LifecycleMode.DISABLED, LifecyclePhase.PERIODIC, false, false, false, 0.03);
         assertCall(calls.get(2), LifecycleMode.AUTONOMOUS, LifecyclePhase.PERIODIC, true, true, false, 0.02);
-        assertCall(calls.get(3), LifecycleMode.SIMULATION, LifecyclePhase.PERIODIC, true, false, true, 0.03);
     }
 
     @Test

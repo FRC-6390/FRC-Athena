@@ -182,6 +182,27 @@ class HardwareGraphTest {
     }
 
     @Test
+    void digitalInputCleanupDoesNotClearNewlySampledEdges() {
+        boolean[] raw = {false};
+        DigitalInputDevice input = DigitalInputDevice.rio(8).bind(() -> raw[0]);
+
+        input.sample();
+        raw[0] = true;
+        input.sample();
+        assertEquals(true, input.risingLatched());
+
+        raw[0] = false;
+        input.sample();
+        raw[0] = true;
+        input.sample();
+        input.clearLatchedEdges();
+
+        assertEquals(true, input.risingLatched());
+        input.clearLatchedEdges();
+        assertEquals(false, input.risingLatched());
+    }
+
+    @Test
     void simModelsComposeMotorsEncodersRangesLimitsAndDependencies() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 11);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);

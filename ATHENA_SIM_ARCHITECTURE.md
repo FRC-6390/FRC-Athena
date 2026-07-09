@@ -99,6 +99,8 @@ if (RobotBase.isSimulation()) {
 
 Tests can force simulation directly with a session/harness even when WPILib simulation detection is unavailable.
 
+Normal robot periodic still owns action, hook, command, vision, and localization evaluation. WPILib simulation periodic only advances the selected `SimulationSession` physics from the hardware commands already applied by the normal runtime tick; it must not execute mechanisms a second time.
+
 ## Pose And Drivetrain State
 
 `SimulationSession` owns the provider-neutral robot pose as a `PoseSnapshot`. Tests and future WPILib adapters can reset/read that pose without leaking `Pose2d`, `Field2d`, or WPILib simulation classes into Athena mechanism code.
@@ -130,6 +132,10 @@ Whole-drivetrain pose simulation is declared as Athena metadata too. A rectangul
 
 Vision simulation uses Athena-owned field metadata through `VisionSimulationField` and `VisionSimulationTarget`. A `SimulationSession` can be configured with `visionField(...)`; root runtime camera discovery passes that field into optional vision simulation providers. PhotonVision support binds unbound Athena camera declarations to deterministic target and pose measurements from that field, while native Photon simulation object creation is opt-in with `-Dathena.photonvision.sim.native=true` so teams can avoid vendor sim startup failures when they only need Athena measurements.
 
+## Scoped Digital Inputs
+
+Digital input declarations remain real hardware declarations. In simulation, `SimulationSession` owns a scoped digital input runtime that binds those declarations to session-local `SimDigitalInputHandle` state. Root `RobotRuntime.simulated(session)` evaluates mechanisms inside that scope, so two sessions can use the same DIO declaration without leaking raw values or latched signal edges into each other. Manual `DigitalInputDevice.bindRuntime(...)` remains a simple non-session helper for tests and direct bindings.
+
 ```java
 List<SimModel> swerveSim = SwerveSimModels.drive(
         0.58,
@@ -150,6 +156,7 @@ When the drive marker is registered in a `SimulationSession`, module speed/angle
 - `athena-simulation` owns generic in-memory handle/model stepping.
 - `athena-wpilib` owns WPILib-backed motor, flywheel, arm, elevator, battery, and swerve pose simulation.
 - `AthenaRobot` creates a simulation-backed `RobotRuntime` under WPILib simulation.
+- Simulation periodic steps physics only; robot actions are evaluated once through the normal runtime path.
 - Vision simulation is bridged through provider discovery and currently uses PhotonVision when that vendor dependency is present.
 
 Remaining coverage work is test depth and tuning: broaden real-kind backend coverage, expand mechanism physics assertions, add more whole-robot sim fixtures, and keep benchmark coverage growing around large robot projects.

@@ -1,9 +1,15 @@
 package ca.frc6390.athena.vendor.ctre;
 
+import ca.frc6390.athena.hardware.backend.FocPolicy;
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
+import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.StatusCode;
+import com.ctre.phoenix6.configs.SlotConfigs;
 import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -22,6 +28,8 @@ public final class CtreMotorHandle implements MotorHandle {
     private boolean inputsFresh;
     private double positionRotations;
     private double velocityRotationsPerSecond;
+    private MotorClosedLoopConfig appliedClosedLoopConfig;
+    private boolean focDisabledAfterLicenseFault;
 
     /**
      * Creates a CTRE motor handle using a real Phoenix 6 TalonFX-family controller.
@@ -84,8 +92,67 @@ public final class CtreMotorHandle implements MotorHandle {
     }
 
     @Override
+    public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
+        MotorClosedLoopRequest safeRequest = safeRequest(request);
+        applyClosedLoopConfig(safeRequest.config());
+        FocPolicy focPolicy = effectiveFocPolicy(safeRequest.config());
+        boolean focRequested = enableFoc(focPolicy);
+        boolean licenseFault = controller.setPositionTarget(
+                finiteOrZero(rotations),
+                safeRequest.config().slot(),
+                finiteOrZero(safeRequest.arbitraryFeedforwardVolts()),
+                focRequested);
+        if (licenseFault && focRequested) {
+            if (focPolicy == FocPolicy.REQUIRE) {
+                throw new IllegalStateException("FOC is required but not licensed for " + device.defaultName());
+            }
+            if (focPolicy == FocPolicy.ENABLE_IF_AVAILABLE) {
+                focDisabledAfterLicenseFault = true;
+                controller.setPositionTarget(
+                        finiteOrZero(rotations),
+                        safeRequest.config().slot(),
+                        finiteOrZero(safeRequest.arbitraryFeedforwardVolts()),
+                        false);
+            }
+        }
+    }
+
+    @Override
     public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
         controller.setVelocityTarget(finiteOrZero(rotationsPerSecond));
+    }
+
+    @Override
+    public void setVelocityTargetRotationsPerSecond(
+            double rotationsPerSecond,
+            MotorClosedLoopRequest request) {
+        MotorClosedLoopRequest safeRequest = safeRequest(request);
+        applyClosedLoopConfig(safeRequest.config());
+        FocPolicy focPolicy = effectiveFocPolicy(safeRequest.config());
+        boolean focRequested = enableFoc(focPolicy);
+        boolean licenseFault = controller.setVelocityTarget(
+                finiteOrZero(rotationsPerSecond),
+                safeRequest.config().slot(),
+                finiteOrZero(safeRequest.arbitraryFeedforwardVolts()),
+                focRequested);
+        if (licenseFault && focRequested) {
+            if (focPolicy == FocPolicy.REQUIRE) {
+                throw new IllegalStateException("FOC is required but not licensed for " + device.defaultName());
+            }
+            if (focPolicy == FocPolicy.ENABLE_IF_AVAILABLE) {
+                focDisabledAfterLicenseFault = true;
+                controller.setVelocityTarget(
+                        finiteOrZero(rotationsPerSecond),
+                        safeRequest.config().slot(),
+                        finiteOrZero(safeRequest.arbitraryFeedforwardVolts()),
+                        false);
+            }
+        }
+    }
+
+    @Override
+    public MotorControlCapabilities controlCapabilities() {
+        return new MotorControlCapabilities(true, true, true, true, true, false, 3);
     }
 
     @Override
@@ -111,6 +178,26 @@ public final class CtreMotorHandle implements MotorHandle {
         }
     }
 
+    private MotorClosedLoopRequest safeRequest(MotorClosedLoopRequest request) {
+        return request == null ? MotorClosedLoopRequest.device(MotorClosedLoopConfig.empty()) : request;
+    }
+
+    private void applyClosedLoopConfig(MotorClosedLoopConfig config) {
+        if (config.equals(appliedClosedLoopConfig)) {
+            return;
+        }
+        controller.configureSlot(config);
+        appliedClosedLoopConfig = config;
+    }
+
+    private FocPolicy effectiveFocPolicy(MotorClosedLoopConfig config) {
+        return options.focPolicy() == FocPolicy.DISABLED ? config.focPolicy() : options.focPolicy();
+    }
+
+    private boolean enableFoc(FocPolicy policy) {
+        return policy != FocPolicy.DISABLED && !focDisabledAfterLicenseFault;
+    }
+
     private static double clamp(double value) {
         double finite = finiteOrZero(value);
         return Math.max(-1.0, Math.min(1.0, finite));
@@ -129,6 +216,23 @@ public final class CtreMotorHandle implements MotorHandle {
 
         void setVelocityTarget(double rotationsPerSecond);
 
+        default boolean setPositionTarget(double rotations, int slot, double feedforwardVolts, boolean enableFoc) {
+            setPositionTarget(rotations);
+            return false;
+        }
+
+        default boolean setVelocityTarget(
+                double rotationsPerSecond,
+                int slot,
+                double feedforwardVolts,
+                boolean enableFoc) {
+            setVelocityTarget(rotationsPerSecond);
+            return false;
+        }
+
+        default void configureSlot(MotorClosedLoopConfig config) {
+        }
+
         void stop();
 
         void setNeutralMode(boolean brake);
@@ -140,6 +244,8 @@ public final class CtreMotorHandle implements MotorHandle {
 
     private static final class PhoenixTalonController implements TalonController {
         private final TalonFX talon;
+        private final PositionVoltage positionVoltage = new PositionVoltage(0.0);
+        private final VelocityVoltage velocityVoltage = new VelocityVoltage(0.0);
 
         private PhoenixTalonController(MotorDevice device) {
             talon = new TalonFX(device.id(), new CANBus(device.canbus()));
@@ -163,6 +269,43 @@ public final class CtreMotorHandle implements MotorHandle {
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {
             talon.setControl(new VelocityVoltage(rotationsPerSecond));
+        }
+
+        @Override
+        public boolean setPositionTarget(double rotations, int slot, double feedforwardVolts, boolean enableFoc) {
+            StatusCode status = talon.setControl(positionVoltage
+                    .withPosition(rotations)
+                    .withSlot(slot)
+                    .withFeedForward(feedforwardVolts)
+                    .withEnableFOC(enableFoc));
+            return status == StatusCode.UsingProFeatureOnUnlicensedDevice;
+        }
+
+        @Override
+        public boolean setVelocityTarget(
+                double rotationsPerSecond,
+                int slot,
+                double feedforwardVolts,
+                boolean enableFoc) {
+            StatusCode status = talon.setControl(velocityVoltage
+                    .withVelocity(rotationsPerSecond)
+                    .withSlot(slot)
+                    .withFeedForward(feedforwardVolts)
+                    .withEnableFOC(enableFoc));
+            return status == StatusCode.UsingProFeatureOnUnlicensedDevice;
+        }
+
+        @Override
+        public void configureSlot(MotorClosedLoopConfig config) {
+            SlotConfigs slot = new SlotConfigs()
+                    .withKP(config.p())
+                    .withKI(config.i())
+                    .withKD(config.d())
+                    .withKS(config.staticFeedforward())
+                    .withKV(config.velocityFeedforward())
+                    .withKG(config.gravityFeedforward());
+            slot.SlotNumber = config.slot();
+            talon.getConfigurator().apply(slot);
         }
 
         @Override

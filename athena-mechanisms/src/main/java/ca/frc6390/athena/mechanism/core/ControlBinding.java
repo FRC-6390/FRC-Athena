@@ -2,8 +2,8 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.mechanism.ref.FeedforwardGains;
-import ca.frc6390.athena.mechanism.ref.PidGains;
+import ca.frc6390.athena.mechanism.control.FeedforwardGains;
+import ca.frc6390.athena.mechanism.control.PidGains;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -15,6 +15,7 @@ import java.util.function.DoubleSupplier;
 public record ControlBinding(
         ControlMode mode,
         MotorDevice output,
+        int slot,
         List<MotorDevice> followers,
         List<EncoderDevice> feedback,
         List<Object> dependencies,
@@ -22,6 +23,7 @@ public record ControlBinding(
         List<MotorDevice> motors) {
     public ControlBinding {
         mode = mode == null ? ControlMode.POSITION : mode;
+        slot = Math.max(0, slot);
         followers = followers == null ? List.of() : List.copyOf(followers);
         feedback = feedback == null ? List.of() : List.copyOf(feedback);
         dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
@@ -36,18 +38,33 @@ public record ControlBinding(
             List<EncoderDevice> feedback,
             List<Object> dependencies,
             List<ControlLoop> loops) {
-        this(mode, output, followers, feedback, dependencies, loops, null);
+        this(mode, output, 0, followers, feedback, dependencies, loops, null);
+    }
+
+    public ControlBinding(
+            ControlMode mode,
+            MotorDevice output,
+            int slot,
+            List<MotorDevice> followers,
+            List<EncoderDevice> feedback,
+            List<Object> dependencies,
+            List<ControlLoop> loops) {
+        this(mode, output, slot, followers, feedback, dependencies, loops, null);
     }
 
     public ControlBinding output(MotorDevice output) {
-        return new ControlBinding(mode, Objects.requireNonNull(output, "output"), followers, feedback, dependencies, loops);
+        return new ControlBinding(mode, Objects.requireNonNull(output, "output"), slot, followers, feedback, dependencies, loops);
+    }
+
+    public ControlBinding slot(int slot) {
+        return new ControlBinding(mode, output, slot, followers, feedback, dependencies, loops);
     }
 
     public ControlBinding follower(MotorDevice follower) {
         Objects.requireNonNull(follower, "follower");
         List<MotorDevice> updated = new ArrayList<>(followers);
         updated.add(follower);
-        return new ControlBinding(mode, output, updated, feedback, dependencies, loops);
+        return new ControlBinding(mode, output, slot, updated, feedback, dependencies, loops);
     }
 
     public ControlBinding followers(MotorDevice... followers) {
@@ -62,7 +79,7 @@ public record ControlBinding(
         Objects.requireNonNull(encoder, "encoder");
         List<EncoderDevice> updated = new ArrayList<>(feedback);
         updated.add(encoder);
-        return new ControlBinding(mode, output, followers, updated, dependencies, loops);
+        return new ControlBinding(mode, output, slot, followers, updated, dependencies, loops);
     }
 
     public ControlBinding feedback(EncoderDevice... encoders) {
@@ -77,7 +94,7 @@ public record ControlBinding(
         Objects.requireNonNull(dependency, "dependency");
         List<Object> updated = new ArrayList<>(dependencies);
         updated.add(dependency);
-        return new ControlBinding(mode, output, followers, feedback, updated, loops);
+        return new ControlBinding(mode, output, slot, followers, feedback, updated, loops);
     }
 
     public ControlBinding dependencies(Object... dependencies) {
@@ -92,7 +109,7 @@ public record ControlBinding(
         Objects.requireNonNull(loop, "loop");
         List<ControlLoop> updated = new ArrayList<>(loops);
         updated.add(loop);
-        return new ControlBinding(mode, output, followers, feedback, dependencies, updated);
+        return new ControlBinding(mode, output, slot, followers, feedback, dependencies, updated);
     }
 
     public ControlBinding loops(ControlLoop... loops) {

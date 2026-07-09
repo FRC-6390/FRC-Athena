@@ -8,9 +8,9 @@ import java.util.Objects;
 import java.util.function.UnaryOperator;
 
 import ca.frc6390.athena.runtime.measurement.Measurement;
-import ca.frc6390.athena.vision.ref.CameraDevice;
-import ca.frc6390.athena.vision.ref.PoseSignal;
-import ca.frc6390.athena.vision.ref.TargetSignal;
+import ca.frc6390.athena.vision.device.CameraDevice;
+import ca.frc6390.athena.vision.signal.PoseSignal;
+import ca.frc6390.athena.vision.signal.TargetSignal;
 
 /**
  * Runtime graph for camera declarations and cached vision measurements.

@@ -7,7 +7,10 @@ import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.backend.BackendRegistry;
+import ca.frc6390.athena.hardware.backend.ControlRoute;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
+import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.backend.MotorBackend;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
@@ -153,7 +156,7 @@ class MechanismRuntimeTest {
         boolean[] raw = new boolean[1];
         DigitalInputDevice input = DigitalInputDevice.rio(10).bind(() -> raw[0]);
         DigitalHookedMechanism mechanism = new DigitalHookedMechanism(input);
-        RobotRuntime runtime = RobotRuntime.create(new RecordingActionContext(MOTOR))
+        MechanismScheduler runtime = MechanismScheduler.create(new RecordingActionContext(MOTOR))
                 .register(mechanism);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
@@ -170,7 +173,7 @@ class MechanismRuntimeTest {
         boolean[] raw = new boolean[1];
         DigitalInputDevice input = DigitalInputDevice.rio(11).bind(() -> raw[0]);
         DigitalHookedMechanism mechanism = new DigitalHookedMechanism(input);
-        RobotRuntime runtime = RobotRuntime.create(new RecordingActionContext(MOTOR))
+        MechanismScheduler runtime = MechanismScheduler.create(new RecordingActionContext(MOTOR))
                 .register(mechanism);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
@@ -242,7 +245,7 @@ class MechanismRuntimeTest {
         TestMechanism mechanism = new TestMechanism(MOTOR.percent(0.1));
         Action requested = MOTOR.percent(0.8);
         mechanism.secondary = requested;
-        RobotRuntime runtime = RobotRuntime.create(actions).register(mechanism);
+        MechanismScheduler runtime = MechanismScheduler.create(actions).register(mechanism);
 
         ActionRequests.bind(runtime::request);
         try {
@@ -262,7 +265,7 @@ class MechanismRuntimeTest {
         Action requested = CHILD_MOTOR.percent(0.9);
         child.secondary = requested;
         ParentMechanism parent = new ParentMechanism(child);
-        RobotRuntime runtime = RobotRuntime.create(actions).register(parent);
+        MechanismScheduler runtime = MechanismScheduler.create(actions).register(parent);
 
         runtime.request(requested);
         runtime.robotPeriodic(1.0, 0.02);
@@ -275,7 +278,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         DeviceMechanism mechanism = new DeviceMechanism();
         ExternalActions external = new ExternalActions(mechanism);
-        RobotRuntime runtime = RobotRuntime.create(actions).register(mechanism);
+        MechanismScheduler runtime = MechanismScheduler.create(actions).register(mechanism);
 
         ActionRequests.bind(runtime::request);
         try {
@@ -292,7 +295,7 @@ class MechanismRuntimeTest {
     void robotRuntimeCanUseHardwareGraphAsRuntimeActionContext() {
         RecordingMotorBackend backend = new RecordingMotorBackend();
         HardwareGraph hardware = HardwareGraph.using(BackendRegistry.of(backend));
-        RobotRuntime runtime = RobotRuntime.create(hardware)
+        MechanismScheduler runtime = MechanismScheduler.create(hardware)
                 .register(new TestMechanism(MOTOR.percent(0.55)));
 
         runtime.robotPeriodic(1.0, 0.02);
@@ -374,11 +377,101 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void pidControlUsesDeviceClosedLoopWhenSupported() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(MOTOR.encoder())
+                .pid(0.2, 0.0, 0.0);
+        TestMechanism mechanism = new TestMechanism(control.position(2.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(2.0, actions.motor(MOTOR).positionTarget, 1.0e-9);
+        assertEquals(0.2, actions.motor(MOTOR).closedLoopRequest.config().p(), 1.0e-9);
+        assertEquals(ControlRoute.DEVICE_CLOSED_LOOP, actions.motor(MOTOR).closedLoopRequest.route());
+    }
+
+    @Test
+    void deviceClosedLoopUsesDeclaredMotorSlot() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
+        ControlBinding control = Controls.position(MOTOR)
+                .slot(2)
+                .feedback(MOTOR.encoder())
+                .pid(0.2, 0.0, 0.0);
+        TestMechanism mechanism = new TestMechanism(control.position(2.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(2, actions.motor(MOTOR).closedLoopRequest.config().slot());
+        assertEquals(ControlRoute.DEVICE_CLOSED_LOOP, actions.motor(MOTOR).closedLoopRequest.route());
+    }
+
+    @Test
+    void arbitraryFeedforwardLoopCanHybridizeWithDeviceClosedLoop() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
+        ControlBinding control = Controls.velocity(MOTOR)
+                .feedback(MOTOR.encoder())
+                .pid(0.1, 0.0, 0.0)
+                .loop(ControlLoops.arbitraryFeedforward(binding -> context -> ControlOutput.voltage(1.5)));
+        TestMechanism mechanism = new TestMechanism(control.velocity(3.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(3.0, actions.motor(MOTOR).velocityTarget, 1.0e-9);
+        assertEquals(1.5, actions.motor(MOTOR).closedLoopRequest.arbitraryFeedforwardVolts(), 1.0e-9);
+        assertEquals(ControlRoute.HYBRID_CLOSED_LOOP, actions.motor(MOTOR).closedLoopRequest.route());
+    }
+
+    @Test
+    void unclassifiedCustomLoopFallsBackToAthenaClosedLoop() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(MOTOR.encoder())
+                .loop(binding -> context -> ControlOutput.percent(0.25));
+        TestMechanism mechanism = new TestMechanism(control.position(2.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.25, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(null, actions.motor(MOTOR).closedLoopRequest);
+    }
+
+    @Test
+    void deviceClosedLoopClearsArbitraryFeedforwardWhenHybridLoopIsNotActive() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
+        ControlBinding hybrid = Controls.velocity(MOTOR)
+                .feedback(MOTOR.encoder())
+                .pid(0.1, 0.0, 0.0)
+                .loop(ControlLoops.arbitraryFeedforward(binding -> context -> ControlOutput.voltage(1.5)));
+        ControlBinding deviceOnly = Controls.velocity(MOTOR)
+                .feedback(MOTOR.encoder())
+                .pid(0.1, 0.0, 0.0);
+        TestMechanism mechanism = new TestMechanism(hybrid.velocity(3.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        runtime.set(deviceOnly.velocity(3.0));
+        runtime.periodic(contextAt(0.02), EventContext.empty());
+
+        assertEquals(0.0, actions.motor(MOTOR).closedLoopRequest.arbitraryFeedforwardVolts(), 1.0e-9);
+        assertEquals(ControlRoute.DEVICE_CLOSED_LOOP, actions.motor(MOTOR).closedLoopRequest.route());
+    }
+
+    @Test
     void robotRuntimeStepsDiscoveredSimulationModels() {
         SimulatedMechanism mechanism = new SimulatedMechanism();
         SimulationSession session = SimulationSession.create()
                 .model("mechanism", mechanism.simulation);
-        RobotRuntime runtime = RobotRuntime.create(session.hardwareGraph())
+        MechanismScheduler runtime = MechanismScheduler.create(session.hardwareGraph())
                 .register(mechanism);
 
         runtime.simulationPeriodic(0.0, 0.2);
@@ -604,6 +697,10 @@ class MechanismRuntimeTest {
         private final MotorDevice device;
         private double percent = Double.NaN;
         private double voltage = Double.NaN;
+        private double positionTarget = Double.NaN;
+        private double velocityTarget = Double.NaN;
+        private MotorControlCapabilities capabilities = MotorControlCapabilities.OPEN_LOOP_ONLY;
+        private MotorClosedLoopRequest closedLoopRequest;
 
         private RecordingMotorHandle(MotorDevice device) {
             this.device = device;
@@ -622,6 +719,23 @@ class MechanismRuntimeTest {
         @Override
         public void setVoltage(double volts) {
             this.voltage = volts;
+        }
+
+        @Override
+        public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
+            positionTarget = rotations;
+            closedLoopRequest = request;
+        }
+
+        @Override
+        public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond, MotorClosedLoopRequest request) {
+            velocityTarget = rotationsPerSecond;
+            closedLoopRequest = request;
+        }
+
+        @Override
+        public MotorControlCapabilities controlCapabilities() {
+            return capabilities;
         }
     }
 

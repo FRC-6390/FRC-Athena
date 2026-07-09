@@ -10,7 +10,7 @@ import java.util.Objects;
 /**
  * Minimal Athena-owned runtime loop for the new mechanism model.
  */
-public final class MechanismRuntime {
+final class MechanismRuntime {
     private final Mechanism mechanism;
     private final MechanismNode node;
     private final ActionContext actionContext;
@@ -45,7 +45,7 @@ public final class MechanismRuntime {
         this.action = node.initialState();
     }
 
-    public static MechanismRuntime of(Mechanism mechanism, ActionContext actionContext) {
+    static MechanismRuntime of(Mechanism mechanism, ActionContext actionContext) {
         return new MechanismRuntime(
                 MechanismIntrospector.inspect(mechanism),
                 actionContext,
@@ -53,14 +53,14 @@ public final class MechanismRuntime {
                 new HashMap<>());
     }
 
-    public static MechanismRuntime of(
+    static MechanismRuntime of(
             Mechanism mechanism,
             ActionContext actionContext,
             OutputResolver resolver) {
         return new MechanismRuntime(MechanismIntrospector.inspect(mechanism), actionContext, resolver, new HashMap<>());
     }
 
-    public static MechanismRuntime of(
+    static MechanismRuntime of(
             Mechanism mechanism,
             ActionContext actionContext,
             OutputResolver resolver,
@@ -76,12 +76,12 @@ public final class MechanismRuntime {
         return new MechanismRuntime(node, actionContext, resolver, pathRuntimes);
     }
 
-    public MechanismRuntime path(PathAction ref, PathRuntime runtime) {
+    MechanismRuntime path(PathAction ref, PathRuntime runtime) {
         pathRuntimes.put(Objects.requireNonNull(ref, "ref"), Objects.requireNonNull(runtime, "runtime"));
         return this;
     }
 
-    public MechanismRuntime simulationStep(Runnable simulationStep) {
+    MechanismRuntime simulationStep(Runnable simulationStep) {
         this.simulationStep = simulationStep == null ? () -> {
         } : simulationStep;
         return this;
@@ -98,6 +98,16 @@ public final class MechanismRuntime {
     }
 
     public List<ResolvedOutput> periodic(MechanismContext mechanismContext, EventContext eventContext) {
+        List<ResolvedOutput> outputs = new ArrayList<>();
+        periodicInto(mechanismContext, eventContext, outputs);
+        return outputs;
+    }
+
+    void periodicInto(
+            MechanismContext mechanismContext,
+            EventContext eventContext,
+            List<ResolvedOutput> outputs) {
+        Objects.requireNonNull(outputs, "outputs");
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
         if (Double.isNaN(stateStartSeconds)) {
@@ -114,11 +124,11 @@ public final class MechanismRuntime {
             timedContext = withTimeInState(safeMechanismContext, 0.0);
         }
         StateScheduler.Result active = scheduler.evaluate(action, timedContext);
-        List<ResolvedOutput> outputs = resolver.resolve(mechanism, active.action(), active.context());
-        applier.applyAll(outputs, active.context());
+        int outputStart = outputs.size();
+        resolver.resolveInto(mechanism, active.action(), active.context(), outputs);
+        applier.applyAll(outputs, outputStart, active.context());
         hookRuntime.run(safeEventContext, actionContext, hookBindings);
         simulationStep.run();
-        return outputs;
     }
 
     private static MechanismContext withTimeInState(MechanismContext context, double timeInStateSeconds) {
@@ -185,13 +195,13 @@ public final class MechanismRuntime {
                 return evaluateCycle(cycle, schedule, context, node);
             }
             if (action instanceof Actions.Parallel parallel) {
-                return evaluateGroup(parallel.Actions(), schedule, context, GroupMode.PARALLEL, -1);
+                return evaluateGroup(parallel.Actions(), schedule, context, node, GroupMode.PARALLEL, -1);
             }
             if (action instanceof Actions.Race race) {
-                return evaluateGroup(race.Actions(), schedule, context, GroupMode.RACE, -1);
+                return evaluateGroup(race.Actions(), schedule, context, node, GroupMode.RACE, -1);
             }
             if (action instanceof Actions.Deadline deadline) {
-                return evaluateGroup(deadline.Actions(), schedule, context, GroupMode.DEADLINE, 0);
+                return evaluateGroup(deadline.Actions(), schedule, context, node, GroupMode.DEADLINE, 0);
             }
             if (action instanceof Actions.Choice choice) {
                 return evaluate(schedule.named("choice", choice.choose(local)), context);
@@ -342,9 +352,11 @@ public final class MechanismRuntime {
                 List<Action> actions,
                 SchedulerNode schedule,
                 MechanismContext context,
+                Node node,
                 GroupMode mode,
                 int deadlineIndex) {
-            List<Action> outputs = new ArrayList<>();
+            List<Action> outputs = node.groupOutputs;
+            outputs.clear();
             boolean anyComplete = false;
             boolean allComplete = !actions.isEmpty();
             for (int i = 0; i < actions.size(); i++) {
@@ -462,6 +474,7 @@ public final class MechanismRuntime {
             private int index;
             private PathAction pathState;
             private PathRuntime pathRuntime;
+            private final List<Action> groupOutputs = new ArrayList<>();
 
             private Node(double startSeconds) {
                 this.startSeconds = startSeconds;

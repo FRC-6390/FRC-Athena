@@ -6,8 +6,8 @@ import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.mechanism.ref.FeedforwardGains;
-import ca.frc6390.athena.mechanism.ref.PidGains;
+import ca.frc6390.athena.mechanism.control.FeedforwardGains;
+import ca.frc6390.athena.mechanism.control.PidGains;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.LinkedHashMap;
@@ -21,18 +21,18 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Discovers mechanism structure from already-constructed mechanism instances.
  */
-public final class MechanismIntrospector {
+final class MechanismIntrospector {
     private static final Map<Class<?>, Field[]> FIELDS_BY_TYPE = new ConcurrentHashMap<>();
 
     private MechanismIntrospector() {
     }
 
-    public static MechanismNode inspect(Mechanism mechanism) {
+    static MechanismNode inspect(Mechanism mechanism) {
         Objects.requireNonNull(mechanism, "mechanism");
         return inspect(defaultName(mechanism.getClass()), mechanism);
     }
 
-    public static MechanismNode inspect(String name, Mechanism mechanism) {
+    static MechanismNode inspect(String name, Mechanism mechanism) {
         Objects.requireNonNull(mechanism, "mechanism");
         Map<String, Mechanism> children = new LinkedHashMap<>();
         Map<String, Action> actions = new LinkedHashMap<>();

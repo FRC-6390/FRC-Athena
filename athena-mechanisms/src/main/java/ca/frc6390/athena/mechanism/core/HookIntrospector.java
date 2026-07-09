@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Discovers hooks from arbitrary already-constructed robot objects.
  */
-public final class HookIntrospector {
+final class HookIntrospector {
     private static final Map<Class<?>, Field[]> FIELDS_BY_TYPE = new ConcurrentHashMap<>();
 
     private HookIntrospector() {
@@ -126,7 +126,7 @@ public final class HookIntrospector {
                 && !packageName.startsWith("com.ctre.")
                 && !packageName.startsWith("com.revrobotics.")
                 && !packageName.startsWith("ca.frc6390.athena.hardware.")
-                && !packageName.startsWith("ca.frc6390.athena.mechanism.ref.");
+                && !packageName.startsWith("ca.frc6390.athena.mechanism.control.");
     }
 
     private static String defaultName(Class<?> type) {

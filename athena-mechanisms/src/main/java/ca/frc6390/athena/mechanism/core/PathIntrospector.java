@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * Discovers path Actions from autonomous declaration objects.
  */
-public final class PathIntrospector {
+final class PathIntrospector {
     private static final Map<Class<?>, List<Field>> FIELDS_BY_TYPE = new ConcurrentHashMap<>();
 
     private PathIntrospector() {

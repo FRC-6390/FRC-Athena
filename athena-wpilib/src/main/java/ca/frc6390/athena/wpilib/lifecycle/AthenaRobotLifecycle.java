@@ -63,7 +63,7 @@ final class AthenaRobotLifecycle {
     }
 
     void simulationPeriodic() {
-        run(LifecycleMode.SIMULATION, LifecyclePhase.PERIODIC, true, false, true);
+        elapsed(timestampSeconds.getAsDouble());
     }
 
     private void run(

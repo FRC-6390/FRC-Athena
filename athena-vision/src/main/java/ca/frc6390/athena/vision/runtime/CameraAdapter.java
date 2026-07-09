@@ -1,6 +1,6 @@
 package ca.frc6390.athena.vision.runtime;
 
-import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.device.CameraDevice;
 
 /**
  * Service-loaded adapter that can bind runtime signals to a camera declaration.

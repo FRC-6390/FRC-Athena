@@ -1,5 +1,7 @@
 package ca.frc6390.athena.sim.hardware;
 
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
+import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import java.util.Objects;
 
 import ca.frc6390.athena.hardware.backend.MotorHandle;
@@ -26,6 +28,7 @@ public final class SimMotorHandle implements MotorHandle {
     private double percentOutput;
     private double positionRotations;
     private double velocityRotationsPerSecond;
+    private MotorClosedLoopRequest closedLoopRequest;
 
     /**
      * Creates a simulation motor handle.
@@ -73,6 +76,13 @@ public final class SimMotorHandle implements MotorHandle {
         commandValue = safeRotations;
         positionRotations = safeRotations;
         velocityRotationsPerSecond = 0.0;
+        closedLoopRequest = null;
+    }
+
+    @Override
+    public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
+        setPositionTargetRotations(rotations);
+        closedLoopRequest = request;
     }
 
     @Override
@@ -81,6 +91,18 @@ public final class SimMotorHandle implements MotorHandle {
         commandKind = CommandKind.VELOCITY;
         commandValue = safeVelocity;
         velocityRotationsPerSecond = safeVelocity;
+        closedLoopRequest = null;
+    }
+
+    @Override
+    public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond, MotorClosedLoopRequest request) {
+        setVelocityTargetRotationsPerSecond(rotationsPerSecond);
+        closedLoopRequest = request;
+    }
+
+    @Override
+    public MotorControlCapabilities controlCapabilities() {
+        return new MotorControlCapabilities(true, true, true, true, true, true, 4);
     }
 
     @Override
@@ -109,6 +131,15 @@ public final class SimMotorHandle implements MotorHandle {
      */
     public double commandValue() {
         return commandValue;
+    }
+
+    /**
+     * Returns the last offloaded closed-loop request.
+     *
+     * @return closed-loop request, or null when the last command was not offloaded
+     */
+    public MotorClosedLoopRequest closedLoopRequest() {
+        return closedLoopRequest;
     }
 
     /**

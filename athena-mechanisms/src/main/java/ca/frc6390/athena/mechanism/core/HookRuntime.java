@@ -12,6 +12,8 @@ import java.util.Objects;
 final class HookRuntime {
     private final Map<HookBinding, Boolean> previousEventActive = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> previousSourceActive = new IdentityHashMap<>();
+    private final Map<EventBinding, Boolean> consumedEvents = new IdentityHashMap<>();
+    private final Map<EventBinding, Boolean> sourceSamples = new IdentityHashMap<>();
 
     /**
      * Runs all hooks for one runtime tick.
@@ -24,8 +26,8 @@ final class HookRuntime {
         Objects.requireNonNull(actionContext, "actionContext");
         Objects.requireNonNull(hooks, "hooks");
         EventContext safeContext = context == null ? EventContext.empty() : context;
-        Map<EventBinding, Boolean> consumedEvents = new IdentityHashMap<>();
-        Map<EventBinding, Boolean> sourceSamples = new IdentityHashMap<>();
+        consumedEvents.clear();
+        sourceSamples.clear();
         for (HookBinding hook : hooks) {
             runOne(safeContext, actionContext, hook, sourceSamples);
             consumedEvents.put(hook.event(), Boolean.TRUE);
@@ -47,10 +49,11 @@ final class HookRuntime {
         Objects.requireNonNull(actionContext, "actionContext");
         Objects.requireNonNull(hook, "hook");
         EventContext safeContext = context == null ? EventContext.empty() : context;
-        Map<EventBinding, Boolean> sourceSamples = new IdentityHashMap<>();
+        sourceSamples.clear();
         runOne(safeContext, actionContext, hook, sourceSamples);
         previousSourceActive.put(hook.event(), sourceSamples.getOrDefault(hook.event(), false));
         hook.event().afterRun(safeContext);
+        sourceSamples.clear();
     }
 
     private void runOne(
@@ -79,5 +82,7 @@ final class HookRuntime {
     public void reset() {
         previousEventActive.clear();
         previousSourceActive.clear();
+        consumedEvents.clear();
+        sourceSamples.clear();
     }
 }

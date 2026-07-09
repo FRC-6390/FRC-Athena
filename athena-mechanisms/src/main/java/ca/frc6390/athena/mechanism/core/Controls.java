@@ -18,6 +18,6 @@ public final class Controls {
     }
 
     public static ControlBinding of(ControlMode mode) {
-        return new ControlBinding(mode, null, null, null, null, null);
+        return new ControlBinding(mode, null, 0, null, null, null, null);
     }
 }

@@ -17,8 +17,6 @@ import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
-import java.util.IdentityHashMap;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -27,9 +25,9 @@ import java.util.Objects;
 public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @SuppressWarnings("unused")
     public final Action initial = Actions.neutral();
-    private final Map<Mechanism, Mechanism> registeredRoots = new IdentityHashMap<>();
     private RobotRuntime runtime;
     private double lastTimestampSeconds;
+    private double lastSimulationTimestampSeconds;
 
     /**
      * Registers mechanisms, bindings, and robot controls.
@@ -50,27 +48,11 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     protected final void register(Mechanism mechanism) {
         Objects.requireNonNull(mechanism, "mechanism");
-        Mechanism root = new RegisteredMechanism(mechanism);
-        registeredRoots.put(mechanism, root);
-        athena().register(root);
-    }
-
-    public final void set(Mechanism mechanism, Action Action) {
-        Objects.requireNonNull(mechanism, "mechanism");
-        Objects.requireNonNull(Action, "Action");
-        Mechanism root = registeredRoots.get(mechanism);
-        if (root == null) {
-            throw new IllegalArgumentException("Mechanism is not registered: " + mechanism.getClass().getName());
-        }
-        athena().set(root, Actions.set().set(mechanism, Action));
+        athena().register(new RegisteredMechanism(mechanism));
     }
 
     public final void set(Action Action) {
         athena().request(Objects.requireNonNull(Action, "Action"));
-    }
-
-    public final CommandAction Action(Mechanism mechanism, Action Action) {
-        return Controls.run("Action:" + mechanism.getClass().getSimpleName(), () -> set(mechanism, Action));
     }
 
     public final CommandAction Action(Action Action) {
@@ -80,6 +62,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @Override
     public final void robotInit() {
         lastTimestampSeconds = timestampSeconds();
+        lastSimulationTimestampSeconds = lastTimestampSeconds;
         runtime = createRuntime(RobotBase.isSimulation());
         ActionRequests.bind(runtime::request);
         runtime.register(this);
@@ -162,7 +145,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     @Override
     public final void simulationPeriodic() {
-        run(LifecycleMode.SIMULATION, LifecyclePhase.PERIODIC, true, true);
+        double timestamp = timestampSeconds();
+        athena().simulationPeriodic(timestamp, simulationElapsed(timestamp));
     }
 
     private void run(LifecycleMode mode, LifecyclePhase phase, boolean enabled, boolean simulation) {
@@ -177,6 +161,12 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private double elapsed(double timestampSeconds) {
         double dtSeconds = timestampSeconds - lastTimestampSeconds;
         lastTimestampSeconds = timestampSeconds;
+        return Double.isFinite(dtSeconds) && dtSeconds >= 0.0 ? dtSeconds : 0.0;
+    }
+
+    private double simulationElapsed(double timestampSeconds) {
+        double dtSeconds = timestampSeconds - lastSimulationTimestampSeconds;
+        lastSimulationTimestampSeconds = timestampSeconds;
         return Double.isFinite(dtSeconds) && dtSeconds >= 0.0 ? dtSeconds : 0.0;
     }
 

@@ -8,11 +8,11 @@ import java.util.Objects;
 /**
  * Resolves requested mechanism Actions into hardware output requests.
  */
-public final class OutputResolver {
+final class OutputResolver {
     private OutputResolver() {
     }
 
-    public static OutputResolver empty() {
+    static OutputResolver empty() {
         return new OutputResolver();
     }
 

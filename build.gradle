@@ -234,6 +234,15 @@ project(':athena-benchmarks') {
         mainClass = 'org.openjdk.jmh.Main'
     }
 
+    tasks.register('jmhGc', JavaExec) {
+        group = 'Verification'
+        description = 'Runs Athena JMH benchmarks with GC allocation profiling.'
+        dependsOn tasks.named('classes')
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'org.openjdk.jmh.Main'
+        args '-prof', 'gc'
+    }
+
     tasks.withType(PublishToMavenRepository).configureEach {
         enabled = false
     }

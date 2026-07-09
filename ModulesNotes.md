@@ -24,7 +24,7 @@
   - [x] Focused stale-name scan found no deleted runtime names in `athena-runtime/src/main/java`.
 - [x] Architecture: `athena-runtime` is now the low-level value/signal layer; the root runtime lives in `athena-robot` instead of this module.
   - [x] Final ownership converges through `athena-robot`, which composes mechanism runtime, hardware graph, drivetrain runtime, localization scheduling, paths, autos, command graph, and sim graph.
-  - [x] `RobotRuntime` can now be constructed with a runtime-owned `ActionContext` such as `HardwareGraph`, so mechanism Action dispatch can resolve hardware through the graph boundary.
+  - [x] `MechanismScheduler` can now be constructed with a runtime-owned `ActionContext` such as `HardwareGraph`, so mechanism Action dispatch can resolve hardware through the graph boundary.
 
 ## athena-hardware
 
@@ -45,10 +45,10 @@
 ## athena-mechanisms
 
 - [x] Overall task: make `athena-mechanisms` the mechanism graph/Action execution slice of the final robot runtime.
-- [x] Code optimization: moved mechanism graph discovery into an internal `RobotGraph` and made `MechanismRuntime` consume a prebuilt `MechanismNode`.
+- [x] Code optimization: moved mechanism graph discovery into an internal `RobotGraph` and made internal `MechanismRuntime` consume a prebuilt `MechanismNode`.
   - [x] Add internal `RobotGraph` for mechanism node caching, declaration collection, and sim model discovery.
   - [x] Use cached `MechanismNode` when constructing `MechanismRuntime`.
-  - [x] Cache class field lists in `MechanismIntrospector`, `HookIntrospector`, and `PathIntrospector`.
+  - [x] Cache class field lists in package-private `MechanismIntrospector`, `HookIntrospector`, and `PathIntrospector`.
   - [x] Cache per-node `PathRuntime` resolution after first path-Action entry.
   - [x] Lower `StateScheduler` into a cached scheduler-node tree so static child Action nodes are built once and runtime Action no longer uses generated string path keys.
 - [x] Runtime optimization: hook discovery is no longer performed every periodic tick.
@@ -56,12 +56,12 @@
   - [x] Reuse graph-owned declaration/simulation discovery in `RobotRuntime.bindInMemoryRuntime()` and simulation refresh.
   - [x] Rename old `HookRunner` plumbing to package-private `HookRuntime`.
 - [x] Test surfaces needed: Action sequencing, timeout and conditional behavior, hook edge behavior, path runtime lifecycle, child mechanism output routing, sim model stepping, and control output application to `MotorHandle` are covered by `MechanismRuntimeTest`.
-  - [x] Added focused `MechanismRuntimeTest` coverage for sequence timing, timeout/conditional transitions, rising-edge hook behavior, path runtime lifecycle, child mechanism output routing, output application through fake `MotorHandle`s, `RobotRuntime` dispatch through a `HardwareGraph`, and in-memory sim model stepping.
+  - [x] Added focused `MechanismRuntimeTest` coverage for sequence timing, timeout/conditional transitions, rising-edge hook behavior, path runtime lifecycle, child mechanism output routing, output application through fake `MotorHandle`s, `MechanismScheduler` dispatch through a `HardwareGraph`, and in-memory sim model stepping.
   - [x] Cover lowered scheduler subtree reset behavior with nested sequence coverage.
   - [x] Cover `Action.request()` dispatch and registered child-mechanism owner inference.
 - [x] Upkeep: `Action`, `Output`, and `MechanismContext` now live in this module, and current Java sources are moved off old mechanism names.
   - [x] Removed `HookRunner` from the mechanism source/API surface.
-- [x] Architecture: the mechanism `RobotRuntime` is backed by an internal mechanism `RobotGraph` and is now composed by the final `athena-robot` root.
+- [x] Architecture: the old public mechanism `RobotRuntime` name is removed. The final public robot runtime is `ca.frc6390.athena.robot.RobotRuntime`; the mechanism slice exposes `MechanismScheduler` for root-runtime composition and keeps lower runtime/introspection/application classes package-private.
   - [x] Add graph ownership for mechanism nodes, declarations, and sim model discovery.
   - [x] Keep lifecycle/Action dispatch in `RobotRuntime` instead of separate runners.
   - [x] Allow `RobotRuntime` to use a graph-backed hardware context while preserving explicit registered test handles.
@@ -95,6 +95,7 @@
   - [x] `RobotRuntimeTest` covers root graph mounting/refresh ownership for vision graphs.
   - [x] `RobotRuntimeTest` covers hardware vendor `ServiceLoader` discovery from root test runtime classpath descriptors and root mounting/refresh of Limelight/PhotonVision camera declarations.
 - [x] Upkeep: current Java sources are moved off old camera `*Ref` types and frame DTOs. Future examples should stay on `*Device`, `PoseSignal`, `TargetSignal`, and graph-cached signals.
+- [x] Package cleanup: camera declarations now live in `vision.device`; pose and target streams now live in `vision.signal`; the old `vision.ref` package was removed.
 - [x] Architecture: vision now declares camera devices and typed signals, and has a `VisionGraph` cache boundary for runtime-owned measurements.
   - [x] Add pose/target signal metadata hooks for vendor strategy/runtime policy.
   - [x] Graph mounting is covered through `RobotRuntime.vision(...)` and `RobotRuntime.cameras(...)`.
@@ -113,6 +114,7 @@
 - [x] Test surfaces needed: input chaining, nested pipeline estimates, filter rejection, field-bounds filtering, weighted-average behavior, latest-valid behavior, reset actions, and behavior when no pose-capable measurements exist are covered by focused JUnit tests.
   - [x] Root `RobotRuntime` now owns localization max-age filtering and disabled-mode refresh policy for localization snapshots.
 - [x] Upkeep: removed the old public config/spec layer, old localization contexts, `LocalizationRef`, `LocalizationFilterRef`, `LocalizationEstimatorRef`, `FieldBoundsRef`, and stale vision frame estimator files. Current Java sources use `Localizations`, `LocalizationPipeline`, `LocalizationFilter`, and `FieldBoundsFilter`.
+- [x] Package cleanup: localization APIs now live in `localization.pipeline`; the old `localization.ref` package was removed.
 - [x] Architecture: localization now consumes a runtime-level pose sample contract instead of reflecting into concrete measurement records.
   - [x] Replace temporary reflective bridge with `PoseMeasurementSample`.
   - [x] Final graph ownership keeps localization inputs as generic `MeasurementSignal`s with typed pose-capable samples for now.
@@ -248,9 +250,15 @@
 - [x] Vision sim field metadata: `SimulationSession.visionField(...)` now feeds discovered vision simulation providers through Athena-owned `VisionSimulationField` / `VisionSimulationTarget` declarations, and PhotonVision simulation binds both target and pose measurements without exposing WPILib or Photon classes to robot code.
 - [x] Runtime safety: simulation stepping rejects non-finite or non-positive timesteps before physics engines run, worker failure callbacks run outside the worker lock, and hardware refresh snapshots handles before vendor calls so graph mutation is not blocked by slow I/O.
 - [x] Naming cleanup: public command/path behavior declarations are now `CommandAction` and `PathAction`; the previous public state-named command/path declarations were removed.
+- [x] Digital input runtime scoping: `SimulationSession` owns a scoped DIO reader/signal runtime so sessions can simulate the same real DIO declaration independently, while manual `DigitalInputDevice.bindRuntime(...)` remains available for non-session tests.
+- [x] Digital edge durability: latched edge cleanup now clears only the edge generation observed by hooks, so fast samples arriving during hook execution are not erased by end-of-hook cleanup.
+- [x] Hot-path allocation pass: root mechanism runtime now appends into one output list instead of allocating one output list per mechanism, hook event/source maps are reused per `HookRuntime`, grouped scheduler nodes reuse per-node output scratch lists, and control request reset tracking no longer allocates key records per resolved control output.
+- [x] Benchmarking: `:athena-benchmarks:jmhGc` runs the existing JMH suite with GC allocation profiling for allocation-regression checks.
+- [x] Control slots: `ControlBinding.slot(...)` now carries the motor-controller slot through the normal action/control path into vendor-neutral closed-loop requests.
+- [x] Package cleanup: control gains now live in `mechanism.control`; the old `mechanism.ref` package was removed.
 
 - [x] Code optimization: added the root `RobotRuntime` as a thin composition layer instead of forcing cross-module ownership into `athena-mechanisms`.
-- [x] Runtime optimization: root periodic owns vision refresh, localization evaluation, command graph scheduling, autonomous lifecycle dispatch, disabled cancellation, and simulation stepping.
+- [x] Runtime optimization: root periodic owns vision refresh, localization evaluation, command graph scheduling, autonomous lifecycle dispatch, disabled cancellation, and mechanism output application; simulation periodic advances physics without evaluating mechanisms again.
 - [x] Test surfaces needed: `RobotRuntimeTest` covers root command/autonomous lifecycle ownership, disabled cancellation, and simulation-backed hardware graph exposure.
 - [x] Upkeep: `athena-robot` is included in settings and published artifacts so WPILib and robot projects can depend on the final root boundary; it is intentionally not in the default minimal artifact set because it composes optional modules.
 - [x] Architecture: `athena-robot` is the cross-module runtime owner for hardware, mechanisms, drivetrain, vision, localization, autos, path markers, commands, and simulation.
@@ -258,7 +266,7 @@
 ## athena-wpilib
 
 - [x] Code optimization: the module is reduced to `AthenaRobot` and `WpilibPoseEstimatorAdapter`; old command adapters, drivetrain adapters, controller bindings, trigger bindings, NetworkTables wrappers, and lifecycle config/spec classes are gone.
-- [x] Runtime optimization: `AthenaRobot` performs one timestamp read and one runtime periodic dispatch per WPILib callback. Package-private lifecycle dispatch keeps deterministic tests out of the public API.
+- [x] Runtime optimization: `AthenaRobot` dispatches robot behavior through normal WPILib lifecycle callbacks and uses simulation callbacks only to step the `SimulationSession`. Package-private lifecycle dispatch keeps deterministic tests out of the public API.
 - [x] Test surfaces needed: WPILib lifecycle-to-Athena lifecycle mapping, dt calculation/reset behavior, simulation callback behavior, pose estimator adapter behavior, and runtime host construction policy are covered or explicitly scoped.
   - [x] Added focused `AthenaRobotTest` coverage for lifecycle mapping, simulation callback flags, and negative/non-finite dt clamping through the package-private lifecycle delegate.
   - [x] Added focused `WpilibPoseEstimatorAdapterTest` coverage for standard-deviation vector mapping, null standard-deviation defaults, and timestamp sanitization/forwarding.

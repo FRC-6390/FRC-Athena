@@ -10,6 +10,9 @@ import ca.frc6390.athena.api.hardware.ImuKind;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.hardware.backend.FocPolicy;
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
+import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -88,6 +91,39 @@ class CtreBackendTest {
     }
 
     @Test
+    void motorClosedLoopConfigIsAppliedOnlyWhenChanged() {
+        RecordingTalonController controller = new RecordingTalonController();
+        CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.TALON_FX, 2), null, controller);
+        MotorClosedLoopConfig config = new MotorClosedLoopConfig(
+                0, 0.2, 0.0, 0.01, 0.0, 0.0, 0.1, 0.2, 0.3, FocPolicy.DISABLED);
+        MotorClosedLoopRequest request = MotorClosedLoopRequest.hybrid(config, 1.5);
+
+        handle.setPositionTargetRotations(2.0, request);
+        handle.setPositionTargetRotations(3.0, request);
+
+        assertEquals(1, controller.configureSlotCalls);
+        assertEquals(config, controller.config);
+        assertEquals(3.0, controller.positionTarget, 1.0e-9);
+        assertEquals(1.5, controller.feedforwardVolts, 1.0e-9);
+    }
+
+    @Test
+    void optionalFocFallsBackAfterLicenseFault() {
+        RecordingTalonController controller = new RecordingTalonController();
+        controller.licenseFault = true;
+        CtreMotorHandle handle = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.TALON_FX, 2),
+                new CtreMotorOptions().foc(FocPolicy.ENABLE_IF_AVAILABLE),
+                controller);
+        MotorClosedLoopRequest request = MotorClosedLoopRequest.device(MotorClosedLoopConfig.empty());
+
+        handle.setVelocityTargetRotationsPerSecond(4.0, request);
+
+        assertEquals(2, controller.velocityTargetCalls);
+        assertFalse(controller.enableFoc);
+    }
+
+    @Test
     void encoderInputsAreCachedUntilNextRefresh() {
         RecordingCancoderController controller = new RecordingCancoderController();
         CtreEncoderHandle handle = new CtreEncoderHandle(EncoderDevice.of(EncoderKinds.CANCODER, 3), controller);
@@ -122,6 +158,13 @@ class CtreBackendTest {
     private static final class RecordingTalonController implements CtreMotorHandle.TalonController {
         private int neutralModeCalls;
         private boolean brake;
+        private int configureSlotCalls;
+        private int velocityTargetCalls;
+        private boolean licenseFault;
+        private boolean enableFoc;
+        private double positionTarget;
+        private double feedforwardVolts;
+        private MotorClosedLoopConfig config;
 
         @Override
         public void setPercent(double percent) {}
@@ -134,6 +177,32 @@ class CtreBackendTest {
 
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {}
+
+        @Override
+        public boolean setPositionTarget(double rotations, int slot, double feedforwardVolts, boolean enableFoc) {
+            positionTarget = rotations;
+            this.feedforwardVolts = feedforwardVolts;
+            this.enableFoc = enableFoc;
+            return licenseFault && enableFoc;
+        }
+
+        @Override
+        public boolean setVelocityTarget(
+                double rotationsPerSecond,
+                int slot,
+                double feedforwardVolts,
+                boolean enableFoc) {
+            velocityTargetCalls++;
+            this.feedforwardVolts = feedforwardVolts;
+            this.enableFoc = enableFoc;
+            return licenseFault && enableFoc;
+        }
+
+        @Override
+        public void configureSlot(MotorClosedLoopConfig config) {
+            configureSlotCalls++;
+            this.config = config;
+        }
 
         @Override
         public void stop() {}

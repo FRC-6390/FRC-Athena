@@ -21,9 +21,10 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.hardware.sim.SimModels;
-import ca.frc6390.athena.localization.ref.LocalizationPipeline;
-import ca.frc6390.athena.localization.ref.Localizations;
+import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
+import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Events;
 import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
@@ -34,7 +35,7 @@ import ca.frc6390.athena.runtime.measurement.Measurements;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.vision.config.Cameras;
-import ca.frc6390.athena.vision.ref.CameraDevice;
+import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.runtime.CameraAdapters;
 import ca.frc6390.athena.vision.runtime.VisionGraph;
 import java.util.List;
@@ -266,11 +267,24 @@ class RobotRuntimeTest {
         SimulationSession simulation = SimulationSession.create();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
-        runtime.simulationPeriodic(0.0, 0.5);
+        runtime.robotPeriodic(0.0, 0.02);
+        runtime.simulationPeriodic(0.02, 0.5);
 
         MotorHandle handle = simulation.motor(mechanism.motor);
         assertEquals(0.5, handle.integratedPositionRotations(), 1.0e-9);
         assertEquals(1.0, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
+    }
+
+    @Test
+    void simulationPeriodicDoesNotEvaluateMechanismActionsAgain() {
+        AtomicInteger evaluations = new AtomicInteger();
+        CountingOutputMechanism mechanism = new CountingOutputMechanism(evaluations);
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+
+        runtime.robotPeriodic(0.0, 0.02);
+        runtime.simulationPeriodic(0.02, 0.02);
+
+        assertEquals(1, evaluations.get());
     }
 
     @Test
@@ -279,7 +293,8 @@ class RobotRuntimeTest {
         SimulationSession simulation = SimulationSession.create();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
-        runtime.simulationPeriodic(0.0, 0.2);
+        runtime.robotPeriodic(0.0, 0.02);
+        runtime.simulationPeriodic(0.02, 0.2);
 
         assertEquals(1, simulation.registeredModels().size());
         assertTrue(simulation.encoder(mechanism.encoder).positionRotations() > 0.0);
@@ -429,6 +444,16 @@ class RobotRuntimeTest {
         private final Action initial = motor.percent(1.0);
     }
 
+    private static final class CountingOutputMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 44);
+        @SuppressWarnings("unused")
+        private final Action initial;
+
+        private CountingOutputMechanism(AtomicInteger evaluations) {
+            initial = motor.percent(() -> evaluations.incrementAndGet());
+        }
+    }
+
     private static final class FailingRefreshMotorBackend implements MotorBackend {
         private FailingRefreshMotorHandle handle;
 
@@ -481,6 +506,8 @@ class RobotRuntimeTest {
     private static final class DigitalHookMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
         @SuppressWarnings("unused")
         private final DigitalInputDevice input;
+        @SuppressWarnings("unused")
+        private final Action initial = Actions.neutral();
         @SuppressWarnings("unused")
         private final HookBinding hook;
 

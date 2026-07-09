@@ -17,8 +17,8 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.hardware.sim.SimModels;
-import ca.frc6390.athena.localization.ref.LocalizationPipeline;
-import ca.frc6390.athena.localization.ref.Localizations;
+import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
+import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.robot.RobotRuntime;
@@ -81,7 +81,8 @@ class WpilibSimPhysicsEngineTest {
                 .physicsEngine(new WpilibSimPhysicsEngine());
         RobotRuntime runtime = RobotRuntime.simulated(session).register(mechanism);
 
-        runtime.simulationPeriodic(0.0, 0.2);
+        runtime.robotPeriodic(0.0, 0.02);
+        runtime.simulationPeriodic(0.02, 0.2);
 
         assertEquals(1, session.registeredModels().size());
         assertTrue(session.motor(mechanism.motor).integratedVelocityRotationsPerSecond() > 0.0);
@@ -170,7 +171,8 @@ class WpilibSimPhysicsEngineTest {
                 .physicsEngine(new WpilibSimPhysicsEngine());
         RobotRuntime runtime = RobotRuntime.simulated(session).register(drive);
 
-        runtime.simulationPeriodic(0.0, 1.0);
+        runtime.robotPeriodic(0.0, 0.02);
+        runtime.simulationPeriodic(0.02, 1.0);
 
         assertEquals(9, session.registeredModels().size());
         assertTrue(session.pose().xMeters() > 0.0);
@@ -188,7 +190,8 @@ class WpilibSimPhysicsEngineTest {
                 .register(drive)
                 .localization(localization);
 
-        runtime.simulationPeriodic(0.0, 1.0);
+        runtime.robotPeriodic(0.0, 0.02);
+        runtime.simulationPeriodic(0.02, 1.0);
 
         assertTrue(session.pose().xMeters() > 0.0);
         assertEquals(session.pose().xMeters(), localization.pose().xMeters(), 1.0e-9);

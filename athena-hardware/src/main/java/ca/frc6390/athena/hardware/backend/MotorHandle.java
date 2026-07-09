@@ -55,12 +55,43 @@ public interface MotorHandle {
     }
 
     /**
+     * Sets a closed-loop position target with explicit controller configuration.
+     *
+     * @param rotations target position in rotations
+     * @param request closed-loop request metadata
+     */
+    default void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
+        setPositionTargetRotations(rotations);
+    }
+
+    /**
      * Sets a closed-loop velocity target.
      *
      * @param rotationsPerSecond target velocity in rotations per second
      */
     default void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
         throw new UnsupportedOperationException("Velocity closed-loop is not implemented by " + device().defaultName());
+    }
+
+    /**
+     * Sets a closed-loop velocity target with explicit controller configuration.
+     *
+     * @param rotationsPerSecond target velocity in rotations per second
+     * @param request closed-loop request metadata
+     */
+    default void setVelocityTargetRotationsPerSecond(
+            double rotationsPerSecond,
+            MotorClosedLoopRequest request) {
+        setVelocityTargetRotationsPerSecond(rotationsPerSecond);
+    }
+
+    /**
+     * Returns onboard control features supported by this handle.
+     *
+     * @return motor control capabilities
+     */
+    default MotorControlCapabilities controlCapabilities() {
+        return MotorControlCapabilities.OPEN_LOOP_ONLY;
     }
 
     /**
