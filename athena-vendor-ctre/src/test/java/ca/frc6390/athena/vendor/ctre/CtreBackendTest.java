@@ -74,12 +74,12 @@ class CtreBackendTest {
                 new CtreMotorOptions(),
                 controller);
 
-        assertEquals(0, controller.neutralModeCalls);
+        assertEquals(0, controller.outputConfigurationCalls);
 
         handle.activate();
         handle.activate();
 
-        assertEquals(1, controller.neutralModeCalls);
+        assertEquals(1, controller.outputConfigurationCalls);
         assertTrue(controller.brake);
         assertTrue(controller.inverted);
     }
@@ -179,7 +179,7 @@ class CtreBackendTest {
     }
 
     private static final class RecordingTalonController implements CtreMotorHandle.TalonController {
-        private int neutralModeCalls;
+        private int outputConfigurationCalls;
         private boolean brake;
         private int configureSlotCalls;
         private int velocityTargetCalls;
@@ -240,13 +240,9 @@ class CtreBackendTest {
         public void stop() {}
 
         @Override
-        public void setNeutralMode(boolean brake) {
-            neutralModeCalls++;
+        public void configureOutput(boolean brake, boolean inverted) {
+            outputConfigurationCalls++;
             this.brake = brake;
-        }
-
-        @Override
-        public void setInverted(boolean inverted) {
             this.inverted = inverted;
         }
 

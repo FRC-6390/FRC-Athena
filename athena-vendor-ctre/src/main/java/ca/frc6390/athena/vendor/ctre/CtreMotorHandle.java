@@ -68,10 +68,9 @@ public final class CtreMotorHandle implements MotorHandle {
     @Override
     public void activate() {
         if (!activated) {
-            controller.setNeutralMode(device.neutralMode() == MotorNeutralMode.BRAKE);
-            if (device.follower() == null) {
-                controller.setInverted(device.isInverted());
-            }
+            controller.configureOutput(
+                    device.neutralMode() == MotorNeutralMode.BRAKE,
+                    device.follower() == null && device.isInverted());
             activated = true;
         }
     }
@@ -255,10 +254,7 @@ public final class CtreMotorHandle implements MotorHandle {
 
         void stop();
 
-        void setNeutralMode(boolean brake);
-
-        default void setInverted(boolean inverted) {
-        }
+        void configureOutput(boolean brake, boolean inverted);
 
         double positionRotations();
 
@@ -344,14 +340,12 @@ public final class CtreMotorHandle implements MotorHandle {
         }
 
         @Override
-        public void setNeutralMode(boolean brake) {
-            talon.setNeutralMode(brake ? NeutralModeValue.Brake : NeutralModeValue.Coast);
-        }
-
-        @Override
-        public void setInverted(boolean inverted) {
-            talon.getConfigurator().apply(new MotorOutputConfigs().withInverted(
-                    inverted ? InvertedValue.Clockwise_Positive : InvertedValue.CounterClockwise_Positive));
+        public void configureOutput(boolean brake, boolean inverted) {
+            talon.getConfigurator().apply(new MotorOutputConfigs()
+                    .withNeutralMode(brake ? NeutralModeValue.Brake : NeutralModeValue.Coast)
+                    .withInverted(inverted
+                            ? InvertedValue.Clockwise_Positive
+                            : InvertedValue.CounterClockwise_Positive));
         }
 
         @Override
