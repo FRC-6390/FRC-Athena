@@ -8,6 +8,7 @@ import ca.frc6390.athena.wpilib.controls.Gamepad;
 import java.util.function.DoubleSupplier;
 
 public final class Controls implements Mechanism {
+    private boolean fieldOriented = true;
     public final Gamepad driver = Controllers.xbox(Constants.Driver.PORT);
     public final DoubleSupplier forward = driver.leftY()
             .deadband(Constants.Driver.DEADBAND)
@@ -22,9 +23,18 @@ public final class Controls implements Mechanism {
     public final HookBinding drive;
 
     public Controls(DriveTrain driveTrain) {
-        drive = Events.teleopPeriodic().whileActive(() -> driveTrain.drive(
-                forward.getAsDouble(),
-                strafe.getAsDouble(),
-                rotation.getAsDouble()).request());
+        driver.y().onActive(() -> fieldOriented = true);
+        driver.a().onActive(() -> fieldOriented = false);
+
+        drive = Events.teleopPeriodic().whileActive(() -> {
+            double forwardValue = forward.getAsDouble();
+            double strafeValue = strafe.getAsDouble();
+            double rotationValue = rotation.getAsDouble();
+            if (fieldOriented) {
+                driveTrain.fieldOrientedDrive(forwardValue, strafeValue, rotationValue).request();
+            } else {
+                driveTrain.robotOrientedDrive(forwardValue, strafeValue, rotationValue).request();
+            }
+        });
     }
 }

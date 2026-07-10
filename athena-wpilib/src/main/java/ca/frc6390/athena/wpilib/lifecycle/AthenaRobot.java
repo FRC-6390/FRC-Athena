@@ -13,10 +13,13 @@ import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import java.util.Objects;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Subclassable WPILib robot host backed by Athena mechanisms.
@@ -171,10 +174,14 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     static RobotRuntime createRuntime(boolean simulation) {
-        if (!simulation) {
-            return RobotRuntime.create();
-        }
-        return RobotRuntime.simulated(SimulationSession.create().physicsEngine(new WpilibSimPhysicsEngine()));
+        RobotRuntime runtime = simulation
+                ? RobotRuntime.simulated(SimulationSession.create().physicsEngine(new WpilibSimPhysicsEngine()))
+                : RobotRuntime.create();
+        Map<Integer, DigitalInput> inputs = new ConcurrentHashMap<>();
+        return runtime.digitalInputs(device -> {
+            DigitalInput input = inputs.computeIfAbsent(device.channel(), DigitalInput::new);
+            return input::get;
+        });
     }
 
 }

@@ -5,6 +5,8 @@ import ca.frc6390.athena.auto.PathGraph;
 import ca.frc6390.athena.commands.CommandGraph;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
+import ca.frc6390.athena.hardware.device.DigitalInputDevice;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
 import ca.frc6390.athena.mechanism.core.EventContext;
@@ -31,6 +33,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Function;
+import java.util.function.BooleanSupplier;
 
 /**
  * Root Athena runtime that composes hardware, mechanisms, drivetrain, vision, localization, autos, commands, and sim.
@@ -47,6 +51,7 @@ public final class RobotRuntime {
     private final List<MeasurementSnapshot> localizationSnapshots = new ArrayList<>();
     private final Set<SimModel> registeredSimulationModels = new LinkedHashSet<>();
     private RuntimeWorkers workers = RuntimeWorkers.none();
+    private Function<DigitalInputDevice, BooleanSupplier> digitalInputResolver;
     private double localizationMaxAgeSeconds = Double.POSITIVE_INFINITY;
     private boolean localizationRefreshWhileDisabled;
 
@@ -146,6 +151,19 @@ public final class RobotRuntime {
     }
 
     /**
+     * Configures the robot host responsible for reading declared digital inputs.
+     * Existing and subsequently registered declarations are bound automatically.
+     *
+     * @param resolver host reader factory
+     * @return this runtime
+     */
+    public RobotRuntime digitalInputs(Function<DigitalInputDevice, BooleanSupplier> resolver) {
+        digitalInputResolver = Objects.requireNonNull(resolver, "resolver");
+        bindDigitalInputs();
+        return this;
+    }
+
+    /**
      * Samples declared signal inputs from the main runtime loop on the requested period.
      *
      * @param periodSeconds period in seconds
@@ -189,11 +207,28 @@ public final class RobotRuntime {
     public RobotRuntime register(Mechanism mechanism) {
         mechanisms.register(mechanism);
         mechanisms.followerMotors().forEach(hardwareGraph::motor);
+        mechanisms.imuDevices().forEach(imu -> {
+            var handle = hardwareGraph.imu(imu);
+            ImuDevice.bindRuntime(imu, handle::yawDegrees, handle::angleDegrees);
+        });
         if (simulationSession != null) {
             registerSimulationModels();
             mechanisms.bindInMemoryRuntime();
         }
+        bindDigitalInputs();
         return this;
+    }
+
+    private void bindDigitalInputs() {
+        if (digitalInputResolver == null) {
+            return;
+        }
+        mechanisms.digitalInputDevices().forEach(input -> {
+            BooleanSupplier reader = Objects.requireNonNull(
+                    digitalInputResolver.apply(input),
+                    "Digital input resolver returned null for " + input.defaultName());
+            mechanisms.digitalInput(input, reader);
+        });
     }
 
     private void registerSimulationModels() {

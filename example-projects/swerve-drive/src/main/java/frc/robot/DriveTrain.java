@@ -1,15 +1,18 @@
 package frc.robot;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
+import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModules;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModuleTarget;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
@@ -24,12 +27,25 @@ public final class DriveTrain implements Mechanism {
     public final SwerveModule frontRight = module(3, 4, 12);
     public final SwerveModule backLeft = module(5, 6, 13);
     public final SwerveModule backRight = module(7, 8, 14);
+    public final ImuDevice imu = Constants.RIO.imu(ImuKinds.PIGEON_2, 20);
 
-    public Action drive(double forward, double strafe, double rotation) {
-        SwerveModuleState[] states = kinematics().toSwerveModuleStates(new ChassisSpeeds(
-                clamp(forward) * MAX_SPEED_METERS_PER_SECOND,
-                clamp(strafe) * MAX_SPEED_METERS_PER_SECOND,
-                clamp(rotation) * MAX_ROTATION_RADIANS_PER_SECOND));
+    public Action fieldOrientedDrive(double forward, double strafe, double rotation) {
+        return drive(ChassisSpeeds.fromFieldRelativeSpeeds(
+                linearSpeed(forward),
+                linearSpeed(strafe),
+                rotationSpeed(rotation),
+                Rotation2d.fromDegrees(imu.yawDegrees())));
+    }
+
+    public Action robotOrientedDrive(double forward, double strafe, double rotation) {
+        return drive(new ChassisSpeeds(
+                linearSpeed(forward),
+                linearSpeed(strafe),
+                rotationSpeed(rotation)));
+    }
+
+    private Action drive(ChassisSpeeds speeds) {
+        SwerveModuleState[] states = kinematics().toSwerveModuleStates(speeds);
         SwerveDriveKinematics.desaturateWheelSpeeds(states, MAX_SPEED_METERS_PER_SECOND);
 
         return Actions.parallel(
@@ -61,6 +77,14 @@ public final class DriveTrain implements Mechanism {
 
     private static double clamp(double value) {
         return Math.max(-1.0, Math.min(1.0, value));
+    }
+
+    private static double linearSpeed(double input) {
+        return clamp(input) * MAX_SPEED_METERS_PER_SECOND;
+    }
+
+    private static double rotationSpeed(double input) {
+        return clamp(input) * MAX_ROTATION_RADIANS_PER_SECOND;
     }
 }
 

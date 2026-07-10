@@ -18,6 +18,7 @@ import ca.frc6390.athena.hardware.backend.MotorBackend;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.sim.SimModel;
@@ -44,10 +45,24 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class RobotRuntimeTest {
+    @Test
+    void bindsDeclaredImuReadingsThroughTheRobotRuntime() {
+        SimulationSession simulation = SimulationSession.create();
+        ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 30);
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(new ImuMechanism(imu));
+
+        simulation.imu(imu).yawDegrees(72.5);
+        runtime.robotPeriodic(0.0, 0.02);
+
+        assertEquals(72.5, imu.yawDegrees(), 1.0e-9);
+        assertEquals(72.5, imu.angleDegrees(), 1.0e-9);
+    }
+
     @Test
     void discoversHardwareVendorBackendsFromServiceDescriptorsOnRootClasspath() {
         BackendRegistry.setGlobal(null);
@@ -424,6 +439,23 @@ class RobotRuntimeTest {
         assertEquals(1, secondStarts.get());
     }
 
+    @Test
+    void hostResolverBindsDigitalInputsForRealRuntimeRegistration() {
+        DigitalInputDevice input = DigitalInputDevice.rio(27);
+        AtomicBoolean raw = new AtomicBoolean();
+        AtomicInteger starts = new AtomicInteger();
+        RobotRuntime runtime = RobotRuntime.create()
+                .digitalInputs(ignored -> raw::get)
+                .register(new DigitalHookMechanism(input, starts));
+
+        runtime.robotPeriodic(0.0, 0.02);
+        raw.set(true);
+        runtime.robotPeriodic(0.02, 0.02);
+
+        assertTrue(input.active());
+        assertEquals(1, starts.get());
+    }
+
     private record TestPoseMeasurement(PoseSnapshot pose, double timestampSeconds) implements PoseMeasurementSample {
         @Override
         public RobotVelocity speeds() {
@@ -583,5 +615,8 @@ class RobotRuntimeTest {
             this.input = input;
             hook = Events.when(input).rising().onStart(starts::incrementAndGet);
         }
+    }
+
+    private record ImuMechanism(ImuDevice imu) implements ca.frc6390.athena.mechanism.core.Mechanism {
     }
 }

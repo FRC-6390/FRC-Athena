@@ -1,7 +1,7 @@
 # Athena Example Projects
 
 - `tank-drive` - tank drive robot with processed driver axes in a dedicated `Controls.java`
-- `swerve-drive` - swerve drive robot with processed translation and rotation axes in a dedicated `Controls.java`
+- `swerve-drive` - swerve drive robot with selectable field-oriented and robot-oriented control using a declared Pigeon 2 IMU
 - `auto-following` - autonomous setup with PathPlanner, Choreo-style paths, markers, and a custom timed provider
 - `localization-setups` - odometry, multi-camera vision, weighted, latest-valid, and Kalman localization pipelines
 - `mechanism-examples` - button-bound open-loop, velocity, and split-wheel shooters; manual, single-joint, and 2DOF arms; roller and indexed intakes; single and follower elevators; simulations; and a composed superstructure

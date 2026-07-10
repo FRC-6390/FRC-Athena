@@ -3,6 +3,7 @@ package ca.frc6390.athena.mechanism.core;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimModel;
@@ -114,6 +115,7 @@ final class MechanismIntrospector {
     private static boolean isDeclaration(Object value) {
         return value instanceof MotorDevice
                 || value instanceof EncoderDevice
+                || value instanceof ImuDevice
                 || value instanceof DigitalInputDevice
                 || value instanceof Range
                 || value instanceof GearRatio

@@ -4,6 +4,7 @@ import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
@@ -160,6 +161,15 @@ public final class MechanismScheduler {
         return this;
     }
 
+    /**
+     * Returns digital input declarations owned by registered mechanisms.
+     *
+     * @return declared digital inputs
+     */
+    public Set<DigitalInputDevice> digitalInputDevices() {
+        return Set.copyOf(digitalInputs);
+    }
+
     public List<Mechanism> mechanisms() {
         return List.copyOf(runtimes.keySet());
     }
@@ -171,6 +181,21 @@ public final class MechanismScheduler {
      */
     public Set<SimModel> simulationModels() {
         return graph.simulations(runtimes.keySet());
+    }
+
+    /**
+     * Returns IMU declarations owned by registered mechanisms.
+     *
+     * @return declared IMUs
+     */
+    public Set<ImuDevice> imuDevices() {
+        Set<ImuDevice> imus = new LinkedHashSet<>();
+        for (Object declaration : graph.declarations(runtimes.keySet())) {
+            if (declaration instanceof ImuDevice imu) {
+                imus.add(imu);
+            }
+        }
+        return Set.copyOf(imus);
     }
 
     /**
