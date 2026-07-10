@@ -28,4 +28,14 @@ class AxisSignalTest {
         raw[0] = Double.NaN;
         assertEquals(0.0, axis.getAsDouble(), 1.0e-9);
     }
+
+    @Test
+    void squaringPreservesNegativeInputSign() {
+        DoubleSupplier axis = new AxisSignal(() -> -0.6)
+                .deadband(0.2)
+                .squared()
+                .toSupplier();
+
+        assertEquals(-0.25, axis.getAsDouble(), 1.0e-9);
+    }
 }

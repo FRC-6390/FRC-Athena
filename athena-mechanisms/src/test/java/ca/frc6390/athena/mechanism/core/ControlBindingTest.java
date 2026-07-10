@@ -8,6 +8,8 @@ import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.backend.EncoderHandle;
+import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.signal.PositionSignal;
 import ca.frc6390.athena.hardware.signal.VelocitySignal;
 import java.util.List;
@@ -68,5 +70,37 @@ class ControlBindingTest {
         assertSame(feedback, control.feedback());
         assertSame(position, control.feedback().position());
         assertSame(velocity, control.feedback().velocity());
+    }
+
+    @Test
+    void absoluteEncoderSignalReadsAbsoluteChannelAndRetainsDependency() {
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2).offset(0.25);
+        PositionSignal absolute = encoder.absolutePosition();
+        EncoderHandle handle = new EncoderHandle() {
+            @Override
+            public EncoderDevice device() {
+                return encoder;
+            }
+
+            @Override
+            public double positionRotations() {
+                return 7.0;
+            }
+
+            @Override
+            public double absolutePositionRotations() {
+                return 0.75;
+            }
+        };
+        ActionContext context = new ActionContext() {
+            @Override
+            public EncoderHandle encoder(EncoderDevice requested) {
+                assertSame(encoder, requested);
+                return handle;
+            }
+        };
+
+        assertEquals(0.5, absolute.position(context), 1.0e-9);
+        assertEquals(List.of(encoder), absolute.dependencies());
     }
 }

@@ -186,6 +186,15 @@ public record EncoderDevice(
     }
 
     /**
+     * Returns a position signal backed by this encoder's absolute-position channel.
+     *
+     * @return absolute position in this declaration's configured mechanism units
+     */
+    public PositionSignal absolutePosition() {
+        return new AbsolutePositionSignal(this);
+    }
+
+    /**
      * Reads configured mechanism velocity through the runtime handle.
      *
      * @param context runtime hardware context
@@ -284,6 +293,19 @@ public record EncoderDevice(
             public MotorAbsolute {
                 Objects.requireNonNull(motor, "motor");
             }
+        }
+    }
+
+    private record AbsolutePositionSignal(EncoderDevice encoder) implements PositionSignal {
+        @Override
+        public double position(ActionContext context) {
+            Objects.requireNonNull(context, "context");
+            return encoder.positionFromRotations(context.encoder(encoder).absolutePositionRotations());
+        }
+
+        @Override
+        public java.util.List<?> dependencies() {
+            return java.util.List.of(encoder);
         }
     }
 

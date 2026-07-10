@@ -81,6 +81,13 @@ public final class SwerveKinematics implements SimModel.Source {
             double speed = Math.hypot(wheelX, wheelY);
             greatestSpeed = Math.max(greatestSpeed, speed);
             double angleRotations = speed <= 1.0e-12 ? 0.0 : Math.atan2(wheelY, wheelX) / TWO_PI;
+            if (angleRotations > 0.25) {
+                angleRotations -= 0.5;
+                speed = -speed;
+            } else if (angleRotations < -0.25) {
+                angleRotations += 0.5;
+                speed = -speed;
+            }
             targets.add(new SwerveModuleTarget(speed, angleRotations));
         }
         if (greatestSpeed <= maxSpeedMetersPerSecond) {

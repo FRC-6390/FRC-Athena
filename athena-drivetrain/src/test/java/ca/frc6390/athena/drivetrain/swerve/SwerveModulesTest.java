@@ -118,6 +118,22 @@ class SwerveModulesTest {
         assertEquals(requested.angularRadiansPerSecond(), measured.angularRadiansPerSecond(), 1.0e-9);
     }
 
+    @Test
+    void reverseTranslationFlipsDriveSpeedInsteadOfRotatingModulesHalfATurn() {
+        SwerveKinematics kinematics = SwerveKinematics.rectangular(
+                0.6, 0.5, 4.5, module(41, 42, 51), module(43, 44, 52), module(45, 46, 53), module(47, 48, 54));
+
+        List<SwerveModuleTarget> targets = kinematics.targets(new RobotVelocity(-2.0, 0.0, 0.0));
+
+        for (SwerveModuleTarget target : targets) {
+            assertEquals(-2.0, target.speedMetersPerSecond(), 1.0e-9);
+            assertEquals(0.0, target.angleRotations(), 1.0e-9);
+        }
+        RobotVelocity reconstructed = kinematics.velocity(targets);
+        assertEquals(-2.0, reconstructed.xMetersPerSecond(), 1.0e-9);
+        assertEquals(0.0, reconstructed.yMetersPerSecond(), 1.0e-9);
+    }
+
     private static ExpectedPreset preset(
             String vendor,
             String name,

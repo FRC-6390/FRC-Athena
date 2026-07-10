@@ -2,6 +2,8 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.signal.PositionSignal;
+import ca.frc6390.athena.hardware.signal.VelocitySignal;
 import ca.frc6390.athena.mechanism.constraint.Constraint;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
@@ -85,6 +87,10 @@ public record ControlBinding(
     public ControlBinding feedback(EncoderDevice encoder) {
         Objects.requireNonNull(encoder, "encoder");
         return feedback(new FeedbackBinding(encoder, encoder));
+    }
+
+    public ControlBinding feedback(PositionSignal position, VelocitySignal velocity) {
+        return feedback(new FeedbackBinding(position, velocity));
     }
 
     public ControlBinding feedback(FeedbackBinding feedback) {
