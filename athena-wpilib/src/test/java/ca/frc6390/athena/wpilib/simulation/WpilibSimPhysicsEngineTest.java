@@ -240,7 +240,9 @@ class WpilibSimPhysicsEngineTest {
         return new SwerveModules.SDS.MK5N.R3()
                 .drive.fill(canivore.motor(MotorKinds.KRAKEN_X60, driveMotorId))
                 .steer.fill(canivore.motor(MotorKinds.KRAKEN_X44, steerMotorId))
-                .angle.fill(canivore.encoder(EncoderKinds.CANCODER, encoderId));
+                .angle.fill(canivore.encoder(EncoderKinds.CANCODER, encoderId))
+                .driveMaxSpeedMetersPerSecond(4.0)
+                .steerPid(1.9, 0.0, 0.0);
     }
 
     private static final class FlywheelMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {

@@ -107,6 +107,11 @@ final class MechanismRuntime {
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
         hookRuntime.run(safeEventContext, actionContext, hookBindings);
+        if (!safeMechanismContext.enabled()) {
+            applier.stopAll();
+            simulationStep.run();
+            return;
+        }
         if (Double.isNaN(stateStartSeconds)) {
             stateStartSeconds = safeMechanismContext.nowSeconds();
         }

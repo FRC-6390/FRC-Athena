@@ -10,6 +10,7 @@ import ca.frc6390.athena.mechanism.core.EncoderSlot;
 import ca.frc6390.athena.mechanism.core.MechanismTemplate;
 import ca.frc6390.athena.mechanism.core.MotorSlot;
 import ca.frc6390.athena.mechanism.core.Slots;
+import ca.frc6390.athena.mechanism.control.PidGains;
 import java.util.Objects;
 
 /**
@@ -22,6 +23,8 @@ public abstract class SwerveModule implements MechanismTemplate {
     public final EncoderSlot<SwerveModule> angle = Slots.encoder(this, "angle", this::configureIfReady);
     public ControlBinding driveVelocity;
     public ControlBinding steerPosition;
+    private double driveMaxSpeedMetersPerSecond = Double.NaN;
+    private PidGains steerPid;
 
     protected SwerveModule(SwerveModuleModel model) {
         this.model = Objects.requireNonNull(model, "model");
@@ -29,6 +32,21 @@ public abstract class SwerveModule implements MechanismTemplate {
 
     public SwerveModuleModel model() {
         return model;
+    }
+
+    public SwerveModule driveMaxSpeedMetersPerSecond(double maxSpeedMetersPerSecond) {
+        if (!Double.isFinite(maxSpeedMetersPerSecond) || maxSpeedMetersPerSecond <= 0.0) {
+            throw new IllegalArgumentException("Drive max speed must be positive.");
+        }
+        driveMaxSpeedMetersPerSecond = maxSpeedMetersPerSecond;
+        configureIfReady();
+        return this;
+    }
+
+    public SwerveModule steerPid(double p, double i, double d) {
+        steerPid = PidGains.of(p, i, d);
+        configureIfReady();
+        return this;
     }
 
     private void configureIfReady() {
@@ -45,12 +63,22 @@ public abstract class SwerveModule implements MechanismTemplate {
                 .feedback(driveDistance);
         steerPosition = Controls.position(steer.get())
                 .feedback(angle.get());
+        if (Double.isFinite(driveMaxSpeedMetersPerSecond)) {
+            driveVelocity = driveVelocity.ff(0.0, 12.0 / driveMaxSpeedMetersPerSecond, 0.0);
+        }
+        if (steerPid != null) {
+            steerPosition = steerPosition.pid(steerPid);
+        }
     }
 
     public Action target(SwerveModuleTarget target) {
         Objects.requireNonNull(target, "target");
         if (driveVelocity == null || steerPosition == null) {
             throw new IllegalStateException("Swerve module controls have not been configured.");
+        }
+        if (driveVelocity.loops().isEmpty() || steerPosition.loops().isEmpty()) {
+            throw new IllegalStateException(
+                    "Swerve module requires driveMaxSpeedMetersPerSecond(...) and steerPid(...) before targeting.");
         }
         return Actions.parallel(
                 driveVelocity.velocity(target.speedMetersPerSecond()),

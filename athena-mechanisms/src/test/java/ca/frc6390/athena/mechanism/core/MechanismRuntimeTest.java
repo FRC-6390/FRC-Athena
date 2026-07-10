@@ -286,6 +286,26 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void disabledContextStopsDrivenMotorsWithoutEvaluatingTheRetainedAction() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        AtomicInteger evaluations = new AtomicInteger();
+        TestMechanism mechanism = new TestMechanism(MOTOR.percent(() -> {
+            evaluations.incrementAndGet();
+            return 0.7;
+        }));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        runtime.periodic(
+                new MechanismContext(0.02, 0.0, 0.02, false, false, false),
+                new EventContext(0.02, 0.02, LifecycleMode.DISABLED, LifecyclePhase.PERIODIC, false, false));
+
+        assertEquals(1, evaluations.get());
+        assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
     void robotRuntimeRequestsRootOwnedAction() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(MOTOR.percent(0.1));

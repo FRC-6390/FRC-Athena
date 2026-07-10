@@ -13,9 +13,11 @@ import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Applies resolved mechanism outputs to runtime hardware handles.
@@ -23,6 +25,7 @@ import java.util.Objects;
 final class OutputApplier {
     private final ActionContext context;
     private final Map<ControlBinding, ControlRuntimeState> controlRuntimes = new HashMap<>();
+    private final Set<MotorHandle> drivenMotors = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final AppliedOutput appliedOutput = new AppliedOutput();
 
     private OutputApplier(ActionContext context) {
@@ -61,8 +64,14 @@ final class OutputApplier {
                 output,
                 mechanismContext == null ? MechanismContext.empty() : mechanismContext);
         for (MotorDevice motor : motors(output.request())) {
-            apply(context.motor(motor), applied);
+            MotorHandle handle = context.motor(motor);
+            drivenMotors.add(handle);
+            apply(handle, applied);
         }
+    }
+
+    void stopAll() {
+        drivenMotors.forEach(MotorHandle::stop);
     }
 
     private AppliedOutput resolveControlOutput(ResolvedOutput output, MechanismContext mechanismContext) {

@@ -78,6 +78,10 @@ class SwerveModulesTest {
 
         assertNotNull(module.driveVelocity);
         assertNotNull(module.steerPosition);
+        assertThrows(IllegalStateException.class, () -> module.target(new SwerveModuleTarget(1.0, 0.25)));
+
+        module.driveMaxSpeedMetersPerSecond(4.0).steerPid(1.0, 0.0, 0.0);
+
         assertDoesNotThrow(() -> module.target(new SwerveModuleTarget(1.0, 0.25)));
     }
 

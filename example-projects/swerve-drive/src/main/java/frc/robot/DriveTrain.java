@@ -67,7 +67,9 @@ public final class DriveTrain implements Mechanism {
                 .drive.fill(Constants.RIO.motor(MotorKinds.KRAKEN_X60, driveMotorId))
                 .steer.fill(Constants.RIO.motor(MotorKinds.KRAKEN_X44, steerMotorId))
                 .angle.fill(Constants.RIO.encoder(EncoderKinds.CANCODER, encoderId)
-                        .units(EncoderUnit.ROTATIONS));
+                        .units(EncoderUnit.ROTATIONS))
+                .driveMaxSpeedMetersPerSecond(MAX_SPEED_METERS_PER_SECOND)
+                .steerPid(1.9, 0.0, 0.0);
     }
 
     private static SwerveModuleTarget target(SwerveModuleState state) {
