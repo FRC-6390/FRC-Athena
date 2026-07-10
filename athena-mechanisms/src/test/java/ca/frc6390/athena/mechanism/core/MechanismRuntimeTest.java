@@ -35,6 +35,25 @@ class MechanismRuntimeTest {
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 1);
 
     @Test
+    void nestedTeleopHookRunsLazyCallbackAndRequestsDynamicAction() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        AtomicInteger callbacks = new AtomicInteger();
+        LazyHookDrive drive = new LazyHookDrive();
+        LazyHookRoot root = new LazyHookRoot(drive, callbacks);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(root);
+        ActionRequests.bind(scheduler::request);
+        try {
+            scheduler.teleopPeriodic(0.0, 0.02);
+            scheduler.robotPeriodic(0.02, 0.02);
+
+            assertEquals(1, callbacks.get());
+            assertEquals(0.65, actions.motor(MOTOR).percent, 1.0e-9);
+        } finally {
+            ActionRequests.clear();
+        }
+    }
+
+    @Test
     void sequenceAdvancesByTimeAndRoutesOutputsToMotorHandle() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(
@@ -631,6 +650,35 @@ class MechanismRuntimeTest {
         private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 21);
         private final SimModel simulation = SimModels.motor(motor).encoder(encoder);
         private final Action initial = motor.percent(1.0);
+    }
+
+    private static final class LazyHookDrive implements Mechanism {
+        private final MotorDevice motor = MOTOR;
+
+        private Action drive() {
+            return motor.percent(0.65);
+        }
+    }
+
+    private static final class LazyHookControls implements Mechanism {
+        private final HookBinding driverControl;
+
+        private LazyHookControls(LazyHookDrive drive, AtomicInteger callbacks) {
+            driverControl = Events.teleopPeriodic().whileActive(() -> {
+                callbacks.incrementAndGet();
+                drive.drive().request();
+            });
+        }
+    }
+
+    private static final class LazyHookRoot implements Mechanism {
+        private final LazyHookDrive drive;
+        private final LazyHookControls controls;
+
+        private LazyHookRoot(LazyHookDrive drive, AtomicInteger callbacks) {
+            this.drive = drive;
+            controls = new LazyHookControls(drive, callbacks);
+        }
     }
 
     private static final class HookedMechanism implements Mechanism {
