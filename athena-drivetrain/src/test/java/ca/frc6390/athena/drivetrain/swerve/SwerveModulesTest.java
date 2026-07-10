@@ -119,19 +119,36 @@ class SwerveModulesTest {
     }
 
     @Test
-    void reverseTranslationFlipsDriveSpeedInsteadOfRotatingModulesHalfATurn() {
+    void moduleOptimizationUsesCurrentAngleAndFlipsReverseDriveSpeed() {
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
                 0.6, 0.5, 4.5, module(41, 42, 51), module(43, 44, 52), module(45, 46, 53), module(47, 48, 54));
 
         List<SwerveModuleTarget> targets = kinematics.targets(new RobotVelocity(-2.0, 0.0, 0.0));
 
         for (SwerveModuleTarget target : targets) {
-            assertEquals(-2.0, target.speedMetersPerSecond(), 1.0e-9);
-            assertEquals(0.0, target.angleRotations(), 1.0e-9);
+            assertEquals(2.0, target.speedMetersPerSecond(), 1.0e-9);
+            assertEquals(0.5, target.angleRotations(), 1.0e-9);
         }
         RobotVelocity reconstructed = kinematics.velocity(targets);
         assertEquals(-2.0, reconstructed.xMetersPerSecond(), 1.0e-9);
         assertEquals(0.0, reconstructed.yMetersPerSecond(), 1.0e-9);
+
+        SwerveModuleTarget optimized = kinematics.modules().get(0).module().optimizedTarget(targets.get(0), 0.0);
+        assertEquals(-2.0, optimized.speedMetersPerSecond(), 1.0e-9);
+        assertEquals(0.0, optimized.angleRotations(), 1.0e-9);
+    }
+
+    @Test
+    void moduleOptimizationCosineScalesAndHoldsLastAngleAtZeroSpeed() {
+        SwerveModule module = module(61, 62, 63);
+
+        SwerveModuleTarget moving = module.optimizedTarget(new SwerveModuleTarget(2.0, 0.125), 0.0);
+        SwerveModuleTarget stopped = module.optimizedTarget(new SwerveModuleTarget(0.0, 0.0), 0.4);
+
+        assertEquals(Math.sqrt(2.0), moving.speedMetersPerSecond(), 1.0e-9);
+        assertEquals(0.125, moving.angleRotations(), 1.0e-9);
+        assertEquals(0.0, stopped.speedMetersPerSecond(), 1.0e-9);
+        assertEquals(0.125, stopped.angleRotations(), 1.0e-9);
     }
 
     private static ExpectedPreset preset(

@@ -1,5 +1,8 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
+import java.util.Objects;
+
 /**
  * Factory methods for localization pipelines.
  */
@@ -7,8 +10,9 @@ public final class Localizations {
     private Localizations() {
     }
 
-    public static LocalizationPipeline odometry() {
-        return new LocalizationPipeline("odometry", LocalizationEstimators.odometry());
+    public static LocalizationPipeline odometry(MeasurementSignal odometry) {
+        return new LocalizationPipeline("odometry", LocalizationEstimators.odometry())
+                .input(Objects.requireNonNull(odometry, "odometry"));
     }
 
     public static LocalizationPipeline vision() {
@@ -23,7 +27,4 @@ public final class Localizations {
         return new LocalizationPipeline("latestValid", LocalizationEstimators.latestValid());
     }
 
-    public static LocalizationPipeline kalman() {
-        return new LocalizationPipeline("kalman", LocalizationEstimators.kalman());
-    }
 }

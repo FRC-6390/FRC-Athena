@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
@@ -96,6 +97,11 @@ public final class MechanismScheduler {
 
     public MechanismScheduler encoder(EncoderDevice device, EncoderHandle encoder) {
         registeredHandles.encoder(Objects.requireNonNull(device, "device"), Objects.requireNonNull(encoder, "encoder"));
+        return this;
+    }
+
+    public MechanismScheduler imu(ImuDevice device, ImuHandle imu) {
+        registeredHandles.imu(Objects.requireNonNull(device, "device"), Objects.requireNonNull(imu, "imu"));
         return this;
     }
 
@@ -422,6 +428,10 @@ public final class MechanismScheduler {
             parallel.Actions().forEach(child -> collectActionDeclarations(child, declarations));
         } else if (action instanceof Actions.Computed computed) {
             collectActionDeclarations(computed.evaluate(MechanismContext.empty()), declarations);
+        } else if (action instanceof Actions.HardwareComputed computed) {
+            declarations.addAll(computed.declarations());
+        } else if (action instanceof Actions.ImuSetYaw setYaw) {
+            declarations.addAll(setYaw.imu().dependencies());
         } else if (action instanceof Actions.Race race) {
             race.Actions().forEach(child -> collectActionDeclarations(child, declarations));
         } else if (action instanceof Actions.Deadline deadline) {
@@ -549,6 +559,14 @@ public final class MechanismScheduler {
                 return registered.motor(ref);
             }
             return fallback.motor(ref);
+        }
+
+        @Override
+        public ImuHandle imu(ImuDevice ref) {
+            if (registered.hasImu(ref)) {
+                return registered.imu(ref);
+            }
+            return fallback.imu(ref);
         }
     }
 

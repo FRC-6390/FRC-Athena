@@ -194,6 +194,10 @@ final class MechanismRuntime {
                 Evaluation child = evaluate(schedule.named("computed", computed.evaluate(local)), context);
                 return schedule.result(child.output(), false, child.context());
             }
+            if (action instanceof Actions.HardwareComputed computed) {
+                Evaluation child = evaluate(schedule.named("hardwareComputed", computed.evaluate(actionContext)), context);
+                return schedule.result(child.output(), false, child.context());
+            }
             if (action instanceof Actions.Choice choice) {
                 return evaluate(schedule.named("choice", choice.choose(local)), context);
             }
@@ -248,6 +252,13 @@ final class MechanismRuntime {
                 if (!node.entered) {
                     actionContext.encoder(setPosition.encoder()).setPositionRotations(
                             setPosition.encoder().rotationsFromPosition(setPosition.position()));
+                    node.entered = true;
+                }
+                return schedule.result(null, true, local);
+            }
+            if (action instanceof Actions.ImuSetYaw setYaw) {
+                if (!node.entered) {
+                    setYaw.imu().applyYaw(actionContext, setYaw.yawDegrees());
                     node.entered = true;
                 }
                 return schedule.result(null, true, local);

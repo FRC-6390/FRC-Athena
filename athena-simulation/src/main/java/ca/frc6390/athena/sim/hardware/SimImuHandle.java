@@ -11,7 +11,12 @@ import ca.frc6390.athena.hardware.device.ImuDevice;
 public final class SimImuHandle implements ImuHandle {
     private final ImuDevice device;
     private double yawDegrees;
+    private double pitchDegrees;
+    private double rollDegrees;
     private double yawRateDegreesPerSecond;
+    private double linearAccelerationXG;
+    private double linearAccelerationYG;
+    private double linearAccelerationZG;
 
     /**
      * Creates a simulation IMU handle.
@@ -38,6 +43,41 @@ public final class SimImuHandle implements ImuHandle {
     }
 
     @Override
+    public double pitchDegrees() {
+        return pitchDegrees;
+    }
+
+    @Override
+    public double rollDegrees() {
+        return rollDegrees;
+    }
+
+    @Override
+    public double yawRateDegreesPerSecond() {
+        return yawRateDegreesPerSecond;
+    }
+
+    @Override
+    public double linearAccelerationXG() {
+        return linearAccelerationXG;
+    }
+
+    @Override
+    public double linearAccelerationYG() {
+        return linearAccelerationYG;
+    }
+
+    @Override
+    public double linearAccelerationZG() {
+        return linearAccelerationZG;
+    }
+
+    @Override
+    public void setYawDegrees(double yawDegrees) {
+        this.yawDegrees = finiteOrZero(yawDegrees);
+    }
+
+    @Override
     public void zeroYaw() {
         yawDegrees = 0.0;
     }
@@ -45,7 +85,12 @@ public final class SimImuHandle implements ImuHandle {
     @Override
     public void reset() {
         yawDegrees = 0.0;
+        pitchDegrees = 0.0;
+        rollDegrees = 0.0;
         yawRateDegreesPerSecond = 0.0;
+        linearAccelerationXG = 0.0;
+        linearAccelerationYG = 0.0;
+        linearAccelerationZG = 0.0;
     }
 
     /**
@@ -55,7 +100,17 @@ public final class SimImuHandle implements ImuHandle {
      * @return this handle
      */
     public SimImuHandle yawDegrees(double yawDegrees) {
-        this.yawDegrees = Double.isFinite(yawDegrees) ? yawDegrees : 0.0;
+        this.yawDegrees = finiteOrZero(yawDegrees);
+        return this;
+    }
+
+    public SimImuHandle pitchDegrees(double pitchDegrees) {
+        this.pitchDegrees = finiteOrZero(pitchDegrees);
+        return this;
+    }
+
+    public SimImuHandle rollDegrees(double rollDegrees) {
+        this.rollDegrees = finiteOrZero(rollDegrees);
         return this;
     }
 
@@ -66,7 +121,14 @@ public final class SimImuHandle implements ImuHandle {
      * @return this handle
      */
     public SimImuHandle yawRateDegreesPerSecond(double yawRateDegreesPerSecond) {
-        this.yawRateDegreesPerSecond = Double.isFinite(yawRateDegreesPerSecond) ? yawRateDegreesPerSecond : 0.0;
+        this.yawRateDegreesPerSecond = finiteOrZero(yawRateDegreesPerSecond);
+        return this;
+    }
+
+    public SimImuHandle linearAccelerationG(double x, double y, double z) {
+        linearAccelerationXG = finiteOrZero(x);
+        linearAccelerationYG = finiteOrZero(y);
+        linearAccelerationZG = finiteOrZero(z);
         return this;
     }
 
@@ -79,5 +141,9 @@ public final class SimImuHandle implements ImuHandle {
         if (Double.isFinite(seconds) && seconds > 0.0) {
             yawDegrees += yawRateDegreesPerSecond * seconds;
         }
+    }
+
+    private static double finiteOrZero(double value) {
+        return Double.isFinite(value) ? value : 0.0;
     }
 }

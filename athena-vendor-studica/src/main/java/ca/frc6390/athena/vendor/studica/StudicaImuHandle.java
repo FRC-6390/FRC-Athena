@@ -48,6 +48,36 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     }
 
     @Override
+    public double pitchDegrees() {
+        return controller.pitchDegrees();
+    }
+
+    @Override
+    public double rollDegrees() {
+        return controller.rollDegrees();
+    }
+
+    @Override
+    public double yawRateDegreesPerSecond() {
+        return controller.yawRateDegreesPerSecond();
+    }
+
+    @Override
+    public double linearAccelerationXG() {
+        return controller.linearAccelerationXG();
+    }
+
+    @Override
+    public double linearAccelerationYG() {
+        return controller.linearAccelerationYG();
+    }
+
+    @Override
+    public double linearAccelerationZG() {
+        return controller.linearAccelerationZG();
+    }
+
+    @Override
     public void zeroYaw() {
         controller.zeroYaw();
     }
@@ -95,6 +125,18 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
         double angleDegrees();
 
+        double pitchDegrees();
+
+        double rollDegrees();
+
+        double yawRateDegreesPerSecond();
+
+        double linearAccelerationXG();
+
+        double linearAccelerationYG();
+
+        double linearAccelerationZG();
+
         void zeroYaw();
 
         void reset();
@@ -124,6 +166,36 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
         @Override
         public double angleDegrees() {
             return ahrs().getAngle();
+        }
+
+        @Override
+        public double pitchDegrees() {
+            return ahrs().getPitch();
+        }
+
+        @Override
+        public double rollDegrees() {
+            return ahrs().getRoll();
+        }
+
+        @Override
+        public double yawRateDegreesPerSecond() {
+            return ahrs().getRate();
+        }
+
+        @Override
+        public double linearAccelerationXG() {
+            return ahrs().getWorldLinearAccelX();
+        }
+
+        @Override
+        public double linearAccelerationYG() {
+            return ahrs().getWorldLinearAccelY();
+        }
+
+        @Override
+        public double linearAccelerationZG() {
+            return ahrs().getWorldLinearAccelZ();
         }
 
         @Override

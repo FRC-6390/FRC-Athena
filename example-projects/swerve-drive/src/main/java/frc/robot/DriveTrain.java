@@ -8,6 +8,7 @@ import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
 import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.device.ImuDevice;
+import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
@@ -26,6 +27,8 @@ public final class DriveTrain implements Mechanism {
     public final SwerveModule backLeft = module(5, 6, 13);
     public final SwerveModule backRight = module(7, 8, 14);
     public final ImuDevice imu = Constants.RIO.imu(ImuKinds.PIGEON_2, 20);
+    public final ImuSource heading = imu.relative();
+    public final Action resetHeading = heading.setYaw(0.0);
     private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
             WHEELBASE_METERS,
             TRACK_WIDTH_METERS,
@@ -46,7 +49,7 @@ public final class DriveTrain implements Mechanism {
                     linearSpeed(strafe.getAsDouble()),
                     rotationSpeed(rotation.getAsDouble()));
             if (fieldOriented.getAsBoolean()) {
-                velocity = velocity.fieldToRobot(Math.toRadians(imu.yawDegrees()));
+                velocity = velocity.fieldToRobot(Math.toRadians(heading.yawDegrees()));
             }
             return kinematics.drive(velocity);
         });
@@ -54,8 +57,8 @@ public final class DriveTrain implements Mechanism {
 
     private static SwerveModule module(int driveMotorId, int steerMotorId, int encoderId) {
         return new SwerveModules.SDS.MK5N.R3()
-                .drive.fill(Constants.RIO.motor(MotorKinds.KRAKEN_X60, driveMotorId))
-                .steer.fill(Constants.RIO.motor(MotorKinds.KRAKEN_X44, steerMotorId))
+                .drive.brake().fill(Constants.RIO.motor(MotorKinds.KRAKEN_X60, driveMotorId))
+                .steer.brake().fill(Constants.RIO.motor(MotorKinds.KRAKEN_X44, steerMotorId))
                 .angle.fill(Constants.RIO.encoder(EncoderKinds.CANCODER, encoderId)
                         .units(EncoderUnit.ROTATIONS))
                 .driveMaxSpeedMetersPerSecond(MAX_SPEED_METERS_PER_SECOND)

@@ -214,7 +214,16 @@ public final class RobotRuntime {
         mechanisms.followerMotors().forEach(hardwareGraph::motor);
         mechanisms.imuDevices().forEach(imu -> {
             var handle = hardwareGraph.imu(imu);
-            ImuDevice.bindRuntime(imu, handle::yawDegrees, handle::angleDegrees);
+            ImuDevice.bindRuntime(
+                    imu,
+                    handle::yawDegrees,
+                    handle::pitchDegrees,
+                    handle::rollDegrees,
+                    handle::angleDegrees,
+                    handle::yawRateDegreesPerSecond,
+                    handle::linearAccelerationXG,
+                    handle::linearAccelerationYG,
+                    handle::linearAccelerationZG);
         });
         if (simulationSession != null) {
             registerSimulationModels();
@@ -586,7 +595,11 @@ public final class RobotRuntime {
             return;
         }
         for (int i = 0; i < localizations.size(); i++) {
-            MeasurementSignal signal = localizations.get(i);
+            LocalizationPipeline pipeline = localizations.get(i);
+            MeasurementSignal signal = pipeline.refresh(
+                    hardwareGraph,
+                    context.nowSeconds(),
+                    context.dtSeconds());
             if (localizationMaxAgeSeconds != Double.POSITIVE_INFINITY) {
                 signal = signal.maxAge(context.nowSeconds(), localizationMaxAgeSeconds);
             }

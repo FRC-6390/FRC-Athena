@@ -1,6 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
@@ -18,6 +19,8 @@ import java.util.Objects;
  * Base type for a swerve module declared as a specialized mechanism.
  */
 public abstract class SwerveModule implements MechanismTemplate {
+    private static final double TWO_PI = Math.PI * 2.0;
+    private static final double HOLD_SPEED_EPSILON = 1.0e-3;
     private final SwerveModuleModel model;
     public final MotorSlot<SwerveModule> drive = Slots.motor(this, "drive", this::configureIfReady);
     public final MotorSlot<SwerveModule> steer = Slots.motor(this, "steer", this::configureIfReady);
@@ -26,6 +29,7 @@ public abstract class SwerveModule implements MechanismTemplate {
     public ControlBinding steerPosition;
     private double driveMaxSpeedMetersPerSecond = Double.NaN;
     private PidGains steerPid;
+    private double heldAngleRotations = Double.NaN;
 
     protected SwerveModule(SwerveModuleModel model) {
         this.model = Objects.requireNonNull(model, "model");
@@ -56,7 +60,7 @@ public abstract class SwerveModule implements MechanismTemplate {
         }
 
         EncoderDevice driveDistance = drive.get().encoder()
-                .gearRatio(model.driveReduction())
+                .gearRatio(GearRatio.reduction(model.driveReduction(), 1.0))
                 .wheelDiameterMeters(model.wheelDiameterMeters())
                 .units(EncoderUnit.METERS);
 
@@ -82,8 +86,43 @@ public abstract class SwerveModule implements MechanismTemplate {
             throw new IllegalStateException(
                     "Swerve module requires driveMaxSpeedMetersPerSecond(...) and steerPid(...) before targeting.");
         }
+        return Actions.computeHardware(
+                java.util.List.of(drive.get(), steer.get(), angle.get()),
+                context -> applyTarget(optimizedTarget(
+                        target,
+                        angle.get().absolutePosition().position(context))));
+    }
+
+    SwerveModuleTarget optimizedTarget(SwerveModuleTarget target, double currentAngleRotations) {
+        if (!Double.isFinite(currentAngleRotations)) {
+            return new SwerveModuleTarget(0.0, Double.isFinite(heldAngleRotations) ? heldAngleRotations : 0.0);
+        }
+        if (Math.abs(target.speedMetersPerSecond()) < HOLD_SPEED_EPSILON) {
+            if (!Double.isFinite(heldAngleRotations)) {
+                heldAngleRotations = currentAngleRotations;
+            }
+            return new SwerveModuleTarget(0.0, heldAngleRotations);
+        }
+
+        double delta = wrapHalfRotation(target.angleRotations() - currentAngleRotations);
+        double speed = target.speedMetersPerSecond();
+        if (Math.abs(delta) > 0.25) {
+            delta -= Math.copySign(0.5, delta);
+            speed = -speed;
+        }
+        speed *= Math.cos(delta * TWO_PI);
+        heldAngleRotations = currentAngleRotations + delta;
+        return new SwerveModuleTarget(speed, heldAngleRotations);
+    }
+
+    private Action applyTarget(SwerveModuleTarget target) {
         return Actions.parallel(
                 driveVelocity.velocity(target.speedMetersPerSecond()),
                 steerPosition.position(target.angleRotations()));
+    }
+
+    private static double wrapHalfRotation(double rotations) {
+        double wrapped = rotations - Math.floor(rotations + 0.5);
+        return wrapped == -0.5 ? 0.5 : wrapped;
     }
 }

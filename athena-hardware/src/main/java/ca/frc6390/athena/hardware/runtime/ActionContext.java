@@ -2,7 +2,9 @@ package ca.frc6390.athena.hardware.runtime;
 
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 
 /**
@@ -27,6 +29,10 @@ public interface ActionContext {
      */
     default MotorHandle motor(MotorDevice ref) {
         throw new UnsupportedOperationException("Runtime motor access is not available.");
+    }
+
+    default ImuHandle imu(ImuDevice ref) {
+        throw new UnsupportedOperationException("Runtime IMU access is not available.");
     }
 
     /**

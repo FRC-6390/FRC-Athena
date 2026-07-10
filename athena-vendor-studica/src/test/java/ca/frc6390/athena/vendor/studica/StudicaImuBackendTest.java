@@ -55,6 +55,12 @@ class StudicaImuBackendTest {
         genericHandle.activate();
         assertEquals(12.0, genericHandle.yawDegrees(), 1.0e-9);
         assertEquals(34.0, genericHandle.angleDegrees(), 1.0e-9);
+        assertEquals(3.0, genericHandle.pitchDegrees(), 1.0e-9);
+        assertEquals(4.0, genericHandle.rollDegrees(), 1.0e-9);
+        assertEquals(5.0, genericHandle.yawRateDegreesPerSecond(), 1.0e-9);
+        assertEquals(0.1, genericHandle.linearAccelerationXG(), 1.0e-9);
+        assertEquals(0.2, genericHandle.linearAccelerationYG(), 1.0e-9);
+        assertEquals(0.3, genericHandle.linearAccelerationZG(), 1.0e-9);
         genericHandle.zeroYaw();
         genericHandle.reset();
         handle.close();
@@ -91,6 +97,36 @@ class StudicaImuBackendTest {
         @Override
         public double angleDegrees() {
             return 34.0;
+        }
+
+        @Override
+        public double pitchDegrees() {
+            return 3.0;
+        }
+
+        @Override
+        public double rollDegrees() {
+            return 4.0;
+        }
+
+        @Override
+        public double yawRateDegreesPerSecond() {
+            return 5.0;
+        }
+
+        @Override
+        public double linearAccelerationXG() {
+            return 0.1;
+        }
+
+        @Override
+        public double linearAccelerationYG() {
+            return 0.2;
+        }
+
+        @Override
+        public double linearAccelerationZG() {
+            return 0.3;
         }
 
         @Override

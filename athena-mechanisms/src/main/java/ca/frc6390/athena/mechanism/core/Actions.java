@@ -1,9 +1,11 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
+import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.signal.ImuSource;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -60,6 +62,10 @@ public final class Actions {
 
     static Action setPosition(EncoderDevice encoder, double position) {
         return new EncoderSetPosition(encoder, position);
+    }
+
+    static Action setYaw(ImuSource imu, double yawDegrees) {
+        return new ImuSetYaw(imu, yawDegrees);
     }
 
     static Action then(DeviceAction action, DeviceAction next) {
@@ -121,6 +127,12 @@ public final class Actions {
      */
     public static Action compute(Function<MechanismContext, Action> action) {
         return new Computed(action);
+    }
+
+    public static Action computeHardware(
+            List<?> declarations,
+            Function<ActionContext, Action> action) {
+        return new HardwareComputed(declarations, action);
     }
 
     public static Action doOnce(Runnable action) {
@@ -338,6 +350,15 @@ public final class Actions {
         }
     }
 
+    public record ImuSetYaw(ImuSource imu, double yawDegrees) implements Action {
+        public ImuSetYaw {
+            Objects.requireNonNull(imu, "imu");
+            if (!Double.isFinite(yawDegrees)) {
+                throw new IllegalArgumentException("IMU yaw must be finite.");
+            }
+        }
+    }
+
     public record DoOnce(Runnable action) implements Action {
         public DoOnce {
             Objects.requireNonNull(action, "action");
@@ -452,6 +473,17 @@ public final class Actions {
 
         public Action evaluate(MechanismContext context) {
             return Objects.requireNonNull(action.apply(context), "Computed action returned null.");
+        }
+    }
+
+    public record HardwareComputed(List<?> declarations, Function<ActionContext, Action> action) implements Action {
+        public HardwareComputed {
+            declarations = declarations == null ? List.of() : List.copyOf(declarations);
+            Objects.requireNonNull(action, "action");
+        }
+
+        public Action evaluate(ActionContext context) {
+            return Objects.requireNonNull(action.apply(context), "Hardware-computed action returned null.");
         }
     }
 

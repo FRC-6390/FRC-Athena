@@ -1,6 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import ca.frc6390.athena.hardware.device.GearRatio;
+import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
@@ -81,13 +82,6 @@ public final class SwerveKinematics implements SimModel.Source {
             double speed = Math.hypot(wheelX, wheelY);
             greatestSpeed = Math.max(greatestSpeed, speed);
             double angleRotations = speed <= 1.0e-12 ? 0.0 : Math.atan2(wheelY, wheelX) / TWO_PI;
-            if (angleRotations > 0.25) {
-                angleRotations -= 0.5;
-                speed = -speed;
-            } else if (angleRotations < -0.25) {
-                angleRotations += 0.5;
-                speed = -speed;
-            }
             targets.add(new SwerveModuleTarget(speed, angleRotations));
         }
         if (greatestSpeed <= maxSpeedMetersPerSecond) {
@@ -127,6 +121,11 @@ public final class SwerveKinematics implements SimModel.Source {
 
     public double maxSpeedMetersPerSecond() {
         return maxSpeedMetersPerSecond;
+    }
+
+    /** Creates odometry backed by this layout's measured wheel travel and an IMU heading. */
+    public SwerveOdometry odometry(ImuSource imu) {
+        return new SwerveOdometry(this, imu);
     }
 
     /**

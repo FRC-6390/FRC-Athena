@@ -6,11 +6,14 @@ import java.util.Objects;
 import java.util.Optional;
 
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
+import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.hardware.runtime.HardwareMeasurementSignal;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
 import ca.frc6390.athena.runtime.measurement.Measurements;
+import ca.frc6390.athena.runtime.measurement.ResettablePoseSignal;
 
 /**
  * Runtime-owned localization pipeline declaration.
@@ -136,16 +139,35 @@ public final class LocalizationPipeline implements MeasurementSignal {
         return estimated.or(() -> Optional.ofNullable(Action.latest));
     }
 
+    /** Refreshes hardware-backed inputs before evaluating this pipeline for a runtime cycle. */
+    public MeasurementSignal refresh(ActionContext context, double timestampSeconds, double dtSeconds) {
+        for (MeasurementSignal input : inputs) {
+            if (input instanceof LocalizationPipeline pipeline) {
+                pipeline.refreshHardwareInputs(context, timestampSeconds, dtSeconds);
+            } else if (input instanceof HardwareMeasurementSignal hardware) {
+                hardware.refresh(context, timestampSeconds, dtSeconds);
+            }
+        }
+        List<Measurement> snapshot = latest()
+                .map(LocalizationPipeline::measurement)
+                .map(List::<Measurement>of)
+                .orElseGet(List::of);
+        return () -> snapshot;
+    }
+
     @Override
     public List<Measurement> measurements() {
         return latest()
-                .map(result -> List.<Measurement>of(Measurements.poseAndSpeeds(result.pose(), result.speeds())))
+                .map(result -> List.<Measurement>of(measurement(result)))
                 .orElseGet(List::of);
     }
 
     public ActionBinding reset(PoseSnapshot pose) {
         Objects.requireNonNull(pose, "pose");
-        return context -> Action.latest = LocalizationResult.of(pose);
+        return context -> {
+            resetInputs(pose);
+            Action.latest = LocalizationResult.of(pose);
+        };
     }
 
     public ActionBinding reset(double xMeters, double yMeters, double headingRadians) {
@@ -187,6 +209,32 @@ public final class LocalizationPipeline implements MeasurementSignal {
 
     private boolean accept(Measurement measurement, PoseSnapshot pose) {
         return filters.stream().allMatch(filter -> filter.accept(this, measurement, pose));
+    }
+
+    private void resetInputs(PoseSnapshot pose) {
+        for (MeasurementSignal input : inputs) {
+            if (input instanceof LocalizationPipeline pipeline) {
+                pipeline.resetInputs(pose);
+            } else if (input instanceof ResettablePoseSignal resettable) {
+                resettable.reset(pose);
+            }
+        }
+    }
+
+    private void refreshHardwareInputs(ActionContext context, double timestampSeconds, double dtSeconds) {
+        for (MeasurementSignal input : inputs) {
+            if (input instanceof LocalizationPipeline pipeline) {
+                pipeline.refreshHardwareInputs(context, timestampSeconds, dtSeconds);
+            } else if (input instanceof HardwareMeasurementSignal hardware) {
+                hardware.refresh(context, timestampSeconds, dtSeconds);
+            }
+        }
+    }
+
+    private static Measurement measurement(LocalizationResult result) {
+        return Measurements.poseAndSpeeds(result.pose(), result.speeds())
+                .timing(result.timestampSeconds(), 0.0)
+                .source(result);
     }
 
     private static final class Action {

@@ -47,10 +47,6 @@ final class LocalizationEstimators {
         };
     }
 
-    static LocalizationEstimator kalman() {
-        return weightedAverage();
-    }
-
     private static Optional<LocalizationResult> latestCandidate(
             List<LocalizationResult> inputResults,
             List<Measurement> measurements) {

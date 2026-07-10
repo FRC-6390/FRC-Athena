@@ -181,6 +181,10 @@ class CtreBackendTest {
         assertEquals(12.0, handle.yawDegrees(), 1.0e-9);
         assertEquals(3.0, handle.pitchDegrees(), 1.0e-9);
         assertEquals(4.0, handle.rollDegrees(), 1.0e-9);
+        assertEquals(5.0, handle.yawRateDegreesPerSecond(), 1.0e-9);
+        assertEquals(0.1, handle.linearAccelerationXG(), 1.0e-9);
+        assertEquals(0.2, handle.linearAccelerationYG(), 1.0e-9);
+        assertEquals(0.3, handle.linearAccelerationZG(), 1.0e-9);
         assertEquals(12.0, handle.yawDegrees(), 1.0e-9);
         assertEquals(1, controller.yawCalls);
         assertEquals(1, controller.pitchCalls);
@@ -328,6 +332,26 @@ class CtreBackendTest {
         public double rollDegrees() {
             rollCalls++;
             return 4.0;
+        }
+
+        @Override
+        public double yawRateDegreesPerSecond() {
+            return 5.0;
+        }
+
+        @Override
+        public double linearAccelerationXG() {
+            return 0.1;
+        }
+
+        @Override
+        public double linearAccelerationYG() {
+            return 0.2;
+        }
+
+        @Override
+        public double linearAccelerationZG() {
+            return 0.3;
         }
 
         @Override

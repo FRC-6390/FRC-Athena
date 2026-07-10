@@ -16,8 +16,8 @@ import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 class LocalizationPipelineTest {
     @Test
     void inputChainingUsesNestedPipelineResults() {
-        LocalizationPipeline odometry = Localizations.odometry()
-                .input(signal(sample(1.0, 2.0, 0.0, 5.0, 1.0)));
+        LocalizationPipeline odometry = Localizations.odometry(
+                signal(sample(1.0, 2.0, 0.0, 5.0, 1.0)));
         LocalizationPipeline fused = Localizations.latestValid().input(odometry);
 
         assertPose(fused.pose(), 1.0, 2.0, 0.0);
@@ -62,7 +62,7 @@ class LocalizationPipelineTest {
 
     @Test
     void resetAndResetToUpdateSharedPipelineState() {
-        LocalizationPipeline source = Localizations.odometry();
+        LocalizationPipeline source = Localizations.latestValid();
         LocalizationPipeline copy = Localizations.vision();
 
         source.reset(4.0, 5.0, 0.25).apply(null);

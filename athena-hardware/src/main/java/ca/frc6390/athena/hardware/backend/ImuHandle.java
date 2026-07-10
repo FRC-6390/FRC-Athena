@@ -34,6 +34,14 @@ public interface ImuHandle {
      */
     double yawDegrees();
 
+    default double pitchDegrees() {
+        throw new UnsupportedOperationException("IMU pitch is not supported by this handle.");
+    }
+
+    default double rollDegrees() {
+        throw new UnsupportedOperationException("IMU roll is not supported by this handle.");
+    }
+
     /**
      * Returns accumulated angle in degrees.
      *
@@ -41,6 +49,29 @@ public interface ImuHandle {
      */
     default double angleDegrees() {
         return yawDegrees();
+    }
+
+    default double yawRateDegreesPerSecond() {
+        throw new UnsupportedOperationException("IMU yaw rate is not supported by this handle.");
+    }
+
+    default double linearAccelerationXG() {
+        throw new UnsupportedOperationException("IMU X acceleration is not supported by this handle.");
+    }
+
+    default double linearAccelerationYG() {
+        throw new UnsupportedOperationException("IMU Y acceleration is not supported by this handle.");
+    }
+
+    default double linearAccelerationZG() {
+        throw new UnsupportedOperationException("IMU Z acceleration is not supported by this handle.");
+    }
+
+    default void setYawDegrees(double yawDegrees) {
+        if (Double.compare(yawDegrees, 0.0) != 0) {
+            throw new UnsupportedOperationException("Setting arbitrary IMU yaw is not supported by this handle.");
+        }
+        zeroYaw();
     }
 
     /**

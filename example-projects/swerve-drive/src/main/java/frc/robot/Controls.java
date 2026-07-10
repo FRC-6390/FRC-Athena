@@ -25,6 +25,7 @@ public final class Controls implements Mechanism {
     public Controls(DriveTrain driveTrain) {
         driver.y().onActive(() -> fieldOriented = true);
         driver.a().onActive(() -> fieldOriented = false);
+        driver.back().onActive(driveTrain.resetHeading);
 
         drive = Events.teleopPeriodic().whileActive(
                 driveTrain.drive(forward, strafe, rotation, () -> fieldOriented));
