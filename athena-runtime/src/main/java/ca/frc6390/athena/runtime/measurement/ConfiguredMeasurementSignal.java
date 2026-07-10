@@ -92,7 +92,7 @@ final class ConfiguredMeasurementSignal implements MeasurementSignal {
 
     private Measurement applyStdDevs(Measurement measurement) {
         if (stdDevs != null && measurement instanceof PoseMeasurementSample poseMeasurement) {
-            return poseMeasurement.stdDevs(stdDevs);
+            return PoseSignals.withStdDevs(poseMeasurement, stdDevs);
         }
         return measurement;
     }

@@ -16,7 +16,7 @@ import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
+import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
@@ -186,7 +186,7 @@ class WpilibSimPhysicsEngineTest {
         SwerveDriveMechanism drive = new SwerveDriveMechanism();
         SimulationSession session = SimulationSession.create()
                 .physicsEngine(new WpilibSimPhysicsEngine());
-        LocalizationPipeline localization = Localizations.latestValid()
+        Localization localization = Localizations.latestValid()
                 .input(Measurements.poses(session::pose));
         RobotRuntime runtime = RobotRuntime.simulated(session)
                 .register(drive)

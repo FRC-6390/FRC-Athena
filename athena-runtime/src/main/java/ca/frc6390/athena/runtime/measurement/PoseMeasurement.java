@@ -14,6 +14,7 @@ import ca.frc6390.athena.runtime.filter.PoseSnapshot;
  * @param latencySeconds measurement latency
  * @param ambiguity source ambiguity, where lower is better
  * @param targetCount number of targets used by the measurement
+ * @param averageTargetDistanceMeters average distance to used targets
  * @param stdDevs standard deviations
  * @param source source object
  */
@@ -24,6 +25,7 @@ record PoseMeasurement(
         double latencySeconds,
         double ambiguity,
         int targetCount,
+        double averageTargetDistanceMeters,
         MeasurementStdDevs stdDevs,
         Object source) implements PoseMeasurementSample {
     public PoseMeasurement {
@@ -33,6 +35,9 @@ record PoseMeasurement(
         latencySeconds = Math.max(0.0, finiteOrZero(latencySeconds));
         ambiguity = Math.max(0.0, finiteOrZero(ambiguity));
         targetCount = Math.max(0, targetCount);
+        averageTargetDistanceMeters = Double.isFinite(averageTargetDistanceMeters)
+                ? Math.max(0.0, averageTargetDistanceMeters)
+                : Double.NaN;
         stdDevs = stdDevs == null
                 ? MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY)
                 : stdDevs;
@@ -45,7 +50,8 @@ record PoseMeasurement(
      * @return updated measurement
      */
     public PoseMeasurementSample stdDevs(MeasurementStdDevs stdDevs) {
-        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount, stdDevs, source);
+        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount,
+                averageTargetDistanceMeters, stdDevs, source);
     }
 
     /**
@@ -56,7 +62,8 @@ record PoseMeasurement(
      * @return updated measurement
      */
     public PoseMeasurementSample timing(double timestampSeconds, double latencySeconds) {
-        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount, stdDevs, source);
+        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount,
+                averageTargetDistanceMeters, stdDevs, source);
     }
 
     /**
@@ -67,7 +74,16 @@ record PoseMeasurement(
      * @return updated measurement
      */
     public PoseMeasurementSample visionMetadata(double ambiguity, int targetCount) {
-        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount, stdDevs, source);
+        return visionMetadata(ambiguity, targetCount, averageTargetDistanceMeters);
+    }
+
+    @Override
+    public PoseMeasurementSample visionMetadata(
+            double ambiguity,
+            int targetCount,
+            double averageTargetDistanceMeters) {
+        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount,
+                averageTargetDistanceMeters, stdDevs, source);
     }
 
     /**
@@ -77,7 +93,8 @@ record PoseMeasurement(
      * @return updated measurement
      */
     public PoseMeasurementSample source(Object source) {
-        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount, stdDevs, source);
+        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount,
+                averageTargetDistanceMeters, stdDevs, source);
     }
 
     private static double finiteOrZero(double value) {

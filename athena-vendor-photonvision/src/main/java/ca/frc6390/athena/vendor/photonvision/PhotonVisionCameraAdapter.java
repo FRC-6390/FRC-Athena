@@ -13,11 +13,15 @@ import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
 import ca.frc6390.athena.vision.device.CameraDevice;
+import ca.frc6390.athena.vision.device.CameraMountPose;
 import ca.frc6390.athena.vision.device.PhotonVisionDevice;
 import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
 import ca.frc6390.athena.vision.runtime.CameraAdapter;
 import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Transform3d;
+import edu.wpi.first.math.geometry.Translation3d;
 import org.photonvision.PhotonCamera;
 import org.photonvision.PhotonPoseEstimator;
 import org.photonvision.targeting.PhotonPipelineResult;
@@ -46,7 +50,10 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
      * @param device PhotonVision camera device
      */
     public PhotonVisionCameraAdapter(PhotonVisionDevice device) {
-        this(device, new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())), null);
+        this(
+                device,
+                new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
+                new CoprocessorMultiTagPoseClient(device.mountPose()));
     }
 
     /**
@@ -232,8 +239,19 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 result.latencySeconds(),
                 pose.ambiguity(),
                 pose.targetCount(),
+                averageTargetDistance(result.targets()),
                 MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
                 source));
+    }
+
+    private static double averageTargetDistance(List<PhotonVisionTarget> targets) {
+        return targets == null || targets.isEmpty()
+                ? Double.NaN
+                : targets.stream()
+                        .mapToDouble(PhotonVisionTarget::distanceMeters)
+                        .filter(Double::isFinite)
+                        .average()
+                        .orElse(Double.NaN);
     }
 
     /**
@@ -384,6 +402,37 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         }
     }
 
+    private static final class CoprocessorMultiTagPoseClient implements PhotonPoseClient {
+        private final Transform3d robotToCamera;
+
+        private CoprocessorMultiTagPoseClient(CameraMountPose mount) {
+            CameraMountPose safe = mount == null || !mount.isFinite() ? CameraMountPose.identity() : mount;
+            robotToCamera = new Transform3d(
+                    new Translation3d(safe.xMeters(), safe.yMeters(), safe.zMeters()),
+                    new Rotation3d(
+                            Math.toRadians(safe.rollDegrees()),
+                            Math.toRadians(safe.pitchDegrees()),
+                            Math.toRadians(safe.yawDegrees())));
+        }
+
+        @Override
+        public Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result) {
+            if (result == null || result.getMultiTagResult().isEmpty()) {
+                return Optional.empty();
+            }
+            Pose3d fieldToRobot = Pose3d.kZero
+                    .plus(result.getMultiTagResult().get().estimatedPose.best)
+                    .plus(robotToCamera.inverse());
+            var pose = fieldToRobot.toPose2d();
+            List<PhotonTrackedTarget> targets = result.getTargets();
+            return Optional.of(new PhotonVisionPoseEstimate(
+                    new PoseSnapshot(pose.getX(), pose.getY(), pose.getRotation().getRadians()),
+                    result.getTimestampSeconds(),
+                    PhotonPoseEstimatorClient.ambiguity(targets),
+                    targets.size()));
+        }
+    }
+
     static record PhotonVisionResult(
             double timestampSeconds,
             double latencySeconds,
@@ -463,6 +512,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             double latencySeconds,
             double ambiguity,
             int targetCount,
+            double averageTargetDistanceMeters,
             MeasurementStdDevs stdDevs,
             Object source) implements PoseMeasurementSample {
     }

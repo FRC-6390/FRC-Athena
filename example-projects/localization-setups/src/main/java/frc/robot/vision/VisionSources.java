@@ -1,6 +1,6 @@
 package frc.robot.vision;
 
-import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
+import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import ca.frc6390.athena.vision.config.Cameras;
 import ca.frc6390.athena.vision.device.CameraMountPose;
 import ca.frc6390.athena.vision.device.HeliosDevice;
@@ -16,12 +16,19 @@ public final class VisionSources {
     public final HeliosDevice driverHelios = Cameras.helios("10.63.90.11")
             .mount(new CameraMountPose(0.0, 0.0, 0.7, 0.0, -20.0, 0.0));
 
-    public final MeasurementSignal limelightPose = frontLimelight.pose()
+    public final PoseSignal limelightPose = frontLimelight.pose()
             .megatag2Blue()
             .tags(7, 8)
-            .stdDevs(0.6, Units.degreesToRadians(20.0));
-    public final MeasurementSignal photonPose = rearPhoton.pose()
-            .stdDevs(0.6, Units.degreesToRadians(20.0));
-    public final MeasurementSignal heliosPose = driverHelios.pose()
-            .stdDevs(0.6, Units.degreesToRadians(20.0));
+            .singleTagStdDevs(0.8, 0.8, Units.degreesToRadians(30.0))
+            .multiTagStdDevs(0.25, 0.25, Units.degreesToRadians(6.0))
+            .distanceStdDevScaling(2.0, 2.0);
+    public final PoseSignal photonPose = rearPhoton.pose()
+            .multiTagOnCoprocessor()
+            .singleTagStdDevs(0.7, 0.7, Units.degreesToRadians(25.0))
+            .multiTagStdDevs(0.18, 0.18, Units.degreesToRadians(4.0))
+            .distanceStdDevScaling(2.0, 2.0);
+    public final PoseSignal heliosPose = driverHelios.pose()
+            .singleTagStdDevs(0.9, 0.9, Units.degreesToRadians(35.0))
+            .multiTagStdDevs(0.3, 0.3, Units.degreesToRadians(8.0))
+            .distanceStdDevScaling(1.5, 2.0);
 }

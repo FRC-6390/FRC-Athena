@@ -9,7 +9,7 @@ import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
+import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import ca.frc6390.athena.mechanism.core.LifecyclePhase;
@@ -49,7 +49,7 @@ public final class RobotRuntime {
     private final List<AutoRuntime> autos = new ArrayList<>();
     private final List<PathGraph> pathGraphs = new ArrayList<>();
     private final List<VisionGraph> visionGraphs = new ArrayList<>();
-    private final List<LocalizationPipeline> localizations = new ArrayList<>();
+    private final List<Localization> localizations = new ArrayList<>();
     private final List<MeasurementSnapshot> localizationSnapshots = new ArrayList<>();
     private final Set<SimModel> registeredSimulationModels = new LinkedHashSet<>();
     private final Set<ControlBinding> registeredSimulationControls =
@@ -357,9 +357,9 @@ public final class RobotRuntime {
      * @param pipelines localization pipelines
      * @return this runtime
      */
-    public RobotRuntime localization(LocalizationPipeline... pipelines) {
+    public RobotRuntime localization(Localization... pipelines) {
         if (pipelines != null) {
-            for (LocalizationPipeline pipeline : pipelines) {
+            for (Localization pipeline : pipelines) {
                 if (pipeline != null) {
                     localizations.add(pipeline);
                     localizationSnapshots.add(new MeasurementSnapshot(pipeline));
@@ -595,8 +595,8 @@ public final class RobotRuntime {
             return;
         }
         for (int i = 0; i < localizations.size(); i++) {
-            LocalizationPipeline pipeline = localizations.get(i);
-            MeasurementSignal signal = pipeline.refresh(
+            Localization localization = localizations.get(i);
+            MeasurementSignal signal = localization.refresh(
                     hardwareGraph,
                     context.nowSeconds(),
                     context.dtSeconds());

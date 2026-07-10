@@ -22,7 +22,7 @@ public final class Measurements {
      * @return measurement
      */
     public static PoseMeasurementSample pose(PoseSnapshot pose) {
-        return new PoseMeasurement(pose, RobotVelocity.zero(), 0.0, 0.0, 0.0, 0, null, null);
+        return new PoseMeasurement(pose, RobotVelocity.zero(), 0.0, 0.0, 0.0, 0, Double.NaN, null, null);
     }
 
     /**
@@ -33,7 +33,7 @@ public final class Measurements {
      * @return measurement
      */
     public static PoseMeasurementSample poseAndSpeeds(PoseSnapshot pose, RobotVelocity speeds) {
-        return new PoseMeasurement(pose, speeds, 0.0, 0.0, 0.0, 0, null, null);
+        return new PoseMeasurement(pose, speeds, 0.0, 0.0, 0.0, 0, Double.NaN, null, null);
     }
 
     /**
@@ -71,9 +71,9 @@ public final class Measurements {
      * @param pose pose supplier
      * @return measurement signal
      */
-    public static MeasurementSignal poses(Supplier<PoseSnapshot> pose) {
+    public static PoseSignal poses(Supplier<PoseSnapshot> pose) {
         Objects.requireNonNull(pose, "pose");
-        return new SingleMeasurementSignal(() -> pose(pose.get()));
+        return () -> List.of(pose(pose.get()));
     }
 
     /**
@@ -83,10 +83,10 @@ public final class Measurements {
      * @param speeds speeds supplier
      * @return measurement signal
      */
-    public static MeasurementSignal poseAndSpeeds(Supplier<PoseSnapshot> pose, Supplier<RobotVelocity> speeds) {
+    public static PoseSignal poseAndSpeeds(Supplier<PoseSnapshot> pose, Supplier<RobotVelocity> speeds) {
         Objects.requireNonNull(pose, "pose");
         Objects.requireNonNull(speeds, "speeds");
-        return new SingleMeasurementSignal(() -> poseAndSpeeds(pose.get(), speeds.get()));
+        return () -> List.of(poseAndSpeeds(pose.get(), speeds.get()));
     }
 
     /**

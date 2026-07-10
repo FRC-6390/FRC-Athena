@@ -113,7 +113,7 @@
   - [x] Root runtime scheduling now decides when pipelines evaluate.
 - [x] Test surfaces needed: input chaining, nested pipeline estimates, filter rejection, field-bounds filtering, weighted-average behavior, latest-valid behavior, reset actions, and behavior when no pose-capable measurements exist are covered by focused JUnit tests.
   - [x] Root `RobotRuntime` now owns localization max-age filtering and disabled-mode refresh policy for localization snapshots.
-- [x] Upkeep: removed the old public config/spec layer, old localization contexts, `LocalizationRef`, `LocalizationFilterRef`, `LocalizationEstimatorRef`, `FieldBoundsRef`, and stale vision frame estimator files. Current Java sources use `Localizations`, `LocalizationPipeline`, `LocalizationFilter`, and `FieldBoundsFilter`.
+- [x] Upkeep: removed the old public config/spec layer, old localization contexts, `LocalizationRef`, `LocalizationFilterRef`, `LocalizationEstimatorRef`, `FieldBoundsRef`, and stale vision frame estimator files. Current Java sources use uniform `PoseSignal -> Localization -> Localization` composition with `Localizations`, `LocalizationFilter`, and `FieldBoundsFilter`.
 - [x] Package cleanup: localization APIs now live in `localization.pipeline`; the old `localization.ref` package was removed.
 - [x] Architecture: localization now consumes a runtime-level pose sample contract instead of reflecting into concrete measurement records.
   - [x] Replace temporary reflective bridge with `PoseMeasurementSample`.
@@ -265,11 +265,11 @@
 
 ## athena-wpilib
 
-- [x] Code optimization: the module is reduced to `AthenaRobot` and `WpilibPoseEstimatorAdapter`; old command adapters, drivetrain adapters, controller bindings, trigger bindings, NetworkTables wrappers, and lifecycle config/spec classes are gone.
+- [x] Code optimization: the module contains the WPILib robot host, controller signals, command bridging, and simulation physics adapter; localization estimation lives in `athena-localization` behind `Localizations.kalman()`.
 - [x] Runtime optimization: `AthenaRobot` dispatches robot behavior through normal WPILib lifecycle callbacks and uses simulation callbacks only to step the `SimulationSession`. Package-private lifecycle dispatch keeps deterministic tests out of the public API.
-- [x] Test surfaces needed: WPILib lifecycle-to-Athena lifecycle mapping, dt calculation/reset behavior, simulation callback behavior, pose estimator adapter behavior, and runtime host construction policy are covered or explicitly scoped.
+- [x] Test surfaces needed: WPILib lifecycle-to-Athena lifecycle mapping, dt calculation/reset behavior, simulation callback behavior, controller signals, and runtime host construction policy are covered or explicitly scoped.
   - [x] Added focused `AthenaRobotTest` coverage for lifecycle mapping, simulation callback flags, and negative/non-finite dt clamping through the package-private lifecycle delegate.
-  - [x] Added focused `WpilibPoseEstimatorAdapterTest` coverage for standard-deviation vector mapping, null standard-deviation defaults, and timestamp sanitization/forwarding.
+  - [x] Added direct WPILib parity coverage in `athena-localization` for odometry, vision correction, delayed samples, and resets.
   - [x] Direct `TimedRobot` host construction is intentionally scoped to robot-style integration fixtures because WPILib robot-base construction terminates the Gradle test worker in this environment.
 - [x] Upkeep: `AthenaRobot` now imports `RobotRuntime` from `athena-robot`, not the mechanism slice.
 - [x] Architecture: WPILib is now an adapter/host boundary, not a place for command scheduling, telemetry, controller binding, or drivetrain runtime logic.

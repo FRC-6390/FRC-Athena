@@ -348,6 +348,11 @@ public final class Actions {
                 throw new IllegalArgumentException("Encoder position must be finite.");
             }
         }
+
+        @Override
+        public void apply(ActionContext context) {
+            context.encoder(encoder).setPositionRotations(encoder.rotationsFromPosition(position));
+        }
     }
 
     public record ImuSetYaw(ImuSource imu, double yawDegrees) implements Action {
@@ -356,6 +361,10 @@ public final class Actions {
             if (!Double.isFinite(yawDegrees)) {
                 throw new IllegalArgumentException("IMU yaw must be finite.");
             }
+        }
+        @Override
+        public void apply(ActionContext context) {
+            imu.applyYaw(context, yawDegrees);
         }
     }
 

@@ -22,7 +22,7 @@ import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
+import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
@@ -391,7 +391,7 @@ class RobotRuntimeTest {
     @Test
     void refreshesLocalizationSnapshotsDuringRobotPeriodic() {
         AtomicInteger reads = new AtomicInteger();
-        LocalizationPipeline localization = Localizations.latestValid()
+        Localization localization = Localizations.latestValid()
                 .input(() -> {
                     reads.incrementAndGet();
                     return List.of(Measurements.pose(new PoseSnapshot(2.0, 3.0, 0.5)));
@@ -402,13 +402,13 @@ class RobotRuntimeTest {
 
         assertEquals(1, reads.get());
         assertEquals(2.0, localization.pose().xMeters(), 1.0e-9);
-        assertEquals(2, reads.get());
+        assertEquals(1, reads.get());
     }
 
     @Test
     void localizationRefreshPolicyAppliesRootAgeAndDisabledRules() {
         AtomicInteger reads = new AtomicInteger();
-        LocalizationPipeline localization = Localizations.latestValid()
+        Localization localization = Localizations.latestValid()
                 .input(() -> {
                     reads.incrementAndGet();
                     return List.of(new TestPoseMeasurement(new PoseSnapshot(4.0, 5.0, 0.25), 1.0));

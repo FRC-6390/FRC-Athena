@@ -2,7 +2,7 @@ package ca.frc6390.athena.benchmarks;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
+import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
@@ -58,7 +58,7 @@ public class FullRobotPeriodicBenchmark {
             }
             ca.frc6390.athena.runtime.measurement.Measurement target = Measurements.custom("target", null);
             CameraDevice camera = Cameras.photonVision("front").bindTargets(() -> List.of(target));
-            LocalizationPipeline localization = Localizations.latestValid()
+            Localization localization = Localizations.latestValid()
                     .input(() -> List.of(Measurements.pose(new PoseSnapshot(1.0, 2.0, 0.25))));
             runtime.cameras(camera).localization(localization);
             runtime.robotPeriodic(0.0, 0.02);

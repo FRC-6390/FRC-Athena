@@ -28,6 +28,25 @@ class ImuActionTest {
         assertEquals(90.0, handle.yawDegrees, 1.0e-9);
     }
 
+    @Test
+    void setYawActionAppliesImmediatelyWhenTriggeredByAHook() {
+        ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 1);
+        RecordingImuHandle handle = new RecordingImuHandle(imu);
+        ActionContext context = new ActionContext() {
+            @Override
+            public ImuHandle imu(ImuDevice requested) {
+                return handle;
+            }
+        };
+        Action resetHeading = imu.setYaw(0.0);
+        HookBinding hook = Events.when(() -> true).active().onStart(resetHeading);
+        handle.yawDegrees = 42.0;
+
+        new HookRuntime().run(EventContext.empty(), context, hook);
+
+        assertEquals(0.0, handle.yawDegrees, 1.0e-9);
+    }
+
     private static final class ImuMechanism implements Mechanism {
         private final ImuDevice imu;
         private final Action setHeading;

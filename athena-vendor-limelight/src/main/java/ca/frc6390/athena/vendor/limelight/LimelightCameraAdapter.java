@@ -17,6 +17,7 @@ import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
 import ca.frc6390.athena.vision.runtime.CameraAdapter;
 import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
 
 /**
@@ -128,7 +129,11 @@ public final class LimelightCameraAdapter implements CameraAdapter {
         LimelightFrame latestFrame();
     }
 
-    record LimelightFrame(LimelightTarget target, double[] botPoseBlue) {
+    record LimelightFrame(LimelightTarget target, double[] botPoseBlue, double timestampSeconds) {
+        LimelightFrame(LimelightTarget target, double[] botPoseBlue) {
+            this(target, botPoseBlue, 0.0);
+        }
+
         LimelightFrame {
             target = target == null ? LimelightTarget.noTarget() : target;
             botPoseBlue = botPoseBlue == null ? EMPTY_POSE : botPoseBlue.clone();
@@ -208,6 +213,7 @@ public final class LimelightCameraAdapter implements CameraAdapter {
             double latencySeconds,
             double ambiguity,
             int targetCount,
+            double averageTargetDistanceMeters,
             MeasurementStdDevs stdDevs,
             Object source) implements PoseMeasurementSample {
     }
@@ -243,7 +249,11 @@ public final class LimelightCameraAdapter implements CameraAdapter {
                             distanceMeters(targetPose),
                             table.getEntry("ta").getDouble(0.0))
                     : LimelightTarget.noTarget();
-            return new LimelightFrame(target, table.getEntry("botpose_wpiblue").getDoubleArray(EMPTY_POSE));
+            NetworkTableEntry poseEntry = table.getEntry("botpose_wpiblue");
+            double[] pose = poseEntry.getDoubleArray(EMPTY_POSE);
+            double latencySeconds = pose.length > 6 ? Math.max(0.0, finiteOrZero(pose[6]) / 1000.0) : 0.0;
+            double timestampSeconds = poseEntry.getLastChange() / 1_000_000.0 - latencySeconds;
+            return new LimelightFrame(target, pose, timestampSeconds);
         }
 
         private static String normalizeTableName(String tableName) {
@@ -268,14 +278,20 @@ public final class LimelightCameraAdapter implements CameraAdapter {
             return List.of();
         }
         double latencySeconds = pose.length > 6 ? Math.max(0.0, finiteOrZero(pose[6]) / 1000.0) : 0.0;
-        int targetCount = frame.target().hasTarget() ? 1 : 0;
+        int targetCount = pose.length > 7
+                ? Math.max(0, (int) Math.round(finiteOrZero(pose[7])))
+                : (frame.target().hasTarget() ? 1 : 0);
+        double averageTagDistanceMeters = pose.length > 9
+                ? Math.max(0.0, finiteOrZero(pose[9]))
+                : frame.target().distanceMeters();
         return List.of(new LimelightPoseMeasurement(
                 new PoseSnapshot(finiteOrZero(pose[0]), finiteOrZero(pose[1]), Math.toRadians(finiteOrZero(pose[5]))),
                 RobotVelocity.zero(),
-                0.0,
+                frame.timestampSeconds(),
                 latencySeconds,
                 0.0,
                 targetCount,
+                averageTagDistanceMeters,
                 MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
                 source));
     }

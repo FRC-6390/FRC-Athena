@@ -2,13 +2,12 @@ package ca.frc6390.athena.vision.signal;
 
 import java.util.Map;
 
-import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
 import ca.frc6390.athena.vision.device.CameraDevice;
 
 /**
  * Pose measurements produced from a camera.
  */
-public interface PoseSignal extends MeasurementSignal {
+public interface PoseSignal extends ca.frc6390.athena.runtime.measurement.PoseSignal {
     /**
      * Returns the camera producing this pose stream.
      *

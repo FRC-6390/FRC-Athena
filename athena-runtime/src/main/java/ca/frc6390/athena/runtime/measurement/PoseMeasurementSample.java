@@ -35,6 +35,11 @@ public interface PoseMeasurementSample extends Measurement {
      */
     int targetCount();
 
+    /** Returns average target distance, or NaN when the source does not provide it. */
+    default double averageTargetDistanceMeters() {
+        return Double.NaN;
+    }
+
     /**
      * Returns measurement standard deviations.
      *
@@ -71,6 +76,14 @@ public interface PoseMeasurementSample extends Measurement {
      * @return updated sample
      */
     default PoseMeasurementSample visionMetadata(double ambiguity, int targetCount) {
+        return visionMetadata(ambiguity, targetCount, averageTargetDistanceMeters());
+    }
+
+    /** Returns a copy with complete vision quality metadata. */
+    default PoseMeasurementSample visionMetadata(
+            double ambiguity,
+            int targetCount,
+            double averageTargetDistanceMeters) {
         return this;
     }
 

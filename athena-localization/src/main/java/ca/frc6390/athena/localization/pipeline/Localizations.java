@@ -1,30 +1,32 @@
 package ca.frc6390.athena.localization.pipeline;
 
-import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
-import java.util.Objects;
-
-/**
- * Factory methods for localization pipelines.
- */
+/** Factory methods for uniform, inspectable localization nodes. */
 public final class Localizations {
     private Localizations() {
     }
 
-    public static LocalizationPipeline odometry(MeasurementSignal odometry) {
-        return new LocalizationPipeline("odometry", LocalizationEstimators.odometry())
-                .input(Objects.requireNonNull(odometry, "odometry"));
+    /** Passes accepted pose measurements through unchanged. */
+    public static Localization filter() {
+        return new Localization(Localization.Strategy.FILTER);
     }
 
-    public static LocalizationPipeline vision() {
-        return new LocalizationPipeline("vision", LocalizationEstimators.vision());
+    /** Emits the newest accepted pose measurement. */
+    public static Localization latestValid() {
+        return new Localization(Localization.Strategy.LATEST_VALID);
     }
 
-    public static LocalizationPipeline weightedAverage() {
-        return new LocalizationPipeline("weightedAverage", LocalizationEstimators.weightedAverage());
+    /** Emits a variance-weighted pose average. */
+    public static Localization weightedAverage() {
+        return new Localization(Localization.Strategy.WEIGHTED_AVERAGE);
     }
 
-    public static LocalizationPipeline latestValid() {
-        return new LocalizationPipeline("latestValid", LocalizationEstimators.latestValid());
+    /** Conservatively fuses pose measurements with unknown cross-correlation. */
+    public static Localization covarianceIntersection() {
+        return new Localization(Localization.Strategy.COVARIANCE_INTERSECTION);
     }
 
+    /** Creates a real timestamp-aware Kalman localization node. */
+    public static Localization kalman() {
+        return new Localization(Localization.Strategy.KALMAN);
+    }
 }

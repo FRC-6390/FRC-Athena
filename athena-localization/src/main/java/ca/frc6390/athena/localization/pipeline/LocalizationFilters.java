@@ -1,6 +1,8 @@
 package ca.frc6390.athena.localization.pipeline;
 
 import java.util.Objects;
+import ca.frc6390.athena.runtime.measurement.PoseSignal;
+import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 
 /**
  * Built-in localization filters.
@@ -24,21 +26,19 @@ public final class LocalizationFilters {
 
     public static LocalizationFilter tagCountAtLeast(int count) {
         int minimum = Math.max(0, count);
-        return (pipeline, measurement, pose) -> PoseSamples.from(measurement)
-                .map(sample -> sample.targetCount() >= minimum)
-                .orElse(true);
+        return (pipeline, measurement, pose) -> !(measurement instanceof PoseMeasurementSample sample)
+                || sample.targetCount() >= minimum;
     }
 
-    public static LocalizationFilter maxPoseJump(LocalizationPipeline baseline, double meters) {
+    public static LocalizationFilter maxPoseJump(PoseSignal baseline, double meters) {
         Objects.requireNonNull(baseline, "baseline");
         double max = Double.isFinite(meters) ? Math.max(0.0, meters) : Double.POSITIVE_INFINITY;
         return (pipeline, measurement, pose) -> {
             if (pose != null) {
                 return distance(pose, baseline.pose()) <= max;
             }
-            return PoseSamples.from(measurement)
-                    .map(sample -> distance(sample.pose(), baseline.pose()) <= max)
-                    .orElse(true);
+            return !(measurement instanceof PoseMeasurementSample sample)
+                    || distance(sample.pose(), baseline.pose()) <= max;
         };
     }
 

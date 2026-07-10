@@ -10,13 +10,14 @@ import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.Measurements;
+import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import ca.frc6390.athena.runtime.measurement.ResettablePoseSignal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 /** Runtime-refreshed odometry derived from measured swerve module travel and IMU heading. */
-public final class SwerveOdometry implements HardwareMeasurementSignal, ResettablePoseSignal {
+public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSignal, ResettablePoseSignal {
     private static final double TWO_PI = Math.PI * 2.0;
 
     private final SwerveKinematics kinematics;
@@ -26,8 +27,10 @@ public final class SwerveOdometry implements HardwareMeasurementSignal, Resettab
     private PoseSnapshot pose = new PoseSnapshot(0.0, 0.0, 0.0);
     private PoseSnapshot pendingReset;
     private RobotVelocity velocity = RobotVelocity.zero();
+    private List<ModulePosition> modulePositions = List.of();
     private double headingOffsetRadians;
     private double previousHeadingRadians;
+    private double lastRefreshTimestamp = Double.NaN;
     private Measurement measurement;
 
     SwerveOdometry(SwerveKinematics kinematics, ImuSource imu) {
@@ -41,12 +44,20 @@ public final class SwerveOdometry implements HardwareMeasurementSignal, Resettab
     @Override
     public synchronized void refresh(ActionContext context, double timestampSeconds, double dtSeconds) {
         Objects.requireNonNull(context, "context");
+        if (Double.compare(lastRefreshTimestamp, timestampSeconds) == 0) {
+            return;
+        }
         double[] distances = new double[driveEncoders.size()];
         List<Double> angles = new ArrayList<>(driveEncoders.size());
         for (int index = 0; index < driveEncoders.size(); index++) {
             distances[index] = driveEncoders.get(index).position(context);
             angles.add(kinematics.modules().get(index).module().angle.get().absolutePosition().position(context));
         }
+        List<ModulePosition> positions = new ArrayList<>(distances.length);
+        for (int index = 0; index < distances.length; index++) {
+            positions.add(new ModulePosition(distances[index], angles.get(index)));
+        }
+        modulePositions = List.copyOf(positions);
 
         double rawHeading = Math.toRadians(imu.yawDegrees());
         if (pendingReset != null) {
@@ -90,6 +101,7 @@ public final class SwerveOdometry implements HardwareMeasurementSignal, Resettab
         measurement = Measurements.poseAndSpeeds(pose, velocity)
                 .timing(timestampSeconds, 0.0)
                 .source(this);
+        lastRefreshTimestamp = timestampSeconds;
     }
 
     @Override
@@ -112,6 +124,21 @@ public final class SwerveOdometry implements HardwareMeasurementSignal, Resettab
         return velocity;
     }
 
+    /** Returns the kinematic layout represented by this odometry source. */
+    public SwerveKinematics kinematics() {
+        return kinematics;
+    }
+
+    /** Returns the latest gyro-backed heading used by odometry. */
+    public synchronized double headingRadians() {
+        return pose.headingRadians();
+    }
+
+    /** Returns the latest measured module positions in kinematic order. */
+    public synchronized List<ModulePosition> modulePositions() {
+        return modulePositions;
+    }
+
     private static EncoderDevice distanceEncoder(SwerveModule module) {
         return module.drive.get().encoder()
                 .gearRatio(GearRatio.reduction(module.model().driveReduction(), 1.0))
@@ -121,5 +148,9 @@ public final class SwerveOdometry implements HardwareMeasurementSignal, Resettab
 
     private static double wrapRadians(double radians) {
         return radians - Math.floor((radians + Math.PI) / TWO_PI) * TWO_PI;
+    }
+
+    /** Measured wheel travel and azimuth for one positioned module. */
+    public record ModulePosition(double distanceMeters, double angleRotations) {
     }
 }

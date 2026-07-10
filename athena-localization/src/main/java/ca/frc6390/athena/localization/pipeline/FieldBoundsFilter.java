@@ -2,6 +2,7 @@ package ca.frc6390.athena.localization.pipeline;
 
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
+import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 
 /**
  * Rectangular field bounds that can be used as a localization filter.
@@ -18,12 +19,10 @@ public record FieldBoundsFilter(double minX, double minY, double maxX, double ma
     }
 
     @Override
-    public boolean accept(LocalizationPipeline pipeline, Measurement measurement, PoseSnapshot pose) {
+    public boolean accept(Localization localization, Measurement measurement, PoseSnapshot pose) {
         if (pose != null) {
             return contains(pose);
         }
-        return PoseSamples.from(measurement)
-                .map(sample -> contains(sample.pose()))
-                .orElse(true);
+        return !(measurement instanceof PoseMeasurementSample sample) || contains(sample.pose());
     }
 }

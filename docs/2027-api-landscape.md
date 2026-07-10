@@ -42,7 +42,7 @@ This is the current public API Rebuilt actually imports.
 - Mechanisms: `Mechanism`, `Action`, `Actions`, `Events`, `HookBinding`, `EventContext`, `LifecycleMode`, `LifecyclePhase`, `RobotRuntime`, `PathAction`, `Paths`.
 - Control values: `ControlBinding`, `PidGains`, `FeedforwardGains`, `Constraint`, `MotionProfile`, `MotionPlanner`.
 - Runtime helpers: `ModifiedAxis`, `RobotVelocity`, `PoseSnapshot`, `Measurement`, `Measurements`, `MeasurementStdDevs`.
-- Localization: `Localizations`, `FieldBounds`, `LocalizationFilters`, `LocalizationPipeline`.
+- Localization: `PoseSignal`, `Localization`, `Localizations`, `FieldBounds`, and `LocalizationFilters`.
 - Vision: `Cameras`, `HeliosDevice`, `LimelightDevice`, `PhotonVisionDevice`, `CameraMountPose`.
 - Commands: `CommandAction`.
 - Drivetrain geometry: `WheelBase`, `TrackWidth`.
@@ -175,8 +175,8 @@ Localization is not a signal. It is a pipeline that consumes pose/measurement si
 | `MeasurementStdDevs` | `MeasurementStdDevs` | KEEP | Rebuilt uses vision weighting. |
 | `CameraPoseRef` | `PoseSignal` | RENAME | Camera pose streams emit pose measurements. |
 | `CameraTargetRef` | `TargetSignal` | RENAME | Target streams are a valid camera signal family. |
-| `LocalizationRef` | `LocalizationPipeline` | RENAME | Rebuilt composes odometry, vision, and weighted field pose. |
-| `LocalizationEstimatorRef` | removed | REMOVE | Old ref surface; `LocalizationPipeline` owns estimator composition. |
+| `LocalizationRef` | `Localization` | RENAME | Rebuilt composes pose signals through uniform localization nodes. |
+| `LocalizationEstimatorRef` | removed | REMOVE | Estimation is a `Localization` node, not a separate public abstraction. |
 | `LocalizationFilterRef` | `LocalizationFilter` | RENAME | Rebuilt uses filters publicly. |
 | `BooleanRef` | `BooleanSignal` | REMOVE | Name is valid, but Rebuilt uses direct digital input devices now. |
 | `Booleans` | removed | REMOVE | Not used by Rebuilt. |
@@ -293,7 +293,7 @@ The old DTO/builder layer is not a 2027 API category. Rebuilt uses declarations 
 | `EncoderSpec` | removed | REMOVE | Replace with `EncoderDevice` fields and runtime lowering. |
 | `ImuSpec` | removed | REMOVE | Replace with `ImuDevice` fields and runtime lowering. |
 | `CameraSpec` | removed | REMOVE | Replace with `CameraDevice` fields and runtime lowering. |
-| `LocalizationSpec` | removed | REMOVE | Replace with `LocalizationPipeline`. |
+| `LocalizationSpec` | removed | REMOVE | Replace with `Localization` composition. |
 | `SwerveModuleSpec` | removed | REMOVE | Replace with swerve graph/runtime. |
 | `SwerveDrivetrainSpec` | removed | REMOVE | Replace with swerve graph/runtime. |
 | `DifferentialDrivetrainSpec` | removed | REMOVE | Rebuilt is swerve-only. |
@@ -336,7 +336,7 @@ Runtimes execute. Robot code should touch one public runtime host, not a collect
 | `AutoRegistry` | removed | REMOVE | Old global registry. |
 | `AutoInputStore` | removed | REMOVE | Old auto input store. |
 | `AutoInputScope` | removed | REMOVE | Old auto input scope. |
-| `VisionPoseEstimator` | `VisionPoseEstimator` | KEEP INTERNAL | Estimator implementation behind `LocalizationPipeline`. |
+| `VisionPoseEstimator` | removed | REMOVE | Vision sources produce `PoseSignal`; localization nodes own fusion. |
 | `VisionTurnAssist` | removed | REMOVE | Not used by Rebuilt. |
 | superstructure runtimes | removed | REMOVE | Rebuilt uses Action composition instead of superstructure module. |
 | `SimWorld` | `SimulationSession` | RENAME | Public simulation coordinator for backend state, physics, pose, and test readback. |
@@ -366,7 +366,7 @@ Contexts are runtime plumbing. Only event context stays public.
 | `ControlLoopContext` | `ControlLoopContext` | KEEP INTERNAL | Required by `ControlLoopRuntime`. |
 | `RuleContext` | removed | REMOVE | Rules public API is removed. |
 | `LocalizationFilterContext` | removed | REMOVE | Filters should receive typed pose/measurement data directly. |
-| `LocalizationEstimateContext` | removed | REMOVE | `LocalizationPipeline` should own estimator context. |
+| `LocalizationEstimateContext` | removed | REMOVE | `Localization` owns its evaluation state. |
 | `AthenaValidationContext` | removed | REMOVE | Old validation context shape. |
 
 ## Backends
@@ -401,7 +401,7 @@ Only adapters needed by Rebuilt stay public. Most source/sink APIs are not curre
 | `WpilibCommandPathRuntime` | removed | REMOVE | Replace with Athena `PathRuntime` and provider adapters. |
 | `WpilibDifferentialDriveAdapter` | removed | REMOVE | Rebuilt is swerve-only. |
 | `WpilibSwerveDriveAdapter` | removed | REMOVE | Replace with mechanism-composed swerve control. |
-| `WpilibPoseEstimatorAdapter` | `WpilibPoseEstimatorAdapter` | KEEP INTERNAL | Required behind `LocalizationPipeline`. |
+| `WpilibPoseEstimatorAdapter` | removed | REMOVE | WPILib estimation is internal to `Localizations.kalman()`. |
 | `WpilibNetworkTableWriter` | removed | REMOVE | Telemetry not used by Rebuilt. |
 | `WpilibNetworkTableSink` | removed | REMOVE | Telemetry not used by Rebuilt. |
 | `AutoSource` | `PathProvider` | RENAME | Provider concept stays, auto/source naming goes away. |

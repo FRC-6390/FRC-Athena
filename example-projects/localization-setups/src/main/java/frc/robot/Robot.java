@@ -14,7 +14,7 @@ public final class Robot extends AthenaRobot {
         register(driveTrain);
         athena()
                 .cameras(vision.frontLimelight, vision.rearPhoton, vision.driverHelios)
-                .localization(localization.weightedFieldPose)
+                .localization(localization.estimatedFieldPose)
                 .localization(localization.latestCameraPose)
                 .localizationMaxAge(0.5);
     }
