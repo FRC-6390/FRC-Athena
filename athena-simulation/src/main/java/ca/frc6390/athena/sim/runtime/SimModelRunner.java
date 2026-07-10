@@ -166,31 +166,15 @@ final class SimModelRunner implements SimPhysicsEngine {
         for (MotorDevice motor : simulation.motors()) {
             encoders.add(motor.encoder());
         }
-        for (Object dependency : simulation.dependencies()) {
-            if (dependency instanceof EncoderDevice encoder) {
-                encoders.add(encoder);
-            }
-        }
         return List.copyOf(encoders);
     }
 
     private static Range range(SimModel simulation) {
-        for (Object dependency : simulation.dependencies()) {
-            if (dependency instanceof Range range) {
-                return range;
-            }
-        }
-        return null;
+        return simulation.range();
     }
 
     private static List<SimLimit> limits(SimModel simulation) {
-        List<SimLimit> limits = new ArrayList<>();
-        for (Object dependency : simulation.dependencies()) {
-            if (dependency instanceof SimLimit limit) {
-                limits.add(limit);
-            }
-        }
-        return limits;
+        return simulation.limits();
     }
 
     private record MotorCommand(SimMotorHandle.CommandKind kind, double value) {

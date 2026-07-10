@@ -23,7 +23,6 @@ import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.sim.SimLimit;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.sim.hardware.SimDigitalInputHandle;
@@ -35,13 +34,14 @@ import ca.frc6390.athena.sim.hardware.SimMotorHandle;
 import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulationField;
 
-final class SimulationCoordinator {
+final class SimulationCoordinator implements SimModel.Context {
     private final Map<HardwareIdentity, SimMotorHandle> motors = new LinkedHashMap<>();
     private final Map<HardwareIdentity, SimEncoderHandle> encoders = new LinkedHashMap<>();
     private final Map<HardwareIdentity, SimImuHandle> imus = new LinkedHashMap<>();
     private final Map<DigitalInputDevice, SimDigitalInputHandle> digitalInputs = new LinkedHashMap<>();
     private final DigitalInputDevice.RuntimeScope digitalInputScope = DigitalInputDevice.runtimeScope();
     private final Map<String, SimModel> models = new LinkedHashMap<>();
+    private final Map<String, List<SimModel.Runtime>> modelRuntimes = new LinkedHashMap<>();
     private final List<VisionSimulation> visionSimulations = new java.util.ArrayList<>();
     private final Set<HardwareIdentity> modeledMotors = new LinkedHashSet<>();
     private final RuntimeMotorBackend motorBackend = new RuntimeMotorBackend();
@@ -61,13 +61,26 @@ final class SimulationCoordinator {
     SimulationCoordinator model(String name, SimModel model) {
         Objects.requireNonNull(model, "model");
         String key = normalizeName(name, "model-" + models.size());
+        SimModel previous = models.get(key);
+        Set<HardwareIdentity> previousMotors = previous == null
+                ? Set.of()
+                : previous.motors().stream().map(HardwareIdentity::motor).collect(java.util.stream.Collectors.toSet());
+        for (MotorDevice motor : model.motors()) {
+            HardwareIdentity identity = HardwareIdentity.motor(motor);
+            if (modeledMotors.contains(identity) && !previousMotors.contains(identity)) {
+                throw new IllegalArgumentException(
+                        "Motor " + motor.defaultName() + " is already claimed by another simulation model.");
+            }
+        }
+        previousMotors.forEach(modeledMotors::remove);
         models.put(key, model);
         model.motors().forEach(motor -> {
             this.motor(motor);
             modeledMotors.add(HardwareIdentity.motor(motor));
         });
         model.encoders().forEach(this::encoder);
-        model.dependencies().forEach(this::materializeDependency);
+        model.digitalInputs().forEach(this::digitalInput);
+        modelRuntimes.put(key, model.bind(this));
         return this;
     }
 
@@ -142,7 +155,8 @@ final class SimulationCoordinator {
      *
      * @return pose
      */
-    PoseSnapshot pose() {
+    @Override
+    public PoseSnapshot pose() {
         return pose;
     }
 
@@ -260,7 +274,11 @@ final class SimulationCoordinator {
         if (!Double.isFinite(seconds) || seconds <= 0.0) {
             return;
         }
-        physicsEngine.step(models.values(), session, seconds);
+        List<SimModel> physicsLeaves = models.values().stream()
+                .flatMap(model -> model.physicsLeaves().stream())
+                .toList();
+        physicsEngine.step(physicsLeaves, session, seconds);
+        modelRuntimes.values().forEach(runtimes -> runtimes.forEach(runtime -> runtime.step(seconds)));
         motors.forEach((identity, handle) -> {
             if (!modeledMotors.contains(identity)) {
                 handle.step(seconds);
@@ -270,6 +288,71 @@ final class SimulationCoordinator {
         visionSimulations.forEach(simulation -> simulation.update(pose));
     }
 
+    @Override
+    public SimModel.MotorCommand command(MotorDevice motor) {
+        SimMotorHandle handle = motor(motor);
+        SimModel.CommandMode mode = switch (handle.commandKind()) {
+            case NEUTRAL -> SimModel.CommandMode.NEUTRAL;
+            case PERCENT -> SimModel.CommandMode.PERCENT;
+            case VOLTAGE -> SimModel.CommandMode.VOLTAGE;
+            case POSITION -> SimModel.CommandMode.POSITION;
+            case VELOCITY -> SimModel.CommandMode.VELOCITY;
+        };
+        return new SimModel.MotorCommand(mode, handle.commandValue());
+    }
+
+    @Override
+    public double motorPosition(MotorDevice motor) {
+        return motor(motor).integratedPositionRotations();
+    }
+
+    @Override
+    public double motorVelocity(MotorDevice motor) {
+        return motor(motor).integratedVelocityRotationsPerSecond();
+    }
+
+    @Override
+    public void motorState(MotorDevice motor, double position, double velocity) {
+        motor(motor).state(position, velocity);
+    }
+
+    @Override
+    public double encoderPosition(EncoderDevice encoder) {
+        return encoder(encoder).positionRotations();
+    }
+
+    @Override
+    public double encoderAbsolutePosition(EncoderDevice encoder) {
+        return encoder(encoder).absolutePositionRotations();
+    }
+
+    @Override
+    public double encoderVelocity(EncoderDevice encoder) {
+        return encoder(encoder).velocityRotationsPerSecond();
+    }
+
+    @Override
+    public void encoderState(EncoderDevice encoder, double position, double absolutePosition, double velocity) {
+        encoder(encoder)
+                .positionRotations(position)
+                .absolutePositionRotations(absolutePosition)
+                .velocityRotationsPerSecond(velocity);
+    }
+
+    @Override
+    public void digitalInput(DigitalInputDevice input, boolean active) {
+        digitalInput(input).raw(input.isInverted() ? !active : active);
+    }
+
+    @Override
+    public void advancePose(
+            double fieldXVelocity,
+            double fieldYVelocity,
+            double angularVelocity,
+            double seconds) {
+        drivePose(fieldXVelocity, fieldYVelocity, angularVelocity, seconds);
+    }
+
     private void syncImuYaw() {
         double yawDegrees = Math.toDegrees(pose.headingRadians());
         imus.values().forEach(handle -> handle.yawDegrees(yawDegrees));
@@ -277,16 +360,6 @@ final class SimulationCoordinator {
 
     private static String normalizeName(String requested, String fallback) {
         return requested == null || requested.isBlank() ? fallback : requested.trim();
-    }
-
-    private void materializeDependency(Object dependency) {
-        if (dependency instanceof EncoderDevice encoder) {
-            encoder(encoder);
-        } else if (dependency instanceof DigitalInputDevice digitalInput) {
-            digitalInput(digitalInput);
-        } else if (dependency instanceof SimLimit limit) {
-            digitalInput(limit.sensor());
-        }
     }
 
     Map<HardwareIdentity, SimMotorHandle> motorHandles() {

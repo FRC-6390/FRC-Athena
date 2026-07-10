@@ -4,7 +4,6 @@ import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.device.Range;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -195,6 +194,10 @@ public final class Actions {
         return until(ctx -> condition.getAsBoolean(), action);
     }
 
+    public static Action untilWithin(Action action, double tolerance) {
+        return new WithinTolerance(action, tolerance);
+    }
+
     public static Action then(Action action, Action next) {
         Objects.requireNonNull(next, "next");
         if (action instanceof Action.Conditional conditional) {
@@ -207,10 +210,6 @@ public final class Actions {
             return sequence.then(next);
         }
         return new Then(action, next);
-    }
-
-    public static Action clamp(Action action, Range range) {
-        return new Clamped(action, range);
     }
 
     public record Neutral() implements Action, Output.Neutral {
@@ -463,17 +462,23 @@ public final class Actions {
         }
     }
 
+    public record WithinTolerance(Action action, double tolerance) implements Action {
+        public WithinTolerance {
+            Objects.requireNonNull(action, "action");
+            if (!supportsTolerance(action)) {
+                throw new IllegalArgumentException(
+                        "untilWithin requires one position or velocity control action.");
+            }
+            if (!Double.isFinite(tolerance) || tolerance < 0.0) {
+                throw new IllegalArgumentException("Control tolerance must be finite and non-negative.");
+            }
+        }
+    }
+
     public record Then(Action action, Action next) implements Action {
         public Then {
             Objects.requireNonNull(action, "action");
             Objects.requireNonNull(next, "next");
-        }
-    }
-
-    public record Clamped(Action action, Range range) implements Action {
-        public Clamped {
-            Objects.requireNonNull(action, "action");
-            Objects.requireNonNull(range, "range");
         }
     }
 
@@ -578,6 +583,11 @@ public final class Actions {
         private Cycle() {
         }
 
+        public Cycle run(Action action) {
+            steps.add(new CycleStep(action, ctx -> false));
+            return this;
+        }
+
         public Cycle forTime(double seconds, Action action) {
             steps.add(new CycleStep(action, ctx -> ctx.timeInStateSeconds() >= seconds));
             return this;
@@ -619,6 +629,16 @@ public final class Actions {
             copy.add(Objects.requireNonNull(action, "action"));
         }
         return List.copyOf(copy);
+    }
+
+    private static boolean supportsTolerance(Action action) {
+        if (action instanceof ControlPosition
+                || action instanceof DynamicControlPosition
+                || action instanceof ControlVelocity
+                || action instanceof DynamicControlVelocity) {
+            return true;
+        }
+        return false;
     }
 
     private static final class DeadlineActions extends java.util.AbstractList<Action> {

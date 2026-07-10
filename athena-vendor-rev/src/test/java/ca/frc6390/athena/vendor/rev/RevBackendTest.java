@@ -13,7 +13,6 @@ import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.HardwareBus;
-import ca.frc6390.athena.hardware.device.HardwarePort;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import org.junit.jupiter.api.Test;
@@ -35,7 +34,7 @@ class RevBackendTest {
         assertTrue(backend.supports(EncoderKinds.REV_THROUGH_BORE));
         assertFalse(backend.supports((EncoderKind) () -> "ctre:cancoder"));
         assertTrue(backend.supports(HardwareBus.rio()
-                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(0))));
+                .dio(0).encoder(EncoderKinds.REV_THROUGH_BORE)));
         assertFalse(backend.supports(EncoderDevice.of(EncoderKinds.REV_THROUGH_BORE, 0)));
     }
 
@@ -54,7 +53,7 @@ class RevBackendTest {
     @Test
     void throughBoreReadsAbsolutePositionAndRejectsVelocityWhenUnavailable() {
         RevThroughBoreEncoderHandle handle = new RevThroughBoreEncoderHandle(
-                HardwareBus.rio().encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(4)),
+                HardwareBus.rio().dio(4).encoder(EncoderKinds.REV_THROUGH_BORE),
                 new RevThroughBoreEncoderHandle.ThroughBoreController() {
                     @Override
                     public double absolutePositionRotations() {

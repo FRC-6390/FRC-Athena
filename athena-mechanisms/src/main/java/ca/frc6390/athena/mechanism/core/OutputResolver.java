@@ -43,14 +43,6 @@ final class OutputResolver {
     }
 
     private void resolveState(Action action, MechanismContext context, List<ResolvedOutput> outputs) {
-        if (action instanceof Actions.Clamped clamped) {
-            resolveState(clamped.action(), context, outputs);
-            return;
-        }
-        if (action instanceof Action.Clamped clamped) {
-            resolveState(clamped.action(), context, outputs);
-            return;
-        }
         if (action instanceof Actions.Conditional conditional) {
             resolveState(conditional.action(), context, outputs);
             return;

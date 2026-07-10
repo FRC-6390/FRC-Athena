@@ -38,9 +38,9 @@ This is the current public API Rebuilt actually imports.
 - Hardware kinds: `MotorKinds`, `EncoderKinds`, `ImuKinds`, `CameraKinds`.
 - Hardware declarations: `MotorDevice`, `EncoderDevice`, `ImuDevice`, `DigitalInputDevice`, `HardwareBus`.
 - Hardware values: `GearRatio`, `Range`, `EncoderUnit`.
-- Simulation declarations: `SimModel`, `SimModels`, `SimulationSession`.
+- Simulation declarations: composable `SimModel` and `SimulationSession`.
 - Mechanisms: `Mechanism`, `Action`, `Actions`, `Events`, `HookBinding`, `EventContext`, `LifecycleMode`, `LifecyclePhase`, `RobotRuntime`, `PathAction`, `Paths`.
-- Control values: `ControlBinding`, `PidGains`, `FeedforwardGains`.
+- Control values: `ControlBinding`, `PidGains`, `FeedforwardGains`, `Constraint`, `MotionProfile`, `MotionPlanner`.
 - Runtime helpers: `ModifiedAxis`, `RobotVelocity`, `PoseSnapshot`, `Measurement`, `Measurements`, `MeasurementStdDevs`.
 - Localization: `Localizations`, `FieldBounds`, `LocalizationFilters`, `LocalizationPipeline`.
 - Vision: `Cameras`, `HeliosDevice`, `LimelightDevice`, `PhotonVisionDevice`, `CameraMountPose`.
@@ -252,7 +252,7 @@ Actions are the main public behavior API and stay public.
 
 Robot-facing code should request an Action directly with `action.request()` or through the one-argument robot helper. The runtime infers ownership from registered mechanism Action fields.
 
-Control Actions execute through the same output path as motor Actions. `ControlBinding` loop runtimes reset on first use and when the requested output kind or target changes. Multiple loop outputs compose additively; mixed percent/voltage outputs promote percent to nominal 12V voltage so PID plus feedforward produces one applied voltage request.
+Control Actions execute through the same output path as motor Actions. `ControlBinding` loop runtimes reset on first use and when the requested output kind changes; same-mode dynamic targets preserve controller and profile state. Target transforms run before constraints and planning, profiles produce position/velocity/acceleration references, PID and feedforward consume those references, and final output saturation plus directional and predictive constraint checks run last. Multiple loop outputs compose additively; mixed percent/voltage outputs promote percent to nominal 12V voltage so PID plus feedforward produces one applied voltage request.
 
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |
@@ -428,7 +428,7 @@ Catalogs are public only when they create the kept robot API.
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |
 | `DigitalInputs` | `DigitalInputs` | KEEP | Rebuilt uses it. |
-| `Sim` | `SimModels` | RENAME | Rebuilt uses sim declarations. |
+| `Sim` | `SimModel` | REPLACE | One model composes provider-backed physics, child models, and custom runtime rules. |
 | `Actions` | `Actions` | KEEP | Rebuilt uses it heavily. |
 | `Events` | `Events` | KEEP | Rebuilt uses it. |
 | `Paths` | `Paths` | KEEP | Rebuilt autos use it. |
@@ -475,7 +475,7 @@ These modules need old public surface removed. Feature support stays when it can
 
 - `ca.frc6390.athena.hardware.device`: hardware declarations and physical value objects such as `MotorDevice`, `EncoderDevice`, `ImuDevice`, `DigitalInputDevice`, `GearRatio`, `Range`, and neutral/follower metadata.
 - `ca.frc6390.athena.hardware.runtime`: runtime hardware access surfaces such as `HardwareGraph`, `ActionContext`, and `MappedActionContext`.
-- `ca.frc6390.athena.hardware.sim`: simulation declarations such as `SimModel`, `SimModels`, `SimLimit`, and `SimProfile`.
+- `ca.frc6390.athena.hardware.sim`: the unified `SimModel` declaration/runtime-rule API and typed `SimLimit` values.
 - `ca.frc6390.athena.hardware.backend`: backend SPI and live runtime handles such as `MotorBackend`, `MotorHandle`, and `HardwareIdentity`.
 
 ## Additions Needed Before Robot Testing

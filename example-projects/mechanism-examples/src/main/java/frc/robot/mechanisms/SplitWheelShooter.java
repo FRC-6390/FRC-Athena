@@ -20,6 +20,8 @@ public final class SplitWheelShooter implements Mechanism {
     public final Action spinShot = velocity(78.0, 58.0);
 
     private Action velocity(double topVelocity, double bottomVelocity) {
-        return Actions.parallel(top.velocity(topVelocity), bottom.velocity(bottomVelocity));
+        return Actions.parallel(
+                top.velocity(topVelocity).untilWithin(2.0),
+                bottom.velocity(bottomVelocity).untilWithin(2.0));
     }
 }

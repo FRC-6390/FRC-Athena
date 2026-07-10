@@ -7,6 +7,7 @@ import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
+import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
 import ca.frc6390.athena.mechanism.core.EventContext;
@@ -15,6 +16,7 @@ import ca.frc6390.athena.mechanism.core.LifecyclePhase;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.MechanismScheduler;
+import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.runtime.measurement.Measurement;
@@ -50,6 +52,9 @@ public final class RobotRuntime {
     private final List<LocalizationPipeline> localizations = new ArrayList<>();
     private final List<MeasurementSnapshot> localizationSnapshots = new ArrayList<>();
     private final Set<SimModel> registeredSimulationModels = new LinkedHashSet<>();
+    private final Set<ControlBinding> registeredSimulationControls =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private final Set<MotorDevice> modeledSimulationMotors = new LinkedHashSet<>();
     private RuntimeWorkers workers = RuntimeWorkers.none();
     private Function<DigitalInputDevice, BooleanSupplier> digitalInputResolver;
     private double localizationMaxAgeSeconds = Double.POSITIVE_INFINITY;
@@ -234,8 +239,26 @@ public final class RobotRuntime {
     private void registerSimulationModels() {
         for (SimModel model : mechanisms.simulationModels()) {
             if (registeredSimulationModels.add(model)) {
+                modeledSimulationMotors.addAll(model.motors());
                 simulationSession.model("mechanism-" + registeredSimulationModels.size(), model);
             }
+        }
+        for (ControlBinding control : mechanisms.controlBindings()) {
+            if (registeredSimulationControls.contains(control)
+                    || control.motors().isEmpty()
+                    || control.motors().stream().anyMatch(modeledSimulationMotors::contains)) {
+                continue;
+            }
+            SimModel model = SimModel.motor(control.motors().toArray(MotorDevice[]::new));
+            if (control.feedback() != null) {
+                for (var encoder : control.feedback().encoders()) {
+                    model = model.encoder(encoder);
+                }
+            }
+            registeredSimulationControls.add(control);
+            registeredSimulationModels.add(model);
+            modeledSimulationMotors.addAll(model.motors());
+            simulationSession.model("automatic-control-" + registeredSimulationControls.size(), model);
         }
     }
 

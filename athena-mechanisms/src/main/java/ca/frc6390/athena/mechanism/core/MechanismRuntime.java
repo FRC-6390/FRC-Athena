@@ -207,6 +207,12 @@ final class MechanismRuntime {
                 Evaluation child = evaluate(schedule.named("timeout", timeout.action()), context);
                 return schedule.result(child.output(), child.complete(), child.context());
             }
+            if (action instanceof Actions.WithinTolerance within) {
+                Evaluation child = evaluate(schedule.named("withinTolerance", within.action()), context);
+                boolean complete = child.complete()
+                        || isWithinTolerance(child.output(), within.tolerance());
+                return schedule.result(child.output(), complete, child.context());
+            }
             if (action instanceof Actions.Conditional conditional) {
                 return evaluateConditional(
                         conditional.action(),
@@ -230,16 +236,6 @@ final class MechanismRuntime {
             }
             if (action instanceof Action.Then then) {
                 return evaluateThen(then.action(), then.next(), schedule, context);
-            }
-            if (action instanceof Actions.Clamped clamped) {
-                Evaluation child = evaluate(schedule.named("clamped", clamped.action()), context);
-                return schedule.result(child.output() == null ? null : Actions.clamp(child.output(), clamped.range()),
-                        child.complete(), child.context());
-            }
-            if (action instanceof Action.Clamped clamped) {
-                Evaluation child = evaluate(schedule.named("clamped", clamped.action()), context);
-                return schedule.result(child.output() == null ? null : Actions.clamp(child.output(), clamped.range()),
-                        child.complete(), child.context());
             }
             if (action instanceof Actions.RuntimeAction runtimeAction) {
                 if (!node.entered) {
@@ -407,6 +403,48 @@ final class MechanismRuntime {
             return child;
         }
 
+        private boolean isWithinTolerance(Action output, double tolerance) {
+            ControlTarget target = controlTarget(output);
+            if (target == null) {
+                return false;
+            }
+            double measurement = switch (target.mode()) {
+                case POSITION -> feedbackPosition(target.control());
+                case VELOCITY -> feedbackVelocity(target.control());
+            };
+            return Math.abs(target.value() - measurement) <= tolerance;
+        }
+
+        private double feedbackPosition(ControlBinding control) {
+            if (control.feedback() != null) {
+                return control.feedback().position().position(actionContext);
+            }
+            return actionContext.motor(control.output()).integratedPositionRotations();
+        }
+
+        private double feedbackVelocity(ControlBinding control) {
+            if (control.feedback() != null) {
+                return control.feedback().velocity().velocity(actionContext);
+            }
+            return actionContext.motor(control.output()).integratedVelocityRotationsPerSecond();
+        }
+
+        private static ControlTarget controlTarget(Action action) {
+            if (action instanceof Actions.ControlPosition position) {
+                return new ControlTarget(position.control(), ControlMode.POSITION, position.position());
+            }
+            if (action instanceof Actions.DynamicControlPosition position) {
+                return new ControlTarget(position.control(), ControlMode.POSITION, position.position());
+            }
+            if (action instanceof Actions.ControlVelocity velocity) {
+                return new ControlTarget(velocity.control(), ControlMode.VELOCITY, velocity.velocity());
+            }
+            if (action instanceof Actions.DynamicControlVelocity velocity) {
+                return new ControlTarget(velocity.control(), ControlMode.VELOCITY, velocity.velocity());
+            }
+            return null;
+        }
+
         private static Action groupOutput(List<Action> actions) {
             if (actions.isEmpty()) {
                 return null;
@@ -421,6 +459,9 @@ final class MechanismRuntime {
             PARALLEL,
             RACE,
             DEADLINE
+        }
+
+        private record ControlTarget(ControlBinding control, ControlMode mode, double value) {
         }
 
         private static final class Evaluation {
@@ -564,6 +605,8 @@ final class MechanismRuntime {
                     lowerIndexed(deadline.Actions());
                 } else if (action instanceof Actions.Timeout timeout) {
                     named("timeout", timeout.action());
+                } else if (action instanceof Actions.WithinTolerance within) {
+                    named("withinTolerance", within.action());
                 } else if (action instanceof Actions.Conditional conditional) {
                     lowerConditional(conditional.action(), conditional.next());
                 } else if (action instanceof Action.Conditional conditional) {
@@ -572,10 +615,6 @@ final class MechanismRuntime {
                     lowerThen(then.action(), then.next());
                 } else if (action instanceof Action.Then then) {
                     lowerThen(then.action(), then.next());
-                } else if (action instanceof Actions.Clamped clamped) {
-                    named("clamped", clamped.action());
-                } else if (action instanceof Action.Clamped clamped) {
-                    named("clamped", clamped.action());
                 }
             }
 

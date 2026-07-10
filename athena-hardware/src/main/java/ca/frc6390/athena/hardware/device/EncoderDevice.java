@@ -6,7 +6,10 @@ import java.util.Objects;
 import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
+import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.hardware.signal.PositionSignal;
+import ca.frc6390.athena.hardware.signal.VelocitySignal;
 
 /**
  * Reusable encoder declaration for robot constants.
@@ -17,14 +20,14 @@ public record EncoderDevice(
         double gearRatio,
         double conversion,
         double offset,
-        EncoderUnit units) {
+        EncoderUnit units) implements PositionSignal, VelocitySignal {
     public static EncoderDevice of(EncoderKind kind, int id) {
-        return connected(kind, "rio", HardwarePort.can(id));
+        return connected(kind, "rio", new HardwareAddress.Can(id));
     }
 
-    static EncoderDevice connected(EncoderKind kind, String bus, HardwarePort port) {
+    static EncoderDevice connected(EncoderKind kind, String bus, HardwareAddress connection) {
         return new EncoderDevice(
-                new EncoderSource.Standalone(kind, bus, port),
+                new EncoderSource.Standalone(kind, bus, connection),
                 false,
                 1.0,
                 1.0,
@@ -80,11 +83,12 @@ public record EncoderDevice(
         return motorSource().id();
     }
 
-    public HardwarePort port() {
+    public HardwareAddress connection() {
         if (source instanceof EncoderSource.Standalone standalone) {
-            return standalone.port();
+            return standalone.connection();
         }
-        throw new IllegalStateException("Motor-integrated encoder " + defaultName() + " does not have a standalone port.");
+        throw new IllegalStateException(
+                "Motor-integrated encoder " + defaultName() + " does not have a standalone connection.");
     }
 
     public String bus() {
@@ -106,7 +110,7 @@ public record EncoderDevice(
         if (source instanceof EncoderSource.Standalone standalone) {
             requireCan(standalone);
             return new EncoderDevice(
-                    new EncoderSource.Standalone(standalone.kind(), canbus, standalone.port()),
+                    new EncoderSource.Standalone(standalone.kind(), canbus, standalone.connection()),
                     isInverted,
                     gearRatio,
                     conversion,
@@ -170,6 +174,35 @@ public record EncoderDevice(
     }
 
     /**
+     * Reads configured mechanism position through the runtime handle.
+     *
+     * @param context runtime hardware context
+     * @return configured mechanism position
+     */
+    @Override
+    public double position(ActionContext context) {
+        Objects.requireNonNull(context, "context");
+        return positionFromRotations(context.encoder(this).positionRotations());
+    }
+
+    /**
+     * Reads configured mechanism velocity through the runtime handle.
+     *
+     * @param context runtime hardware context
+     * @return configured mechanism velocity
+     */
+    @Override
+    public double velocity(ActionContext context) {
+        Objects.requireNonNull(context, "context");
+        return velocityFromRotationsPerSecond(context.encoder(this).velocityRotationsPerSecond());
+    }
+
+    @Override
+    public java.util.List<?> dependencies() {
+        return java.util.List.of(this);
+    }
+
+    /**
      * Converts raw sensor rotations into configured mechanism position.
      *
      * @param rotations raw sensor rotations
@@ -207,8 +240,8 @@ public record EncoderDevice(
 
     public String defaultName() {
         if (source instanceof EncoderSource.Standalone standalone) {
-            return sanitize(kind().key()) + "_" + sanitize(standalone.port().identity()) + "_"
-                    + standalone.port().primaryAddress();
+            return sanitize(kind().key()) + "_" + sanitize(standalone.connection().identity()) + "_"
+                    + standalone.connection().primaryAddress();
         }
         return sanitize(kind().key()) + "_" + motorSource().id();
     }
@@ -233,11 +266,11 @@ public record EncoderDevice(
 
     public sealed interface EncoderSource
             permits EncoderSource.Standalone, EncoderSource.IntegratedMotor, EncoderSource.MotorAbsolute {
-        record Standalone(EncoderKind kind, String bus, HardwarePort port) implements EncoderSource {
+        record Standalone(EncoderKind kind, String bus, HardwareAddress connection) implements EncoderSource {
             public Standalone {
                 Objects.requireNonNull(kind, "kind");
                 bus = bus == null || bus.isBlank() ? "rio" : bus;
-                Objects.requireNonNull(port, "port");
+                Objects.requireNonNull(connection, "connection");
             }
         }
 
@@ -261,8 +294,8 @@ public record EncoderDevice(
         return ((EncoderSource.MotorAbsolute) source).motor();
     }
 
-    private static HardwarePort.Can requireCan(EncoderSource.Standalone standalone) {
-        if (standalone.port() instanceof HardwarePort.Can can) {
+    private static HardwareAddress.Can requireCan(EncoderSource.Standalone standalone) {
+        if (standalone.connection() instanceof HardwareAddress.Can can) {
             return can;
         }
         throw new IllegalStateException("Encoder " + standalone.kind().key() + " is not connected over CAN.");

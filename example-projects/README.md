@@ -2,11 +2,14 @@
 
 - `tank-drive` - tank drive robot with processed driver axes in a dedicated `Controls.java`
 - `swerve-drive` - swerve drive robot with selectable field-oriented and robot-oriented control using a declared Pigeon 2 IMU
-- `auto-following` - autonomous setup with PathPlanner, Choreo-style paths, markers, and a custom timed provider
+- `auto-following` - graduated one-auto-per-file PathPlanner and Choreo examples covering markers,
+  mechanism states, multipath routines, Choreo splits, runtime conditions, generated paths, a custom
+  marker provider, and autonomous-style teleop assists
 - `localization-setups` - odometry, multi-camera vision, weighted, latest-valid, and Kalman localization pipelines
-- `mechanism-examples` - button-bound open-loop, velocity, and split-wheel shooters; manual, single-joint, and 2DOF arms; roller and indexed intakes; single and follower elevators; simulations; and a composed superstructure
-- `rule-examples` - button-bound guarded Actions using clamps, limit switches, conditional branches, timeouts, hooks, and sensor gates
-- `custom-controls` - button-bound software control loops and arbitrary feedforward layered onto closed-loop controls
+- `mechanism-examples` - button-bound open-loop, velocity, and split-wheel shooters; manual, single-joint, and constrained 2DOF arms; a bounded field-relative turret; roller and indexed intakes; single and follower elevators; simulations; and a composed superstructure
+- `rule-examples` - reusable control constraints using ranges and Boolean-supplier boundaries, plus conditional branches, timeouts, hooks, and sensor gates
+- `custom-controls` - button-bound software control loops, arbitrary feedforward, modular/CRT position decoding,
+  absolute-relative fusion, filtered velocity, and redundant feedback
 - `controller-bindings` - Xbox axes and button bindings contained in a dedicated `Controls.java` mechanism
 
 Each folder is a standalone WPILib robot project.

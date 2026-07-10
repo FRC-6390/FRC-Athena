@@ -1,7 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.sim.SimLimit;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import java.util.Collection;
 import java.util.Collections;
@@ -47,6 +46,11 @@ final class RobotGraph {
         for (Object declaration : declarations(mechanisms)) {
             if (declaration instanceof SimModel simulation) {
                 simulations.add(simulation);
+            } else if (declaration instanceof SimModel.Source source) {
+                SimModel simulation = source.simulationModel();
+                if (simulation != null) {
+                    simulations.add(simulation);
+                }
             }
         }
         return simulations;
@@ -104,7 +108,9 @@ final class RobotGraph {
 
     private static void collectControlDeclarations(ControlBinding control, Set<Object> declarations) {
         declarations.addAll(control.motors());
-        declarations.addAll(control.feedback());
+        if (control.feedback() != null) {
+            declarations.addAll(control.feedback().dependencies());
+        }
         declarations.addAll(control.dependencies());
         for (ControlLoop loop : control.loops()) {
             declarations.addAll(loop.dependencies());
@@ -132,16 +138,16 @@ final class RobotGraph {
     private static void collectSimDeclarations(SimModel simulation, Set<Object> declarations) {
         declarations.addAll(simulation.motors());
         declarations.addAll(simulation.encoders());
+        declarations.addAll(simulation.digitalInputs());
         for (MotorDevice motor : simulation.motors()) {
             declarations.add(motor.encoder());
         }
-        for (Object declaration : simulation.dependencies()) {
-            declarations.add(declaration);
-            if (declaration instanceof ControlBinding control) {
-                collectControlDeclarations(control, declarations);
-            } else if (declaration instanceof SimLimit limit) {
-                declarations.add(limit.sensor());
-            }
+        if (simulation.range() != null) {
+            declarations.add(simulation.range());
         }
+        simulation.limits().forEach(limit -> {
+            declarations.add(limit);
+            declarations.add(limit.sensor());
+        });
     }
 }

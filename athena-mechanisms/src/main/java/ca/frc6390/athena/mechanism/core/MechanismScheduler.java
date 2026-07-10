@@ -184,6 +184,21 @@ public final class MechanismScheduler {
     }
 
     /**
+     * Returns control bindings available for automatic functional simulation.
+     *
+     * @return declared controls
+     */
+    public Set<ControlBinding> controlBindings() {
+        Set<ControlBinding> controls = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Object declaration : graph.declarations(runtimes.keySet())) {
+            if (declaration instanceof ControlBinding control) {
+                controls.add(control);
+            }
+        }
+        return java.util.Collections.unmodifiableSet(controls);
+    }
+
+    /**
      * Returns IMU declarations owned by registered mechanisms.
      *
      * @return declared IMUs
@@ -423,6 +438,8 @@ public final class MechanismScheduler {
             collectActionDeclarations(branch.active(), declarations);
         } else if (action instanceof Actions.Timeout timeout) {
             collectActionDeclarations(timeout.action(), declarations);
+        } else if (action instanceof Actions.WithinTolerance within) {
+            collectActionDeclarations(within.action(), declarations);
         } else if (action instanceof Actions.Conditional conditional) {
             collectActionDeclarations(conditional.action(), declarations);
             collectActionDeclarations(conditional.next(), declarations);
@@ -435,10 +452,6 @@ public final class MechanismScheduler {
         } else if (action instanceof Action.Then then) {
             collectActionDeclarations(then.action(), declarations);
             collectActionDeclarations(then.next(), declarations);
-        } else if (action instanceof Actions.Clamped clamped) {
-            collectActionDeclarations(clamped.action(), declarations);
-        } else if (action instanceof Action.Clamped clamped) {
-            collectActionDeclarations(clamped.action(), declarations);
         } else if (action instanceof PathAction path) {
             declarations.add(path);
         } else if (action instanceof Actions.MotorPercent motor) {
@@ -460,7 +473,9 @@ public final class MechanismScheduler {
     private static Set<Object> controlDeclarations(ControlBinding control) {
         Set<Object> declarations = new LinkedHashSet<>();
         declarations.addAll(control.motors());
-        declarations.addAll(control.feedback());
+        if (control.feedback() != null) {
+            declarations.addAll(control.feedback().dependencies());
+        }
         declarations.addAll(control.dependencies());
         for (ControlLoop loop : control.loops()) {
             declarations.addAll(loop.dependencies());

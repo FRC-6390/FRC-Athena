@@ -112,7 +112,7 @@ The Athena vendor adapter artifacts are included by the single Athena vendordep,
 
 ## Hardware Connections
 
-`HardwareBus` is the unified entry point for hardware declarations. Integer device IDs remain CAN shorthand. Non-CAN devices use an explicit `HardwarePort` so the same encoder or IMU declaration can represent its real physical connection.
+`HardwareBus` is the unified entry point for hardware declarations. Integer device IDs remain CAN shorthand. For other interfaces, select the connection from the bus and declare the device on it.
 
 ```java
 HardwareBus RIO = HardwareBus.rio();
@@ -122,12 +122,9 @@ MotorDevice drive = CANIVORE.motor(MotorKinds.KRAKEN_X60, 1);
 EncoderDevice angle = CANIVORE.encoder(EncoderKinds.CANCODER, 9);
 ImuDevice pigeon = RIO.imu(ImuKinds.PIGEON_2, 0);
 
-EncoderDevice throughBore = RIO.encoder(
-        EncoderKinds.REV_THROUGH_BORE,
-        HardwarePort.dio(2));
-ImuDevice navx = RIO.imu(
-        ImuKinds.NAVX,
-        HardwarePort.spi(SpiPort.MXP));
+EncoderDevice throughBore = RIO.dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
+ImuDevice navx = RIO.spi(SpiPort.MXP).imu(ImuKinds.NAVX);
+DigitalInputDevice home = RIO.dio(3).digitalInput("arm home");
 ```
 
 The roboRIO bus exposes CAN, DIO, analog, SPI, I2C, serial, and USB. Named CAN buses expose CAN only. Requesting an unavailable interface, such as DIO from a CANivore, fails when the declaration is created. Vendor backends then validate that the selected device kind supports that connection.
@@ -152,4 +149,4 @@ The roboRIO bus exposes CAN, DIO, analog, SPI, I2C, serial, and USB. Named CAN b
 
 Mechanisms are the main robot behavior abstraction. Swerve is not a special runtime graph anymore: a drivetrain should be a normal `Mechanism`, and swerve modules are normal mechanism components. Hardware declarations resolve through `HardwareGraph`; vendor modules provide backend implementations through service loading.
 
-Simulation runs through the normal `RobotRuntime` with `SimulationSession` selecting simulated hardware backends. The in-memory runner covers basic handle/model stepping, and `athena-wpilib` provides WPILib-backed motor, flywheel, arm, elevator, battery, and swerve pose simulation without leaking WPILib sim classes into robot mechanisms. Robot actions are evaluated by the normal runtime tick; simulation periodic advances physics from the already-applied hardware commands.
+Simulation runs through the normal `RobotRuntime` with `SimulationSession` selecting simulated hardware backends. `SimModel` is one composable API for provider-backed leaves, nested models, and custom runtime rules. Production `SwerveKinematics` owns module targeting and forward kinematics and contributes its model automatically, so drive code and simulation share one layout without calling WPILib kinematics. Robot actions are evaluated by the normal runtime tick; simulation periodic advances physics from the already-applied hardware commands.

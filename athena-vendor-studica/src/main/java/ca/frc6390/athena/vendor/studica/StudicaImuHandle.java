@@ -2,7 +2,7 @@ package ca.frc6390.athena.vendor.studica;
 
 import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.ImuDevice;
-import ca.frc6390.athena.hardware.device.HardwarePort;
+import ca.frc6390.athena.hardware.device.HardwareAddress;
 import com.studica.frc.AHRS;
 import java.util.Objects;
 
@@ -67,23 +67,23 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     }
 
     private static AHRS.NavXComType comType(ImuDevice device) {
-        HardwarePort port = device.port();
-        if (port instanceof HardwarePort.Spi) {
+        HardwareAddress address = device.connection();
+        if (address instanceof HardwareAddress.Spi) {
             return AHRS.NavXComType.kMXP_SPI;
         }
-        if (port instanceof HardwarePort.Serial) {
+        if (address instanceof HardwareAddress.Serial) {
             return AHRS.NavXComType.kMXP_UART;
         }
-        if (port instanceof HardwarePort.I2c) {
+        if (address instanceof HardwareAddress.I2c) {
             return AHRS.NavXComType.kI2C;
         }
-        if (port instanceof HardwarePort.Usb usb && usb.port() == 1) {
+        if (address instanceof HardwareAddress.Usb usb && usb.port() == 1) {
             return AHRS.NavXComType.kUSB1;
         }
-        if (port instanceof HardwarePort.Usb usb && usb.port() == 2) {
+        if (address instanceof HardwareAddress.Usb usb && usb.port() == 2) {
             return AHRS.NavXComType.kUSB2;
         }
-        throw new IllegalArgumentException("NavX does not support " + port.identity() + ".");
+        throw new IllegalArgumentException("NavX does not support " + address.identity() + ".");
     }
 
     interface NavxController extends AutoCloseable {

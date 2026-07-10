@@ -53,6 +53,16 @@ class ActionsTest {
         assertEquals(1, hook.actions().size());
     }
 
+    @Test
+    void untilWithinOnlyAcceptsClosedLoopTargetsAndValidTolerance() {
+        ControlBinding position = Controls.position(MOTOR);
+        Action openLoop = MOTOR.percent(0.2);
+
+        assertThrows(IllegalArgumentException.class, () -> openLoop.untilWithin(0.1));
+        assertThrows(IllegalArgumentException.class, () -> position.position(1.0).untilWithin(-0.1));
+        assertThrows(IllegalArgumentException.class, () -> position.position(1.0).untilWithin(Double.NaN));
+    }
+
     private record TestMechanism(Action initial) implements Mechanism {
     }
 }

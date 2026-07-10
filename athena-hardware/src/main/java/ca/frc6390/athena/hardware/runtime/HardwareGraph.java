@@ -92,7 +92,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             EncoderHandle handle = backends
                     .encoderBackendFor(device)
                     .orElseThrow(() -> new IllegalStateException(
-                            "No encoder backend for " + device.kind().key() + " over " + device.port().identity()))
+                            "No encoder backend for " + device.kind().key() + " over " + device.connection().identity()))
                     .create(device);
             handle.activate();
             return adjustable(handle);
@@ -115,7 +115,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             ImuHandle handle = backends
                     .imuBackendFor(device)
                     .orElseThrow(() -> new IllegalStateException(
-                            "No IMU backend for " + device.kind().key() + " over " + device.port().identity()))
+                            "No IMU backend for " + device.kind().key() + " over " + device.connection().identity()))
                     .create(device);
             handle.activate();
             return handle;

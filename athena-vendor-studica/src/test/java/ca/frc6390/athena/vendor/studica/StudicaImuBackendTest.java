@@ -9,7 +9,7 @@ import ca.frc6390.athena.api.hardware.ImuKind;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.ImuDevice;
-import ca.frc6390.athena.hardware.device.HardwarePort;
+import ca.frc6390.athena.hardware.device.HardwareAddress;
 import org.junit.jupiter.api.Test;
 
 class StudicaImuBackendTest {
@@ -38,11 +38,11 @@ class StudicaImuBackendTest {
 
     @Test
     void namedNavxPortsCreateClearDeclarations() {
-        assertTrue(StudicaImus.navx(StudicaNavxPort.MXP_SPI).port() instanceof HardwarePort.Spi);
-        assertTrue(StudicaImus.navx(StudicaNavxPort.MXP_UART).port() instanceof HardwarePort.Serial);
-        assertEquals(1, ((HardwarePort.Usb) StudicaImus.navx(StudicaNavxPort.USB1).port()).port());
-        assertEquals(2, ((HardwarePort.Usb) StudicaImus.navx(StudicaNavxPort.USB2).port()).port());
-        assertTrue(StudicaImus.navx(StudicaNavxPort.I2C).port() instanceof HardwarePort.I2c);
+        assertTrue(StudicaImus.navx(StudicaNavxPort.MXP_SPI).connection() instanceof HardwareAddress.Spi);
+        assertTrue(StudicaImus.navx(StudicaNavxPort.MXP_UART).connection() instanceof HardwareAddress.Serial);
+        assertEquals(1, ((HardwareAddress.Usb) StudicaImus.navx(StudicaNavxPort.USB1).connection()).port());
+        assertEquals(2, ((HardwareAddress.Usb) StudicaImus.navx(StudicaNavxPort.USB2).connection()).port());
+        assertTrue(StudicaImus.navx(StudicaNavxPort.I2C).connection() instanceof HardwareAddress.I2c);
         assertEquals(ImuKinds.NAVX, StudicaImus.navx(null).kind());
     }
 

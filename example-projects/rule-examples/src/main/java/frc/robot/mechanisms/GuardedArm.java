@@ -12,6 +12,8 @@ import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Events;
 import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.constraint.Constraints;
+import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import frc.robot.Constants;
 
 public final class GuardedArm implements Mechanism {
@@ -21,19 +23,20 @@ public final class GuardedArm implements Mechanism {
     private final Range travel = Range.degrees(0.0, 110.0);
     private final ControlBinding position = Controls.position(motor)
             .feedback(motor.encoder())
-            .pid(0.06, 0.0, 0.0);
+            .pid(0.06, 0.0, 0.0)
+            .constraints(Constraints.range(travel), Constraints.lower(home), Constraints.upper(hardStop))
+            .profile(MotionProfiles.trapezoid(70.0, 180.0));
 
     @SuppressWarnings("unused")
-    public final HookBinding zeroWhenHomed = Events.when(home).rising().onStart(() -> {});
+    public final HookBinding zeroWhenHomed = Events.when(home).rising().onStart(motor.encoder().setPosition(0.0));
 
-    public final Action hold = motor.percent(0.0);
+    public final Action hold = position.percent(0.0);
     public final Action homeSlowly = Actions.sequence()
-            .until(home::active, motor.percent(() -> home.active() ? 0.0 : -0.12))
-            .then(position.position(0.0).clamp(travel));
-    public final Action score = position.position(90.0).clamp(travel)
+            .until(home::active, position.percent(-0.12))
+            .then(position.position(0.0));
+    public final Action score = position.position(90.0)
             .until(hardStop::active)
             .then(hold);
-    public final Action nudgeUp = motor.<Action>percent(() -> hardStop.active() ? 0.0 : 0.2)
-            .until(hardStop::active);
-    public final Action timedManualEscape = Actions.timeout(motor.percent(-0.15), 0.4).then(hold);
+    public final Action nudgeUp = position.percent(0.2).until(hardStop::active);
+    public final Action timedManualEscape = Actions.timeout(position.percent(-0.15), 0.4).then(hold);
 }

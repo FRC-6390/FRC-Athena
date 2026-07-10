@@ -1,7 +1,6 @@
 package ca.frc6390.athena.wpilib.simulation;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
-import ca.frc6390.athena.drivetrain.swerve.SwerveDriveSimModel;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -16,11 +15,6 @@ import ca.frc6390.athena.sim.runtime.SimulationSession;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.system.plant.LinearSystemId;
 import edu.wpi.first.math.util.Units;
-import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.geometry.Translation2d;
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
-import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
-import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.wpilibj.simulation.BatterySim;
 import edu.wpi.first.wpilibj.simulation.DCMotorSim;
 import edu.wpi.first.wpilibj.simulation.ElevatorSim;
@@ -71,7 +65,6 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         }
         double currentDrawAmps = 0.0;
         for (SimModel model : models) {
-            stepSwerveDriveModels(model, session, seconds);
             if (model == null || model.motors().isEmpty()) {
                 continue;
             }
@@ -79,58 +72,6 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
             currentDrawAmps += adapter.step(model, session, seconds);
         }
         updateBatteryVoltage(currentDrawAmps);
-    }
-
-    private static void stepSwerveDriveModels(SimModel model, SimulationSession session, double seconds) {
-        if (model == null) {
-            return;
-        }
-        for (Object dependency : model.dependencies()) {
-            if (dependency instanceof SwerveDriveSimModel swerveDrive) {
-                stepSwerveDrive(swerveDrive, session, seconds);
-            }
-        }
-    }
-
-    private static void stepSwerveDrive(SwerveDriveSimModel model, SimulationSession session, double seconds) {
-        Translation2d[] locations = new Translation2d[model.modules().size()];
-        SwerveModuleState[] states = new SwerveModuleState[model.modules().size()];
-        for (int index = 0; index < model.modules().size(); index++) {
-            SwerveDriveSimModel.Module module = model.modules().get(index);
-            locations[index] = new Translation2d(module.xMeters(), module.yMeters());
-            states[index] = new SwerveModuleState(
-                    moduleSpeedMetersPerSecond(module, session, model.maxSpeedMetersPerSecond()),
-                    Rotation2d.fromRotations(moduleAngleRotations(module, session)));
-        }
-        ChassisSpeeds speeds = new SwerveDriveKinematics(locations).toChassisSpeeds(states);
-        session.drivePose(
-                speeds.vxMetersPerSecond,
-                speeds.vyMetersPerSecond,
-                speeds.omegaRadiansPerSecond,
-                seconds);
-    }
-
-    private static double moduleSpeedMetersPerSecond(
-            SwerveDriveSimModel.Module module,
-            SimulationSession session,
-            double maxSpeedMetersPerSecond) {
-        SimMotorHandle drive = session.motor(module.module().drive.get());
-        return switch (drive.commandKind()) {
-            case VELOCITY -> drive.commandValue();
-            case PERCENT -> drive.commandValue() * maxSpeedMetersPerSecond;
-            case VOLTAGE -> drive.commandValue() / 12.0 * maxSpeedMetersPerSecond;
-            case POSITION, NEUTRAL -> drive.integratedVelocityRotationsPerSecond()
-                    * Math.PI
-                    * module.module().model().wheelDiameterMeters();
-        };
-    }
-
-    private static double moduleAngleRotations(SwerveDriveSimModel.Module module, SimulationSession session) {
-        SimMotorHandle steer = session.motor(module.module().steer.get());
-        if (steer.commandKind() == SimMotorHandle.CommandKind.POSITION) {
-            return steer.commandValue();
-        }
-        return session.encoder(module.module().angle.get()).absolutePositionRotations();
     }
 
     double estimatedBatteryVoltage() {
@@ -245,12 +186,7 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
     }
 
     private static Range range(SimModel model, Range fallback) {
-        for (Object dependency : model.dependencies()) {
-            if (dependency instanceof Range range) {
-                return range;
-            }
-        }
-        return fallback;
+        return model.range() == null ? fallback : model.range();
     }
 
     private static List<EncoderDevice> linkedEncoders(SimModel model) {
@@ -258,22 +194,11 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         for (MotorDevice motor : model.motors()) {
             encoders.add(motor.encoder());
         }
-        for (Object dependency : model.dependencies()) {
-            if (dependency instanceof EncoderDevice encoder) {
-                encoders.add(encoder);
-            }
-        }
         return List.copyOf(encoders);
     }
 
     private static List<SimLimit> limits(SimModel model) {
-        List<SimLimit> limits = new ArrayList<>();
-        for (Object dependency : model.dependencies()) {
-            if (dependency instanceof SimLimit limit) {
-                limits.add(limit);
-            }
-        }
-        return limits;
+        return model.limits();
     }
 
     private static void publish(

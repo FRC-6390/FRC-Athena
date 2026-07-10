@@ -11,7 +11,8 @@ import java.util.function.Supplier;
 /**
  * Reusable digital input declaration.
  */
-public record DigitalInputDevice(String name, int channel, boolean isInverted, BooleanSupplier reader) {
+public record DigitalInputDevice(String name, int channel, boolean isInverted, BooleanSupplier reader)
+        implements BooleanSupplier {
     private static final ConcurrentMap<DigitalInputDevice, BooleanSupplier> RUNTIME_READERS = new ConcurrentHashMap<>();
     private static final ConcurrentMap<DigitalInputDevice, SignalState> SIGNALS = new ConcurrentHashMap<>();
     private static final ThreadLocal<RuntimeScope> CURRENT_SCOPE = new ThreadLocal<>();
@@ -142,6 +143,11 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
     public boolean active() {
         boolean value = raw();
         return isInverted ? !value : value;
+    }
+
+    @Override
+    public boolean getAsBoolean() {
+        return active();
     }
 
     /**

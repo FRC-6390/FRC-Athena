@@ -9,6 +9,7 @@ import frc.robot.mechanisms.LimitedManualArm;
 import frc.robot.mechanisms.OpenLoopShooter;
 import frc.robot.mechanisms.SingleJointArm;
 import frc.robot.mechanisms.Superstructure;
+import frc.robot.mechanisms.Turret;
 
 public final class Controls implements Mechanism {
     public final Gamepad operator = Controllers.xbox(Constants.Operator.PORT);
@@ -19,7 +20,8 @@ public final class Controls implements Mechanism {
             SingleJointArm arm,
             LimitedManualArm manualArm,
             IndexedIntake intake,
-            FollowerElevator elevator) {
+            FollowerElevator elevator,
+            Turret turret) {
         operator.a().onActive(superstructure.home);
         operator.x().onActive(superstructure.collectFloor);
         operator.y().onActive(superstructure.scoreHigh);
@@ -42,5 +44,11 @@ public final class Controls implements Mechanism {
         operator.povRight().onActive(arm.score);
         operator.povDown().onActive(elevator.bottom);
         operator.povLeft().onActive(arm.pickup);
+
+        // Start runs the repeating cycle; Back replaces it with stow on the same mechanism root.
+        operator.start().onActive(arm.exercise);
+        operator.back().onActive(arm.stow);
+        operator.leftStick().onActive(turret.forward);
+        operator.rightStick().onActive(turret.rear);
     }
 }

@@ -9,7 +9,7 @@ import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.sim.SimModels;
+import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -51,7 +51,7 @@ public class SimSteppingBenchmark {
                 MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, i + 1);
                 EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, i + 1);
                 DigitalInputDevice limit = DigitalInputDevice.rio(i);
-                session.model("axis-" + i, SimModels.flywheel(motor)
+                session.model("axis-" + i, SimModel.flywheel(motor)
                         .encoder(encoder)
                         .gearRatio(GearRatio.reduction(12.0, 1.0))
                         .momentOfInertia(0.002)

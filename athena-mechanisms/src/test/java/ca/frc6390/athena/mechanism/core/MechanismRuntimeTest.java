@@ -19,9 +19,11 @@ import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.hardware.sim.SimModels;
+import ca.frc6390.athena.mechanism.constraint.Constraints;
+import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import java.util.HashMap;
 import java.util.Map;
@@ -110,6 +112,66 @@ class MechanismRuntimeTest {
 
         runtime.periodic(contextAt(1.0), EventContext.empty());
         assertEquals(7.0, actions.motor(MOTOR).voltage, 1.0e-9);
+    }
+
+    @Test
+    void sequenceAdvancesWhenPositionControlEntersTolerance() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding position = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(Actions.sequence()
+                .run(position.position(10.0).untilWithin(0.25))
+                .then(MOTOR.percent(0.7)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        actions.encoder(ENCODER).position = 9.5;
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        assertEquals(10.0, actions.motor(MOTOR).positionTarget, 1.0e-9);
+
+        actions.encoder(ENCODER).position = 9.8;
+        runtime.periodic(contextAt(0.02), EventContext.empty());
+        assertEquals(0.7, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void thenAdvancesWhenVelocityControlEntersTolerance() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding velocity = Controls.velocity(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(
+                velocity.velocity(20.0).untilWithin(0.5).then(MOTOR.voltage(4.0)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        actions.encoder(ENCODER).velocity = 19.0;
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        assertEquals(20.0, actions.motor(MOTOR).velocityTarget, 1.0e-9);
+
+        actions.encoder(ENCODER).velocity = 19.6;
+        runtime.periodic(contextAt(0.02), EventContext.empty());
+        assertEquals(4.0, actions.motor(MOTOR).voltage, 1.0e-9);
+    }
+
+    @Test
+    void cycleRunsSelfCompletingControlStepsRepeatedly() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding position = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(Actions.cycle()
+                .run(position.position(1.0).untilWithin(0.05))
+                .run(position.position(-1.0).untilWithin(0.05)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        actions.encoder(ENCODER).position = 0.0;
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        assertEquals(1.0, actions.motor(MOTOR).positionTarget, 1.0e-9);
+
+        actions.encoder(ENCODER).position = 0.98;
+        runtime.periodic(contextAt(0.02), EventContext.empty());
+        assertEquals(-1.0, actions.motor(MOTOR).positionTarget, 1.0e-9);
+
+        actions.encoder(ENCODER).position = -0.98;
+        runtime.periodic(contextAt(0.04), EventContext.empty());
+        assertEquals(1.0, actions.motor(MOTOR).positionTarget, 1.0e-9);
     }
 
     @Test
@@ -421,6 +483,19 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void robotRuntimeInfersOwnershipThroughToleranceWrapper() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        PositionControlMechanism mechanism = new PositionControlMechanism();
+        MechanismScheduler runtime = MechanismScheduler.create(actions).register(mechanism);
+        Action requested = mechanism.position.position(2.0).untilWithin(0.1);
+
+        runtime.request(requested);
+        runtime.robotPeriodic(1.0, 0.02);
+
+        assertEquals(2.0, actions.motor(MOTOR).positionTarget, 1.0e-9);
+    }
+
+    @Test
     void robotRuntimeCanUseHardwareGraphAsRuntimeActionContext() {
         RecordingMotorBackend backend = new RecordingMotorBackend();
         HardwareGraph hardware = HardwareGraph.using(BackendRegistry.of(backend));
@@ -452,6 +527,129 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void positionConstraintCorrectsTargetBeforePidRuns() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 0.5;
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .pid(0.2, 0.0, 0.0)
+                .constraint(Constraints.range(Range.of(0.0, 1.0)));
+        TestMechanism mechanism = new TestMechanism(control.position(2.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.1, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void upperConstraintBlocksOnlyMotionTowardActiveBoundary() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 0.5;
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .constraint(Constraints.upper(() -> true));
+        TestMechanism mechanism = new TestMechanism(control.percent(0.2));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
+
+        runtime.set(control.percent(-0.2));
+        runtime.periodic(contextAt(0.02), EventContext.empty());
+        assertEquals(-0.2, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void motionProfileLimitsReferenceVelocityAndAcceleration() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .profile(MotionProfiles.trapezoid(1.0, 2.0))
+                .loop(binding -> context -> ControlOutput.percent(context.reference().position()));
+        TestMechanism mechanism = new TestMechanism(control.position(10.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(new MechanismContext(0.0, 0.0, 0.1, true, false, false), EventContext.empty());
+
+        assertEquals(0.01, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void profileBrakesBeforePredictedRangeViolation() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 0.9;
+        actions.encoder(ENCODER).velocity = 1.0;
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .pid(0.2, 0.0, 0.0)
+                .constraint(Constraints.range(Range.of(0.0, 1.0)))
+                .profile(MotionProfiles.trapezoid(2.0, 2.0));
+        TestMechanism mechanism = new TestMechanism(control.position(1.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void constraintCanReadRelatedAthenaFeedback() {
+        EncoderDevice related = EncoderDevice.of(EncoderKinds.CANCODER, 2);
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 0.5;
+        actions.encoder(related).position = 2.0;
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .constraint(Constraints.require(context -> context.position(related) >= 5.0));
+        TestMechanism mechanism = new TestMechanism(control.percent(0.2));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void invalidTargetTransformFailsClosedBeforePid() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 5.0;
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .loop(ControlLoops.targetTransform(binding -> context -> ControlOutput.voltage(6.0)))
+                .pid(0.2, 0.0, 0.0);
+        TestMechanism mechanism = new TestMechanism(control.position(10.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void velocityPidUsesVelocityFeedback() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 100.0;
+        actions.encoder(ENCODER).velocity = 2.0;
+        ControlBinding control = Controls.velocity(MOTOR)
+                .feedback(ENCODER)
+                .pid(0.2, 0.0, 0.0);
+        TestMechanism mechanism = new TestMechanism(control.velocity(3.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.2, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
     void controlFeedforwardLoopTransformsVelocityRequestIntoMotorVoltage() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding control = Controls.velocity(MOTOR)
@@ -480,6 +678,22 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void mixedFeedbackBindingSuppliesIndependentPositionAndVelocity() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        FeedbackBinding feedback = new FeedbackBinding(context -> 4.5, context -> -1.5);
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(feedback)
+                .loop(binding -> context -> ControlOutput.voltage(context.position() + context.velocity()));
+        TestMechanism mechanism = new TestMechanism(control.position(10.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(3.0, actions.motor(MOTOR).voltage, 1.0e-9);
+    }
+
+    @Test
     void controlLoopsComposePidPercentAndFeedforwardVoltageAsVoltage() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding control = Controls.velocity(MOTOR)
@@ -495,7 +709,7 @@ class MechanismRuntimeTest {
     }
 
     @Test
-    void controlLoopRuntimeResetsWhenRequestedTargetChanges() {
+    void controlLoopRuntimePreservesStateWhenSameModeTargetChanges() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ResetCountingLoop loop = new ResetCountingLoop();
         ControlBinding control = Controls.position(MOTOR).loop(loop);
@@ -508,7 +722,7 @@ class MechanismRuntimeTest {
         runtime.set(control.position(2.0));
         runtime.periodic(contextAt(0.04), EventContext.empty());
 
-        assertEquals(2, loop.runtime.resets);
+        assertEquals(1, loop.runtime.resets);
         assertEquals(3, loop.runtime.calculations);
     }
 
@@ -581,6 +795,25 @@ class MechanismRuntimeTest {
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
         assertEquals(0.25, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(null, actions.motor(MOTOR).closedLoopRequest);
+    }
+
+    @Test
+    void mixedFeedbackBindingDoesNotUseDeviceNativeClosedLoop() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(MOTOR.encoder()).position = 0.5;
+        actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
+        FeedbackBinding feedback = new FeedbackBinding(MOTOR.encoder(), context -> 0.0);
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(feedback)
+                .pid(0.2, 0.0, 0.0);
+        TestMechanism mechanism = new TestMechanism(control.position(2.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.3, actions.motor(MOTOR).percent, 1.0e-9);
         assertEquals(null, actions.motor(MOTOR).closedLoopRequest);
     }
 
@@ -671,6 +904,13 @@ class MechanismRuntimeTest {
         private final Action initial = Actions.neutral();
     }
 
+    private static final class PositionControlMechanism implements Mechanism {
+        private final MotorDevice motor = MOTOR;
+        private final EncoderDevice encoder = ENCODER;
+        private final ControlBinding position = Controls.position(motor).feedback(encoder);
+        private final Action initial = Actions.neutral();
+    }
+
     private static final class EncoderPositionMechanism implements Mechanism {
         private final EncoderDevice encoder = ENCODER;
         private final DeviceAction setPosition = encoder.setPosition(2.5);
@@ -687,7 +927,7 @@ class MechanismRuntimeTest {
     private static final class SimulatedMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 21);
         private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 21);
-        private final SimModel simulation = SimModels.motor(motor).encoder(encoder);
+        private final SimModel simulation = SimModel.motor(motor).encoder(encoder);
         private final Action initial = motor.percent(1.0);
     }
 
@@ -929,9 +1169,19 @@ class MechanismRuntimeTest {
         }
 
         @Override
+        public void setPositionTargetRotations(double rotations) {
+            positionTarget = rotations;
+        }
+
+        @Override
         public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
             positionTarget = rotations;
             closedLoopRequest = request;
+        }
+
+        @Override
+        public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
+            velocityTarget = rotationsPerSecond;
         }
 
         @Override

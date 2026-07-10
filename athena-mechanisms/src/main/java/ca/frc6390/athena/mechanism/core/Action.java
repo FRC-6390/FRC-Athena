@@ -1,6 +1,5 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import java.util.Objects;
@@ -28,12 +27,19 @@ public interface Action extends DeviceAction {
         return until(ctx -> condition.getAsBoolean());
     }
 
-    default Action then(Action next) {
-        return new Then(this, next);
+    /**
+     * Completes this position or velocity control action when its configured
+     * feedback is within the supplied tolerance of the requested target.
+     *
+     * @param tolerance maximum absolute target error in the control's configured units
+     * @return feedback-completing action
+     */
+    default Action untilWithin(double tolerance) {
+        return Actions.untilWithin(this, tolerance);
     }
 
-    default Action clamp(Range range) {
-        return new Clamped(this, range);
+    default Action then(Action next) {
+        return new Then(this, next);
     }
 
     record Conditional(Action action, ActionCondition condition, Action next) implements Action {
@@ -55,10 +61,4 @@ public interface Action extends DeviceAction {
         }
     }
 
-    record Clamped(Action action, Range range) implements Action {
-        public Clamped {
-            Objects.requireNonNull(action, "action");
-            Objects.requireNonNull(range, "range");
-        }
-    }
 }

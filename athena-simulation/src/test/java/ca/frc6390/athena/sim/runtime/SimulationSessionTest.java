@@ -3,6 +3,7 @@ package ca.frc6390.athena.sim.runtime;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,7 @@ import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.sim.SimModels;
+import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.sim.hardware.SimEncoderHandle;
 import ca.frc6390.athena.sim.hardware.SimImuHandle;
@@ -90,7 +91,7 @@ class SimulationSessionTest {
         AtomicInteger calls = new AtomicInteger();
         SimulationSession session = SimulationSession.create()
                 .physicsEngine((models, runtime, seconds) -> calls.incrementAndGet())
-                .model("drive", SimModels.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 4)));
+                .model("drive", SimModel.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 4)));
 
         session.step(Double.NaN);
         session.step(Double.POSITIVE_INFINITY);
@@ -129,7 +130,7 @@ class SimulationSessionTest {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 11);
 
-        session.model("drive", SimModels.motor(motor).encoder(encoder));
+        session.model("drive", SimModel.motor(motor).encoder(encoder));
 
         assertEquals(1, session.registeredModels().size());
         assertSame(session.motor(motor), session.motor(motor));
@@ -303,7 +304,7 @@ class SimulationSessionTest {
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
         DigitalInputDevice limit = DigitalInputDevice.rio(0);
         SimulationSession session = SimulationSession.create()
-                .model("axis", SimModels.motor(motor).encoder(encoder).limit(limit, 12.0, 1.0));
+                .model("axis", SimModel.motor(motor).encoder(encoder).limit(limit, 12.0, 1.0));
 
         MotorHandle handle = session.hardwareGraph().motor(motor);
         handle.setPercentOutput(1.0);
@@ -325,5 +326,39 @@ class SimulationSessionTest {
 
         first.withDigitalInputs(() -> assertTrue(input.active()));
         second.withDigitalInputs(() -> assertEquals(false, input.active()));
+    }
+
+    @Test
+    void unifiedModelComposesProviderLeavesAndCustomRuntimeRules() {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 40);
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 40);
+        SimModel custom = SimModel.builder()
+                .motor(motor)
+                .encoder(encoder)
+                .runtime(context -> seconds -> {
+                    double velocity = context.command(motor).value() * 5.0;
+                    double position = context.encoderPosition(encoder) + velocity * seconds;
+                    context.motorState(motor, position, velocity);
+                    context.encoderState(encoder, position, position, velocity);
+                })
+                .build();
+        SimModel composed = SimModel.motor(MotorDevice.of(MotorKinds.KRAKEN_X44, 41)).and(custom);
+        SimulationSession session = SimulationSession.create().model("robot", composed);
+
+        session.hardwareGraph().motor(motor).setPercentOutput(0.5);
+        session.step(0.2);
+
+        assertEquals(1, session.registeredModels().size());
+        assertEquals(1, composed.physicsLeaves().size());
+        assertEquals(0.5, session.encoder(encoder).positionRotations(), 1.0e-9);
+        assertEquals(2.5, session.encoder(encoder).velocityRotationsPerSecond(), 1.0e-9);
+    }
+
+    @Test
+    void separateModelsCannotClaimTheSameMotor() {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 42);
+        SimulationSession session = SimulationSession.create().model("first", SimModel.motor(motor));
+
+        assertThrows(IllegalArgumentException.class, () -> session.model("second", SimModel.motor(motor)));
     }
 }

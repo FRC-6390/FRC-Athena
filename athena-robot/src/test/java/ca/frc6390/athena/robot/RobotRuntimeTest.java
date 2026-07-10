@@ -22,11 +22,12 @@ import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.hardware.sim.SimModels;
 import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
 import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
+import ca.frc6390.athena.mechanism.core.ControlBinding;
+import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Events;
 import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
@@ -335,6 +336,20 @@ class RobotRuntimeTest {
     }
 
     @Test
+    void controlBindingsReceiveAutomaticModelsWhenNothingExplicitClaimsThem() {
+        AutomaticControlMechanism mechanism = new AutomaticControlMechanism();
+        SimulationSession simulation = SimulationSession.create();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
+
+        runtime.request(mechanism.initial);
+        runtime.robotPeriodic(0.0, 0.02);
+        runtime.simulationPeriodic(0.02, 0.2);
+
+        assertEquals(1, simulation.registeredModels().size());
+        assertTrue(simulation.encoder(mechanism.encoder).velocityRotationsPerSecond() > 0.0);
+    }
+
+    @Test
     void refreshesVisionGraphsDuringRobotPeriodic() {
         AtomicInteger reads = new AtomicInteger();
         Measurement measurement = Measurements.custom("target", null);
@@ -598,9 +613,17 @@ class RobotRuntimeTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 43);
         private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 43);
         @SuppressWarnings("unused")
-        private final SimModel simulation = SimModels.motor(motor).encoder(encoder);
+        private final SimModel simulation = SimModel.motor(motor).encoder(encoder);
         @SuppressWarnings("unused")
         private final Action initial = motor.percent(1.0);
+    }
+
+    private static final class AutomaticControlMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 44);
+        private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 44);
+        @SuppressWarnings("unused")
+        private final ControlBinding velocity = Controls.velocity(motor).feedback(encoder);
+        private final Action initial = velocity.velocity(5.0);
     }
 
     private static final class DigitalHookMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {

@@ -27,7 +27,8 @@ public final class Superstructure implements Mechanism {
         home = Actions.parallel(shooter.stop, arm.stow, intake.stop, elevator.home);
         collectFloor = Actions.parallel(shooter.stop, arm.floorPickup, intake.intake, elevator.low);
         scoreHigh = Actions.sequence()
-                .forTime(0.75, Actions.parallel(shooter.podium, arm.trapScore, elevator.high))
+                .run(Actions.parallel(shooter.podium, arm.trapScore, elevator.high))
+                .timeout(2.0)
                 .then(Actions.parallel(shooter.podium, arm.trapScore, intake.eject, elevator.high));
         ejectAll = Actions.parallel(shooter.reverse, arm.ampScore, intake.eject, elevator.low);
     }

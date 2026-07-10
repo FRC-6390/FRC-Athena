@@ -5,17 +5,13 @@ import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModules;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
-import ca.frc6390.athena.drivetrain.swerve.SwerveModuleTarget;
+import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
-import edu.wpi.first.math.geometry.Translation2d;
-import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
-import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
-import edu.wpi.first.math.kinematics.SwerveModuleState;
+import ca.frc6390.athena.runtime.control.RobotVelocity;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 
@@ -30,6 +26,14 @@ public final class DriveTrain implements Mechanism {
     public final SwerveModule backLeft = module(5, 6, 13);
     public final SwerveModule backRight = module(7, 8, 14);
     public final ImuDevice imu = Constants.RIO.imu(ImuKinds.PIGEON_2, 20);
+    private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
+            WHEELBASE_METERS,
+            TRACK_WIDTH_METERS,
+            MAX_SPEED_METERS_PER_SECOND,
+            frontLeft,
+            frontRight,
+            backLeft,
+            backRight);
 
     public Action drive(
             DoubleSupplier forward,
@@ -37,29 +41,15 @@ public final class DriveTrain implements Mechanism {
             DoubleSupplier rotation,
             BooleanSupplier fieldOriented) {
         return Actions.compute(() -> {
-            ChassisSpeeds speeds = fieldOriented.getAsBoolean()
-                    ? ChassisSpeeds.fromFieldRelativeSpeeds(
-                            linearSpeed(forward.getAsDouble()),
-                            linearSpeed(strafe.getAsDouble()),
-                            rotationSpeed(rotation.getAsDouble()),
-                            Rotation2d.fromDegrees(imu.yawDegrees()))
-                    : new ChassisSpeeds(
-                            linearSpeed(forward.getAsDouble()),
-                            linearSpeed(strafe.getAsDouble()),
-                            rotationSpeed(rotation.getAsDouble()));
-            return drive(speeds);
+            RobotVelocity velocity = new RobotVelocity(
+                    linearSpeed(forward.getAsDouble()),
+                    linearSpeed(strafe.getAsDouble()),
+                    rotationSpeed(rotation.getAsDouble()));
+            if (fieldOriented.getAsBoolean()) {
+                velocity = velocity.fieldToRobot(Math.toRadians(imu.yawDegrees()));
+            }
+            return kinematics.drive(velocity);
         });
-    }
-
-    private Action drive(ChassisSpeeds speeds) {
-        SwerveModuleState[] states = kinematics().toSwerveModuleStates(speeds);
-        SwerveDriveKinematics.desaturateWheelSpeeds(states, MAX_SPEED_METERS_PER_SECOND);
-
-        return Actions.parallel(
-                frontLeft.target(target(states[0])),
-                frontRight.target(target(states[1])),
-                backLeft.target(target(states[2])),
-                backRight.target(target(states[3])));
     }
 
     private static SwerveModule module(int driveMotorId, int steerMotorId, int encoderId) {
@@ -70,18 +60,6 @@ public final class DriveTrain implements Mechanism {
                         .units(EncoderUnit.ROTATIONS))
                 .driveMaxSpeedMetersPerSecond(MAX_SPEED_METERS_PER_SECOND)
                 .steerPid(1.9, 0.0, 0.0);
-    }
-
-    private static SwerveModuleTarget target(SwerveModuleState state) {
-        return new SwerveModuleTarget(state.speedMetersPerSecond, state.angle.getRotations());
-    }
-
-    private static SwerveDriveKinematics kinematics() {
-        return new SwerveDriveKinematics(
-                new Translation2d(WHEELBASE_METERS / 2.0, TRACK_WIDTH_METERS / 2.0),
-                new Translation2d(WHEELBASE_METERS / 2.0, -TRACK_WIDTH_METERS / 2.0),
-                new Translation2d(-WHEELBASE_METERS / 2.0, TRACK_WIDTH_METERS / 2.0),
-                new Translation2d(-WHEELBASE_METERS / 2.0, -TRACK_WIDTH_METERS / 2.0));
     }
 
     private static double clamp(double value) {

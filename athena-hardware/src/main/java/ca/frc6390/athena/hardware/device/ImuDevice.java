@@ -14,21 +14,21 @@ import ca.frc6390.athena.api.hardware.ImuKind;
 public record ImuDevice(
         ImuKind kind,
         String bus,
-        HardwarePort port) {
+        HardwareAddress connection) {
     private static final ConcurrentMap<ImuDevice, RuntimeReader> RUNTIME_READERS = new ConcurrentHashMap<>();
 
     public static ImuDevice of(ImuKind kind, int id) {
-        return connected(kind, "rio", HardwarePort.can(id));
+        return connected(kind, "rio", new HardwareAddress.Can(id));
     }
 
-    static ImuDevice connected(ImuKind kind, String bus, HardwarePort port) {
-        return new ImuDevice(kind, bus, port);
+    static ImuDevice connected(ImuKind kind, String bus, HardwareAddress connection) {
+        return new ImuDevice(kind, bus, connection);
     }
 
     public ImuDevice {
         Objects.requireNonNull(kind, "kind");
         bus = bus == null || bus.isBlank() ? "rio" : bus;
-        Objects.requireNonNull(port, "port");
+        Objects.requireNonNull(connection, "connection");
     }
 
     public int id() {
@@ -42,11 +42,11 @@ public record ImuDevice(
 
     public ImuDevice canbus(String canbus) {
         requireCan();
-        return new ImuDevice(kind, canbus, port);
+        return new ImuDevice(kind, canbus, connection);
     }
 
     public String defaultName() {
-        return sanitize(kind.key()) + "_" + sanitize(port.identity()) + "_" + port.primaryAddress();
+        return sanitize(kind.key()) + "_" + sanitize(connection.identity()) + "_" + connection.primaryAddress();
     }
 
     /**
@@ -89,8 +89,8 @@ public record ImuDevice(
         return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
     }
 
-    private HardwarePort.Can requireCan() {
-        if (port instanceof HardwarePort.Can can) {
+    private HardwareAddress.Can requireCan() {
+        if (connection instanceof HardwareAddress.Can can) {
             return can;
         }
         throw new IllegalStateException("IMU " + kind.key() + " is not connected over CAN.");

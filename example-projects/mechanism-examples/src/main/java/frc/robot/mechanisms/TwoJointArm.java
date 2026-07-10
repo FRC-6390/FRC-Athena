@@ -9,12 +9,13 @@ import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.hardware.sim.SimModels;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.constraint.Constraints;
+import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import edu.wpi.first.math.util.Units;
 import frc.robot.Constants;
 
@@ -27,23 +28,33 @@ public final class TwoJointArm implements Mechanism {
     private final Range shoulderTravel = Range.degrees(-25.0, 95.0);
     private final Range wristTravel = Range.degrees(-70.0, 80.0);
     @SuppressWarnings("unused")
-    private final SimModel shoulderSimulation = SimModels.arm(shoulderMotor)
+    private final SimModel shoulderSimulation = SimModel.arm(shoulderMotor)
             .encoder(shoulderEncoder)
             .range(shoulderTravel)
             .lengthMeters(Units.inchesToMeters(22.0))
             .gearRatio(GearRatio.reduction(60.0, 1.0));
     @SuppressWarnings("unused")
-    private final SimModel wristSimulation = SimModels.arm(wristMotor)
+    private final SimModel wristSimulation = SimModel.arm(wristMotor)
             .encoder(wristEncoder)
             .range(wristTravel)
             .lengthMeters(Units.inchesToMeters(12.0))
             .gearRatio(GearRatio.reduction(30.0, 1.0));
     private final ControlBinding shoulder = Controls.position(shoulderMotor)
             .feedback(shoulderEncoder)
-            .pid(0.08, 0.0, 0.002);
+            .pid(0.08, 0.0, 0.002)
+            .constraints(
+                    Constraints.range(shoulderTravel),
+                    Constraints.require(context -> context.requested() >= 5.0
+                            || context.position(wristEncoder) <= 45.0))
+            .profile(MotionProfiles.trapezoid(80.0, 180.0));
     private final ControlBinding wrist = Controls.position(wristMotor)
             .feedback(wristEncoder)
-            .pid(0.06, 0.0, 0.001);
+            .pid(0.06, 0.0, 0.001)
+            .constraints(
+                    Constraints.range(wristTravel),
+                    Constraints.require(context -> context.requested() <= 45.0
+                            || context.position(shoulderEncoder) >= 5.0))
+            .profile(MotionProfiles.trapezoid(120.0, 280.0));
 
     public final Action stow = Actions.sequence()
             .until(homeSwitch::active, shoulderMotor.percent(() -> homeSwitch.active() ? 0.0 : -0.15))
@@ -54,7 +65,7 @@ public final class TwoJointArm implements Mechanism {
 
     private Action pose(double shoulderDegrees, double wristDegrees) {
         return Actions.parallel(
-                shoulder.position(shoulderDegrees).clamp(shoulderTravel),
-                wrist.position(wristDegrees).clamp(wristTravel));
+                shoulder.position(shoulderDegrees).untilWithin(2.0),
+                wrist.position(wristDegrees).untilWithin(2.0));
     }
 }

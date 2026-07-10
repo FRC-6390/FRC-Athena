@@ -2,7 +2,7 @@ package ca.frc6390.athena.vendor.rev;
 
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
-import ca.frc6390.athena.hardware.device.HardwarePort;
+import ca.frc6390.athena.hardware.device.HardwareAddress;
 import edu.wpi.first.wpilibj.DutyCycleEncoder;
 import java.util.Objects;
 
@@ -57,7 +57,7 @@ public final class RevThroughBoreEncoderHandle implements EncoderHandle {
         private final DutyCycleEncoder encoder;
 
         private WpilibThroughBoreController(EncoderDevice device) {
-            if (!(device.port() instanceof HardwarePort.Dio dio)) {
+            if (!(device.connection() instanceof HardwareAddress.Dio dio)) {
                 throw new IllegalArgumentException(
                         "REV through-bore absolute input requires a single DIO connection.");
             }

@@ -8,7 +8,7 @@ Robot code must declare real hardware kinds. Simulation code must not require te
 MotorDevice shooter = Constants.CANIVORE.motor(MotorKinds.KRAKEN_X60, 12);
 EncoderDevice shooterEncoder = shooter.encoder();
 
-SimModel shooterSim = SimModels.flywheel(shooter)
+SimModel shooterSim = SimModel.flywheel(shooter)
         .encoder(shooterEncoder)
         .gearRatio(GearRatio.reduction(18.0, 1.0))
         .momentOfInertia(0.004);
@@ -43,7 +43,7 @@ device handles, and shared world state behind `SimulationSession`:
 - IMU state
 - digital input state
 - field pose state
-- registered `SimModel` declarations
+- registered, composable `SimModel` declarations
 - deterministic step loop
 
 `athena-wpilib` owns WPILib-backed physics adapters. It may use `DCMotorSim`, `FlywheelSim`, `SingleJointedArmSim`, `ElevatorSim`, `BatterySim`, `RoboRioSim`, and `Field2d` internally, but those types must not leak into user-facing Athena mechanism code.
@@ -60,12 +60,14 @@ stepping.
 
 ## SimModel Contract
 
-`SimModel` is Athena-only metadata. It describes what real declared hardware physically represents when the selected backend is simulation.
+`SimModel` is the single simulation composition API. One model can contain provider-backed
+physics leaves, other models, and custom per-session runtime rules. A declaration implementing
+`SimModel.Source` contributes its model automatically when discovered in a mechanism.
 
 Good public API:
 
 ```java
-SimModels.arm(pivotMotor)
+SimModel.arm(pivotMotor)
         .encoder(pivotEncoder)
         .gearRatio(GearRatio.reduction(125.0, 1.0))
         .lengthMeters(0.42)
@@ -81,7 +83,22 @@ new SingleJointedArmSim(...);
 DCMotor.getKrakenX60(...);
 ```
 
-If Athena needs more physical detail, add Athena-owned records and factories such as `SimMotorPhysics.krakenX60(...)`, then map those records to WPILib internals inside `athena-wpilib`.
+Custom behavior uses the same model rather than creating another simulation runtime:
+
+```java
+SimModel custom = SimModel.builder()
+        .motor(motor)
+        .encoder(encoder)
+        .runtime(context -> seconds -> {
+            double velocity = context.command(motor).value() * 5.0;
+            double position = context.encoderPosition(encoder) + velocity * seconds;
+            context.encoderState(encoder, position, position, velocity);
+        })
+        .build();
+```
+
+Provider-specific physics remains behind the provider-backed leaves and does not change the
+model/session contract.
 
 ## Automatic Selection
 
@@ -113,7 +130,10 @@ session.drivePose(1.0, 0.0, 0.0, 0.02);
 PoseSnapshot pose = session.pose();
 ```
 
-Swerve module simulation is module-template based. `SwerveSimModels` turns a filled `SwerveModule` into drive and steer `SimModel` declarations. This keeps the replacement for the old drivebase API aligned with the new mechanism-template architecture.
+Drivetrain kinematics are production declarations, not simulation selections. `SwerveKinematics`
+owns the real module layout and is used both to create module target Actions and to solve measured
+chassis velocity. Because it implements `SimModel.Source`, its composed motor/steer/pose model is
+discovered automatically in simulation.
 
 ```java
 SwerveModule frontLeft = new SwerveModules.SDS.MK5N.R3();
@@ -121,12 +141,23 @@ frontLeft.drive.fill(driveMotor)
         .steer.fill(steerMotor)
         .angle.fill(absoluteEncoder);
 
-List<SimModel> frontLeftModels = SwerveSimModels.module(frontLeft);
-session.model("frontLeftDrive", frontLeftModels.get(0))
-        .model("frontLeftSteer", frontLeftModels.get(1));
+private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
+        0.58,
+        0.58,
+        4.5,
+        frontLeft,
+        frontRight,
+        backLeft,
+        backRight);
+
+public Action drive(RobotVelocity velocity) {
+    return kinematics.drive(velocity);
+}
 ```
 
-Whole-drivetrain pose simulation is declared as Athena metadata too. A rectangular drive descriptor adds the four module models plus a marker model that `WpilibSimPhysicsEngine` consumes internally with WPILib swerve kinematics. Robot code still owns normal `SwerveModule` instances; Athena does not reintroduce the old `SwerveDriveBase`.
+The rectangular constructor is only a layout convenience. Arbitrary module positions use the
+normal `SwerveKinematics` constructor. Simulation does not inspect motors to guess a drivetrain
+type and no longer calls WPILib swerve kinematics.
 
 ## Vision Field Simulation
 
@@ -136,25 +167,15 @@ Vision simulation uses Athena-owned field metadata through `VisionSimulationFiel
 
 Digital input declarations remain real hardware declarations. In simulation, `SimulationSession` owns a scoped digital input runtime that binds those declarations to session-local `SimDigitalInputHandle` state. Root `RobotRuntime.simulated(session)` evaluates mechanisms inside that scope, so two sessions can use the same DIO declaration without leaking raw values or latched signal edges into each other. Manual `DigitalInputDevice.bindRuntime(...)` remains a simple non-session helper for tests and direct bindings.
 
-```java
-List<SimModel> swerveSim = SwerveSimModels.drive(
-        0.58,
-        0.58,
-        4.5,
-        frontLeft,
-        frontRight,
-        backLeft,
-        backRight);
-```
-
-When the drive marker is registered in a `SimulationSession`, module speed/angle commands advance `SimulationSession.pose()` and synchronize simulated IMU yaw through the shared runtime pose state.
+When the discovered kinematics model runs, module speed/angle commands advance
+`SimulationSession.pose()` and synchronize simulated IMU yaw through the shared runtime pose state.
 
 ## Current Coverage
 
 - Robot code declares real hardware kinds; there are no public `SIM` motor, encoder, or IMU kinds.
 - `SimulationSession` provides simulated hardware handles, model registration, pose state, and test readback.
-- `athena-simulation` owns generic in-memory handle/model stepping.
-- `athena-wpilib` owns WPILib-backed motor, flywheel, arm, elevator, battery, and swerve pose simulation.
+- `athena-simulation` owns generic in-memory handle/model stepping and custom model runtimes.
+- `athena-wpilib` owns WPILib-backed motor, flywheel, arm, elevator, and battery simulation.
 - `AthenaRobot` creates a simulation-backed `RobotRuntime` under WPILib simulation.
 - Simulation periodic steps physics only; robot actions are evaluated once through the normal runtime path.
 - Vision simulation is bridged through provider discovery and currently uses PhotonVision when that vendor dependency is present.

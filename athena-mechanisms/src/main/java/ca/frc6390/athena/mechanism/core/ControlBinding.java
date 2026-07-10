@@ -2,8 +2,11 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.mechanism.constraint.Constraint;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
+import ca.frc6390.athena.mechanism.motion.MotionPlanner;
+import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -17,17 +20,20 @@ public record ControlBinding(
         MotorDevice output,
         int slot,
         List<MotorDevice> followers,
-        List<EncoderDevice> feedback,
+        FeedbackBinding feedback,
         List<Object> dependencies,
         List<ControlLoop> loops,
+        List<Constraint<Double>> constraints,
+        MotionProfile profile,
+        MotionPlanner planner,
         List<MotorDevice> motors) {
     public ControlBinding {
         mode = mode == null ? ControlMode.POSITION : mode;
         slot = Math.max(0, slot);
         followers = followers == null ? List.of() : List.copyOf(followers);
-        feedback = feedback == null ? List.of() : List.copyOf(feedback);
         dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
         loops = loops == null ? List.of() : List.copyOf(loops);
+        constraints = constraints == null ? List.of() : List.copyOf(constraints);
         motors = motors == null ? motorList(output, followers) : List.copyOf(motors);
     }
 
@@ -35,10 +41,10 @@ public record ControlBinding(
             ControlMode mode,
             MotorDevice output,
             List<MotorDevice> followers,
-            List<EncoderDevice> feedback,
+            FeedbackBinding feedback,
             List<Object> dependencies,
             List<ControlLoop> loops) {
-        this(mode, output, 0, followers, feedback, dependencies, loops, null);
+        this(mode, output, 0, followers, feedback, dependencies, loops, null, null, null, null);
     }
 
     public ControlBinding(
@@ -46,25 +52,26 @@ public record ControlBinding(
             MotorDevice output,
             int slot,
             List<MotorDevice> followers,
-            List<EncoderDevice> feedback,
+            FeedbackBinding feedback,
             List<Object> dependencies,
             List<ControlLoop> loops) {
-        this(mode, output, slot, followers, feedback, dependencies, loops, null);
+        this(mode, output, slot, followers, feedback, dependencies, loops, null, null, null, null);
     }
 
     public ControlBinding output(MotorDevice output) {
-        return new ControlBinding(mode, Objects.requireNonNull(output, "output"), slot, followers, feedback, dependencies, loops);
+        return copy(Objects.requireNonNull(output, "output"), slot, followers, feedback, dependencies, loops,
+                constraints, profile, planner);
     }
 
     public ControlBinding slot(int slot) {
-        return new ControlBinding(mode, output, slot, followers, feedback, dependencies, loops);
+        return copy(output, slot, followers, feedback, dependencies, loops, constraints, profile, planner);
     }
 
     public ControlBinding follower(MotorDevice follower) {
         Objects.requireNonNull(follower, "follower");
         List<MotorDevice> updated = new ArrayList<>(followers);
         updated.add(follower);
-        return new ControlBinding(mode, output, slot, updated, feedback, dependencies, loops);
+        return copy(output, slot, updated, feedback, dependencies, loops, constraints, profile, planner);
     }
 
     public ControlBinding followers(MotorDevice... followers) {
@@ -77,24 +84,19 @@ public record ControlBinding(
 
     public ControlBinding feedback(EncoderDevice encoder) {
         Objects.requireNonNull(encoder, "encoder");
-        List<EncoderDevice> updated = new ArrayList<>(feedback);
-        updated.add(encoder);
-        return new ControlBinding(mode, output, slot, followers, updated, dependencies, loops);
+        return feedback(new FeedbackBinding(encoder, encoder));
     }
 
-    public ControlBinding feedback(EncoderDevice... encoders) {
-        ControlBinding updated = this;
-        for (EncoderDevice encoder : encoders) {
-            updated = updated.feedback(encoder);
-        }
-        return updated;
+    public ControlBinding feedback(FeedbackBinding feedback) {
+        return copy(output, slot, followers, Objects.requireNonNull(feedback, "feedback"), dependencies, loops,
+                constraints, profile, planner);
     }
 
     public ControlBinding dependency(Object dependency) {
         Objects.requireNonNull(dependency, "dependency");
         List<Object> updated = new ArrayList<>(dependencies);
         updated.add(dependency);
-        return new ControlBinding(mode, output, slot, followers, feedback, updated, loops);
+        return copy(output, slot, followers, feedback, updated, loops, constraints, profile, planner);
     }
 
     public ControlBinding dependencies(Object... dependencies) {
@@ -109,7 +111,7 @@ public record ControlBinding(
         Objects.requireNonNull(loop, "loop");
         List<ControlLoop> updated = new ArrayList<>(loops);
         updated.add(loop);
-        return new ControlBinding(mode, output, slot, followers, feedback, dependencies, updated);
+        return copy(output, slot, followers, feedback, dependencies, updated, constraints, profile, planner);
     }
 
     public ControlBinding loops(ControlLoop... loops) {
@@ -136,6 +138,42 @@ public record ControlBinding(
         return loop(feedforward);
     }
 
+    public ControlBinding constraint(Constraint<Double> constraint) {
+        Objects.requireNonNull(constraint, "constraint");
+        List<Constraint<Double>> updated = new ArrayList<>(constraints);
+        updated.add(constraint);
+        return copy(output, slot, followers, feedback, dependencies, loops, updated, profile, planner);
+    }
+
+    @SafeVarargs
+    public final ControlBinding constraints(Constraint<Double>... constraints) {
+        ControlBinding updated = this;
+        if (constraints != null) {
+            for (Constraint<Double> constraint : constraints) {
+                updated = updated.constraint(constraint);
+            }
+        }
+        return updated;
+    }
+
+    public ControlBinding profile(MotionProfile profile) {
+        requirePositionControl("Motion profiles");
+        return copy(output, slot, followers, feedback, dependencies, loops, constraints,
+                Objects.requireNonNull(profile, "profile"), planner);
+    }
+
+    public ControlBinding planner(MotionPlanner planner) {
+        requirePositionControl("Motion planners");
+        return copy(output, slot, followers, feedback, dependencies, loops, constraints, profile,
+                Objects.requireNonNull(planner, "planner"));
+    }
+
+    private void requirePositionControl(String feature) {
+        if (mode != ControlMode.POSITION) {
+            throw new IllegalStateException(feature + " require a position control binding.");
+        }
+    }
+
     public List<MotorDevice> motors() {
         return motors;
     }
@@ -147,6 +185,30 @@ public record ControlBinding(
         }
         motors.addAll(followers == null ? List.of() : followers);
         return List.copyOf(motors);
+    }
+
+    private ControlBinding copy(
+            MotorDevice output,
+            int slot,
+            List<MotorDevice> followers,
+            FeedbackBinding feedback,
+            List<Object> dependencies,
+            List<ControlLoop> loops,
+            List<Constraint<Double>> constraints,
+            MotionProfile profile,
+            MotionPlanner planner) {
+        return new ControlBinding(
+                mode,
+                output,
+                slot,
+                followers,
+                feedback,
+                dependencies,
+                loops,
+                constraints,
+                profile,
+                planner,
+                null);
     }
 
     public Action set(double target) {

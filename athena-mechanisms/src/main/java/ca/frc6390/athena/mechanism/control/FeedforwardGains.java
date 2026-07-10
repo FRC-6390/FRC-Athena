@@ -38,9 +38,13 @@ public record FeedforwardGains(double staticGain, double velocityGain, double gr
 
         @Override
         public ControlOutput calculate(ControlLoopContext context) {
-            double target = context.target();
-            double sign = Math.signum(target);
-            return ControlOutput.voltage(gains.staticGain * sign + gains.velocityGain * target + gains.gravityGain);
+            double velocity = context.reference().velocity();
+            if (!Double.isFinite(velocity)) {
+                return ControlOutput.neutral();
+            }
+            double sign = Math.signum(velocity);
+            return ControlOutput.voltage(
+                    gains.staticGain * sign + gains.velocityGain * velocity + gains.gravityGain);
         }
     }
 }

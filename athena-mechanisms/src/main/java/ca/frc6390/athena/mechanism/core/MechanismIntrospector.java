@@ -123,7 +123,8 @@ final class MechanismIntrospector {
                 || value instanceof FeedforwardGains
                 || value instanceof ControlBinding
                 || value instanceof PathAction
-                || value instanceof SimModel;
+                || value instanceof SimModel
+                || value instanceof SimModel.Source;
     }
 
     private static String defaultName(Class<?> type) {

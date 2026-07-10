@@ -5,19 +5,23 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.ControlLoops;
+import ca.frc6390.athena.mechanism.core.ControlOutput;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import frc.robot.Constants;
-import frc.robot.controls.SlewLimitedPositionLoop;
 
 public final class ExperimentalArm implements Mechanism {
     private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 20);
     private final ControlBinding arm = Controls.position(motor)
             .feedback(motor.encoder())
-            .loop(ControlLoops.software(binding -> new SlewLimitedPositionLoop(0.45, 0.08)));
+            .pid(0.08, 0.0, 0.002)
+            .profile(MotionProfiles.trapezoid(75.0, 180.0))
+            .loop(ControlLoops.arbitraryFeedforward(binding -> context ->
+                    ControlOutput.voltage(0.45 * Math.cos(Math.toRadians(context.position())))));
 
     public final Action home = arm.position(0.0);
-    public final Action motionProfiled = arm.position(75.0);
+    public final Action score = arm.position(75.0);
     public final Action holdOperatorSetpoint = arm.position(this::operatorSetpointDegrees);
 
     private double operatorSetpointDegrees() {

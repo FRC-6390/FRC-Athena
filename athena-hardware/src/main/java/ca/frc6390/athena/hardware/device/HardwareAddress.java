@@ -5,10 +5,10 @@ import java.util.Objects;
 /**
  * Typed physical connection on a {@link HardwareBus}.
  */
-public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
-        HardwarePort.Quadrature, HardwarePort.Analog, HardwarePort.Spi,
-        HardwarePort.I2c, HardwarePort.Serial, HardwarePort.Usb {
-    /** Returns the physical interface required by this port. */
+public sealed interface HardwareAddress permits HardwareAddress.Can, HardwareAddress.Dio,
+        HardwareAddress.Quadrature, HardwareAddress.Analog, HardwareAddress.Spi,
+        HardwareAddress.I2c, HardwareAddress.Serial, HardwareAddress.Usb {
+    /** Returns the physical interface required by this address. */
     HardwareInterface hardwareInterface();
 
     /** Returns the primary numeric address used in hardware identity keys. */
@@ -17,47 +17,7 @@ public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
     /** Returns the stable connection detail used in diagnostics and identity keys. */
     String identity();
 
-    static HardwarePort can(int id) {
-        return new Can(id);
-    }
-
-    static HardwarePort dio(int channel) {
-        return new Dio(channel);
-    }
-
-    static HardwarePort quadrature(int channelA, int channelB) {
-        return new Quadrature(channelA, channelB, -1);
-    }
-
-    static HardwarePort quadrature(int channelA, int channelB, int indexChannel) {
-        return new Quadrature(channelA, channelB, indexChannel);
-    }
-
-    static HardwarePort analog(int channel) {
-        return new Analog(channel);
-    }
-
-    static HardwarePort spi(SpiPort port) {
-        return new Spi(port);
-    }
-
-    static HardwarePort i2c(I2cPort port) {
-        return new I2c(port, -1);
-    }
-
-    static HardwarePort i2c(I2cPort port, int address) {
-        return new I2c(port, address);
-    }
-
-    static HardwarePort serial(SerialPort port) {
-        return new Serial(port);
-    }
-
-    static HardwarePort usb(int port) {
-        return new Usb(port);
-    }
-
-    record Can(int id) implements HardwarePort {
+    record Can(int id) implements HardwareAddress {
         public Can {
             requireNonNegative(id, "CAN device ID");
         }
@@ -78,7 +38,7 @@ public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
         }
     }
 
-    record Dio(int channel) implements HardwarePort {
+    record Dio(int channel) implements HardwareAddress {
         public Dio {
             requireNonNegative(channel, "DIO channel");
         }
@@ -99,7 +59,7 @@ public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
         }
     }
 
-    record Quadrature(int channelA, int channelB, int indexChannel) implements HardwarePort {
+    record Quadrature(int channelA, int channelB, int indexChannel) implements HardwareAddress {
         public Quadrature {
             requireNonNegative(channelA, "Quadrature channel A");
             requireNonNegative(channelB, "Quadrature channel B");
@@ -125,7 +85,7 @@ public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
         }
     }
 
-    record Analog(int channel) implements HardwarePort {
+    record Analog(int channel) implements HardwareAddress {
         public Analog {
             requireNonNegative(channel, "Analog channel");
         }
@@ -146,7 +106,7 @@ public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
         }
     }
 
-    record Spi(SpiPort port) implements HardwarePort {
+    record Spi(SpiPort port) implements HardwareAddress {
         public Spi {
             Objects.requireNonNull(port, "port");
         }
@@ -167,7 +127,7 @@ public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
         }
     }
 
-    record I2c(I2cPort port, int address) implements HardwarePort {
+    record I2c(I2cPort port, int address) implements HardwareAddress {
         public I2c {
             Objects.requireNonNull(port, "port");
             if (address < -1) {
@@ -192,7 +152,7 @@ public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
         }
     }
 
-    record Serial(SerialPort port) implements HardwarePort {
+    record Serial(SerialPort port) implements HardwareAddress {
         public Serial {
             Objects.requireNonNull(port, "port");
         }
@@ -213,7 +173,7 @@ public sealed interface HardwarePort permits HardwarePort.Can, HardwarePort.Dio,
         }
     }
 
-    record Usb(int port) implements HardwarePort {
+    record Usb(int port) implements HardwareAddress {
         public Usb {
             requireNonNegative(port, "USB port");
         }

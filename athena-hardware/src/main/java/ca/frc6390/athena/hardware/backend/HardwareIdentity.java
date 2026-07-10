@@ -59,10 +59,10 @@ public record HardwareIdentity(String category, String kindKey, String bus, int 
                 "encoder",
                 device.kind().key(),
                 device.bus(),
-                device.port().primaryAddress(),
-                device.port() instanceof ca.frc6390.athena.hardware.device.HardwarePort.Can
+                device.connection().primaryAddress(),
+                device.connection() instanceof ca.frc6390.athena.hardware.device.HardwareAddress.Can
                         ? ""
-                        : device.port().identity());
+                        : device.connection().identity());
     }
 
     /**
@@ -77,10 +77,10 @@ public record HardwareIdentity(String category, String kindKey, String bus, int 
                 "imu",
                 device.kind().key(),
                 device.bus(),
-                device.port().primaryAddress(),
-                device.port() instanceof ca.frc6390.athena.hardware.device.HardwarePort.Can
+                device.connection().primaryAddress(),
+                device.connection() instanceof ca.frc6390.athena.hardware.device.HardwareAddress.Can
                         ? ""
-                        : device.port().identity());
+                        : device.connection().identity());
     }
 
     private static String normalize(String value, String fallback) {

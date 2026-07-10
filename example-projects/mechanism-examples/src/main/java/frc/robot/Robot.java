@@ -11,6 +11,7 @@ import frc.robot.mechanisms.SingleJointArm;
 import frc.robot.mechanisms.SplitWheelShooter;
 import frc.robot.mechanisms.Superstructure;
 import frc.robot.mechanisms.TwoJointArm;
+import frc.robot.mechanisms.Turret;
 import frc.robot.mechanisms.VelocityShooter;
 
 public final class Robot extends AthenaRobot {
@@ -26,13 +27,15 @@ public final class Robot extends AthenaRobot {
     public final LimitedManualArm limitedManualArm = new LimitedManualArm();
     public final IndexedIntake indexedIntake = new IndexedIntake();
     public final FollowerElevator followerElevator = new FollowerElevator();
+    public final Turret turret = new Turret();
     public final Controls controls = new Controls(
             superstructure,
             openLoopShooter,
             singleJointArm,
             limitedManualArm,
             indexedIntake,
-            followerElevator);
+            followerElevator,
+            turret);
 
     @Override
     protected void configure() {
@@ -43,6 +46,7 @@ public final class Robot extends AthenaRobot {
         register(limitedManualArm);
         register(indexedIntake);
         register(followerElevator);
+        register(turret);
         register(controls);
     }
 }

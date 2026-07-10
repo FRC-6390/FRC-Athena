@@ -9,15 +9,13 @@ import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModules;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModuleTarget;
-import ca.frc6390.athena.drivetrain.swerve.SwerveSimModels;
+import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.HardwareBus;
-import ca.frc6390.athena.hardware.device.HardwarePort;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.hardware.sim.SimModels;
 import ca.frc6390.athena.localization.pipeline.LocalizationPipeline;
 import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -25,7 +23,6 @@ import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.runtime.measurement.Measurements;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -35,7 +32,7 @@ class WpilibSimPhysicsEngineTest {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 1);
         WpilibSimPhysicsEngine engine = new WpilibSimPhysicsEngine();
-        SimulationSession session = sessionWith(engine, "motor", SimModels.motor(motor).encoder(encoder));
+        SimulationSession session = sessionWith(engine, "motor", SimModel.motor(motor).encoder(encoder));
 
         session.hardwareGraph().motor(motor).setVoltage(12.0);
         session.step(0.2);
@@ -51,7 +48,7 @@ class WpilibSimPhysicsEngineTest {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
         AtomicReference<Double> voltage = new AtomicReference<>();
         WpilibSimPhysicsEngine engine = new WpilibSimPhysicsEngine(voltage::set);
-        SimulationSession session = sessionWith(engine, "motor", SimModels.motor(motor));
+        SimulationSession session = sessionWith(engine, "motor", SimModel.motor(motor));
 
         session.hardwareGraph().motor(motor).setVoltage(12.0);
         session.step(0.2);
@@ -64,8 +61,8 @@ class WpilibSimPhysicsEngineTest {
     void flywheelModelPublishesVelocityBackToAthenaHandles() {
         MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2);
         EncoderDevice encoder = HardwareBus.rio()
-                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(2));
-        SimulationSession session = sessionWith("flywheel", SimModels.flywheel(motor)
+                .dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
+        SimulationSession session = sessionWith("flywheel", SimModel.flywheel(motor)
                 .encoder(encoder)
                 .momentOfInertia(0.004));
 
@@ -96,7 +93,7 @@ class WpilibSimPhysicsEngineTest {
     void armModelUsesWpilibArmSimulationAndRange() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X44, 3);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 3);
-        SimModel model = SimModels.arm(motor)
+        SimModel model = SimModel.arm(motor)
                 .encoder(encoder)
                 .range(Range.rotations(-0.25, 0.25))
                 .lengthMeters(0.45)
@@ -114,8 +111,8 @@ class WpilibSimPhysicsEngineTest {
     void elevatorModelUsesWpilibElevatorSimulationAndRange() {
         MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_FLEX_BRUSHLESS, 4);
         EncoderDevice encoder = HardwareBus.rio()
-                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(4));
-        SimulationSession session = sessionWith("elevator", SimModels.elevator(motor)
+                .dio(4).encoder(EncoderKinds.REV_THROUGH_BORE);
+        SimulationSession session = sessionWith("elevator", SimModel.elevator(motor)
                 .encoder(encoder)
                 .range(Range.of(0.0, 1.0)));
 
@@ -179,7 +176,7 @@ class WpilibSimPhysicsEngineTest {
         runtime.robotPeriodic(0.0, 0.02);
         runtime.simulationPeriodic(0.02, 1.0);
 
-        assertEquals(9, session.registeredModels().size());
+        assertEquals(1, session.registeredModels().size());
         assertTrue(session.pose().xMeters() > 0.0);
         assertEquals(0.0, session.pose().yMeters(), 1.0e-9);
     }
@@ -220,14 +217,11 @@ class WpilibSimPhysicsEngineTest {
             SwerveModule frontRight,
             SwerveModule backLeft,
             SwerveModule backRight) {
-        SimulationSession session = SimulationSession.create()
-                .physicsEngine(new WpilibSimPhysicsEngine());
-        int index = 0;
-        for (SimModel model : SwerveSimModels.drive(0.5, 0.5, 4.0, frontLeft, frontRight, backLeft, backRight)) {
-            session.model("swerve-" + index, model);
-            index++;
-        }
-        return session;
+        SwerveKinematics kinematics = SwerveKinematics.rectangular(
+                0.5, 0.5, 4.0, frontLeft, frontRight, backLeft, backRight);
+        return SimulationSession.create()
+                .physicsEngine(new WpilibSimPhysicsEngine())
+                .model("swerve", kinematics.simulationModel());
     }
 
     private static void setModule(SwerveModule module, SimulationSession session, double speedMetersPerSecond, double angleRotations) {
@@ -248,9 +242,9 @@ class WpilibSimPhysicsEngineTest {
     private static final class FlywheelMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 70);
         private final EncoderDevice encoder = HardwareBus.rio()
-                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(7));
+                .dio(7).encoder(EncoderKinds.REV_THROUGH_BORE);
         @SuppressWarnings("unused")
-        private final SimModel simulation = SimModels.flywheel(motor)
+        private final SimModel simulation = SimModel.flywheel(motor)
                 .encoder(encoder)
                 .momentOfInertia(0.004);
         @SuppressWarnings("unused")
@@ -263,7 +257,7 @@ class WpilibSimPhysicsEngineTest {
         private final SwerveModule backLeft = module(85, 86, 93);
         private final SwerveModule backRight = module(87, 88, 94);
         @SuppressWarnings("unused")
-        private final List<SimModel> simulation = SwerveSimModels.drive(
+        private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
                 0.5,
                 0.5,
                 4.0,

@@ -30,6 +30,16 @@ public final class ControlLoops {
         return new Custom(ControlLoopRole.ARBITRARY_FEEDFORWARD, factory);
     }
 
+    /**
+     * Creates a custom loop that transforms a position or velocity request before constraints.
+     *
+     * @param factory runtime factory
+     * @return target-transform loop
+     */
+    public static ControlLoop targetTransform(Function<ControlLoopBinding, ControlLoopRuntime> factory) {
+        return new Custom(ControlLoopRole.TARGET_TRANSFORM, factory);
+    }
+
     private record Custom(ControlLoopRole role, Function<ControlLoopBinding, ControlLoopRuntime> factory)
             implements ControlLoop {
         private Custom {

@@ -4,7 +4,6 @@ import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.hardware.sim.SimModels;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -18,7 +17,7 @@ public final class VelocityShooter implements Mechanism {
     private final MotorDevice follower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 2).follow(leader).inverted();
     private final EncoderDevice velocity = leader.encoder();
     @SuppressWarnings("unused")
-    private final SimModel simulation = SimModels.flywheel(leader, follower)
+    private final SimModel simulation = SimModel.flywheel(leader, follower)
             .encoder(velocity)
             .momentOfInertia(0.006);
     private final ControlBinding wheel = Controls.velocity(leader)
@@ -29,6 +28,6 @@ public final class VelocityShooter implements Mechanism {
 
     public final Action stop = leader.percent(0.0);
     public final Action idle = wheel.velocity(35.0);
-    public final Action podium = wheel.velocity(78.0);
+    public final Action podium = wheel.velocity(78.0).untilWithin(2.0);
     public final Action reverse = wheel.velocity(-25.0);
 }

@@ -6,6 +6,7 @@ import ca.frc6390.athena.mechanism.core.ControlLoop;
 import ca.frc6390.athena.mechanism.core.ControlLoopRole;
 import ca.frc6390.athena.mechanism.core.ControlLoopRuntime;
 import ca.frc6390.athena.mechanism.core.ControlOutput;
+import ca.frc6390.athena.mechanism.core.Output;
 
 /**
  * Reusable PID gains for control loops.
@@ -52,7 +53,13 @@ public record PidGains(double p, double i, double d, double iZone, double tolera
 
         @Override
         public ControlOutput calculate(ControlLoopContext context) {
-            double error = context.target() - context.position();
+            double measurement = context.request() instanceof Output.Velocity
+                    ? context.velocity()
+                    : context.position();
+            double error = context.target() - measurement;
+            if (!Double.isFinite(error)) {
+                return ControlOutput.neutral();
+            }
             double dt = Math.max(context.dtSeconds(), 1.0e-9);
             if (gains.iZone <= 0.0 || Math.abs(error) <= gains.iZone) {
                 integral += error * dt;

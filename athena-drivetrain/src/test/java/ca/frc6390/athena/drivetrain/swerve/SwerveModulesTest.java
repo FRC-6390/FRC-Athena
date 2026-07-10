@@ -9,6 +9,7 @@ import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.HardwareBus;
 import ca.frc6390.athena.hardware.sim.SimModel;
+import ca.frc6390.athena.runtime.control.RobotVelocity;
 import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -86,40 +87,35 @@ class SwerveModulesTest {
     }
 
     @Test
-    void filledModulesExposeDriveAndSteerSimulationModels() {
-        HardwareBus canivore = HardwareBus.can("canivore");
-        SwerveModule module = new SwerveModules.SDS.MK5N.R3();
-        module.drive.fill(canivore.motor(MotorKinds.KRAKEN_X60, 1))
-                .steer.fill(canivore.motor(MotorKinds.KRAKEN_X44, 2))
-                .angle.fill(canivore.encoder(EncoderKinds.CANCODER, 3));
-
-        List<SimModel> models = SwerveSimModels.module(module);
-
-        assertEquals(2, models.size());
-        assertEquals(module.drive.get(), models.get(0).motors().get(0));
-        assertEquals(module.drive.get().encoder(), models.get(0).encoders().get(0));
-        assertEquals(1.0 / module.model().driveReduction(), models.get(0).gearRatio().ratio(), 1.0e-9);
-        assertEquals(module.steer.get(), models.get(1).motors().get(0));
-        assertEquals(module.angle.get(), models.get(1).encoders().get(0));
-        assertEquals(1.0 / module.model().steerReduction(), models.get(1).gearRatio().ratio(), 1.0e-9);
-    }
-
-    @Test
-    void rectangularDriveSimulationIncludesModuleModelsAndPoseDescriptor() {
+    void rectangularKinematicsOwnsControlAndUnifiedSimulationModel() {
         SwerveModule frontLeft = module(1, 2, 11);
         SwerveModule frontRight = module(3, 4, 12);
         SwerveModule backLeft = module(5, 6, 13);
         SwerveModule backRight = module(7, 8, 14);
 
-        List<SimModel> models = SwerveSimModels.drive(0.6, 0.5, 4.5, frontLeft, frontRight, backLeft, backRight);
+        SwerveKinematics kinematics = SwerveKinematics.rectangular(
+                0.6, 0.5, 4.5, frontLeft, frontRight, backLeft, backRight);
+        SimModel model = kinematics.simulationModel();
 
-        assertEquals(9, models.size());
-        assertEquals(1, models.get(8).dependencies().size());
-        SwerveDriveSimModel drive = (SwerveDriveSimModel) models.get(8).dependencies().get(0);
-        assertEquals(4, drive.modules().size());
-        assertEquals(4.5, drive.maxSpeedMetersPerSecond(), 1.0e-9);
-        assertEquals(0.3, drive.modules().get(0).xMeters(), 1.0e-9);
-        assertEquals(0.25, drive.modules().get(0).yMeters(), 1.0e-9);
+        assertEquals(4, kinematics.modules().size());
+        assertEquals(0.3, kinematics.modules().get(0).xMeters(), 1.0e-9);
+        assertEquals(0.25, kinematics.modules().get(0).yMeters(), 1.0e-9);
+        assertEquals(8, model.physicsLeaves().size());
+        assertEquals(8, model.motors().size());
+        assertEquals(8, model.encoders().size());
+    }
+
+    @Test
+    void productionKinematicsRoundTripsArbitraryChassisVelocity() {
+        SwerveKinematics kinematics = SwerveKinematics.rectangular(
+                0.6, 0.5, 4.5, module(21, 22, 31), module(23, 24, 32), module(25, 26, 33), module(27, 28, 34));
+        RobotVelocity requested = new RobotVelocity(1.2, -0.7, 0.9);
+
+        RobotVelocity measured = kinematics.velocity(kinematics.targets(requested));
+
+        assertEquals(requested.xMetersPerSecond(), measured.xMetersPerSecond(), 1.0e-9);
+        assertEquals(requested.yMetersPerSecond(), measured.yMetersPerSecond(), 1.0e-9);
+        assertEquals(requested.angularRadiansPerSecond(), measured.angularRadiansPerSecond(), 1.0e-9);
     }
 
     private static ExpectedPreset preset(

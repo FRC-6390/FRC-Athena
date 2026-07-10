@@ -66,7 +66,7 @@
   - [x] Keep lifecycle/Action dispatch in `RobotRuntime` instead of separate runners.
   - [x] Allow `RobotRuntime` to use a graph-backed hardware context while preserving explicit registered test handles.
   - [x] Add request dispatch so robot code can call `action.request()` while runtime routing remains graph-owned.
-  - [x] Expand collection-valued declarations in the graph, so helpers such as `SwerveSimModels.drive(...)` can expose `List<SimModel>` directly.
+  - [x] Expand composable `SimModel` and `SimModel.Source` declarations through the graph, including automatically contributed production kinematics models.
   - [x] Shared action instances across child mechanisms now become ambiguous direct request targets instead of blocking registration; declaration-targeted requests still route normally.
   - [x] Final cross-module root ownership moved to `athena-robot`.
   - [x] Replace public `MutableBoolean` with package-private `SimDigitalInput`; public digital input binding now accepts `BooleanSupplier`.
@@ -79,7 +79,7 @@
 - [x] Test surfaces needed: production surfaces now exist for drivetrain behavior tests to target after the repo-wide test reset.
   - [x] `TrackWidth`, `WheelBase`, and `SwerveModuleModel` validate finite/positive conversion inputs.
   - [x] `SwerveModulesTest` covers preset availability and filling template slots into runtime controls.
-  - [x] WPILib sim tests cover a root-registered swerve mechanism exposing `List<SimModel>` from `SwerveSimModels.drive(...)` and moving `SimulationSession.pose()` through `RobotRuntime.simulationPeriodic(...)`.
+  - [x] WPILib sim tests cover root-discovered `SwerveKinematics` moving `SimulationSession.pose()` through `RobotRuntime.simulationPeriodic(...)` without a swerve-specific sim descriptor.
   - [x] Runtime graph/introspection tests were removed with the deleted runtime path.
 - [x] Upkeep: the old module location ref, swerve drive marker/definition/node API, `SwerveModuleOrder`, `Drivetrains`, all drivetrain `*Config`, all drivetrain `*Spec`, and differential drivetrain public API were removed. The module dropped its stale Gradle API dependency on `athena-commands`.
 

@@ -28,7 +28,7 @@ import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.HardwareBus;
 import ca.frc6390.athena.hardware.device.HardwareInterface;
-import ca.frc6390.athena.hardware.device.HardwarePort;
+import ca.frc6390.athena.hardware.device.HardwareAddress;
 import ca.frc6390.athena.hardware.device.I2cPort;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -36,7 +36,6 @@ import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.device.SpiPort;
 import ca.frc6390.athena.hardware.sim.SimLimit;
 import ca.frc6390.athena.hardware.sim.SimModel;
-import ca.frc6390.athena.hardware.sim.SimModels;
 
 class HardwareGraphTest {
     @Test
@@ -195,7 +194,7 @@ class HardwareGraphTest {
         assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).gearRatio(0.0));
         assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).conversion(Double.NaN));
         EncoderDevice dioEncoder = HardwareBus.rio()
-                .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(2));
+                .dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
         assertThrows(IllegalStateException.class, dioEncoder::id);
         assertThrows(IllegalStateException.class, dioEncoder::canbus);
     }
@@ -220,19 +219,23 @@ class HardwareGraphTest {
         HardwareBus rio = HardwareBus.rio();
         HardwareBus canivore = HardwareBus.can("canivore");
 
-        EncoderDevice throughBore = rio.encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(2));
-        ImuDevice navx = rio.imu(ImuKinds.NAVX, HardwarePort.spi(SpiPort.MXP));
+        EncoderDevice throughBore = rio.dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
+        ImuDevice navx = rio.spi(SpiPort.MXP).imu(ImuKinds.NAVX);
+        DigitalInputDevice limit = rio.dio(3).digitalInput("arm home");
 
-        assertInstanceOf(HardwarePort.Dio.class, throughBore.port());
-        assertInstanceOf(HardwarePort.Spi.class, navx.port());
+        assertInstanceOf(HardwareAddress.Dio.class, throughBore.connection());
+        assertInstanceOf(HardwareAddress.Spi.class, navx.connection());
         assertEquals("encoder:rev_through_bore:rio:2:dio", HardwareIdentity.encoder(throughBore).key());
         assertEquals("imu:studica_navx:rio:4:spi:mxp", HardwareIdentity.imu(navx).key());
+        assertEquals("arm_home", limit.defaultName());
         assertEquals(true, rio.supports(HardwareInterface.DIO));
         assertEquals(false, canivore.supports(HardwareInterface.DIO));
         assertThrows(IllegalArgumentException.class,
-                () -> canivore.encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(0)));
+                () -> canivore.dio(0));
         assertThrows(IllegalArgumentException.class,
-                () -> canivore.imu(ImuKinds.NAVX, HardwarePort.i2c(I2cPort.MXP)));
+                () -> canivore.i2c(I2cPort.MXP));
+        assertThrows(IllegalArgumentException.class,
+                () -> rio.dio(0).motor(MotorKinds.KRAKEN_X60));
     }
 
     @Test
@@ -281,7 +284,7 @@ class HardwareGraphTest {
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
         DigitalInputDevice limit = DigitalInputDevice.rio(4);
         Range range = Range.of(-2.0, 2.0);
-        SimModel model = SimModels.arm(motor)
+        SimModel model = SimModel.arm(motor)
                 .encoder(encoder)
                 .gearRatio(GearRatio.reduction(12.0, 48.0))
                 .range(range)
@@ -290,9 +293,9 @@ class HardwareGraphTest {
         assertEquals(List.of(motor), model.motors());
         assertEquals(List.of(encoder), model.encoders());
         assertEquals(true, model.simulatesGravity());
-        assertEquals(2, model.dependencies().size());
-        assertEquals(range, model.dependencies().get(0));
-        SimLimit simLimit = assertInstanceOf(SimLimit.class, model.dependencies().get(1));
+        assertEquals(range, model.range());
+        assertEquals(1, model.limits().size());
+        SimLimit simLimit = model.limits().get(0);
         assertEquals(limit, simLimit.sensor());
         assertEquals(1.5, simLimit.position(), 1.0e-9);
         assertEquals(0.1, simLimit.tolerance(), 1.0e-9);
