@@ -43,12 +43,6 @@ final class OutputResolver {
     }
 
     private void resolveState(Action action, MechanismContext context, List<ResolvedOutput> outputs) {
-        if (action instanceof Actions.ChildSet childSet) {
-            for (Actions.ChildTarget target : childSet.targets()) {
-                resolveState(target.action(), context, outputs);
-            }
-            return;
-        }
         if (action instanceof Actions.Clamped clamped) {
             resolveState(clamped.action(), context, outputs);
             return;
@@ -113,6 +107,7 @@ final class OutputResolver {
             return;
         }
         if (action instanceof Actions.RuntimeAction || action instanceof Actions.DoOnce
+                || action instanceof Actions.EncoderSetPosition
                 || action instanceof Actions.WaitSeconds || action instanceof Actions.WaitUntil
                 || action instanceof PathAction) {
             return;

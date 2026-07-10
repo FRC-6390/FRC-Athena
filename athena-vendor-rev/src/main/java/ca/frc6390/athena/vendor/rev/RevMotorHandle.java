@@ -160,6 +160,19 @@ public final class RevMotorHandle implements MotorHandle {
     }
 
     @Override
+    public void setIntegratedPositionRotations(double rotations) {
+        double safeRotations = finiteOrZero(rotations);
+        controller.setSensorPosition(safeRotations);
+        positionRotations = safeRotations;
+        inputsFresh = true;
+    }
+
+    @Override
+    public boolean supportsIntegratedPositionSetting() {
+        return true;
+    }
+
+    @Override
     public double absolutePositionRotations() {
         ensureInputsFresh();
         return absolutePositionRotations;
@@ -221,6 +234,10 @@ public final class RevMotorHandle implements MotorHandle {
         void setPositionTarget(double rotations);
 
         void setVelocityTarget(double rotationsPerSecond);
+
+        default void setSensorPosition(double rotations) {
+            throw new UnsupportedOperationException("Integrated encoder position cannot be set.");
+        }
 
         default void setPositionTarget(double rotations, int slot, double arbitraryFeedforwardVolts) {
             setPositionTarget(rotations);
@@ -298,6 +315,11 @@ public final class RevMotorHandle implements MotorHandle {
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {
             spark.getClosedLoopController().setSetpoint(rotationsPerSecond * 60.0, ControlType.kVelocity);
+        }
+
+        @Override
+        public void setSensorPosition(double rotations) {
+            spark.getEncoder().setPosition(rotations);
         }
 
         @Override

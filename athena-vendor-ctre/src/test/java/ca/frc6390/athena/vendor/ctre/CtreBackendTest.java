@@ -111,6 +111,11 @@ class CtreBackendTest {
         assertEquals(10.0, handle.integratedPositionRotations(), 1.0e-9);
         assertEquals(1, controller.positionCalls);
         assertEquals(1, controller.velocityCalls);
+
+        handle.setIntegratedPositionRotations(6.0);
+
+        assertEquals(6.0, handle.integratedPositionRotations(), 1.0e-9);
+        assertEquals(6.0, controller.sensorPosition, 1.0e-9);
     }
 
     @Test
@@ -160,6 +165,11 @@ class CtreBackendTest {
         assertEquals(1, controller.positionCalls);
         assertEquals(1, controller.absolutePositionCalls);
         assertEquals(1, controller.velocityCalls);
+
+        handle.setPositionRotations(4.5);
+
+        assertEquals(4.5, controller.setPositionRotations, 1.0e-9);
+        assertEquals(4.5, handle.positionRotations(), 1.0e-9);
     }
 
     @Test
@@ -191,6 +201,7 @@ class CtreBackendTest {
         private int followLeaderId = -1;
         private boolean followInverted;
         private boolean inverted;
+        private double sensorPosition = 10.0;
 
         @Override
         public void setPercent(double percent) {}
@@ -203,6 +214,11 @@ class CtreBackendTest {
 
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {}
+
+        @Override
+        public void setSensorPosition(double rotations) {
+            sensorPosition = rotations;
+        }
 
         @Override
         public boolean setPositionTarget(double rotations, int slot, double feedforwardVolts, boolean enableFoc) {
@@ -249,7 +265,7 @@ class CtreBackendTest {
         @Override
         public double positionRotations() {
             positionCalls++;
-            return 10.0;
+            return sensorPosition;
         }
 
         @Override
@@ -266,6 +282,7 @@ class CtreBackendTest {
         private int positionCalls;
         private int absolutePositionCalls;
         private int velocityCalls;
+        private double setPositionRotations;
 
         @Override
         public double positionRotations() {
@@ -283,6 +300,11 @@ class CtreBackendTest {
         public double velocityRotationsPerSecond() {
             velocityCalls++;
             return 2.5;
+        }
+
+        @Override
+        public void setPositionRotations(double rotations) {
+            setPositionRotations = rotations;
         }
     }
 

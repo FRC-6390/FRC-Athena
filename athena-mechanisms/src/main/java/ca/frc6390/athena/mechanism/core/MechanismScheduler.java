@@ -199,10 +199,7 @@ public final class MechanismScheduler {
             throw new IllegalArgumentException("Action is not owned by a registered mechanism and does not target "
                     + "a declaration owned by one.");
         }
-        Action routed = target.owner() == target.root()
-                ? action
-                : Actions.set().set(target.owner(), action);
-        return set(target.root(), routed);
+        return set(target.root(), action);
     }
 
     public Action action(Mechanism mechanism) {
@@ -342,7 +339,16 @@ public final class MechanismScheduler {
             }
         }
         if (targets.size() > 1) {
-            throw new IllegalArgumentException("Action targets declarations owned by multiple registered mechanisms.");
+            Mechanism sharedRoot = null;
+            for (RequestTarget target : targets) {
+                if (sharedRoot == null) {
+                    sharedRoot = target.root();
+                } else if (sharedRoot != target.root()) {
+                    throw new IllegalArgumentException(
+                            "Action targets declarations owned by multiple registered mechanism roots.");
+                }
+            }
+            return new RequestTarget(sharedRoot, sharedRoot);
         }
         return targets.isEmpty() ? null : targets.iterator().next();
     }
@@ -357,11 +363,7 @@ public final class MechanismScheduler {
         if (action == null) {
             return;
         }
-        if (action instanceof Actions.ChildSet childSet) {
-            for (Actions.ChildTarget target : childSet.targets()) {
-                collectActionDeclarations(target.action(), declarations);
-            }
-        } else if (action instanceof Actions.Parallel parallel) {
+        if (action instanceof Actions.Parallel parallel) {
             parallel.Actions().forEach(child -> collectActionDeclarations(child, declarations));
         } else if (action instanceof Actions.Race race) {
             race.Actions().forEach(child -> collectActionDeclarations(child, declarations));
@@ -405,6 +407,8 @@ public final class MechanismScheduler {
             declarations.add(motor.motor());
         } else if (action instanceof Actions.DynamicMotorVoltage motor) {
             declarations.add(motor.motor());
+        } else if (action instanceof Actions.EncoderSetPosition encoder) {
+            declarations.add(encoder.encoder());
         } else if (control(action) != null) {
             declarations.add(control(action));
             declarations.addAll(controlDeclarations(control(action)));
@@ -570,6 +574,16 @@ public final class MechanismScheduler {
         @Override
         public double velocityRotationsPerSecond() {
             return velocity;
+        }
+
+        @Override
+        public void setPositionRotations(double rotations) {
+            position = Double.isFinite(rotations) ? rotations : 0.0;
+        }
+
+        @Override
+        public boolean supportsPositionSetting() {
+            return true;
         }
     }
 }

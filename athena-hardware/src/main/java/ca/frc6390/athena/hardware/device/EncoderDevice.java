@@ -155,6 +155,56 @@ public record EncoderDevice(
         return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units);
     }
 
+    /**
+     * Creates an action that sets this encoder's relative position.
+     *
+     * @param position relative position in this declaration's configured units
+     * @param <T> mechanism action type
+     * @return position-setting action
+     */
+    public <T> T setPosition(double position) {
+        if (!Double.isFinite(position)) {
+            throw new IllegalArgumentException("Encoder position must be finite.");
+        }
+        return action("setPosition", new Class<?>[] {EncoderDevice.class, double.class}, this, position);
+    }
+
+    /**
+     * Converts raw sensor rotations into configured mechanism position.
+     *
+     * @param rotations raw sensor rotations
+     * @return configured position
+     */
+    public double positionFromRotations(double rotations) {
+        double directed = isInverted ? -rotations : rotations;
+        return (directed - offset) * gearRatio * conversion;
+    }
+
+    /**
+     * Converts raw sensor velocity into configured mechanism velocity.
+     *
+     * @param rotationsPerSecond raw sensor rotations per second
+     * @return configured velocity
+     */
+    public double velocityFromRotationsPerSecond(double rotationsPerSecond) {
+        double directed = isInverted ? -rotationsPerSecond : rotationsPerSecond;
+        return directed * gearRatio * conversion;
+    }
+
+    /**
+     * Converts configured mechanism position into raw sensor rotations.
+     *
+     * @param position configured position
+     * @return raw sensor rotations
+     */
+    public double rotationsFromPosition(double position) {
+        if (!Double.isFinite(position)) {
+            throw new IllegalArgumentException("Encoder position must be finite.");
+        }
+        double directed = position / (gearRatio * conversion) + offset;
+        return isInverted ? -directed : directed;
+    }
+
     public String defaultName() {
         if (source instanceof EncoderSource.Standalone standalone) {
             return sanitize(kind().key()) + "_" + sanitize(standalone.port().identity()) + "_"
@@ -165,6 +215,20 @@ public record EncoderDevice(
 
     private static String sanitize(String key) {
         return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T action(String method, Class<?>[] parameterTypes, Object... args) {
+        try {
+            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
+            var factory = actions.getDeclaredMethod(method, parameterTypes);
+            if (!factory.canAccess(null)) {
+                factory.setAccessible(true);
+            }
+            return (T) factory.invoke(null, args);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Encoder action factories require athena-mechanisms on the classpath.", exception);
+        }
     }
 
     public sealed interface EncoderSource

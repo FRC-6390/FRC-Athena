@@ -170,20 +170,6 @@ final class MechanismRuntime {
             Node node = schedule.runtime(context);
             MechanismContext local = withTimeInState(context, context.nowSeconds() - node.startSeconds);
 
-            if (action instanceof Actions.ChildSet childSet) {
-                Actions.ChildSet output = Actions.set();
-                boolean complete = !childSet.targets().isEmpty();
-                int index = 0;
-                for (Actions.ChildTarget target : childSet.targets()) {
-                    Evaluation child = evaluate(schedule.indexed(index, target.action()), context);
-                    if (child.output() != null) {
-                        output.set(target.mechanism(), child.output());
-                    }
-                    complete &= child.complete();
-                    index++;
-                }
-                return schedule.result(output.targets().isEmpty() ? null : output, complete, local);
-            }
             if (action instanceof Actions.Sequence sequence) {
                 return evaluateSequence(sequence, schedule, context, local, node);
             }
@@ -249,6 +235,14 @@ final class MechanismRuntime {
             if (action instanceof Actions.RuntimeAction runtimeAction) {
                 if (!node.entered) {
                     runtimeAction.action().apply(actionContext);
+                    node.entered = true;
+                }
+                return schedule.result(null, true, local);
+            }
+            if (action instanceof Actions.EncoderSetPosition setPosition) {
+                if (!node.entered) {
+                    actionContext.encoder(setPosition.encoder()).setPositionRotations(
+                            setPosition.encoder().rotationsFromPosition(setPosition.position()));
                     node.entered = true;
                 }
                 return schedule.result(null, true, local);
@@ -540,12 +534,7 @@ final class MechanismRuntime {
             }
 
             private void lowerKnownChildren() {
-                if (action instanceof Actions.ChildSet childSet) {
-                    int index = 0;
-                    for (Actions.ChildTarget target : childSet.targets()) {
-                        indexed(index++, target.action());
-                    }
-                } else if (action instanceof Actions.Sequence sequence) {
+                if (action instanceof Actions.Sequence sequence) {
                     int index = 0;
                     for (Actions.SequenceStep step : sequence.steps()) {
                         indexed(index++, step.action());

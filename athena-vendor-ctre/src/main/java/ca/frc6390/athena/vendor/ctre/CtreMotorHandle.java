@@ -187,6 +187,19 @@ public final class CtreMotorHandle implements MotorHandle {
         return velocityRotationsPerSecond;
     }
 
+    @Override
+    public void setIntegratedPositionRotations(double rotations) {
+        double safeRotations = finiteOrZero(rotations);
+        controller.setSensorPosition(safeRotations);
+        positionRotations = safeRotations;
+        inputsFresh = true;
+    }
+
+    @Override
+    public boolean supportsIntegratedPositionSetting() {
+        return true;
+    }
+
     private void ensureInputsFresh() {
         if (!inputsFresh) {
             refreshInputs();
@@ -230,6 +243,10 @@ public final class CtreMotorHandle implements MotorHandle {
         void setPositionTarget(double rotations);
 
         void setVelocityTarget(double rotationsPerSecond);
+
+        default void setSensorPosition(double rotations) {
+            throw new UnsupportedOperationException("Integrated encoder position cannot be set.");
+        }
 
         default boolean setPositionTarget(double rotations, int slot, double feedforwardVolts, boolean enableFoc) {
             setPositionTarget(rotations);
@@ -288,6 +305,11 @@ public final class CtreMotorHandle implements MotorHandle {
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {
             talon.setControl(new VelocityVoltage(rotationsPerSecond));
+        }
+
+        @Override
+        public void setSensorPosition(double rotations) {
+            talon.setPosition(rotations);
         }
 
         @Override

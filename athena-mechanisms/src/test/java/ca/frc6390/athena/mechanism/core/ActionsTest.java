@@ -21,14 +21,14 @@ class ActionsTest {
     void builderActionAccessorsReturnStableImmutableViews() {
         Action first = MOTOR.percent(0.2);
         Action second = MOTOR.percent(0.4);
-        Actions.ChildSet childSet = Actions.set().set(new TestMechanism(first), first);
+        Actions.Parallel parallel = Actions.parallel(first);
         Actions.Sequence sequence = Actions.sequence().run(first).run(second);
         Actions.Cycle cycle = Actions.cycle().forTime(0.1, first).forTime(0.2, second);
 
-        assertSame(childSet.targets(), childSet.targets());
+        assertSame(parallel.Actions(), parallel.Actions());
         assertSame(sequence.steps(), sequence.steps());
         assertSame(cycle.steps(), cycle.steps());
-        assertThrows(UnsupportedOperationException.class, () -> childSet.targets().clear());
+        assertThrows(UnsupportedOperationException.class, () -> parallel.Actions().clear());
         assertThrows(UnsupportedOperationException.class, () -> sequence.steps().clear());
         assertThrows(UnsupportedOperationException.class, () -> cycle.steps().clear());
     }

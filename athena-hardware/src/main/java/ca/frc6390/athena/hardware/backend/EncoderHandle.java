@@ -53,4 +53,22 @@ public interface EncoderHandle {
     default double velocityRotationsPerSecond() {
         throw new UnsupportedOperationException("Velocity is not implemented by " + device().defaultName());
     }
+
+    /**
+     * Sets relative position in rotations.
+     *
+     * @param rotations relative position rotations
+     */
+    default void setPositionRotations(double rotations) {
+        throw new UnsupportedOperationException("Setting position is not implemented by " + device().defaultName());
+    }
+
+    /**
+     * Returns whether this handle can set relative position natively.
+     *
+     * @return true when native position setting is supported
+     */
+    default boolean supportsPositionSetting() {
+        return false;
+    }
 }

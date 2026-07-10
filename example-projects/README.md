@@ -4,7 +4,7 @@
 - `swerve-drive` - swerve drive robot
 - `auto-following` - autonomous setup with PathPlanner, Choreo-style paths, markers, and a custom timed provider
 - `localization-setups` - odometry, multi-camera vision, weighted, latest-valid, and Kalman localization pipelines
-- `mechanism-examples` - shooter, 2DOF arm, intake, elevator, simulations, and a composed superstructure
+- `mechanism-examples` - open-loop, velocity, and split-wheel shooters; manual, single-joint, and 2DOF arms; roller and indexed intakes; single and follower elevators; simulations; and a composed superstructure
 - `rule-examples` - guarded Actions using clamps, limit switches, conditional branches, timeouts, hooks, and sensor gates
 - `custom-controls` - software control loops and arbitrary feedforward layered onto closed-loop controls
 

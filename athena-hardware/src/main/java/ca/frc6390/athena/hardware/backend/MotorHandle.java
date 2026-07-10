@@ -130,6 +130,25 @@ public interface MotorHandle {
     }
 
     /**
+     * Sets the integrated encoder's relative position.
+     *
+     * @param rotations relative position rotations
+     */
+    default void setIntegratedPositionRotations(double rotations) {
+        throw new UnsupportedOperationException(
+                "Setting integrated encoder position is not implemented by " + device().defaultName());
+    }
+
+    /**
+     * Returns whether the integrated encoder position can be set natively.
+     *
+     * @return true when native position setting is supported
+     */
+    default boolean supportsIntegratedPositionSetting() {
+        return false;
+    }
+
+    /**
      * Returns controller-attached absolute encoder position in rotations.
      *
      * @return absolute position rotations

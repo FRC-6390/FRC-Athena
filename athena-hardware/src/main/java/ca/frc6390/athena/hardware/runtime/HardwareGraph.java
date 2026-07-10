@@ -81,12 +81,12 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated) {
             return encoders.computeIfAbsent(
                     HardwareIdentity.encoder(device),
-                    ignored -> new IntegratedEncoderHandle(device, motor(integrated.motor())));
+                    ignored -> adjustable(new IntegratedEncoderHandle(device, motor(integrated.motor()))));
         }
         if (device.source() instanceof EncoderDevice.EncoderSource.MotorAbsolute absolute) {
             return encoders.computeIfAbsent(
                     HardwareIdentity.encoder(device),
-                    ignored -> new AbsoluteMotorEncoderHandle(device, motor(absolute.motor())));
+                    ignored -> adjustable(new AbsoluteMotorEncoderHandle(device, motor(absolute.motor()))));
         }
         return encoders.computeIfAbsent(HardwareIdentity.encoder(device), ignored -> {
             EncoderHandle handle = backends
@@ -95,8 +95,12 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                             "No encoder backend for " + device.kind().key() + " over " + device.port().identity()))
                     .create(device);
             handle.activate();
-            return handle;
+            return adjustable(handle);
         });
+    }
+
+    private static EncoderHandle adjustable(EncoderHandle handle) {
+        return handle.supportsPositionSetting() ? handle : new PositionAdjustableEncoderHandle(handle);
     }
 
     /**
@@ -200,6 +204,82 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         @Override
         public double velocityRotationsPerSecond() {
             return motor.integratedVelocityRotationsPerSecond();
+        }
+
+        @Override
+        public void setPositionRotations(double rotations) {
+            motor.setIntegratedPositionRotations(rotations);
+        }
+
+        @Override
+        public boolean supportsPositionSetting() {
+            return motor.supportsIntegratedPositionSetting();
+        }
+    }
+
+    private static final class PositionAdjustableEncoderHandle implements EncoderHandle, AutoCloseable {
+        private final EncoderHandle delegate;
+        private volatile double softwareOffsetRotations;
+
+        private PositionAdjustableEncoderHandle(EncoderHandle delegate) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+        }
+
+        @Override
+        public EncoderDevice device() {
+            return delegate.device();
+        }
+
+        @Override
+        public void refreshInputs() {
+            delegate.refreshInputs();
+        }
+
+        @Override
+        public double positionRotations() {
+            return delegate.positionRotations() + softwareOffsetRotations;
+        }
+
+        @Override
+        public double absolutePositionRotations() {
+            return delegate.absolutePositionRotations();
+        }
+
+        @Override
+        public double velocityRotationsPerSecond() {
+            return delegate.velocityRotationsPerSecond();
+        }
+
+        @Override
+        public synchronized void setPositionRotations(double rotations) {
+            if (!Double.isFinite(rotations)) {
+                throw new IllegalArgumentException("Encoder position must be finite.");
+            }
+            try {
+                delegate.setPositionRotations(rotations);
+                softwareOffsetRotations = 0.0;
+            } catch (UnsupportedOperationException unsupported) {
+                softwareOffsetRotations = rotations - delegate.positionRotations();
+            }
+        }
+
+        @Override
+        public boolean supportsPositionSetting() {
+            return true;
+        }
+
+        @Override
+        public void close() {
+            if (delegate instanceof AutoCloseable closeable) {
+                try {
+                    closeable.close();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while closing " + device().defaultName(), exception);
+                } catch (Exception exception) {
+                    throw new IllegalStateException("Failed to close " + device().defaultName(), exception);
+                }
+            }
         }
     }
 

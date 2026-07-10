@@ -41,6 +41,16 @@ class MeasurementSignalPolicyTest {
     }
 
     @Test
+    void stdDevValuesCanBeConfiguredWithoutASettingsObject() {
+        MeasurementSignal signal = Measurements.measurement(() -> timedPose(1.0, 0.0)).stdDevs(0.2, 0.4);
+
+        PoseMeasurementSample pose = assertInstanceOf(
+                PoseMeasurementSample.class,
+                signal.latestMeasurement().orElseThrow());
+        assertEquals(MeasurementStdDevs.of(0.2, 0.2, 0.4), pose.stdDevs());
+    }
+
+    @Test
     void measurementSnapshotCachesListAndLatestUntilRefresh() {
         AtomicReference<List<Measurement>> values = new AtomicReference<>(List.of(timedPose(1.0, 0.0)));
         MeasurementSnapshot snapshot = new MeasurementSnapshot(values::get);

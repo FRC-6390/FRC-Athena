@@ -129,6 +129,22 @@ class HardwareGraphTest {
     }
 
     @Test
+    void readOnlyEncoderUsesSoftwareRelativePositionAdjustment() {
+        FakeEncoderBackend encoderBackend = new FakeEncoderBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(
+                List.of(), List.of(encoderBackend), List.of()));
+        EncoderDevice device = EncoderDevice.of(EncoderKinds.CANCODER, 8);
+        EncoderHandle encoder = graph.encoder(device);
+        encoderBackend.last.position = 0.25;
+
+        encoder.setPositionRotations(3.0);
+
+        assertEquals(3.0, encoder.positionRotations(), 1.0e-9);
+        encoderBackend.last.position = 0.75;
+        assertEquals(3.5, encoder.positionRotations(), 1.0e-9);
+    }
+
+    @Test
     void motorAbsoluteEncoderHandleReadsThroughCachedMotorHandle() {
         FakeMotorBackend motorBackend = new FakeMotorBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));
@@ -182,6 +198,21 @@ class HardwareGraphTest {
                 .encoder(EncoderKinds.REV_THROUGH_BORE, HardwarePort.dio(2));
         assertThrows(IllegalStateException.class, dioEncoder::id);
         assertThrows(IllegalStateException.class, dioEncoder::canbus);
+    }
+
+    @Test
+    void encoderPositionConversionRoundTripsConfiguredMechanismUnits() {
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 1)
+                .inverted()
+                .offset(0.25)
+                .gearRatio(0.5)
+                .conversion(360.0);
+
+        double rawRotations = encoder.rotationsFromPosition(-90.0);
+
+        assertEquals(0.25, rawRotations, 1.0e-9);
+        assertEquals(-90.0, encoder.positionFromRotations(rawRotations), 1.0e-9);
+        assertEquals(-180.0, encoder.velocityFromRotationsPerSecond(1.0), 1.0e-9);
     }
 
     @Test
@@ -389,6 +420,7 @@ class HardwareGraphTest {
         private final EncoderDevice device;
         private int activateCalls;
         private int closeCalls;
+        private double position;
 
         private FakeEncoderHandle(EncoderDevice device) {
             this.device = device;
@@ -402,6 +434,11 @@ class HardwareGraphTest {
         @Override
         public void activate() {
             activateCalls++;
+        }
+
+        @Override
+        public double positionRotations() {
+            return position;
         }
 
         @Override

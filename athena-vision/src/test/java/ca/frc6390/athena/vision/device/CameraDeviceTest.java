@@ -28,8 +28,9 @@ class CameraDeviceTest {
     }
 
     @Test
-    void mountAndBindingsReturnCopiesWithoutChangingOriginal() {
+    void mountCopiesConfigurationAndRuntimeBindingReachesPreviouslyDeclaredSignals() {
         CameraDevice original = Cameras.photonVision("front");
+        PoseSignal declaredSignal = original.pose();
         CameraMountPose mount = new CameraMountPose(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
         Measurement pose = Measurements.pose(new PoseSnapshot(2.0, 3.0, 0.5));
 
@@ -40,7 +41,7 @@ class CameraDeviceTest {
         assertNotSame(mounted, bound);
         assertEquals(CameraMountPose.identity(), original.mountPose());
         assertEquals(mount, mounted.mountPose());
-        assertTrue(original.pose().measurements().isEmpty());
+        assertEquals(List.of(pose), declaredSignal.measurements());
         assertEquals(List.of(pose), bound.pose().measurements());
     }
 

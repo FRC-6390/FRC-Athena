@@ -32,11 +32,11 @@ public final class DriveTrain implements Mechanism {
                 clamp(rotation) * MAX_ROTATION_RADIANS_PER_SECOND));
         SwerveDriveKinematics.desaturateWheelSpeeds(states, MAX_SPEED_METERS_PER_SECOND);
 
-        return Actions.set()
-                .set(frontLeft, frontLeft.target(target(states[0])))
-                .set(frontRight, frontRight.target(target(states[1])))
-                .set(backLeft, backLeft.target(target(states[2])))
-                .set(backRight, backRight.target(target(states[3])));
+        return Actions.parallel(
+                frontLeft.target(target(states[0])),
+                frontRight.target(target(states[1])),
+                backLeft.target(target(states[2])),
+                backRight.target(target(states[3])));
     }
 
     private static SwerveModule module(int driveMotorId, int steerMotorId, int encoderId) {

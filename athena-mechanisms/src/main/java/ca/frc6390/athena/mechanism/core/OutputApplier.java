@@ -301,8 +301,9 @@ final class OutputApplier {
 
     private double firstFeedbackPosition(ControlBinding control) {
         if (!control.feedback().isEmpty()) {
-            EncoderHandle encoder = context.encoder(control.feedback().get(0));
-            return readOrZero(encoder::positionRotations);
+            EncoderDevice device = control.feedback().get(0);
+            EncoderHandle encoder = context.encoder(device);
+            return device.positionFromRotations(readOrZero(encoder::positionRotations));
         }
         if (control.output() != null) {
             MotorHandle motor = context.motor(control.output());
@@ -313,8 +314,9 @@ final class OutputApplier {
 
     private double firstFeedbackVelocity(ControlBinding control) {
         if (!control.feedback().isEmpty()) {
-            EncoderHandle encoder = context.encoder(control.feedback().get(0));
-            return readOrZero(encoder::velocityRotationsPerSecond);
+            EncoderDevice device = control.feedback().get(0);
+            EncoderHandle encoder = context.encoder(device);
+            return device.velocityFromRotationsPerSecond(readOrZero(encoder::velocityRotationsPerSecond));
         }
         if (control.output() != null) {
             MotorHandle motor = context.motor(control.output());

@@ -43,6 +43,16 @@ public final class SimEncoderHandle implements EncoderHandle {
         return velocityRotationsPerSecond;
     }
 
+    @Override
+    public void setPositionRotations(double rotations) {
+        positionRotations = finiteOrZero(rotations);
+    }
+
+    @Override
+    public boolean supportsPositionSetting() {
+        return true;
+    }
+
     /**
      * Sets relative position.
      *

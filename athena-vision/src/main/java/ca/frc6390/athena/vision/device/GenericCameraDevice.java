@@ -17,28 +17,25 @@ public final class GenericCameraDevice implements CameraDevice {
     private final CameraKind kind;
     private final String name;
     private final CameraMountPose mountPose;
-    private final Supplier<? extends List<? extends Measurement>> poseMeasurements;
-    private final Supplier<? extends List<? extends Measurement>> targetMeasurements;
+    private final SignalBinding signals;
     private final boolean poseBound;
     private final boolean targetBound;
 
     public GenericCameraDevice(CameraKind kind, String name) {
-        this(kind, name, CameraMountPose.identity(), List::of, List::of, false, false);
+        this(kind, name, CameraMountPose.identity(), new SignalBinding(), false, false);
     }
 
     private GenericCameraDevice(
             CameraKind kind,
             String name,
             CameraMountPose mountPose,
-            Supplier<? extends List<? extends Measurement>> poseMeasurements,
-            Supplier<? extends List<? extends Measurement>> targetMeasurements,
+            SignalBinding signals,
             boolean poseBound,
             boolean targetBound) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.name = name == null || name.isBlank() ? kind.key() : name;
         this.mountPose = mountPose == null ? CameraMountPose.identity() : mountPose;
-        this.poseMeasurements = poseMeasurements == null ? List::of : poseMeasurements;
-        this.targetMeasurements = targetMeasurements == null ? List::of : targetMeasurements;
+        this.signals = Objects.requireNonNull(signals, "signals");
         this.poseBound = poseBound;
         this.targetBound = targetBound;
     }
@@ -60,31 +57,56 @@ public final class GenericCameraDevice implements CameraDevice {
 
     @Override
     public GenericCameraDevice mount(CameraMountPose pose) {
-        return new GenericCameraDevice(kind, name, pose, poseMeasurements, targetMeasurements, poseBound, targetBound);
+        return new GenericCameraDevice(kind, name, pose, signals, poseBound, targetBound);
     }
 
     @Override
     public GenericCameraDevice bindPose(Supplier<? extends List<? extends Measurement>> poseMeasurements) {
-        return new GenericCameraDevice(kind, name, mountPose, poseMeasurements, targetMeasurements, true, targetBound);
+        signals.bindPose(poseMeasurements);
+        return new GenericCameraDevice(kind, name, mountPose, signals, true, targetBound);
     }
 
     @Override
     public GenericCameraDevice bindTargets(Supplier<? extends List<? extends Measurement>> targetMeasurements) {
-        return new GenericCameraDevice(kind, name, mountPose, poseMeasurements, targetMeasurements, poseBound, true);
+        signals.bindTargets(targetMeasurements);
+        return new GenericCameraDevice(kind, name, mountPose, signals, poseBound, true);
     }
 
     @Override
     public PoseSignal pose() {
-        return new GenericPoseSignal(this, poseMeasurements);
+        return new GenericPoseSignal(this, signals::poseMeasurements);
     }
 
     @Override
     public TargetSignal targets() {
-        return new GenericTargetSignal(this, targetMeasurements);
+        return new GenericTargetSignal(this, signals::targetMeasurements);
     }
 
     @Override
     public boolean hasBoundSignals() {
         return poseBound || targetBound;
+    }
+
+    private static final class SignalBinding {
+        private volatile Supplier<? extends List<? extends Measurement>> poseMeasurements = List::of;
+        private volatile Supplier<? extends List<? extends Measurement>> targetMeasurements = List::of;
+
+        private void bindPose(Supplier<? extends List<? extends Measurement>> measurements) {
+            poseMeasurements = measurements == null ? List::of : measurements;
+        }
+
+        private void bindTargets(Supplier<? extends List<? extends Measurement>> measurements) {
+            targetMeasurements = measurements == null ? List::of : measurements;
+        }
+
+        private List<? extends Measurement> poseMeasurements() {
+            List<? extends Measurement> values = poseMeasurements.get();
+            return values == null ? List.of() : values;
+        }
+
+        private List<? extends Measurement> targetMeasurements() {
+            List<? extends Measurement> values = targetMeasurements.get();
+            return values == null ? List.of() : values;
+        }
     }
 }

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 class MechanismRuntimeTest {
     private static final MotorDevice MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
     private static final MotorDevice CHILD_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
+    private static final MotorDevice SECOND_CHILD_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 1);
 
     @Test
@@ -232,10 +234,10 @@ class MechanismRuntimeTest {
     }
 
     @Test
-    void childSetRoutesChildMechanismOutputToChildMotorHandle() {
+    void parallelRoutesChildMechanismOutputToChildMotorHandle() {
         RecordingActionContext actions = new RecordingActionContext(CHILD_MOTOR);
         TestMechanism child = new TestMechanism(CHILD_MOTOR.percent(0.7));
-        TestMechanism parent = new TestMechanism(Actions.set().set(child, child.initial));
+        TestMechanism parent = new TestMechanism(Actions.parallel(child.initial));
         MechanismRuntime runtime = MechanismRuntime.of(parent, actions);
         runtime.set(parent.initial);
 
@@ -276,6 +278,51 @@ class MechanismRuntimeTest {
         runtime.robotPeriodic(1.0, 0.02);
 
         assertEquals(0.9, actions.motor(CHILD_MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void encoderSetPositionActionInfersOwnershipAndRunsOnce() {
+        RecordingActionContext actions = new RecordingActionContext();
+        EncoderPositionMechanism mechanism = new EncoderPositionMechanism();
+        MechanismScheduler runtime = MechanismScheduler.create(actions).register(mechanism);
+
+        runtime.request(mechanism.setPosition);
+        runtime.robotPeriodic(1.0, 0.02);
+        runtime.robotPeriodic(1.02, 0.02);
+
+        assertEquals(2.5, actions.encoder(ENCODER).position, 1.0e-9);
+        assertEquals(1, actions.encoder(ENCODER).setPositionCalls);
+    }
+
+    @Test
+    void parallelInfersMultipleChildOwnersUnderOneRegisteredRoot() {
+        RecordingActionContext actions = new RecordingActionContext(CHILD_MOTOR, SECOND_CHILD_MOTOR);
+        DeclaredMotorMechanism first = new DeclaredMotorMechanism(CHILD_MOTOR);
+        DeclaredMotorMechanism second = new DeclaredMotorMechanism(SECOND_CHILD_MOTOR);
+        MultiParentMechanism parent = new MultiParentMechanism(first, second);
+        MechanismScheduler runtime = MechanismScheduler.create(actions).register(parent);
+        Action requested = Actions.parallel(
+                CHILD_MOTOR.percent(0.7),
+                SECOND_CHILD_MOTOR.percent(0.8));
+
+        runtime.request(requested);
+        runtime.robotPeriodic(1.0, 0.02);
+
+        assertEquals(0.7, actions.motor(CHILD_MOTOR).percent, 1.0e-9);
+        assertEquals(0.8, actions.motor(SECOND_CHILD_MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void parallelRejectsActionsOwnedBySeparateRegisteredRoots() {
+        RecordingActionContext actions = new RecordingActionContext(CHILD_MOTOR, SECOND_CHILD_MOTOR);
+        MechanismScheduler runtime = MechanismScheduler.create(actions)
+                .register(new DeclaredMotorMechanism(CHILD_MOTOR))
+                .register(new DeclaredMotorMechanism(SECOND_CHILD_MOTOR));
+        Action requested = Actions.parallel(
+                CHILD_MOTOR.percent(0.7),
+                SECOND_CHILD_MOTOR.percent(0.8));
+
+        assertThrows(IllegalArgumentException.class, () -> runtime.request(requested));
     }
 
     @Test
@@ -540,9 +587,34 @@ class MechanismRuntimeTest {
         }
     }
 
+    private static final class MultiParentMechanism implements Mechanism {
+        private final DeclaredMotorMechanism first;
+        private final DeclaredMotorMechanism second;
+
+        private MultiParentMechanism(DeclaredMotorMechanism first, DeclaredMotorMechanism second) {
+            this.first = first;
+            this.second = second;
+        }
+    }
+
+    private static final class DeclaredMotorMechanism implements Mechanism {
+        private final MotorDevice motor;
+        private final Action initial;
+
+        private DeclaredMotorMechanism(MotorDevice motor) {
+            this.motor = motor;
+            initial = motor.percent(0.0);
+        }
+    }
+
     private static final class DeviceMechanism implements Mechanism {
         private final MotorDevice motor = MOTOR;
         private final Action initial = Actions.neutral();
+    }
+
+    private static final class EncoderPositionMechanism implements Mechanism {
+        private final EncoderDevice encoder = ENCODER;
+        private final Action setPosition = encoder.setPosition(2.5);
     }
 
     private static final class ExternalActions {
@@ -779,6 +851,7 @@ class MechanismRuntimeTest {
         private final EncoderDevice device;
         private double position;
         private double velocity;
+        private int setPositionCalls;
 
         private RecordingEncoderHandle(EncoderDevice device) {
             this.device = device;
@@ -797,6 +870,12 @@ class MechanismRuntimeTest {
         @Override
         public double velocityRotationsPerSecond() {
             return velocity;
+        }
+
+        @Override
+        public void setPositionRotations(double rotations) {
+            position = rotations;
+            setPositionCalls++;
         }
     }
 

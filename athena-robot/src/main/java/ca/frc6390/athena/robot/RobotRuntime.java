@@ -20,6 +20,7 @@ import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
 import ca.frc6390.athena.runtime.measurement.MeasurementSnapshot;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.vision.device.CameraDevice;
+import ca.frc6390.athena.vision.runtime.CameraAdapters;
 import ca.frc6390.athena.vision.runtime.VisionGraph;
 import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulations;
@@ -211,7 +212,7 @@ public final class RobotRuntime {
      */
     public RobotRuntime cameras(CameraDevice... cameras) {
         VisionSimulation simulation = discoverVisionSimulation(cameras);
-        VisionGraph graph = VisionGraph.of(bindSimulatedCameras(simulation, cameras));
+        VisionGraph graph = VisionGraph.of(bindCameras(simulation, cameras));
         visionGraphs.add(graph);
         if (simulation != null) {
             simulationSession.vision(simulation);
@@ -232,12 +233,21 @@ public final class RobotRuntime {
     }
 
     private VisionGraph bindVisionGraphForSimulation(VisionGraph visionGraph) {
-        VisionSimulation simulation = discoverVisionSimulation(visionGraph.cameras().stream()
+        CameraDevice[] cameras = visionGraph.cameras().stream()
                 .map(VisionGraph.CameraRuntime::camera)
-                .toArray(CameraDevice[]::new));
+                .toArray(CameraDevice[]::new);
+        VisionSimulation simulation = discoverVisionSimulation(cameras);
         if (simulation != null) {
             simulationSession.vision(simulation);
-            return visionGraph.bind(camera -> camera.hasBoundSignals() ? camera : simulation.bind(camera));
+        }
+        for (CameraDevice camera : cameras) {
+            if (!camera.hasBoundSignals()) {
+                if (simulation != null) {
+                    simulation.bind(camera);
+                } else {
+                    CameraAdapters.bindDiscovered(camera);
+                }
+            }
         }
         return visionGraph;
     }
@@ -256,14 +266,20 @@ public final class RobotRuntime {
         return VisionSimulations.createDiscovered(unboundCameras, simulationSession.visionField()).orElse(null);
     }
 
-    private static CameraDevice[] bindSimulatedCameras(VisionSimulation simulation, CameraDevice... cameras) {
-        if (cameras == null || cameras.length == 0 || simulation == null) {
+    private static CameraDevice[] bindCameras(VisionSimulation simulation, CameraDevice... cameras) {
+        if (cameras == null || cameras.length == 0) {
             return cameras;
         }
         CameraDevice[] bound = new CameraDevice[cameras.length];
         for (int i = 0; i < cameras.length; i++) {
             CameraDevice camera = cameras[i];
-            bound[i] = camera == null || camera.hasBoundSignals() ? camera : simulation.bind(camera);
+            if (camera == null || camera.hasBoundSignals()) {
+                bound[i] = camera;
+            } else if (simulation != null) {
+                bound[i] = simulation.bind(camera);
+            } else {
+                bound[i] = CameraAdapters.bindDiscovered(camera);
+            }
         }
         return bound;
     }

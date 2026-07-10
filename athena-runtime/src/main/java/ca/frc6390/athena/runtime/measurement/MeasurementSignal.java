@@ -42,6 +42,29 @@ public interface MeasurementSignal {
     }
 
     /**
+     * Applies standard deviations with one translation value shared by both field axes.
+     *
+     * @param translationMeters translation standard deviation
+     * @param headingRadians heading standard deviation
+     * @return configured measurement signal
+     */
+    default MeasurementSignal stdDevs(double translationMeters, double headingRadians) {
+        return stdDevs(translationMeters, translationMeters, headingRadians);
+    }
+
+    /**
+     * Applies standard deviations directly without requiring a configuration object.
+     *
+     * @param xMeters x standard deviation
+     * @param yMeters y standard deviation
+     * @param headingRadians heading standard deviation
+     * @return configured measurement signal
+     */
+    default MeasurementSignal stdDevs(double xMeters, double yMeters, double headingRadians) {
+        return stdDevs(MeasurementStdDevs.of(xMeters, yMeters, headingRadians));
+    }
+
+    /**
      * Filters measurements with latency above a limit.
      *
      * @param seconds latency limit

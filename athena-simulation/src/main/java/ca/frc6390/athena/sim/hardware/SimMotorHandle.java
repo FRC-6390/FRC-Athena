@@ -126,6 +126,16 @@ public final class SimMotorHandle implements MotorHandle {
         return velocityRotationsPerSecond;
     }
 
+    @Override
+    public void setIntegratedPositionRotations(double rotations) {
+        positionRotations = finiteOrZero(rotations);
+    }
+
+    @Override
+    public boolean supportsIntegratedPositionSetting() {
+        return true;
+    }
+
     /**
      * Returns the last command kind applied to this handle.
      *

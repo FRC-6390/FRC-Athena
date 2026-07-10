@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import java.util.ArrayList;
@@ -57,6 +58,10 @@ public final class Actions {
         return new DynamicControlVoltage(control, volts);
     }
 
+    static Action setPosition(EncoderDevice encoder, double position) {
+        return new EncoderSetPosition(encoder, position);
+    }
+
     public static Action position(ControlBinding control, double position) {
         return new ControlPosition(control, position);
     }
@@ -75,19 +80,6 @@ public final class Actions {
 
     public static Action fault(String reason) {
         return new Fault(reason);
-    }
-
-    public static ChildSet set() {
-        return new ChildSet();
-    }
-
-    public static ChildSet from(ChildSet action) {
-        Objects.requireNonNull(action, "action");
-        ChildSet copy = set();
-        for (ChildTarget target : action.targets()) {
-            copy.set(target.mechanism(), target.action());
-        }
-        return copy;
     }
 
     public static Action dynamic(Supplier<Output> output) {
@@ -305,6 +297,15 @@ public final class Actions {
         }
     }
 
+    public record EncoderSetPosition(EncoderDevice encoder, double position) implements Action {
+        public EncoderSetPosition {
+            Objects.requireNonNull(encoder, "encoder");
+            if (!Double.isFinite(position)) {
+                throw new IllegalArgumentException("Encoder position must be finite.");
+            }
+        }
+    }
+
     public record DoOnce(Runnable action) implements Action {
         public DoOnce {
             Objects.requireNonNull(action, "action");
@@ -430,27 +431,6 @@ public final class Actions {
         public Clamped {
             Objects.requireNonNull(action, "action");
             Objects.requireNonNull(range, "range");
-        }
-    }
-
-    public static final class ChildSet implements Action {
-        private final List<ChildTarget> targets = new ArrayList<>();
-        private final List<ChildTarget> targetView = Collections.unmodifiableList(targets);
-
-        public ChildSet set(Mechanism mechanism, Action action) {
-            targets.add(new ChildTarget(mechanism, action));
-            return this;
-        }
-
-        public List<ChildTarget> targets() {
-            return targetView;
-        }
-    }
-
-    public record ChildTarget(Mechanism mechanism, Action action) {
-        public ChildTarget {
-            Objects.requireNonNull(mechanism, "mechanism");
-            Objects.requireNonNull(action, "action");
         }
     }
 

@@ -270,10 +270,10 @@ class WpilibSimPhysicsEngineTest {
                 backLeft,
                 backRight);
         @SuppressWarnings("unused")
-        private final Action initial = Actions.set()
-                .set(frontLeft, frontLeft.target(new SwerveModuleTarget(1.0, 0.0)))
-                .set(frontRight, frontRight.target(new SwerveModuleTarget(1.0, 0.0)))
-                .set(backLeft, backLeft.target(new SwerveModuleTarget(1.0, 0.0)))
-                .set(backRight, backRight.target(new SwerveModuleTarget(1.0, 0.0)));
+        private final Action initial = Actions.parallel(
+                frontLeft.target(new SwerveModuleTarget(1.0, 0.0)),
+                frontRight.target(new SwerveModuleTarget(1.0, 0.0)),
+                backLeft.target(new SwerveModuleTarget(1.0, 0.0)),
+                backRight.target(new SwerveModuleTarget(1.0, 0.0)));
     }
 }

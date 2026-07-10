@@ -152,6 +152,11 @@ class RevBackendTest {
         assertEquals(2, controller.velocityReads);
         assertEquals(2, controller.absolutePositionReads);
         assertEquals(2, controller.absoluteVelocityReads);
+
+        handle.setIntegratedPositionRotations(5.0);
+
+        assertEquals(5.0, controller.position, 1.0e-9);
+        assertEquals(5.0, handle.integratedPositionRotations(), 1.0e-9);
     }
 
     @Test
@@ -213,6 +218,11 @@ class RevBackendTest {
 
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {}
+
+        @Override
+        public void setSensorPosition(double rotations) {
+            position = rotations;
+        }
 
         @Override
         public void setVelocityTarget(double rotationsPerSecond, int slot, double arbitraryFeedforwardVolts) {
