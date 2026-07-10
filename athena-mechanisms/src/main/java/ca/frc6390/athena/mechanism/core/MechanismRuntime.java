@@ -106,6 +106,7 @@ final class MechanismRuntime {
         Objects.requireNonNull(outputs, "outputs");
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
+        hookRuntime.run(safeEventContext, actionContext, hookBindings);
         if (Double.isNaN(stateStartSeconds)) {
             stateStartSeconds = safeMechanismContext.nowSeconds();
         }
@@ -123,7 +124,6 @@ final class MechanismRuntime {
         int outputStart = outputs.size();
         resolver.resolveInto(mechanism, active.action(), active.context(), outputs);
         applier.applyAll(outputs, outputStart, active.context());
-        hookRuntime.run(safeEventContext, actionContext, hookBindings);
         simulationStep.run();
     }
 
@@ -184,6 +184,10 @@ final class MechanismRuntime {
             }
             if (action instanceof Actions.Deadline deadline) {
                 return evaluateGroup(deadline.Actions(), schedule, context, node, GroupMode.DEADLINE, 0);
+            }
+            if (action instanceof Actions.Computed computed) {
+                Evaluation child = evaluate(schedule.named("computed", computed.evaluate(local)), context);
+                return schedule.result(child.output(), false, child.context());
             }
             if (action instanceof Actions.Choice choice) {
                 return evaluate(schedule.named("choice", choice.choose(local)), context);

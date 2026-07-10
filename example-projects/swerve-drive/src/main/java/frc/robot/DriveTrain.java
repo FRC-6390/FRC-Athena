@@ -16,6 +16,8 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
+import java.util.function.BooleanSupplier;
+import java.util.function.DoubleSupplier;
 
 public final class DriveTrain implements Mechanism {
     private static final double MAX_SPEED_METERS_PER_SECOND = 4.0;
@@ -29,19 +31,24 @@ public final class DriveTrain implements Mechanism {
     public final SwerveModule backRight = module(7, 8, 14);
     public final ImuDevice imu = Constants.RIO.imu(ImuKinds.PIGEON_2, 20);
 
-    public Action fieldOrientedDrive(double forward, double strafe, double rotation) {
-        return drive(ChassisSpeeds.fromFieldRelativeSpeeds(
-                linearSpeed(forward),
-                linearSpeed(strafe),
-                rotationSpeed(rotation),
-                Rotation2d.fromDegrees(imu.yawDegrees())));
-    }
-
-    public Action robotOrientedDrive(double forward, double strafe, double rotation) {
-        return drive(new ChassisSpeeds(
-                linearSpeed(forward),
-                linearSpeed(strafe),
-                rotationSpeed(rotation)));
+    public Action drive(
+            DoubleSupplier forward,
+            DoubleSupplier strafe,
+            DoubleSupplier rotation,
+            BooleanSupplier fieldOriented) {
+        return Actions.compute(() -> {
+            ChassisSpeeds speeds = fieldOriented.getAsBoolean()
+                    ? ChassisSpeeds.fromFieldRelativeSpeeds(
+                            linearSpeed(forward.getAsDouble()),
+                            linearSpeed(strafe.getAsDouble()),
+                            rotationSpeed(rotation.getAsDouble()),
+                            Rotation2d.fromDegrees(imu.yawDegrees()))
+                    : new ChassisSpeeds(
+                            linearSpeed(forward.getAsDouble()),
+                            linearSpeed(strafe.getAsDouble()),
+                            rotationSpeed(rotation.getAsDouble()));
+            return drive(speeds);
+        });
     }
 
     private Action drive(ChassisSpeeds speeds) {

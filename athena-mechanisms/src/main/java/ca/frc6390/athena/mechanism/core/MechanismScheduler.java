@@ -364,6 +364,13 @@ public final class MechanismScheduler {
         if (direct != null) {
             return direct;
         }
+        if (action instanceof Actions.Computed computed) {
+            RequestTarget computedTarget = targetFor(computed.evaluate(MechanismContext.empty()));
+            if (computedTarget != null) {
+                actionTargets.put(action, computedTarget);
+            }
+            return computedTarget;
+        }
         Set<RequestTarget> targets = new HashSet<>();
         for (Object declaration : actionDeclarations(action)) {
             RequestTarget target = declarationTargets.get(declaration);
@@ -398,6 +405,8 @@ public final class MechanismScheduler {
         }
         if (action instanceof Actions.Parallel parallel) {
             parallel.Actions().forEach(child -> collectActionDeclarations(child, declarations));
+        } else if (action instanceof Actions.Computed computed) {
+            collectActionDeclarations(computed.evaluate(MechanismContext.empty()), declarations);
         } else if (action instanceof Actions.Race race) {
             race.Actions().forEach(child -> collectActionDeclarations(child, declarations));
         } else if (action instanceof Actions.Deadline deadline) {

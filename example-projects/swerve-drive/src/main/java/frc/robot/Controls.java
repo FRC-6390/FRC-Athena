@@ -26,15 +26,7 @@ public final class Controls implements Mechanism {
         driver.y().onActive(() -> fieldOriented = true);
         driver.a().onActive(() -> fieldOriented = false);
 
-        drive = Events.teleopPeriodic().whileActive(() -> {
-            double forwardValue = forward.getAsDouble();
-            double strafeValue = strafe.getAsDouble();
-            double rotationValue = rotation.getAsDouble();
-            if (fieldOriented) {
-                driveTrain.fieldOrientedDrive(forwardValue, strafeValue, rotationValue).request();
-            } else {
-                driveTrain.robotOrientedDrive(forwardValue, strafeValue, rotationValue).request();
-            }
-        });
+        drive = Events.teleopPeriodic().whileActive(
+                driveTrain.drive(forward, strafe, rotation, () -> fieldOriented));
     }
 }

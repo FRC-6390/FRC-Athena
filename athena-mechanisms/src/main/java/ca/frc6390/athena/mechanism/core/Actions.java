@@ -103,6 +103,27 @@ public final class Actions {
         return new DynamicOutput(output);
     }
 
+    /**
+     * Creates an action whose child action tree is recomputed every runtime cycle.
+     *
+     * @param action child action supplier
+     * @return computed action
+     */
+    public static Action compute(Supplier<Action> action) {
+        Objects.requireNonNull(action, "action");
+        return compute(context -> action.get());
+    }
+
+    /**
+     * Creates an action whose child action tree is recomputed every runtime cycle.
+     *
+     * @param action child action resolver
+     * @return computed action
+     */
+    public static Action compute(Function<MechanismContext, Action> action) {
+        return new Computed(action);
+    }
+
     public static Action doOnce(Runnable action) {
         return new DoOnce(action);
     }
@@ -422,6 +443,16 @@ public final class Actions {
     public record DynamicOutput(Function<MechanismContext, Output> output) implements Action {
         public DynamicOutput {
             Objects.requireNonNull(output, "output");
+        }
+    }
+
+    public record Computed(Function<MechanismContext, Action> action) implements Action {
+        public Computed {
+            Objects.requireNonNull(action, "action");
+        }
+
+        public Action evaluate(MechanismContext context) {
+            return Objects.requireNonNull(action.apply(context), "Computed action returned null.");
         }
     }
 

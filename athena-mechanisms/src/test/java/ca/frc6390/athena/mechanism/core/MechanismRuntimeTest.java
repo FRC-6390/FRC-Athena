@@ -54,6 +54,25 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void teleopHookResolvesComputedChildrenInTheSameCycle() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        double[] output = {0.25};
+        ComputedHookRoot root = new ComputedHookRoot(output);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(root);
+        ActionRequests.bind(scheduler::request);
+        try {
+            scheduler.teleopPeriodic(0.0, 0.02);
+            assertEquals(0.25, actions.motor(MOTOR).percent, 1.0e-9);
+
+            output[0] = 0.75;
+            scheduler.teleopPeriodic(0.02, 0.02);
+            assertEquals(0.75, actions.motor(MOTOR).percent, 1.0e-9);
+        } finally {
+            ActionRequests.clear();
+        }
+    }
+
+    @Test
     void sequenceAdvancesByTimeAndRoutesOutputsToMotorHandle() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(
@@ -678,6 +697,17 @@ class MechanismRuntimeTest {
         private LazyHookRoot(LazyHookDrive drive, AtomicInteger callbacks) {
             this.drive = drive;
             controls = new LazyHookControls(drive, callbacks);
+        }
+    }
+
+    private static final class ComputedHookRoot implements Mechanism {
+        private final MotorDevice motor = MOTOR;
+        private final Action drive;
+        private final HookBinding driverControl;
+
+        private ComputedHookRoot(double[] output) {
+            drive = Actions.compute(() -> Actions.parallel(motor.percent(output[0])));
+            driverControl = Events.teleopPeriodic().whileActive(drive);
         }
     }
 
