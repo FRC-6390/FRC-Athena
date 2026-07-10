@@ -142,7 +142,8 @@ def exampleProjects = [
         'localization-setups',
         'mechanism-examples',
         'rule-examples',
-        'custom-controls'
+        'custom-controls',
+        'controller-bindings'
 ]
 def exampleGradleCommand = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('win')
         ? 'gradlew.bat'

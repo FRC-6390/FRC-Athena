@@ -1,12 +1,13 @@
 # Athena Example Projects
 
-- `tank-drive` - tank drive robot
-- `swerve-drive` - swerve drive robot
+- `tank-drive` - tank drive robot with processed driver axes in a dedicated `Controls.java`
+- `swerve-drive` - swerve drive robot with processed translation and rotation axes in a dedicated `Controls.java`
 - `auto-following` - autonomous setup with PathPlanner, Choreo-style paths, markers, and a custom timed provider
 - `localization-setups` - odometry, multi-camera vision, weighted, latest-valid, and Kalman localization pipelines
-- `mechanism-examples` - open-loop, velocity, and split-wheel shooters; manual, single-joint, and 2DOF arms; roller and indexed intakes; single and follower elevators; simulations; and a composed superstructure
-- `rule-examples` - guarded Actions using clamps, limit switches, conditional branches, timeouts, hooks, and sensor gates
-- `custom-controls` - software control loops and arbitrary feedforward layered onto closed-loop controls
+- `mechanism-examples` - button-bound open-loop, velocity, and split-wheel shooters; manual, single-joint, and 2DOF arms; roller and indexed intakes; single and follower elevators; simulations; and a composed superstructure
+- `rule-examples` - button-bound guarded Actions using clamps, limit switches, conditional branches, timeouts, hooks, and sensor gates
+- `custom-controls` - button-bound software control loops and arbitrary feedforward layered onto closed-loop controls
+- `controller-bindings` - Xbox axes and button bindings contained in a dedicated `Controls.java` mechanism
 
 Each folder is a standalone WPILib robot project.
 

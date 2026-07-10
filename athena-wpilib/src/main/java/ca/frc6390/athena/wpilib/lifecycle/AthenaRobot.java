@@ -9,7 +9,7 @@ import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ActionRequests;
 import ca.frc6390.athena.robot.RobotRuntime;
-import ca.frc6390.athena.wpilib.controls.Controls;
+import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import edu.wpi.first.wpilibj.RobotBase;
@@ -52,7 +52,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     public final CommandAction Action(Action Action) {
-        return Controls.run("Action:robot", () -> set(Action));
+        return WpilibCommands.run("Action:robot", () -> set(Action));
     }
 
     @Override

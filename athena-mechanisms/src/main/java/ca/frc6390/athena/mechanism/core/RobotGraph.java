@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -49,6 +50,25 @@ final class RobotGraph {
             }
         }
         return simulations;
+    }
+
+    Map<String, HookBinding> hooks(Mechanism mechanism) {
+        Map<String, HookBinding> hooks = new LinkedHashMap<>();
+        collectHooks("", mechanism, Collections.newSetFromMap(new IdentityHashMap<>()), hooks);
+        return hooks;
+    }
+
+    private void collectHooks(
+            String path,
+            Mechanism mechanism,
+            Set<Mechanism> visited,
+            Map<String, HookBinding> hooks) {
+        if (!visited.add(mechanism)) {
+            return;
+        }
+        MechanismNode node = node(mechanism);
+        node.hooks().forEach((name, hook) -> hooks.put(path + name, hook));
+        node.children().forEach((name, child) -> collectHooks(path + name + ".", child, visited, hooks));
     }
 
     private void collectDeclarations(Mechanism mechanism, Set<Mechanism> visited, Set<Object> declarations) {

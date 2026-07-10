@@ -256,7 +256,15 @@ public final class MechanismScheduler {
     }
 
     private MechanismRuntime runtime(Mechanism mechanism) {
-        return MechanismRuntime.of(graph.node(mechanism), actionContext, resolver, pathRuntimes)
+        MechanismNode node = graph.node(mechanism);
+        MechanismNode runtimeNode = new MechanismNode(
+                node.name(),
+                node.mechanism(),
+                node.children(),
+                node.Actions(),
+                node.declarations(),
+                graph.hooks(mechanism));
+        return MechanismRuntime.of(runtimeNode, actionContext, resolver, pathRuntimes)
                 .simulationStep(simulationStep);
     }
 

@@ -1,7 +1,5 @@
 package frc.robot;
 
-import ca.frc6390.athena.mechanism.core.Events;
-import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.wpilib.lifecycle.AthenaRobot;
 import frc.robot.mechanisms.FollowerElevator;
 import frc.robot.mechanisms.IndexedIntake;
@@ -28,9 +26,13 @@ public final class Robot extends AthenaRobot {
     public final LimitedManualArm limitedManualArm = new LimitedManualArm();
     public final IndexedIntake indexedIntake = new IndexedIntake();
     public final FollowerElevator followerElevator = new FollowerElevator();
-
-    @SuppressWarnings("unused")
-    public final HookBinding runExample = Events.teleopPeriodic().whileActive(superstructure.scoreHigh::request);
+    public final Controls controls = new Controls(
+            superstructure,
+            openLoopShooter,
+            singleJointArm,
+            limitedManualArm,
+            indexedIntake,
+            followerElevator);
 
     @Override
     protected void configure() {
@@ -41,5 +43,6 @@ public final class Robot extends AthenaRobot {
         register(limitedManualArm);
         register(indexedIntake);
         register(followerElevator);
+        register(controls);
     }
 }

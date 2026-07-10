@@ -54,6 +54,8 @@ final class MechanismIntrospector {
                 actions.put(fieldName, action);
             } else if (value instanceof HookBinding hook) {
                 hooks.put(fieldName, hook);
+            } else if (value instanceof HookGroup group) {
+                group.hooks().forEach((hookName, hook) -> hooks.put(fieldName + "." + hookName, hook));
             } else {
                 Object declaration = declaration(value);
                 if (declaration != null) {
