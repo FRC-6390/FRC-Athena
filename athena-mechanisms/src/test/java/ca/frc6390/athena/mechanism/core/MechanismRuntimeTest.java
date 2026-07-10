@@ -15,6 +15,7 @@ import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.backend.MotorBackend;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -286,7 +287,7 @@ class MechanismRuntimeTest {
         EncoderPositionMechanism mechanism = new EncoderPositionMechanism();
         MechanismScheduler runtime = MechanismScheduler.create(actions).register(mechanism);
 
-        runtime.request(mechanism.setPosition);
+        runtime.request((Action) mechanism.setPosition);
         runtime.robotPeriodic(1.0, 0.02);
         runtime.robotPeriodic(1.02, 0.02);
 
@@ -614,7 +615,7 @@ class MechanismRuntimeTest {
 
     private static final class EncoderPositionMechanism implements Mechanism {
         private final EncoderDevice encoder = ENCODER;
-        private final Action setPosition = encoder.setPosition(2.5);
+        private final DeviceAction setPosition = encoder.setPosition(2.5);
     }
 
     private static final class ExternalActions {

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
+import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
@@ -60,6 +61,17 @@ public final class Actions {
 
     static Action setPosition(EncoderDevice encoder, double position) {
         return new EncoderSetPosition(encoder, position);
+    }
+
+    static Action then(DeviceAction action, DeviceAction next) {
+        return new Action.Then(mechanismAction(action), mechanismAction(next));
+    }
+
+    private static Action mechanismAction(DeviceAction action) {
+        if (action instanceof Action mechanismAction) {
+            return mechanismAction;
+        }
+        throw new IllegalArgumentException("Device action was not created by Athena mechanisms.");
     }
 
     public static Action position(ControlBinding control, double position) {

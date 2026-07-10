@@ -7,6 +7,7 @@ import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.vendor.VendorOptions;
+import ca.frc6390.athena.hardware.runtime.DeviceAction;
 
 /**
  * Reusable motor declaration for robot constants.
@@ -56,19 +57,19 @@ public record MotorDevice(
         return EncoderDevice.motorAbsolute(this);
     }
 
-    public <T> T percent(double percent) {
+    public <T extends DeviceAction> T percent(double percent) {
         return action("percent", new Class<?>[] {MotorDevice.class, double.class}, this, percent);
     }
 
-    public <T> T percent(DoubleSupplier percent) {
+    public <T extends DeviceAction> T percent(DoubleSupplier percent) {
         return action("percent", new Class<?>[] {MotorDevice.class, DoubleSupplier.class}, this, percent);
     }
 
-    public <T> T voltage(double volts) {
+    public <T extends DeviceAction> T voltage(double volts) {
         return action("voltage", new Class<?>[] {MotorDevice.class, double.class}, this, volts);
     }
 
-    public <T> T voltage(DoubleSupplier volts) {
+    public <T extends DeviceAction> T voltage(DoubleSupplier volts) {
         return action("voltage", new Class<?>[] {MotorDevice.class, DoubleSupplier.class}, this, volts);
     }
 
@@ -206,7 +207,7 @@ public record MotorDevice(
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> T action(String method, Class<?>[] parameterTypes, Object... args) {
+    private static <T extends DeviceAction> T action(String method, Class<?>[] parameterTypes, Object... args) {
         try {
             Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
             var factory = actions.getDeclaredMethod(method, parameterTypes);

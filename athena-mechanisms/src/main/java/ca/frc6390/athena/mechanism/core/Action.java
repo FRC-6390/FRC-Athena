@@ -1,13 +1,20 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.Range;
+import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 /**
  * Robot intent for a mechanism.
  */
-public interface Action {
+public interface Action extends DeviceAction {
+    @Override
+    default void apply(ActionContext context) {
+        request();
+    }
+
     default void request() {
         ActionRequests.request(this);
     }

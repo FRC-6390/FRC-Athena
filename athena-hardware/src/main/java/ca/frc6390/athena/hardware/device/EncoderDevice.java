@@ -6,6 +6,7 @@ import java.util.Objects;
 import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
+import ca.frc6390.athena.hardware.runtime.DeviceAction;
 
 /**
  * Reusable encoder declaration for robot constants.
@@ -159,10 +160,9 @@ public record EncoderDevice(
      * Creates an action that sets this encoder's relative position.
      *
      * @param position relative position in this declaration's configured units
-     * @param <T> mechanism action type
      * @return position-setting action
      */
-    public <T> T setPosition(double position) {
+    public DeviceAction setPosition(double position) {
         if (!Double.isFinite(position)) {
             throw new IllegalArgumentException("Encoder position must be finite.");
         }
@@ -218,14 +218,14 @@ public record EncoderDevice(
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> T action(String method, Class<?>[] parameterTypes, Object... args) {
+    private static DeviceAction action(String method, Class<?>[] parameterTypes, Object... args) {
         try {
             Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
             var factory = actions.getDeclaredMethod(method, parameterTypes);
             if (!factory.canAccess(null)) {
                 factory.setAccessible(true);
             }
-            return (T) factory.invoke(null, args);
+            return (DeviceAction) factory.invoke(null, args);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Encoder action factories require athena-mechanisms on the classpath.", exception);
         }

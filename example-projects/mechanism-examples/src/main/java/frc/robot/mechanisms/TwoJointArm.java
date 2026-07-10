@@ -47,7 +47,7 @@ public final class TwoJointArm implements Mechanism {
 
     public final Action stow = Actions.sequence()
             .until(homeSwitch::active, shoulderMotor.percent(() -> homeSwitch.active() ? 0.0 : -0.15))
-            .then(shoulderEncoder.<Action>setPosition(0.0).then(pose(0.0, 0.0)));
+            .then(shoulderEncoder.setPosition(0.0).then(pose(0.0, 0.0)));
     public final Action floorPickup = pose(-18.0, -45.0);
     public final Action ampScore = pose(65.0, 40.0);
     public final Action trapScore = pose(92.0, 70.0);

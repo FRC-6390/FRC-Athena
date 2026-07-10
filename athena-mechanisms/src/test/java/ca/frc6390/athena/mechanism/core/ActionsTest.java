@@ -46,6 +46,13 @@ class ActionsTest {
         assertThrows(UnsupportedOperationException.class, () -> actions.clear());
     }
 
+    @Test
+    void hooksAcceptDeviceActionsDirectly() {
+        HookBinding hook = Events.when(() -> true).active().onStart(MOTOR.encoder().setPosition(1.0));
+
+        assertEquals(1, hook.actions().size());
+    }
+
     private record TestMechanism(Action initial) implements Mechanism {
     }
 }

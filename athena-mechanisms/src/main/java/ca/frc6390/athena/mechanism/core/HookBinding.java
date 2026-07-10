@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
+import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -26,12 +27,20 @@ public record HookBinding(EventBinding event, List<HookAction> actions) {
         return with(Phase.ON_START, action);
     }
 
+    public HookBinding onStart(DeviceAction action) {
+        return onStart((ActionBinding) action);
+    }
+
     public HookBinding whileActive(Runnable action) {
         return whileActive(ActionBinding.run(action));
     }
 
     public HookBinding whileActive(ActionBinding action) {
         return with(Phase.WHILE_ACTIVE, action);
+    }
+
+    public HookBinding whileActive(DeviceAction action) {
+        return whileActive((ActionBinding) action);
     }
 
     public HookBinding onEnd(Runnable action) {
@@ -42,6 +51,10 @@ public record HookBinding(EventBinding event, List<HookAction> actions) {
         return with(Phase.ON_END, action);
     }
 
+    public HookBinding onEnd(DeviceAction action) {
+        return onEnd((ActionBinding) action);
+    }
+
     public HookBinding onInactive(Runnable action) {
         return onInactive(ActionBinding.run(action));
     }
@@ -50,12 +63,20 @@ public record HookBinding(EventBinding event, List<HookAction> actions) {
         return with(Phase.ON_INACTIVE, action);
     }
 
+    public HookBinding onInactive(DeviceAction action) {
+        return onInactive((ActionBinding) action);
+    }
+
     public HookBinding whileInactive(Runnable action) {
         return whileInactive(ActionBinding.run(action));
     }
 
     public HookBinding whileInactive(ActionBinding action) {
         return with(Phase.WHILE_INACTIVE, action);
+    }
+
+    public HookBinding whileInactive(DeviceAction action) {
+        return whileInactive((ActionBinding) action);
     }
 
     private HookBinding with(Phase phase, ActionBinding action) {
