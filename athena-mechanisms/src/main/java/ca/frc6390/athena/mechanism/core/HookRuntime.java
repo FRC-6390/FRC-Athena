@@ -19,17 +19,23 @@ final class HookRuntime {
     }
 
     private final LeaseController leases;
+    private final Runnable immediateMutation;
     private final Map<HookBinding, Boolean> previousEventActive = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> previousSourceActive = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> consumedEvents = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> sourceSamples = new IdentityHashMap<>();
 
     HookRuntime() {
-        this(null);
+        this(null, null);
     }
 
     HookRuntime(LeaseController leases) {
+        this(leases, null);
+    }
+
+    HookRuntime(LeaseController leases, Runnable immediateMutation) {
         this.leases = leases;
+        this.immediateMutation = immediateMutation == null ? () -> { } : immediateMutation;
     }
 
     /**
@@ -40,6 +46,14 @@ final class HookRuntime {
      * @param hooks hooks to evaluate
      */
     public void run(EventContext context, ActionContext actionContext, Collection<HookBinding> hooks) {
+        run(context, actionContext, hooks, true);
+    }
+
+    void run(
+            EventContext context,
+            ActionContext actionContext,
+            Collection<HookBinding> hooks,
+            boolean finishEvents) {
         Objects.requireNonNull(actionContext, "actionContext");
         Objects.requireNonNull(hooks, "hooks");
         EventContext safeContext = context == null ? EventContext.empty() : context;
@@ -51,7 +65,9 @@ final class HookRuntime {
         }
         for (EventBinding event : consumedEvents.keySet()) {
             previousSourceActive.put(event, sourceSamples.getOrDefault(event, false));
-            event.afterRun(safeContext);
+            if (finishEvents) {
+                event.afterRun(safeContext);
+            }
         }
     }
 
@@ -88,6 +104,7 @@ final class HookRuntime {
             if (isImmediateDeviceMutation(binding.action())) {
                 if (binding.phase().shouldRun(event, wasActive, active)) {
                     binding.action().apply(actionContext);
+                    immediateMutation.run();
                 }
                 continue;
             }
@@ -115,12 +132,6 @@ final class HookRuntime {
             boolean active) {
         boolean shouldRun = binding.phase().shouldRun(event, wasActive, active);
         if (isHeldPhase(binding.phase())) {
-            if (event.pulse()) {
-                if (active) {
-                    leases.activate(binding, action, false);
-                }
-                return;
-            }
             boolean held = binding.phase() == HookBinding.Phase.WHILE_ACTIVE ? active : !active;
             if (held) {
                 leases.activate(binding, action, false);
@@ -148,7 +159,7 @@ final class HookRuntime {
                         : Actions.parallel(captured.toArray(Action[]::new));
                 leases.activate(binding, action, false);
             }
-        } else if (wasHeld && !event.pulse()) {
+        } else if (wasHeld) {
             leases.release(binding);
         }
     }

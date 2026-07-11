@@ -3,11 +3,17 @@ package ca.frc6390.athena.hardware.runtime;
 /**
  * Marker for an Athena action created by a hardware declaration.
  */
-public interface DeviceAction extends ActionBinding {
+public interface DeviceAction extends ActionBinding, Runnable {
     /**
      * Requests this action from the active robot runtime.
      */
     void request();
+
+    /** Requests this action when used through Java's runnable APIs. */
+    @Override
+    default void run() {
+        request();
+    }
 
     /**
      * Runs another device action after this one completes.

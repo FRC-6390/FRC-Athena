@@ -9,6 +9,9 @@ package ca.frc6390.athena.hardware.device;
  */
 public record Range(double minimum, double maximum, String unit) {
     public Range {
+        if (!Double.isFinite(minimum) || !Double.isFinite(maximum)) {
+            throw new IllegalArgumentException("Range bounds must be finite.");
+        }
         if (maximum < minimum) {
             throw new IllegalArgumentException("Range maximum must be greater than or equal to minimum.");
         }

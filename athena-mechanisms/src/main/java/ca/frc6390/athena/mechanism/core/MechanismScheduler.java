@@ -328,8 +328,9 @@ public final class MechanismScheduler {
         sampleSignals();
         List<ResolvedOutput> outputs = new ArrayList<>();
         for (MechanismRuntime runtime : runtimes.values()) {
-            runtime.runHooks(eventContext);
+            runtime.runHooks(eventContext, false);
         }
+        digitalInputs.forEach(DigitalInputDevice::clearLatchedEdges);
         for (MechanismRuntime runtime : runtimes.values()) {
             runtime.periodicOutputsInto(safeMechanismContext, outputs);
         }

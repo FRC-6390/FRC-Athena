@@ -76,6 +76,11 @@ final class OutputApplier {
 
     void stopAll() {
         drivenMotors.forEach(MotorHandle::stop);
+        resetControls();
+    }
+
+    void resetControls() {
+        controlRuntimes.clear();
     }
 
     private AppliedOutput resolveControlOutput(ResolvedOutput output, MechanismContext mechanismContext) {
@@ -121,13 +126,15 @@ final class OutputApplier {
             return offloaded;
         }
         Output applied = null;
-        for (int index = 0; index < state.runtimes.size(); index++) {
-            if (state.roles[index] == ControlLoopRole.TARGET_TRANSFORM) {
-                continue;
-            }
-            ControlOutput controlOutput = state.runtimes.get(index).calculate(loopContext);
-            if (controlOutput != null) {
-                applied = combine(applied, controlOutput.output());
+        if (staged.output() instanceof Output.Position || staged.output() instanceof Output.Velocity) {
+            for (int index = 0; index < state.runtimes.size(); index++) {
+                if (state.roles[index] == ControlLoopRole.TARGET_TRANSFORM) {
+                    continue;
+                }
+                ControlOutput controlOutput = state.runtimes.get(index).calculate(loopContext);
+                if (controlOutput != null) {
+                    applied = combine(applied, controlOutput.output());
+                }
             }
         }
         Output resolved = applied == null ? staged.output() : applied;
@@ -156,6 +163,9 @@ final class OutputApplier {
             ControlRuntimeState state,
             double position,
             double velocity) {
+        if (!(request instanceof Output.Position || request instanceof Output.Velocity)) {
+            return request;
+        }
         Output transformed = request;
         for (int index = 0; index < state.runtimes.size(); index++) {
             if (state.roles[index] != ControlLoopRole.TARGET_TRANSFORM) {

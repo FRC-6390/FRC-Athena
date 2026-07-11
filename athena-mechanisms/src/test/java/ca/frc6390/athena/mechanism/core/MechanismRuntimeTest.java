@@ -69,10 +69,11 @@ class MechanismRuntimeTest {
         ActionRequests.bind(scheduler::request);
         try {
             scheduler.teleopPeriodic(0.0, 0.02);
+            assertEquals(0.65, actions.motor(MOTOR).percent, 1.0e-9);
             scheduler.robotPeriodic(0.02, 0.02);
 
             assertEquals(1, callbacks.get());
-            assertEquals(0.65, actions.motor(MOTOR).percent, 1.0e-9);
+            assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
         } finally {
             ActionRequests.clear();
         }

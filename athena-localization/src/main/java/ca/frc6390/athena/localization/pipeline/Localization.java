@@ -19,6 +19,8 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StructPublisher;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
@@ -177,6 +179,7 @@ public final class Localization implements PoseSignal {
             }
             refreshInputs(context, timestampSeconds, dtSeconds);
             evaluate(timestampSeconds);
+            publishPose();
             state.lastRefreshTimestamp = timestampSeconds;
             state.runtimeOwned = true;
             return snapshot(state.output);
@@ -302,6 +305,28 @@ public final class Localization implements PoseSignal {
             case COVARIANCE_INTERSECTION -> covarianceIntersection(accepted);
             case KALMAN -> kalman(odometry, accepted, timestampSeconds);
         };
+    }
+
+    private void publishPose() {
+        if (!publishNetworkTables) {
+            return;
+        }
+        PoseSnapshot latest = poseSamples(state.output).stream()
+                .max(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
+                .map(PoseMeasurementSample::pose)
+                .orElse(null);
+        if (latest == null) {
+            return;
+        }
+        if (state.posePublisher == null) {
+            String topic = debugName.isBlank()
+                    ? "Athena/Localization/Pose"
+                    : "Athena/Localization/" + debugName + "/Pose";
+            state.posePublisher = NetworkTableInstance.getDefault()
+                    .getStructTopic(topic, Pose2d.struct)
+                    .publish();
+        }
+        state.posePublisher.set(toWpilib(latest));
     }
 
     private List<Measurement> kalman(
@@ -538,6 +563,7 @@ public final class Localization implements PoseSignal {
         private double lastRefreshTimestamp = Double.NaN;
         private boolean runtimeOwned;
         private KalmanEngine kalman;
+        private StructPublisher<Pose2d> posePublisher;
     }
 
     private static final class KalmanEngine {

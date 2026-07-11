@@ -43,6 +43,10 @@ public interface EventBinding {
         return new HookBinding(this).onStart(action);
     }
 
+    default HookBinding onStart(Action action) {
+        return new HookBinding(this).onStart(action);
+    }
+
     default HookBinding whileActive(Runnable action) {
         return new HookBinding(this).whileActive(action);
     }
@@ -52,6 +56,10 @@ public interface EventBinding {
     }
 
     default HookBinding whileActive(DeviceAction action) {
+        return new HookBinding(this).whileActive(action);
+    }
+
+    default HookBinding whileActive(Action action) {
         return new HookBinding(this).whileActive(action);
     }
 
@@ -67,6 +75,10 @@ public interface EventBinding {
         return new HookBinding(this).onEnd(action);
     }
 
+    default HookBinding onEnd(Action action) {
+        return new HookBinding(this).onEnd(action);
+    }
+
     default HookBinding onInactive(Runnable action) {
         return new HookBinding(this).onInactive(action);
     }
@@ -79,6 +91,10 @@ public interface EventBinding {
         return new HookBinding(this).onInactive(action);
     }
 
+    default HookBinding onInactive(Action action) {
+        return new HookBinding(this).onInactive(action);
+    }
+
     default HookBinding whileInactive(Runnable action) {
         return new HookBinding(this).whileInactive(action);
     }
@@ -88,6 +104,10 @@ public interface EventBinding {
     }
 
     default HookBinding whileInactive(DeviceAction action) {
+        return new HookBinding(this).whileInactive(action);
+    }
+
+    default HookBinding whileInactive(Action action) {
         return new HookBinding(this).whileInactive(action);
     }
 }

@@ -8,6 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.frc6390.athena.auto.AutoRuntime;
 import ca.frc6390.athena.auto.Autos;
 import ca.frc6390.athena.commands.CommandAction;
+import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
+import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
+import ca.frc6390.athena.drivetrain.swerve.SwerveModuleModel;
+import ca.frc6390.athena.drivetrain.swerve.SwerveOdometry;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKind;
@@ -20,6 +24,8 @@ import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.encoder.EncoderUnit;
+import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.localization.pipeline.Localization;
@@ -428,6 +434,21 @@ class RobotRuntimeTest {
     }
 
     @Test
+    void refreshesDiscoveredSwerveKalmanLocalizationFromIntegratedDriveEncoders() {
+        SimulationSession simulation = SimulationSession.create();
+        SwerveLocalizationMechanism mechanism = new SwerveLocalizationMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
+
+        runtime.robotPeriodic(0.0, 0.02);
+        mechanism.driveMotors().forEach(motor -> simulation.motor(motor).state(2.0, 2.0));
+        runtime.robotPeriodic(1.0, 1.0);
+
+        assertTrue(mechanism.odometry.pose().xMeters() > 0.0);
+        assertTrue(mechanism.estimatedPose.pose().xMeters() > 0.0);
+        assertEquals(mechanism.odometry.pose().xMeters(), mechanism.estimatedPose.pose().xMeters(), 1.0e-9);
+    }
+
+    @Test
     void localizationRefreshPolicyAppliesRootAgeAndDisabledRules() {
         AtomicInteger reads = new AtomicInteger();
         Localization localization = Localizations.latestValid()
@@ -667,5 +688,42 @@ class RobotRuntimeTest {
 
     private record LocalizationMechanism(Localization output)
             implements ca.frc6390.athena.mechanism.core.Mechanism {
+    }
+
+    private static final class SwerveLocalizationMechanism
+            implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final ImuDevice imuDevice = ImuDevice.of(ImuKinds.PIGEON_2, 60);
+        private final ImuSource imu = imuDevice.relative();
+        private final SwerveModule frontLeft = module(61, 71, 81);
+        private final SwerveModule frontRight = module(62, 72, 82);
+        private final SwerveModule backLeft = module(63, 73, 83);
+        private final SwerveModule backRight = module(64, 74, 84);
+        private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
+                0.5, 0.5, 5.0, frontLeft, frontRight, backLeft, backRight);
+        private final SwerveOdometry odometry = kinematics.odometry(imu);
+        private final Localization estimatedPose = Localizations.kalman().input(odometry);
+
+        private List<MotorDevice> driveMotors() {
+            return List.of(
+                    frontLeft.drive.get(),
+                    frontRight.drive.get(),
+                    backLeft.drive.get(),
+                    backRight.drive.get());
+        }
+
+        private static SwerveModule module(int driveId, int steerId, int angleId) {
+            TestSwerveModule module = new TestSwerveModule();
+            module.drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId));
+            module.steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId));
+            module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, angleId)
+                    .units(EncoderUnit.ROTATIONS));
+            return module;
+        }
+    }
+
+    private static final class TestSwerveModule extends SwerveModule {
+        private TestSwerveModule() {
+            super(SwerveModuleModel.custom(2.0, 1.0, 1.0 / Math.PI));
+        }
     }
 }

@@ -47,7 +47,7 @@ final class MechanismRuntime {
         this.actionContext = Objects.requireNonNull(actionContext, "actionContext");
         this.resolver = Objects.requireNonNull(resolver, "resolver");
         this.applier = OutputApplier.using(actionContext);
-        this.hookRuntime = new HookRuntime(leaseController);
+        this.hookRuntime = new HookRuntime(leaseController, applier::resetControls);
         this.hookBindings = List.copyOf(node.hooks().values());
         this.pathRuntimes = Objects.requireNonNull(pathRuntimes, "pathRuntimes");
         this.scheduler = new StateScheduler(actionContext, pathRuntimes);
@@ -154,8 +154,12 @@ final class MechanismRuntime {
     }
 
     void runHooks(EventContext eventContext) {
+        runHooks(eventContext, true);
+    }
+
+    void runHooks(EventContext eventContext, boolean finishEvents) {
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
-        hookRuntime.run(safeEventContext, actionContext, hookBindings);
+        hookRuntime.run(safeEventContext, actionContext, hookBindings, finishEvents);
     }
 
     void periodicOutputsInto(
