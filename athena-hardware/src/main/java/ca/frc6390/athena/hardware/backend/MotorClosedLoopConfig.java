@@ -1,7 +1,9 @@
 package ca.frc6390.athena.hardware.backend;
 
 /**
- * Vendor-neutral closed-loop gains for one motor-controller slot.
+ * Vendor-neutral voltage-output closed-loop gains for one motor-controller slot.
+ * PID gains produce volts from Athena position or velocity error units, and
+ * feedforward gains produce volts from the corresponding reference units.
  */
 public record MotorClosedLoopConfig(
         int slot,

@@ -12,6 +12,7 @@ import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
+import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.HardwareBus;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -105,6 +106,16 @@ class RevBackendTest {
 
         assertEquals(1, followerController.followLeaderId);
         assertTrue(followerController.followInverted);
+    }
+
+    @Test
+    void motorDoesNotAdvertiseDutyCyclePidAsVoltageClosedLoop() {
+        RevMotorHandle handle = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.NEO, 1),
+                new RevMotorOptions(),
+                new RecordingSparkController());
+
+        assertEquals(MotorControlCapabilities.OPEN_LOOP_ONLY, handle.controlCapabilities());
     }
 
     @Test

@@ -8,7 +8,7 @@ import ca.frc6390.athena.mechanism.core.ControlLoopRuntime;
 import ca.frc6390.athena.mechanism.core.ControlOutput;
 
 /**
- * Reusable feedforward gains for control loops.
+ * Reusable feedforward gains whose calculated effort is expressed in volts.
  */
 public record FeedforwardGains(double staticGain, double velocityGain, double gravityGain) implements ControlLoop {
     public static FeedforwardGains of(double staticGain, double velocityGain, double gravityGain) {

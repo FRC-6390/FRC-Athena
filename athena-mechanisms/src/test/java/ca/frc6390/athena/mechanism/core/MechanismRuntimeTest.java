@@ -537,7 +537,7 @@ class MechanismRuntimeTest {
     }
 
     @Test
-    void controlPidLoopTransformsPositionRequestIntoMotorOutput() {
+    void controlPidLoopTransformsPositionRequestIntoMotorVoltage() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         actions.encoder(ENCODER).position = 0.5;
         ControlBinding control = Controls.position(MOTOR)
@@ -549,7 +549,7 @@ class MechanismRuntimeTest {
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
-        assertEquals(0.3, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(0.3, actions.motor(MOTOR).voltage, 1.0e-9);
     }
 
     @Test
@@ -566,7 +566,7 @@ class MechanismRuntimeTest {
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
-        assertEquals(0.1, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(0.1, actions.motor(MOTOR).voltage, 1.0e-9);
     }
 
     @Test
@@ -672,7 +672,7 @@ class MechanismRuntimeTest {
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
-        assertEquals(0.2, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(0.2, actions.motor(MOTOR).voltage, 1.0e-9);
     }
 
     @Test
@@ -687,6 +687,23 @@ class MechanismRuntimeTest {
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
         assertEquals(7.5, actions.motor(MOTOR).voltage, 1.0e-9);
+    }
+
+    @Test
+    void pidAndFeedforwardAddDirectlyAsVolts() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).velocity = 2.0;
+        ControlBinding control = Controls.velocity(MOTOR)
+                .feedback(ENCODER)
+                .pid(0.2, 0.0, 0.0)
+                .ff(0.5, 2.0, 1.0);
+        TestMechanism mechanism = new TestMechanism(control.velocity(3.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(7.7, actions.motor(MOTOR).voltage, 1.0e-9);
     }
 
     @Test
@@ -720,7 +737,7 @@ class MechanismRuntimeTest {
     }
 
     @Test
-    void controlLoopsComposePidPercentAndFeedforwardVoltageAsVoltage() {
+    void explicitlyMixedPercentAndVoltageLoopsConvertPercentToNominalVoltage() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding control = Controls.velocity(MOTOR)
                 .loop(binding -> context -> ControlOutput.percent(0.25))
@@ -839,7 +856,7 @@ class MechanismRuntimeTest {
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
 
-        assertEquals(0.3, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(0.3, actions.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(null, actions.motor(MOTOR).closedLoopRequest);
     }
 

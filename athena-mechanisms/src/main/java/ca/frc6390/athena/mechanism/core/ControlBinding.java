@@ -128,18 +128,22 @@ public record ControlBinding(
         return updated;
     }
 
+    /** Adds PID gains whose resulting control effort is measured in volts. */
     public ControlBinding pid(double p, double i, double d) {
         return loop(PidGains.of(p, i, d));
     }
 
+    /** Adds PID gains whose resulting control effort is measured in volts. */
     public ControlBinding pid(PidGains pid) {
         return loop(pid);
     }
 
+    /** Adds static, velocity, and gravity feedforward contributions measured in volts. */
     public ControlBinding ff(double staticGain, double velocityGain, double gravityGain) {
         return feedforward(FeedforwardGains.of(staticGain, velocityGain, gravityGain));
     }
 
+    /** Adds a feedforward contribution measured in volts. */
     public ControlBinding feedforward(FeedforwardGains feedforward) {
         return loop(feedforward);
     }

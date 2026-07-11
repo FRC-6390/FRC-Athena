@@ -9,7 +9,7 @@ import ca.frc6390.athena.mechanism.core.ControlOutput;
 import ca.frc6390.athena.mechanism.core.Output;
 
 /**
- * Reusable PID gains for control loops.
+ * Reusable PID gains whose calculated effort is always expressed in volts.
  */
 public record PidGains(double p, double i, double d, double iZone, double tolerance) implements ControlLoop {
     public static PidGains of(double p, double i, double d) {
@@ -69,7 +69,7 @@ public record PidGains(double p, double i, double d, double iZone, double tolera
             double derivative = first ? 0.0 : (error - previousError) / dt;
             first = false;
             previousError = error;
-            return ControlOutput.percent(gains.p * error + gains.i * integral + gains.d * derivative);
+            return ControlOutput.voltage(gains.p * error + gains.i * integral + gains.d * derivative);
         }
     }
 }

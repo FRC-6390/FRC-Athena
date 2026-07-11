@@ -252,7 +252,9 @@ Actions are the main public behavior API and stay public.
 
 Robot-facing code should request an Action directly with `action.request()` or through the one-argument robot helper. The runtime infers ownership from registered mechanism Action fields.
 
-Control Actions execute through the same output path as motor Actions. `ControlBinding` loop runtimes reset on first use and when the requested output kind changes; same-mode dynamic targets preserve controller and profile state. Target transforms run before constraints and planning, profiles produce position/velocity/acceleration references, PID and feedforward consume those references, and final output saturation plus directional and predictive constraint checks run last. Multiple loop outputs compose additively; mixed percent/voltage outputs promote percent to nominal 12V voltage so PID plus feedforward produces one applied voltage request.
+Control Actions execute through the same output path as motor Actions. `ControlBinding` loop runtimes reset on first use and when the requested output kind changes; same-mode dynamic targets preserve controller and profile state. Target transforms run before constraints and planning, profiles produce position/velocity/acceleration references, PID and feedforward consume those references, and final output saturation plus directional and predictive constraint checks run last.
+
+Athena's built-in PID and feedforward gains always produce volts. Their contributions add directly and the final closed-loop request is clamped to the available 12V command range. Percent remains an explicit open-loop motor Action or custom `ControlOutput.percent(...)`; it is never the implicit unit of `.pid(...)`. A vendor backend may run a loop on-device only when that controller exposes voltage-output PID semantics in Athena's position and velocity units. Otherwise Athena runs the same voltage loop and calls `setVoltage(...)`.
 
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |

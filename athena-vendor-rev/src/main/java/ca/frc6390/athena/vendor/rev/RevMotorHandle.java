@@ -140,7 +140,9 @@ public final class RevMotorHandle implements MotorHandle {
 
     @Override
     public MotorControlCapabilities controlCapabilities() {
-        return new MotorControlCapabilities(true, true, true, true, false, false, 4);
+        // SPARK PID gains produce duty cycle while Athena gains are defined in volts.
+        // Keep Athena's voltage loop on the host until REV exposes voltage-output PID.
+        return MotorControlCapabilities.OPEN_LOOP_ONLY;
     }
 
     @Override

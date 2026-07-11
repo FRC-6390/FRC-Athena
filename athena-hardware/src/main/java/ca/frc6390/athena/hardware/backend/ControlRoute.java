@@ -10,12 +10,12 @@ public enum ControlRoute {
     OPEN_LOOP,
 
     /**
-     * Athena calculates the closed-loop output before sending it to hardware.
+     * Athena calculates closed-loop voltage before sending it to hardware.
      */
     ATHENA_CLOSED_LOOP,
 
     /**
-     * The motor controller owns the closed-loop calculation.
+     * The motor controller owns a voltage-output closed-loop calculation.
      */
     DEVICE_CLOSED_LOOP,
 
