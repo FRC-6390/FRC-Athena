@@ -10,12 +10,4 @@ public final class Robot extends AthenaRobot {
     public final Flywheel flywheel = new Flywheel();
     public final AdvancedFeedback advancedFeedback = new AdvancedFeedback();
     public final Controls controls = new Controls(arm, flywheel, advancedFeedback);
-
-    @Override
-    protected void configure() {
-        register(arm);
-        register(flywheel);
-        register(advancedFeedback);
-        register(controls);
-    }
 }

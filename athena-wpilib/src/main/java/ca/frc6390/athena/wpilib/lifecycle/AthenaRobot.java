@@ -30,11 +30,6 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private double lastSimulationTimestampSeconds;
 
     /**
-     * Registers mechanisms, bindings, and robot controls.
-     */
-    protected abstract void configure();
-
-    /**
      * Returns the owned Athena mechanism runtime.
      *
      * @return runtime
@@ -44,10 +39,6 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
             throw new IllegalStateException("Athena has not been created yet.");
         }
         return runtime;
-    }
-
-    protected final void register(Mechanism mechanism) {
-        athena().register(Objects.requireNonNull(mechanism, "mechanism"));
     }
 
     public final void set(Action Action) {
@@ -65,7 +56,6 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         runtime = createRuntime(RobotBase.isSimulation());
         ActionRequests.bind(runtime::request);
         runtime.register(this);
-        configure();
         run(LifecycleMode.ROBOT, LifecyclePhase.INIT, true, false);
     }
 

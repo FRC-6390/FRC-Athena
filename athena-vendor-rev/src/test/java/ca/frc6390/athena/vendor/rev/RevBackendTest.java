@@ -9,6 +9,7 @@ import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
@@ -22,7 +23,8 @@ class RevBackendTest {
     void motorBackendSupportsBuiltInAndEquivalentKeys() {
         RevMotorBackend backend = new RevMotorBackend();
 
-        assertTrue(backend.supports(MotorKinds.SPARK_MAX_BRUSHLESS));
+        assertTrue(backend.supports(MotorKinds.NEO));
+        assertTrue(backend.supports(MotorKinds.NEO.controlledBy(MotorControllerKinds.SPARK_FLEX)));
         assertTrue(backend.supports((MotorKind) () -> "rev:spark-flex-brushed"));
         assertFalse(backend.supports((MotorKind) () -> "ctre:kraken-x60"));
     }
@@ -76,7 +78,7 @@ class RevBackendTest {
         RecordingSparkController controller = new RecordingSparkController();
         RevMotorOptions options = new RevMotorOptions().smartCurrentLimit(35);
         RevMotorHandle handle = new RevMotorHandle(
-                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 1).neutralMode(MotorNeutralMode.BRAKE),
+                MotorDevice.of(MotorKinds.NEO, 1).neutralMode(MotorNeutralMode.BRAKE),
                 options,
                 controller);
 
@@ -95,9 +97,9 @@ class RevBackendTest {
         RecordingSparkController leaderController = new RecordingSparkController();
         RecordingSparkController followerController = new RecordingSparkController();
         RevMotorHandle leader = new RevMotorHandle(
-                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 1), null, leaderController);
+                MotorDevice.of(MotorKinds.NEO, 1), null, leaderController);
         RevMotorHandle follower = new RevMotorHandle(
-                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2), null, followerController);
+                MotorDevice.of(MotorKinds.NEO, 2), null, followerController);
 
         follower.follow(leader, true);
 
@@ -109,7 +111,7 @@ class RevBackendTest {
     void motorSensorReadsAreSnapshottedUntilRefresh() {
         RecordingSparkController controller = new RecordingSparkController();
         RevMotorHandle handle = new RevMotorHandle(
-                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2),
+                MotorDevice.of(MotorKinds.NEO, 2),
                 new RevMotorOptions(),
                 controller);
 
@@ -162,7 +164,7 @@ class RevBackendTest {
     void motorClosedLoopConfigIsAppliedOnlyWhenChanged() {
         RecordingSparkController controller = new RecordingSparkController();
         RevMotorHandle handle = new RevMotorHandle(
-                MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2),
+                MotorDevice.of(MotorKinds.NEO, 2),
                 new RevMotorOptions(),
                 controller);
         MotorClosedLoopConfig config = new MotorClosedLoopConfig(

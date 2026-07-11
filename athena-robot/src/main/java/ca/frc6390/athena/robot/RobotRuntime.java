@@ -51,6 +51,10 @@ public final class RobotRuntime {
     private final List<VisionGraph> visionGraphs = new ArrayList<>();
     private final List<Localization> localizations = new ArrayList<>();
     private final List<MeasurementSnapshot> localizationSnapshots = new ArrayList<>();
+    private final Set<Localization> registeredLocalizations =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private final Set<CameraDevice> registeredCameras =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     private final Set<SimModel> registeredSimulationModels = new LinkedHashSet<>();
     private final Set<ControlBinding> registeredSimulationControls =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
@@ -211,6 +215,9 @@ public final class RobotRuntime {
      */
     public RobotRuntime register(Mechanism mechanism) {
         mechanisms.register(mechanism);
+        RuntimeGraphDiscovery.Result services = RuntimeGraphDiscovery.inspect(mechanism);
+        registerDiscoveredCameras(services.cameras());
+        localization(services.localizations().toArray(Localization[]::new));
         mechanisms.followerMotors().forEach(hardwareGraph::motor);
         mechanisms.imuDevices().forEach(imu -> {
             var handle = hardwareGraph.imu(imu);
@@ -231,6 +238,10 @@ public final class RobotRuntime {
         }
         bindDigitalInputs();
         return this;
+    }
+
+    private void registerDiscoveredCameras(List<CameraDevice> cameras) {
+        cameras(cameras.toArray(CameraDevice[]::new));
     }
 
     private void bindDigitalInputs() {
@@ -278,8 +289,15 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime cameras(CameraDevice... cameras) {
-        VisionSimulation simulation = discoverVisionSimulation(cameras);
-        VisionGraph graph = VisionGraph.of(bindCameras(simulation, cameras));
+        CameraDevice[] additions = cameras == null ? new CameraDevice[0] : Arrays.stream(cameras)
+                .filter(Objects::nonNull)
+                .filter(registeredCameras::add)
+                .toArray(CameraDevice[]::new);
+        if (additions.length == 0) {
+            return this;
+        }
+        VisionSimulation simulation = discoverVisionSimulation(additions);
+        VisionGraph graph = VisionGraph.of(bindCameras(simulation, additions));
         visionGraphs.add(graph);
         if (simulation != null) {
             simulationSession.vision(simulation);
@@ -361,8 +379,10 @@ public final class RobotRuntime {
         if (pipelines != null) {
             for (Localization pipeline : pipelines) {
                 if (pipeline != null) {
-                    localizations.add(pipeline);
-                    localizationSnapshots.add(new MeasurementSnapshot(pipeline));
+                    if (registeredLocalizations.add(pipeline)) {
+                        localizations.add(pipeline);
+                        localizationSnapshots.add(new MeasurementSnapshot(pipeline));
+                    }
                 }
             }
         }

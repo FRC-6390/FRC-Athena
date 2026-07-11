@@ -57,6 +57,11 @@ final class ConfiguredMeasurementSignal implements MeasurementSignal {
     }
 
     @Override
+    public List<MeasurementSignal> sources() {
+        return List.of(delegate);
+    }
+
+    @Override
     public MeasurementSignal stdDevs(MeasurementStdDevs stdDevs) {
         return new ConfiguredMeasurementSignal(delegate, stdDevs, latencyLimitSeconds, maxAgeSeconds, enabled, debugName,
                 nowSeconds);

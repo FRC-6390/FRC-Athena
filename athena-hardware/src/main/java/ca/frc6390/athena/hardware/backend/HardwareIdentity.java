@@ -36,7 +36,10 @@ public record HardwareIdentity(String category, String kindKey, String bus, int 
      */
     public static HardwareIdentity motor(MotorDevice device) {
         Objects.requireNonNull(device, "device");
-        return new HardwareIdentity("motor", device.kind().key(), device.canbus(), device.id(), "");
+        String controllerKey = device.kind().controllerKind() == null
+                ? device.kind().key()
+                : device.kind().controllerKind().key();
+        return new HardwareIdentity("motor", controllerKey, device.canbus(), device.id(), "");
     }
 
     /**

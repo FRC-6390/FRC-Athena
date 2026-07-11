@@ -1,6 +1,7 @@
 package ca.frc6390.athena.vendor.rev;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.hardware.backend.MotorBackend;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -11,7 +12,9 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 public final class RevMotorBackend implements MotorBackend {
     @Override
     public boolean supports(MotorKind kind) {
-        return kind.key().startsWith("rev:spark-");
+        return kind.controllerKind() == MotorControllerKinds.SPARK_MAX
+                || kind.controllerKind() == MotorControllerKinds.SPARK_FLEX
+                || kind.key().startsWith("rev:spark-");
     }
 
     @Override

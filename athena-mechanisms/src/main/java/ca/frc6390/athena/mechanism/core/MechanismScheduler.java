@@ -37,7 +37,9 @@ public final class MechanismScheduler {
     private final Set<DigitalInputDevice> digitalInputs = new LinkedHashSet<>();
     private final RobotGraph graph = new RobotGraph();
     private final Map<PathAction, PathRuntime> pathRuntimes = new LinkedHashMap<>();
+    private final Map<Object, List<LeaseRegistration>> leaseTargets = new IdentityHashMap<>();
     private final OutputResolver resolver;
+    private long requestSequence;
     private Runnable simulationStep = () -> {
     };
 
@@ -234,18 +236,68 @@ public final class MechanismScheduler {
         return Set.copyOf(followers);
     }
 
-    private MechanismScheduler set(Mechanism mechanism, Action action) {
-        runtimeFor(mechanism).set(action);
-        return this;
+    private void activateLease(Object key, Action action, boolean restart) {
+        List<LeaseRegistration> existing = leaseTargets.get(key);
+        if (existing != null && !restart) {
+            return;
+        }
+        if (existing != null) {
+            releaseLease(key);
+        }
+        Map<Mechanism, List<Action>> partitions = partitions(Objects.requireNonNull(action, "action"));
+        List<LeaseRegistration> registrations = new ArrayList<>(partitions.size());
+        long recency = ++requestSequence;
+        for (Map.Entry<Mechanism, List<Action>> partition : partitions.entrySet()) {
+            Action partitioned = partition.getValue().size() == 1
+                    ? partition.getValue().get(0)
+                    : Actions.parallel(partition.getValue().toArray(Action[]::new));
+            MechanismRuntime runtime = runtimeFor(partition.getKey());
+            Object runtimeKey = new Object();
+            runtime.activateLease(runtimeKey, partitioned, recency);
+            registrations.add(new LeaseRegistration(runtimeKey, runtime));
+        }
+        leaseTargets.put(key, List.copyOf(registrations));
     }
 
-    public MechanismScheduler request(Action action) {
-        RequestTarget target = targetFor(Objects.requireNonNull(action, "action"));
+    private void releaseLease(Object key) {
+        List<LeaseRegistration> registrations = leaseTargets.remove(key);
+        if (registrations != null) {
+            for (LeaseRegistration registration : registrations) {
+                registration.runtime().releaseLease(registration.runtimeKey());
+            }
+        }
+    }
+
+    private Map<Mechanism, List<Action>> partitions(Action action) {
+        Map<Mechanism, List<Action>> partitions = new IdentityHashMap<>();
+        RequestTarget direct = ambiguousActionTargets.contains(action) ? null : actionTargets.get(action);
+        if (direct != null) {
+            partitions.computeIfAbsent(direct.root(), ignored -> new ArrayList<>()).add(action);
+            return partitions;
+        }
+        if (action instanceof Actions.Parallel parallel) {
+            for (Action child : parallel.Actions()) {
+                addPartition(partitions, child);
+            }
+        } else {
+            addPartition(partitions, action);
+        }
+        return partitions;
+    }
+
+    private void addPartition(Map<Mechanism, List<Action>> partitions, Action action) {
+        RequestTarget target = targetFor(action);
         if (target == null) {
             throw new IllegalArgumentException("Action is not owned by a registered mechanism and does not target "
                     + "a declaration owned by one.");
         }
-        return set(target.root(), action);
+        partitions.computeIfAbsent(target.root(), ignored -> new ArrayList<>()).add(action);
+    }
+
+    public MechanismScheduler request(Action action) {
+        Action safeAction = Objects.requireNonNull(action, "action");
+        activateLease(safeAction, safeAction, true);
+        return this;
     }
 
     public Action action(Mechanism mechanism) {
@@ -257,7 +309,10 @@ public final class MechanismScheduler {
         sampleSignals();
         List<ResolvedOutput> outputs = new ArrayList<>();
         for (MechanismRuntime runtime : runtimes.values()) {
-            runtime.periodicInto(safeMechanismContext, eventContext, outputs);
+            runtime.runHooks(eventContext);
+        }
+        for (MechanismRuntime runtime : runtimes.values()) {
+            runtime.periodicOutputsInto(safeMechanismContext, outputs);
         }
         return outputs;
     }
@@ -310,7 +365,18 @@ public final class MechanismScheduler {
                 node.Actions(),
                 node.declarations(),
                 graph.hooks(mechanism));
-        return MechanismRuntime.of(runtimeNode, actionContext, resolver, pathRuntimes)
+        HookRuntime.LeaseController leases = new HookRuntime.LeaseController() {
+            @Override
+            public void activate(Object key, Action action, boolean restart) {
+                activateLease(key, action, restart);
+            }
+
+            @Override
+            public void release(Object key) {
+                releaseLease(key);
+            }
+        };
+        return MechanismRuntime.of(runtimeNode, actionContext, resolver, pathRuntimes, leases)
                 .simulationStep(simulationStep);
     }
 
@@ -464,6 +530,8 @@ public final class MechanismScheduler {
             collectActionDeclarations(then.next(), declarations);
         } else if (action instanceof PathAction path) {
             declarations.add(path);
+        } else if (action instanceof Actions.MotorNeutral motor) {
+            declarations.add(motor.motor());
         } else if (action instanceof Actions.MotorPercent motor) {
             declarations.add(motor.motor());
         } else if (action instanceof Actions.DynamicMotorPercent motor) {
@@ -494,6 +562,9 @@ public final class MechanismScheduler {
     }
 
     private static ControlBinding control(Action action) {
+        if (action instanceof Actions.ControlNeutral control) {
+            return control.control();
+        }
         if (action instanceof Actions.ControlPercent control) {
             return control.control();
         }
@@ -575,6 +646,9 @@ public final class MechanismScheduler {
             root = Objects.requireNonNull(root, "root");
             owner = Objects.requireNonNull(owner, "owner");
         }
+    }
+
+    private record LeaseRegistration(Object runtimeKey, MechanismRuntime runtime) {
     }
 
     private static final class MemoryMotor implements MotorHandle {

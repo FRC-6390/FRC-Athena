@@ -1,11 +1,17 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.hardware.device.MotorDevice;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Minimal Athena-owned runtime loop for the new mechanism model.
@@ -16,25 +22,31 @@ final class MechanismRuntime {
     private final ActionContext actionContext;
     private final OutputResolver resolver;
     private final OutputApplier applier;
-    private final HookRuntime hookRuntime = new HookRuntime();
+    private final HookRuntime hookRuntime;
     private final List<HookBinding> hookBindings;
     private final StateScheduler scheduler;
+    private final Map<Object, ActiveLease> activeLeases = new IdentityHashMap<>();
+    private final Set<MotorDevice> previouslyDrivenMotors = new LinkedHashSet<>();
     private final Map<PathAction, PathRuntime> pathRuntimes;
     private Runnable simulationStep = () -> {
     };
     private Action action;
     private double stateStartSeconds = Double.NaN;
+    private long actionRecency;
+    private long localRecency;
 
     private MechanismRuntime(
             MechanismNode node,
             ActionContext actionContext,
             OutputResolver resolver,
-            Map<PathAction, PathRuntime> pathRuntimes) {
+            Map<PathAction, PathRuntime> pathRuntimes,
+            HookRuntime.LeaseController leaseController) {
         this.node = Objects.requireNonNull(node, "node");
         this.mechanism = Objects.requireNonNull(node.mechanism(), "mechanism");
         this.actionContext = Objects.requireNonNull(actionContext, "actionContext");
         this.resolver = Objects.requireNonNull(resolver, "resolver");
         this.applier = OutputApplier.using(actionContext);
+        this.hookRuntime = new HookRuntime(leaseController);
         this.hookBindings = List.copyOf(node.hooks().values());
         this.pathRuntimes = Objects.requireNonNull(pathRuntimes, "pathRuntimes");
         this.scheduler = new StateScheduler(actionContext, pathRuntimes);
@@ -46,14 +58,16 @@ final class MechanismRuntime {
                 MechanismIntrospector.inspect(mechanism),
                 actionContext,
                 OutputResolver.empty(),
-                new HashMap<>());
+                new HashMap<>(),
+                null);
     }
 
     static MechanismRuntime of(
             Mechanism mechanism,
             ActionContext actionContext,
             OutputResolver resolver) {
-        return new MechanismRuntime(MechanismIntrospector.inspect(mechanism), actionContext, resolver, new HashMap<>());
+        return new MechanismRuntime(
+                MechanismIntrospector.inspect(mechanism), actionContext, resolver, new HashMap<>(), null);
     }
 
     static MechanismRuntime of(
@@ -61,7 +75,8 @@ final class MechanismRuntime {
             ActionContext actionContext,
             OutputResolver resolver,
             Map<PathAction, PathRuntime> pathRuntimes) {
-        return new MechanismRuntime(MechanismIntrospector.inspect(mechanism), actionContext, resolver, pathRuntimes);
+        return new MechanismRuntime(
+                MechanismIntrospector.inspect(mechanism), actionContext, resolver, pathRuntimes, null);
     }
 
     static MechanismRuntime of(
@@ -69,7 +84,16 @@ final class MechanismRuntime {
             ActionContext actionContext,
             OutputResolver resolver,
             Map<PathAction, PathRuntime> pathRuntimes) {
-        return new MechanismRuntime(node, actionContext, resolver, pathRuntimes);
+        return new MechanismRuntime(node, actionContext, resolver, pathRuntimes, null);
+    }
+
+    static MechanismRuntime of(
+            MechanismNode node,
+            ActionContext actionContext,
+            OutputResolver resolver,
+            Map<PathAction, PathRuntime> pathRuntimes,
+            HookRuntime.LeaseController leaseController) {
+        return new MechanismRuntime(node, actionContext, resolver, pathRuntimes, leaseController);
     }
 
     MechanismRuntime path(PathAction ref, PathRuntime runtime) {
@@ -84,13 +108,34 @@ final class MechanismRuntime {
     }
 
     public Action action() {
-        return action;
+        ActiveLease newest = activeLeases.values().stream()
+                .max(Comparator.comparingLong(ActiveLease::recency))
+                .orElse(null);
+        return newest != null && newest.recency() > actionRecency ? newest.action : action;
     }
 
     public void set(Action action) {
+        set(action, ++localRecency);
+    }
+
+    void set(Action action, long recency) {
         this.action = Objects.requireNonNull(action, "action");
+        this.actionRecency = recency;
         this.stateStartSeconds = Double.NaN;
         this.scheduler.reset();
+    }
+
+    void activateLease(Object key, Action action, long recency) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(action, "action");
+        activeLeases.computeIfAbsent(key, ignored -> new ActiveLease(action, recency, actionContext, pathRuntimes));
+    }
+
+    void releaseLease(Object key) {
+        ActiveLease removed = activeLeases.remove(key);
+        if (removed != null) {
+            removed.scheduler.reset();
+        }
     }
 
     public List<ResolvedOutput> periodic(MechanismContext mechanismContext, EventContext eventContext) {
@@ -103,12 +148,23 @@ final class MechanismRuntime {
             MechanismContext mechanismContext,
             EventContext eventContext,
             List<ResolvedOutput> outputs) {
-        Objects.requireNonNull(outputs, "outputs");
-        MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
+        runHooks(eventContext);
+        periodicOutputsInto(mechanismContext, outputs);
+    }
+
+    void runHooks(EventContext eventContext) {
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
         hookRuntime.run(safeEventContext, actionContext, hookBindings);
+    }
+
+    void periodicOutputsInto(
+            MechanismContext mechanismContext,
+            List<ResolvedOutput> outputs) {
+        Objects.requireNonNull(outputs, "outputs");
+        MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
         if (!safeMechanismContext.enabled()) {
             applier.stopAll();
+            previouslyDrivenMotors.clear();
             simulationStep.run();
             return;
         }
@@ -125,11 +181,95 @@ final class MechanismRuntime {
             scheduler.reset();
             timedContext = withTimeInState(safeMechanismContext, 0.0);
         }
-        StateScheduler.Result active = scheduler.evaluate(action, timedContext);
-        int outputStart = outputs.size();
-        resolver.resolveInto(mechanism, active.action(), active.context(), outputs);
-        applier.applyAll(outputs, outputStart, active.context());
+        List<CandidateOutput> candidates = new ArrayList<>();
+        addCandidates(candidates, actionRecency, scheduler.evaluate(action, timedContext));
+        activeLeases.values().stream()
+                .sorted(Comparator.comparingLong(ActiveLease::recency))
+                .forEach(lease -> addCandidates(candidates, lease.recency(), lease.evaluate(safeMechanismContext)));
+
+        List<CandidateOutput> selected = arbitrate(candidates);
+        Set<MotorDevice> drivenNow = new LinkedHashSet<>();
+        for (CandidateOutput candidate : selected) {
+            outputs.add(candidate.output());
+            drivenNow.addAll(candidate.output().request().motors());
+            applier.apply(candidate.output(), candidate.context());
+        }
+        for (MotorDevice motor : previouslyDrivenMotors) {
+            if (!drivenNow.contains(motor)) {
+                actionContext.motor(motor).stop();
+            }
+        }
+        previouslyDrivenMotors.clear();
+        previouslyDrivenMotors.addAll(drivenNow);
         simulationStep.run();
+    }
+
+    private void addCandidates(
+            List<CandidateOutput> candidates,
+            long recency,
+            StateScheduler.Result active) {
+        List<ResolvedOutput> resolved = resolver.resolve(mechanism, active.action(), active.context());
+        for (ResolvedOutput output : resolved) {
+            candidates.add(new CandidateOutput(output, active.context(), recency, candidates.size()));
+        }
+    }
+
+    private static List<CandidateOutput> arbitrate(List<CandidateOutput> candidates) {
+        Map<MotorDevice, CandidateOutput> winners = new LinkedHashMap<>();
+        for (CandidateOutput candidate : candidates) {
+            for (MotorDevice motor : candidate.output().request().motors()) {
+                CandidateOutput current = winners.get(motor);
+                if (current == null || candidate.newerThan(current)) {
+                    winners.put(motor, candidate);
+                }
+            }
+        }
+        List<CandidateOutput> selected = new ArrayList<>();
+        for (CandidateOutput candidate : candidates) {
+            List<MotorDevice> motors = candidate.output().request().motors();
+            if (!motors.isEmpty() && motors.stream().allMatch(motor -> winners.get(motor) == candidate)) {
+                selected.add(candidate);
+            }
+        }
+        return selected;
+    }
+
+    private record CandidateOutput(
+            ResolvedOutput output,
+            MechanismContext context,
+            long recency,
+            int order) {
+        private boolean newerThan(CandidateOutput other) {
+            return recency > other.recency || recency == other.recency && order > other.order;
+        }
+    }
+
+    private static final class ActiveLease {
+        private final Action action;
+        private final long recency;
+        private final StateScheduler scheduler;
+        private double startSeconds = Double.NaN;
+
+        private ActiveLease(
+                Action action,
+                long recency,
+                ActionContext actionContext,
+                Map<PathAction, PathRuntime> pathRuntimes) {
+            this.action = action;
+            this.recency = recency;
+            this.scheduler = new StateScheduler(actionContext, pathRuntimes);
+        }
+
+        private long recency() {
+            return recency;
+        }
+
+        private StateScheduler.Result evaluate(MechanismContext context) {
+            if (Double.isNaN(startSeconds)) {
+                startSeconds = context.nowSeconds();
+            }
+            return scheduler.evaluate(action, withTimeInState(context, context.nowSeconds() - startSeconds));
+        }
     }
 
     private static MechanismContext withTimeInState(MechanismContext context, double timeInStateSeconds) {

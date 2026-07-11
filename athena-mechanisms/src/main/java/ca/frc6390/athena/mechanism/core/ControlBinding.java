@@ -241,6 +241,11 @@ public record ControlBinding(
         return Actions.voltage(this, volts);
     }
 
+    /** Stops driving this control and applies the motor's configured neutral mode. */
+    public Action neutral() {
+        return Actions.neutral(this);
+    }
+
     public Action position(double position) {
         return Actions.position(this, position);
     }

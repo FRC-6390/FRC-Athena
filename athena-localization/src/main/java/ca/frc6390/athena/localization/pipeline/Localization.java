@@ -205,6 +205,12 @@ public final class Localization implements PoseSignal {
         }
     }
 
+    /** Returns the current estimate using WPILib's standard pose type. */
+    public Pose2d pose2d() {
+        PoseSnapshot pose = pose();
+        return new Pose2d(pose.xMeters(), pose.yMeters(), new Rotation2d(pose.headingRadians()));
+    }
+
     public ActionBinding reset(PoseSnapshot pose) {
         Objects.requireNonNull(pose, "pose");
         return context -> {
@@ -219,6 +225,12 @@ public final class Localization implements PoseSignal {
                 state.kalman = null;
             }
         };
+    }
+
+    /** Resets this localization chain from a WPILib pose. */
+    public ActionBinding reset(Pose2d pose) {
+        Objects.requireNonNull(pose, "pose");
+        return reset(new PoseSnapshot(pose.getX(), pose.getY(), pose.getRotation().getRadians()));
     }
 
     public ActionBinding reset(double xMeters, double yMeters, double headingRadians) {

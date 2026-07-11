@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -35,6 +36,27 @@ class MechanismRuntimeTest {
     private static final MotorDevice CHILD_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
     private static final MotorDevice SECOND_CHILD_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 1);
+
+    @Test
+    void activeHookRequestsRunningActionAndReleaseRequestsTargetedNeutral() {
+        boolean[] trigger = {false};
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        TriggerReleaseMechanism mechanism = new TriggerReleaseMechanism(trigger);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism);
+        ActionRequests.bind(scheduler::request);
+        try {
+            trigger[0] = true;
+            scheduler.teleopPeriodic(0.0, 0.02);
+            assertEquals(0.8, actions.motor(MOTOR).percent, 1.0e-9);
+
+            trigger[0] = false;
+            scheduler.teleopPeriodic(0.02, 0.02);
+            assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
+            assertSame(mechanism.coast, scheduler.action(mechanism));
+        } finally {
+            ActionRequests.clear();
+        }
+    }
 
     @Test
     void nestedTeleopHookRunsLazyCallbackAndRequestsDynamicAction() {
@@ -434,7 +456,7 @@ class MechanismRuntimeTest {
     }
 
     @Test
-    void parallelRejectsActionsOwnedBySeparateRegisteredRoots() {
+    void parallelRoutesActionsOwnedBySeparateRegisteredRoots() {
         RecordingActionContext actions = new RecordingActionContext(CHILD_MOTOR, SECOND_CHILD_MOTOR);
         MechanismScheduler runtime = MechanismScheduler.create(actions)
                 .register(new DeclaredMotorMechanism(CHILD_MOTOR))
@@ -443,7 +465,11 @@ class MechanismRuntimeTest {
                 CHILD_MOTOR.percent(0.7),
                 SECOND_CHILD_MOTOR.percent(0.8));
 
-        assertThrows(IllegalArgumentException.class, () -> runtime.request(requested));
+        runtime.request(requested);
+        runtime.robotPeriodic(0.0, 0.02);
+
+        assertEquals(0.7, actions.motor(CHILD_MOTOR).percent, 1.0e-9);
+        assertEquals(0.8, actions.motor(SECOND_CHILD_MOTOR).percent, 1.0e-9);
     }
 
     @Test
@@ -1225,6 +1251,19 @@ class MechanismRuntimeTest {
         public void setPositionRotations(double rotations) {
             position = rotations;
             setPositionCalls++;
+        }
+    }
+
+    private static final class TriggerReleaseMechanism implements Mechanism {
+        private final ControlBinding speed = Controls.velocity(MOTOR);
+        private final Action running = speed.percent(0.8);
+        private final Action coast = speed.neutral();
+        private final HookBinding trigger;
+
+        private TriggerReleaseMechanism(boolean[] active) {
+            trigger = Events.when(() -> active[0]).active()
+                    .whileActive(running)
+                    .onEnd(coast);
         }
     }
 

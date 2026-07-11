@@ -137,6 +137,9 @@ final class OutputResolver {
     }
 
     private static ControlBinding control(Action action) {
+        if (action instanceof Actions.ControlNeutral controlState) {
+            return controlState.control();
+        }
         if (action instanceof Actions.ControlPercent controlState) {
             return controlState.control();
         }
@@ -165,6 +168,9 @@ final class OutputResolver {
     }
 
     private static MotorDevice motor(Action action) {
+        if (action instanceof Actions.MotorNeutral motorState) {
+            return motorState.motor();
+        }
         if (action instanceof Actions.MotorPercent motorState) {
             return motorState.motor();
         }

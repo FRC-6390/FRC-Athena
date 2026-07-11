@@ -14,6 +14,11 @@ SimModel shooterSim = SimModel.flywheel(shooter)
         .momentOfInertia(0.004);
 ```
 
+Motor declarations retain both the controller family and physical motor model. The vendor
+backend selects hardware from the controller family, while the physics provider selects motor
+constants from the physical model. Common motors use their usual controller by default; alternate
+pairings can be declared with `motor(MotorControllerKinds.SPARK_FLEX, MotorKinds.NEO, id)`.
+
 The same mechanism graph, `Action` graph, hardware declarations, controls, and `RobotRuntime` run in real and simulated modes. Only the hardware backend changes.
 
 ## Runtime Boundary

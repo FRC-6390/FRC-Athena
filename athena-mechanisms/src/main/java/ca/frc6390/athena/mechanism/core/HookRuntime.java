@@ -3,6 +3,7 @@ package ca.frc6390.athena.mechanism.core;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import java.util.Collection;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -10,10 +11,25 @@ import java.util.Objects;
  * Executes hooks against sampled event Action.
  */
 final class HookRuntime {
+    interface LeaseController {
+        void activate(Object key, Action action, boolean restart);
+
+        void release(Object key);
+    }
+
+    private final LeaseController leases;
     private final Map<HookBinding, Boolean> previousEventActive = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> previousSourceActive = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> consumedEvents = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> sourceSamples = new IdentityHashMap<>();
+
+    HookRuntime() {
+        this(null);
+    }
+
+    HookRuntime(LeaseController leases) {
+        this.leases = leases;
+    }
 
     /**
      * Runs all hooks for one runtime tick.
@@ -68,6 +84,14 @@ final class HookRuntime {
         boolean wasActive = previousEventActive.getOrDefault(hook, false);
 
         for (HookBinding.HookAction binding : hook.actions()) {
+            if (leases != null && binding.action() instanceof Action action) {
+                runLeasedAction(event, binding, action, wasActive, active);
+                continue;
+            }
+            if (leases != null && isHeldPhase(binding.phase())) {
+                runCapturedBinding(event, binding, actionContext, wasActive, active);
+                continue;
+            }
             if (binding.phase().shouldRun(event, wasActive, active)) {
                 binding.action().apply(actionContext);
             }
@@ -75,6 +99,57 @@ final class HookRuntime {
 
         previousEventActive.put(hook, active);
     }
+
+    private void runLeasedAction(
+            EventBinding event,
+            HookBinding.HookAction binding,
+            Action action,
+            boolean wasActive,
+            boolean active) {
+        boolean shouldRun = binding.phase().shouldRun(event, wasActive, active);
+        if (isHeldPhase(binding.phase())) {
+            if (event.pulse()) {
+                if (active) {
+                    leases.activate(binding, action, false);
+                }
+                return;
+            }
+            boolean held = binding.phase() == HookBinding.Phase.WHILE_ACTIVE ? active : !active;
+            if (held) {
+                leases.activate(binding, action, false);
+            } else {
+                leases.release(binding);
+            }
+        } else if (shouldRun) {
+            leases.activate(binding, action, true);
+        }
+    }
+
+    private void runCapturedBinding(
+            EventBinding event,
+            HookBinding.HookAction binding,
+            ActionContext actionContext,
+            boolean wasActive,
+            boolean active) {
+        boolean held = binding.phase() == HookBinding.Phase.WHILE_ACTIVE ? active : !active;
+        boolean wasHeld = binding.phase() == HookBinding.Phase.WHILE_ACTIVE ? wasActive : !wasActive;
+        if (held) {
+            List<Action> captured = ActionRequests.capture(() -> binding.action().apply(actionContext));
+            if (!captured.isEmpty()) {
+                Action action = captured.size() == 1
+                        ? captured.get(0)
+                        : Actions.parallel(captured.toArray(Action[]::new));
+                leases.activate(binding, action, false);
+            }
+        } else if (wasHeld && !event.pulse()) {
+            leases.release(binding);
+        }
+    }
+
+    private static boolean isHeldPhase(HookBinding.Phase phase) {
+        return phase == HookBinding.Phase.WHILE_ACTIVE || phase == HookBinding.Phase.WHILE_INACTIVE;
+    }
+
 
     /**
      * Clears remembered event Action.

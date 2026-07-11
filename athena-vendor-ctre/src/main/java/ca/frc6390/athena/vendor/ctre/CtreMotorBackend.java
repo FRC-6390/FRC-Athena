@@ -1,7 +1,7 @@
 package ca.frc6390.athena.vendor.ctre;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
-import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.hardware.backend.MotorBackend;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -12,9 +12,10 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 public final class CtreMotorBackend implements MotorBackend {
     @Override
     public boolean supports(MotorKind kind) {
-        return kind == MotorKinds.TALON_FX
-                || kind == MotorKinds.KRAKEN_X60
-                || kind == MotorKinds.KRAKEN_X44
+        return kind.controllerKind() == MotorControllerKinds.TALON_FX
+                || kind.controllerKind() == MotorControllerKinds.TALON_FXS
+                || kind.key().startsWith("ctre:talon-fx/")
+                || kind.key().startsWith("ctre:talon-fxs/")
                 || kind.key().equals("ctre:talon-fx")
                 || kind.key().equals("ctre:kraken-x60")
                 || kind.key().equals("ctre:kraken-x44");

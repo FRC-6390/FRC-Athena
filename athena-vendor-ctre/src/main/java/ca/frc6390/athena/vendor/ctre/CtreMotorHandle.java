@@ -7,17 +7,22 @@ import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
+import ca.frc6390.athena.api.hardware.MotorControllerKinds;
+import ca.frc6390.athena.api.hardware.MotorKinds;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.SlotConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
+import com.ctre.phoenix6.configs.CommutationConfigs;
 import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.hardware.TalonFXS;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.ctre.phoenix6.signals.MotorArrangementValue;
 import edu.wpi.first.units.Units;
 import java.util.Objects;
 
@@ -42,7 +47,10 @@ public final class CtreMotorHandle implements MotorHandle {
      * @param options CTRE options
      */
     public CtreMotorHandle(MotorDevice device, CtreMotorOptions options) {
-        this(device, options, new PhoenixTalonController(device));
+        this(device, options, device.kind().controllerKind() == MotorControllerKinds.TALON_FXS
+                || device.kind().key().startsWith("ctre:talon-fxs/")
+                ? new PhoenixTalonFxsController(device)
+                : new PhoenixTalonController(device));
     }
 
     CtreMotorHandle(MotorDevice device, CtreMotorOptions options, TalonController controller) {
@@ -285,6 +293,126 @@ public final class CtreMotorHandle implements MotorHandle {
 
         private PhoenixTalonController(MotorDevice device) {
             talon = new TalonFX(device.id(), new CANBus(device.canbus()));
+        }
+
+        @Override
+        public void setPercent(double percent) {
+            talon.set(percent);
+        }
+
+        @Override
+        public void setVoltage(double volts) {
+            talon.setVoltage(volts);
+        }
+
+        @Override
+        public void setPositionTarget(double rotations) {
+            talon.setControl(new PositionVoltage(rotations));
+        }
+
+        @Override
+        public void setVelocityTarget(double rotationsPerSecond) {
+            talon.setControl(new VelocityVoltage(rotationsPerSecond));
+        }
+
+        @Override
+        public void setSensorPosition(double rotations) {
+            talon.setPosition(rotations);
+        }
+
+        @Override
+        public boolean setPositionTarget(double rotations, int slot, double feedforwardVolts, boolean enableFoc) {
+            StatusCode status = talon.setControl(positionVoltage
+                    .withPosition(rotations)
+                    .withSlot(slot)
+                    .withFeedForward(feedforwardVolts)
+                    .withEnableFOC(enableFoc));
+            return status == StatusCode.UsingProFeatureOnUnlicensedDevice;
+        }
+
+        @Override
+        public boolean setVelocityTarget(
+                double rotationsPerSecond,
+                int slot,
+                double feedforwardVolts,
+                boolean enableFoc) {
+            StatusCode status = talon.setControl(velocityVoltage
+                    .withVelocity(rotationsPerSecond)
+                    .withSlot(slot)
+                    .withFeedForward(feedforwardVolts)
+                    .withEnableFOC(enableFoc));
+            return status == StatusCode.UsingProFeatureOnUnlicensedDevice;
+        }
+
+        @Override
+        public void configureSlot(MotorClosedLoopConfig config) {
+            SlotConfigs slot = new SlotConfigs()
+                    .withKP(config.p())
+                    .withKI(config.i())
+                    .withKD(config.d())
+                    .withKS(config.staticFeedforward())
+                    .withKV(config.velocityFeedforward())
+                    .withKG(config.gravityFeedforward());
+            slot.SlotNumber = config.slot();
+            talon.getConfigurator().apply(slot);
+        }
+
+        @Override
+        public void follow(int leaderId, boolean inverted) {
+            talon.setControl(new Follower(
+                    leaderId,
+                    inverted ? MotorAlignmentValue.Opposed : MotorAlignmentValue.Aligned));
+        }
+
+        @Override
+        public void stop() {
+            talon.stopMotor();
+        }
+
+        @Override
+        public void configureOutput(boolean brake, boolean inverted) {
+            talon.getConfigurator().apply(new MotorOutputConfigs()
+                    .withNeutralMode(brake ? NeutralModeValue.Brake : NeutralModeValue.Coast)
+                    .withInverted(inverted
+                            ? InvertedValue.Clockwise_Positive
+                            : InvertedValue.CounterClockwise_Positive));
+        }
+
+        @Override
+        public double positionRotations() {
+            return talon.getPosition().refresh().getValue().in(Units.Rotations);
+        }
+
+        @Override
+        public double velocityRotationsPerSecond() {
+            return talon.getVelocity().refresh().getValue().in(Units.RotationsPerSecond);
+        }
+    }
+
+    private static final class PhoenixTalonFxsController implements TalonController {
+        private final TalonFXS talon;
+        private final PositionVoltage positionVoltage = new PositionVoltage(0.0);
+        private final VelocityVoltage velocityVoltage = new VelocityVoltage(0.0);
+
+        private PhoenixTalonFxsController(MotorDevice device) {
+            talon = new TalonFXS(device.id(), new CANBus(device.canbus()));
+            talon.getConfigurator().apply(new CommutationConfigs()
+                    .withMotorArrangement(arrangement(device)));
+        }
+
+        private static MotorArrangementValue arrangement(MotorDevice device) {
+            if (!(device.kind().motorKind() instanceof MotorKinds motor)) {
+                return MotorArrangementValue.Disabled;
+            }
+            return switch (motor) {
+                case MINION -> MotorArrangementValue.Minion_JST;
+                case NEO -> MotorArrangementValue.NEO_JST;
+                case NEO_550 -> MotorArrangementValue.NEO550_JST;
+                case NEO_VORTEX -> MotorArrangementValue.VORTEX_JST;
+                case CIM, MINI_CIM, BAG, VEX_775_PRO, ANDYMARK_9015, ANDYMARK_RS775_125,
+                        BANEBOTS_RS550, BANEBOTS_RS775 -> MotorArrangementValue.Brushed_DC;
+                case FALCON_500, KRAKEN_X60, KRAKEN_X44 -> MotorArrangementValue.Disabled;
+            };
         }
 
         @Override

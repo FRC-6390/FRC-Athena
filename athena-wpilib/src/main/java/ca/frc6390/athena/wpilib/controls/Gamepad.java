@@ -14,11 +14,23 @@ import java.util.function.BooleanSupplier;
  * A gamepad declaration exposing processed axes and directly bindable buttons.
  */
 public final class Gamepad implements HookGroup {
-    private final XboxController controller;
+    interface Input {
+        double axis(int axis);
+
+        boolean button(int button);
+
+        int pov();
+
+        boolean connected();
+    }
+
+    private final Input controller;
     private final AxisSignal leftX;
     private final AxisSignal leftY;
     private final AxisSignal rightX;
     private final AxisSignal rightY;
+    private final AxisSignal leftTrigger;
+    private final AxisSignal rightTrigger;
     private final ButtonSignal a;
     private final ButtonSignal b;
     private final ButtonSignal x;
@@ -33,15 +45,21 @@ public final class Gamepad implements HookGroup {
     private final ButtonSignal povRight;
     private final ButtonSignal povDown;
     private final ButtonSignal povLeft;
-    private final List<ButtonSignal> buttons;
+    private final List<ControlSignal> signals;
 
     Gamepad(XboxController controller) {
+        this(new XboxInput(controller));
+    }
+
+    Gamepad(Input controller) {
         this.controller = Objects.requireNonNull(controller, "controller");
-        buttons = new ArrayList<>();
-        leftX = axis(XboxController.Axis.kLeftX);
-        leftY = axis(XboxController.Axis.kLeftY);
-        rightX = axis(XboxController.Axis.kRightX);
-        rightY = axis(XboxController.Axis.kRightY);
+        signals = new ArrayList<>();
+        leftX = axis("leftX", XboxController.Axis.kLeftX);
+        leftY = axis("leftY", XboxController.Axis.kLeftY);
+        rightX = axis("rightX", XboxController.Axis.kRightX);
+        rightY = axis("rightY", XboxController.Axis.kRightY);
+        leftTrigger = axis("leftTrigger", XboxController.Axis.kLeftTrigger);
+        rightTrigger = axis("rightTrigger", XboxController.Axis.kRightTrigger);
         a = button("a", XboxController.Button.kA);
         b = button("b", XboxController.Button.kB);
         x = button("x", XboxController.Button.kX);
@@ -62,6 +80,8 @@ public final class Gamepad implements HookGroup {
     public AxisSignal leftY() { return leftY; }
     public AxisSignal rightX() { return rightX; }
     public AxisSignal rightY() { return rightY; }
+    public AxisSignal leftTrigger() { return leftTrigger; }
+    public AxisSignal rightTrigger() { return rightTrigger; }
     public ButtonSignal a() { return a; }
     public ButtonSignal b() { return b; }
     public ButtonSignal x() { return x; }
@@ -78,40 +98,79 @@ public final class Gamepad implements HookGroup {
     public ButtonSignal povLeft() { return povLeft; }
 
     public ButtonSignal leftTrigger(double threshold) {
-        return signal("leftTrigger", () -> controller.getLeftTriggerAxis() > threshold);
+        return buttonFrom(leftTrigger.above(threshold));
     }
 
     public ButtonSignal rightTrigger(double threshold) {
-        return signal("rightTrigger", () -> controller.getRightTriggerAxis() > threshold);
+        return buttonFrom(rightTrigger.above(threshold));
     }
 
     public ButtonSignal signal(String name, BooleanSupplier source) {
-        ButtonSignal signal = new ButtonSignal(name, source);
-        buttons.add(signal);
-        return signal;
+        Objects.requireNonNull(source, "source");
+        return new ButtonSignal(this, name, context -> source.getAsBoolean());
     }
 
     @Override
     public Map<String, HookBinding> hooks() {
         Map<String, HookBinding> hooks = new LinkedHashMap<>();
-        for (int index = 0; index < buttons.size(); index++) {
-            ButtonSignal button = buttons.get(index);
-            if (!button.binding().actions().isEmpty()) {
-                hooks.put(button.name() + "." + index, button.binding());
+        for (int index = 0; index < signals.size(); index++) {
+            ControlSignal signal = signals.get(index);
+            if (!signal.binding().actions().isEmpty()) {
+                hooks.put(signal.name() + "." + index, signal.binding());
             }
         }
         return Map.copyOf(hooks);
     }
 
-    private AxisSignal axis(XboxController.Axis axis) {
-        return new AxisSignal(() -> controller.getRawAxis(axis.value));
+    void register(ControlSignal signal) {
+        signals.add(Objects.requireNonNull(signal, "signal"));
+    }
+
+    boolean connected() {
+        return controller.connected();
+    }
+
+    private AxisSignal axis(String name, XboxController.Axis axis) {
+        return new AxisSignal(this, name, () -> controller.axis(axis.value));
     }
 
     private ButtonSignal button(String name, XboxController.Button button) {
-        return signal(name, () -> controller.getRawButton(button.value));
+        return signal(name, () -> controller.button(button.value));
     }
 
     private ButtonSignal pov(String name, int angle) {
-        return signal(name, () -> controller.getPOV() == angle);
+        return signal(name, () -> controller.pov() == angle);
+    }
+
+    private ButtonSignal buttonFrom(ControlSignal signal) {
+        return new ButtonSignal(this, signal.name(), signal::sample);
+    }
+
+    private static final class XboxInput implements Input {
+        private final XboxController controller;
+
+        private XboxInput(XboxController controller) {
+            this.controller = Objects.requireNonNull(controller, "controller");
+        }
+
+        @Override
+        public double axis(int axis) {
+            return controller.getRawAxis(axis);
+        }
+
+        @Override
+        public boolean button(int button) {
+            return controller.getRawButton(button);
+        }
+
+        @Override
+        public int pov() {
+            return controller.getPOV();
+        }
+
+        @Override
+        public boolean connected() {
+            return controller.isConnected();
+        }
     }
 }

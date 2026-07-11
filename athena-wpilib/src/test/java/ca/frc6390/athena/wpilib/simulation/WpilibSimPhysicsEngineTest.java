@@ -44,6 +44,18 @@ class WpilibSimPhysicsEngineTest {
     }
 
     @Test
+    void everyBuiltInPhysicalMotorHasWpilibPhysicsConstants() {
+        int id = 100;
+        for (MotorKinds kind : MotorKinds.values()) {
+            MotorDevice motor = MotorDevice.of(kind, id++);
+            SimulationSession session = sessionWith(kind.name(), SimModel.motor(motor));
+            session.hardwareGraph().motor(motor).setVoltage(6.0);
+            session.step(0.02);
+            assertTrue(Double.isFinite(session.motor(motor).integratedVelocityRotationsPerSecond()));
+        }
+    }
+
+    @Test
     void batteryVoltageSinkReceivesEstimatedLoadedVoltage() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
         AtomicReference<Double> voltage = new AtomicReference<>();
@@ -59,7 +71,7 @@ class WpilibSimPhysicsEngineTest {
 
     @Test
     void flywheelModelPublishesVelocityBackToAthenaHandles() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 2);
+        MotorDevice motor = MotorDevice.of(MotorKinds.NEO, 2);
         EncoderDevice encoder = HardwareBus.rio()
                 .dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
         SimulationSession session = sessionWith("flywheel", SimModel.flywheel(motor)
@@ -109,7 +121,7 @@ class WpilibSimPhysicsEngineTest {
 
     @Test
     void elevatorModelUsesWpilibElevatorSimulationAndRange() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_FLEX_BRUSHLESS, 4);
+        MotorDevice motor = MotorDevice.of(MotorKinds.NEO_VORTEX, 4);
         EncoderDevice encoder = HardwareBus.rio()
                 .dio(4).encoder(EncoderKinds.REV_THROUGH_BORE);
         SimulationSession session = sessionWith("elevator", SimModel.elevator(motor)
@@ -240,7 +252,7 @@ class WpilibSimPhysicsEngineTest {
     }
 
     private static final class FlywheelMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
-        private final MotorDevice motor = MotorDevice.of(MotorKinds.SPARK_MAX_BRUSHLESS, 70);
+        private final MotorDevice motor = MotorDevice.of(MotorKinds.NEO, 70);
         private final EncoderDevice encoder = HardwareBus.rio()
                 .dio(7).encoder(EncoderKinds.REV_THROUGH_BORE);
         @SuppressWarnings("unused")

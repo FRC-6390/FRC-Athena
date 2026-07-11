@@ -7,6 +7,7 @@ import java.util.Set;
 import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.ImuKind;
 import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.api.hardware.MotorControllerKind;
 
 /**
  * Named hardware bus used to declare devices without repeating the bus on every ref.
@@ -33,6 +34,10 @@ public record HardwareBus(String name, Set<HardwareInterface> interfaces) {
 
     public MotorDevice motor(MotorKind kind, int id) {
         return can(id).motor(kind);
+    }
+
+    public MotorDevice motor(MotorControllerKind controller, MotorKind motor, int id) {
+        return can(id).motor(controller, motor);
     }
 
     public EncoderDevice encoder(EncoderKind kind, int id) {
@@ -119,6 +124,11 @@ public record HardwareBus(String name, Set<HardwareInterface> interfaces) {
                 throw new IllegalArgumentException("Motors require a CAN connection, not " + address.identity() + ".");
             }
             return MotorDevice.of(kind, can.id()).canbus(bus.name());
+        }
+
+        public MotorDevice motor(MotorControllerKind controller, MotorKind motor) {
+            Objects.requireNonNull(motor, "motor");
+            return motor(motor.controlledBy(controller));
         }
 
         public EncoderDevice encoder(EncoderKind kind) {

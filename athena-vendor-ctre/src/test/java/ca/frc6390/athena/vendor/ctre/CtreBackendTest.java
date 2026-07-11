@@ -26,7 +26,9 @@ class CtreBackendTest {
     void motorBackendSupportsBuiltInAndEquivalentKeys() {
         CtreMotorBackend backend = new CtreMotorBackend();
 
-        assertTrue(backend.supports(MotorKinds.TALON_FX));
+        assertTrue(backend.supports(MotorKinds.FALCON_500));
+        assertTrue(backend.supports(MotorKinds.MINION));
+        assertTrue(backend.supports(() -> "ctre:talon-fxs/minion"));
         assertTrue(backend.supports(() -> "ctre:kraken-x60"));
         assertFalse(backend.supports((MotorKind) () -> "rev:spark-max-brushless"));
     }
@@ -69,7 +71,7 @@ class CtreBackendTest {
     void motorConfigurationRunsDuringActivationOnlyOnce() {
         RecordingTalonController controller = new RecordingTalonController();
         CtreMotorHandle handle = new CtreMotorHandle(
-                MotorDevice.of(MotorKinds.TALON_FX, 1).neutralMode(MotorNeutralMode.BRAKE).inverted(),
+                MotorDevice.of(MotorKinds.FALCON_500, 1).neutralMode(MotorNeutralMode.BRAKE).inverted(),
                 new CtreMotorOptions(),
                 controller);
 
@@ -101,7 +103,7 @@ class CtreBackendTest {
     @Test
     void motorInputsAreCachedUntilNextRefresh() {
         RecordingTalonController controller = new RecordingTalonController();
-        CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.TALON_FX, 2), null, controller);
+        CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.FALCON_500, 2), null, controller);
 
         handle.refreshInputs();
 
@@ -120,7 +122,7 @@ class CtreBackendTest {
     @Test
     void motorClosedLoopConfigIsAppliedOnlyWhenChanged() {
         RecordingTalonController controller = new RecordingTalonController();
-        CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.TALON_FX, 2), null, controller);
+        CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.FALCON_500, 2), null, controller);
         MotorClosedLoopConfig config = new MotorClosedLoopConfig(
                 0, 0.2, 0.0, 0.01, 0.0, 0.0, 0.1, 0.2, 0.3, FocPolicy.DISABLED);
         MotorClosedLoopRequest request = MotorClosedLoopRequest.hybrid(config, 1.5);
@@ -139,7 +141,7 @@ class CtreBackendTest {
         RecordingTalonController controller = new RecordingTalonController();
         controller.licenseFault = true;
         CtreMotorHandle handle = new CtreMotorHandle(
-                MotorDevice.of(MotorKinds.TALON_FX, 2),
+                MotorDevice.of(MotorKinds.FALCON_500, 2),
                 new CtreMotorOptions().foc(FocPolicy.ENABLE_IF_AVAILABLE),
                 controller);
         MotorClosedLoopRequest request = MotorClosedLoopRequest.device(MotorClosedLoopConfig.empty());

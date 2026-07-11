@@ -15,6 +15,7 @@ import ca.frc6390.athena.api.hardware.ImuKind;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.hardware.backend.BackendRegistry;
 import ca.frc6390.athena.hardware.backend.EncoderBackend;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
@@ -43,10 +44,19 @@ class HardwareGraphTest {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 7).canbus("CANivore A");
         EncoderDevice encoder = motor.encoder();
 
-        assertEquals("motor:ctre_kraken_x60:canivore_a:7", HardwareIdentity.motor(motor).key());
+        assertEquals("motor:ctre_talon_fx:canivore_a:7", HardwareIdentity.motor(motor).key());
         assertEquals("encoder:athena_integrated_motor:canivore_a:7:integrated", HardwareIdentity.encoder(encoder).key());
         assertEquals("encoder:athena_integrated_motor:canivore_a:7:absolute", HardwareIdentity.encoder(motor.absoluteEncoder()).key());
         assertEquals("imu:ctre_pigeon_2:rio:2", HardwareIdentity.imu(ImuDevice.of(ImuKinds.PIGEON_2, 2)).key());
+    }
+
+    @Test
+    void hardwareBusAllowsExplicitControllerMotorPairing() {
+        MotorDevice motor = HardwareBus.rio().motor(MotorControllerKinds.SPARK_FLEX, MotorKinds.NEO, 8);
+
+        assertEquals(MotorControllerKinds.SPARK_FLEX, motor.kind().controllerKind());
+        assertEquals(MotorKinds.NEO, motor.kind().motorKind());
+        assertEquals("rev:spark-flex/neo", motor.kind().key());
     }
 
     @Test

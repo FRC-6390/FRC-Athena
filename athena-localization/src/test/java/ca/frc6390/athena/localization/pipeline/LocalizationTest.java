@@ -10,6 +10,7 @@ import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
+import edu.wpi.first.math.geometry.Pose2d;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -57,6 +58,10 @@ class LocalizationTest {
         assertSame(newest, latest.measurements().get(0));
         assertEquals("filtered", filtered.debugName());
         assertEquals("latest", latest.debugName());
+        Pose2d pose2d = latest.pose2d();
+        assertEquals(3.0, pose2d.getX(), EPSILON);
+        assertEquals(2.0, pose2d.getY(), EPSILON);
+        assertEquals(0.4, pose2d.getRotation().getRadians(), EPSILON);
     }
 
     @Test

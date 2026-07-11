@@ -5,11 +5,12 @@ import ca.frc6390.athena.localization.pipeline.LocalizationFilters;
 import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.localization.pipeline.VisionFilters;
+import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import frc.robot.DriveTrain;
 import frc.robot.vision.VisionSources;
 
-public final class LocalizationExamples {
+public final class LocalizationExamples implements Mechanism {
     public final PoseSignal odometry;
     public final Localization filteredVision;
     public final Localization fusedVision;

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -12,6 +13,13 @@ public interface OutputRequest {
     MotorDevice motor();
 
     Output output();
+
+    default List<MotorDevice> motors() {
+        if (control() != null) {
+            return control().motors();
+        }
+        return motor() == null ? List.of() : List.of(motor());
+    }
 
     default boolean openLoop() {
         return output() instanceof Output.Percent || output() instanceof Output.Voltage;

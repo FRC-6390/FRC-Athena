@@ -28,6 +28,14 @@ public final class Actions {
         return NEUTRAL;
     }
 
+    static Action neutral(ControlBinding control) {
+        return new ControlNeutral(control);
+    }
+
+    static Action neutral(MotorDevice motor) {
+        return new MotorNeutral(motor);
+    }
+
     static Action percent(MotorDevice motor, double percent) {
         return new MotorPercent(motor, percent);
     }
@@ -225,6 +233,18 @@ public final class Actions {
     }
 
     public record Neutral() implements Action, Output.Neutral {
+    }
+
+    public record ControlNeutral(ControlBinding control) implements Action, Output.Neutral {
+        public ControlNeutral {
+            Objects.requireNonNull(control, "control");
+        }
+    }
+
+    public record MotorNeutral(MotorDevice motor) implements Action, Output.Neutral {
+        public MotorNeutral {
+            Objects.requireNonNull(motor, "motor");
+        }
     }
 
     public record MotorPercent(MotorDevice motor, double percent) implements Action, Output.Percent {

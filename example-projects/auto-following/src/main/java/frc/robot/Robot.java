@@ -11,12 +11,9 @@ public final class Robot extends AthenaRobot {
     public final AutoExamples autos = new AutoExamples(drive);
 
     @SuppressWarnings("unused")
-    public final HookBinding selectDefault = Events.robotInit()
-            .onStart(() -> autos.runtime.select("PP 1 - Leave"));
-
-    @Override
-    protected void configure() {
+    public final HookBinding initializeAutos = Events.robotInit().onStart(() -> {
         drive.configurePathPlanner();
         athena().auto(autos.runtime, autos.customMarkers);
-    }
+        autos.runtime.select("PP 1 - Leave");
+    });
 }

@@ -16,6 +16,18 @@ public interface MeasurementSignal {
     List<Measurement> measurements();
 
     /**
+     * Returns signals wrapped by this signal.
+     *
+     * <p>This preserves declaration provenance through filters and configuration so a
+     * runtime can discover hardware-backed sources without evaluating measurements.</p>
+     *
+     * @return direct source signals
+     */
+    default List<MeasurementSignal> sources() {
+        return List.of();
+    }
+
+    /**
      * Returns the newest measurement if one exists.
      *
      * @return newest measurement

@@ -1,42 +1,58 @@
 package ca.frc6390.athena.api.hardware;
 
 /**
- * Common built-in motor kinds known to Athena.
+ * Common physical FRC motor models with their usual controller pairing.
  *
- * <p>These constants are identifiers, not vendor dependencies. For example,
- * {@link #TALON_FX} may be used in source without the CTRE adapter installed;
- * construction requires an installed backend at validation/runtime.</p>
+ * <p>The physical model lets simulation select accurate motor constants. Use
+ * {@link MotorKind#controlledBy(MotorControllerKind)} when a motor is attached to a
+ * controller other than its default.</p>
  */
 public enum MotorKinds implements MotorKind {
-    /** CTRE Talon FX Phoenix 6 motor controller. */
-    TALON_FX("ctre:talon-fx"),
+    FALCON_500("falcon-500", MotorControllerKinds.TALON_FX, MotorTechnology.BRUSHLESS),
+    KRAKEN_X60("kraken-x60", MotorControllerKinds.TALON_FX, MotorTechnology.BRUSHLESS),
+    KRAKEN_X44("kraken-x44", MotorControllerKinds.TALON_FX, MotorTechnology.BRUSHLESS),
+    MINION("minion", MotorControllerKinds.TALON_FXS, MotorTechnology.BRUSHLESS),
 
-    /** CTRE Kraken X60 Phoenix 6 motor controller. */
-    KRAKEN_X60("ctre:kraken-x60"),
+    NEO("neo", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHLESS),
+    NEO_550("neo-550", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHLESS),
+    NEO_VORTEX("neo-vortex", MotorControllerKinds.SPARK_FLEX, MotorTechnology.BRUSHLESS),
 
-    /** CTRE Kraken X44 Phoenix 6 motor controller. */
-    KRAKEN_X44("ctre:kraken-x44"),
+    CIM("cim", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHED),
+    MINI_CIM("mini-cim", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHED),
+    BAG("bag", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHED),
+    VEX_775_PRO("vex-775-pro", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHED),
+    ANDYMARK_9015("andymark-9015", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHED),
+    ANDYMARK_RS775_125("andymark-rs775-125", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHED),
+    BANEBOTS_RS550("banebots-rs550", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHED),
+    BANEBOTS_RS775("banebots-rs775", MotorControllerKinds.SPARK_MAX, MotorTechnology.BRUSHED);
 
-    /** REV Spark MAX controlling a brushless motor. */
-    SPARK_MAX_BRUSHLESS("rev:spark-max-brushless"),
+    private final String motorKey;
+    private final MotorControllerKind controllerKind;
+    private final MotorTechnology technology;
 
-    /** REV Spark MAX controlling a brushed motor. */
-    SPARK_MAX_BRUSHED("rev:spark-max-brushed"),
-
-    /** REV Spark Flex controlling a brushless motor. */
-    SPARK_FLEX_BRUSHLESS("rev:spark-flex-brushless"),
-
-    /** REV Spark Flex controlling a brushed motor. */
-    SPARK_FLEX_BRUSHED("rev:spark-flex-brushed");
-
-    private final String key;
-
-    MotorKinds(String key) {
-        this.key = key;
+    MotorKinds(String motorKey, MotorControllerKind controllerKind, MotorTechnology technology) {
+        this.motorKey = motorKey;
+        this.controllerKind = controllerKind;
+        this.technology = technology;
     }
 
     @Override
     public String key() {
-        return key;
+        return controllerKind.key() + "/" + motorKey;
+    }
+
+    @Override
+    public String motorKey() {
+        return motorKey;
+    }
+
+    @Override
+    public MotorControllerKind controllerKind() {
+        return controllerKind;
+    }
+
+    @Override
+    public MotorTechnology technology() {
+        return technology;
     }
 }

@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.api.hardware.MotorControllerKinds;
+import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.backend.BackendRegistry;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.backend.ImuHandle;
@@ -160,21 +162,16 @@ class SimulationSessionTest {
     void hardwareGraphResolvesSupportedRealMotorKindsInSimulation() {
         SimulationSession session = SimulationSession.create();
         HardwareGraph graph = session.hardwareGraph();
-        List.of(
-                MotorKinds.TALON_FX,
-                MotorKinds.KRAKEN_X60,
-                MotorKinds.KRAKEN_X44,
-                MotorKinds.SPARK_MAX_BRUSHLESS,
-                MotorKinds.SPARK_MAX_BRUSHED,
-                MotorKinds.SPARK_FLEX_BRUSHLESS,
-                MotorKinds.SPARK_FLEX_BRUSHED)
-                .forEach(kind -> {
-                    MotorDevice motor = MotorDevice.of(kind, kind.name().hashCode() & 0x7fff);
-                    MotorHandle handle = graph.motor(motor);
+        List<MotorKind> kinds = new java.util.ArrayList<>(List.of(MotorKinds.values()));
+        kinds.add(MotorKinds.NEO.controlledBy(MotorControllerKinds.SPARK_FLEX));
+        for (int index = 0; index < kinds.size(); index++) {
+            MotorKind kind = kinds.get(index);
+            MotorDevice motor = MotorDevice.of(kind, index + 1);
+            MotorHandle handle = graph.motor(motor);
 
-                    assertSame(session.motor(motor), handle);
-                    assertInstanceOf(SimMotorHandle.class, handle);
-                });
+            assertSame(session.motor(motor), handle);
+            assertInstanceOf(SimMotorHandle.class, handle);
+        }
     }
 
     @Test

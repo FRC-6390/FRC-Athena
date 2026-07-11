@@ -36,17 +36,4 @@ public final class Robot extends AthenaRobot {
             indexedIntake,
             followerElevator,
             turret);
-
-    @Override
-    protected void configure() {
-        register(superstructure);
-        register(openLoopShooter);
-        register(splitWheelShooter);
-        register(singleJointArm);
-        register(limitedManualArm);
-        register(indexedIntake);
-        register(followerElevator);
-        register(turret);
-        register(controls);
-    }
 }

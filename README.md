@@ -119,6 +119,8 @@ HardwareBus RIO = HardwareBus.rio();
 HardwareBus CANIVORE = HardwareBus.can("canivore");
 
 MotorDevice drive = CANIVORE.motor(MotorKinds.KRAKEN_X60, 1);
+MotorDevice intake = RIO.motor(MotorKinds.NEO_550, 2);
+MotorDevice flexNeo = RIO.motor(MotorControllerKinds.SPARK_FLEX, MotorKinds.NEO, 3);
 EncoderDevice angle = CANIVORE.encoder(EncoderKinds.CANCODER, 9);
 ImuDevice pigeon = RIO.imu(ImuKinds.PIGEON_2, 0);
 
@@ -126,6 +128,11 @@ EncoderDevice throughBore = RIO.dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
 ImuDevice navx = RIO.spi(SpiPort.MXP).imu(ImuKinds.NAVX);
 DigitalInputDevice home = RIO.dio(3).digitalInput("arm home");
 ```
+
+`MotorKinds` identifies the physical motor so simulation can select its real motor constants.
+Each built-in motor has a usual controller (`KRAKEN_X60` uses Talon FX, `NEO` uses Spark MAX,
+and `NEO_VORTEX` uses Spark Flex). The explicit controller overload supports valid alternate
+pairings without losing the physical motor model.
 
 The roboRIO bus exposes CAN, DIO, analog, SPI, I2C, serial, and USB. Named CAN buses expose CAN only. Requesting an unavailable interface, such as DIO from a CANivore, fails when the declaration is created. Vendor backends then validate that the selected device kind supports that connection.
 

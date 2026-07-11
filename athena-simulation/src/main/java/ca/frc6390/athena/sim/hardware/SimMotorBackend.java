@@ -12,13 +12,7 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 public final class SimMotorBackend implements MotorBackend {
     @Override
     public boolean supports(MotorKind kind) {
-        return kind == MotorKinds.TALON_FX
-                || kind == MotorKinds.KRAKEN_X60
-                || kind == MotorKinds.KRAKEN_X44
-                || kind == MotorKinds.SPARK_MAX_BRUSHLESS
-                || kind == MotorKinds.SPARK_MAX_BRUSHED
-                || kind == MotorKinds.SPARK_FLEX_BRUSHLESS
-                || kind == MotorKinds.SPARK_FLEX_BRUSHED;
+        return kind.motorKind() instanceof MotorKinds;
     }
 
     @Override

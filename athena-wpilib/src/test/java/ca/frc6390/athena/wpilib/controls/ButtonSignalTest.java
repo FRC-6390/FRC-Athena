@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.mechanism.core.HookBinding.Phase;
+import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -24,5 +25,13 @@ class ButtonSignalTest {
         assertFalse(button.getAsBoolean());
         active[0] = true;
         assertTrue(button.getAsBoolean());
+    }
+
+    @Test
+    void acceptsRuntimeActionBindings() {
+        ActionBinding resetPose = context -> {};
+        ButtonSignal button = new ButtonSignal("test", () -> true).onActive(resetPose);
+
+        assertEquals(resetPose, button.binding().actions().get(0).action());
     }
 }

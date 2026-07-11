@@ -57,6 +57,8 @@
   - [x] Rename old `HookRunner` plumbing to package-private `HookRuntime`.
 - [x] Test surfaces needed: Action sequencing, timeout and conditional behavior, hook edge behavior, path runtime lifecycle, child mechanism output routing, sim model stepping, and control output application to `MotorHandle` are covered by `MechanismRuntimeTest`.
   - [x] Added focused `MechanismRuntimeTest` coverage for sequence timing, timeout/conditional transitions, rising-edge hook behavior, path runtime lifecycle, child mechanism output routing, output application through fake `MotorHandle`s, `MechanismScheduler` dispatch through a `HardwareGraph`, and in-memory sim model stepping.
+  - [x] Action arbitration is resource-scoped: disjoint motor requests coexist, newer conflicting activations win without per-tick renewal, releasing a held request restores older active intent, and newly unclaimed motors neutralize independently.
+  - [x] Scheduler periodic runs hooks before action evaluation so cross-mechanism bindings take effect deterministically in the same cycle; constraints remain downstream of arbitration.
   - [x] Cover lowered scheduler subtree reset behavior with nested sequence coverage.
   - [x] Cover `Action.request()` dispatch and registered child-mechanism owner inference.
 - [x] Upkeep: `Action`, `Output`, and `MechanismContext` now live in this module, and current Java sources are moved off old mechanism names.

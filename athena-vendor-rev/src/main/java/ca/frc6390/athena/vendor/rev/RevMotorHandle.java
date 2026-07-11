@@ -3,7 +3,8 @@ package ca.frc6390.athena.vendor.rev;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
-import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.api.hardware.MotorControllerKinds;
+import ca.frc6390.athena.api.hardware.MotorTechnology;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
@@ -203,16 +204,16 @@ public final class RevMotorHandle implements MotorHandle {
     }
 
     private static SparkController createController(MotorDevice device) {
-        boolean brushless = device.kind() == MotorKinds.SPARK_MAX_BRUSHLESS
-                || device.kind() == MotorKinds.SPARK_FLEX_BRUSHLESS
-                || device.kind().key().endsWith("brushless");
+        boolean brushless = device.kind().technology() == MotorTechnology.BRUSHLESS
+                || device.kind().technology() == MotorTechnology.UNKNOWN
+                        && device.kind().key().endsWith("brushless");
         MotorType motorType = brushless ? MotorType.kBrushless : MotorType.kBrushed;
-        SparkBase spark = device.kind() == MotorKinds.SPARK_FLEX_BRUSHLESS
-                || device.kind() == MotorKinds.SPARK_FLEX_BRUSHED
-                || device.kind().key().startsWith("rev:spark-flex")
+        boolean flex = device.kind().controllerKind() == MotorControllerKinds.SPARK_FLEX
+                || device.kind().key().startsWith("rev:spark-flex");
+        SparkBase spark = flex
                         ? new SparkFlex(device.id(), motorType)
                         : new SparkMax(device.id(), motorType);
-        return new RevSparkController(spark, device.kind().key().startsWith("rev:spark-flex"));
+        return new RevSparkController(spark, flex);
     }
 
     private static double clamp(double value) {

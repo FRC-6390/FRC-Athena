@@ -69,8 +69,8 @@ class RobotRuntimeTest {
         BackendRegistry.setGlobal(null);
         BackendRegistry registry = BackendRegistry.discover();
 
-        assertTrue(registry.motorBackendFor(MotorKinds.TALON_FX).isPresent());
-        assertTrue(registry.motorBackendFor(MotorKinds.SPARK_MAX_BRUSHLESS).isPresent());
+        assertTrue(registry.motorBackendFor(MotorKinds.FALCON_500).isPresent());
+        assertTrue(registry.motorBackendFor(MotorKinds.NEO).isPresent());
         assertTrue(registry.encoderBackendFor(EncoderKinds.CANCODER).isPresent());
         assertTrue(registry.encoderBackendFor(EncoderKinds.REV_THROUGH_BORE).isPresent());
         assertTrue(registry.imuBackendFor(ImuKinds.PIGEON_2).isPresent());
@@ -406,6 +406,28 @@ class RobotRuntimeTest {
     }
 
     @Test
+    void discoversLocalizationAndCameraGraphsFromRegisteredMechanisms() {
+        AtomicInteger reads = new AtomicInteger();
+        CameraDevice camera = Cameras.photonVision("automatic-front").bindPose(() -> {
+            reads.incrementAndGet();
+            return List.of(Measurements.pose(new PoseSnapshot(6.0, 2.0, 0.25)));
+        });
+        ca.frc6390.athena.runtime.measurement.PoseSignal configuredCameraPose = camera.pose()
+                .multiTagStdDevs(0.2, 0.2, 0.1)
+                .distanceStdDevScaling(2.0, 2.0);
+        Localization filtered = Localizations.filter().input(configuredCameraPose);
+        Localization output = Localizations.latestValid().input(filtered);
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
+                .register(new LocalizationMechanism(output));
+
+        runtime.robotPeriodic(1.0, 0.02);
+
+        assertTrue(reads.get() > 0);
+        assertEquals(6.0, output.pose().xMeters(), 1.0e-9);
+        assertEquals(1, runtime.localizationMeasurements().size());
+    }
+
+    @Test
     void localizationRefreshPolicyAppliesRootAgeAndDisabledRules() {
         AtomicInteger reads = new AtomicInteger();
         Localization localization = Localizations.latestValid()
@@ -641,5 +663,9 @@ class RobotRuntimeTest {
     }
 
     private record ImuMechanism(ImuDevice imu) implements ca.frc6390.athena.mechanism.core.Mechanism {
+    }
+
+    private record LocalizationMechanism(Localization output)
+            implements ca.frc6390.athena.mechanism.core.Mechanism {
     }
 }

@@ -6,6 +6,7 @@ import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.api.hardware.MotorControllerKind;
 import ca.frc6390.athena.hardware.vendor.VendorOptions;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 
@@ -30,6 +31,12 @@ public record MotorDevice(
      */
     public static MotorDevice of(MotorKind kind, int id) {
         return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST, 40, VendorOptions.empty(), null);
+    }
+
+    /** Creates a motor with an explicit controller and physical motor pairing. */
+    public static MotorDevice of(MotorControllerKind controller, MotorKind motor, int id) {
+        Objects.requireNonNull(motor, "motor");
+        return of(motor.controlledBy(controller), id);
     }
 
     public MotorDevice {
@@ -71,6 +78,11 @@ public record MotorDevice(
 
     public <T extends DeviceAction> T voltage(DoubleSupplier volts) {
         return action("voltage", new Class<?>[] {MotorDevice.class, DoubleSupplier.class}, this, volts);
+    }
+
+    /** Stops commanding this motor and applies its configured neutral mode. */
+    public <T extends DeviceAction> T neutral() {
+        return action("neutral", new Class<?>[] {MotorDevice.class}, this);
     }
 
     /**

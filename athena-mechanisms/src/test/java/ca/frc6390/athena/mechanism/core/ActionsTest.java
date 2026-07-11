@@ -18,6 +18,22 @@ class ActionsTest {
     }
 
     @Test
+    void controlNeutralRetainsItsTargetControl() {
+        ControlBinding speed = Controls.velocity(MOTOR);
+
+        Actions.ControlNeutral neutral = (Actions.ControlNeutral) speed.neutral();
+
+        assertSame(speed, neutral.control());
+    }
+
+    @Test
+    void motorNeutralRetainsItsTargetMotor() {
+        Actions.MotorNeutral neutral = (Actions.MotorNeutral) MOTOR.neutral();
+
+        assertSame(MOTOR, neutral.motor());
+    }
+
+    @Test
     void builderActionAccessorsReturnStableImmutableViews() {
         Action first = MOTOR.percent(0.2);
         Action second = MOTOR.percent(0.4);

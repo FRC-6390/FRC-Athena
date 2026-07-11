@@ -2,6 +2,7 @@ package ca.frc6390.athena.runtime.measurement;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
 
 /** Pose-signal transformations shared by all pose-producing backends. */
 public final class PoseSignals {
@@ -11,9 +12,9 @@ public final class PoseSignals {
     static PoseSignal tagStdDevs(PoseSignal source, boolean multiTag, MeasurementStdDevs stdDevs) {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(stdDevs, "stdDevs");
-        return () -> source.measurements().stream()
+        return derived(source, measurements -> measurements.stream()
                 .map(measurement -> configureTags(measurement, multiTag, stdDevs))
-                .toList();
+                .toList());
     }
 
     static PoseSignal distanceStdDevScaling(PoseSignal source, double referenceMeters, double exponent) {
@@ -24,17 +25,32 @@ public final class PoseSignals {
         if (!Double.isFinite(exponent) || exponent < 0.0) {
             throw new IllegalArgumentException("Distance exponent must be finite and non-negative.");
         }
-        return () -> source.measurements().stream()
+        return derived(source, measurements -> measurements.stream()
                 .map(measurement -> scaleDistance(measurement, referenceMeters, exponent))
-                .toList();
+                .toList());
     }
 
     /** Returns a pose signal backed by an arbitrary measurement signal. */
     public static PoseSignal from(MeasurementSignal source) {
         Objects.requireNonNull(source, "source");
-        return () -> {
-            List<Measurement> values = source.measurements();
+        return derived(source, values -> {
             return values == null ? List.of() : values;
+        });
+    }
+
+    private static PoseSignal derived(
+            MeasurementSignal source,
+            Function<List<Measurement>, List<Measurement>> transform) {
+        return new PoseSignal() {
+            @Override
+            public List<Measurement> measurements() {
+                return transform.apply(source.measurements());
+            }
+
+            @Override
+            public List<MeasurementSignal> sources() {
+                return List.of(source);
+            }
         };
     }
 

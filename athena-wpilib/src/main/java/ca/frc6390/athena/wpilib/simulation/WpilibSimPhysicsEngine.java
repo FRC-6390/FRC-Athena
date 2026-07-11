@@ -153,25 +153,32 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
     private static DCMotor gearbox(SimModel model) {
         MotorDevice first = model.motors().get(0);
         int count = Math.max(1, model.motors().size());
-        if (first.kind() == MotorKinds.KRAKEN_X60) {
-            return DCMotor.getKrakenX60(count);
+        if (!(first.kind().motorKind() instanceof MotorKinds motorKind)) {
+            throw new IllegalArgumentException("No WPILib motor model for " + first.kind().key() + ".");
         }
-        if (first.kind() == MotorKinds.KRAKEN_X44) {
-            return DCMotor.getKrakenX44(count);
+        for (MotorDevice motor : model.motors()) {
+            if (motor.kind().motorKind() != motorKind) {
+                throw new IllegalArgumentException(
+                        "A simulation physics leaf cannot combine different physical motor models.");
+            }
         }
-        if (first.kind() == MotorKinds.TALON_FX) {
-            return DCMotor.getFalcon500(count);
-        }
-        if (first.kind() == MotorKinds.SPARK_FLEX_BRUSHLESS) {
-            return DCMotor.getNeoVortex(count);
-        }
-        if (first.kind() == MotorKinds.SPARK_MAX_BRUSHLESS) {
-            return DCMotor.getNEO(count);
-        }
-        if (first.kind() == MotorKinds.SPARK_MAX_BRUSHED || first.kind() == MotorKinds.SPARK_FLEX_BRUSHED) {
-            return DCMotor.getCIM(count);
-        }
-        return DCMotor.getCIM(count);
+        return switch (motorKind) {
+            case FALCON_500 -> DCMotor.getFalcon500(count);
+            case KRAKEN_X60 -> DCMotor.getKrakenX60(count);
+            case KRAKEN_X44 -> DCMotor.getKrakenX44(count);
+            case MINION -> DCMotor.getMinion(count);
+            case NEO -> DCMotor.getNEO(count);
+            case NEO_550 -> DCMotor.getNeo550(count);
+            case NEO_VORTEX -> DCMotor.getNeoVortex(count);
+            case CIM -> DCMotor.getCIM(count);
+            case MINI_CIM -> DCMotor.getMiniCIM(count);
+            case BAG -> DCMotor.getBag(count);
+            case VEX_775_PRO -> DCMotor.getVex775Pro(count);
+            case ANDYMARK_9015 -> DCMotor.getAndymark9015(count);
+            case ANDYMARK_RS775_125 -> DCMotor.getAndymarkRs775_125(count);
+            case BANEBOTS_RS550 -> DCMotor.getBanebotsRs550(count);
+            case BANEBOTS_RS775 -> DCMotor.getBanebotsRs775(count);
+        };
     }
 
     private static double gearing(SimModel model) {
