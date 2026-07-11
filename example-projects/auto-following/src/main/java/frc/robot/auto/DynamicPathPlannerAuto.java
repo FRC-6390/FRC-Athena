@@ -2,6 +2,7 @@ package frc.robot.auto;
 
 import ca.frc6390.athena.auto.AutoRoutine;
 import ca.frc6390.athena.auto.Autos;
+import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.path.GoalEndState;
 import com.pathplanner.lib.path.IdealStartingState;
@@ -26,7 +27,8 @@ public final class DynamicPathPlannerAuto {
             Command command = Commands.defer(
                     () -> AutoBuilder.followPath(buildPath(context)),
                     Set.of(context.drive));
-            return ExampleCommands.fromWpilib("pp-dynamic-short-path", command);
+            command.setName("pp-dynamic-short-path");
+            return WpilibCommands.wrap(command);
         });
     }
 

@@ -29,7 +29,7 @@ public final class MotionPlanners {
                 double candidate = requested + (center + offset) * period;
                 ConstraintResult<Double> result = Constraints.evaluate(
                         constraints,
-                        new ConstraintContext<>(current, candidate, context.runtime(), context.hardware()));
+                        new ConstraintContext<>(current, candidate, context.runtime()));
                 if (!(result instanceof ConstraintResult.Allowed<Double>)) {
                     continue;
                 }

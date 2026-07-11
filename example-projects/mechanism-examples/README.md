@@ -1,6 +1,8 @@
 # Athena mechanism examples
 
-This project shows declarative motor, sensor, control-loop, action-composition, and simulation patterns.
+This project shows declarative devices, reusable controls, action composition, mechanism templates, and simulation. `Robot` is the mechanism root: Athena discovers its child mechanisms, actions, controls, hooks, devices, and simulation models automatically. There is no registration or `configure()` method.
+
+`Controls` receives that root and binds directly to `robot.<mechanism>.<action>`. Controller bindings are declarations owned by the discovered `Gamepad`; `onTrue` makes one request, `whileTrue` maintains a request lease, and `onFalse` requests the release action.
 
 ## Feedback-completing actions
 
@@ -14,19 +16,64 @@ public final Action ready = wheel.velocity(78.0)
         .untilWithin(2.0);
 ```
 
-The tolerance uses the configured feedback units. It controls action completion independently from any tolerance configured on the PID controller.
+The tolerance uses the configured feedback units and controls action completion. Tolerance is intentionally not part
+of `PidGains`; use `untilWithin(...)`, `control.at(...)`, or `control.isAt(...)` where completion or coordination needs
+a tolerance.
 
 Travel limits and motion behavior belong to the reusable control binding, so percent, voltage, and closed-loop actions share the same safety policy:
 
 ```java
 private final ControlBinding lift = Controls.position(motor)
         .feedback(height)
-        .pid(0.5, 0.0, 0.0)
+        .pid(6.0, 0.0, 0.0)
         .constraint(Constraints.range(travel))
         .profile(MotionProfiles.trapezoid(0.8, 1.8));
 ```
 
+Athena PID gains produce volts: `kP`, `kI`, and `kD` are volts per feedback-error unit, integrated-error unit, and error-rate unit respectively. Feedforward is also volts, so PID and feedforward add directly before the final output is limited to the available voltage.
+
+`PidGains.of(p, i, d).iZone(error)` enables integral accumulation only while the absolute error is inside that zone.
+The zone is expressed in the control's configured feedback units. A zero zone means the integral is always enabled.
+Athena applies anti-windup at the 12 V boundary without clearing accumulated integral state.
+
+Feedforward supports `kS`, `kV`, `kA`, and constant `kG`:
+
+```java
+control.ff(kS, kV, kA, kG);
+```
+
+The three-argument overload remains `ff(kS, kV, kG)` and defaults `kA` to zero. Profiled controls provide velocity
+and acceleration references. For an unprofiled position target, `kS` follows position-error direction. Angle-based
+arm gravity compensation is state-dependent and should remain a custom loop rather than using constant `kG`.
+
 `TwoJointArm` demonstrates constraints that inspect another Athena feedback signal. `Turret` demonstrates field-heading correction before bounded-angle planning, range enforcement, profiling, PID, output saturation, and predictive stopping.
+
+## Templates and device slots
+
+`TemplateRoller` is a compact non-swerve `MechanismTemplate`. Its motor slot applies mechanism-owned configuration to whichever real device fills it:
+
+```java
+public final MotorSlot<TemplateRoller> motor = Slots.motor(this, "motor", this::configureIfReady)
+        .coast()
+        .currentLimit(20);
+```
+
+The robot supplies the physical device while the template owns its requirements:
+
+```java
+public final TemplateRoller templateRoller = new TemplateRoller().motor.fill(
+        Constants.RIO.motor(MotorControllerKinds.SPARK_FLEX, MotorKinds.NEO, 15));
+```
+
+This also shows the explicit controller-plus-physical-motor overload for a non-default pairing. Filling the slot creates the template actions and simulation model before Athena discovers the robot graph. The left-stick Y threshold in `Controls` runs this roller and releases it when the threshold becomes inactive.
+
+## Simulation
+
+`PositionElevator`, `VelocityShooter`, `TwoJointArm`, `LimitedManualArm`, and `TemplateRoller` declare `SimModel` fields beside the devices they represent. Athena finds those models automatically in simulation and runs the same actions, constraints, profiles, and control bindings used on the robot. Limits declared with `SimModel.limit(...)` drive the same `DigitalInputDevice` declarations used by real code.
+
+## Stop versus release
+
+The shooter and roller `stop` actions use `neutral()`. That stops Athena control output and lets the motor use its configured coast mode. Arms and elevators configure brake mode so their neutral behavior resists motion. Use `percent(0.0)` only when commanding zero output is intentionally part of an active control action; it is not the same as releasing control.
 
 ## Repeating between feedback targets
 
@@ -41,11 +88,11 @@ public final Action exercise = Actions.cycle()
 Request the cycle once with an edge binding. A later action request for the same mechanism root replaces it:
 
 ```java
-operator.start().onActive(arm.exercise);
-operator.back().onActive(arm.stow);
+operator.start().onTrue(arm.exercise);
+operator.back().onTrue(arm.stow);
 ```
 
-Avoid `whileActive(exercise)` for a persistent cycle because that requests and resets the cycle every active tick.
+Avoid `whileTrue(exercise)` for a persistent cycle because that requests and resets the cycle every active tick.
 
 ## Coordinating several mechanisms
 

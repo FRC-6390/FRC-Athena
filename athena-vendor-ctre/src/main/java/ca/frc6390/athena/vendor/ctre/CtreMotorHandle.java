@@ -222,7 +222,9 @@ public final class CtreMotorHandle implements MotorHandle {
         if (config.equals(appliedClosedLoopConfig)) {
             return;
         }
-        controller.configureSlot(config);
+        if (!controller.configureSlot(config)) {
+            throw new IllegalStateException("Failed to configure closed-loop slot for " + device.defaultName());
+        }
         appliedClosedLoopConfig = config;
     }
 
@@ -270,7 +272,8 @@ public final class CtreMotorHandle implements MotorHandle {
             return false;
         }
 
-        default void configureSlot(MotorClosedLoopConfig config) {
+        default boolean configureSlot(MotorClosedLoopConfig config) {
+            return true;
         }
 
         default void follow(int leaderId, boolean inverted) {
@@ -345,16 +348,17 @@ public final class CtreMotorHandle implements MotorHandle {
         }
 
         @Override
-        public void configureSlot(MotorClosedLoopConfig config) {
+        public boolean configureSlot(MotorClosedLoopConfig config) {
             SlotConfigs slot = new SlotConfigs()
                     .withKP(config.p())
                     .withKI(config.i())
                     .withKD(config.d())
                     .withKS(config.staticFeedforward())
                     .withKV(config.velocityFeedforward())
+                    .withKA(config.accelerationFeedforward())
                     .withKG(config.gravityFeedforward());
             slot.SlotNumber = config.slot();
-            talon.getConfigurator().apply(slot);
+            return talon.getConfigurator().apply(slot).isOK();
         }
 
         @Override
@@ -465,16 +469,17 @@ public final class CtreMotorHandle implements MotorHandle {
         }
 
         @Override
-        public void configureSlot(MotorClosedLoopConfig config) {
+        public boolean configureSlot(MotorClosedLoopConfig config) {
             SlotConfigs slot = new SlotConfigs()
                     .withKP(config.p())
                     .withKI(config.i())
                     .withKD(config.d())
                     .withKS(config.staticFeedforward())
                     .withKV(config.velocityFeedforward())
+                    .withKA(config.accelerationFeedforward())
                     .withKG(config.gravityFeedforward());
             slot.SlotNumber = config.slot();
-            talon.getConfigurator().apply(slot);
+            return talon.getConfigurator().apply(slot).isOK();
         }
 
         @Override

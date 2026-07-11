@@ -3,52 +3,42 @@ package frc.robot;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.wpilib.controls.Controllers;
 import ca.frc6390.athena.wpilib.controls.Gamepad;
-import frc.robot.mechanisms.FollowerElevator;
-import frc.robot.mechanisms.IndexedIntake;
-import frc.robot.mechanisms.LimitedManualArm;
-import frc.robot.mechanisms.OpenLoopShooter;
-import frc.robot.mechanisms.SingleJointArm;
-import frc.robot.mechanisms.Superstructure;
-import frc.robot.mechanisms.Turret;
 
 public final class Controls implements Mechanism {
     public final Gamepad operator = Controllers.xbox(Constants.Operator.PORT);
 
-    public Controls(
-            Superstructure superstructure,
-            OpenLoopShooter shooter,
-            SingleJointArm arm,
-            LimitedManualArm manualArm,
-            IndexedIntake intake,
-            FollowerElevator elevator,
-            Turret turret) {
-        operator.a().onActive(superstructure.home);
-        operator.x().onActive(superstructure.collectFloor);
-        operator.y().onActive(superstructure.scoreHigh);
-        operator.b().onActive(superstructure.ejectAll);
+    public Controls(Robot robot) {
+        operator.a().onTrue(robot.superstructure.home);
+        operator.x().onTrue(robot.superstructure.collectFloor);
+        operator.y().onTrue(robot.superstructure.scoreHigh);
+        operator.b().onTrue(robot.superstructure.ejectAll);
 
         operator.rightTrigger(0.5)
-                .whileActive(shooter.shoot)
-                .onDeactive(shooter.stop);
+                .whileTrue(robot.openLoopShooter.shoot)
+                .onFalse(robot.openLoopShooter.stop);
         operator.leftTrigger(0.5)
-                .whileActive(intake.collect)
-                .onDeactive(intake.stop);
+                .whileTrue(robot.indexedIntake.collect)
+                .onFalse(robot.indexedIntake.stop);
         operator.rightBumper()
-                .whileActive(manualArm.raise)
-                .onDeactive(manualArm.stop);
+                .whileTrue(robot.limitedManualArm.raise)
+                .onFalse(robot.limitedManualArm.stop);
         operator.leftBumper()
-                .whileActive(manualArm.lower)
-                .onDeactive(manualArm.stop);
+                .whileTrue(robot.limitedManualArm.lower)
+                .onFalse(robot.limitedManualArm.stop);
 
-        operator.povUp().onActive(elevator.top);
-        operator.povRight().onActive(arm.score);
-        operator.povDown().onActive(elevator.bottom);
-        operator.povLeft().onActive(arm.pickup);
+        operator.povUp().onTrue(robot.followerElevator.top);
+        operator.povRight().onTrue(robot.singleJointArm.score);
+        operator.povDown().onTrue(robot.followerElevator.bottom);
+        operator.povLeft().onTrue(robot.singleJointArm.pickup);
 
         // Start runs the repeating cycle; Back replaces it with stow on the same mechanism root.
-        operator.start().onActive(arm.exercise);
-        operator.back().onActive(arm.stow);
-        operator.leftStick().onActive(turret.forward);
-        operator.rightStick().onActive(turret.rear);
+        operator.start().onTrue(robot.singleJointArm.exercise);
+        operator.back().onTrue(robot.singleJointArm.stow);
+        operator.leftStick().onTrue(robot.turret.forward);
+        operator.rightStick().onTrue(robot.turret.rear);
+
+        operator.leftY().above(0.75, 0.65)
+                .whileTrue(robot.templateRoller.run)
+                .onFalse(robot.templateRoller.stop);
     }
 }

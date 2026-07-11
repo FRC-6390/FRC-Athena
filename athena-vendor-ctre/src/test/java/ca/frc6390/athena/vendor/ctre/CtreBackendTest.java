@@ -2,6 +2,7 @@ package ca.frc6390.athena.vendor.ctre;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.EncoderKind;
@@ -124,7 +125,7 @@ class CtreBackendTest {
         RecordingTalonController controller = new RecordingTalonController();
         CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.FALCON_500, 2), null, controller);
         MotorClosedLoopConfig config = new MotorClosedLoopConfig(
-                0, 0.2, 0.0, 0.01, 0.0, 0.0, 0.1, 0.2, 0.3, FocPolicy.DISABLED);
+                0, 0.2, 0.0, 0.01, 0.0, 0.1, 0.2, 0.3, 0.4, FocPolicy.DISABLED);
         MotorClosedLoopRequest request = MotorClosedLoopRequest.hybrid(config, 1.5);
 
         handle.setPositionTargetRotations(2.0, request);
@@ -134,6 +135,26 @@ class CtreBackendTest {
         assertEquals(config, controller.config);
         assertEquals(3.0, controller.positionTarget, 1.0e-9);
         assertEquals(1.5, controller.feedforwardVolts, 1.0e-9);
+    }
+
+    @Test
+    void failedSlotConfigurationIsNotCachedAndIsRetried() {
+        RecordingTalonController controller = new RecordingTalonController();
+        controller.configurationSucceeds = false;
+        CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.FALCON_500, 2), null, controller);
+        MotorClosedLoopRequest request = MotorClosedLoopRequest.device(new MotorClosedLoopConfig(
+                0, 0.2, 0.01, 0.03, 0.0, 0.1, 0.2, 0.3, 0.4, FocPolicy.DISABLED));
+
+        assertThrows(IllegalStateException.class,
+                () -> handle.setPositionTargetRotations(2.0, request));
+        assertEquals(1, controller.configureSlotCalls);
+
+        controller.configurationSucceeds = true;
+        handle.setPositionTargetRotations(2.0, request);
+        handle.setPositionTargetRotations(3.0, request);
+
+        assertEquals(2, controller.configureSlotCalls);
+        assertEquals(3.0, controller.positionTarget, 1.0e-9);
     }
 
     @Test
@@ -199,6 +220,7 @@ class CtreBackendTest {
         private int configureSlotCalls;
         private int velocityTargetCalls;
         private boolean licenseFault;
+        private boolean configurationSucceeds = true;
         private boolean enableFoc;
         private double positionTarget;
         private double feedforwardVolts;
@@ -246,9 +268,10 @@ class CtreBackendTest {
         }
 
         @Override
-        public void configureSlot(MotorClosedLoopConfig config) {
+        public boolean configureSlot(MotorClosedLoopConfig config) {
             configureSlotCalls++;
             this.config = config;
+            return configurationSucceeds;
         }
 
         @Override

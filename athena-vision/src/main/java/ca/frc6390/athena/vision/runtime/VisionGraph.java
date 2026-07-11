@@ -159,10 +159,11 @@ public final class VisionGraph {
 
         private CameraRuntime(CameraDevice camera) {
             this.camera = Objects.requireNonNull(camera, "camera");
-            poseSignal = camera.pose();
-            targetSignal = camera.targets();
+            poseSignal = camera.sourcePose();
+            targetSignal = camera.sourceTargets();
             cachedPoseSignal = new CachedPoseSignal(this);
             cachedTargetSignal = new CachedTargetSignal(this);
+            camera.bindRuntimeSignals(cachedPoseSignal, cachedTargetSignal);
         }
 
         /**

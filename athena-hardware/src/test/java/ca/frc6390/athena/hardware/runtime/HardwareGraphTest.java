@@ -138,6 +138,62 @@ class HardwareGraphTest {
     }
 
     @Test
+    void encoderDeclarationReadsBoundRuntimeSnapshotDirectly() {
+        FakeEncoderBackend backend = new FakeEncoderBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(), List.of(backend), List.of()));
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 6)
+                .offset(0.25)
+                .gearRatio(0.5)
+                .conversion(360.0);
+        graph.encoder(encoder);
+        backend.last.position = 0.75;
+        backend.last.absolutePosition = 0.5;
+        backend.last.velocity = 2.0;
+
+        assertEquals(90.0, encoder.position(), 1.0e-9);
+        assertEquals(45.0, encoder.absolutePosition(), 1.0e-9);
+        assertEquals(360.0, encoder.velocity(), 1.0e-9);
+
+        graph.close();
+        assertThrows(IllegalStateException.class, encoder::position);
+    }
+
+    @Test
+    void sharedDeclarationRequiresScopeWhenBoundToMultipleRuntimes() {
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 7);
+        FakeEncoderBackend firstBackend = new FakeEncoderBackend();
+        FakeEncoderBackend secondBackend = new FakeEncoderBackend();
+        HardwareGraph first = HardwareGraph.using(BackendRegistry.of(List.of(), List.of(firstBackend), List.of()));
+        HardwareGraph second = HardwareGraph.using(BackendRegistry.of(List.of(), List.of(secondBackend), List.of()));
+        first.encoder(encoder);
+        second.encoder(encoder);
+        firstBackend.last.position = 1.0;
+        secondBackend.last.position = 2.0;
+
+        assertThrows(IllegalStateException.class, encoder::position);
+        assertEquals(1.0, first.runtimeScope().call(encoder::position), 1.0e-9);
+        assertEquals(2.0, second.runtimeScope().call(encoder::position), 1.0e-9);
+
+        first.close();
+        assertEquals(2.0, encoder.position(), 1.0e-9);
+        second.close();
+    }
+
+    @Test
+    void imuDeclarationReadsBoundRuntimeSnapshotDirectly() {
+        FakeImuBackend backend = new FakeImuBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(), List.of(), List.of(backend)));
+        ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 8);
+        graph.imu(imu);
+        backend.last.yaw = 42.5;
+
+        assertEquals(42.5, imu.yawDegrees(), 1.0e-9);
+
+        graph.close();
+        assertThrows(IllegalStateException.class, imu::yawDegrees);
+    }
+
+    @Test
     void readOnlyEncoderUsesSoftwareRelativePositionAdjustment() {
         FakeEncoderBackend encoderBackend = new FakeEncoderBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(
@@ -289,6 +345,27 @@ class HardwareGraphTest {
     }
 
     @Test
+    void digitalInputReadsOneCachedSampleUntilNextSample() {
+        int[] reads = {0};
+        boolean[] raw = {false};
+        DigitalInputDevice input = DigitalInputDevice.rio(9).bind(() -> {
+            reads[0]++;
+            return raw[0];
+        });
+
+        input.sample();
+        raw[0] = true;
+
+        assertEquals(false, input.raw());
+        assertEquals(false, input.active());
+        assertEquals(1, reads[0]);
+
+        input.sample();
+        assertEquals(true, input.active());
+        assertEquals(2, reads[0]);
+    }
+
+    @Test
     void simModelsComposeMotorsEncodersRangesLimitsAndDependencies() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 11);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
@@ -434,6 +511,8 @@ class HardwareGraphTest {
         private int activateCalls;
         private int closeCalls;
         private double position;
+        private double absolutePosition;
+        private double velocity;
 
         private FakeEncoderHandle(EncoderDevice device) {
             this.device = device;
@@ -455,6 +534,16 @@ class HardwareGraphTest {
         }
 
         @Override
+        public double absolutePositionRotations() {
+            return absolutePosition;
+        }
+
+        @Override
+        public double velocityRotationsPerSecond() {
+            return velocity;
+        }
+
+        @Override
         public void close() {
             closeCalls++;
         }
@@ -464,6 +553,7 @@ class HardwareGraphTest {
         private final ImuDevice device;
         private int activateCalls;
         private int closeCalls;
+        private double yaw;
 
         private FakeImuHandle(ImuDevice device) {
             this.device = device;
@@ -481,7 +571,7 @@ class HardwareGraphTest {
 
         @Override
         public double yawDegrees() {
-            return 0.0;
+            return yaw;
         }
 
         @Override

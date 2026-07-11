@@ -2,34 +2,38 @@ package frc.robot;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import java.util.function.DoubleSupplier;
 
 public final class DriveTrain implements Mechanism {
-    private double forward;
-    private double turn;
+    public final MotorDevice leftLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 1)
+            .brake()
+            .currentLimit(Constants.Drive.CURRENT_LIMIT_AMPS);
+    public final MotorDevice leftFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 2)
+            .follow(leftLeader)
+            .brake()
+            .currentLimit(Constants.Drive.CURRENT_LIMIT_AMPS);
+    public final MotorDevice rightLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 3)
+            .inverted()
+            .brake()
+            .currentLimit(Constants.Drive.CURRENT_LIMIT_AMPS);
+    public final MotorDevice rightFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 4)
+            .follow(rightLeader)
+            .brake()
+            .currentLimit(Constants.Drive.CURRENT_LIMIT_AMPS);
 
-    public final MotorDevice leftLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 1);
-    public final MotorDevice leftFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 2).follow(leftLeader);
-    public final MotorDevice rightLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 3).inverted();
-    public final MotorDevice rightFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 4).follow(rightLeader);
+    private final SimModel leftSimulation = SimModel.motor(leftLeader, leftFollower)
+            .encoder(leftLeader.encoder());
+    private final SimModel rightSimulation = SimModel.motor(rightLeader, rightFollower)
+            .encoder(rightLeader.encoder());
 
-    public final Action drive = Actions.parallel(
-            leftLeader.percent(this::leftPercent),
-            rightLeader.percent(this::rightPercent));
-
-    public void arcade(double forward, double turn) {
-        this.forward = clamp(forward);
-        this.turn = clamp(turn);
-    }
-
-    private double leftPercent() {
-        return clamp(forward + turn);
-    }
-
-    private double rightPercent() {
-        return clamp(forward - turn);
+    public Action arcadeDrive(DoubleSupplier forward, DoubleSupplier turn) {
+        return Actions.parallel(
+                leftLeader.percent(() -> clamp(forward.getAsDouble() + turn.getAsDouble())),
+                rightLeader.percent(() -> clamp(forward.getAsDouble() - turn.getAsDouble())));
     }
 
     private static double clamp(double value) {

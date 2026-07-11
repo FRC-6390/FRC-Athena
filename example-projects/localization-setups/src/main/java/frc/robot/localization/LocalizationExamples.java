@@ -5,10 +5,13 @@ import ca.frc6390.athena.localization.pipeline.LocalizationFilters;
 import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.localization.pipeline.VisionFilters;
+import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import frc.robot.DriveTrain;
 import frc.robot.vision.VisionSources;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 
 public final class LocalizationExamples implements Mechanism {
     public final PoseSignal odometry;
@@ -45,6 +48,21 @@ public final class LocalizationExamples implements Mechanism {
                 .name("latestCameraPose");
         estimatedFieldPose = Localizations.kalman()
                 .input(odometry, fusedVision)
+                .stateStdDevs(0.08, Math.toRadians(3.0))
+                .defaultVisionStdDevs(0.7, Math.toRadians(20.0))
+                .maxNormalizedVisionResidual(9.0)
+                .publishNetworkTables()
                 .name("estimatedFieldPose");
+    }
+
+    public Pose2d pose() {
+        return estimatedFieldPose.pose2d();
+    }
+
+    public ActionBinding resetHeading() {
+        return context -> {
+            Pose2d current = pose();
+            estimatedFieldPose.reset(new Pose2d(current.getTranslation(), Rotation2d.kZero)).apply(context);
+        };
     }
 }

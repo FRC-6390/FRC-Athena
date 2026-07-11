@@ -58,8 +58,25 @@ public final class PhotonVisionDevice implements CameraDevice {
     }
 
     @Override
+    public PhotonVisionPoseSignal sourcePose() {
+        return new PhotonVisionPoseSignal(this, camera.sourcePose());
+    }
+
+    @Override
     public TargetSignal targets() {
         return camera.targets();
+    }
+
+    @Override
+    public TargetSignal sourceTargets() {
+        return camera.sourceTargets();
+    }
+
+    @Override
+    public void bindRuntimeSignals(
+            ca.frc6390.athena.vision.signal.PoseSignal poseSignal,
+            TargetSignal targetSignal) {
+        camera.bindRuntimeSignals(poseSignal, targetSignal);
     }
 
     @Override

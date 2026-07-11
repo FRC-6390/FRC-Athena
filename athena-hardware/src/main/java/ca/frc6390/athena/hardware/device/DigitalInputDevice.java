@@ -68,6 +68,7 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
      */
     public static void bindRuntime(DigitalInputDevice ref, BooleanSupplier reader) {
         RUNTIME_READERS.put(Objects.requireNonNull(ref, "ref"), Objects.requireNonNull(reader, "reader"));
+        SIGNALS.remove(ref);
     }
 
     /**
@@ -125,6 +126,14 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
      * @return raw value
      */
     public boolean raw() {
+        SignalState sampled = signalIfPresent(this);
+        if (sampled != null && sampled.hasSample()) {
+            return sampled.raw();
+        }
+        return readRawSource();
+    }
+
+    private boolean readRawSource() {
         if (reader == null) {
             BooleanSupplier runtimeReader = runtimeReader(this);
             if (runtimeReader == null) {
@@ -157,7 +166,8 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
      * latched until hooks consume it.</p>
      */
     public void sample() {
-        signal(this).sample(active());
+        boolean raw = readRawSource();
+        signal(this).sample(raw, isInverted ? !raw : raw);
     }
 
     /**
@@ -267,6 +277,7 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
 
     private static final class SignalState {
         private boolean sampled;
+        private boolean raw;
         private boolean active;
         private boolean risingLatched;
         private boolean fallingLatched;
@@ -275,7 +286,7 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
         private long observedRisingGeneration;
         private long observedFallingGeneration;
 
-        private synchronized void sample(boolean nextActive) {
+        private synchronized void sample(boolean nextRaw, boolean nextActive) {
             if (sampled) {
                 if (!active && nextActive) {
                     risingLatched = true;
@@ -286,6 +297,7 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
                     fallingGeneration++;
                 }
             }
+            raw = nextRaw;
             active = nextActive;
             sampled = true;
         }
@@ -296,6 +308,10 @@ public record DigitalInputDevice(String name, int channel, boolean isInverted, B
 
         private synchronized boolean active() {
             return active;
+        }
+
+        private synchronized boolean raw() {
+            return raw;
         }
 
         private synchronized boolean risingLatched() {

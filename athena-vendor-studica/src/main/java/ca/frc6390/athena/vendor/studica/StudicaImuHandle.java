@@ -12,6 +12,7 @@ import java.util.Objects;
 public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     private final ImuDevice device;
     private final NavxController controller;
+    private volatile Snapshot snapshot = Snapshot.empty();
 
     /**
      * Creates a Studica/NavX IMU handle using a real Studica AHRS.
@@ -34,7 +35,7 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
     @Override
     public double yawDegrees() {
-        return controller.yawDegrees();
+        return snapshot.yawDegrees();
     }
 
     @Override
@@ -43,38 +44,51 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     }
 
     @Override
+    public void refreshInputs() {
+        snapshot = new Snapshot(
+                controller.yawDegrees(),
+                controller.angleDegrees(),
+                controller.pitchDegrees(),
+                controller.rollDegrees(),
+                controller.yawRateDegreesPerSecond(),
+                controller.linearAccelerationXG(),
+                controller.linearAccelerationYG(),
+                controller.linearAccelerationZG());
+    }
+
+    @Override
     public double angleDegrees() {
-        return controller.angleDegrees();
+        return snapshot.angleDegrees();
     }
 
     @Override
     public double pitchDegrees() {
-        return controller.pitchDegrees();
+        return snapshot.pitchDegrees();
     }
 
     @Override
     public double rollDegrees() {
-        return controller.rollDegrees();
+        return snapshot.rollDegrees();
     }
 
     @Override
     public double yawRateDegreesPerSecond() {
-        return controller.yawRateDegreesPerSecond();
+        return snapshot.yawRateDegreesPerSecond();
     }
 
     @Override
     public double linearAccelerationXG() {
-        return controller.linearAccelerationXG();
+        return snapshot.linearAccelerationXG();
     }
 
     @Override
     public double linearAccelerationYG() {
-        return controller.linearAccelerationYG();
+        return snapshot.linearAccelerationYG();
     }
 
     @Override
     public double linearAccelerationZG() {
-        return controller.linearAccelerationZG();
+        return snapshot.linearAccelerationZG();
     }
 
     @Override
@@ -94,6 +108,21 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
     private static AHRS createAhrs(ImuDevice device) {
         return new AHRS(comType(device), AHRS.NavXUpdateRate.k100Hz);
+    }
+
+    private record Snapshot(
+            double yawDegrees,
+            double angleDegrees,
+            double pitchDegrees,
+            double rollDegrees,
+            double yawRateDegreesPerSecond,
+            double linearAccelerationXG,
+            double linearAccelerationYG,
+            double linearAccelerationZG) {
+        private static Snapshot empty() {
+            return new Snapshot(Double.NaN, Double.NaN, Double.NaN, Double.NaN,
+                    Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+        }
     }
 
     private static AHRS.NavXComType comType(ImuDevice device) {

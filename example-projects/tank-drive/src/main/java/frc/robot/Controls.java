@@ -12,16 +12,16 @@ public final class Controls implements Mechanism {
     public final DoubleSupplier forward = driver.leftY()
             .deadband(Constants.Driver.DEADBAND)
             .inverted()
+            .squared()
             .toSupplier();
     public final DoubleSupplier turn = driver.rightX()
             .deadband(Constants.Driver.DEADBAND)
+            .squared()
             .toSupplier();
     public final HookBinding drive;
 
-    public Controls(DriveTrain driveTrain) {
-        drive = Events.teleopPeriodic().whileActive(() -> {
-            driveTrain.arcade(forward.getAsDouble(), turn.getAsDouble());
-            driveTrain.drive.request();
-        });
+    public Controls(Robot robot) {
+        drive = Events.teleopPeriodic().whileActive(
+                robot.driveTrain.arcadeDrive(forward, turn));
     }
 }

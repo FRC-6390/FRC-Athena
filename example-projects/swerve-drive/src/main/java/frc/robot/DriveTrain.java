@@ -22,14 +22,14 @@ public final class DriveTrain implements Mechanism {
     private static final double WHEELBASE_METERS = 0.55;
     private static final double TRACK_WIDTH_METERS = 0.55;
 
-    public final SwerveModule frontLeft = module(1, 2, 11);
-    public final SwerveModule frontRight = module(3, 4, 12);
-    public final SwerveModule backLeft = module(5, 6, 13);
-    public final SwerveModule backRight = module(7, 8, 14);
+    public final SwerveModule frontLeft = module(1, 2, 11, Constants.ModuleOffsets.FRONT_LEFT);
+    public final SwerveModule frontRight = module(3, 4, 12, Constants.ModuleOffsets.FRONT_RIGHT);
+    public final SwerveModule backLeft = module(5, 6, 13, Constants.ModuleOffsets.BACK_LEFT);
+    public final SwerveModule backRight = module(7, 8, 14, Constants.ModuleOffsets.BACK_RIGHT);
     public final ImuDevice imu = Constants.RIO.imu(ImuKinds.PIGEON_2, 20);
     public final ImuSource heading = imu.relative();
     public final Action resetHeading = heading.setYaw(0.0);
-    private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
+    public final SwerveKinematics kinematics = SwerveKinematics.rectangular(
             WHEELBASE_METERS,
             TRACK_WIDTH_METERS,
             MAX_SPEED_METERS_PER_SECOND,
@@ -55,14 +55,19 @@ public final class DriveTrain implements Mechanism {
         });
     }
 
-    private static SwerveModule module(int driveMotorId, int steerMotorId, int encoderId) {
+    private static SwerveModule module(
+            int driveMotorId,
+            int steerMotorId,
+            int encoderId,
+            double angleOffsetRotations) {
         return new SwerveModules.SDS.MK5N.R3()
                 .drive.brake().fill(Constants.RIO.motor(MotorKinds.KRAKEN_X60, driveMotorId))
                 .steer.brake().fill(Constants.RIO.motor(MotorKinds.KRAKEN_X44, steerMotorId))
                 .angle.fill(Constants.RIO.encoder(EncoderKinds.CANCODER, encoderId)
+                        .offset(angleOffsetRotations)
                         .units(EncoderUnit.ROTATIONS))
                 .driveMaxSpeedMetersPerSecond(MAX_SPEED_METERS_PER_SECOND)
-                .steerPid(1.9, 0.0, 0.0);
+                .steerPid(22.8, 0.0, 0.0);
     }
 
     private static double clamp(double value) {

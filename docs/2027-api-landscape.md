@@ -158,6 +158,36 @@ flowchart TD
 
 Signals are typed streams. The final name must say what value comes out of the stream. `Signal` is not a generic replacement for old `Ref` names.
 
+### Direct device reads
+
+Robot code reads runtime-owned sensor snapshots directly from declarations. Reading a value must not require an
+`ActionContext`, hook context, mechanism context, or runtime object:
+
+```java
+double armPosition = armEncoder.position();
+double armVelocity = armEncoder.velocity();
+double moduleAngle = moduleEncoder.absolutePosition();
+double heading = imu.yawDegrees();
+boolean atHome = homeSwitch.active();
+Optional<PoseSnapshot> cameraPose = camera.pose().value();
+Optional<TargetMeasurementSample> target = camera.targets().latest();
+```
+
+The runtime discovers declarations, creates their vendor handles, refreshes each handle once per input cycle, and
+binds the declaration to that cached handle. Every read in the cycle observes the same snapshot; getters do not poll
+vendor APIs again. A declaration read before registration, or after its runtime closes, fails with a clear
+`IllegalStateException`. Multiple simultaneous runtimes are isolated by runtime scope so tests and simulation cannot
+silently read another runtime's device.
+
+`PositionSignal` and `VelocitySignal` use context-free `position()` and `velocity()` methods, so custom feedback,
+constraints, hooks, and ordinary helper methods all use the same API. `EncoderDevice.absolutePosition()` is the
+numeric absolute channel; `absoluteSignal()` adapts that channel when a control binding needs a `PositionSignal`.
+Camera pose and target signals expose typed optional reads because no measurement is a valid state. Legacy
+`PoseSignal.pose()` remains an origin-fallback convenience, not the authoritative missing-data API.
+
+`ActionContext` remains runtime-internal for applying outputs and executing device mutations. It is not part of the
+robot-facing read path.
+
 Final signal names:
 
 - `BooleanSignal`: emits a boolean.
@@ -255,6 +285,12 @@ Robot-facing code should request an Action directly with `action.request()` or t
 Control Actions execute through the same output path as motor Actions. `ControlBinding` loop runtimes reset on first use and when the requested output kind changes; same-mode dynamic targets preserve controller and profile state. Target transforms run before constraints and planning, profiles produce position/velocity/acceleration references, PID and feedforward consume those references, and final output saturation plus directional and predictive constraint checks run last.
 
 Athena's built-in PID and feedforward gains always produce volts. Their contributions add directly and the final closed-loop request is clamped to the available 12V command range. Percent remains an explicit open-loop motor Action or custom `ControlOutput.percent(...)`; it is never the implicit unit of `.pid(...)`. A vendor backend may run a loop on-device only when that controller exposes voltage-output PID semantics in Athena's position and velocity units. Otherwise Athena runs the same voltage loop and calls `setVoltage(...)`.
+
+`PidGains` contains `kP`, `kI`, `kD`, and `iZone`; tolerance belongs to Action completion and reusable
+`ControlBinding.at(...)` conditions, not controller gains. Integral state uses composed-output anti-windup and resets
+when the control is neutralized. Derivative is taken from measurement to avoid target-step kick. `FeedforwardGains`
+contains `kS`, `kV`, `kA`, and constant `kG`. Device offload is allowed only when every targeted motor supports the
+same voltage-semantic request and the selected feedback source is actually configured by the backend.
 
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |

@@ -50,7 +50,7 @@ public final class AdvancedFeedback implements Mechanism {
     // Only the mixed case constructs FeedbackBinding explicitly.
     private final ControlBinding modular = Controls.position(modularMotor)
             .feedback(new FeedbackBinding(trackedPosition, filteredVelocity))
-            .pid(0.12, 0.0, 0.002);
+            .pid(1.44, 0.0, 0.024);
 
     private final MotorDevice redundantMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 23);
     private final EncoderDevice redundantA = Constants.RIO.encoder(EncoderKinds.CANCODER, 32);
@@ -63,7 +63,7 @@ public final class AdvancedFeedback implements Mechanism {
             .feedback(new FeedbackBinding(
                     medianPosition,
                     FeedbackSignals.lowPass(redundantMotor.encoder(), 0.2)))
-            .pid(0.1, 0.0, 0.001);
+            .pid(1.2, 0.0, 0.012);
 
     public final Action ordinaryRelativeMove = ordinary.position(2.0);
     public final Action modularAbsoluteMove = modular.position(12.0);

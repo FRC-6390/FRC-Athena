@@ -2,6 +2,7 @@ package frc.robot.auto;
 
 import ca.frc6390.athena.auto.AutoRoutine;
 import ca.frc6390.athena.auto.Autos;
+import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import choreo.auto.AutoTrajectory;
 import edu.wpi.first.wpilibj2.command.Commands;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -28,9 +29,7 @@ public final class ChoreoMultiPathSplitAuto {
             inbound.done().onTrue(context.mechanisms.score().andThen(exit.cmd()));
             exit.done().onTrue(Commands.runOnce(() -> finished.set(true)));
 
-            return ExampleCommands.fromWpilib(
-                    "choreo-multipath-splits",
-                    routine.cmd(finished::get));
+            return WpilibCommands.wrap(routine.cmd(finished::get).withName("choreo-multipath-splits"));
         });
     }
 }

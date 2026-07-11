@@ -1,6 +1,5 @@
 package ca.frc6390.athena.vendor.rev;
 
-import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
@@ -38,7 +37,6 @@ public final class RevMotorHandle implements MotorHandle {
     private double velocityRotationsPerSecond;
     private double absolutePositionRotations;
     private double absoluteVelocityRotationsPerSecond;
-    private MotorClosedLoopConfig appliedClosedLoopConfig;
 
     /**
      * Creates a REV motor handle using real REVLib Spark controllers.
@@ -113,12 +111,7 @@ public final class RevMotorHandle implements MotorHandle {
 
     @Override
     public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
-        MotorClosedLoopRequest safeRequest = safeRequest(request);
-        applyClosedLoopConfig(safeRequest.config());
-        controller.setPositionTarget(
-                finiteOrZero(rotations),
-                safeRequest.config().slot(),
-                finiteOrZero(safeRequest.arbitraryFeedforwardVolts()));
+        throw unsupportedVoltageClosedLoop();
     }
 
     @Override
@@ -130,12 +123,7 @@ public final class RevMotorHandle implements MotorHandle {
     public void setVelocityTargetRotationsPerSecond(
             double rotationsPerSecond,
             MotorClosedLoopRequest request) {
-        MotorClosedLoopRequest safeRequest = safeRequest(request);
-        applyClosedLoopConfig(safeRequest.config());
-        controller.setVelocityTarget(
-                finiteOrZero(rotationsPerSecond),
-                safeRequest.config().slot(),
-                finiteOrZero(safeRequest.arbitraryFeedforwardVolts()));
+        throw unsupportedVoltageClosedLoop();
     }
 
     @Override
@@ -193,16 +181,10 @@ public final class RevMotorHandle implements MotorHandle {
         }
     }
 
-    private MotorClosedLoopRequest safeRequest(MotorClosedLoopRequest request) {
-        return request == null ? MotorClosedLoopRequest.device(MotorClosedLoopConfig.empty()) : request;
-    }
-
-    private void applyClosedLoopConfig(MotorClosedLoopConfig config) {
-        if (config.equals(appliedClosedLoopConfig)) {
-            return;
-        }
-        controller.configureClosedLoop(device, options, config);
-        appliedClosedLoopConfig = config;
+    private UnsupportedOperationException unsupportedVoltageClosedLoop() {
+        return new UnsupportedOperationException(
+                "REV closed-loop gains use duty-cycle semantics; Athena voltage-gain requests must run in software for "
+                        + device.defaultName());
     }
 
     private static SparkController createController(MotorDevice device) {
@@ -248,12 +230,6 @@ public final class RevMotorHandle implements MotorHandle {
 
         default void setVelocityTarget(double rotationsPerSecond, int slot, double arbitraryFeedforwardVolts) {
             setVelocityTarget(rotationsPerSecond);
-        }
-
-        default void configureClosedLoop(
-                MotorDevice device,
-                RevMotorOptions options,
-                MotorClosedLoopConfig closedLoopConfig) {
         }
 
         default void follow(int leaderId, boolean inverted) {
@@ -343,24 +319,6 @@ public final class RevMotorHandle implements MotorHandle {
                     closedLoopSlot(slot),
                     arbitraryFeedforwardVolts,
                     ArbFFUnits.kVoltage);
-        }
-
-        @Override
-        public void configureClosedLoop(
-                MotorDevice device,
-                RevMotorOptions options,
-                MotorClosedLoopConfig closedLoopConfig) {
-            SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
-            ClosedLoopSlot slot = closedLoopSlot(closedLoopConfig.slot());
-            config.closedLoop
-                    .pid(closedLoopConfig.p(), closedLoopConfig.i(), closedLoopConfig.d(), slot)
-                    .iZone(closedLoopConfig.iZone(), slot)
-                    .allowedClosedLoopError(closedLoopConfig.tolerance(), slot);
-            config.closedLoop.feedForward
-                    .kS(closedLoopConfig.staticFeedforward(), slot)
-                    .kV(closedLoopConfig.velocityFeedforward(), slot)
-                    .kG(closedLoopConfig.gravityFeedforward(), slot);
-            spark.configure(config, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters);
         }
 
         @Override

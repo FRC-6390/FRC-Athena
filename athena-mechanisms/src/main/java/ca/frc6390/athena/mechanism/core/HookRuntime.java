@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import java.util.Collection;
 import java.util.IdentityHashMap;
@@ -84,6 +85,12 @@ final class HookRuntime {
         boolean wasActive = previousEventActive.getOrDefault(hook, false);
 
         for (HookBinding.HookAction binding : hook.actions()) {
+            if (isImmediateDeviceMutation(binding.action())) {
+                if (binding.phase().shouldRun(event, wasActive, active)) {
+                    binding.action().apply(actionContext);
+                }
+                continue;
+            }
             if (leases != null && binding.action() instanceof Action action) {
                 runLeasedAction(event, binding, action, wasActive, active);
                 continue;
@@ -150,6 +157,9 @@ final class HookRuntime {
         return phase == HookBinding.Phase.WHILE_ACTIVE || phase == HookBinding.Phase.WHILE_INACTIVE;
     }
 
+    private static boolean isImmediateDeviceMutation(ActionBinding action) {
+        return action instanceof Actions.EncoderSetPosition || action instanceof Actions.ImuSetYaw;
+    }
 
     /**
      * Clears remembered event Action.

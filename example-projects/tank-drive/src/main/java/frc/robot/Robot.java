@@ -4,5 +4,5 @@ import ca.frc6390.athena.wpilib.lifecycle.AthenaRobot;
 
 public final class Robot extends AthenaRobot {
     public final DriveTrain driveTrain = new DriveTrain();
-    public final Controls controls = new Controls(driveTrain);
+    public final Controls controls = new Controls(this);
 }

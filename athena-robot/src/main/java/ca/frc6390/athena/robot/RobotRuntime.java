@@ -219,19 +219,8 @@ public final class RobotRuntime {
         registerDiscoveredCameras(services.cameras());
         localization(services.localizations().toArray(Localization[]::new));
         mechanisms.followerMotors().forEach(hardwareGraph::motor);
-        mechanisms.imuDevices().forEach(imu -> {
-            var handle = hardwareGraph.imu(imu);
-            ImuDevice.bindRuntime(
-                    imu,
-                    handle::yawDegrees,
-                    handle::pitchDegrees,
-                    handle::rollDegrees,
-                    handle::angleDegrees,
-                    handle::yawRateDegreesPerSecond,
-                    handle::linearAccelerationXG,
-                    handle::linearAccelerationYG,
-                    handle::linearAccelerationZG);
-        });
+        mechanisms.encoderDevices().forEach(hardwareGraph::encoder);
+        mechanisms.imuDevices().forEach(hardwareGraph::imu);
         if (simulationSession != null) {
             registerSimulationModels();
             mechanisms.bindInMemoryRuntime();

@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.IdentityHashMap;
 
 import ca.frc6390.athena.hardware.backend.BackendRegistry;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
@@ -25,6 +26,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final Map<HardwareIdentity, EncoderHandle> encoders = new LinkedHashMap<>();
     private final Map<HardwareIdentity, ImuHandle> imus = new LinkedHashMap<>();
     private final Map<HardwareIdentity, RuntimeException> refreshFailures = new LinkedHashMap<>();
+    private final Map<Object, AutoCloseable> runtimeBindings = new IdentityHashMap<>();
+    private final RuntimeScope runtimeScope = new RuntimeScope("hardware-" + Integer.toHexString(System.identityHashCode(this)));
 
     /**
      * Creates a graph using the global backend registry.
@@ -78,25 +81,32 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     @Override
     public synchronized EncoderHandle encoder(EncoderDevice device) {
         Objects.requireNonNull(device, "device");
+        EncoderHandle handle;
         if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated) {
-            return encoders.computeIfAbsent(
+            handle = encoders.computeIfAbsent(
                     HardwareIdentity.encoder(device),
                     ignored -> adjustable(new IntegratedEncoderHandle(device, motor(integrated.motor()))));
-        }
-        if (device.source() instanceof EncoderDevice.EncoderSource.MotorAbsolute absolute) {
-            return encoders.computeIfAbsent(
+        } else if (device.source() instanceof EncoderDevice.EncoderSource.MotorAbsolute absolute) {
+            handle = encoders.computeIfAbsent(
                     HardwareIdentity.encoder(device),
                     ignored -> adjustable(new AbsoluteMotorEncoderHandle(device, motor(absolute.motor()))));
+        } else {
+            handle = encoders.computeIfAbsent(HardwareIdentity.encoder(device), ignored -> {
+                EncoderHandle created = backends
+                        .encoderBackendFor(device)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "No encoder backend for " + device.kind().key() + " over " + device.connection().identity()))
+                        .create(device);
+                created.activate();
+                return adjustable(created);
+            });
         }
-        return encoders.computeIfAbsent(HardwareIdentity.encoder(device), ignored -> {
-            EncoderHandle handle = backends
-                    .encoderBackendFor(device)
-                    .orElseThrow(() -> new IllegalStateException(
-                            "No encoder backend for " + device.kind().key() + " over " + device.connection().identity()))
-                    .create(device);
-            handle.activate();
-            return adjustable(handle);
-        });
+        runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, handle));
+        return handle;
+    }
+
+    public RuntimeScope runtimeScope() {
+        return runtimeScope;
     }
 
     private static EncoderHandle adjustable(EncoderHandle handle) {
@@ -111,15 +121,17 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      */
     public synchronized ImuHandle imu(ImuDevice device) {
         Objects.requireNonNull(device, "device");
-        return imus.computeIfAbsent(HardwareIdentity.imu(device), ignored -> {
-            ImuHandle handle = backends
+        ImuHandle handle = imus.computeIfAbsent(HardwareIdentity.imu(device), ignored -> {
+            ImuHandle created = backends
                     .imuBackendFor(device)
                     .orElseThrow(() -> new IllegalStateException(
                             "No IMU backend for " + device.kind().key() + " over " + device.connection().identity()))
                     .create(device);
-            handle.activate();
-            return handle;
+            created.activate();
+            return created;
         });
+        runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, handle));
+        return handle;
     }
 
     /**
@@ -165,12 +177,14 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
 
     @Override
     public synchronized void close() {
+        closeAll(runtimeBindings);
+        runtimeBindings.clear();
         closeAll(imus);
         closeAll(encoders);
         closeAll(motors);
     }
 
-    private static void closeAll(Map<HardwareIdentity, ?> handles) {
+    private static void closeAll(Map<?, ?> handles) {
         for (Object handle : handles.values()) {
             if (handle instanceof AutoCloseable closeable) {
                 try {

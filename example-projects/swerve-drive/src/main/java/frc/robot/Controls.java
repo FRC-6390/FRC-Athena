@@ -5,6 +5,7 @@ import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.wpilib.controls.Controllers;
 import ca.frc6390.athena.wpilib.controls.Gamepad;
+import edu.wpi.first.wpilibj.DriverStation;
 import java.util.function.DoubleSupplier;
 
 public final class Controls implements Mechanism {
@@ -23,9 +24,12 @@ public final class Controls implements Mechanism {
     public final HookBinding drive;
 
     public Controls(DriveTrain driveTrain) {
-        driver.y().onActive(() -> fieldOriented = true);
-        driver.a().onActive(() -> fieldOriented = false);
-        driver.start().onActive(driveTrain.resetHeading);
+        driver.y().pressed().onlyIf(DriverStation::isTeleopEnabled)
+                .onTrue(() -> fieldOriented = true);
+        driver.a().pressed().onlyIf(DriverStation::isTeleopEnabled)
+                .onTrue(() -> fieldOriented = false);
+        driver.start().pressed().onlyIf(DriverStation::isTeleopEnabled)
+                .onTrue(driveTrain.resetHeading);
 
         drive = Events.teleopPeriodic().whileActive(
                 driveTrain.drive(forward, strafe, rotation, () -> fieldOriented));

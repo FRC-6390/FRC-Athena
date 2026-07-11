@@ -87,19 +87,19 @@ public final class Actions {
         throw new IllegalArgumentException("Device action was not created by Athena mechanisms.");
     }
 
-    public static Action position(ControlBinding control, double position) {
+    static Action position(ControlBinding control, double position) {
         return new ControlPosition(control, position);
     }
 
-    public static Action position(ControlBinding control, DoubleSupplier position) {
+    static Action position(ControlBinding control, DoubleSupplier position) {
         return new DynamicControlPosition(control, position);
     }
 
-    public static Action velocity(ControlBinding control, double velocity) {
+    static Action velocity(ControlBinding control, double velocity) {
         return new ControlVelocity(control, velocity);
     }
 
-    public static Action velocity(ControlBinding control, DoubleSupplier velocity) {
+    static Action velocity(ControlBinding control, DoubleSupplier velocity) {
         return new DynamicControlVelocity(control, velocity);
     }
 
@@ -286,6 +286,8 @@ public final class Actions {
     public record ControlPercent(ControlBinding control, double percent) implements Action, Output.Percent {
         public ControlPercent {
             Objects.requireNonNull(control, "control");
+            requireControlOutput(control);
+            requireFinite(percent, "Control percent");
         }
     }
 
@@ -293,17 +295,20 @@ public final class Actions {
         public DynamicControlPercent {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(percentSupplier, "percentSupplier");
+            requireControlOutput(control);
         }
 
         @Override
         public double percent() {
-            return percentSupplier.getAsDouble();
+            return requireFinite(percentSupplier.getAsDouble(), "Control percent");
         }
     }
 
     public record ControlVoltage(ControlBinding control, double volts) implements Action, Output.Voltage {
         public ControlVoltage {
             Objects.requireNonNull(control, "control");
+            requireControlOutput(control);
+            requireFinite(volts, "Control voltage");
         }
     }
 
@@ -311,17 +316,20 @@ public final class Actions {
         public DynamicControlVoltage {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(voltsSupplier, "voltsSupplier");
+            requireControlOutput(control);
         }
 
         @Override
         public double volts() {
-            return voltsSupplier.getAsDouble();
+            return requireFinite(voltsSupplier.getAsDouble(), "Control voltage");
         }
     }
 
     public record ControlPosition(ControlBinding control, double position) implements Action, Output.Position {
         public ControlPosition {
             Objects.requireNonNull(control, "control");
+            requireControlMode(control, ControlMode.POSITION);
+            requireFinite(position, "Control position");
         }
     }
 
@@ -329,17 +337,20 @@ public final class Actions {
         public DynamicControlPosition {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(positionSupplier, "positionSupplier");
+            requireControlMode(control, ControlMode.POSITION);
         }
 
         @Override
         public double position() {
-            return positionSupplier.getAsDouble();
+            return requireFinite(positionSupplier.getAsDouble(), "Control position");
         }
     }
 
     public record ControlVelocity(ControlBinding control, double velocity) implements Action, Output.Velocity {
         public ControlVelocity {
             Objects.requireNonNull(control, "control");
+            requireControlMode(control, ControlMode.VELOCITY);
+            requireFinite(velocity, "Control velocity");
         }
     }
 
@@ -347,11 +358,12 @@ public final class Actions {
         public DynamicControlVelocity {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(velocitySupplier, "velocitySupplier");
+            requireControlMode(control, ControlMode.VELOCITY);
         }
 
         @Override
         public double velocity() {
-            return velocitySupplier.getAsDouble();
+            return requireFinite(velocitySupplier.getAsDouble(), "Control velocity");
         }
     }
 
@@ -700,6 +712,27 @@ public final class Actions {
             return true;
         }
         return false;
+    }
+
+    private static void requireControlOutput(ControlBinding control) {
+        if (control.output() == null) {
+            throw new IllegalStateException("Control actions require an output motor.");
+        }
+    }
+
+    private static void requireControlMode(ControlBinding control, ControlMode required) {
+        requireControlOutput(control);
+        if (control.mode() != required) {
+            throw new IllegalStateException(required.name().toLowerCase(java.util.Locale.ROOT)
+                    + " action requires a matching control binding.");
+        }
+    }
+
+    private static double requireFinite(double value, String description) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(description + " must be finite.");
+        }
+        return value;
     }
 
     private static final class DeadlineActions extends java.util.AbstractList<Action> {

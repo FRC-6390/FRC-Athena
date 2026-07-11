@@ -3,6 +3,7 @@ package frc.robot.auto;
 import ca.frc6390.athena.auto.AutoRoutine;
 import ca.frc6390.athena.auto.Autos;
 import ca.frc6390.athena.auto.PathProvider;
+import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 
 /** Athena-native marker metadata for a custom provider that owns marker timing. */
 public final class CustomProviderMarkersAuto {
@@ -16,13 +17,11 @@ public final class CustomProviderMarkersAuto {
                 "custom-provider-path",
                 Autos.marker(
                         "custom-intake",
-                        ExampleCommands.fromWpilib(
-                                "custom-intake-marker",
-                                context.mechanisms.intakeUntilCaptured())),
+                        WpilibCommands.wrap(context.mechanisms.intakeUntilCaptured()
+                                .withName("custom-intake-marker"))),
                 Autos.marker(
                         "custom-stow",
-                        ExampleCommands.fromWpilib(
-                                "custom-stow-marker",
-                                context.mechanisms.stow())));
+                        WpilibCommands.wrap(context.mechanisms.stow()
+                                .withName("custom-stow-marker"))));
     }
 }

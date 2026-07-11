@@ -12,6 +12,7 @@ import java.util.Objects;
 public final class RevThroughBoreEncoderHandle implements EncoderHandle {
     private final EncoderDevice device;
     private final ThroughBoreController controller;
+    private volatile double absolutePositionRotations = Double.NaN;
 
     /**
      * Creates a through-bore handle using a real WPILib duty cycle encoder.
@@ -33,8 +34,13 @@ public final class RevThroughBoreEncoderHandle implements EncoderHandle {
     }
 
     @Override
+    public void refreshInputs() {
+        absolutePositionRotations = controller.absolutePositionRotations();
+    }
+
+    @Override
     public double absolutePositionRotations() {
-        return controller.absolutePositionRotations();
+        return absolutePositionRotations;
     }
 
     @Override
@@ -44,7 +50,7 @@ public final class RevThroughBoreEncoderHandle implements EncoderHandle {
 
     @Override
     public double velocityRotationsPerSecond() {
-        return controller.velocityRotationsPerSecond();
+        throw new UnsupportedOperationException("REV through-bore velocity is not available from duty cycle input.");
     }
 
     interface ThroughBoreController {

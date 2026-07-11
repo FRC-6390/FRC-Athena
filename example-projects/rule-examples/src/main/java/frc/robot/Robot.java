@@ -6,6 +6,6 @@ import frc.robot.mechanisms.GuardedArm;
 
 public final class Robot extends AthenaRobot {
     public final GuardedArm arm = new GuardedArm();
-    public final Conveyor conveyor = new Conveyor();
-    public final Controls controls = new Controls(arm, conveyor);
+    public final Conveyor conveyor = new Conveyor(arm.atScore);
+    public final Controls controls = new Controls(this);
 }

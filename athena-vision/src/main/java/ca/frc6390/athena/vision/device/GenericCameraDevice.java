@@ -74,12 +74,36 @@ public final class GenericCameraDevice implements CameraDevice {
 
     @Override
     public PoseSignal pose() {
+        PoseSignal runtimeSignal = signals.runtimePoseSignal;
+        if (runtimeSignal != null) {
+            return runtimeSignal;
+        }
+        return sourcePose();
+    }
+
+    @Override
+    public PoseSignal sourcePose() {
         return new GenericPoseSignal(this, signals::poseMeasurements);
     }
 
     @Override
     public TargetSignal targets() {
+        TargetSignal runtimeSignal = signals.runtimeTargetSignal;
+        if (runtimeSignal != null) {
+            return runtimeSignal;
+        }
+        return sourceTargets();
+    }
+
+    @Override
+    public TargetSignal sourceTargets() {
         return new GenericTargetSignal(this, signals::targetMeasurements);
+    }
+
+    @Override
+    public void bindRuntimeSignals(PoseSignal poseSignal, TargetSignal targetSignal) {
+        signals.runtimePoseSignal = Objects.requireNonNull(poseSignal, "poseSignal");
+        signals.runtimeTargetSignal = Objects.requireNonNull(targetSignal, "targetSignal");
     }
 
     @Override
@@ -90,6 +114,8 @@ public final class GenericCameraDevice implements CameraDevice {
     private static final class SignalBinding {
         private volatile Supplier<? extends List<? extends Measurement>> poseMeasurements = List::of;
         private volatile Supplier<? extends List<? extends Measurement>> targetMeasurements = List::of;
+        private volatile PoseSignal runtimePoseSignal;
+        private volatile TargetSignal runtimeTargetSignal;
 
         private void bindPose(Supplier<? extends List<? extends Measurement>> measurements) {
             poseMeasurements = measurements == null ? List::of : measurements;

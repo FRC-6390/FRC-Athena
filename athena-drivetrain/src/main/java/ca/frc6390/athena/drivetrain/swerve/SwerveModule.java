@@ -11,6 +11,7 @@ import ca.frc6390.athena.mechanism.core.EncoderSlot;
 import ca.frc6390.athena.mechanism.core.MechanismTemplate;
 import ca.frc6390.athena.mechanism.core.MotorSlot;
 import ca.frc6390.athena.mechanism.core.Slots;
+import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanners;
 import java.util.Objects;
@@ -67,7 +68,7 @@ public abstract class SwerveModule implements MechanismTemplate {
         driveVelocity = Controls.velocity(drive.get())
                 .feedback(driveDistance);
         steerPosition = Controls.position(steer.get())
-                .feedback(angle.get().absolutePosition(), angle.get())
+                .feedback(angle.get().absoluteSignal(), angle.get())
                 .planner(MotionPlanners.boundedAngular(1.0));
         if (Double.isFinite(driveMaxSpeedMetersPerSecond)) {
             driveVelocity = driveVelocity.ff(0.0, 12.0 / driveMaxSpeedMetersPerSecond, 0.0);
@@ -88,9 +89,9 @@ public abstract class SwerveModule implements MechanismTemplate {
         }
         return Actions.computeHardware(
                 java.util.List.of(drive.get(), steer.get(), angle.get()),
-                context -> applyTarget(optimizedTarget(
+                context -> RuntimeHardwareAccess.call(context, () -> applyTarget(optimizedTarget(
                         target,
-                        angle.get().absolutePosition().position(context))));
+                        angle.get().absolutePosition()))));
     }
 
     SwerveModuleTarget optimizedTarget(SwerveModuleTarget target, double currentAngleRotations) {

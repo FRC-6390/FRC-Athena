@@ -21,7 +21,7 @@ public final class PositionElevator implements Mechanism {
     private final SimModel simulation = SimModel.elevator(motor).encoder(height).range(travel);
     private final ControlBinding lift = Controls.position(motor)
             .feedback(height)
-            .pid(0.5, 0.0, 0.0)
+            .pid(6.0, 0.0, 0.0)
             .constraint(Constraints.range(travel))
             .profile(MotionProfiles.trapezoid(0.8, 1.8));
 

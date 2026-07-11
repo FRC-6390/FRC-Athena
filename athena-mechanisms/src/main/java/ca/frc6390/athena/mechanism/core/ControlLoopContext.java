@@ -1,6 +1,5 @@
 package ca.frc6390.athena.mechanism.core;
 
-import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.mechanism.motion.MotionReference;
 
 /**
@@ -49,7 +48,4 @@ public interface ControlLoopContext {
         return 0.02;
     }
 
-    default ActionContext actionContext() {
-        return ActionContext.empty();
-    }
 }

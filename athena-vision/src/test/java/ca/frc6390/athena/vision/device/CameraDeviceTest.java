@@ -13,6 +13,8 @@ import ca.frc6390.athena.api.hardware.CameraKinds;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.Measurements;
+import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
+import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
 import ca.frc6390.athena.vision.config.Cameras;
 import ca.frc6390.athena.vision.runtime.VisionGraph;
 import ca.frc6390.athena.vision.signal.PoseSignal;
@@ -56,16 +58,19 @@ class CameraDeviceTest {
         assertTrue(nullSuppliers.targets().measurements().isEmpty());
         assertTrue(nullResults.pose().measurements().isEmpty());
         assertTrue(nullResults.targets().measurements().isEmpty());
+        assertTrue(nullResults.pose().measurement().isEmpty());
+        assertTrue(nullResults.pose().value().isEmpty());
+        assertTrue(nullResults.targets().latest().isEmpty());
     }
 
     @Test
     void visionGraphCachesPoseAndTargetSignalsUntilRefresh() {
         AtomicInteger poseReads = new AtomicInteger();
         AtomicInteger targetReads = new AtomicInteger();
-        Measurement firstPose = Measurements.pose(new PoseSnapshot(1.0, 0.0, 0.0));
-        Measurement secondPose = Measurements.pose(new PoseSnapshot(2.0, 0.0, 0.0));
-        Measurement firstTarget = Measurements.custom("target-1", null);
-        Measurement secondTarget = Measurements.custom("target-2", null);
+        PoseMeasurementSample firstPose = Measurements.pose(new PoseSnapshot(1.0, 0.0, 0.0));
+        PoseMeasurementSample secondPose = Measurements.pose(new PoseSnapshot(2.0, 0.0, 0.0));
+        TargetMeasurementSample firstTarget = Measurements.target(1, 10.0, 2.0, 3.0, 0.9);
+        TargetMeasurementSample secondTarget = Measurements.target(2, 20.0, 4.0, 6.0, 0.8);
         CameraDevice camera = Cameras.photonVision("cache")
                 .bindPose(() -> List.of(poseReads.incrementAndGet() == 1 ? firstPose : secondPose))
                 .bindTargets(() -> List.of(targetReads.incrementAndGet() == 1 ? firstTarget : secondTarget));
@@ -79,11 +84,20 @@ class CameraDeviceTest {
         assertSame(cachedTargetSignal, runtime.targetSignal());
         assertTrue(cachedPoseSignal.measurements().isEmpty());
         assertTrue(cachedTargetSignal.measurements().isEmpty());
+        assertTrue(camera.pose().value().isEmpty());
+        assertTrue(camera.targets().latest().isEmpty());
+        assertEquals(0, poseReads.get());
+        assertEquals(0, targetReads.get());
 
         graph.refresh();
         List<Measurement> graphTargets = graph.targetMeasurements();
         assertEquals(List.of(firstPose), cachedPoseSignal.measurements());
         assertEquals(List.of(firstTarget), graphTargets);
+        assertEquals(firstPose, camera.pose().measurement().orElseThrow());
+        assertEquals(firstPose.pose(), camera.pose().value().orElseThrow());
+        assertEquals(firstTarget, camera.targets().latest().orElseThrow());
+        assertEquals(List.of(firstTarget), camera.targets().values());
+        assertTrue(camera.targets().hasTarget());
         assertSame(graphTargets, graph.targetMeasurements());
         assertEquals(1, poseReads.get());
         assertEquals(1, targetReads.get());
@@ -96,6 +110,10 @@ class CameraDeviceTest {
         runtime.refresh();
         assertEquals(List.of(secondPose), graph.poseMeasurements());
         assertEquals(List.of(secondTarget), cachedTargetSignal.measurements());
+        assertEquals(secondPose, camera.pose().measurement().orElseThrow());
+        assertEquals(secondTarget, camera.targets().latest().orElseThrow());
+        assertEquals(2, poseReads.get());
+        assertEquals(2, targetReads.get());
         assertSame(camera, cachedPoseSignal.camera());
         assertSame(camera, cachedTargetSignal.camera());
     }

@@ -92,6 +92,37 @@ public interface CameraDevice {
     TargetSignal targets();
 
     /**
+     * Returns the supplier-backed pose source used by the vision runtime.
+     *
+     * <p>Robot code should use {@link #pose()}.</p>
+     *
+     * @return runtime pose source
+     */
+    default PoseSignal sourcePose() {
+        return pose();
+    }
+
+    /**
+     * Returns the supplier-backed target source used by the vision runtime.
+     *
+     * <p>Robot code should use {@link #targets()}.</p>
+     *
+     * @return runtime target source
+     */
+    default TargetSignal sourceTargets() {
+        return targets();
+    }
+
+    /**
+     * Binds public reads to runtime-owned cached signals.
+     *
+     * @param poseSignal cached pose signal
+     * @param targetSignal cached target signal
+     */
+    default void bindRuntimeSignals(PoseSignal poseSignal, TargetSignal targetSignal) {
+    }
+
+    /**
      * Returns whether this declaration has explicit pose or target signal bindings.
      *
      * @return true when signals are externally supplied

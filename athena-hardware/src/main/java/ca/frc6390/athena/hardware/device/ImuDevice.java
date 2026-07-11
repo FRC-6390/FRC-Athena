@@ -2,12 +2,12 @@ package ca.frc6390.athena.hardware.device;
 
 import java.util.Locale;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.function.DoubleSupplier;
-
 import ca.frc6390.athena.api.hardware.ImuKind;
+import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.hardware.runtime.RuntimeBindings;
+import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
+import ca.frc6390.athena.hardware.runtime.RuntimeScope;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 
 /**
@@ -17,7 +17,7 @@ public record ImuDevice(
         ImuKind kind,
         String bus,
         HardwareAddress connection) implements ImuSource {
-    private static final ConcurrentMap<ImuDevice, RuntimeReader> RUNTIME_READERS = new ConcurrentHashMap<>();
+    private static final RuntimeBindings<ImuDevice, ImuHandle> RUNTIMES = new RuntimeBindings<>();
 
     public static ImuDevice of(ImuKind kind, int id) {
         return connected(kind, "rio", new HardwareAddress.Can(id));
@@ -57,7 +57,7 @@ public record ImuDevice(
      * @return yaw degrees
      */
     public double yawDegrees() {
-        return runtimeReader().yawDegrees().getAsDouble();
+        return runtimeHandle().yawDegrees();
     }
 
     /**
@@ -66,37 +66,37 @@ public record ImuDevice(
      * @return accumulated angle degrees
      */
     public double angleDegrees() {
-        return runtimeReader().angleDegrees().getAsDouble();
+        return runtimeHandle().angleDegrees();
     }
 
     @Override
     public double pitchDegrees() {
-        return runtimeReader().pitchDegrees().getAsDouble();
+        return runtimeHandle().pitchDegrees();
     }
 
     @Override
     public double rollDegrees() {
-        return runtimeReader().rollDegrees().getAsDouble();
+        return runtimeHandle().rollDegrees();
     }
 
     @Override
     public double yawRateDegreesPerSecond() {
-        return runtimeReader().yawRateDegreesPerSecond().getAsDouble();
+        return runtimeHandle().yawRateDegreesPerSecond();
     }
 
     @Override
     public double linearAccelerationXG() {
-        return runtimeReader().linearAccelerationXG().getAsDouble();
+        return runtimeHandle().linearAccelerationXG();
     }
 
     @Override
     public double linearAccelerationYG() {
-        return runtimeReader().linearAccelerationYG().getAsDouble();
+        return runtimeHandle().linearAccelerationYG();
     }
 
     @Override
     public double linearAccelerationZG() {
-        return runtimeReader().linearAccelerationZG().getAsDouble();
+        return runtimeHandle().linearAccelerationZG();
     }
 
     @Override
@@ -109,45 +109,8 @@ public record ImuDevice(
         Objects.requireNonNull(context, "context").imu(this).setYawDegrees(yawDegrees);
     }
 
-    /**
-     * Binds runtime-refreshed readings to an IMU declaration.
-     *
-     * @param device IMU declaration
-     * @param yawDegrees yaw reader
-     * @param angleDegrees accumulated-angle reader
-     */
-    public static void bindRuntime(
-            ImuDevice device,
-            DoubleSupplier yawDegrees,
-            DoubleSupplier angleDegrees) {
-        DoubleSupplier unsupported = () -> {
-            throw new UnsupportedOperationException("IMU reading is not available from this runtime.");
-        };
-        bindRuntime(device, yawDegrees, unsupported, unsupported, angleDegrees,
-                unsupported, unsupported, unsupported, unsupported);
-    }
-
-    public static void bindRuntime(
-            ImuDevice device,
-            DoubleSupplier yawDegrees,
-            DoubleSupplier pitchDegrees,
-            DoubleSupplier rollDegrees,
-            DoubleSupplier angleDegrees,
-            DoubleSupplier yawRateDegreesPerSecond,
-            DoubleSupplier linearAccelerationXG,
-            DoubleSupplier linearAccelerationYG,
-            DoubleSupplier linearAccelerationZG) {
-        RUNTIME_READERS.put(
-                Objects.requireNonNull(device, "device"),
-                new RuntimeReader(
-                        Objects.requireNonNull(yawDegrees, "yawDegrees"),
-                        Objects.requireNonNull(pitchDegrees, "pitchDegrees"),
-                        Objects.requireNonNull(rollDegrees, "rollDegrees"),
-                        Objects.requireNonNull(angleDegrees, "angleDegrees"),
-                        Objects.requireNonNull(yawRateDegreesPerSecond, "yawRateDegreesPerSecond"),
-                        Objects.requireNonNull(linearAccelerationXG, "linearAccelerationXG"),
-                        Objects.requireNonNull(linearAccelerationYG, "linearAccelerationYG"),
-                        Objects.requireNonNull(linearAccelerationZG, "linearAccelerationZG")));
+    public AutoCloseable bindRuntime(RuntimeScope scope, ImuHandle handle) {
+        return RUNTIMES.bind(this, scope, handle);
     }
 
     private static String sanitize(String key) {
@@ -161,22 +124,11 @@ public record ImuDevice(
         throw new IllegalStateException("IMU " + kind.key() + " is not connected over CAN.");
     }
 
-    private RuntimeReader runtimeReader() {
-        RuntimeReader reader = RUNTIME_READERS.get(this);
-        if (reader == null) {
-            throw new IllegalStateException("IMU " + defaultName() + " is not runtime-bound.");
+    private ImuHandle runtimeHandle() {
+        ActionContext current = RuntimeHardwareAccess.current();
+        if (current != null) {
+            return current.imu(this);
         }
-        return reader;
-    }
-
-    private record RuntimeReader(
-            DoubleSupplier yawDegrees,
-            DoubleSupplier pitchDegrees,
-            DoubleSupplier rollDegrees,
-            DoubleSupplier angleDegrees,
-            DoubleSupplier yawRateDegreesPerSecond,
-            DoubleSupplier linearAccelerationXG,
-            DoubleSupplier linearAccelerationYG,
-            DoubleSupplier linearAccelerationZG) {
+        return RUNTIMES.get(this, "IMU " + defaultName());
     }
 }

@@ -2,6 +2,7 @@ package frc.robot.auto;
 
 import ca.frc6390.athena.auto.AutoRoutine;
 import ca.frc6390.athena.auto.Autos;
+import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 
@@ -22,9 +23,8 @@ public final class ConditionalPathPlannerAuto {
                     context.pathPlanner.command("PP-Safe-Lane"),
                     context.state::centerLaneClear);
 
-            return ExampleCommands.fromWpilib(
-                    "pp-conditional",
-                    Commands.sequence(scoreOrContinue, chooseLane));
+            Command command = Commands.sequence(scoreOrContinue, chooseLane).withName("pp-conditional");
+            return WpilibCommands.wrap(command);
         });
     }
 }

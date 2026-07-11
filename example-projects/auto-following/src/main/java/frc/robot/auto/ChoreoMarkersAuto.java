@@ -3,7 +3,7 @@ package frc.robot.auto;
 import ca.frc6390.athena.auto.AutoRoutine;
 import ca.frc6390.athena.auto.Autos;
 
-/** Level 2: Choreo event markers invoke factory-wide command bindings. */
+/** Level 2: Choreo event markers invoke factory-wide mechanism actions. */
 public final class ChoreoMarkersAuto {
     private ChoreoMarkersAuto() {
     }
@@ -19,7 +19,7 @@ public final class ChoreoMarkersAuto {
 
     public static AutoRoutine create(AutoContext context) {
         return Autos.path(
-                "Choreo 2 - Markers and states",
+                "Choreo 2 - Markers and actions",
                 context.choreo,
                 "Choreo-Markers-And-States");
     }

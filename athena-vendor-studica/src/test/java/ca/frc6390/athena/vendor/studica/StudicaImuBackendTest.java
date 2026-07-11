@@ -53,6 +53,7 @@ class StudicaImuBackendTest {
         StudicaImuHandle handle = (StudicaImuHandle) genericHandle;
 
         genericHandle.activate();
+        genericHandle.refreshInputs();
         assertEquals(12.0, genericHandle.yawDegrees(), 1.0e-9);
         assertEquals(34.0, genericHandle.angleDegrees(), 1.0e-9);
         assertEquals(3.0, genericHandle.pitchDegrees(), 1.0e-9);

@@ -5,9 +5,13 @@ import java.util.Objects;
 
 import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
+import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.hardware.runtime.RuntimeBindings;
+import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
+import ca.frc6390.athena.hardware.runtime.RuntimeScope;
 import ca.frc6390.athena.hardware.signal.PositionSignal;
 import ca.frc6390.athena.hardware.signal.VelocitySignal;
 
@@ -21,6 +25,8 @@ public record EncoderDevice(
         double conversion,
         double offset,
         EncoderUnit units) implements PositionSignal, VelocitySignal {
+    private static final RuntimeBindings<EncoderDevice, EncoderHandle> RUNTIMES = new RuntimeBindings<>();
+
     public static EncoderDevice of(EncoderKind kind, int id) {
         return connected(kind, "rio", new HardwareAddress.Can(id));
     }
@@ -174,36 +180,42 @@ public record EncoderDevice(
     }
 
     /**
-     * Reads configured mechanism position through the runtime handle.
+     * Reads configured mechanism position from the runtime's latest cached snapshot.
      *
-     * @param context runtime hardware context
      * @return configured mechanism position
      */
     @Override
-    public double position(ActionContext context) {
-        Objects.requireNonNull(context, "context");
-        return positionFromRotations(context.encoder(this).positionRotations());
+    public double position() {
+        return positionFromRotations(runtimeHandle().positionRotations());
     }
 
     /**
-     * Returns a position signal backed by this encoder's absolute-position channel.
+     * Returns the current absolute position in configured mechanism units.
      *
-     * @return absolute position in this declaration's configured mechanism units
+     * @return absolute position
      */
-    public PositionSignal absolutePosition() {
+    public double absolutePosition() {
+        return positionFromRotations(runtimeHandle().absolutePositionRotations());
+    }
+
+    /** Returns a feedback signal backed by this encoder's absolute-position channel. */
+    public PositionSignal absoluteSignal() {
         return new AbsolutePositionSignal(this);
     }
 
     /**
-     * Reads configured mechanism velocity through the runtime handle.
+     * Reads configured mechanism velocity from the runtime's latest cached snapshot.
      *
-     * @param context runtime hardware context
      * @return configured mechanism velocity
      */
     @Override
-    public double velocity(ActionContext context) {
-        Objects.requireNonNull(context, "context");
-        return velocityFromRotationsPerSecond(context.encoder(this).velocityRotationsPerSecond());
+    public double velocity() {
+        return velocityFromRotationsPerSecond(runtimeHandle().velocityRotationsPerSecond());
+    }
+
+    /** Binds this declaration to one runtime-owned cached encoder handle. */
+    public AutoCloseable bindRuntime(RuntimeScope scope, EncoderHandle handle) {
+        return RUNTIMES.bind(this, scope, handle);
     }
 
     @Override
@@ -298,15 +310,26 @@ public record EncoderDevice(
 
     private record AbsolutePositionSignal(EncoderDevice encoder) implements PositionSignal {
         @Override
-        public double position(ActionContext context) {
-            Objects.requireNonNull(context, "context");
-            return encoder.positionFromRotations(context.encoder(encoder).absolutePositionRotations());
+        public double position() {
+            return encoder.absolutePosition();
         }
 
         @Override
         public java.util.List<?> dependencies() {
             return java.util.List.of(encoder);
         }
+    }
+
+    private EncoderHandle runtimeHandle() {
+        ActionContext current = RuntimeHardwareAccess.current();
+        if (current != null) {
+            return current.encoder(this);
+        }
+        EncoderHandle bound = RUNTIMES.find(this);
+        if (bound != null) {
+            return bound;
+        }
+        return RUNTIMES.get(this, "Encoder " + defaultName());
     }
 
     private MotorDevice motorSource() {

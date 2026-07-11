@@ -9,4 +9,8 @@ public interface Constants {
         int PORT = 0;
         double DEADBAND = 0.08;
     }
+
+    interface Drive {
+        int CURRENT_LIMIT_AMPS = 60;
+    }
 }

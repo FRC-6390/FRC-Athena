@@ -20,7 +20,7 @@ public final class FollowerElevator implements Mechanism {
     private final Range travel = Range.of(0.0, 1.7);
     private final ControlBinding lift = Controls.position(leader)
             .feedback(leader.encoder())
-            .pid(0.5, 0.0, 0.0)
+            .pid(6.0, 0.0, 0.0)
             .constraint(Constraints.range(travel))
             .profile(MotionProfiles.trapezoid(1.0, 2.0));
 

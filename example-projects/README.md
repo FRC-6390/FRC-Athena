@@ -1,16 +1,16 @@
 # Athena Example Projects
 
-- `tank-drive` - tank drive robot with processed driver axes in a dedicated `Controls.java`
-- `swerve-drive` - swerve drive robot with selectable field-oriented and robot-oriented control using a declared Pigeon 2 IMU
+- `tank-drive` - supplier-backed arcade drive, followers, device configuration, automatic discovery, and simulation
+- `swerve-drive` - absolute module offsets, slot-configured SDS modules, field-oriented control, heading reset, optimization, and simulation
 - `auto-following` - graduated one-auto-per-file PathPlanner and Choreo examples covering markers,
-  mechanism states, multipath routines, Choreo splits, runtime conditions, generated paths, a custom
-  marker provider, and autonomous-style teleop assists
-- `localization-setups` - odometry, multi-camera vision, weighted, latest-valid, and Kalman localization pipelines
-- `mechanism-examples` - button-bound open-loop, velocity, and split-wheel shooters; manual, single-joint, and constrained 2DOF arms; a bounded field-relative turret; roller and indexed intakes; single and follower elevators; simulations; and a composed superstructure
-- `rule-examples` - reusable control constraints using ranges and Boolean-supplier boundaries, plus conditional branches, timeouts, hooks, and sensor gates
+  mechanism actions, multipath routines, Choreo splits, runtime conditions, generated paths, a custom
+  marker provider, WPILib command adaptation, and autonomous-style teleop assists
+- `localization-setups` - swerve odometry, three camera sources, inspectable filtering/fusion stages, Kalman estimation, and pose resets
+- `mechanism-examples` - open/closed-loop mechanisms, composition, constraints, profiles, neutral release, simulation, and a non-swerve mechanism template with configured slots
+- `rule-examples` - ranges, Boolean boundaries, conditional actions, timeouts, hooks, unified DIO declarations, and simulated limits
 - `custom-controls` - button-bound software control loops, arbitrary feedforward, modular/CRT position decoding,
-  absolute-relative fusion, filtered velocity, and redundant feedback
-- `controller-bindings` - Xbox axes and button bindings contained in a dedicated `Controls.java` mechanism
+  absolute-relative fusion, filtered velocity, redundant feedback, neutral output, and simulation
+- `controller-bindings` - composed controller signals, sign-preserving axis processing, toggle state, teleop gating, and live supplier actions
 
 Each folder is a standalone WPILib robot project.
 
@@ -19,4 +19,6 @@ The base vendordeps are:
 - `FRC6390-Athena.json`
 - `WPILibNewCommands.json`
 
-The examples declare real motor, encoder, camera, path, and mechanism APIs. For real hardware or real vendor path tools, install the normal vendor vendordeps for the hardware and tools on the robot.
+The examples declare real motor, encoder, camera, path, and mechanism APIs. Hardware declarations use real device kinds in simulation as well as on the robot; there are no separate simulated motor kinds or parallel robot implementations.
+
+Athena PID and feedforward gains are voltage-based. The mechanism and custom-control projects show both Athena-hosted loops and vendor-native voltage loops.

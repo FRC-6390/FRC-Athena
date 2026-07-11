@@ -9,5 +9,5 @@ public final class Robot extends AthenaRobot {
     public final ExperimentalArm arm = new ExperimentalArm();
     public final Flywheel flywheel = new Flywheel();
     public final AdvancedFeedback advancedFeedback = new AdvancedFeedback();
-    public final Controls controls = new Controls(arm, flywheel, advancedFeedback);
+    public final Controls controls = new Controls(this);
 }

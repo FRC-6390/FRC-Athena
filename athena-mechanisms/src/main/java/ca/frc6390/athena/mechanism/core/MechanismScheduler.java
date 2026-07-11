@@ -221,6 +221,25 @@ public final class MechanismScheduler {
         return Set.copyOf(imus);
     }
 
+    /** Returns every encoder declaration required by the registered mechanism graph. */
+    public Set<EncoderDevice> encoderDevices() {
+        Set<EncoderDevice> encoders = new LinkedHashSet<>();
+        for (Object declaration : graph.declarations(runtimes.keySet())) {
+            collectEncoders(declaration, encoders);
+        }
+        return Set.copyOf(encoders);
+    }
+
+    private static void collectEncoders(Object declaration, Set<EncoderDevice> encoders) {
+        if (declaration instanceof EncoderDevice encoder) {
+            encoders.add(encoder);
+        } else if (declaration instanceof ControlBinding control) {
+            controlDeclarations(control).forEach(value -> collectEncoders(value, encoders));
+        } else if (declaration instanceof Iterable<?> values) {
+            values.forEach(value -> collectEncoders(value, encoders));
+        }
+    }
+
     /**
      * Returns declared motors that require hardware follower activation.
      *

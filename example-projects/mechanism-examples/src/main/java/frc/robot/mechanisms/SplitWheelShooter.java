@@ -10,12 +10,12 @@ import ca.frc6390.athena.mechanism.core.Mechanism;
 import frc.robot.Constants;
 
 public final class SplitWheelShooter implements Mechanism {
-    private final MotorDevice topMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 8);
-    private final MotorDevice bottomMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 9).inverted();
+    private final MotorDevice topMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 8).coast();
+    private final MotorDevice bottomMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 9).inverted().coast();
     private final ControlBinding top = Controls.velocity(topMotor).feedback(topMotor.encoder()).pid(0.08, 0.0, 0.0);
     private final ControlBinding bottom = Controls.velocity(bottomMotor).feedback(bottomMotor.encoder()).pid(0.08, 0.0, 0.0);
 
-    public final Action stop = Actions.parallel(topMotor.percent(0.0), bottomMotor.percent(0.0));
+    public final Action stop = Actions.parallel(topMotor.neutral(), bottomMotor.neutral());
     public final Action straightShot = velocity(70.0, 70.0);
     public final Action spinShot = velocity(78.0, 58.0);
 

@@ -10,7 +10,13 @@ public record MotorClosedLoopRequest(
     public MotorClosedLoopRequest {
         route = route == null ? ControlRoute.DEVICE_CLOSED_LOOP : route;
         config = config == null ? MotorClosedLoopConfig.empty() : config;
-        arbitraryFeedforwardVolts = Double.isFinite(arbitraryFeedforwardVolts) ? arbitraryFeedforwardVolts : 0.0;
+        if (!Double.isFinite(arbitraryFeedforwardVolts)) {
+            throw new IllegalArgumentException("Arbitrary feedforward voltage must be finite.");
+        }
+        if (route == ControlRoute.DEVICE_CLOSED_LOOP && arbitraryFeedforwardVolts != 0.0) {
+            throw new IllegalArgumentException(
+                    "Device closed-loop requests cannot include arbitrary feedforward voltage.");
+        }
     }
 
     public static MotorClosedLoopRequest device(MotorClosedLoopConfig config) {

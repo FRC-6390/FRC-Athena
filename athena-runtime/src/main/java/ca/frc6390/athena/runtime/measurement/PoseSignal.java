@@ -3,25 +3,32 @@ package ca.frc6390.athena.runtime.measurement;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import java.util.Comparator;
+import java.util.Optional;
 
 /** A stream of field-pose measurements that can feed localization stages. */
 public interface PoseSignal extends MeasurementSignal {
-    /** Returns the newest pose, or the origin when no pose is available. */
-    default PoseSnapshot pose() {
+    /** Returns the newest typed pose measurement, if one is available. */
+    default Optional<PoseMeasurementSample> measurement() {
         return measurements().stream()
                 .filter(PoseMeasurementSample.class::isInstance)
                 .map(PoseMeasurementSample.class::cast)
-                .max(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
-                .map(PoseMeasurementSample::pose)
+                .max(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds));
+    }
+
+    /** Returns the newest pose value, if one is available. */
+    default Optional<PoseSnapshot> value() {
+        return measurement().map(PoseMeasurementSample::pose);
+    }
+
+    /** Returns the newest pose, or the origin when no pose is available. */
+    default PoseSnapshot pose() {
+        return value()
                 .orElseGet(() -> new PoseSnapshot(0.0, 0.0, 0.0));
     }
 
     /** Returns speeds from the newest pose sample. */
     default RobotVelocity speeds() {
-        return measurements().stream()
-                .filter(PoseMeasurementSample.class::isInstance)
-                .map(PoseMeasurementSample.class::cast)
-                .max(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
+        return measurement()
                 .map(PoseMeasurementSample::speeds)
                 .orElseGet(RobotVelocity::zero);
     }

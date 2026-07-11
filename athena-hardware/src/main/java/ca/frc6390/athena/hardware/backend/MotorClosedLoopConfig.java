@@ -11,21 +11,23 @@ public record MotorClosedLoopConfig(
         double i,
         double d,
         double iZone,
-        double tolerance,
         double staticFeedforward,
         double velocityFeedforward,
+        double accelerationFeedforward,
         double gravityFeedforward,
         FocPolicy focPolicy) {
     public MotorClosedLoopConfig {
         slot = Math.max(0, slot);
-        p = finiteOrZero(p);
-        i = finiteOrZero(i);
-        d = finiteOrZero(d);
-        iZone = finiteOrZero(iZone);
-        tolerance = finiteOrZero(tolerance);
-        staticFeedforward = finiteOrZero(staticFeedforward);
-        velocityFeedforward = finiteOrZero(velocityFeedforward);
-        gravityFeedforward = finiteOrZero(gravityFeedforward);
+        requireFinite(p, "Proportional gain");
+        requireFinite(i, "Integral gain");
+        requireFinite(d, "Derivative gain");
+        if (!Double.isFinite(iZone) || iZone < 0.0) {
+            throw new IllegalArgumentException("Integral zone must be finite and non-negative.");
+        }
+        requireFinite(staticFeedforward, "Static feedforward");
+        requireFinite(velocityFeedforward, "Velocity feedforward");
+        requireFinite(accelerationFeedforward, "Acceleration feedforward");
+        requireFinite(gravityFeedforward, "Gravity feedforward");
         focPolicy = focPolicy == null ? FocPolicy.DISABLED : focPolicy;
     }
 
@@ -33,7 +35,9 @@ public record MotorClosedLoopConfig(
         return new MotorClosedLoopConfig(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, FocPolicy.DISABLED);
     }
 
-    private static double finiteOrZero(double value) {
-        return Double.isFinite(value) ? value : 0.0;
+    private static void requireFinite(double value, String description) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(description + " must be finite.");
+        }
     }
 }

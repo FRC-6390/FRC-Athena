@@ -9,7 +9,7 @@ its own Java file and registered by `AutoExamples`.
 | --- | --- |
 | `PathPlannerSimpleAuto` | One PathPlanner `.auto` file through `PathPlannerPathProvider` |
 | `PathPlannerMarkersAuto` | PathPlanner event markers through `NamedCommands` |
-| `PathPlannerMultiPathAuto` | Several path files and mechanism commands sequenced in Java |
+| `PathPlannerMultiPathAuto` | Several path files and mechanism actions sequenced in Java |
 | `ConditionalPathPlannerAuto` | Sensor-dependent scoring and lane choices evaluated at the branch |
 | `DynamicPathPlannerAuto` | A short `PathPlannerPath` generated from live localization |
 | `ChoreoSimpleAuto` | One Choreo trajectory through `ChoreoPathAdapter` |
@@ -19,8 +19,9 @@ its own Java file and registered by `AutoExamples`.
 | `CustomProviderMarkersAuto` | Athena `PathGraph` metadata driven by `ExampleMarkerPathProvider` |
 | `TeleopAssistRoutines` | Pathfinding, live-target paths, heading assist, and a scoring mini-auto |
 
-The mechanism and drivetrain classes are deliberately small integration boundaries. Replace their
-method bodies with the real robot outputs; keep the auto classes focused on orchestration.
+The mechanism and drivetrain classes are deliberately small vendor-integration boundaries. Replace
+their method bodies with real mechanism actions, localization, and drivetrain output; keep the auto
+classes focused on orchestration.
 
 ## GUI assets expected by the examples
 
@@ -57,14 +58,19 @@ would risk firing a command twice.
 
 ## Teleop usage
 
-`TeleopAssistRoutines` returns ordinary WPILib commands. Bind them to `onTrue`, `whileTrue`, or
-another control policy. The heading example owns the drivetrain while active but continuously mixes
+`TeleopAssistRoutines` returns ordinary WPILib commands. Schedule them through Athena control
+signals with `onTrue` or `whileTrue`, or through another deliberate command policy. The heading
+example owns the drivetrain while active but continuously mixes
 the driver's translation with automatic rotation. The pathfinding and generated-path examples own
 all drivetrain axes and should cancel immediately when the driver releases the assist control.
 
 The distinction matters: a full path follower and a default drive command both require the same
 subsystem, so they cannot run concurrently merely by putting them in parallel. Shared control needs
-axis-level intent arbitration, which is the focus of `docs/simple-auto-api-sketch.md`.
+an explicit ownership policy at the drivetrain boundary.
+
+Athena auto routines return `CommandAction`s. Vendor routines in this project are adapted with
+`WpilibCommands.wrap(...)`, which schedules the original WPILib command and therefore preserves its
+requirements, interruption behavior, and composed-command lifecycle.
 
 ## Running the sample
 
@@ -74,5 +80,7 @@ From the repository root, publish Athena locally and compile the standalone exam
 ./gradlew.bat compileAutoFollowingExample
 ```
 
-The default selection is `PP 1 - Leave`. It will only execute successfully when its PathPlanner
-assets and GUI robot settings have been deployed.
+`AutoRuntime` selects the first registered routine by default, which is `PP 1 - Leave` here. The
+robot-init hook configures PathPlanner before registering the runtime with Athena. Vendor-backed
+routines will only execute successfully after their named assets and PathPlanner GUI robot settings
+have been deployed.

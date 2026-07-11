@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -559,6 +560,11 @@ final class MechanismRuntime {
             if (target == null) {
                 return false;
             }
+            if (target.control().feedback() != null) {
+                return RuntimeHardwareAccess.call(
+                        actionContext,
+                        () -> target.control().isAt(target.value(), tolerance));
+            }
             double measurement = switch (target.mode()) {
                 case POSITION -> feedbackPosition(target.control());
                 case VELOCITY -> feedbackVelocity(target.control());
@@ -568,14 +574,14 @@ final class MechanismRuntime {
 
         private double feedbackPosition(ControlBinding control) {
             if (control.feedback() != null) {
-                return control.feedback().position().position(actionContext);
+                return RuntimeHardwareAccess.call(actionContext, control.feedback().position()::position);
             }
             return actionContext.motor(control.output()).integratedPositionRotations();
         }
 
         private double feedbackVelocity(ControlBinding control) {
             if (control.feedback() != null) {
-                return control.feedback().velocity().velocity(actionContext);
+                return RuntimeHardwareAccess.call(actionContext, control.feedback().velocity()::velocity);
             }
             return actionContext.motor(control.output()).integratedVelocityRotationsPerSecond();
         }

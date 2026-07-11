@@ -2,7 +2,6 @@ package frc.robot.controls;
 
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.Range;
-import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.signal.PositionSignal;
 import ca.frc6390.athena.hardware.signal.VelocitySignal;
 import java.util.Arrays;
@@ -75,9 +74,8 @@ public final class FeedbackSignals {
 
     private record AbsolutePhase(EncoderDevice encoder) implements PositionSignal {
         @Override
-        public double position(ActionContext context) {
-            double rotations = context.encoder(encoder).absolutePositionRotations();
-            return wrap(encoder.positionFromRotations(rotations));
+        public double position() {
+            return wrap(encoder.absolutePosition());
         }
 
         @Override
@@ -110,10 +108,10 @@ public final class FeedbackSignals {
         }
 
         @Override
-        public double position(ActionContext context) {
+        public double position() {
             double[] measured = new double[inputs.size()];
             for (int index = 0; index < inputs.size(); index++) {
-                measured[index] = wrap(inputs.get(index).phase().position(context));
+                measured[index] = wrap(inputs.get(index).phase().position());
                 if (!Double.isFinite(measured[index])) {
                     return Double.NaN;
                 }
@@ -222,12 +220,12 @@ public final class FeedbackSignals {
         }
 
         @Override
-        public double position(ActionContext context) {
-            double relativePosition = relative.position(context);
+        public double position() {
+            double relativePosition = relative.position();
             if (!Double.isFinite(relativePosition)) {
                 return Double.NaN;
             }
-            double absolutePosition = absolute.position(context);
+            double absolutePosition = absolute.position();
             if (hasLastSample
                     && Double.compare(absolutePosition, lastAbsolute) == 0
                     && Double.compare(relativePosition, lastRelative) == 0) {
@@ -273,8 +271,8 @@ public final class FeedbackSignals {
         }
 
         @Override
-        public double velocity(ActionContext context) {
-            double measurement = input.velocity(context);
+        public double velocity() {
+            double measurement = input.velocity();
             if (!Double.isFinite(measurement)) {
                 return Double.NaN;
             }
@@ -306,11 +304,11 @@ public final class FeedbackSignals {
         }
 
         @Override
-        public double position(ActionContext context) {
+        public double position() {
             double[] finite = new double[inputs.size()];
             int count = 0;
             for (PositionSignal input : inputs) {
-                double value = input.position(context);
+                double value = input.position();
                 if (Double.isFinite(value)) {
                     finite[count++] = value;
                 }

@@ -69,6 +69,7 @@ class RevBackendTest {
                     }
                 });
 
+        handle.refreshInputs();
         assertEquals(0.42, handle.absolutePositionRotations(), 1.0e-9);
         assertEquals(0.42, handle.positionRotations(), 1.0e-9);
         assertThrows(UnsupportedOperationException.class, handle::velocityRotationsPerSecond);
@@ -172,24 +173,19 @@ class RevBackendTest {
     }
 
     @Test
-    void motorClosedLoopConfigIsAppliedOnlyWhenChanged() {
+    void explicitVoltageSemanticClosedLoopRequestsAreRejected() {
         RecordingSparkController controller = new RecordingSparkController();
         RevMotorHandle handle = new RevMotorHandle(
                 MotorDevice.of(MotorKinds.NEO, 2),
                 new RevMotorOptions(),
                 controller);
-        MotorClosedLoopConfig config = new MotorClosedLoopConfig(
-                1, 0.2, 0.0, 0.01, 0.0, 0.0, 0.1, 0.2, 0.3, null);
-        MotorClosedLoopRequest request = MotorClosedLoopRequest.hybrid(config, 1.5);
+        MotorClosedLoopRequest request = MotorClosedLoopRequest.device(MotorClosedLoopConfig.empty());
 
-        handle.setVelocityTargetRotationsPerSecond(2.0, request);
-        handle.setVelocityTargetRotationsPerSecond(3.0, request);
-
-        assertEquals(1, controller.configureClosedLoopCalls);
-        assertEquals(config, controller.closedLoopConfig);
-        assertEquals(3.0, controller.velocityTarget, 1.0e-9);
-        assertEquals(1, controller.slot);
-        assertEquals(1.5, controller.arbitraryFeedforwardVolts, 1.0e-9);
+        assertThrows(UnsupportedOperationException.class,
+                () -> handle.setPositionTargetRotations(2.0, request));
+        assertThrows(UnsupportedOperationException.class,
+                () -> handle.setVelocityTargetRotationsPerSecond(3.0, request));
+        assertEquals(MotorControlCapabilities.OPEN_LOOP_ONLY, handle.controlCapabilities());
     }
 
     private static final class RecordingSparkController implements RevMotorHandle.SparkController {
@@ -200,15 +196,10 @@ class RevBackendTest {
         private int velocityReads;
         private int absolutePositionReads;
         private int absoluteVelocityReads;
-        private int configureClosedLoopCalls;
         private double position;
         private double velocity;
         private double absolutePosition;
         private double absoluteVelocity;
-        private double velocityTarget;
-        private double arbitraryFeedforwardVolts;
-        private int slot;
-        private MotorClosedLoopConfig closedLoopConfig;
         private int followLeaderId = -1;
         private boolean followInverted;
 
@@ -234,22 +225,6 @@ class RevBackendTest {
         @Override
         public void setSensorPosition(double rotations) {
             position = rotations;
-        }
-
-        @Override
-        public void setVelocityTarget(double rotationsPerSecond, int slot, double arbitraryFeedforwardVolts) {
-            velocityTarget = rotationsPerSecond;
-            this.slot = slot;
-            this.arbitraryFeedforwardVolts = arbitraryFeedforwardVolts;
-        }
-
-        @Override
-        public void configureClosedLoop(
-                MotorDevice device,
-                RevMotorOptions options,
-                MotorClosedLoopConfig closedLoopConfig) {
-            configureClosedLoopCalls++;
-            this.closedLoopConfig = closedLoopConfig;
         }
 
         @Override

@@ -5,6 +5,7 @@ import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.HardwareMeasurementSignal;
+import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
@@ -50,8 +51,10 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
         double[] distances = new double[driveEncoders.size()];
         List<Double> angles = new ArrayList<>(driveEncoders.size());
         for (int index = 0; index < driveEncoders.size(); index++) {
-            distances[index] = driveEncoders.get(index).position(context);
-            angles.add(kinematics.modules().get(index).module().angle.get().absolutePosition().position(context));
+            EncoderDevice driveEncoder = driveEncoders.get(index);
+            EncoderDevice angleEncoder = kinematics.modules().get(index).module().angle.get();
+            distances[index] = RuntimeHardwareAccess.call(context, driveEncoder::position);
+            angles.add(RuntimeHardwareAccess.call(context, angleEncoder::absolutePosition));
         }
         List<ModulePosition> positions = new ArrayList<>(distances.length);
         for (int index = 0; index < distances.length; index++) {

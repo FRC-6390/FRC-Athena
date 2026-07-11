@@ -20,7 +20,7 @@ public final class SingleJointArm implements Mechanism {
     private final Range travel = Range.degrees(-10.0, 105.0);
     private final ControlBinding position = Controls.position(motor)
             .feedback(encoder)
-            .pid(0.07, 0.0, 0.002)
+            .pid(0.84, 0.0, 0.024)
             .constraint(Constraints.range(travel))
             .profile(MotionProfiles.trapezoid(90.0, 220.0));
 

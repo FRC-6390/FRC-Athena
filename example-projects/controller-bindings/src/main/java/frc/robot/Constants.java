@@ -8,5 +8,6 @@ public interface Constants {
     interface Driver {
         int PORT = 0;
         double DEADBAND = 0.08;
+        double SLOW_SCALE = 0.4;
     }
 }
