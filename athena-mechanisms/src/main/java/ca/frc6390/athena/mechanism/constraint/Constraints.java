@@ -40,6 +40,13 @@ public final class Constraints {
                 : new ConstraintResult.Allowed<>(context.requested());
     }
 
+    public static Constraint<Double> require(BooleanSupplier allowed) {
+        Objects.requireNonNull(allowed, "allowed");
+        return context -> allowed.getAsBoolean()
+                ? new ConstraintResult.Allowed<>(context.requested())
+                : new ConstraintResult.Rejected<>(context.requested());
+    }
+
     public static <T> Constraint<T> require(Predicate<ConstraintContext<T>> allowed) {
         Objects.requireNonNull(allowed, "allowed");
         return context -> allowed.test(context)

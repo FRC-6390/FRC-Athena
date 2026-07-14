@@ -650,7 +650,7 @@ class MechanismRuntimeTest {
         actions.encoder(related).position = 2.0;
         ControlBinding control = Controls.position(MOTOR)
                 .feedback(ENCODER)
-                .constraint(Constraints.require(context -> related.position() >= 5.0));
+                .constraint(Constraints.require(() -> related.position() >= 5.0));
         TestMechanism mechanism = new TestMechanism(control.percent(0.2));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);

@@ -594,6 +594,10 @@ public final class Actions {
             return this;
         }
 
+        public Sequence doOnce(DeviceAction action) {
+            return doOnce((ActionBinding) action);
+        }
+
         public Sequence waitSeconds(double seconds) {
             steps.add(new SequenceStep(Actions.waitSeconds(seconds), ctx -> ctx.timeInStateSeconds() >= seconds));
             return this;

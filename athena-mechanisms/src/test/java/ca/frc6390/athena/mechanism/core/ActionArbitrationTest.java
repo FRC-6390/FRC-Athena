@@ -255,7 +255,7 @@ class ActionArbitrationTest {
     private static final class ConstrainedActions implements Mechanism {
         private final Action older = ARM.percent(-0.30);
         private final ControlBinding guarded = Controls.velocity(ARM)
-                .constraint(Constraints.require(context -> false));
+                .constraint(Constraints.require(() -> false));
         private final Action rejected = guarded.percent(0.80);
         private final HookBinding olderBinding;
         private final HookBinding rejectedBinding;
