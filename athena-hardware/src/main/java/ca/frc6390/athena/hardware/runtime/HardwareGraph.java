@@ -68,7 +68,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());
         MotorHandle handle = backends
                 .motorBackendFor(device.kind())
-                .orElseThrow(() -> new IllegalStateException("No motor backend for " + device.kind().key()))
+                .orElseThrow(() -> new IllegalStateException(
+                        backends.missingBackendMessage("motor", device.kind().key())))
                 .create(device);
         handle.activate();
         if (leader != null) {
@@ -94,8 +95,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             handle = encoders.computeIfAbsent(HardwareIdentity.encoder(device), ignored -> {
                 EncoderHandle created = backends
                         .encoderBackendFor(device)
-                        .orElseThrow(() -> new IllegalStateException(
-                                "No encoder backend for " + device.kind().key() + " over " + device.connection().identity()))
+                        .orElseThrow(() -> new IllegalStateException(backends.missingBackendMessage(
+                                "encoder", device.kind().key() + " over " + device.connection().identity())))
                         .create(device);
                 created.activate();
                 return adjustable(created);
@@ -124,8 +125,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         ImuHandle handle = imus.computeIfAbsent(HardwareIdentity.imu(device), ignored -> {
             ImuHandle created = backends
                     .imuBackendFor(device)
-                    .orElseThrow(() -> new IllegalStateException(
-                            "No IMU backend for " + device.kind().key() + " over " + device.connection().identity()))
+                    .orElseThrow(() -> new IllegalStateException(backends.missingBackendMessage(
+                            "IMU", device.kind().key() + " over " + device.connection().identity())))
                     .create(device);
             created.activate();
             return created;

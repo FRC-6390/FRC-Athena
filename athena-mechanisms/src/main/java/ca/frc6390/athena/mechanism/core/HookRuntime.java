@@ -94,6 +94,9 @@ final class HookRuntime {
             ActionContext actionContext,
             HookBinding hook,
             Map<EventBinding, Boolean> sourceSamples) {
+        if (hook.isDisabled()) {
+            return;
+        }
         EventBinding event = hook.event();
         boolean previousSource = previousSourceActive.getOrDefault(event, false);
         boolean currentSource = sourceSamples.computeIfAbsent(event, value -> value.sourceActive(safeContext));

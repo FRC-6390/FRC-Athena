@@ -13,6 +13,7 @@ import java.util.ServiceLoader;
  */
 public final class CameraAdapters {
     private static volatile List<CameraAdapter> discovered;
+    private static volatile List<String> discoveryFailures = List.of();
 
     private CameraAdapters() {
     }
@@ -41,11 +42,13 @@ public final class CameraAdapters {
     static void clearCache() {
         synchronized (CameraAdapters.class) {
             discovered = null;
+            discoveryFailures = List.of();
         }
     }
 
     private static List<CameraAdapter> load() {
         List<CameraAdapter> adapters = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
         Iterator<CameraAdapter> iterator = ServiceLoader.load(CameraAdapter.class).iterator();
         while (true) {
             try {
@@ -54,10 +57,36 @@ public final class CameraAdapters {
                 }
                 adapters.add(iterator.next());
             } catch (ServiceConfigurationError error) {
-                // Adapter jars may be present while their real vendor libraries are not.
+                failures.add(describe(error));
             }
         }
+        discoveryFailures = List.copyOf(failures);
         return List.copyOf(adapters);
+    }
+
+    public static List<String> discoveryFailures() {
+        discover();
+        return discoveryFailures;
+    }
+
+    public static String missingAdapterMessage(CameraDevice camera) {
+        String failures = discoveryFailures().isEmpty()
+                ? "No camera adapter advertised support for this camera kind."
+                : "Vendor adapter loading failed: " + String.join("; ", discoveryFailures());
+        return "Athena cannot start camera '" + camera.name() + "' (" + camera.kind().key() + "). "
+                + failures + " Add the vendor's WPILib vendordep, or disable dependency checks only for debugging.";
+    }
+
+    private static String describe(Throwable error) {
+        Throwable cause = error;
+        while (cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        String provider = error.getMessage();
+        String missing = cause.getMessage();
+        String detail = cause.getClass().getSimpleName()
+                + (missing == null || missing.isBlank() ? "" : ": " + missing);
+        return provider == null || provider.isBlank() ? detail : provider + " (" + detail + ")";
     }
 
     /**

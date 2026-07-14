@@ -22,6 +22,7 @@ import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
 import ca.frc6390.athena.runtime.measurement.MeasurementSnapshot;
+import ca.frc6390.athena.runtime.RuntimeDependencyChecks;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.runtime.CameraAdapters;
@@ -218,7 +219,7 @@ public final class RobotRuntime {
         RuntimeGraphDiscovery.Result services = RuntimeGraphDiscovery.inspect(mechanism);
         registerDiscoveredCameras(services.cameras());
         localization(services.localizations().toArray(Localization[]::new));
-        mechanisms.followerMotors().forEach(hardwareGraph::motor);
+        mechanisms.followerMotors().stream().filter(motor -> !motor.isDisabled()).forEach(hardwareGraph::motor);
         mechanisms.encoderDevices().forEach(hardwareGraph::encoder);
         mechanisms.imuDevices().forEach(hardwareGraph::imu);
         if (simulationSession != null) {
@@ -353,6 +354,9 @@ public final class RobotRuntime {
                 bound[i] = simulation.bind(camera);
             } else {
                 bound[i] = CameraAdapters.bindDiscovered(camera);
+                if (!bound[i].hasBoundSignals() && RuntimeDependencyChecks.enabled()) {
+                    throw new IllegalStateException(CameraAdapters.missingAdapterMessage(camera));
+                }
             }
         }
         return bound;

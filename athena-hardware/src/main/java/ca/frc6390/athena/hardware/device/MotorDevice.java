@@ -21,7 +21,8 @@ public record MotorDevice(
         MotorNeutralMode neutralMode,
         int currentLimitAmps,
         VendorOptions vendorOptions,
-        MotorFollowerBinding follower) {
+        MotorFollowerBinding follower,
+        boolean isDisabled) {
     /**
      * Creates a motor ref on the default roboRIO CAN bus.
      *
@@ -30,7 +31,7 @@ public record MotorDevice(
      * @return motor ref
      */
     public static MotorDevice of(MotorKind kind, int id) {
-        return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST, 40, VendorOptions.empty(), null);
+        return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST, 40, VendorOptions.empty(), null, false);
     }
 
     /** Creates a motor with an explicit controller and physical motor pairing. */
@@ -44,6 +45,22 @@ public record MotorDevice(
         canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
         neutralMode = neutralMode == null ? MotorNeutralMode.COAST : neutralMode;
         vendorOptions = vendorOptions == null ? VendorOptions.empty() : vendorOptions;
+    }
+
+    public MotorDevice(
+            MotorKind kind, int id, String canbus, boolean isInverted,
+            MotorNeutralMode neutralMode, int currentLimitAmps,
+            VendorOptions vendorOptions, MotorFollowerBinding follower) {
+        this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower, false);
+    }
+
+    public MotorDevice disabled() {
+        return disabled(true);
+    }
+
+    public MotorDevice disabled(boolean disabled) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode,
+                currentLimitAmps, vendorOptions, follower, disabled);
     }
 
     /**
@@ -93,7 +110,7 @@ public record MotorDevice(
      */
     public MotorDevice canbus(String canbus) {
         return new MotorDevice(
-                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower);
+                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower, isDisabled);
     }
 
     /**
@@ -104,7 +121,7 @@ public record MotorDevice(
      */
     public MotorDevice inverted(boolean inverted) {
         return new MotorDevice(
-                kind, id, canbus, inverted, neutralMode, currentLimitAmps, vendorOptions, follower);
+                kind, id, canbus, inverted, neutralMode, currentLimitAmps, vendorOptions, follower, isDisabled);
     }
 
     /**
@@ -142,7 +159,7 @@ public record MotorDevice(
      */
     public MotorDevice neutralMode(MotorNeutralMode neutralMode) {
         return new MotorDevice(
-                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower);
+                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower, isDisabled);
     }
 
     /**
@@ -152,7 +169,7 @@ public record MotorDevice(
      * @return updated ref
      */
     public MotorDevice currentLimit(int amps) {
-        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, amps, vendorOptions, follower);
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, amps, vendorOptions, follower, isDisabled);
     }
 
     /**
@@ -177,7 +194,8 @@ public record MotorDevice(
                 neutralMode,
                 currentLimitAmps,
                 vendorOptions,
-                new MotorFollowerBinding(leader));
+                new MotorFollowerBinding(leader),
+                isDisabled);
     }
 
     public String defaultName() {
@@ -206,7 +224,8 @@ public record MotorDevice(
                     neutralMode,
                     currentLimitAmps,
                     vendorOptions.with(optionType, options),
-                    follower);
+                    follower,
+                    isDisabled);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalArgumentException(
                     "Vendor option type must expose a no-argument constructor: " + optionType.getName(),

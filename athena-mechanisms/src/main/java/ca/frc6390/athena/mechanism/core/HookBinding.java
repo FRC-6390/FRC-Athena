@@ -9,9 +9,13 @@ import java.util.Objects;
 /**
  * Declarative binding from an event to one or more actions.
  */
-public record HookBinding(EventBinding event, List<HookAction> actions) {
+public record HookBinding(EventBinding event, List<HookAction> actions, boolean isDisabled) {
     public HookBinding(EventBinding event) {
-        this(event, List.of());
+        this(event, List.of(), false);
+    }
+
+    public HookBinding(EventBinding event, List<HookAction> actions) {
+        this(event, actions, false);
     }
 
     public HookBinding {
@@ -103,7 +107,15 @@ public record HookBinding(EventBinding event, List<HookAction> actions) {
         Objects.requireNonNull(action, "action");
         List<HookAction> next = new ArrayList<>(actions);
         next.add(new HookAction(phase, action));
-        return new HookBinding(event, next);
+        return new HookBinding(event, next, isDisabled);
+    }
+
+    public HookBinding disabled() {
+        return disabled(true);
+    }
+
+    public HookBinding disabled(boolean disabled) {
+        return new HookBinding(event, actions, disabled);
     }
 
     public enum Phase {

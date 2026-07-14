@@ -29,11 +29,14 @@ public record ControlBinding(
         List<Constraint<Double>> constraints,
         MotionProfile profile,
         MotionPlanner planner,
-        List<MotorDevice> motors) {
+        List<MotorDevice> motors,
+        boolean isDisabled) {
     public ControlBinding {
         Objects.requireNonNull(mode, "mode");
         slot = Math.max(0, slot);
-        followers = followers == null ? List.of() : List.copyOf(followers);
+        followers = followers == null ? List.of() : followers.stream()
+                .filter(motor -> !motor.isDisabled())
+                .toList();
         dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
         loops = loops == null ? List.of() : List.copyOf(loops);
         constraints = constraints == null ? List.of() : List.copyOf(constraints);
@@ -48,7 +51,7 @@ public record ControlBinding(
             FeedbackBinding feedback,
             List<Object> dependencies,
             List<ControlLoop> loops) {
-        this(mode, output, 0, followers, feedback, dependencies, loops, null, null, null, null);
+        this(mode, output, 0, followers, feedback, dependencies, loops, null, null, null, null, false);
     }
 
     public ControlBinding(
@@ -59,7 +62,23 @@ public record ControlBinding(
             FeedbackBinding feedback,
             List<Object> dependencies,
             List<ControlLoop> loops) {
-        this(mode, output, slot, followers, feedback, dependencies, loops, null, null, null, null);
+        this(mode, output, slot, followers, feedback, dependencies, loops, null, null, null, null, false);
+    }
+
+    public ControlBinding(
+            ControlMode mode,
+            MotorDevice output,
+            int slot,
+            List<MotorDevice> followers,
+            FeedbackBinding feedback,
+            List<Object> dependencies,
+            List<ControlLoop> loops,
+            List<Constraint<Double>> constraints,
+            MotionProfile profile,
+            MotionPlanner planner,
+            List<MotorDevice> motors) {
+        this(mode, output, slot, followers, feedback, dependencies, loops,
+                constraints, profile, planner, motors, false);
     }
 
     public ControlBinding output(MotorDevice output) {
@@ -215,6 +234,15 @@ public record ControlBinding(
         return motors;
     }
 
+    public ControlBinding disabled() {
+        return disabled(true);
+    }
+
+    public ControlBinding disabled(boolean disabled) {
+        return new ControlBinding(mode, output, slot, followers, feedback, dependencies, loops,
+                constraints, profile, planner, null, disabled);
+    }
+
     /** Returns the latest configured position feedback. */
     public double position() {
         return requireFeedback().position().position();
@@ -310,7 +338,8 @@ public record ControlBinding(
                 constraints,
                 profile,
                 planner,
-                null);
+                null,
+                isDisabled);
     }
 
     public Action set(double target) {

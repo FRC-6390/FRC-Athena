@@ -127,6 +127,13 @@ final class OutputResolver {
         if (output == null) {
             return null;
         }
+        if (control != null && (control.isDisabled()
+                || (control.output() != null && control.output().isDisabled()))) {
+            return null;
+        }
+        if (motor != null && motor.isDisabled()) {
+            return null;
+        }
         if (control != null) {
             return OutputRequest.of(control, output);
         }

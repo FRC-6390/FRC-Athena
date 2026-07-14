@@ -42,6 +42,7 @@ public interface Action extends DeviceAction {
         return new Then(this, next);
     }
 
+
     record Conditional(Action action, ActionCondition condition, Action next) implements Action {
         public Conditional {
             Objects.requireNonNull(action, "action");

@@ -39,6 +39,44 @@ class MechanismRuntimeTest {
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 1);
 
     @Test
+    void disabledMotorDoesNotApplyOutput() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        DisabledMotorMechanism mechanism = new DisabledMotorMechanism();
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism);
+
+        scheduler.request(mechanism.move);
+        scheduler.teleopPeriodic(0.0, 0.02);
+
+        assertTrue(Double.isNaN(actions.motor(MOTOR).percent));
+        assertEquals(MOTOR, MOTOR.disabled(false));
+    }
+
+    @Test
+    void disabledControlDoesNotApplyOutput() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        DisabledControlMechanism mechanism = new DisabledControlMechanism();
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism);
+
+        scheduler.request(mechanism.move);
+        scheduler.teleopPeriodic(0.0, 0.02);
+
+        assertTrue(Double.isNaN(actions.motor(MOTOR).percent));
+    }
+
+    @Test
+    void disabledHookDoesNotRun() {
+        AtomicInteger calls = new AtomicInteger();
+        DisabledHookMechanism mechanism = new DisabledHookMechanism(calls);
+        MechanismScheduler scheduler = MechanismScheduler.create(new RecordingActionContext(MOTOR))
+                .register(mechanism);
+
+        scheduler.teleopPeriodic(0.0, 0.02);
+
+        assertEquals(0, calls.get());
+    }
+
+
+    @Test
     void activeHookRequestsRunningActionAndReleaseRequestsTargetedNeutral() {
         boolean[] trigger = {false};
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
@@ -1665,6 +1703,24 @@ class MechanismRuntimeTest {
             trigger = Events.when(() -> active[0]).active()
                     .whileActive(running)
                     .onEnd(coast);
+        }
+    }
+
+    private static final class DisabledMotorMechanism implements Mechanism {
+        private final MotorDevice motor = MOTOR.disabled();
+        private final Action move = Actions.percent(motor, 0.7);
+    }
+
+    private static final class DisabledControlMechanism implements Mechanism {
+        private final ControlBinding control = Controls.position(MOTOR).disabled();
+        private final Action move = control.position(1.0);
+    }
+
+    private static final class DisabledHookMechanism implements Mechanism {
+        private final HookBinding hook;
+
+        private DisabledHookMechanism(AtomicInteger calls) {
+            hook = Events.teleopPeriodic().whileActive(calls::incrementAndGet).disabled();
         }
     }
 
