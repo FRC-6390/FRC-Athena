@@ -11,6 +11,7 @@ import com.revrobotics.AbsoluteEncoder;
 import com.revrobotics.PersistMode;
 import com.revrobotics.RelativeEncoder;
 import com.revrobotics.ResetMode;
+import com.revrobotics.REVLibError;
 import com.revrobotics.spark.ClosedLoopSlot;
 import com.revrobotics.spark.SparkBase;
 import com.revrobotics.spark.SparkBase.ControlType;
@@ -71,7 +72,14 @@ public final class RevMotorHandle implements MotorHandle {
     @Override
     public void activate() {
         if (!activated) {
-            controller.configure(device, options);
+            if (device.supplyCurrentLimitAmps() > 0 || device.statorCurrentLimitAmps() > 0) {
+                throw new IllegalStateException("REV motor " + device.defaultName()
+                        + " does not support explicit supplyCurrentLimit or statorCurrentLimit settings. "
+                        + "Use currentLimit(...) for the REV smart current limit.");
+            }
+            if (!controller.configure(device, options)) {
+                throw new IllegalStateException("Failed to configure " + device.defaultName());
+            }
             activated = true;
         }
     }
@@ -91,7 +99,9 @@ public final class RevMotorHandle implements MotorHandle {
             throw new IllegalArgumentException("REV motor " + device.defaultName()
                     + " can only follow another REV motor.");
         }
-        controller.follow(revLeader.device.id(), inverted);
+        if (!controller.follow(revLeader.device.id(), inverted)) {
+            throw new IllegalStateException("Failed to configure follower " + device.defaultName());
+        }
     }
 
     @Override
@@ -153,7 +163,9 @@ public final class RevMotorHandle implements MotorHandle {
     @Override
     public void setIntegratedPositionRotations(double rotations) {
         double safeRotations = finiteOrZero(rotations);
-        controller.setSensorPosition(safeRotations);
+        if (!controller.setSensorPosition(safeRotations)) {
+            throw new IllegalStateException("Failed to set position for " + device.defaultName());
+        }
         positionRotations = safeRotations;
         inputsFresh = true;
     }
@@ -210,7 +222,7 @@ public final class RevMotorHandle implements MotorHandle {
     }
 
     interface SparkController {
-        void configure(MotorDevice device, RevMotorOptions options);
+        boolean configure(MotorDevice device, RevMotorOptions options);
 
         void setPercent(double percent);
 
@@ -220,7 +232,7 @@ public final class RevMotorHandle implements MotorHandle {
 
         void setVelocityTarget(double rotationsPerSecond);
 
-        default void setSensorPosition(double rotations) {
+        default boolean setSensorPosition(double rotations) {
             throw new UnsupportedOperationException("Integrated encoder position cannot be set.");
         }
 
@@ -232,7 +244,7 @@ public final class RevMotorHandle implements MotorHandle {
             setVelocityTarget(rotationsPerSecond);
         }
 
-        default void follow(int leaderId, boolean inverted) {
+        default boolean follow(int leaderId, boolean inverted) {
             throw new UnsupportedOperationException("Hardware following is unavailable.");
         }
 
@@ -257,7 +269,7 @@ public final class RevMotorHandle implements MotorHandle {
         }
 
         @Override
-        public void configure(MotorDevice device, RevMotorOptions options) {
+        public boolean configure(MotorDevice device, RevMotorOptions options) {
             SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
             config.idleMode(device.neutralMode() == MotorNeutralMode.BRAKE ? IdleMode.kBrake : IdleMode.kCoast);
             config.inverted(device.isInverted());
@@ -273,7 +285,8 @@ public final class RevMotorHandle implements MotorHandle {
             if (options.closedLoopRampSeconds() > 0.0) {
                 config.closedLoopRampRate(options.closedLoopRampSeconds());
             }
-            spark.configure(config, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters);
+            return spark.configure(config, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters)
+                    == REVLibError.kOk;
         }
 
         @Override
@@ -297,8 +310,8 @@ public final class RevMotorHandle implements MotorHandle {
         }
 
         @Override
-        public void setSensorPosition(double rotations) {
-            spark.getEncoder().setPosition(rotations);
+        public boolean setSensorPosition(double rotations) {
+            return spark.getEncoder().setPosition(rotations) == REVLibError.kOk;
         }
 
         @Override
@@ -322,10 +335,11 @@ public final class RevMotorHandle implements MotorHandle {
         }
 
         @Override
-        public void follow(int leaderId, boolean inverted) {
+        public boolean follow(int leaderId, boolean inverted) {
             SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
             config.follow(leaderId, inverted);
-            spark.configure(config, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters);
+            return spark.configure(config, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters)
+                    == REVLibError.kOk;
         }
 
         @Override

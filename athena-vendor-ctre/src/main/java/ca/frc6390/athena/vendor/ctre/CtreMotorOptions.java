@@ -3,7 +3,9 @@ package ca.frc6390.athena.vendor.ctre;
 import ca.frc6390.athena.hardware.backend.FocPolicy;
 
 /**
- * CTRE-specific motor options stored in Athena motor declarations.
+ * CTRE-specific motor options stored in Athena motor declarations. Prefer the
+ * direct {@code MotorDevice} current-limit methods for ordinary configuration;
+ * values set here override their direct equivalents.
  */
 public final class CtreMotorOptions {
     private int supplyCurrentLimitAmps;
@@ -12,9 +14,10 @@ public final class CtreMotorOptions {
     private FocPolicy focPolicy = FocPolicy.DISABLED;
 
     /**
-     * Sets supply current limit.
+     * Sets the supply-side current limit, overriding both the direct supply limit
+     * and portable current limit on the motor declaration.
      *
-     * @param amps limit in amps
+     * @param amps limit in amps; negative values are treated as unset
      * @return this options object
      */
     public CtreMotorOptions supplyCurrentLimit(int amps) {
@@ -23,9 +26,10 @@ public final class CtreMotorOptions {
     }
 
     /**
-     * Sets stator current limit.
+     * Sets the stator-side current limit, overriding the direct stator limit on the
+     * motor declaration.
      *
-     * @param amps limit in amps
+     * @param amps limit in amps; negative values are treated as disabled
      * @return this options object
      */
     public CtreMotorOptions statorCurrentLimit(int amps) {
@@ -34,9 +38,10 @@ public final class CtreMotorOptions {
     }
 
     /**
-     * Sets torque current limit.
+     * Sets symmetric forward and reverse torque-current limits. This setting is
+     * supported by TalonFX and rejected by TalonFXS.
      *
-     * @param amps limit in amps
+     * @param amps limit in amps; negative values are treated as disabled
      * @return this options object
      */
     public CtreMotorOptions torqueCurrentLimit(int amps) {

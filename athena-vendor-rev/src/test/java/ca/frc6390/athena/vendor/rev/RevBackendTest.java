@@ -95,6 +95,26 @@ class RevBackendTest {
     }
 
     @Test
+    void explicitSupplyAndStatorLimitsFailClearlyOnRev() {
+        RecordingSparkController supplyController = new RecordingSparkController();
+        RevMotorHandle supply = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.NEO, 1).supplyCurrentLimit(40),
+                new RevMotorOptions(),
+                supplyController);
+        RevMotorHandle stator = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.NEO, 2).statorCurrentLimit(60),
+                new RevMotorOptions(),
+                new RecordingSparkController());
+
+        IllegalStateException supplyFailure = assertThrows(IllegalStateException.class, supply::activate);
+        IllegalStateException statorFailure = assertThrows(IllegalStateException.class, stator::activate);
+
+        assertTrue(supplyFailure.getMessage().contains("Use currentLimit(...)"));
+        assertTrue(statorFailure.getMessage().contains("Use currentLimit(...)"));
+        assertEquals(0, supplyController.configureCalls);
+    }
+
+    @Test
     void motorFollowerUsesLeaderCanIdAndRequestedDirection() {
         RecordingSparkController leaderController = new RecordingSparkController();
         RecordingSparkController followerController = new RecordingSparkController();
@@ -204,10 +224,11 @@ class RevBackendTest {
         private boolean followInverted;
 
         @Override
-        public void configure(MotorDevice device, RevMotorOptions options) {
+        public boolean configure(MotorDevice device, RevMotorOptions options) {
             configureCalls++;
             this.device = device;
             this.options = options;
+            return true;
         }
 
         @Override
@@ -223,14 +244,16 @@ class RevBackendTest {
         public void setVelocityTarget(double rotationsPerSecond) {}
 
         @Override
-        public void setSensorPosition(double rotations) {
+        public boolean setSensorPosition(double rotations) {
             position = rotations;
+            return true;
         }
 
         @Override
-        public void follow(int leaderId, boolean inverted) {
+        public boolean follow(int leaderId, boolean inverted) {
             followLeaderId = leaderId;
             followInverted = inverted;
+            return true;
         }
 
         @Override

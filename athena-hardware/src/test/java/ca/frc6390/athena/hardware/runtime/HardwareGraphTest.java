@@ -255,6 +255,12 @@ class HardwareGraphTest {
     @Test
     void deviceValidationRejectsInvalidDeclarations() {
         assertThrows(NullPointerException.class, () -> MotorDevice.of(null, 1));
+        assertThrows(IllegalArgumentException.class,
+                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).currentLimit(-1));
+        assertThrows(IllegalArgumentException.class,
+                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).supplyCurrentLimit(-1));
+        assertThrows(IllegalArgumentException.class,
+                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(-1));
         assertThrows(NullPointerException.class, () -> EncoderDevice.of(null, 1));
         assertThrows(NullPointerException.class, () -> ImuDevice.of(null, 1));
         assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).gearRatio(0.0));

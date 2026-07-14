@@ -58,7 +58,9 @@ public final class CtreEncoderHandle implements EncoderHandle {
     @Override
     public void setPositionRotations(double rotations) {
         double safeRotations = finiteOrZero(rotations);
-        controller.setPositionRotations(safeRotations);
+        if (!controller.setPositionRotations(safeRotations)) {
+            throw new IllegalStateException("Failed to set position for " + device.defaultName());
+        }
         positionRotations = safeRotations;
         inputsFresh = true;
     }
@@ -89,7 +91,7 @@ public final class CtreEncoderHandle implements EncoderHandle {
 
         double velocityRotationsPerSecond();
 
-        void setPositionRotations(double rotations);
+        boolean setPositionRotations(double rotations);
     }
 
     private static final class PhoenixCANCoderController implements CANCoderController {
@@ -115,8 +117,8 @@ public final class CtreEncoderHandle implements EncoderHandle {
         }
 
         @Override
-        public void setPositionRotations(double rotations) {
-            encoder.setPosition(rotations);
+        public boolean setPositionRotations(double rotations) {
+            return encoder.setPosition(rotations).isOK();
         }
     }
 

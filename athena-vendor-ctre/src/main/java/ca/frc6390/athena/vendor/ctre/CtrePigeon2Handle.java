@@ -107,7 +107,9 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
     @Override
     public void setYawDegrees(double yawDegrees) {
-        controller.setYawDegrees(yawDegrees);
+        if (!controller.setYawDegrees(yawDegrees)) {
+            throw new IllegalStateException("Failed to set yaw for " + device.defaultName());
+        }
         inputsFresh = false;
     }
 
@@ -149,7 +151,7 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
         double linearAccelerationZG();
 
-        void setYawDegrees(double yawDegrees);
+        boolean setYawDegrees(double yawDegrees);
 
         void reset();
 
@@ -203,8 +205,8 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         }
 
         @Override
-        public void setYawDegrees(double yawDegrees) {
-            pigeon.setYaw(yawDegrees);
+        public boolean setYawDegrees(double yawDegrees) {
+            return pigeon.setYaw(yawDegrees).isOK();
         }
 
         @Override

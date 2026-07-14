@@ -87,6 +87,61 @@ class CtreBackendTest {
     }
 
     @Test
+    void genericCurrentLimitConfiguresCtreSupplyLimit() {
+        RecordingTalonController controller = new RecordingTalonController();
+        CtreMotorHandle handle = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 1).currentLimit(37),
+                new CtreMotorOptions(),
+                controller);
+
+        handle.activate();
+
+        assertEquals(1, controller.currentLimitConfigurationCalls);
+        assertEquals(37, controller.supplyCurrentLimitAmps);
+        assertEquals(0, controller.statorCurrentLimitAmps);
+        assertEquals(0, controller.torqueCurrentLimitAmps);
+    }
+
+    @Test
+    void directSupplyAndStatorLimitsConfigureCtreController() {
+        RecordingTalonController controller = new RecordingTalonController();
+        CtreMotorHandle handle = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 1)
+                        .currentLimit(37)
+                        .supplyCurrentLimit(45)
+                        .statorCurrentLimit(80),
+                new CtreMotorOptions(),
+                controller);
+
+        handle.activate();
+
+        assertEquals(45, controller.supplyCurrentLimitAmps);
+        assertEquals(80, controller.statorCurrentLimitAmps);
+        assertEquals(0, controller.torqueCurrentLimitAmps);
+    }
+
+    @Test
+    void ctreCurrentLimitOptionsOverrideAndExtendGenericLimit() {
+        RecordingTalonController controller = new RecordingTalonController();
+        CtreMotorHandle handle = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 1)
+                        .currentLimit(37)
+                        .supplyCurrentLimit(42)
+                        .statorCurrentLimit(70),
+                new CtreMotorOptions()
+                        .supplyCurrentLimit(45)
+                        .statorCurrentLimit(80)
+                        .torqueCurrentLimit(60),
+                controller);
+
+        handle.activate();
+
+        assertEquals(45, controller.supplyCurrentLimitAmps);
+        assertEquals(80, controller.statorCurrentLimitAmps);
+        assertEquals(60, controller.torqueCurrentLimitAmps);
+    }
+
+    @Test
     void motorFollowerUsesLeaderCanIdAndRequestedDirection() {
         RecordingTalonController leaderController = new RecordingTalonController();
         RecordingTalonController followerController = new RecordingTalonController();
@@ -229,6 +284,10 @@ class CtreBackendTest {
         private boolean followInverted;
         private boolean inverted;
         private double sensorPosition = 10.0;
+        private int currentLimitConfigurationCalls;
+        private int supplyCurrentLimitAmps;
+        private int statorCurrentLimitAmps;
+        private int torqueCurrentLimitAmps;
 
         @Override
         public void setPercent(double percent) {}
@@ -284,10 +343,20 @@ class CtreBackendTest {
         public void stop() {}
 
         @Override
-        public void configureOutput(boolean brake, boolean inverted) {
+        public boolean configureOutput(boolean brake, boolean inverted) {
             outputConfigurationCalls++;
             this.brake = brake;
             this.inverted = inverted;
+            return true;
+        }
+
+        @Override
+        public boolean configureCurrentLimits(int supplyAmps, int statorAmps, int torqueAmps) {
+            currentLimitConfigurationCalls++;
+            supplyCurrentLimitAmps = supplyAmps;
+            statorCurrentLimitAmps = statorAmps;
+            torqueCurrentLimitAmps = torqueAmps;
+            return true;
         }
 
         @Override
@@ -331,8 +400,9 @@ class CtreBackendTest {
         }
 
         @Override
-        public void setPositionRotations(double rotations) {
+        public boolean setPositionRotations(double rotations) {
             setPositionRotations = rotations;
+            return true;
         }
     }
 
@@ -380,7 +450,9 @@ class CtreBackendTest {
         }
 
         @Override
-        public void setYawDegrees(double yawDegrees) {}
+        public boolean setYawDegrees(double yawDegrees) {
+            return true;
+        }
 
         @Override
         public void reset() {}

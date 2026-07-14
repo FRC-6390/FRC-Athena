@@ -14,6 +14,8 @@ import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.SlotConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.CommutationConfigs;
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.TorqueCurrentConfigs;
 import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.controls.Follower;
@@ -76,9 +78,25 @@ public final class CtreMotorHandle implements MotorHandle {
     @Override
     public void activate() {
         if (!activated) {
-            controller.configureOutput(
+            if (!controller.configureOutput(
                     device.neutralMode() == MotorNeutralMode.BRAKE,
-                    device.follower() == null && device.isInverted());
+                    device.follower() == null && device.isInverted())) {
+                throw new IllegalStateException("Failed to configure output for " + device.defaultName());
+            }
+            int supplyLimit = options.supplyCurrentLimitAmps() > 0
+                    ? options.supplyCurrentLimitAmps()
+                    : device.supplyCurrentLimitAmps() > 0
+                            ? device.supplyCurrentLimitAmps()
+                            : device.currentLimitAmps();
+            int statorLimit = options.statorCurrentLimitAmps() > 0
+                    ? options.statorCurrentLimitAmps()
+                    : device.statorCurrentLimitAmps();
+            if (!controller.configureCurrentLimits(
+                    supplyLimit,
+                    statorLimit,
+                    options.torqueCurrentLimitAmps())) {
+                throw new IllegalStateException("Failed to configure current limits for " + device.defaultName());
+            }
             activated = true;
         }
     }
@@ -282,7 +300,11 @@ public final class CtreMotorHandle implements MotorHandle {
 
         void stop();
 
-        void configureOutput(boolean brake, boolean inverted);
+        boolean configureOutput(boolean brake, boolean inverted);
+
+        default boolean configureCurrentLimits(int supplyAmps, int statorAmps, int torqueAmps) {
+            return true;
+        }
 
         double positionRotations();
 
@@ -374,12 +396,17 @@ public final class CtreMotorHandle implements MotorHandle {
         }
 
         @Override
-        public void configureOutput(boolean brake, boolean inverted) {
-            talon.getConfigurator().apply(new MotorOutputConfigs()
+        public boolean configureOutput(boolean brake, boolean inverted) {
+            return talon.getConfigurator().apply(new MotorOutputConfigs()
                     .withNeutralMode(brake ? NeutralModeValue.Brake : NeutralModeValue.Coast)
                     .withInverted(inverted
                             ? InvertedValue.Clockwise_Positive
-                            : InvertedValue.CounterClockwise_Positive));
+                            : InvertedValue.CounterClockwise_Positive)).isOK();
+        }
+
+        @Override
+        public boolean configureCurrentLimits(int supplyAmps, int statorAmps, int torqueAmps) {
+            return CtreMotorHandle.configureCurrentLimits(talon, supplyAmps, statorAmps, torqueAmps);
         }
 
         @Override
@@ -395,13 +422,13 @@ public final class CtreMotorHandle implements MotorHandle {
 
     private static final class PhoenixTalonFxsController implements TalonController {
         private final TalonFXS talon;
+        private final MotorArrangementValue arrangement;
         private final PositionVoltage positionVoltage = new PositionVoltage(0.0);
         private final VelocityVoltage velocityVoltage = new VelocityVoltage(0.0);
 
         private PhoenixTalonFxsController(MotorDevice device) {
             talon = new TalonFXS(device.id(), new CANBus(device.canbus()));
-            talon.getConfigurator().apply(new CommutationConfigs()
-                    .withMotorArrangement(arrangement(device)));
+            arrangement = arrangement(device);
         }
 
         private static MotorArrangementValue arrangement(MotorDevice device) {
@@ -495,12 +522,20 @@ public final class CtreMotorHandle implements MotorHandle {
         }
 
         @Override
-        public void configureOutput(boolean brake, boolean inverted) {
-            talon.getConfigurator().apply(new MotorOutputConfigs()
+        public boolean configureOutput(boolean brake, boolean inverted) {
+            boolean commutationApplied = talon.getConfigurator().apply(new CommutationConfigs()
+                    .withMotorArrangement(arrangement)).isOK();
+            boolean outputApplied = talon.getConfigurator().apply(new MotorOutputConfigs()
                     .withNeutralMode(brake ? NeutralModeValue.Brake : NeutralModeValue.Coast)
                     .withInverted(inverted
                             ? InvertedValue.Clockwise_Positive
-                            : InvertedValue.CounterClockwise_Positive));
+                            : InvertedValue.CounterClockwise_Positive)).isOK();
+            return commutationApplied && outputApplied;
+        }
+
+        @Override
+        public boolean configureCurrentLimits(int supplyAmps, int statorAmps, int torqueAmps) {
+            return CtreMotorHandle.configureCurrentLimits(talon, supplyAmps, statorAmps, torqueAmps);
         }
 
         @Override
@@ -512,5 +547,38 @@ public final class CtreMotorHandle implements MotorHandle {
         public double velocityRotationsPerSecond() {
             return talon.getVelocity().refresh().getValue().in(Units.RotationsPerSecond);
         }
+    }
+
+    private static boolean configureCurrentLimits(
+            TalonFX talon,
+            int supplyAmps,
+            int statorAmps,
+            int torqueAmps) {
+        CurrentLimitsConfigs limits = currentLimits(supplyAmps, statorAmps);
+        boolean currentLimitsApplied = talon.getConfigurator().apply(limits).isOK();
+        if (torqueAmps <= 0) {
+            return currentLimitsApplied;
+        }
+        return currentLimitsApplied && talon.getConfigurator().apply(new TorqueCurrentConfigs()
+                .withPeakForwardTorqueCurrent(torqueAmps)
+                .withPeakReverseTorqueCurrent(-torqueAmps)).isOK();
+    }
+
+    private static boolean configureCurrentLimits(
+            TalonFXS talon,
+            int supplyAmps,
+            int statorAmps,
+            int torqueAmps) {
+        CurrentLimitsConfigs limits = currentLimits(supplyAmps, statorAmps);
+        boolean currentLimitsApplied = talon.getConfigurator().apply(limits).isOK();
+        return currentLimitsApplied && torqueAmps <= 0;
+    }
+
+    private static CurrentLimitsConfigs currentLimits(int supplyAmps, int statorAmps) {
+        return new CurrentLimitsConfigs()
+                .withSupplyCurrentLimit(Math.max(0, supplyAmps))
+                .withSupplyCurrentLimitEnable(supplyAmps > 0)
+                .withStatorCurrentLimit(Math.max(0, statorAmps))
+                .withStatorCurrentLimitEnable(statorAmps > 0);
     }
 }

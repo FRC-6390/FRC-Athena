@@ -12,6 +12,18 @@ import ca.frc6390.athena.hardware.runtime.DeviceAction;
 
 /**
  * Reusable motor declaration for robot constants.
+ *
+ * @param kind physical motor and controller pairing
+ * @param id controller CAN identifier
+ * @param canbus CAN bus name
+ * @param isInverted whether positive output is inverted
+ * @param neutralMode behavior when no output is commanded
+ * @param currentLimitAmps portable current limit, or zero when disabled
+ * @param supplyCurrentLimitAmps explicit supply-side limit, or zero when unset
+ * @param statorCurrentLimitAmps explicit stator-side limit, or zero when disabled
+ * @param vendorOptions typed vendor-specific configuration
+ * @param follower follower relationship, or {@code null} for an independent motor
+ * @param isDisabled whether Athena should suppress this motor
  */
 public record MotorDevice(
         MotorKind kind,
@@ -20,6 +32,8 @@ public record MotorDevice(
         boolean isInverted,
         MotorNeutralMode neutralMode,
         int currentLimitAmps,
+        int supplyCurrentLimitAmps,
+        int statorCurrentLimitAmps,
         VendorOptions vendorOptions,
         MotorFollowerBinding follower,
         boolean isDisabled) {
@@ -31,7 +45,8 @@ public record MotorDevice(
      * @return motor ref
      */
     public static MotorDevice of(MotorKind kind, int id) {
-        return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST, 40, VendorOptions.empty(), null, false);
+        return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST,
+                40, 0, 0, VendorOptions.empty(), null, false);
     }
 
     /** Creates a motor with an explicit controller and physical motor pairing. */
@@ -44,6 +59,9 @@ public record MotorDevice(
         Objects.requireNonNull(kind, "kind");
         canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
         neutralMode = neutralMode == null ? MotorNeutralMode.COAST : neutralMode;
+        if (currentLimitAmps < 0 || supplyCurrentLimitAmps < 0 || statorCurrentLimitAmps < 0) {
+            throw new IllegalArgumentException("Motor current limits cannot be negative.");
+        }
         vendorOptions = vendorOptions == null ? VendorOptions.empty() : vendorOptions;
     }
 
@@ -54,13 +72,22 @@ public record MotorDevice(
         this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower, false);
     }
 
+    public MotorDevice(
+            MotorKind kind, int id, String canbus, boolean isInverted,
+            MotorNeutralMode neutralMode, int currentLimitAmps,
+            VendorOptions vendorOptions, MotorFollowerBinding follower, boolean isDisabled) {
+        this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
+                0, 0, vendorOptions, follower, isDisabled);
+    }
+
     public MotorDevice disabled() {
         return disabled(true);
     }
 
     public MotorDevice disabled(boolean disabled) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode,
-                currentLimitAmps, vendorOptions, follower, disabled);
+                currentLimitAmps, supplyCurrentLimitAmps, statorCurrentLimitAmps,
+                vendorOptions, follower, disabled);
     }
 
     /**
@@ -110,7 +137,8 @@ public record MotorDevice(
      */
     public MotorDevice canbus(String canbus) {
         return new MotorDevice(
-                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower, isDisabled);
+                kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
     }
 
     /**
@@ -121,7 +149,8 @@ public record MotorDevice(
      */
     public MotorDevice inverted(boolean inverted) {
         return new MotorDevice(
-                kind, id, canbus, inverted, neutralMode, currentLimitAmps, vendorOptions, follower, isDisabled);
+                kind, id, canbus, inverted, neutralMode, currentLimitAmps,
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
     }
 
     /**
@@ -159,17 +188,50 @@ public record MotorDevice(
      */
     public MotorDevice neutralMode(MotorNeutralMode neutralMode) {
         return new MotorDevice(
-                kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower, isDisabled);
+                kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
     }
 
     /**
-     * Sets current limit.
+     * Sets the portable controller current limit. CTRE maps this to supply current and
+     * REV maps it to the smart current limit. An explicit
+     * {@link #supplyCurrentLimit(int)} or vendor-specific supply limit overrides it on
+     * CTRE. A value of zero disables the portable limit.
      *
-     * @param amps current limit in amps
-     * @return updated ref
+     * @param amps non-negative current limit in amps
+     * @return updated motor declaration
      */
     public MotorDevice currentLimit(int amps) {
-        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, amps, vendorOptions, follower, isDisabled);
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, amps,
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
+    }
+
+    /**
+     * Sets the controller supply-side current limit. This limits current drawn from
+     * the battery and is supported by CTRE TalonFX-family controllers. It overrides
+     * {@link #currentLimit(int)} there; a CTRE vendor option overrides this value.
+     * A value of zero leaves the explicit supply limit unset.
+     *
+     * @param amps non-negative supply current limit in amps
+     * @return updated motor declaration
+     */
+    public MotorDevice supplyCurrentLimit(int amps) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
+                amps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
+    }
+
+    /**
+     * Sets the motor stator-side current limit. This limits current through the motor
+     * windings and therefore limits produced torque. It is supported by CTRE
+     * TalonFX-family controllers; a CTRE vendor option overrides this value. A value
+     * of zero disables the stator limit.
+     *
+     * @param amps non-negative stator current limit in amps
+     * @return updated motor declaration
+     */
+    public MotorDevice statorCurrentLimit(int amps) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
+                supplyCurrentLimitAmps, amps, vendorOptions, follower, isDisabled);
     }
 
     /**
@@ -193,6 +255,8 @@ public record MotorDevice(
                 isInverted,
                 neutralMode,
                 currentLimitAmps,
+                supplyCurrentLimitAmps,
+                statorCurrentLimitAmps,
                 vendorOptions,
                 new MotorFollowerBinding(leader),
                 isDisabled);
@@ -223,6 +287,8 @@ public record MotorDevice(
                     isInverted,
                     neutralMode,
                     currentLimitAmps,
+                    supplyCurrentLimitAmps,
+                    statorCurrentLimitAmps,
                     vendorOptions.with(optionType, options),
                     follower,
                     isDisabled);
