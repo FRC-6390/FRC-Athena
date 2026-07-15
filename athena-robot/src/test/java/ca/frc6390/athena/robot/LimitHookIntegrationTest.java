@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 
 class LimitHookIntegrationTest {
     @Test
-    void heldInvertedHomeSwitchZerosEveryCycleAndReportsLifecycleOnce() {
+    void heldInvertedHomeSwitchZerosOnceAndReportsLifecycleOnce() {
         Rig rig = new Rig();
         rig.rawHome(false);
         rig.motorState(4.5);
@@ -38,7 +38,7 @@ class LimitHookIntegrationTest {
 
         rig.motorState(2.0);
         rig.runtime.disabledPeriodic(0.04, 0.02);
-        assertEquals(0.0, rig.motorPosition(), 1.0e-9);
+        assertEquals(2.0, rig.motorPosition(), 1.0e-9);
         assertEquals(1, rig.arm.homeStarts);
 
         rig.rawHome(false);
@@ -206,7 +206,7 @@ class LimitHookIntegrationTest {
         private int homeEnds;
         private final HookBinding zeroAtHome = Events.when(home).active()
                 .onStart(() -> homeStarts++)
-                .whileActive(encoder.setPosition(0.0))
+                .onStart(encoder.setPosition(0.0))
                 .onEnd(() -> homeEnds++);
     }
 }
