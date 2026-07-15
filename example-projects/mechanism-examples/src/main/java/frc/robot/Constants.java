@@ -7,5 +7,6 @@ public interface Constants {
 
     interface Operator {
         int PORT = 0;
+        int SYSID_PORT = 1;
     }
 }

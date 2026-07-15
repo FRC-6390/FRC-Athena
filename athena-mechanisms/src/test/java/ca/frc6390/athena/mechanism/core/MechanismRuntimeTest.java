@@ -877,6 +877,30 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void profileRestartsFromMeasuredStateAfterAnOpenLoopActionOwnsTheMotor() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 0.0;
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .pid(1.0, 0.0, 0.0)
+                .profile(MotionProfiles.trapezoid(10.0, 10.0));
+        TestMechanism mechanism = new TestMechanism(control.position(10.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+
+        runtime.set(control.position(10.0));
+        runtime.periodic(new MechanismContext(0.0, 0.0, 0.1, true, false, false), EventContext.empty());
+
+        runtime.set(MOTOR.percent(-0.2));
+        actions.encoder(ENCODER).position = 5.0;
+        runtime.periodic(new MechanismContext(0.1, 0.0, 0.1, true, false, false), EventContext.empty());
+
+        runtime.set(control.position(10.0));
+        runtime.periodic(new MechanismContext(0.2, 0.0, 0.1, true, false, false), EventContext.empty());
+
+        assertEquals(0.05, actions.motor(MOTOR).voltage, 1.0e-9);
+    }
+
+    @Test
     void pidSkipsIntegralAndDerivativeForInvalidDt() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         actions.encoder(ENCODER).position = 0.0;

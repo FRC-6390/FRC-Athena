@@ -194,11 +194,13 @@ final class MechanismRuntime {
 
         List<CandidateOutput> selected = arbitrate(candidates);
         Set<MotorDevice> drivenNow = new LinkedHashSet<>();
+        applier.beginCycle();
         for (CandidateOutput candidate : selected) {
             outputs.add(candidate.output());
             drivenNow.addAll(candidate.output().request().motors());
             applier.apply(candidate.output(), candidate.context());
         }
+        applier.endCycle();
         for (MotorDevice motor : previouslyDrivenMotors) {
             if (!drivenNow.contains(motor)) {
                 actionContext.motor(motor).stop();
@@ -342,6 +344,13 @@ final class MechanismRuntime {
             if (action instanceof Actions.HardwareComputed computed) {
                 Evaluation child = evaluate(schedule.named("hardwareComputed", computed.evaluate(actionContext)), context);
                 return schedule.result(child.output(), false, child.context());
+            }
+            if (action instanceof Actions.ControlSysIdAction sysId) {
+                if (sysId.routine().timedOut(local.timeInStateSeconds())) {
+                    sysId.routine().end();
+                    return schedule.result(null, true, local);
+                }
+                return schedule.result(sysId.output(local.timeInStateSeconds()), false, local);
             }
             if (action instanceof Actions.Choice choice) {
                 return evaluate(schedule.named("choice", choice.choose(local)), context);
@@ -731,6 +740,9 @@ final class MechanismRuntime {
             }
 
             private void reset() {
+                if (action instanceof Actions.ControlSysIdAction sysId) {
+                    sysId.routine().end();
+                }
                 runtime = null;
                 for (SchedulerNode child : indexedChildren) {
                     if (child != null) {

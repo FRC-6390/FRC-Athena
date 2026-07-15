@@ -6,6 +6,7 @@ import ca.frc6390.athena.wpilib.controls.Gamepad;
 
 public final class Controls implements Mechanism {
     public final Gamepad operator = Controllers.xbox(Constants.Operator.PORT);
+    public final Gamepad sysId = Controllers.xbox(Constants.Operator.SYSID_PORT);
 
     public Controls(Robot robot) {
         operator.a().onTrue(robot.superstructure.home);
@@ -40,5 +41,10 @@ public final class Controls implements Mechanism {
         operator.leftY().above(0.75, 0.65)
                 .whileTrue(robot.templateRoller.run)
                 .onFalse(robot.templateRoller.stop);
+
+        sysId.a().whileActive(robot.turret.sysId.quasistaticForward()).onDeactive(robot.turret.neutral);
+        sysId.b().whileActive(robot.turret.sysId.quasistaticReverse()).onDeactive(robot.turret.neutral);
+        sysId.x().whileActive(robot.turret.sysId.dynamicForward()).onDeactive(robot.turret.neutral);
+        sysId.y().whileActive(robot.turret.sysId.dynamicReverse()).onDeactive(robot.turret.neutral);
     }
 }

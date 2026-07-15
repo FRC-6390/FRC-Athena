@@ -16,6 +16,7 @@ import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.motion.MotionPlanners;
 import ca.frc6390.athena.mechanism.motion.MotionProfiles;
+import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import frc.robot.Constants;
 
 public final class Turret implements Mechanism {
@@ -39,4 +40,6 @@ public final class Turret implements Mechanism {
     public final Action forward = fieldHeading.position(0.0).untilWithin(1.5);
     public final Action left = fieldHeading.position(90.0).untilWithin(1.5);
     public final Action rear = fieldHeading.position(180.0).untilWithin(1.5);
+    public final Action neutral = fieldHeading.neutral();
+    public final ControlSysId sysId = fieldHeading.sysId();
 }

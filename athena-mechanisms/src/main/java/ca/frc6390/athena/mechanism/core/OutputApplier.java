@@ -29,6 +29,8 @@ import java.util.Set;
 final class OutputApplier {
     private final ActionContext context;
     private final Map<ControlBinding, ControlRuntimeState> controlRuntimes = new IdentityHashMap<>();
+    private final Set<ControlBinding> controlsAppliedThisCycle =
+            java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<MotorHandle> drivenMotors = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final AppliedOutput appliedOutput = new AppliedOutput();
 
@@ -64,9 +66,19 @@ final class OutputApplier {
 
     public void apply(ResolvedOutput output, MechanismContext mechanismContext) {
         Objects.requireNonNull(output, "output");
+        if (output.request().control() != null) {
+            controlsAppliedThisCycle.add(output.request().control());
+        }
         AppliedOutput applied = RuntimeHardwareAccess.call(context, () -> resolveControlOutput(
                 output,
                 mechanismContext == null ? MechanismContext.empty() : mechanismContext));
+        if (output.output() instanceof Actions.ControlSysIdVoltage sysId) {
+            double fallbackVoltage = applied.output() instanceof Output.Voltage voltage ? voltage.volts() : 0.0;
+            RuntimeHardwareAccess.call(context, () -> {
+                sysId.routine().record(context, sysId.state(), fallbackVoltage);
+                return null;
+            });
+        }
         for (MotorDevice motor : motors(output.request())) {
             MotorHandle handle = context.motor(motor);
             drivenMotors.add(handle);
@@ -81,6 +93,16 @@ final class OutputApplier {
 
     void resetControls() {
         controlRuntimes.clear();
+        controlsAppliedThisCycle.clear();
+    }
+
+    void beginCycle() {
+        controlsAppliedThisCycle.clear();
+    }
+
+    void endCycle() {
+        controlRuntimes.keySet().removeIf(control -> !controlsAppliedThisCycle.contains(control));
+        controlsAppliedThisCycle.clear();
     }
 
     private AppliedOutput resolveControlOutput(ResolvedOutput output, MechanismContext mechanismContext) {

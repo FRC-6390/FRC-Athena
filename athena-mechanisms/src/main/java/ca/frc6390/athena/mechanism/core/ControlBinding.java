@@ -9,6 +9,7 @@ import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanner;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
+import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -281,6 +282,11 @@ public record ControlBinding(
         Objects.requireNonNull(target, "target");
         validateTolerance(tolerance);
         return () -> isAt(target.getAsDouble(), tolerance);
+    }
+
+    /** Creates a WPILib-compatible SysId routine for this control and its feedback. */
+    public ControlSysId sysId() {
+        return ControlSysId.forControl(this);
     }
 
     private static List<MotorDevice> motorList(MotorDevice output, List<MotorDevice> followers) {

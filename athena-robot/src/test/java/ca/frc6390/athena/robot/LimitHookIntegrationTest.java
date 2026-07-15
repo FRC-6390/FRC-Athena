@@ -9,6 +9,7 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Events;
@@ -60,6 +61,22 @@ class LimitHookIntegrationTest {
 
         assertEquals(0.0, rig.motorPosition(), 1.0e-9);
         assertEquals(CommandKind.VOLTAGE, rig.motor().commandKind());
+        assertEquals(0.0, rig.motor().commandValue(), 1.0e-9);
+    }
+
+    @Test
+    void homingActionNeutralizesAsSoonAsTheHomeSwitchBecomesActive() {
+        Rig rig = new Rig();
+        rig.rawHome(false);
+        rig.runtime.request(rig.arm.homeAction);
+        rig.runtime.teleopPeriodic(0.0, 0.02);
+        assertEquals(CommandKind.PERCENT, rig.motor().commandKind());
+        assertEquals(-0.4, rig.motor().commandValue(), 1.0e-9);
+
+        rig.rawHome(true);
+        rig.runtime.teleopPeriodic(0.02, 0.02);
+
+        assertEquals(CommandKind.NEUTRAL, rig.motor().commandKind());
         assertEquals(0.0, rig.motor().commandValue(), 1.0e-9);
     }
 
@@ -175,6 +192,8 @@ class LimitHookIntegrationTest {
                 .pid(0.5, 0.0, 0.0)
                 .constraint(Constraints.range(Range.of(0.0, 0.35)));
         private final Action holdHome = position.position(0.0);
+        private final Action homeAction = Actions.sequence()
+                .until(home::active, motor.percent(-0.4));
         private final Action manualIn = position.percent(-0.2);
         private final Action manualOut = position.percent(0.2);
         private final Action outsideRange = position.position(1.0);

@@ -159,6 +159,9 @@ final class OutputResolver {
         if (action instanceof Actions.DynamicControlVoltage controlState) {
             return controlState.control();
         }
+        if (action instanceof Actions.ControlSysIdVoltage sysId) {
+            return sysId.routine().control();
+        }
         if (action instanceof Actions.ControlPosition controlState) {
             return controlState.control();
         }

@@ -580,6 +580,9 @@ public final class MechanismScheduler {
             declarations.add(motor.motor());
         } else if (action instanceof Actions.EncoderSetPosition encoder) {
             declarations.add(encoder.encoder());
+        } else if (action instanceof Actions.ControlSysIdAction sysId) {
+            declarations.add(sysId.routine().control());
+            declarations.addAll(controlDeclarations(sysId.routine().control()));
         } else if (control(action) != null) {
             declarations.add(control(action));
             declarations.addAll(controlDeclarations(control(action)));
@@ -614,6 +617,9 @@ public final class MechanismScheduler {
         }
         if (action instanceof Actions.DynamicControlVoltage control) {
             return control.control();
+        }
+        if (action instanceof Actions.ControlSysIdVoltage sysId) {
+            return sysId.routine().control();
         }
         if (action instanceof Actions.ControlPosition control) {
             return control.control();
