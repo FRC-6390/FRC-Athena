@@ -135,23 +135,24 @@ class ActionArbitrationTest {
     }
 
     @Test
-    void heldActionReclaimsOutputOnTheTickAfterANewerEdgeRequest() {
+    void persistentEdgeRequestRemainsNewerThanAnAlreadyHeldAction() {
         boolean[] held = {true};
-        boolean[] edge = {false};
+        boolean[] stop = {false};
         RecordingContext hardware = new RecordingContext();
-        HeldWithEdgeOverride mechanism = new HeldWithEdgeOverride(held, edge);
+        HeldWithPersistentStop mechanism = new HeldWithPersistentStop(held, stop);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
         scheduler.teleopPeriodic(0.0, 0.02);
         assertEquals(0.25, hardware.motor(ARM).percent, 1.0e-9);
 
-        edge[0] = true;
+        stop[0] = true;
         scheduler.teleopPeriodic(0.02, 0.02);
         assertEquals(0.0, hardware.motor(ARM).percent, 1.0e-9);
 
-        edge[0] = false;
+        stop[0] = false;
         scheduler.teleopPeriodic(0.04, 0.02);
-        assertEquals(0.25, hardware.motor(ARM).percent, 1.0e-9);
+        scheduler.teleopPeriodic(0.06, 0.02);
+        assertEquals(0.0, hardware.motor(ARM).percent, 1.0e-9);
     }
 
     @Test
@@ -235,15 +236,15 @@ class ActionArbitrationTest {
         private final Action rollers = ROLLERS.percent(0.70);
     }
 
-    private static final class HeldWithEdgeOverride implements Mechanism {
-        private final Action heldAction = ARM.percent(0.25);
-        private final Action edgeAction = ARM.neutral();
-        private final HookBinding heldBinding;
-        private final HookBinding edgeBinding;
+    private static final class HeldWithPersistentStop implements Mechanism {
+        private final Action drive = ARM.percent(0.25);
+        private final Action stop = ARM.neutral();
+        private final HookBinding driveBinding;
+        private final HookBinding stopBinding;
 
-        private HeldWithEdgeOverride(boolean[] held, boolean[] edge) {
-            heldBinding = Events.when(() -> held[0]).active().whileActive(heldAction);
-            edgeBinding = Events.when(() -> edge[0]).rising().onStart(edgeAction);
+        private HeldWithPersistentStop(boolean[] held, boolean[] stop) {
+            driveBinding = Events.when(() -> held[0]).active().whileActive(drive);
+            stopBinding = Events.when(() -> stop[0]).active().onStart(this.stop);
         }
     }
 
