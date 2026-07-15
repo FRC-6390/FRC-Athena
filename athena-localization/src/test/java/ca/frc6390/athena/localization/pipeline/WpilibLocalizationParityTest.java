@@ -124,6 +124,27 @@ class WpilibLocalizationParityTest {
         assertTrue(rig.athena.pose().headingRadians() < Math.toRadians(10.0));
     }
 
+    @Test
+    void headingOnlyRecoveryIgnoresSyntheticTranslationChanges() {
+        ParityRig rig = new ParityRig(
+                9.0,
+                false,
+                true,
+                Double.POSITIVE_INFINITY);
+        Object cameras = new Object();
+
+        rig.stepAthenaOnly(0.00, vision(1.0, 1.0, Math.toRadians(90.0), 0.00,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), cameras));
+        rig.stepAthenaOnly(0.02, vision(8.0, 6.0, Math.toRadians(90.0), 0.02,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), cameras));
+        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-9);
+
+        rig.stepAthenaOnly(0.04, vision(3.0, 7.0, Math.toRadians(90.0), 0.04,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), cameras));
+
+        assertTrue(rig.athena.pose().headingRadians() > Math.toRadians(10.0));
+    }
+
     private static double[] distances(double frontLeft, double frontRight, double backLeft, double backRight) {
         return new double[] {frontLeft, frontRight, backLeft, backRight};
     }
@@ -183,22 +204,32 @@ class WpilibLocalizationParityTest {
         private PoseSnapshot pendingReset;
 
         private ParityRig() {
-            this(Double.POSITIVE_INFINITY, false, Double.POSITIVE_INFINITY);
+            this(Double.POSITIVE_INFINITY, false, false, Double.POSITIVE_INFINITY);
         }
 
         private ParityRig(double innovationGate) {
-            this(innovationGate, false, Double.POSITIVE_INFINITY);
+            this(innovationGate, false, false, Double.POSITIVE_INFINITY);
         }
 
         private ParityRig(double innovationGate, boolean translationOnlyVision) {
-            this(innovationGate, translationOnlyVision, Double.POSITIVE_INFINITY);
+            this(innovationGate, translationOnlyVision, false, Double.POSITIVE_INFINITY);
         }
 
         private ParityRig(
                 double innovationGate,
                 boolean translationOnlyVision,
                 double maxHeadingResidualRadians) {
-            PoseSignal configuredVision = translationOnlyVision ? visionSource.translationOnly() : visionSource;
+            this(innovationGate, translationOnlyVision, false, maxHeadingResidualRadians);
+        }
+
+        private ParityRig(
+                double innovationGate,
+                boolean translationOnlyVision,
+                boolean headingOnlyVision,
+                double maxHeadingResidualRadians) {
+            PoseSignal configuredVision = translationOnlyVision
+                    ? visionSource.translationOnly()
+                    : headingOnlyVision ? visionSource.headingOnly() : visionSource;
             visionStage = Localizations.filter().input(configuredVision);
             athena = Localizations.kalman()
                     .input(odometry, visionStage)

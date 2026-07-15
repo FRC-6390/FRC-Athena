@@ -732,9 +732,12 @@ public final class Localization implements PoseSignal {
                 boolean strongObservation = sample.targetCount() >= 2;
                 boolean continuous = previousPose != null
                         && sample.timestampSeconds() - previousTimestamp <= RECOVERY_MAX_INTERVAL_SECONDS
-                        && translationDistance(previousPose, sample.pose()) <= RECOVERY_TRANSLATION_METERS
-                        && Math.abs(wrapRadians(previousPose.headingRadians() - sample.pose().headingRadians()))
-                                <= RECOVERY_HEADING_RADIANS;
+                        && (!trustsTranslation(sample)
+                                || translationDistance(previousPose, sample.pose()) <= RECOVERY_TRANSLATION_METERS)
+                        && (!trustsHeading(sample)
+                                || Math.abs(wrapRadians(
+                                        previousPose.headingRadians() - sample.pose().headingRadians()))
+                                        <= RECOVERY_HEADING_RADIANS);
                 consistentSamples = strongObservation && continuous ? consistentSamples + 1 : strongObservation ? 1 : 0;
                 previousPose = sample.pose();
                 previousTimestamp = sample.timestampSeconds();
