@@ -647,8 +647,6 @@ public final class Localization implements PoseSignal {
         private static final double RECOVERY_MAX_INTERVAL_SECONDS = 0.25;
         private static final double RECOVERY_TRANSLATION_METERS = 0.75;
         private static final double RECOVERY_HEADING_RADIANS = Math.toRadians(25.0);
-        private static final double RECOVERY_MAX_TRANSLATION_STEP_METERS = 0.25;
-        private static final double RECOVERY_MAX_HEADING_STEP_RADIANS = Math.toRadians(5.0);
         private final SwerveDriveKinematics kinematics;
         private final MeasurementStdDevs stateStdDevs;
         private final MeasurementStdDevs defaultVisionStdDevs;
@@ -714,8 +712,7 @@ public final class Localization implements PoseSignal {
                 visionRecovery.remove(source);
                 return;
             }
-            boolean recovering = Double.isFinite(innovationGate) && innovation(sample, stdDevs) > innovationGate;
-            if (recovering) {
+            if (Double.isFinite(innovationGate) && innovation(sample, stdDevs) > innovationGate) {
                 VisionRecovery recovery = visionRecovery.computeIfAbsent(source, ignored -> new VisionRecovery());
                 if (!recovery.accepts(sample)) {
                     return;
@@ -723,8 +720,7 @@ public final class Localization implements PoseSignal {
             } else {
                 visionRecovery.remove(source);
             }
-            PoseSnapshot acceptedPose = recovering ? boundedRecoveryPose(sample) : sample.pose();
-            estimator.addVisionMeasurement(toWpilib(acceptedPose), sample.timestampSeconds(), vector(stdDevs));
+            estimator.addVisionMeasurement(toWpilib(sample.pose()), sample.timestampSeconds(), vector(stdDevs));
         }
 
         private static final class VisionRecovery {
@@ -762,23 +758,6 @@ public final class Localization implements PoseSignal {
                     sample.pose().headingRadians() - predicted.getRotation().getRadians()));
         }
 
-        private PoseSnapshot boundedRecoveryPose(PoseMeasurementSample sample) {
-            Pose2d predicted = estimator.sampleAt(sample.timestampSeconds()).orElse(estimator.getEstimatedPosition());
-            double dx = sample.pose().xMeters() - predicted.getX();
-            double dy = sample.pose().yMeters() - predicted.getY();
-            double distance = Math.hypot(dx, dy);
-            double scale = distance > RECOVERY_MAX_TRANSLATION_STEP_METERS
-                    ? RECOVERY_MAX_TRANSLATION_STEP_METERS / distance
-                    : 1.0;
-            double dh = wrapRadians(sample.pose().headingRadians() - predicted.getRotation().getRadians());
-            double boundedHeading = predicted.getRotation().getRadians()
-                    + Math.max(-RECOVERY_MAX_HEADING_STEP_RADIANS,
-                            Math.min(RECOVERY_MAX_HEADING_STEP_RADIANS, dh));
-            return new PoseSnapshot(
-                    predicted.getX() + dx * scale,
-                    predicted.getY() + dy * scale,
-                    boundedHeading);
-        }
 
         private static SwerveModulePosition[] positions(SwerveOdometry odometry) {
             return odometry.modulePositions().stream()
