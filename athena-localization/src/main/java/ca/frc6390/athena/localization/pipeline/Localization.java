@@ -347,6 +347,7 @@ public final class Localization implements PoseSignal {
                 vision,
                 timestampSeconds,
                 innovationGate,
+                maxHeadingDisagreementRadians,
                 state.pendingReset);
         state.pendingReset = null;
         return List.of(outputMeasurement(
@@ -461,9 +462,18 @@ public final class Localization implements PoseSignal {
     }
 
     private boolean agrees(PoseMeasurementSample first, PoseMeasurementSample second) {
-        return translationDistance(first.pose(), second.pose()) <= maxTranslationDisagreementMeters
-                && Math.abs(wrapRadians(first.pose().headingRadians() - second.pose().headingRadians()))
-                        <= maxHeadingDisagreementRadians;
+        if (translationDistance(first.pose(), second.pose()) > maxTranslationDisagreementMeters) {
+            return false;
+        }
+        if (!trustsHeading(first) || !trustsHeading(second)) {
+            return true;
+        }
+        return Math.abs(wrapRadians(first.pose().headingRadians() - second.pose().headingRadians()))
+                <= maxHeadingDisagreementRadians;
+    }
+
+    private static boolean trustsHeading(PoseMeasurementSample sample) {
+        return sample.stdDevs() == null || sample.stdDevs().headingRadians() <= Math.PI;
     }
 
     private static boolean betterCluster(
@@ -626,6 +636,7 @@ public final class Localization implements PoseSignal {
                 List<Measurement> vision,
                 double timestampSeconds,
                 double innovationGate,
+                double maxHeadingResidualRadians,
                 PoseSnapshot reset) {
             Rotation2d heading = new Rotation2d(odometry.headingRadians());
             SwerveModulePosition[] positions = positions(odometry);
@@ -648,11 +659,14 @@ public final class Localization implements PoseSignal {
                     .filter(PoseMeasurementSample.class::isInstance)
                     .map(PoseMeasurementSample.class::cast)
                     .sorted(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
-                    .forEach(sample -> addVision(sample, innovationGate));
+                    .forEach(sample -> addVision(sample, innovationGate, maxHeadingResidualRadians));
             return fromWpilib(estimator.getEstimatedPosition());
         }
 
-        private void addVision(PoseMeasurementSample sample, double innovationGate) {
+        private void addVision(
+                PoseMeasurementSample sample,
+                double innovationGate,
+                double maxHeadingResidualRadians) {
             Object source = sample.source() == null ? sample : sample.source();
             double previous = lastSeenVisionTimestamps.getOrDefault(source, Double.NEGATIVE_INFINITY);
             if (sample.timestampSeconds() <= previous) {
@@ -660,6 +674,10 @@ public final class Localization implements PoseSignal {
             }
             lastSeenVisionTimestamps.put(source, sample.timestampSeconds());
             MeasurementStdDevs stdDevs = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
+            if (headingResidual(sample) > maxHeadingResidualRadians) {
+                visionRecovery.remove(source);
+                return;
+            }
             if (Double.isFinite(innovationGate) && innovation(sample, stdDevs) > innovationGate) {
                 VisionRecovery recovery = visionRecovery.computeIfAbsent(source, ignored -> new VisionRecovery());
                 if (!recovery.accepts(sample)) {
@@ -698,6 +716,12 @@ public final class Localization implements PoseSignal {
             return square(dx / stdDevs.xMeters())
                     + square(dy / stdDevs.yMeters())
                     + square(dh / stdDevs.headingRadians());
+        }
+
+        private double headingResidual(PoseMeasurementSample sample) {
+            Pose2d predicted = estimator.sampleAt(sample.timestampSeconds()).orElse(estimator.getEstimatedPosition());
+            return Math.abs(wrapRadians(
+                    sample.pose().headingRadians() - predicted.getRotation().getRadians()));
         }
 
         private static SwerveModulePosition[] positions(SwerveOdometry odometry) {

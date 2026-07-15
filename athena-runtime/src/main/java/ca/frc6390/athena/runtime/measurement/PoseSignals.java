@@ -6,6 +6,8 @@ import java.util.function.Function;
 
 /** Pose-signal transformations shared by all pose-producing backends. */
 public final class PoseSignals {
+    private static final double UNTRUSTED_HEADING_STD_DEV_RADIANS = 1.0e6;
+
     private PoseSignals() {
     }
 
@@ -27,6 +29,13 @@ public final class PoseSignals {
         }
         return derived(source, measurements -> measurements.stream()
                 .map(measurement -> scaleDistance(measurement, referenceMeters, exponent))
+                .toList());
+    }
+
+    static PoseSignal translationOnly(PoseSignal source) {
+        Objects.requireNonNull(source, "source");
+        return derived(source, measurements -> measurements.stream()
+                .map(PoseSignals::withoutHeading)
                 .toList());
     }
 
@@ -55,6 +64,12 @@ public final class PoseSignals {
     }
 
     static Measurement withStdDevs(PoseMeasurementSample sample, MeasurementStdDevs stdDevs) {
+        if (sample instanceof TranslationOnlyPoseMeasurement) {
+            return new TranslationOnlyPoseMeasurement(sample, MeasurementStdDevs.of(
+                    stdDevs.xMeters(),
+                    stdDevs.yMeters(),
+                    UNTRUSTED_HEADING_STD_DEV_RADIANS));
+        }
         return new ConfiguredPoseMeasurement(sample, stdDevs);
     }
 
@@ -88,10 +103,43 @@ public final class PoseSignals {
                 stdDevs.headingRadians() * scale));
     }
 
+    private static Measurement withoutHeading(Measurement measurement) {
+        if (!(measurement instanceof PoseMeasurementSample sample)) {
+            return measurement;
+        }
+        MeasurementStdDevs configured = sample.stdDevs();
+        MeasurementStdDevs stdDevs = configured == null
+                ? MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY,
+                        UNTRUSTED_HEADING_STD_DEV_RADIANS)
+                : MeasurementStdDevs.of(
+                        configured.xMeters(),
+                        configured.yMeters(),
+                        UNTRUSTED_HEADING_STD_DEV_RADIANS);
+        return new TranslationOnlyPoseMeasurement(sample, stdDevs);
+    }
+
     private record ConfiguredPoseMeasurement(
             PoseMeasurementSample delegate,
             MeasurementStdDevs stdDevs) implements PoseMeasurementSample {
         private ConfiguredPoseMeasurement {
+            Objects.requireNonNull(delegate, "delegate");
+            Objects.requireNonNull(stdDevs, "stdDevs");
+        }
+
+        @Override public ca.frc6390.athena.runtime.filter.PoseSnapshot pose() { return delegate.pose(); }
+        @Override public ca.frc6390.athena.runtime.control.RobotVelocity speeds() { return delegate.speeds(); }
+        @Override public double timestampSeconds() { return delegate.timestampSeconds(); }
+        @Override public double latencySeconds() { return delegate.latencySeconds(); }
+        @Override public double ambiguity() { return delegate.ambiguity(); }
+        @Override public int targetCount() { return delegate.targetCount(); }
+        @Override public double averageTargetDistanceMeters() { return delegate.averageTargetDistanceMeters(); }
+        @Override public Object source() { return delegate.source(); }
+    }
+
+    private record TranslationOnlyPoseMeasurement(
+            PoseMeasurementSample delegate,
+            MeasurementStdDevs stdDevs) implements PoseMeasurementSample {
+        private TranslationOnlyPoseMeasurement {
             Objects.requireNonNull(delegate, "delegate");
             Objects.requireNonNull(stdDevs, "stdDevs");
         }

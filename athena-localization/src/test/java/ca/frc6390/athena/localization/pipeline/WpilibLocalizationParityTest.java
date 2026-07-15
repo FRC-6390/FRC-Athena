@@ -96,6 +96,34 @@ class WpilibLocalizationParityTest {
         assertTrue(rig.athena.pose().xMeters() > 0.0);
     }
 
+    @Test
+    void translationOnlyVisionCorrectsPositionWithoutRotatingImuHeading() {
+        ParityRig rig = new ParityRig(Double.POSITIVE_INFINITY, true);
+
+        rig.stepAthenaOnly(0.0, vision(1.0, 0.0, Math.PI, 0.0,
+                MeasurementStdDevs.of(0.1, 0.1, 0.01), new Object()));
+
+        assertTrue(rig.athena.pose().xMeters() > 0.0);
+        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-6);
+    }
+
+    @Test
+    void headingResidualGateRejectsLargeJumpButAllowsSmallGyroCorrection() {
+        ParityRig rig = new ParityRig(
+                Double.POSITIVE_INFINITY,
+                false,
+                Math.toRadians(35.0));
+
+        rig.stepAthenaOnly(0.0, vision(1.0, 0.0, Math.PI, 0.0,
+                MeasurementStdDevs.of(0.1, 0.1, 0.05), new Object()));
+        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-9);
+
+        rig.stepAthenaOnly(0.02, vision(1.0, 0.0, Math.toRadians(10.0), 0.02,
+                MeasurementStdDevs.of(0.1, 0.1, 0.05), new Object()));
+        assertTrue(rig.athena.pose().headingRadians() > 0.0);
+        assertTrue(rig.athena.pose().headingRadians() < Math.toRadians(10.0));
+    }
+
     private static double[] distances(double frontLeft, double frontRight, double backLeft, double backRight) {
         return new double[] {frontLeft, frontRight, backLeft, backRight};
     }
@@ -139,7 +167,7 @@ class WpilibLocalizationParityTest {
                 new Translation2d(-0.25, 0.25),
                 new Translation2d(-0.25, -0.25));
         private final MutablePoseSignal visionSource = new MutablePoseSignal();
-        private final Localization visionStage = Localizations.filter().input(visionSource);
+        private final Localization visionStage;
         private final SwerveOdometry odometry = athenaKinematics.odometry(imu);
         private final Localization athena;
         private final ActionContext context = new ActionContext() {
@@ -155,14 +183,28 @@ class WpilibLocalizationParityTest {
         private PoseSnapshot pendingReset;
 
         private ParityRig() {
-            this(Double.POSITIVE_INFINITY);
+            this(Double.POSITIVE_INFINITY, false, Double.POSITIVE_INFINITY);
         }
 
         private ParityRig(double innovationGate) {
+            this(innovationGate, false, Double.POSITIVE_INFINITY);
+        }
+
+        private ParityRig(double innovationGate, boolean translationOnlyVision) {
+            this(innovationGate, translationOnlyVision, Double.POSITIVE_INFINITY);
+        }
+
+        private ParityRig(
+                double innovationGate,
+                boolean translationOnlyVision,
+                double maxHeadingResidualRadians) {
+            PoseSignal configuredVision = translationOnlyVision ? visionSource.translationOnly() : visionSource;
+            visionStage = Localizations.filter().input(configuredVision);
             athena = Localizations.kalman()
                     .input(odometry, visionStage)
                     .stateStdDevs(STATE_STD_DEVS.xMeters(), STATE_STD_DEVS.headingRadians())
                     .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians())
+                    .maxHeadingDisagreementRadians(maxHeadingResidualRadians)
                     .maxNormalizedVisionResidual(innovationGate);
         }
 

@@ -141,6 +141,24 @@ class LocalizationTest {
     }
 
     @Test
+    void covarianceIntersectionGroupsTranslationOnlyCamerasWithOppositeHeadings() {
+        PoseSignal first = signal(sample(2.0, 3.0, 0.0, 1.0, 0.02, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).translationOnly();
+        PoseSignal opposite = signal(sample(2.1, 3.0, Math.PI, 1.0, 0.02, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).translationOnly();
+        Localization localization = Localizations.covarianceIntersection()
+                .input(first, opposite)
+                .maxTranslationDisagreementMeters(0.5)
+                .maxHeadingDisagreementRadians(0.25);
+
+        PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
+
+        assertTrue(fused.pose().xMeters() >= 2.0 && fused.pose().xMeters() <= 2.1);
+        assertEquals(4, fused.targetCount());
+        assertTrue(fused.stdDevs().headingRadians() > Math.PI);
+    }
+
+    @Test
     void perSourceTagCovarianceAndDistanceScalingSurviveAFilterStage() {
         Object singleCamera = new Object();
         Object multiCamera = new Object();

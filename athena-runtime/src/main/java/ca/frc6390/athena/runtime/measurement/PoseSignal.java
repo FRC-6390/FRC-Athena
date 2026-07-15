@@ -47,4 +47,13 @@ public interface PoseSignal extends MeasurementSignal {
     default PoseSignal distanceStdDevScaling(double referenceMeters, double exponent) {
         return PoseSignals.distanceStdDevScaling(this, referenceMeters, exponent);
     }
+
+    /**
+     * Uses this source for field translation while leaving heading to odometry/IMU inputs.
+     *
+     * @return translation-only pose signal
+     */
+    default PoseSignal translationOnly() {
+        return PoseSignals.translationOnly(this);
+    }
 }
