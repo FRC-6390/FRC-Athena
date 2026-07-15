@@ -426,10 +426,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
     private static PhotonPoseClient defaultPoseClient(Supplier<CameraMountPose> mount) {
         Supplier<CameraMountPose> safeMount = mount == null ? CameraMountPose::identity : mount;
-        Transform3d robotToCamera = transform(safeMount.get());
         PhotonPoseEstimator estimator = new PhotonPoseEstimator(
                 AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField),
-                robotToCamera);
+                transform(CameraMountPose.identity()));
         return new PhotonPoseEstimatorClient(
                 estimator,
                 PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
