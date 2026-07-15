@@ -38,6 +38,8 @@ public final class RevMotorHandle implements MotorHandle {
     private double velocityRotationsPerSecond;
     private double absolutePositionRotations;
     private double absoluteVelocityRotationsPerSecond;
+    private double appliedVoltage;
+    private double outputCurrentAmps;
 
     /**
      * Creates a REV motor handle using real REVLib Spark controllers.
@@ -90,6 +92,8 @@ public final class RevMotorHandle implements MotorHandle {
         velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
         absolutePositionRotations = controller.absolutePositionRotations();
         absoluteVelocityRotationsPerSecond = controller.absoluteVelocityRotationsPerSecond();
+        appliedVoltage = controller.appliedVoltage();
+        outputCurrentAmps = controller.outputCurrentAmps();
         inputsFresh = true;
     }
 
@@ -187,6 +191,10 @@ public final class RevMotorHandle implements MotorHandle {
         return absoluteVelocityRotationsPerSecond;
     }
 
+    @Override public double appliedVoltage() { ensureInputsFresh(); return appliedVoltage; }
+    @Override public double supplyCurrentAmps() { ensureInputsFresh(); return outputCurrentAmps; }
+    @Override public double statorCurrentAmps() { ensureInputsFresh(); return outputCurrentAmps; }
+
     private void ensureInputsFresh() {
         if (!inputsFresh) {
             refreshInputs();
@@ -257,6 +265,10 @@ public final class RevMotorHandle implements MotorHandle {
         double absolutePositionRotations();
 
         double absoluteVelocityRotationsPerSecond();
+
+        default double appliedVoltage() { return 0.0; }
+
+        default double outputCurrentAmps() { return 0.0; }
     }
 
     private static final class RevSparkController implements SparkController {
@@ -366,6 +378,10 @@ public final class RevMotorHandle implements MotorHandle {
         public double absoluteVelocityRotationsPerSecond() {
             return absoluteEncoder().getVelocity() / 60.0;
         }
+
+        @Override public double appliedVoltage() { return spark.getAppliedOutput() * spark.getBusVoltage(); }
+
+        @Override public double outputCurrentAmps() { return spark.getOutputCurrent(); }
 
         private RelativeEncoder encoder() {
             return spark.getEncoder();

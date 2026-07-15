@@ -9,6 +9,10 @@ import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.api.hardware.MotorControllerKind;
 import ca.frc6390.athena.hardware.vendor.VendorOptions;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.runtime.RuntimeBindings;
+import ca.frc6390.athena.hardware.runtime.RuntimeScope;
+import ca.frc6390.athena.hardware.signal.MotorStallSignal;
 
 /**
  * Reusable motor declaration for robot constants.
@@ -37,6 +41,7 @@ public record MotorDevice(
         VendorOptions vendorOptions,
         MotorFollowerBinding follower,
         boolean isDisabled) {
+    private static final RuntimeBindings<MotorDevice, MotorHandle> RUNTIMES = new RuntimeBindings<>();
     /**
      * Creates a motor ref on the default roboRIO CAN bus.
      *
@@ -232,6 +237,38 @@ public record MotorDevice(
     public MotorDevice statorCurrentLimit(int amps) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
                 supplyCurrentLimitAmps, amps, vendorOptions, follower, isDisabled);
+    }
+
+    /** Returns the effective supply and stator limits used by Athena. */
+    public MotorCurrentLimits currentLimits() {
+        int supply = supplyCurrentLimitAmps > 0 ? supplyCurrentLimitAmps : currentLimitAmps;
+        return new MotorCurrentLimits(supply, statorCurrentLimitAmps);
+    }
+
+    /** Creates a stall detector derived from this motor's configured current limits. */
+    public MotorStallSignal stall() {
+        return new MotorStallSignal(this, 0.9, 1.0, 2.0, 0.15, 0.25);
+    }
+
+    /** Returns the motor's latest applied voltage snapshot. */
+    public double appliedVoltage() { return runtime().appliedVoltage(); }
+
+    /** Returns the motor's latest supply-current snapshot. */
+    public double supplyCurrentAmps() { return runtime().supplyCurrentAmps(); }
+
+    /** Returns the motor's latest stator-current snapshot. */
+    public double statorCurrentAmps() { return runtime().statorCurrentAmps(); }
+
+    /** Returns the motor's latest integrated velocity snapshot. */
+    public double velocityRotationsPerSecond() { return runtime().integratedVelocityRotationsPerSecond(); }
+
+    /** Binds this declaration to its owning runtime handle. */
+    public AutoCloseable bindRuntime(RuntimeScope scope, MotorHandle handle) {
+        return RUNTIMES.bind(this, scope, handle);
+    }
+
+    private MotorHandle runtime() {
+        return RUNTIMES.get(this, "Motor " + defaultName());
     }
 
     /**

@@ -4,6 +4,7 @@ import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
+import ca.frc6390.athena.hardware.signal.MotorStallSignal;
 
 /**
  * Factories for hook events.
@@ -19,6 +20,11 @@ public final class Events {
     public static SignalBuilder when(DigitalInputDevice input) {
         Objects.requireNonNull(input, "input");
         return new SignalBuilder(input.defaultName(), input::sampledActive, input);
+    }
+
+    /** Creates events from a debounced motor stall detector. */
+    public static StallSignalBuilder when(MotorStallSignal signal) {
+        return new StallSignalBuilder(signal);
     }
 
     public static EventBinding robotInit() { return lifecycle("robotInit", LifecycleMode.ROBOT, LifecyclePhase.INIT); }
@@ -79,6 +85,81 @@ public final class Events {
         private EventBinding event(Edge edge) {
             return input == null ? new SignalEvent(name, source, edge) : new DigitalInputEvent(name, input, edge);
         }
+    }
+
+    public static final class StallSignalBuilder {
+        private final MotorStallSignal signal;
+
+        private StallSignalBuilder(MotorStallSignal signal) {
+            this.signal = Objects.requireNonNull(signal, "signal");
+        }
+
+        public EventBinding active() { return new MotorStallEvent(signal, Edge.LEVEL); }
+
+        public EventBinding rising() { return new MotorStallEvent(signal, Edge.RISING); }
+
+        public EventBinding falling() { return new MotorStallEvent(signal, Edge.FALLING); }
+    }
+
+    static final class MotorStallEvent implements EventBinding {
+        private final MotorStallSignal signal;
+        private final Edge edge;
+        private double candidateSince = Double.NaN;
+        private double inactiveSince = Double.NaN;
+        private boolean armed = true;
+
+        private MotorStallEvent(MotorStallSignal signal, Edge edge) {
+            this.signal = signal;
+            this.edge = edge;
+        }
+
+        @Override
+        public String name() { return signal.motor().defaultName() + "Stall"; }
+
+        @Override
+        public boolean sourceActive(EventContext context) {
+            double now = context.nowSeconds();
+            boolean raw = signal.instantaneousActive();
+            if (!armed) {
+                if (raw) {
+                    inactiveSince = Double.NaN;
+                } else if (Double.isNaN(inactiveSince)) {
+                    inactiveSince = now;
+                } else if (now - inactiveSince >= signal.rearmSeconds()) {
+                    armed = true;
+                }
+                return false;
+            }
+            if (!raw) {
+                candidateSince = Double.NaN;
+                return false;
+            }
+            if (Double.isNaN(candidateSince)) {
+                candidateSince = now;
+            }
+            return now - candidateSince >= signal.durationSeconds();
+        }
+
+        @Override
+        public boolean active(EventContext context, boolean previous, boolean current) {
+            boolean result = switch (edge) {
+                case LEVEL -> current;
+                case RISING -> current && !previous;
+                case FALLING -> !current && previous;
+            };
+            if (edge == Edge.RISING && result) {
+                armed = false;
+                candidateSince = Double.NaN;
+                inactiveSince = Double.NaN;
+            }
+            return result;
+        }
+
+        @Override
+        public boolean pulse() { return edge != Edge.LEVEL; }
+
+        @Override
+        public List<Object> declarations() { return List.of(signal.motor()); }
     }
 
     enum Edge { LEVEL, RISING, FALLING }

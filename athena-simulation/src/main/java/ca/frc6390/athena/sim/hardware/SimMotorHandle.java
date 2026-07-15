@@ -31,6 +31,7 @@ public final class SimMotorHandle implements MotorHandle {
     private MotorClosedLoopRequest closedLoopRequest;
     private SimMotorHandle leader;
     private boolean followerInverted;
+    private boolean locked;
 
     /**
      * Creates a simulation motor handle.
@@ -68,7 +69,7 @@ public final class SimMotorHandle implements MotorHandle {
         percentOutput = clamp(percent, -1.0, 1.0);
         commandKind = CommandKind.PERCENT;
         commandValue = percentOutput;
-        velocityRotationsPerSecond = percentOutput;
+        velocityRotationsPerSecond = locked ? 0.0 : percentOutput;
     }
 
     @Override
@@ -77,7 +78,7 @@ public final class SimMotorHandle implements MotorHandle {
         percentOutput = clamp(safeVolts / 12.0, -1.0, 1.0);
         commandKind = CommandKind.VOLTAGE;
         commandValue = safeVolts;
-        velocityRotationsPerSecond = percentOutput;
+        velocityRotationsPerSecond = locked ? 0.0 : percentOutput;
     }
 
     @Override
@@ -174,6 +175,35 @@ public final class SimMotorHandle implements MotorHandle {
         this.positionRotations = finiteOrZero(positionRotations);
         this.velocityRotationsPerSecond = finiteOrZero(velocityRotationsPerSecond);
         return this;
+    }
+
+    /** Locks or unlocks the simulated shaft. */
+    public SimMotorHandle locked(boolean locked) {
+        this.locked = locked;
+        if (locked) {
+            velocityRotationsPerSecond = 0.0;
+        }
+        return this;
+    }
+
+    @Override
+    public double appliedVoltage() {
+        return percentOutput * 12.0;
+    }
+
+    @Override
+    public double supplyCurrentAmps() {
+        int limit = device.currentLimits().supplyAmps();
+        return locked && Math.abs(percentOutput) > 0.01 ? limit : Math.abs(percentOutput) * Math.min(limit, 10.0);
+    }
+
+    @Override
+    public double statorCurrentAmps() {
+        int limit = device.currentLimits().statorAmps();
+        if (limit <= 0) {
+            return supplyCurrentAmps();
+        }
+        return locked && Math.abs(percentOutput) > 0.01 ? limit : Math.abs(percentOutput) * Math.min(limit, 10.0);
     }
 
     /**

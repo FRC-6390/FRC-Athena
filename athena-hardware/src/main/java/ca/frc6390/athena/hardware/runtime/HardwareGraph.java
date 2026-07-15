@@ -81,6 +81,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             handle.follow(leader, device.isInverted());
         }
         motors.put(identity, handle);
+        runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, handle));
         return handle;
     }
 

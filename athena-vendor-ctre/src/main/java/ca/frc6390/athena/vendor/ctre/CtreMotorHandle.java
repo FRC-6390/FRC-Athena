@@ -39,6 +39,9 @@ public final class CtreMotorHandle implements MotorHandle {
     private boolean inputsFresh;
     private double positionRotations;
     private double velocityRotationsPerSecond;
+    private double appliedVoltage;
+    private double supplyCurrentAmps;
+    private double statorCurrentAmps;
     private MotorClosedLoopConfig appliedClosedLoopConfig;
     private boolean focDisabledAfterLicenseFault;
 
@@ -105,6 +108,9 @@ public final class CtreMotorHandle implements MotorHandle {
     public void refreshInputs() {
         positionRotations = controller.positionRotations();
         velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
+        appliedVoltage = controller.appliedVoltage();
+        supplyCurrentAmps = controller.supplyCurrentAmps();
+        statorCurrentAmps = controller.statorCurrentAmps();
         inputsFresh = true;
     }
 
@@ -214,6 +220,15 @@ public final class CtreMotorHandle implements MotorHandle {
     }
 
     @Override
+    public double appliedVoltage() { ensureInputsFresh(); return appliedVoltage; }
+
+    @Override
+    public double supplyCurrentAmps() { ensureInputsFresh(); return supplyCurrentAmps; }
+
+    @Override
+    public double statorCurrentAmps() { ensureInputsFresh(); return statorCurrentAmps; }
+
+    @Override
     public void setIntegratedPositionRotations(double rotations) {
         double safeRotations = finiteOrZero(rotations);
         controller.setSensorPosition(safeRotations);
@@ -309,6 +324,12 @@ public final class CtreMotorHandle implements MotorHandle {
         double positionRotations();
 
         double velocityRotationsPerSecond();
+
+        default double appliedVoltage() { return 0.0; }
+
+        default double supplyCurrentAmps() { return 0.0; }
+
+        default double statorCurrentAmps() { return 0.0; }
     }
 
     private static final class PhoenixTalonController implements TalonController {
@@ -418,6 +439,10 @@ public final class CtreMotorHandle implements MotorHandle {
         public double velocityRotationsPerSecond() {
             return talon.getVelocity().refresh().getValue().in(Units.RotationsPerSecond);
         }
+
+        @Override public double appliedVoltage() { return talon.getMotorVoltage().refresh().getValue().in(Units.Volts); }
+        @Override public double supplyCurrentAmps() { return talon.getSupplyCurrent().refresh().getValue().in(Units.Amps); }
+        @Override public double statorCurrentAmps() { return talon.getStatorCurrent().refresh().getValue().in(Units.Amps); }
     }
 
     private static final class PhoenixTalonFxsController implements TalonController {
@@ -547,6 +572,10 @@ public final class CtreMotorHandle implements MotorHandle {
         public double velocityRotationsPerSecond() {
             return talon.getVelocity().refresh().getValue().in(Units.RotationsPerSecond);
         }
+
+        @Override public double appliedVoltage() { return talon.getMotorVoltage().refresh().getValue().in(Units.Volts); }
+        @Override public double supplyCurrentAmps() { return talon.getSupplyCurrent().refresh().getValue().in(Units.Amps); }
+        @Override public double statorCurrentAmps() { return talon.getStatorCurrent().refresh().getValue().in(Units.Amps); }
     }
 
     private static boolean configureCurrentLimits(

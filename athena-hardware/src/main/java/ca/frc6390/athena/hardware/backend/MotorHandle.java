@@ -27,6 +27,19 @@ public interface MotorHandle {
         // default no-op
     }
 
+    /** Returns the latest applied motor voltage. */
+    default double appliedVoltage() {
+        throw new UnsupportedOperationException("Applied voltage is not available for " + device().defaultName());
+    }
+
+    /** Returns the latest controller supply current. */
+    default double supplyCurrentAmps() {
+        throw new UnsupportedOperationException("Supply current is not available for " + device().defaultName());
+    }
+
+    /** Returns the latest motor stator current. */
+    default double statorCurrentAmps() { return supplyCurrentAmps(); }
+
     /**
      * Configures this controller to follow another runtime motor controller.
      *
