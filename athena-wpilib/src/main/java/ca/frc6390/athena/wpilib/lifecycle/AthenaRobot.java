@@ -12,6 +12,9 @@ import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
+import ca.frc6390.athena.wpilib.telemetry.MechanismTracePublisher;
+import ca.frc6390.athena.wpilib.telemetry.MechanismTelemetryPublisher;
+import ca.frc6390.athena.wpilib.telemetry.AutoPreviewPublisher;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.TimedRobot;
@@ -28,6 +31,11 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private RobotRuntime runtime;
     private double lastTimestampSeconds;
     private double lastSimulationTimestampSeconds;
+    private MechanismTracePublisher tracePublisher;
+    private MechanismTelemetryPublisher mechanismTelemetryPublisher;
+    private AutoPreviewPublisher autoPreviewPublisher;
+    private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
+    private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.SUMMARY;
 
     /**
      * Returns the owned Athena mechanism runtime.
@@ -45,6 +53,14 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         athena().request(Objects.requireNonNull(Action, "Action"));
     }
 
+    /** Selects the live mechanism telemetry profile. Safe to call from the robot constructor. */
+    public final void traceTelemetry(MechanismTracePublisher.Profile profile) {
+        traceProfile = profile == null ? MechanismTracePublisher.Profile.SUMMARY : profile;
+        if (tracePublisher != null) {
+            tracePublisher.profile(traceProfile);
+        }
+    }
+
     public final CommandAction Action(Action Action) {
         return WpilibCommands.run("Action:robot", () -> set(Action));
     }
@@ -53,78 +69,90 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     public final void robotInit() {
         lastTimestampSeconds = timestampSeconds();
         lastSimulationTimestampSeconds = lastTimestampSeconds;
-        runtime = createRuntime(RobotBase.isSimulation());
+        runtime = createRuntime(RobotBase.isSimulation(), digitalInputs);
         ActionRequests.bind(runtime::request);
         runtime.register(this);
-        run(LifecycleMode.ROBOT, LifecyclePhase.INIT, true, false);
+        tracePublisher = new MechanismTracePublisher().profile(
+                RobotBase.isSimulation() && traceProfile == MechanismTracePublisher.Profile.SUMMARY
+                        ? MechanismTracePublisher.Profile.CAPTURE
+                        : traceProfile);
+        mechanismTelemetryPublisher = new MechanismTelemetryPublisher();
+        autoPreviewPublisher = new AutoPreviewPublisher();
+        publishMechanismTelemetry();
+        run(LifecycleMode.ROBOT, LifecyclePhase.INIT, true, simulationActive());
+        publishAutoPreview();
     }
 
     @Override
     public final void robotPeriodic() {
         CommandScheduler.getInstance().run();
-        run(LifecycleMode.ROBOT, LifecyclePhase.PERIODIC, true, false);
+        run(LifecycleMode.ROBOT, LifecyclePhase.PERIODIC, true, simulationActive());
     }
 
     @Override
     public final void disabledInit() {
-        run(LifecycleMode.DISABLED, LifecyclePhase.INIT, false, false);
+        run(LifecycleMode.DISABLED, LifecyclePhase.INIT, false, simulationActive());
     }
 
     @Override
     public final void disabledPeriodic() {
-        run(LifecycleMode.DISABLED, LifecyclePhase.PERIODIC, false, false);
+        run(LifecycleMode.DISABLED, LifecyclePhase.PERIODIC, false, simulationActive());
+        publishTraces();
     }
 
     @Override
     public final void disabledExit() {
-        run(LifecycleMode.DISABLED, LifecyclePhase.EXIT, false, false);
+        run(LifecycleMode.DISABLED, LifecyclePhase.EXIT, false, simulationActive());
     }
 
     @Override
     public final void autonomousInit() {
-        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.INIT, true, false);
+        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.INIT, true, simulationActive());
     }
 
     @Override
     public final void autonomousPeriodic() {
-        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.PERIODIC, true, false);
+        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.PERIODIC, true, simulationActive());
+        publishTraces();
     }
 
     @Override
     public final void autonomousExit() {
-        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.EXIT, true, false);
+        run(LifecycleMode.AUTONOMOUS, LifecyclePhase.EXIT, true, simulationActive());
     }
 
     @Override
     public final void teleopInit() {
         CommandScheduler.getInstance().cancelAll();
-        run(LifecycleMode.TELEOP, LifecyclePhase.INIT, true, false);
+        run(LifecycleMode.TELEOP, LifecyclePhase.INIT, true, simulationActive());
     }
 
     @Override
     public final void teleopPeriodic() {
-        run(LifecycleMode.TELEOP, LifecyclePhase.PERIODIC, true, false);
+        run(LifecycleMode.TELEOP, LifecyclePhase.PERIODIC, true, simulationActive());
+        publishTraces();
     }
 
     @Override
     public final void teleopExit() {
-        run(LifecycleMode.TELEOP, LifecyclePhase.EXIT, true, false);
+        run(LifecycleMode.TELEOP, LifecyclePhase.EXIT, true, simulationActive());
     }
 
     @Override
     public final void testInit() {
         CommandScheduler.getInstance().cancelAll();
-        run(LifecycleMode.TEST, LifecyclePhase.INIT, true, false);
+        run(LifecycleMode.TEST, LifecyclePhase.INIT, true, simulationActive());
     }
 
     @Override
     public final void testPeriodic() {
-        run(LifecycleMode.TEST, LifecyclePhase.PERIODIC, true, false);
+        run(LifecycleMode.TEST, LifecyclePhase.PERIODIC, true, simulationActive());
+        publishTraces();
     }
 
     @Override
     public final void testExit() {
-        run(LifecycleMode.TEST, LifecyclePhase.EXIT, true, false);
+        run(LifecycleMode.TEST, LifecyclePhase.EXIT, true, simulationActive());
     }
 
     @Override
@@ -147,6 +175,30 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
                 eventContext);
     }
 
+    private void publishTraces() {
+        if (tracePublisher != null) {
+            tracePublisher.publish(athena().mechanismTraces());
+        }
+        publishMechanismTelemetry();
+        publishAutoPreview();
+    }
+
+    private void publishMechanismTelemetry() {
+        if (mechanismTelemetryPublisher != null) {
+            mechanismTelemetryPublisher.publish(athena().mechanismTelemetry());
+        }
+    }
+
+    private void publishAutoPreview() {
+        if (autoPreviewPublisher != null) {
+            autoPreviewPublisher.publish(athena().selectedAutoPreviews());
+        }
+    }
+
+    private boolean simulationActive() {
+        return runtime != null && runtime.simulationSession() != null;
+    }
+
     private double elapsed(double timestampSeconds) {
         double dtSeconds = timestampSeconds - lastTimestampSeconds;
         lastTimestampSeconds = timestampSeconds;
@@ -164,14 +216,26 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     static RobotRuntime createRuntime(boolean simulation) {
+        return createRuntime(simulation, new ConcurrentHashMap<>());
+    }
+
+    private static RobotRuntime createRuntime(boolean simulation, Map<Integer, DigitalInput> inputs) {
         RobotRuntime runtime = simulation
                 ? RobotRuntime.simulated(SimulationSession.create().physicsEngine(new WpilibSimPhysicsEngine()))
                 : RobotRuntime.create();
-        Map<Integer, DigitalInput> inputs = new ConcurrentHashMap<>();
         return runtime.digitalInputs(device -> {
             DigitalInput input = inputs.computeIfAbsent(device.channel(), DigitalInput::new);
             return input::get;
         });
+    }
+
+    @Override
+    public void close() {
+        if (tracePublisher != null) tracePublisher.close();
+        if (autoPreviewPublisher != null) autoPreviewPublisher.close();
+        digitalInputs.values().forEach(DigitalInput::close);
+        digitalInputs.clear();
+        super.close();
     }
 
 }

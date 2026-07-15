@@ -9,9 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 
-import ca.frc6390.athena.auto.AutoRoutine;
-import ca.frc6390.athena.auto.Autos;
-import ca.frc6390.athena.auto.PathGraph;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
 import ca.frc6390.athena.mechanism.core.PathAction;
@@ -78,28 +75,6 @@ class PathPlannerPathProviderTest {
         assertEquals("Missing PathPlanner auto 'Missing'.", loadFailure.getMessage());
         assertEquals("Missing PathPlanner auto 'Missing'.", commandFailure.getMessage());
         assertEquals(List.of("Missing", "Missing"), client.buildAutoNames);
-    }
-
-    @Test
-    void providerBackedRoutineKeepsMarkerBindingsForPathGraph() {
-        FakeClient client = new FakeClient(List.of());
-        PathPlannerPathProvider provider = new PathPlannerPathProvider(client);
-        FakeCommand markerCommand = new FakeCommand();
-        markerCommand.finished = true;
-        CommandAction markerState = CommandAction.create("shoot")
-                .onInitialize(markerCommand::initialize)
-                .onExecute(markerCommand::execute)
-                .until(markerCommand::isFinished)
-                .onEnd(() -> markerCommand.end(false))
-                .build();
-
-        AutoRoutine routine = Autos.path("score", provider, "Main", Autos.marker(" shoot ", markerState));
-        PathGraph graph = PathGraph.of(routine);
-
-        assertEquals(List.of("shoot"), List.copyOf(routine.markers().stream().map(binding -> binding.marker()).toList()));
-        assertSame(markerState, graph.marker("shoot").orElseThrow());
-        assertTrue(graph.trigger(" shoot "));
-        assertEquals(List.of("initialize", "execute", "isFinished", "end:false"), markerCommand.events);
     }
 
     @Test

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -34,6 +35,15 @@ public final class ActionRequests {
             throw new IllegalStateException("No Athena Action requester is active.");
         }
         active.request(safeAction);
+    }
+
+    /** Requests a hardware declaration action without requiring callers to cast its public facade. */
+    public static void request(DeviceAction action) {
+        Objects.requireNonNull(action, "action");
+        if (!(action instanceof Action mechanismAction)) {
+            throw new IllegalArgumentException("Device action is not backed by an Athena mechanism action.");
+        }
+        request(mechanismAction);
     }
 
     static List<Action> capture(Runnable callback) {

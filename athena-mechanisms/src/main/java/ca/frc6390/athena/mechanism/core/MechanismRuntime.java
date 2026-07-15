@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import ca.frc6390.athena.hardware.backend.MotorHandle;
 
 /**
  * Minimal Athena-owned runtime loop for the new mechanism model.
@@ -35,6 +36,7 @@ final class MechanismRuntime {
     private double stateStartSeconds = Double.NaN;
     private long actionRecency;
     private long localRecency;
+    private MechanismTraceSnapshot traceSnapshot;
 
     private MechanismRuntime(
             MechanismNode node,
@@ -52,6 +54,7 @@ final class MechanismRuntime {
         this.pathRuntimes = Objects.requireNonNull(pathRuntimes, "pathRuntimes");
         this.scheduler = new StateScheduler(actionContext, pathRuntimes);
         this.action = Actions.neutral();
+        this.traceSnapshot = emptyTrace();
     }
 
     static MechanismRuntime of(Mechanism mechanism, ActionContext actionContext) {
@@ -115,6 +118,10 @@ final class MechanismRuntime {
         return newest != null && newest.recency() > actionRecency ? newest.action : action;
     }
 
+    MechanismTraceSnapshot traceSnapshot() {
+        return traceSnapshot;
+    }
+
     public void set(Action action) {
         set(action, ++localRecency);
     }
@@ -171,6 +178,24 @@ final class MechanismRuntime {
             applier.stopAll();
             previouslyDrivenMotors.clear();
             simulationStep.run();
+            ActiveLease tracedLease = tracedLease();
+            Action tracedAction = tracedLease == null ? action : tracedLease.action();
+            StateScheduler tracedScheduler = tracedLease == null ? scheduler : tracedLease.scheduler();
+            traceSnapshot = new MechanismTraceSnapshot(
+                    node.name(),
+                    safeMechanismContext.nowSeconds(),
+                    0.0,
+                    false,
+                    actionName(tracedAction),
+                    typeName(tracedAction),
+                    tracedScheduler.scheduledActionType(),
+                    tracedScheduler.step(),
+                    tracedScheduler.complete(),
+                    activeLeases.size(),
+                    List.of(),
+                    List.of(),
+                    motorTraces(Map.of()),
+                    hookTraces());
             return;
         }
         if (Double.isNaN(stateStartSeconds)) {
@@ -187,10 +212,14 @@ final class MechanismRuntime {
             timedContext = withTimeInState(safeMechanismContext, 0.0);
         }
         List<CandidateOutput> candidates = new ArrayList<>();
-        addCandidates(candidates, actionRecency, scheduler.evaluate(action, timedContext));
+        addCandidates(candidates, "base", actionRecency, scheduler.evaluate(action, timedContext));
         activeLeases.values().stream()
                 .sorted(Comparator.comparingLong(ActiveLease::recency))
-                .forEach(lease -> addCandidates(candidates, lease.recency(), lease.evaluate(safeMechanismContext)));
+                .forEach(lease -> addCandidates(
+                        candidates,
+                        "lease",
+                        lease.recency(),
+                        lease.evaluate(safeMechanismContext)));
 
         List<CandidateOutput> selected = arbitrate(candidates);
         Set<MotorDevice> drivenNow = new LinkedHashSet<>();
@@ -209,16 +238,165 @@ final class MechanismRuntime {
         previouslyDrivenMotors.clear();
         previouslyDrivenMotors.addAll(drivenNow);
         simulationStep.run();
+        traceSnapshot = buildTrace(timedContext, candidates, selected);
     }
 
     private void addCandidates(
             List<CandidateOutput> candidates,
+            String source,
             long recency,
             StateScheduler.Result active) {
         List<ResolvedOutput> resolved = resolver.resolve(mechanism, active.action(), active.context());
         for (ResolvedOutput output : resolved) {
-            candidates.add(new CandidateOutput(output, active.context(), recency, candidates.size()));
+            candidates.add(new CandidateOutput(output, active.context(), source, recency, candidates.size()));
         }
+    }
+
+    private MechanismTraceSnapshot buildTrace(
+            MechanismContext context,
+            List<CandidateOutput> candidates,
+            List<CandidateOutput> selected) {
+        Set<CandidateOutput> winners = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        winners.addAll(selected);
+        List<MechanismTraceSnapshot.ActionCandidate> candidateTraces = candidates.stream()
+                .map(candidate -> new MechanismTraceSnapshot.ActionCandidate(
+                        candidate.source(),
+                        typeName(candidate.output().output()),
+                        candidate.recency(),
+                        candidate.order(),
+                        winners.contains(candidate),
+                        outputMode(candidate.output().output()),
+                        outputValue(candidate.output().output()),
+                        candidate.output().request().motors().stream().map(MotorDevice::defaultName).toList()))
+                .toList();
+        Map<MotorDevice, CandidateOutput> commands = new LinkedHashMap<>();
+        selected.forEach(candidate -> candidate.output().request().motors().forEach(motor -> commands.put(motor, candidate)));
+        List<MechanismTraceSnapshot.Motor> motors = motorTraces(commands);
+        ActiveLease tracedLease = tracedLease();
+        Action tracedAction = tracedLease == null ? action() : tracedLease.action();
+        StateScheduler tracedScheduler = tracedLease == null ? scheduler : tracedLease.scheduler();
+        return new MechanismTraceSnapshot(
+                node.name(),
+                context.nowSeconds(),
+                tracedLease == null ? context.timeInStateSeconds() : tracedLease.timeInState(context.nowSeconds()),
+                context.enabled(),
+                actionName(tracedAction),
+                typeName(tracedAction),
+                tracedScheduler.scheduledActionType(),
+                tracedScheduler.step(),
+                tracedScheduler.complete(),
+                activeLeases.size(),
+                candidateTraces,
+                applier.controlTraces(),
+                motors,
+                hookTraces());
+    }
+
+    private List<MechanismTraceSnapshot.Motor> motorTraces(Map<MotorDevice, CandidateOutput> commands) {
+        Set<MotorDevice> motors = new LinkedHashSet<>();
+        node.declarations().values().forEach(declaration -> {
+            if (declaration instanceof MotorDevice motor) {
+                motors.add(motor);
+            }
+        });
+        motors.addAll(commands.keySet());
+        List<MechanismTraceSnapshot.Motor> traces = new ArrayList<>(motors.size());
+        for (MotorDevice motor : motors) {
+            MotorHandle handle = actionContext.motor(motor);
+            CandidateOutput candidate = commands.get(motor);
+            OutputApplier.AppliedMotorCommand applied = applier.appliedMotorCommand(motor);
+            String commandMode = "neutral";
+            double commandValue = 0.0;
+            if (applied != null) {
+                commandMode = applied.mode();
+                commandValue = applied.value();
+            } else if (candidate != null) {
+                commandMode = outputMode(candidate.output().output());
+                commandValue = outputValue(candidate.output().output());
+            }
+            traces.add(new MechanismTraceSnapshot.Motor(
+                    motor.defaultName(),
+                    commandMode,
+                    commandValue,
+                    read(handle::integratedPositionRotations),
+                    read(handle::integratedVelocityRotationsPerSecond),
+                    read(handle::appliedVoltage),
+                    read(handle::supplyCurrentAmps),
+                    read(handle::statorCurrentAmps)));
+        }
+        return List.copyOf(traces);
+    }
+
+    private ActiveLease tracedLease() {
+        return activeLeases.values().stream()
+                .max(Comparator.comparingLong(ActiveLease::recency))
+                .orElse(null);
+    }
+
+    private List<MechanismTraceSnapshot.Hook> hookTraces() {
+        List<MechanismTraceSnapshot.Hook> traces = new ArrayList<>();
+        node.hooks().forEach((name, hook) -> {
+            HookRuntime.HookStatus status = hookRuntime.status(hook);
+            traces.add(new MechanismTraceSnapshot.Hook(
+                    name,
+                    status.sourceActive(),
+                    status.active(),
+                    status.triggeredThisCycle()));
+        });
+        return List.copyOf(traces);
+    }
+
+    private MechanismTraceSnapshot emptyTrace() {
+        return new MechanismTraceSnapshot(
+                node.name(), 0.0, 0.0, false, "", "", "", -1, false, 0,
+                List.of(), List.of(), List.of(), List.of());
+    }
+
+    private String actionName(Action selected) {
+        for (Map.Entry<String, Action> entry : node.Actions().entrySet()) {
+            if (entry.getValue() == selected) {
+                return entry.getKey();
+            }
+        }
+        return typeName(selected);
+    }
+
+    private static String typeName(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String name = value.getClass().getSimpleName();
+        return name.isBlank() ? value.getClass().getName() : name;
+    }
+
+    private static String outputMode(Output output) {
+        if (output instanceof Output.Percent) return "percent";
+        if (output instanceof Output.Voltage) return "voltage";
+        if (output instanceof Output.Position) return "position";
+        if (output instanceof Output.Velocity) return "velocity";
+        if (output instanceof Output.Fault) return "fault";
+        return "neutral";
+    }
+
+    private static double outputValue(Output output) {
+        if (output instanceof Output.Percent percent) return percent.percent();
+        if (output instanceof Output.Voltage voltage) return voltage.volts();
+        if (output instanceof Output.Position position) return position.position();
+        if (output instanceof Output.Velocity velocity) return velocity.velocity();
+        return 0.0;
+    }
+
+    private static double read(DoubleRead read) {
+        try {
+            return read.get();
+        } catch (UnsupportedOperationException ignored) {
+            return Double.NaN;
+        }
+    }
+
+    @FunctionalInterface
+    private interface DoubleRead {
+        double get();
     }
 
     private static List<CandidateOutput> arbitrate(List<CandidateOutput> candidates) {
@@ -244,6 +422,7 @@ final class MechanismRuntime {
     private record CandidateOutput(
             ResolvedOutput output,
             MechanismContext context,
+            String source,
             long recency,
             int order) {
         private boolean newerThan(CandidateOutput other) {
@@ -271,6 +450,18 @@ final class MechanismRuntime {
             return recency;
         }
 
+        private Action action() {
+            return action;
+        }
+
+        private StateScheduler scheduler() {
+            return scheduler;
+        }
+
+        private double timeInState(double nowSeconds) {
+            return Double.isNaN(startSeconds) ? 0.0 : Math.max(0.0, nowSeconds - startSeconds);
+        }
+
         private StateScheduler.Result evaluate(MechanismContext context) {
             if (Double.isNaN(startSeconds)) {
                 startSeconds = context.nowSeconds();
@@ -294,6 +485,9 @@ final class MechanismRuntime {
         private final Map<PathAction, PathRuntime> pathRuntimes;
         private final Result result = new Result();
         private SchedulerNode root;
+        private String scheduledActionType = "";
+        private int step = -1;
+        private boolean complete;
 
         private StateScheduler(ActionContext actionContext, Map<PathAction, PathRuntime> pathRuntimes) {
             this.actionContext = Objects.requireNonNull(actionContext, "actionContext");
@@ -311,9 +505,24 @@ final class MechanismRuntime {
                 root = SchedulerNode.lower(action);
             }
             Evaluation evaluation = evaluate(root, context);
+            scheduledActionType = typeName(evaluation.output());
+            step = root.runtime == null ? -1 : root.runtime.index;
+            complete = evaluation.complete();
             return result.set(
                     evaluation.output() == null ? Actions.neutral() : evaluation.output(),
                     evaluation.context());
+        }
+
+        String scheduledActionType() {
+            return scheduledActionType;
+        }
+
+        int step() {
+            return step;
+        }
+
+        boolean complete() {
+            return complete;
         }
 
         private Evaluation evaluate(SchedulerNode schedule, MechanismContext context) {
@@ -431,6 +640,9 @@ final class MechanismRuntime {
                 return schedule.result(null, wait.complete(local), local);
             }
             if (action instanceof PathAction pathState) {
+                if (node.pathComplete) {
+                    return schedule.result(null, true, local);
+                }
                 if (node.pathRuntime == null || node.pathState != pathState) {
                     node.pathState = pathState;
                     node.pathRuntime = pathRuntimes.get(pathState);
@@ -443,12 +655,25 @@ final class MechanismRuntime {
                     runtime.initialize(pathState, local);
                     node.entered = true;
                 }
+                node.lastPathContext = local;
                 runtime.execute(pathState, local);
                 if (runtime.isFinished(pathState, local)) {
                     runtime.end(pathState, local, false);
+                    node.entered = false;
+                    node.pathComplete = true;
                     return schedule.result(null, true, local);
                 }
-                return schedule.result(null, false, local);
+                node.groupOutputs.clear();
+                Action pathOutput = runtime.output(pathState, local);
+                if (pathOutput != null) {
+                    Evaluation drive = evaluate(schedule.named("pathOutput", pathOutput), context);
+                    if (drive.output() != null) node.groupOutputs.add(drive.output());
+                }
+                runtime.activeMarkers(pathState, local).forEach((name, marker) -> {
+                    Evaluation markerOutput = evaluate(schedule.named("pathMarker:" + name, marker), context);
+                    if (markerOutput.output() != null) node.groupOutputs.add(markerOutput.output());
+                });
+                return schedule.result(groupOutput(node.groupOutputs), false, local);
             }
             return schedule.result(action, false, local);
         }
@@ -684,6 +909,8 @@ final class MechanismRuntime {
             private int index;
             private PathAction pathState;
             private PathRuntime pathRuntime;
+            private MechanismContext lastPathContext;
+            private boolean pathComplete;
             private final List<Action> groupOutputs = new ArrayList<>();
 
             private Node(double startSeconds) {
@@ -742,6 +969,12 @@ final class MechanismRuntime {
             private void reset() {
                 if (action instanceof Actions.ControlSysIdAction sysId) {
                     sysId.routine().end();
+                }
+                if (runtime != null && runtime.entered && runtime.pathRuntime != null && runtime.pathState != null) {
+                    runtime.pathRuntime.end(
+                            runtime.pathState,
+                            runtime.lastPathContext == null ? MechanismContext.empty() : runtime.lastPathContext,
+                            true);
                 }
                 runtime = null;
                 for (SchedulerNode child : indexedChildren) {

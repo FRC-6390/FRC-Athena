@@ -1,74 +1,54 @@
 package frc.robot.auto;
 
-import choreo.trajectory.SwerveSample;
-import com.pathplanner.lib.auto.AutoBuilder;
-import com.pathplanner.lib.config.PIDConstants;
-import com.pathplanner.lib.config.RobotConfig;
-import com.pathplanner.lib.controllers.PPHolonomicDriveController;
-import edu.wpi.first.math.controller.PIDController;
+import ca.frc6390.athena.api.hardware.EncoderKinds;
+import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.drivetrain.swerve.FollowerBackend;
+import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
+import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
+import ca.frc6390.athena.drivetrain.swerve.SwerveModules;
+import ca.frc6390.athena.drivetrain.swerve.SwervePathFollower;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.encoder.EncoderUnit;
+import ca.frc6390.athena.mechanism.control.PidGains;
+import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Actions;
+import ca.frc6390.athena.mechanism.core.Mechanism;
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
-import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.DriverStation.Alliance;
-import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
-/** Minimal drivetrain boundary used by both vendor examples. */
-public final class ExampleDrive extends SubsystemBase {
-    private final PIDController choreoX = new PIDController(4.0, 0.0, 0.0);
-    private final PIDController choreoY = new PIDController(4.0, 0.0, 0.0);
-    private final PIDController choreoHeading = new PIDController(3.0, 0.0, 0.0);
+/** Minimal swerve mechanism showing the kinematics-owned path API. */
+public final class ExampleDrive implements Mechanism {
+    private static final double MAX_SPEED = 4.0;
     private Pose2d pose = new Pose2d();
-    private ChassisSpeeds measuredSpeeds = new ChassisSpeeds();
 
-    public ExampleDrive() {
-        choreoHeading.enableContinuousInput(-Math.PI, Math.PI);
-    }
+    public final SwerveModule frontLeft = module(1, 5, 9);
+    public final SwerveModule frontRight = module(2, 6, 10);
+    public final SwerveModule backLeft = module(3, 7, 11);
+    public final SwerveModule backRight = module(4, 8, 12);
+    public final SwerveKinematics kinematics = SwerveKinematics.rectangular(
+            0.55, 0.55, MAX_SPEED, frontLeft, frontRight, backLeft, backRight);
+    public final SwervePathFollower pathFollower = kinematics.follow(
+            FollowerBackend.CHOREO,
+            this::pose,
+            this::resetPose,
+            PidGains.of(4.0, 0.0, 0.0),
+            PidGains.of(3.0, 0.0, 0.0));
 
     public Pose2d pose() {
         return pose;
     }
 
-    public void resetPose(Pose2d pose) {
-        this.pose = pose;
+    public Action resetPose(Pose2d nextPose) {
+        return Actions.doOnce(() -> pose = nextPose);
     }
 
-    public ChassisSpeeds robotRelativeSpeeds() {
-        return measuredSpeeds;
-    }
-
-    /** Replace this body with module-state or drivetrain request output. */
-    public void driveRobotRelative(ChassisSpeeds speeds) {
-        measuredSpeeds = speeds;
-    }
-
-    /** Choreo gives field-relative feedforward velocities plus the desired pose. */
-    public void followChoreoSample(SwerveSample sample) {
-        ChassisSpeeds fieldRelative = new ChassisSpeeds(
-                sample.vx + choreoX.calculate(pose.getX(), sample.x),
-                sample.vy + choreoY.calculate(pose.getY(), sample.y),
-                sample.omega + choreoHeading.calculate(pose.getRotation().getRadians(), sample.heading));
-        driveRobotRelative(ChassisSpeeds.fromFieldRelativeSpeeds(fieldRelative, pose.getRotation()));
-    }
-
-    /**
-     * Loads PathPlanner's RobotConfig from deploy/pathplanner/settings.json.
-     * Call once during robot configuration, after the GUI settings file is deployed.
-     */
-    public void configurePathPlanner() {
-        try {
-            AutoBuilder.configure(
-                    this::pose,
-                    this::resetPose,
-                    this::robotRelativeSpeeds,
-                    this::driveRobotRelative,
-                    new PPHolonomicDriveController(
-                            new PIDConstants(5.0, 0.0, 0.0),
-                            new PIDConstants(4.0, 0.0, 0.0)),
-                    RobotConfig.fromGUISettings(),
-                    () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
-                    this);
-        } catch (Exception exception) {
-            throw new IllegalStateException("PathPlanner GUI settings could not be loaded", exception);
-        }
+    private static SwerveModule module(int driveId, int steerId, int encoderId) {
+        return new SwerveModules.SDS.MK5N.R3()
+                .drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId).brake())
+                .steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId).brake())
+                .angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId)
+                        .units(EncoderUnit.ROTATIONS))
+                .driveMaxSpeedMetersPerSecond(MAX_SPEED)
+                .steerPid(12.0, 0.0, 0.0);
     }
 }

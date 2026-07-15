@@ -2,10 +2,8 @@ package frc.robot.auto;
 
 import ca.frc6390.athena.auto.AutoRoutine;
 import ca.frc6390.athena.auto.Autos;
-import ca.frc6390.athena.wpilib.commands.WpilibCommands;
-import choreo.auto.AutoTrajectory;
-import edu.wpi.first.wpilibj2.command.Commands;
-import java.util.concurrent.atomic.AtomicBoolean;
+import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Actions;
 
 /** Level 4: select the next Choreo path from sensor state at the branch point. */
 public final class ConditionalChoreoAuto {
@@ -13,21 +11,14 @@ public final class ConditionalChoreoAuto {
     }
 
     public static AutoRoutine create(AutoContext context) {
-        return Autos.routine("Choreo 4 - Conditional branch", () -> {
-            AtomicBoolean finished = new AtomicBoolean();
-            choreo.auto.AutoRoutine routine =
-                    context.choreoFactory.newRoutine("choreo-conditional");
-            AutoTrajectory collect = routine.trajectory("Choreo-Collect");
-            AutoTrajectory returnToScore = routine.trajectory("Choreo-Return-To-Score");
-            AutoTrajectory safeExit = routine.trajectory("Choreo-Safe-Exit");
-
-            routine.active().onTrue(collect.resetOdometry().andThen(collect.cmd()));
-            collect.done().onTrue(Commands.either(
-                    returnToScore.cmd().andThen(context.mechanisms.score()),
-                    safeExit.cmd(),
-                    context.state::hasGamePiece).andThen(Commands.runOnce(() -> finished.set(true))));
-
-            return WpilibCommands.wrap(routine.cmd(finished::get).withName("choreo-conditional"));
-        });
+        Action returnAndScore = Actions.sequence()
+                .run(context.choreo.path("Choreo-Return-To-Score"))
+                .then(context.mechanisms.score);
+        Action action = Actions.sequence()
+                .run(context.choreo.path("Choreo-Collect").resetOdometry())
+                .then(Actions.when(context.state::hasGamePiece)
+                        .run(returnAndScore)
+                        .otherwise(context.choreo.path("Choreo-Safe-Exit")));
+        return Autos.routine("Choreo 3 - Conditional branch", action);
     }
 }

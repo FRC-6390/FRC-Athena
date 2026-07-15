@@ -24,6 +24,7 @@ final class HookRuntime {
     private final Map<EventBinding, Boolean> previousSourceActive = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> consumedEvents = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> sourceSamples = new IdentityHashMap<>();
+    private final Map<HookBinding, Boolean> triggeredThisCycle = new IdentityHashMap<>();
 
     HookRuntime() {
         this(null, null);
@@ -59,6 +60,7 @@ final class HookRuntime {
         EventContext safeContext = context == null ? EventContext.empty() : context;
         consumedEvents.clear();
         sourceSamples.clear();
+        triggeredThisCycle.clear();
         for (HookBinding hook : hooks) {
             runOne(safeContext, actionContext, hook, sourceSamples);
             consumedEvents.put(hook.event(), Boolean.TRUE);
@@ -102,6 +104,7 @@ final class HookRuntime {
         boolean currentSource = sourceSamples.computeIfAbsent(event, value -> value.sourceActive(safeContext));
         boolean active = event.active(safeContext, previousSource, currentSource);
         boolean wasActive = previousEventActive.getOrDefault(hook, false);
+        triggeredThisCycle.put(hook, active != wasActive);
 
         for (HookBinding.HookAction binding : hook.actions()) {
             if (isImmediateDeviceMutation(binding.action())) {
@@ -125,6 +128,14 @@ final class HookRuntime {
         }
 
         previousEventActive.put(hook, active);
+    }
+
+    HookStatus status(HookBinding hook) {
+        Objects.requireNonNull(hook, "hook");
+        return new HookStatus(
+                previousSourceActive.getOrDefault(hook.event(), false),
+                previousEventActive.getOrDefault(hook, false),
+                triggeredThisCycle.getOrDefault(hook, false));
     }
 
     private void runLeasedAction(
@@ -183,5 +194,9 @@ final class HookRuntime {
         previousSourceActive.clear();
         consumedEvents.clear();
         sourceSamples.clear();
+        triggeredThisCycle.clear();
+    }
+
+    record HookStatus(boolean sourceActive, boolean active, boolean triggeredThisCycle) {
     }
 }

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,6 +29,7 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -37,6 +39,137 @@ class MechanismRuntimeTest {
     private static final MotorDevice CHILD_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
     private static final MotorDevice SECOND_CHILD_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 1);
+
+    @Test
+    void traceCapturesConstrainedProfiledControlAndSelectedMotorOutput() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 1.0;
+        actions.encoder(ENCODER).velocity = 0.25;
+        ControlBinding position = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .constraint(Constraints.range(Range.of(0.0, 5.0)))
+                .profile(MotionProfiles.trapezoid(2.0, 4.0))
+                .pid(1.0, 0.0, 0.0);
+        TestMechanism mechanism = new TestMechanism(position.position(10.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(2.0), EventContext.empty());
+
+        MechanismTraceSnapshot trace = runtime.traceSnapshot();
+        assertEquals("testMechanism", trace.mechanism());
+        assertEquals("initial", trace.requestedAction());
+        assertEquals(1, trace.candidates().size());
+        assertTrue(trace.candidates().get(0).selected());
+        assertEquals(1, trace.controls().size());
+        MechanismTraceSnapshot.Control control = trace.controls().get(0);
+        assertEquals(10.0, control.requestedValue(), 1.0e-9);
+        assertEquals(5.0, control.goal(), 1.0e-9);
+        assertTrue(control.constrained());
+        assertFalse(control.blocked());
+        assertEquals(1.0, control.measuredPosition(), 1.0e-9);
+        assertEquals(0.25, control.measuredVelocity(), 1.0e-9);
+        assertEquals(control.appliedValue(), control.proportionalVolts(), 1.0e-9);
+        assertEquals(0.0, control.integralVolts(), 1.0e-9);
+        assertEquals(1, trace.motors().size());
+        assertEquals(MOTOR.defaultName(), trace.motors().get(0).name());
+        assertEquals("voltage", trace.motors().get(0).commandMode());
+        assertEquals(control.appliedValue(), trace.motors().get(0).commandValue(), 1.0e-9);
+    }
+
+    @Test
+    void traceExplainsHookLeaseAndArbitrationWinner() {
+        boolean[] trigger = {true};
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        TriggerReleaseMechanism mechanism = new TriggerReleaseMechanism(trigger);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism);
+
+        scheduler.teleopPeriodic(1.0, 0.02);
+
+        MechanismTraceSnapshot trace = scheduler.traceSnapshots().get(0);
+        assertEquals(1, trace.activeLeaseCount());
+        assertTrue(trace.candidates().stream().anyMatch(candidate ->
+                candidate.selected() && candidate.source().equals("lease")));
+        assertEquals(1, trace.hooks().size());
+        assertTrue(trace.hooks().get(0).active());
+        assertTrue(trace.hooks().get(0).triggeredThisCycle());
+    }
+
+    @Test
+    void traceSchedulerStateFollowsNewestRequestedLease() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        DeclaredMotorMechanism mechanism = new DeclaredMotorMechanism(MOTOR);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism);
+        Action routine = Actions.sequence().forTime(0.02, MOTOR.percent(0.5));
+        scheduler.request(routine);
+
+        scheduler.teleopPeriodic(0.0, 0.02);
+        scheduler.teleopPeriodic(0.03, 0.02);
+
+        MechanismTraceSnapshot trace = scheduler.traceSnapshots().get(0);
+        assertEquals("Sequence", trace.requestedActionType());
+        assertTrue(trace.schedulerComplete());
+        assertEquals(1, trace.activeLeaseCount());
+    }
+
+    @Test
+    void traceSnapshotsExposePackedViewsForNestedMechanisms() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        DeclaredMotorMechanism child = new DeclaredMotorMechanism(MOTOR);
+        DeclaredParentMechanism parent = new DeclaredParentMechanism(child);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(parent);
+        scheduler.request(child.initial);
+
+        scheduler.teleopPeriodic(0.0, 0.02);
+
+        List<MechanismTraceSnapshot> traces = scheduler.traceSnapshots();
+        assertEquals(2, traces.size());
+        MechanismTraceSnapshot childTrace = traces.stream()
+                .filter(trace -> trace.mechanism().endsWith("/child"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(1, childTrace.candidates().size());
+        assertEquals(1, childTrace.motors().size());
+        assertEquals(MOTOR.defaultName(), childTrace.motors().get(0).name());
+    }
+
+    @Test
+    void traceCapturesSoftwarePidAndFeedforwardComponents() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 0.0;
+        ControlBinding position = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .pid(2.0, 0.0, 0.0)
+                .ff(0.5, 0.0, 0.0);
+        TestMechanism mechanism = new TestMechanism(position.position(2.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        MechanismTraceSnapshot.Control trace = runtime.traceSnapshot().controls().get(0);
+        assertEquals(4.0, trace.proportionalVolts(), 1.0e-9);
+        assertEquals(0.5, trace.staticFeedforwardVolts(), 1.0e-9);
+        assertEquals(4.5, trace.appliedValue(), 1.0e-9);
+    }
+
+    @Test
+    void readingTraceDoesNotReadMotorOrEncoderAgain() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding position = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(position.position(2.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        int motorReads = actions.motor(MOTOR).reads;
+        int encoderReads = actions.encoder(ENCODER).reads;
+
+        runtime.traceSnapshot();
+        runtime.traceSnapshot();
+
+        assertEquals(motorReads, actions.motor(MOTOR).reads);
+        assertEquals(encoderReads, actions.encoder(ENCODER).reads);
+    }
 
     @Test
     void disabledMotorDoesNotApplyOutput() {
@@ -393,6 +526,28 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void pathOutputAndMarkerActionsRunInsideTheSameSchedulerTree() {
+        PathAction path = Paths.choreo("markers");
+        Action marker = CHILD_MOTOR.percent(0.6);
+        PathRuntime pathRuntime = new PathRuntime() {
+            @Override public boolean isFinished(PathAction path, MechanismContext context) { return false; }
+            @Override public Action output(PathAction path, MechanismContext context) { return MOTOR.percent(0.4); }
+            @Override public Map<String, Action> activeMarkers(PathAction path, MechanismContext context) {
+                return Map.of("marker", marker);
+            }
+        };
+        TestMechanism mechanism = new TestMechanism(path);
+        RecordingActionContext actions = new RecordingActionContext(MOTOR, CHILD_MOTOR);
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions).path(path, pathRuntime);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.4, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(0.6, actions.motor(CHILD_MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
     void loweredSchedulerResetsCompletedSequenceSubtrees() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
@@ -411,6 +566,22 @@ class MechanismRuntimeTest {
 
         assertEquals(2, actions.events);
         assertEquals(0.8, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void repeatedThenCallsChainInsteadOfReplacingEarlierActions() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        TestMechanism mechanism = new TestMechanism(Actions.sequence()
+                .doOnce(() -> actions.events++)
+                .then(Actions.waitSeconds(0.1))
+                .then(Actions.doOnce(() -> actions.events++)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        assertEquals(1, actions.events);
+        runtime.periodic(contextAt(0.11), EventContext.empty());
+        assertEquals(2, actions.events);
     }
 
     @Test
@@ -1170,6 +1341,25 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void livePidEditRefreshesDeviceClosedLoopConfiguration() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
+        PidGains gains = PidGains.of(0.2, 0.0, 0.0);
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(MOTOR.encoder())
+                .pid(gains);
+        TestMechanism mechanism = new TestMechanism(control.position(2.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        gains.telemetry().get("p").set(0.45);
+        runtime.periodic(contextAt(0.02), EventContext.empty());
+
+        assertEquals(0.45, actions.motor(MOTOR).closedLoopRequest.config().p(), 1.0e-9);
+    }
+
+    @Test
     void mixedCapabilityFollowersPreventDeviceOffload() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR, CHILD_MOTOR);
         actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
@@ -1394,6 +1584,15 @@ class MechanismRuntimeTest {
         private DeclaredMotorMechanism(MotorDevice motor) {
             this.motor = motor;
             initial = motor.percent(0.0);
+        }
+    }
+
+    private static final class DeclaredParentMechanism implements Mechanism {
+        private final DeclaredMotorMechanism child;
+        private final Action initial = Actions.neutral();
+
+        private DeclaredParentMechanism(DeclaredMotorMechanism child) {
+            this.child = child;
         }
     }
 
@@ -1646,6 +1845,7 @@ class MechanismRuntimeTest {
         private double velocityTarget = Double.NaN;
         private MotorControlCapabilities capabilities = MotorControlCapabilities.OPEN_LOOP_ONLY;
         private MotorClosedLoopRequest closedLoopRequest;
+        private int reads;
 
         private RecordingMotorHandle(MotorDevice device) {
             this.device = device;
@@ -1692,6 +1892,36 @@ class MechanismRuntimeTest {
         public MotorControlCapabilities controlCapabilities() {
             return capabilities;
         }
+
+        @Override
+        public double integratedPositionRotations() {
+            reads++;
+            return 0.0;
+        }
+
+        @Override
+        public double integratedVelocityRotationsPerSecond() {
+            reads++;
+            return 0.0;
+        }
+
+        @Override
+        public double appliedVoltage() {
+            reads++;
+            return Double.isFinite(voltage) ? voltage : 0.0;
+        }
+
+        @Override
+        public double supplyCurrentAmps() {
+            reads++;
+            return 0.0;
+        }
+
+        @Override
+        public double statorCurrentAmps() {
+            reads++;
+            return 0.0;
+        }
     }
 
     private static final class RecordingEncoderHandle implements EncoderHandle {
@@ -1699,6 +1929,7 @@ class MechanismRuntimeTest {
         private double position;
         private double velocity;
         private int setPositionCalls;
+        private int reads;
 
         private RecordingEncoderHandle(EncoderDevice device) {
             this.device = device;
@@ -1711,11 +1942,13 @@ class MechanismRuntimeTest {
 
         @Override
         public double positionRotations() {
+            reads++;
             return position;
         }
 
         @Override
         public double velocityRotationsPerSecond() {
+            reads++;
             return velocity;
         }
 

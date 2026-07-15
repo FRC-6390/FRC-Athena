@@ -6,326 +6,101 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
-import ca.frc6390.athena.auto.AutoRoutine;
-import ca.frc6390.athena.auto.PathGraph;
-import ca.frc6390.athena.auto.PathMarkerBinding;
-import ca.frc6390.athena.commands.CommandAction;
-import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Actions;
+import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.PathAction;
+import ca.frc6390.athena.mechanism.core.PathRuntime;
 import choreo.trajectory.EventMarker;
+import choreo.trajectory.SwerveSample;
 import choreo.trajectory.Trajectory;
 import choreo.trajectory.TrajectorySample;
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
-import edu.wpi.first.wpilibj2.command.Command;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class ChoreoPathProviderTest {
     @Test
-    void providerNormalizesAndCachesPathsAndTrajectoryLookups() {
-        FakeChoreoClient client = new FakeChoreoClient(List.of("Score", "Leave"));
-        ChoreoPathProvider provider = new ChoreoPathProvider(client);
-
-        PathAction first = provider.path("  Score  ");
-        PathAction second = provider.path("Score");
-
-        assertSame(first, second);
-        assertEquals("choreo", first.source());
-        assertEquals("Score", first.name());
-        assertEquals(Optional.empty(), provider.trajectory("  Score  "));
-        assertEquals(Optional.empty(), provider.trajectory("Score"));
-        assertEquals(List.of(), provider.markerNames("Score"));
-        assertEquals(List.of("Score"), client.loadedTrajectories);
+    void loaderNormalizesCachesAndDiscoversMetadata() {
+        FakeClient client = new FakeClient(Map.of("Score", trajectory()));
+        ChoreoPathProvider provider = new ChoreoPathProvider(client, null, null, null, () -> false);
+        assertEquals("Score", provider.path(" Score ").name());
+        assertTrue(provider.trajectory(" Score ").isPresent());
+        assertTrue(provider.trajectory("Score").isPresent());
+        assertEquals(1, client.loads.size());
+        assertEquals(List.of("Intake", "Shoot"), provider.markerNames("Score"));
+        var preview = provider.preview(provider.path("Score")
+                .marker("Intake", Actions.neutral()).marker("Shoot", Actions.neutral())).orElseThrow();
+        assertEquals(2, preview.poses().size());
+        assertEquals(List.of("Intake", "Shoot"), preview.events().stream().map(event -> event.name()).toList());
+        assertThrows(IllegalStateException.class, provider::runtime);
     }
 
     @Test
-    void providerCachesDiscoveredNames() {
-        FakeChoreoClient client = new FakeChoreoClient(List.of("One", "Two"));
-        ChoreoPathProvider provider = new ChoreoPathProvider(client);
+    void nativeRuntimeProducesDriveResetAndMarkerActionsWithoutCommands() {
+        FakeClient client = new FakeClient(Map.of("Score", trajectory()));
+        AtomicInteger resetCalls = new AtomicInteger();
+        AtomicInteger followCalls = new AtomicInteger();
+        Action reset = Actions.waitSeconds(0.0);
+        Action drive = Actions.waitSeconds(1.0);
+        Action intake = Actions.waitSeconds(2.0);
+        Action shoot = Actions.waitSeconds(3.0);
+        ChoreoPathProvider provider = new ChoreoPathProvider(
+                client,
+                Pose2d::new,
+                pose -> { resetCalls.incrementAndGet(); return reset; },
+                sample -> { followCalls.incrementAndGet(); return drive; },
+                () -> false);
+        PathAction path = provider.path("Score").resetOdometry()
+                .marker("Intake", intake).marker("Shoot", shoot);
+        PathRuntime runtime = provider.runtime();
 
-        assertEquals(List.of("One", "Two"), provider.pathNames());
-        assertEquals(List.of("One", "Two"), provider.pathNames());
+        runtime.initialize(path, context(0.0));
+        runtime.execute(path, context(0.6));
+        assertSame(drive, runtime.output(path, context(0.6)));
+        assertSame(reset, runtime.activeMarkers(path, context(0.6)).get("@resetOdometry"));
+        assertSame(intake, runtime.activeMarkers(path, context(0.6)).get("Intake"));
+        assertFalse(runtime.activeMarkers(path, context(0.6)).containsKey("Shoot"));
+        assertFalse(runtime.isFinished(path, context(0.6)));
 
-        assertEquals(1, client.nameCalls);
+        runtime.execute(path, context(1.1));
+        assertSame(shoot, runtime.activeMarkers(path, context(1.1)).get("Shoot"));
+        assertFalse(runtime.isFinished(path, context(1.1)));
+        assertTrue(runtime.isFinished(path, context(1.12)));
+        runtime.end(path, context(1.1), false);
+        assertEquals(1, resetCalls.get());
+        assertEquals(2, followCalls.get());
     }
 
-    @Test
-    void providerConvertsTrajectoryMarkersToPathGraphBindings() {
-        FakeCommand shootCommand = new FakeCommand();
-        shootCommand.finished = true;
-        FakeCommand intakeCommand = new FakeCommand();
-        intakeCommand.finished = true;
-        CommandAction shootState = commandState("shoot", shootCommand);
-        CommandAction intakeState = commandState("intake", intakeCommand);
-        FakeChoreoClient client = new FakeChoreoClient(
-                List.of("Score"),
-                Map.of("Score", trajectory("Score",
-                        new EventMarker(0.5, " shoot "),
-                        new EventMarker(0.8, "intake"),
-                        new EventMarker(1.0, "shoot"))));
-        ChoreoPathProvider provider = new ChoreoPathProvider(client);
-
-        List<PathMarkerBinding> bindings = provider.markerBindings(
-                " Score ",
-                orderedCommands(Map.entry(" shoot ", shootState), Map.entry("intake", intakeState)));
-        PathGraph graph = PathGraph.of(new AutoRoutine(
-                "score",
-                () -> CommandAction.create("score").build(),
-                bindings));
-
-        assertEquals(List.of("shoot", "intake"), provider.markerNames("Score"));
-        assertEquals(List.of("shoot", "intake"), bindings.stream().map(PathMarkerBinding::marker).toList());
-        assertTrue(graph.trigger(" shoot "));
-        assertTrue(graph.trigger("intake"));
-        assertEquals(List.of("initialize", "execute", "isFinished", "end:false"), shootCommand.events);
-        assertEquals(List.of("initialize", "execute", "isFinished", "end:false"), intakeCommand.events);
+    private static MechanismContext context(double time) {
+        return new MechanismContext(time, time, 0.02, true, true, true);
     }
 
-    @Test
-    void providerRejectsUnboundTrajectoryMarkerCommands() {
-        FakeChoreoClient client = new FakeChoreoClient(
-                List.of("Score"),
-                Map.of("Score", trajectory("Score", new EventMarker(0.5, "shoot"))));
-        ChoreoPathProvider provider = new ChoreoPathProvider(client);
-
-        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
-                () -> provider.markerBindings("Score", Map.of()));
-
-        assertEquals("Missing command for Choreo marker 'shoot'.", failure.getMessage());
+    private static Trajectory<SwerveSample> trajectory() {
+        return new Trajectory<>(
+                "Score",
+                List.of(sample(0.0), sample(1.0)),
+                List.of(0),
+                List.of(new EventMarker(0.5, "Intake"), new EventMarker(1.0, "Shoot")));
     }
 
-    @Test
-    void adapterDelegatesNamedCommandsAndNormalizesNames() {
-        FakeFactoryClient client = new FakeFactoryClient();
-        ChoreoPathAdapter adapter = new ChoreoPathAdapter(client);
-
-        assertSame(client.trajectoryCommand, adapter.trajectoryCommand("  Main  "));
-        assertSame(client.splitTrajectoryCommand, adapter.trajectoryCommand("  Main  ", 2));
-        assertSame(client.resetCommand, adapter.resetOdometryCommand("  Main  "));
-        assertSame(client.splitResetCommand, adapter.resetOdometryCommand("  Main  ", 3));
-        assertSame(client.routineCommand, adapter.routineCommand("  Routine  "));
-        assertSame(client.warmupCommand, adapter.warmupCommand());
-
-        assertEquals(List.of(
-                "trajectory:Main",
-                "trajectorySplit:Main:2",
-                "reset:Main",
-                "resetSplit:Main:3",
-                "routine:Routine",
-                "warmup"), client.calls);
+    private static SwerveSample sample(double time) {
+        return new SwerveSample(time, time, 0, 0, 1, 0, 0, 0, 0, 0, new double[4], new double[4]);
     }
 
-    @Test
-    void adapterLoadWrapsTrajectoryCommandLifecycle() {
-        FakeFactoryClient client = new FakeFactoryClient();
-        ChoreoPathAdapter adapter = new ChoreoPathAdapter(client);
-
-        CommandAction Action = adapter.load("  Main  ");
-        Action.onInitialize().run();
-        Action.onExecute().run();
-        assertFalse(Action.isFinished().getAsBoolean());
-        client.trajectoryCommand.finished = true;
-        assertEquals(true, Action.isFinished().getAsBoolean());
-        Action.onEnd().run();
-
-        assertEquals("choreo:Main", Action.name());
-        assertEquals(List.of("trajectory:Main"), client.calls);
-        assertEquals(List.of("initialize", "execute", "isFinished", "isFinished", "end:false"),
-                client.trajectoryCommand.events);
-    }
-
-    @Test
-    void adapterRuntimesCacheActiveCommandUntilEnded() {
-        FakeFactoryClient client = new FakeFactoryClient();
-        ChoreoPathAdapter adapter = new ChoreoPathAdapter(client);
-        PathRuntime trajectoryRuntime = adapter.trajectoryRuntime();
-        PathRuntime routineRuntime = adapter.routineRuntime();
-        PathAction path = adapter.path("Main");
-
-        trajectoryRuntime.initialize(path, null);
-        trajectoryRuntime.execute(path, null);
-        trajectoryRuntime.end(path, null, true);
-        routineRuntime.initialize(path, null);
-        routineRuntime.execute(path, null);
-        routineRuntime.end(path, null, false);
-
-        assertEquals(List.of("trajectory:Main", "routine:Main"), client.calls);
-        assertEquals(List.of("initialize", "execute", "end:true"), client.trajectoryCommand.events);
-        assertEquals(List.of("initialize", "execute", "end:false"), client.routineCommand.events);
-    }
-
-    private static CommandAction commandState(String name, FakeCommand command) {
-        return CommandAction.create(name)
-                .onInitialize(command::initialize)
-                .onExecute(command::execute)
-                .until(command::isFinished)
-                .onEnd(() -> command.end(false))
-                .build();
-    }
-
-    @SafeVarargs
-    private static Map<String, CommandAction> orderedCommands(Map.Entry<String, CommandAction>... entries) {
-        Map<String, CommandAction> commands = new LinkedHashMap<>();
-        for (Map.Entry<String, CommandAction> entry : entries) {
-            commands.put(entry.getKey(), entry.getValue());
-        }
-        return commands;
-    }
-
-    private static Trajectory<TestSample> trajectory(String name, EventMarker... markers) {
-        return new Trajectory<TestSample>(name, List.<TestSample>of(), List.of(), List.of(markers));
-    }
-
-    private static final class FakeChoreoClient implements ChoreoPathProvider.ChoreoClient {
-        private final List<String> names;
+    private static final class FakeClient implements ChoreoPathProvider.ChoreoClient {
         private final Map<String, Trajectory<? extends TrajectorySample<?>>> trajectories;
-        private final List<String> loadedTrajectories = new ArrayList<>();
-        private int nameCalls;
-
-        private FakeChoreoClient(List<String> names) {
-            this(names, Map.of());
-        }
-
-        private FakeChoreoClient(List<String> names, Map<String, Trajectory<? extends TrajectorySample<?>>> trajectories) {
-            this.names = names;
+        private final List<String> loads = new ArrayList<>();
+        private FakeClient(Map<String, Trajectory<? extends TrajectorySample<?>>> trajectories) {
             this.trajectories = trajectories;
         }
-
-        @Override
-        public Optional<Trajectory<? extends TrajectorySample<?>>> loadTrajectory(String trajectoryName) {
-            loadedTrajectories.add(trajectoryName);
-            return Optional.ofNullable(trajectories.get(trajectoryName));
+        @Override public Optional<Trajectory<? extends TrajectorySample<?>>> loadTrajectory(String name) {
+            loads.add(name); return Optional.ofNullable(trajectories.get(name));
         }
-
-        @Override
-        public List<String> trajectoryNames() {
-            nameCalls++;
-            return names;
-        }
-    }
-
-    private static final class TestSample implements TrajectorySample<TestSample> {
-        @Override
-        public double getTimestamp() {
-            return 0.0;
-        }
-
-        @Override
-        public Pose2d getPose() {
-            return new Pose2d();
-        }
-
-        @Override
-        public ChassisSpeeds getChassisSpeeds() {
-            return new ChassisSpeeds();
-        }
-
-        @Override
-        public TestSample interpolate(TestSample endValue, double t) {
-            return this;
-        }
-
-        @Override
-        public TestSample flipped() {
-            return this;
-        }
-
-        @Override
-        public TestSample mirrorX() {
-            return this;
-        }
-
-        @Override
-        public TestSample mirrorY() {
-            return this;
-        }
-
-        @Override
-        public TestSample rotateAround() {
-            return this;
-        }
-
-        @Override
-        public TestSample offsetBy(double timestampOffset) {
-            return this;
-        }
-    }
-
-    private static final class FakeFactoryClient implements ChoreoPathAdapter.FactoryClient {
-        private final List<String> calls = new ArrayList<>();
-        private final FakeCommand trajectoryCommand = new FakeCommand();
-        private final FakeCommand splitTrajectoryCommand = new FakeCommand();
-        private final FakeCommand resetCommand = new FakeCommand();
-        private final FakeCommand splitResetCommand = new FakeCommand();
-        private final FakeCommand routineCommand = new FakeCommand();
-        private final FakeCommand warmupCommand = new FakeCommand();
-
-        @Override
-        public Command trajectoryCommand(String trajectoryName) {
-            calls.add("trajectory:" + trajectoryName);
-            return trajectoryCommand;
-        }
-
-        @Override
-        public Command trajectoryCommand(String trajectoryName, int splitIndex) {
-            calls.add("trajectorySplit:" + trajectoryName + ":" + splitIndex);
-            return splitTrajectoryCommand;
-        }
-
-        @Override
-        public Command resetOdometryCommand(String trajectoryName) {
-            calls.add("reset:" + trajectoryName);
-            return resetCommand;
-        }
-
-        @Override
-        public Command resetOdometryCommand(String trajectoryName, int splitIndex) {
-            calls.add("resetSplit:" + trajectoryName + ":" + splitIndex);
-            return splitResetCommand;
-        }
-
-        @Override
-        public Command routineCommand(String routineName) {
-            calls.add("routine:" + routineName);
-            return routineCommand;
-        }
-
-        @Override
-        public Command warmupCommand() {
-            calls.add("warmup");
-            return warmupCommand;
-        }
-    }
-
-    private static final class FakeCommand extends Command {
-        private final List<String> events = new ArrayList<>();
-        private boolean finished;
-
-        @Override
-        public void initialize() {
-            events.add("initialize");
-        }
-
-        @Override
-        public void execute() {
-            events.add("execute");
-        }
-
-        @Override
-        public void end(boolean interrupted) {
-            events.add("end:" + interrupted);
-        }
-
-        @Override
-        public boolean isFinished() {
-            events.add("isFinished");
-            return finished;
-        }
+        @Override public List<String> trajectoryNames() { return List.copyOf(trajectories.keySet()); }
     }
 }

@@ -193,6 +193,15 @@ project(':athena-drivetrain') {
     dependencies {
         api project(':athena-hardware')
         api project(':athena-mechanisms')
+        compileOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        testRuntimeOnly "us.hebi.quickbuf:quickbuf-runtime:1.4"
     }
 }
 
@@ -319,6 +328,24 @@ project(':athena-robot') {
 }
 
 project(':athena-wpilib') {
+    def nativeOs = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+    def nativeArch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
+    def nativeClassifier
+    def nativeDirectory
+    if (nativeOs.contains('win')) {
+        nativeClassifier = 'windowsx86-64'
+        nativeDirectory = 'windows/x86-64/shared'
+    } else if (nativeOs.contains('mac')) {
+        nativeClassifier = 'osxuniversal'
+        nativeDirectory = 'osx/universal/shared'
+    } else if (nativeArch.contains('aarch64') || nativeArch.contains('arm64')) {
+        nativeClassifier = 'linuxarm64'
+        nativeDirectory = 'linux/arm64/shared'
+    } else {
+        nativeClassifier = 'linuxx86-64'
+        nativeDirectory = 'linux/x86-64/shared'
+    }
+
     configurations {
         wpilibTestNatives
     }
@@ -352,8 +379,11 @@ project(':athena-wpilib') {
         testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.cscore:cscore-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.cameraserver:cameraserver-java:${rootProject.findProperty('wpilibVersion')}"
-        wpilibTestNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.findProperty('wpilibVersion')}:windowsx86-64@zip"
-        wpilibTestNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.findProperty('wpilibVersion')}:windowsx86-64@zip"
+        wpilibTestNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
+        wpilibTestNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
+        wpilibTestNatives "edu.wpi.first.hal:hal-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
+        wpilibTestNatives "edu.wpi.first.wpinet:wpinet-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
+        wpilibTestNatives "edu.wpi.first.ntcore:ntcore-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
     }
 
     tasks.register('extractWpilibTestNatives', Sync) {
@@ -366,7 +396,7 @@ project(':athena-wpilib') {
         dependsOn tasks.named('extractWpilibTestNatives')
         systemProperty(
                 'java.library.path',
-                layout.buildDirectory.dir('wpilib-test-natives/windows/x86-64/shared').get().asFile.absolutePath)
+                layout.buildDirectory.dir("wpilib-test-natives/${nativeDirectory}").get().asFile.absolutePath)
     }
 }
 
@@ -489,6 +519,7 @@ project(':athena-vendor-pathplanner') {
 project(':athena-vendor-choreo') {
     dependencies {
         api project(':athena-auto')
+        api project(':athena-drivetrain')
         api project(':athena-mechanisms')
         api project(':athena-wpilib')
         compileOnly "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"

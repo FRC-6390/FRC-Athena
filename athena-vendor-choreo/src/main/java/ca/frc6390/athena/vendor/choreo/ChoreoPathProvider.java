@@ -1,163 +1,259 @@
 package ca.frc6390.athena.vendor.choreo;
 
+import ca.frc6390.athena.auto.PathProvider;
+import ca.frc6390.athena.auto.PathPreview;
+import ca.frc6390.athena.drivetrain.swerve.FollowerBackend;
+import ca.frc6390.athena.drivetrain.swerve.SwervePathFollower;
+import ca.frc6390.athena.drivetrain.swerve.SwervePathSample;
+import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.PathAction;
+import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.mechanism.core.Paths;
+import ca.frc6390.athena.runtime.control.RobotVelocity;
+import choreo.Choreo;
+import choreo.trajectory.SwerveSample;
+import choreo.trajectory.Trajectory;
+import choreo.trajectory.TrajectorySample;
+import edu.wpi.first.math.geometry.Pose2d;
 import java.util.Arrays;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
-import ca.frc6390.athena.auto.PathMarkerBinding;
-import ca.frc6390.athena.commands.CommandAction;
-import ca.frc6390.athena.mechanism.core.PathAction;
-import ca.frc6390.athena.mechanism.core.Paths;
-import choreo.Choreo;
-import choreo.trajectory.EventMarker;
-import choreo.trajectory.Trajectory;
-import choreo.trajectory.TrajectorySample;
-
-/**
- * Choreo-backed provider for Athena path Actions and trajectories.
- */
-public final class ChoreoPathProvider {
-    /**
-     * Source key used by Choreo path Actions.
-     */
+/** Native Athena Choreo provider: trajectories execute as ordinary PathActions. */
+public final class ChoreoPathProvider implements PathProvider {
     public static final String KEY = "choreo";
-
     private final ChoreoClient client;
-    private final Map<String, PathAction> pathCache = new ConcurrentHashMap<>();
+    private final Supplier<Pose2d> pose;
+    private final Function<Pose2d, Action> resetPose;
+    private final Function<SwerveSample, Action> followSample;
+    private final SwervePathFollower follower;
+    private final BooleanSupplier mirrorForAlliance;
     private final Map<String, Optional<Trajectory<? extends TrajectorySample<?>>>> trajectoryCache =
             new ConcurrentHashMap<>();
+    private final NativeRuntime runtime = new NativeRuntime();
     private volatile List<String> pathNameCache;
 
-    /**
-     * Creates a provider that delegates to ChoreoLib's global trajectory loader.
-     */
+    /** Loader-only provider. Configure {@link #swerve} before executing paths. */
     public ChoreoPathProvider() {
-        this(new ChoreoLibClient());
+        this(new ChoreoLibClient(), null, null, null, null, () -> false);
     }
 
-    ChoreoPathProvider(ChoreoClient client) {
+    ChoreoPathProvider(
+            ChoreoClient client,
+            Supplier<Pose2d> pose,
+            Function<Pose2d, Action> resetPose,
+            Function<SwerveSample, Action> followSample,
+            BooleanSupplier mirrorForAlliance) {
+        this(client, pose, resetPose, followSample, null, mirrorForAlliance);
+    }
+
+    ChoreoPathProvider(
+            ChoreoClient client,
+            SwervePathFollower follower,
+            BooleanSupplier mirrorForAlliance) {
+        this(client, null, null, null, follower, mirrorForAlliance);
+    }
+
+    private ChoreoPathProvider(
+            ChoreoClient client,
+            Supplier<Pose2d> pose,
+            Function<Pose2d, Action> resetPose,
+            Function<SwerveSample, Action> followSample,
+            SwervePathFollower follower,
+            BooleanSupplier mirrorForAlliance) {
         this.client = Objects.requireNonNull(client, "client");
+        this.pose = pose;
+        this.resetPose = resetPose;
+        this.followSample = followSample;
+        this.follower = follower;
+        this.mirrorForAlliance = mirrorForAlliance == null ? () -> false : mirrorForAlliance;
     }
 
-    /**
-     * Creates a Choreo path Action.
-     *
-     * @param pathName Choreo trajectory name
-     * @return path Action
-     */
-    public PathAction path(String pathName) {
-        return pathCache.computeIfAbsent(normalize(pathName), Paths::choreo);
+    /** Binds Choreo loading to a kinematics-owned follower. */
+    public static ChoreoPathProvider swerve(
+            SwervePathFollower follower, BooleanSupplier mirrorForAlliance) {
+        SwervePathFollower safeFollower = Objects.requireNonNull(follower, "follower");
+        if (safeFollower.backend() != FollowerBackend.CHOREO) {
+            throw new IllegalArgumentException("Choreo requires a CHOREO follower backend.");
+        }
+        return new ChoreoPathProvider(new ChoreoLibClient(), safeFollower, mirrorForAlliance);
     }
 
-    /**
-     * Loads a real Choreo trajectory.
-     *
-     * @param pathName Choreo trajectory name
-     * @return trajectory if ChoreoLib can load it
-     */
+    @Override public PathAction path(String pathName) { return Paths.choreo(normalize(pathName)); }
+    public PathAction split(String pathName, int splitIndex) { return path(pathName).split(splitIndex); }
+
     public Optional<Trajectory<? extends TrajectorySample<?>>> trajectory(String pathName) {
         return trajectoryCache.computeIfAbsent(normalize(pathName), client::loadTrajectory);
     }
 
-    /**
-     * Returns trajectory names discovered by ChoreoLib.
-     *
-     * @return available trajectory names
-     */
     public List<String> pathNames() {
         List<String> names = pathNameCache;
-        if (names == null) {
-            names = client.trajectoryNames();
-            pathNameCache = names;
-        }
+        if (names == null) { names = client.trajectoryNames(); pathNameCache = names; }
         return names;
     }
 
-    /**
-     * Returns normalized marker names from a Choreo trajectory.
-     *
-     * @param pathName Choreo trajectory name
-     * @return marker names in trajectory order, or an empty list when the trajectory is missing
-     */
     public List<String> markerNames(String pathName) {
-        return trajectory(pathName)
-                .map(ChoreoPathProvider::markerNames)
-                .orElseGet(List::of);
+        return trajectory(pathName).map(value -> value.events().stream()
+                .map(marker -> marker.event).distinct().toList()).orElseGet(List::of);
     }
 
-    /**
-     * Converts Choreo trajectory markers into Athena marker bindings.
-     *
-     * @param pathName Choreo trajectory name
-     * @param commandsByMarker command Actions keyed by marker name
-     * @return marker bindings in trajectory order, or an empty list when the trajectory is missing
-     */
-    public List<PathMarkerBinding> markerBindings(String pathName, Map<String, CommandAction> commandsByMarker) {
-        Objects.requireNonNull(commandsByMarker, "commandsByMarker");
-        Map<String, CommandAction> normalizedCommands = new LinkedHashMap<>();
-        for (Map.Entry<String, CommandAction> entry : commandsByMarker.entrySet()) {
-            String marker = normalizeMarker(entry.getKey());
-            CommandAction command = Objects.requireNonNull(entry.getValue(), "marker command");
-            CommandAction previous = normalizedCommands.putIfAbsent(marker, command);
-            if (previous != null) {
-                throw new IllegalArgumentException("Duplicate path marker command '" + marker + "'.");
-            }
+    @Override public PathRuntime runtime() {
+        requireExecutionConfiguration();
+        return runtime;
+    }
+
+    @Override public Optional<PathPreview> preview(PathAction path) {
+        Objects.requireNonNull(path, "path");
+        if (!KEY.equals(path.source())) return Optional.empty();
+        Trajectory<? extends TrajectorySample<?>> value = selected(path);
+        if (mirrorForAlliance.getAsBoolean()) value = value.flipped();
+        Trajectory<? extends TrajectorySample<?>> previewTrajectory = value;
+        List<PathPreview.Pose> poses = Arrays.stream(previewTrajectory.getPoses())
+                .map(pose -> new PathPreview.Pose(
+                        pose.getX(), pose.getY(), pose.getRotation().getRadians()))
+                .toList();
+        List<PathPreview.Event> events = previewTrajectory.events().stream()
+                .filter(marker -> path.markers().containsKey(marker.event))
+                .map(marker -> previewTrajectory.sampleAt(marker.timestamp, false)
+                        .map(sample -> new PathPreview.Event(
+                                marker.event,
+                                marker.timestamp,
+                                new PathPreview.Pose(
+                                        sample.getPose().getX(), sample.getPose().getY(),
+                                        sample.getPose().getRotation().getRadians())))
+                        .orElse(null))
+                .filter(Objects::nonNull)
+                .toList();
+        return Optional.of(new PathPreview(path.key(), poses, events));
+    }
+
+    @Override public long previewRevision() { return mirrorForAlliance.getAsBoolean() ? 1L : 0L; }
+
+    private void requireExecutionConfiguration() {
+        if (follower == null && (pose == null || resetPose == null || followSample == null)) {
+            throw new IllegalStateException("Choreo execution requires a kinematics path follower.");
         }
-
-        List<PathMarkerBinding> bindings = new ArrayList<>();
-        for (String marker : markerNames(pathName)) {
-            CommandAction command = normalizedCommands.get(marker);
-            if (command == null) {
-                throw new IllegalArgumentException("Missing command for Choreo marker '" + marker + "'.");
-            }
-            bindings.add(new PathMarkerBinding(marker, command));
-        }
-        return List.copyOf(bindings);
     }
 
-    private static List<String> markerNames(Trajectory<? extends TrajectorySample<?>> trajectory) {
-        LinkedHashSet<String> names = new LinkedHashSet<>();
-        for (EventMarker marker : trajectory.events()) {
-            names.add(normalizeMarker(marker.event));
-        }
-        return List.copyOf(names);
+    private Trajectory<? extends TrajectorySample<?>> selected(PathAction path) {
+        Trajectory<? extends TrajectorySample<?>> loaded = trajectory(path.name())
+                .orElseThrow(() -> new IllegalArgumentException("Missing Choreo trajectory '" + path.name() + "'."));
+        if (path.splitIndex() < 0) return loaded;
+        return loaded.getSplit(path.splitIndex()).orElseThrow(() -> new IllegalArgumentException(
+                "Missing split " + path.splitIndex() + " in Choreo trajectory '" + path.name() + "'."));
     }
 
-    private static String normalize(String pathName) {
-        return pathName == null || pathName.isBlank() ? "default" : pathName.trim();
-    }
-
-    private static String normalizeMarker(String marker) {
-        return marker == null || marker.isBlank() ? "marker" : marker.trim();
+    private static String normalize(String name) {
+        return name == null || name.isBlank() ? "default" : name.trim();
     }
 
     interface ChoreoClient {
-        Optional<Trajectory<? extends TrajectorySample<?>>> loadTrajectory(String trajectoryName);
-
+        Optional<Trajectory<? extends TrajectorySample<?>>> loadTrajectory(String name);
         List<String> trajectoryNames();
     }
 
     private static final class ChoreoLibClient implements ChoreoClient {
-        @Override
-        public Optional<Trajectory<? extends TrajectorySample<?>>> loadTrajectory(String trajectoryName) {
-            return loadAnyTrajectory(trajectoryName);
+        @Override public Optional<Trajectory<? extends TrajectorySample<?>>> loadTrajectory(String name) {
+            @SuppressWarnings({"rawtypes", "unchecked"})
+            Optional<Trajectory<? extends TrajectorySample<?>>> loaded =
+                    (Optional) Choreo.loadTrajectory(name);
+            return loaded;
+        }
+        @Override public List<String> trajectoryNames() { return List.copyOf(Arrays.asList(Choreo.availableTrajectories())); }
+    }
+
+    private final class NativeRuntime implements PathRuntime {
+        private final Map<PathAction, ActivePath> active = new IdentityHashMap<>();
+
+        @Override public void initialize(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
+            Trajectory<? extends TrajectorySample<?>> trajectory = selected(path);
+            boolean mirrored = mirrorForAlliance.getAsBoolean();
+            ActivePath state = new ActivePath(trajectory, mirrored);
+            active.put(path, state);
+            if (follower != null) follower.reset();
+            if (path.resetsOdometry()) trajectory.getInitialPose(mirrored)
+                    .map(ChoreoPathProvider.this::resetAction)
+                    .ifPresent(action -> state.activeMarkers.put("@resetOdometry", action));
         }
 
-        @Override
-        public List<String> trajectoryNames() {
-            return List.copyOf(Arrays.asList(Choreo.availableTrajectories()));
+        @Override public void execute(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
+            ActivePath state = requireActive(path);
+            double time = Math.max(0.0, context.timeInStateSeconds());
+            state.trajectory.sampleAt(time, state.mirrored).ifPresent(sample -> {
+                if (!(sample instanceof SwerveSample swerve))
+                    throw new IllegalStateException("Choreo path '" + path.name() + "' is not a swerve trajectory.");
+                state.output = followAction(swerve, context.dtSeconds());
+            });
+            for (var marker : state.trajectory.events()) {
+                if (marker.timestamp <= time && state.triggeredMarkers.add(marker)) {
+                    Action action = path.markers().get(marker.event);
+                    if (action != null) state.activeMarkers.put(marker.event, action);
+                }
+            }
         }
 
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        private static Optional<Trajectory<? extends TrajectorySample<?>>> loadAnyTrajectory(String trajectoryName) {
-            Optional<? extends Trajectory> trajectory = Choreo.loadTrajectory(trajectoryName);
-            return (Optional<Trajectory<? extends TrajectorySample<?>>>) (Optional<?>) trajectory;
+        @Override public Action output(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
+            return requireActive(path).output;
+        }
+
+        @Override public Map<String, Action> activeMarkers(
+                PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
+            return java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(requireActive(path).activeMarkers));
+        }
+
+        @Override public boolean isFinished(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
+            ActivePath state = requireActive(path);
+            if (context.timeInStateSeconds() < state.trajectory.getTotalTime()) return false;
+            if (!state.finalSampleEvaluated) {
+                state.finalSampleEvaluated = true;
+                return false;
+            }
+            return true;
+        }
+
+        @Override public void end(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context, boolean interrupted) {
+            active.remove(path);
+        }
+
+        private ActivePath requireActive(PathAction path) {
+            ActivePath value = active.get(path);
+            if (value == null) throw new IllegalStateException("Choreo path was not initialized: " + path.key());
+            return value;
+        }
+    }
+
+    private Action resetAction(Pose2d initialPose) {
+        return follower == null ? resetPose.apply(initialPose) : follower.resetPose(initialPose);
+    }
+
+    private Action followAction(SwerveSample sample, double dtSeconds) {
+        if (follower == null) {
+            return Objects.requireNonNull(followSample.apply(sample), "followSample returned null");
+        }
+        return follower.follow(new SwervePathSample(
+                sample.getPose(),
+                new RobotVelocity(sample.vx, sample.vy, sample.omega)), dtSeconds);
+    }
+
+    private static final class ActivePath {
+        private final Trajectory<? extends TrajectorySample<?>> trajectory;
+        private final boolean mirrored;
+        private final Set<Object> triggeredMarkers = new HashSet<>();
+        private final Map<String, Action> activeMarkers = new java.util.LinkedHashMap<>();
+        private Action output;
+        private boolean finalSampleEvaluated;
+        private ActivePath(Trajectory<? extends TrajectorySample<?>> trajectory, boolean mirrored) {
+            this.trajectory = trajectory; this.mirrored = mirrored;
         }
     }
 }

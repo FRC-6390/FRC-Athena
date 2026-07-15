@@ -12,7 +12,6 @@ public final class Robot extends AthenaRobot {
 
     @SuppressWarnings("unused")
     public final HookBinding initializeAutos = Events.robotInit().onStart(() -> {
-        drive.configurePathPlanner();
-        athena().auto(autos.runtime, autos.customMarkers);
+        athena().paths(autos, autos.context.choreo).auto(autos.runtime);
     });
 }

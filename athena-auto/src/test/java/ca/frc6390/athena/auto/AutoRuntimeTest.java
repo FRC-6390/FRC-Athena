@@ -1,13 +1,13 @@
 package ca.frc6390.athena.auto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ca.frc6390.athena.commands.CommandAction;
-import ca.frc6390.athena.mechanism.core.MechanismContext;
-import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.Paths;
 import java.util.List;
@@ -16,151 +16,42 @@ import org.junit.jupiter.api.Test;
 
 class AutoRuntimeTest {
     @Test
-    void indexesNormalizedRoutineNamesAndRejectsDuplicates() {
-        CommandAction Action = CommandAction.create("score").build();
-
-        AutoRuntime runtime = Autos.runtime(Autos.routine(" score ", Action), Autos.routine("leave", Action));
-
+    void indexesNamesAndRejectsDuplicates() {
+        Action action = Actions.waitSeconds(1.0);
+        AutoRuntime runtime = Autos.runtime(Autos.routine(" score ", action), Autos.routine("leave", action));
         assertEquals(List.of("score", "leave"), List.copyOf(runtime.routineNames()));
-        assertTrue(runtime.find("score").isPresent());
         assertEquals("score", runtime.selectedName());
+        assertTrue(runtime.find(" score ").isPresent());
         assertThrows(IllegalArgumentException.class,
-                () -> Autos.runtime(Autos.routine("score", Action), Autos.routine(" score ", Action)));
+                () -> Autos.runtime(Autos.routine("score", action), Autos.routine(" score ", action)));
     }
 
     @Test
-    void providerBackedRoutineLoadsSelectedStateLazilyAndResetsIt() {
-        FakeProvider provider = new FakeProvider();
-        AutoRoutine routine = Autos.path("drive", provider, " taxi ");
-        AutoRuntime runtime = Autos.runtime(routine);
-
-        CommandAction first = runtime.selectedState();
-        CommandAction second = runtime.selectedState();
-        runtime.reset();
-        CommandAction third = runtime.selectedState();
-
-        assertSame(first, second);
-        assertEquals("pathplanner:taxi", first.name());
-        assertEquals("pathplanner:taxi", third.name());
-        assertEquals(2, provider.loads.get());
-        assertEquals(Paths.pathPlanner("taxi"), provider.path(" taxi "));
+    void selectedActionIsCreatedOncePerRunAndOwnedByMechanismScheduler() {
+        AtomicInteger creations = new AtomicInteger();
+        AutoRuntime runtime = Autos.runtime(Autos.routine("auto", () -> {
+            creations.incrementAndGet();
+            return Actions.waitSeconds(1.0);
+        }));
+        Action first = runtime.initialize();
+        assertSame(first, runtime.initialize());
+        assertSame(first, runtime.end().orElseThrow());
+        Action second = runtime.initialize();
+        assertNotSame(first, second);
+        assertEquals(2, creations.get());
     }
 
     @Test
-    void markerBindingsAreValidatedByRoutine() {
-        CommandAction markerState = CommandAction.create("shoot").build();
-
-        AutoRoutine routine = Autos.routine(
-                "score",
-                CommandAction.create("score").build(),
-                Autos.marker(" shoot ", markerState),
-                Autos.marker("intake", markerState));
-
-        assertEquals(List.of("shoot", "intake"), routine.markers().stream().map(PathMarkerBinding::marker).toList());
-        assertThrows(IllegalArgumentException.class,
-                () -> Autos.routine(
-                        "bad",
-                        CommandAction.create("bad").build(),
-                        Autos.marker("same", markerState),
-                        Autos.marker(" same ", markerState)));
-    }
-
-    @Test
-    void pathGraphIndexesAndDispatchesMarkerCommands() {
-        AtomicInteger initialize = new AtomicInteger();
-        AtomicInteger execute = new AtomicInteger();
-        AtomicInteger end = new AtomicInteger();
-        AtomicInteger finishedChecks = new AtomicInteger();
-        CommandAction markerState = CommandAction.create("shoot")
-                .onInitialize(initialize::incrementAndGet)
-                .onExecute(execute::incrementAndGet)
-                .until(() -> finishedChecks.incrementAndGet() >= 2)
-                .onEnd(end::incrementAndGet)
-                .build();
-        PathGraph graph = PathGraph.of(Autos.routine(
-                "score",
-                CommandAction.create("score").build(),
-                Autos.marker(" shoot ", markerState)));
-
-        assertEquals(List.of("shoot"), List.copyOf(graph.markerNames()));
-        assertSame(markerState, graph.marker("shoot").orElseThrow());
-        assertEquals(false, graph.trigger(" shoot "));
-        assertEquals(true, graph.trigger("shoot"));
-        assertEquals(true, graph.trigger("shoot"));
-
-        assertEquals(2, initialize.get());
-        assertEquals(3, execute.get());
-        assertEquals(2, end.get());
-    }
-
-    @Test
-    void pathGraphRejectsDuplicateMarkersAcrossRoutinesAndEndsActiveMarkers() {
-        AtomicInteger end = new AtomicInteger();
-        CommandAction markerState = CommandAction.create("hold")
-                .onEnd(end::incrementAndGet)
-                .build();
-
-        PathGraph graph = PathGraph.of(Autos.routine(
-                "one",
-                CommandAction.create("one").build(),
-                Autos.marker("hold", markerState)));
-
-        graph.trigger("hold");
-        graph.endAll(true);
-
-        assertEquals(1, end.get());
-        assertThrows(IllegalArgumentException.class,
-                () -> PathGraph.of(
-                        Autos.routine("one", CommandAction.create("one").build(), Autos.marker("same", markerState)),
-                        Autos.routine("two", CommandAction.create("two").build(), Autos.marker(" same ", markerState))));
-    }
-
-    @Test
-    void ownsSelectedCommandLifecycle() {
-        AtomicInteger initialize = new AtomicInteger();
-        AtomicInteger execute = new AtomicInteger();
-        AtomicInteger end = new AtomicInteger();
-        AtomicInteger finishedChecks = new AtomicInteger();
-        CommandAction Action = CommandAction.create("two-cycle")
-                .onInitialize(initialize::incrementAndGet)
-                .onExecute(execute::incrementAndGet)
-                .until(() -> finishedChecks.incrementAndGet() >= 2)
-                .onEnd(end::incrementAndGet)
-                .build();
-        AutoRuntime runtime = Autos.runtime(Autos.routine("auto", Action));
-
-        assertEquals(false, runtime.periodic());
-        assertEquals(true, runtime.periodic());
-        runtime.execute();
-        runtime.end(true);
-
-        assertEquals(2, initialize.get());
-        assertEquals(3, execute.get());
-        assertEquals(2, end.get());
-    }
-
-    private static final class FakeProvider implements PathProvider {
-        private final AtomicInteger loads = new AtomicInteger();
-
-        @Override
-        public PathAction path(String pathName) {
-            return Paths.pathPlanner(pathName);
-        }
-
-        @Override
-        public CommandAction load(String pathName) {
-            loads.incrementAndGet();
-            return CommandAction.create(path(pathName).key()).build();
-        }
-
-        @Override
-        public PathRuntime runtime() {
-            return new PathRuntime() {
-                @Override
-                public boolean isFinished(PathAction path, MechanismContext context) {
-                    return true;
-                }
-            };
-        }
+    void pathActionsCarryNativeSplitsMarkersAndOdometryReset() {
+        Action shoot = Actions.waitSeconds(0.5);
+        PathAction path = Paths.choreo("Demo")
+                .split(2)
+                .resetOdometry()
+                .marker(" Shoot ", shoot);
+        assertEquals("choreo:Demo:split:2", path.key());
+        assertEquals(2, path.splitIndex());
+        assertTrue(path.resetsOdometry());
+        assertSame(shoot, path.markers().get("Shoot"));
+        assertThrows(IllegalArgumentException.class, () -> path.marker("Shoot", shoot));
     }
 }

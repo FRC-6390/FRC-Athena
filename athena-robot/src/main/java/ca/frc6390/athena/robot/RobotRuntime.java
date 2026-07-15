@@ -1,7 +1,10 @@
 package ca.frc6390.athena.robot;
 
 import ca.frc6390.athena.auto.AutoRuntime;
-import ca.frc6390.athena.auto.PathGraph;
+import ca.frc6390.athena.auto.AutoPlan;
+import ca.frc6390.athena.auto.AutoPreview;
+import ca.frc6390.athena.auto.PathProvider;
+import ca.frc6390.athena.auto.PathPreview;
 import ca.frc6390.athena.commands.CommandGraph;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
@@ -19,6 +22,10 @@ import ca.frc6390.athena.mechanism.core.MechanismScheduler;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
 import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.MechanismTraceSnapshot;
+import ca.frc6390.athena.mechanism.core.PathAction;
+import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
 import ca.frc6390.athena.runtime.measurement.MeasurementSnapshot;
@@ -33,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
@@ -48,7 +56,9 @@ public final class RobotRuntime {
     private final MechanismScheduler mechanisms;
     private final CommandGraph commands = new CommandGraph();
     private final List<AutoRuntime> autos = new ArrayList<>();
-    private final List<PathGraph> pathGraphs = new ArrayList<>();
+    private final List<PathProvider> pathProviders = new ArrayList<>();
+    private List<AutoPreview> cachedAutoPreviews = List.of();
+    private long cachedAutoPreviewRevision = Long.MIN_VALUE;
     private final List<VisionGraph> visionGraphs = new ArrayList<>();
     private final List<Localization> localizations = new ArrayList<>();
     private final List<MeasurementSnapshot> localizationSnapshots = new ArrayList<>();
@@ -416,18 +426,105 @@ public final class RobotRuntime {
     }
 
     /**
-     * Adds an autonomous runtime and its marker graph.
+     * Adds an autonomous runtime whose selected ordinary Action is owned by the mechanism scheduler.
      *
      * @param autoRuntime autonomous runtime
-     * @param pathGraph path marker graph
      * @return this runtime
      */
-    public RobotRuntime auto(AutoRuntime autoRuntime, PathGraph pathGraph) {
+    public RobotRuntime auto(AutoRuntime autoRuntime) {
         autos.add(Objects.requireNonNull(autoRuntime, "autoRuntime"));
-        if (pathGraph != null) {
-            pathGraphs.add(pathGraph);
-        }
+        cachedAutoPreviewRevision = Long.MIN_VALUE;
         return this;
+    }
+
+    /** Binds every PathAction reachable from a declaration object to its provider runtime. */
+    public RobotRuntime paths(Object declarations, PathProvider provider) {
+        Objects.requireNonNull(provider, "provider");
+        if (pathProviders.stream().noneMatch(value -> value == provider)) {
+            pathProviders.add(provider);
+            cachedAutoPreviewRevision = Long.MIN_VALUE;
+        }
+        mechanisms.paths(Objects.requireNonNull(declarations, "declarations"), path -> {
+            PathRuntime runtime = provider.runtime();
+            return simulationSession == null ? runtime : simulationPathRuntime(provider, runtime);
+        });
+        return this;
+    }
+
+    private PathRuntime simulationPathRuntime(PathProvider provider, PathRuntime delegate) {
+        return new PathRuntime() {
+            @Override
+            public void initialize(PathAction path, MechanismContext context) {
+                if (path.resetsOdometry()) {
+                    provider.preview(path).flatMap(preview -> preview.poses().stream().findFirst())
+                            .ifPresent(pose -> simulationSession.resetPose(new PoseSnapshot(
+                                    pose.xMeters(), pose.yMeters(), pose.headingRadians())));
+                }
+                delegate.initialize(path, context);
+            }
+
+            @Override
+            public void execute(PathAction path, MechanismContext context) {
+                delegate.execute(path, context);
+            }
+
+            @Override
+            public Action output(PathAction path, MechanismContext context) {
+                return delegate.output(path, context);
+            }
+
+            @Override
+            public Map<String, Action> activeMarkers(PathAction path, MechanismContext context) {
+                return delegate.activeMarkers(path, context);
+            }
+
+            @Override
+            public boolean isFinished(PathAction path, MechanismContext context) {
+                return delegate.isFinished(path, context);
+            }
+
+            @Override
+            public void end(PathAction path, MechanismContext context, boolean interrupted) {
+                delegate.end(path, context, interrupted);
+            }
+        };
+    }
+
+    /** Builds dashboard-safe previews of the currently selected autonomous Actions. */
+    public List<AutoPreview> selectedAutoPreviews() {
+        long revision = 1L;
+        for (AutoRuntime auto : autos) revision = 31L * revision + auto.revision();
+        for (PathProvider provider : pathProviders) revision = 31L * revision + provider.previewRevision();
+        if (revision == cachedAutoPreviewRevision) return cachedAutoPreviews;
+
+        List<AutoPreview> previews = new ArrayList<>();
+        for (AutoRuntime auto : autos) {
+            AutoPlan plan = AutoPlan.inspect(auto.preparedAction());
+            List<String> steps = new ArrayList<>(plan.steps());
+            List<PathPreview> paths = new ArrayList<>();
+            for (var path : plan.paths()) {
+                boolean found = false;
+                for (PathProvider provider : pathProviders) {
+                    try {
+                        var preview = provider.preview(path);
+                        if (preview.isPresent()) {
+                            paths.add(preview.get());
+                            found = true;
+                            break;
+                        }
+                    } catch (RuntimeException exception) {
+                        steps.add("PREVIEW ERROR " + path.key() + ": " + exception.getMessage());
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) steps.add("NO GEOMETRY " + path.key());
+            }
+            previews.add(new AutoPreview(auto.selectedName(), steps, paths));
+        }
+        cachedAutoPreviews = List.copyOf(previews);
+        cachedAutoPreviewRevision = revision;
+        return cachedAutoPreviews;
     }
 
     /**
@@ -461,6 +558,20 @@ public final class RobotRuntime {
      */
     public List<ResolvedOutput> robotPeriodic(double nowSeconds, double dtSeconds) {
         return periodic(nowSeconds, dtSeconds, LifecycleMode.ROBOT, true, false, false);
+    }
+
+    /**
+     * Returns traces captured by the latest mechanism cycle. This method performs no hardware I/O.
+     *
+     * @return latest mechanism traces
+     */
+    public List<MechanismTraceSnapshot> mechanismTraces() {
+        return mechanisms.traceSnapshots();
+    }
+
+    /** Returns mechanism-owned telemetry and live-tuning declarations. */
+    public Map<String, ca.frc6390.athena.mechanism.core.TelemetryValue> mechanismTelemetry() {
+        return mechanisms.telemetryValues();
     }
 
     /**
@@ -501,8 +612,7 @@ public final class RobotRuntime {
      * @return mechanism outputs
      */
     public List<ResolvedOutput> disabledPeriodic(double nowSeconds, double dtSeconds) {
-        autos.forEach(auto -> auto.end(true));
-        pathGraphs.forEach(graph -> graph.endAll(true));
+        endAutos();
         commands.cancelAll();
         return periodic(nowSeconds, dtSeconds, LifecycleMode.DISABLED, false, false, false);
     }
@@ -535,19 +645,23 @@ public final class RobotRuntime {
         hardwareGraph.refreshInputs();
         visionGraphs.forEach(VisionGraph::refresh);
         refreshLocalizations(safeMechanismContext);
-        if (safeEventContext.mode() == LifecycleMode.AUTONOMOUS
-                && safeEventContext.phase() == LifecyclePhase.PERIODIC) {
-            autos.forEach(AutoRuntime::periodic);
-        }
+        boolean autonomous = safeEventContext.mode() == LifecycleMode.AUTONOMOUS && safeEventContext.enabled();
+        // Autonomous-init hooks select the routine. Start it on the first periodic cycle,
+        // after those hooks have run, so the default routine is never briefly scheduled.
+        if (autonomous && safeEventContext.phase() == LifecyclePhase.PERIODIC) startAutos();
+        else if (!safeEventContext.enabled()
+                || safeEventContext.phase() == LifecyclePhase.EXIT
+                || (safeEventContext.mode() != LifecycleMode.AUTONOMOUS
+                        && safeEventContext.phase() == LifecyclePhase.INIT)) endAutos();
         if (!safeEventContext.enabled()) {
-            autos.forEach(auto -> auto.end(true));
-            pathGraphs.forEach(graph -> graph.endAll(true));
             commands.cancelAll();
         } else {
             commands.periodic();
         }
         List<ResolvedOutput> outputs = runMechanisms(safeMechanismContext, safeEventContext);
-        if (safeMechanismContext.simulation() && simulationSession != null) {
+        if (safeMechanismContext.simulation()
+                && simulationSession != null
+                && safeEventContext.mode() == LifecycleMode.SIMULATION) {
             publishSimulationStep(
                     safeMechanismContext.nowSeconds(),
                     safeMechanismContext.dtSeconds(),
@@ -601,6 +715,16 @@ public final class RobotRuntime {
             return simulationSession.withDigitalInputs(() -> mechanisms.periodic(mechanismContext, eventContext));
         }
         return mechanisms.periodic(mechanismContext, eventContext);
+    }
+
+    private void startAutos() {
+        for (AutoRuntime auto : autos) {
+            if (!auto.active()) mechanisms.request(auto.initialize());
+        }
+    }
+
+    private void endAutos() {
+        for (AutoRuntime auto : autos) auto.end().ifPresent(mechanisms::cancel);
     }
 
     private void refreshLocalizations(MechanismContext context) {

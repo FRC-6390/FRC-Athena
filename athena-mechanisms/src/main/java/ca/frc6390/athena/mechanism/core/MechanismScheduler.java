@@ -120,8 +120,14 @@ public final class MechanismScheduler {
 
     public MechanismScheduler paths(Object root, Function<PathAction, PathRuntime> runtimeFactory) {
         Objects.requireNonNull(runtimeFactory, "runtimeFactory");
+        if (runtimes.size() != 1) {
+            throw new IllegalStateException("Path declarations require exactly one registered mechanism root.");
+        }
+        Mechanism owner = runtimes.keySet().iterator().next();
+        RequestTarget target = new RequestTarget(owner, owner);
         for (PathAction path : PathIntrospector.inspect(root)) {
             path(path, runtimeFactory.apply(path));
+            indexDeclarationTarget(path, target);
         }
         return this;
     }
@@ -180,6 +186,85 @@ public final class MechanismScheduler {
 
     public List<Mechanism> mechanisms() {
         return List.copyOf(runtimes.keySet());
+    }
+
+    /** Returns custom and writable telemetry using stable mechanism field paths. */
+    public Map<String, TelemetryValue> telemetryValues() {
+        return graph.telemetry(runtimes.keySet(), resolver.overrides());
+    }
+
+    /**
+     * Returns the latest execution traces without refreshing hardware.
+     *
+     * @return latest mechanism traces
+     */
+    public List<MechanismTraceSnapshot> traceSnapshots() {
+        List<MechanismTraceSnapshot> traces = new ArrayList<>();
+        runtimes.forEach((mechanism, runtime) -> {
+            MechanismTraceSnapshot root = runtime.traceSnapshot();
+            traces.add(root);
+            addChildTraces(traces, mechanism, root.mechanism(), root, "");
+        });
+        return List.copyOf(traces);
+    }
+
+    private void addChildTraces(
+            List<MechanismTraceSnapshot> traces,
+            Mechanism parent,
+            String parentPath,
+            MechanismTraceSnapshot root,
+            String hookPrefix) {
+        graph.node(parent).children().forEach((fieldName, child) -> {
+            String path = parentPath + "/" + fieldName;
+            String childHookPrefix = hookPrefix + fieldName + ".";
+            traces.add(childTrace(path, child, childHookPrefix, root));
+            addChildTraces(traces, child, path, root, childHookPrefix);
+        });
+    }
+
+    private MechanismTraceSnapshot childTrace(
+            String path,
+            Mechanism mechanism,
+            String hookPrefix,
+            MechanismTraceSnapshot root) {
+        Set<String> motorNames = new LinkedHashSet<>();
+        for (Object declaration : graph.declarations(List.of(mechanism))) {
+            if (declaration instanceof MotorDevice motor) {
+                motorNames.add(motor.defaultName());
+            }
+        }
+        List<MechanismTraceSnapshot.ActionCandidate> candidates = root.candidates().stream()
+                .filter(candidate -> candidate.motors().stream().anyMatch(motorNames::contains))
+                .toList();
+        List<MechanismTraceSnapshot.Control> controls = root.controls().stream()
+                .filter(control -> motorNames.contains(control.name()))
+                .toList();
+        List<MechanismTraceSnapshot.Motor> motors = root.motors().stream()
+                .filter(motor -> motorNames.contains(motor.name()))
+                .toList();
+        List<MechanismTraceSnapshot.Hook> hooks = root.hooks().stream()
+                .filter(hook -> hook.name().startsWith(hookPrefix))
+                .map(hook -> new MechanismTraceSnapshot.Hook(
+                        hook.name().substring(hookPrefix.length()),
+                        hook.sourceActive(),
+                        hook.active(),
+                        hook.triggeredThisCycle()))
+                .toList();
+        return new MechanismTraceSnapshot(
+                path,
+                root.timestampSeconds(),
+                root.timeInStateSeconds(),
+                root.enabled(),
+                root.requestedAction(),
+                root.requestedActionType(),
+                root.scheduledActionType(),
+                root.schedulerStep(),
+                root.schedulerComplete(),
+                root.activeLeaseCount(),
+                candidates,
+                controls,
+                motors,
+                hooks);
     }
 
     /**
@@ -337,6 +422,46 @@ public final class MechanismScheduler {
         return this;
     }
 
+    /** Cancels an Action and any marker/start leases it launched. */
+    public MechanismScheduler cancel(Action action) {
+        cancelNested(Objects.requireNonNull(action, "action"),
+                Collections.newSetFromMap(new IdentityHashMap<>()));
+        return this;
+    }
+
+    private void cancelNested(Action action, Set<Action> visited) {
+        if (action == null || !visited.add(action)) return;
+        releaseLease(action);
+        if (action instanceof PathAction path) {
+            path.markers().values().forEach(marker -> cancelNested(marker, visited));
+        } else if (action instanceof Actions.Sequence sequence) {
+            sequence.steps().forEach(step -> cancelNested(step.action(), visited));
+            cancelNested(sequence.next(), visited);
+        } else if (action instanceof Actions.Parallel parallel) {
+            parallel.Actions().forEach(child -> cancelNested(child, visited));
+        } else if (action instanceof Actions.Race race) {
+            race.Actions().forEach(child -> cancelNested(child, visited));
+        } else if (action instanceof Actions.Deadline deadline) {
+            deadline.Actions().forEach(child -> cancelNested(child, visited));
+        } else if (action instanceof Actions.Choice choice) {
+            cancelNested(choice.active(), visited); cancelNested(choice.inactive(), visited);
+        } else if (action instanceof Actions.WhenBranch branch) {
+            cancelNested(branch.active(), visited);
+        } else if (action instanceof Actions.Timeout timeout) {
+            cancelNested(timeout.action(), visited);
+        } else if (action instanceof Actions.WithinTolerance within) {
+            cancelNested(within.action(), visited);
+        } else if (action instanceof Actions.Conditional conditional) {
+            cancelNested(conditional.action(), visited); cancelNested(conditional.next(), visited);
+        } else if (action instanceof Action.Conditional conditional) {
+            cancelNested(conditional.action(), visited); cancelNested(conditional.next(), visited);
+        } else if (action instanceof Actions.Then then) {
+            cancelNested(then.action(), visited); cancelNested(then.next(), visited);
+        } else if (action instanceof Action.Then then) {
+            cancelNested(then.action(), visited); cancelNested(then.next(), visited);
+        }
+    }
+
     public Action action(Mechanism mechanism) {
         return runtimeFor(mechanism).action();
     }
@@ -396,12 +521,19 @@ public final class MechanismScheduler {
 
     private MechanismRuntime runtime(Mechanism mechanism) {
         MechanismNode node = graph.node(mechanism);
+        Map<String, Object> runtimeDeclarations = new LinkedHashMap<>(node.declarations());
+        int declarationIndex = 0;
+        for (Object declaration : graph.declarations(List.of(mechanism))) {
+            if (!runtimeDeclarations.containsValue(declaration)) {
+                runtimeDeclarations.put("runtimeDeclaration" + declarationIndex++, declaration);
+            }
+        }
         MechanismNode runtimeNode = new MechanismNode(
                 node.name(),
                 node.mechanism(),
                 node.children(),
                 node.Actions(),
-                node.declarations(),
+                runtimeDeclarations,
                 graph.hooks(mechanism));
         HookRuntime.LeaseController leases = new HookRuntime.LeaseController() {
             @Override

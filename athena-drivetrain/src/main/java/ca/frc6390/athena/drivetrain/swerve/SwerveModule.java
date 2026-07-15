@@ -19,6 +19,7 @@ import java.util.Objects;
 /**
  * Base type for a swerve module declared as a specialized mechanism.
  */
+@SuppressWarnings("this-escape")
 public abstract class SwerveModule implements MechanismTemplate {
     private static final double TWO_PI = Math.PI * 2.0;
     private static final double HOLD_SPEED_EPSILON = 1.0e-3;

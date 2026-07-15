@@ -124,7 +124,9 @@ final class MechanismIntrospector {
                 || value instanceof ControlBinding
                 || value instanceof PathAction
                 || value instanceof SimModel
-                || value instanceof SimModel.Source;
+                || value instanceof SimModel.Source
+                || value instanceof TelemetryValue
+                || value instanceof TelemetrySource;
     }
 
     private static String defaultName(Class<?> type) {

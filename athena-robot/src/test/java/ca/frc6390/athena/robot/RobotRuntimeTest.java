@@ -200,42 +200,30 @@ class RobotRuntimeTest {
 
 
     @Test
-    void ownsCommandAndAutoLifecycleFromOneRoot() {
-        AtomicInteger commandExecute = new AtomicInteger();
-        AtomicInteger commandEnd = new AtomicInteger();
-        AtomicInteger autoExecute = new AtomicInteger();
-        AtomicInteger autoEnd = new AtomicInteger();
-        CommandAction command = CommandAction.create("drive")
-                .onExecute(commandExecute::incrementAndGet)
-                .onEnd(commandEnd::incrementAndGet)
-                .build();
-        CommandAction auto = CommandAction.create("auto")
-                .onExecute(autoExecute::incrementAndGet)
-                .onEnd(autoEnd::incrementAndGet)
-                .build();
-        AutoRuntime autoRuntime = Autos.runtime(Autos.routine("auto", auto));
-        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
-                .schedule(command)
-                .auto(autoRuntime, null);
+    void selectedAutoIsAnOrdinaryMechanismActionAndCancelsWhenDisabled() {
+        SimulationSession simulation = SimulationSession.create();
+        MotorMechanism mechanism = new MotorMechanism();
+        AutoRuntime autoRuntime = Autos.runtime(Autos.routine("auto", mechanism.initial));
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism).auto(autoRuntime);
 
-        runtime.robotPeriodic(0.0, 0.02);
         runtime.autoPeriodic(0.02, 0.02);
+        assertEquals(12.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+        assertTrue(autoRuntime.active());
         runtime.disabledPeriodic(0.04, 0.02);
-
-        assertEquals(2, commandExecute.get());
-        assertEquals(1, commandEnd.get());
-        assertEquals(1, autoExecute.get());
-        assertEquals(1, autoEnd.get());
+        assertEquals(0.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+        assertEquals(false, autoRuntime.active());
     }
 
     @Test
-    void genericAutonomousPeriodicRunsAutoOnce() {
-        AtomicInteger autoExecute = new AtomicInteger();
-        CommandAction auto = CommandAction.create("auto")
-                .onExecute(autoExecute::incrementAndGet)
-                .build();
-        AutoRuntime autoRuntime = Autos.runtime(Autos.routine("auto", auto));
-        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).auto(autoRuntime, null);
+    void genericAutonomousPeriodicInitializesSelectedActionOnlyOnce() {
+        MotorMechanism mechanism = new MotorMechanism();
+        AtomicInteger creations = new AtomicInteger();
+        AutoRuntime autoRuntime = Autos.runtime(Autos.routine("auto", () -> {
+            creations.incrementAndGet();
+            return mechanism.initial;
+        }));
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
+                .register(mechanism).auto(autoRuntime);
 
         runtime.periodic(
                 new ca.frc6390.athena.mechanism.core.MechanismContext(0.0, 0.0, 0.02, true, true, false),
@@ -247,7 +235,8 @@ class RobotRuntimeTest {
                         true,
                         false));
 
-        assertEquals(1, autoExecute.get());
+        runtime.autoPeriodic(0.02, 0.02);
+        assertEquals(1, creations.get());
     }
 
     @Test
@@ -307,6 +296,29 @@ class RobotRuntimeTest {
         MotorHandle handle = simulation.motor(mechanism.motor);
         assertEquals(0.5, handle.integratedPositionRotations(), 1.0e-9);
         assertEquals(1.0, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
+    }
+
+    @Test
+    void simulatedMatchLifecycleOnlyAdvancesPhysicsDuringSimulationPeriodic() {
+        MotorMechanism mechanism = new MotorMechanism();
+        SimulationSession simulation = SimulationSession.create();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
+        runtime.request(mechanism.initial);
+
+        runtime.periodic(
+                new ca.frc6390.athena.mechanism.core.MechanismContext(0.0, 0.0, 0.5, true, true, true),
+                new ca.frc6390.athena.mechanism.core.EventContext(
+                        0.0,
+                        0.5,
+                        ca.frc6390.athena.mechanism.core.LifecycleMode.AUTONOMOUS,
+                        ca.frc6390.athena.mechanism.core.LifecyclePhase.PERIODIC,
+                        true,
+                        true));
+
+        MotorHandle handle = simulation.motor(mechanism.motor);
+        assertEquals(0.0, handle.integratedPositionRotations(), 1.0e-9);
+        runtime.simulationPeriodic(0.5, 0.5);
+        assertEquals(0.5, handle.integratedPositionRotations(), 1.0e-9);
     }
 
     @Test

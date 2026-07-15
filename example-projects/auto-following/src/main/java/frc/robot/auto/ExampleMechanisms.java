@@ -1,41 +1,23 @@
 package frc.robot.auto;
 
-import edu.wpi.first.wpilibj2.command.Command;
-import edu.wpi.first.wpilibj2.command.Commands;
-import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Actions;
 
-/** Replace these print-only commands with the real superstructure command factories. */
-public final class ExampleMechanisms extends SubsystemBase {
-    private final ExampleRobotState state;
+/** Replace these print-only Actions with real mechanism Actions. */
+public final class ExampleMechanisms {
+    public final Action prepareToScore;
+    public final Action score;
+    public final Action intakeUntilCaptured;
+    public final Action stow;
 
     public ExampleMechanisms(ExampleRobotState state) {
-        this.state = state;
-    }
-
-    public Command prepareToScore() {
-        return Commands.runOnce(() -> System.out.println("prepare score"), this)
-                .withName("PrepareToScore");
-    }
-
-    public Command score() {
-        return Commands.sequence(
-                        Commands.runOnce(() -> System.out.println("score"), this),
-                        Commands.waitSeconds(0.20),
-                        Commands.runOnce(() -> state.setHasGamePiece(false), this))
-                .withName("Score");
-    }
-
-    public Command intakeUntilCaptured() {
-        return Commands.startEnd(
-                        () -> System.out.println("intake on"),
-                        () -> System.out.println("intake off"),
-                        this)
-                .until(state::hasGamePiece)
-                .withTimeout(1.5)
-                .withName("IntakeUntilCaptured");
-    }
-
-    public Command stow() {
-        return Commands.runOnce(() -> System.out.println("stow"), this).withName("Stow");
+        prepareToScore = Actions.doOnce(() -> System.out.println("prepare score"));
+        score = Actions.sequence()
+                .run(Actions.doOnce(() -> System.out.println("score")))
+                .then(Actions.waitSeconds(0.20))
+                .then(Actions.doOnce(() -> state.setHasGamePiece(false)));
+        intakeUntilCaptured = Actions.timeout(
+                Actions.waitUntil(state::hasGamePiece), 1.5);
+        stow = Actions.doOnce(() -> System.out.println("stow"));
     }
 }

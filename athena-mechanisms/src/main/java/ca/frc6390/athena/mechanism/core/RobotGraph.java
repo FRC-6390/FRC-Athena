@@ -56,6 +56,64 @@ final class RobotGraph {
         return simulations;
     }
 
+    Map<String, TelemetryValue> telemetry(
+            Collection<Mechanism> mechanisms, RuntimeOverrides overrides) {
+        Map<String, TelemetryValue> values = new LinkedHashMap<>();
+        Set<Mechanism> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Mechanism mechanism : mechanisms) {
+            collectTelemetry(node(mechanism).name(), mechanism, visited, values, overrides);
+        }
+        return Collections.unmodifiableMap(values);
+    }
+
+    private void collectTelemetry(
+            String path,
+            Mechanism mechanism,
+            Set<Mechanism> visited,
+            Map<String, TelemetryValue> values,
+            RuntimeOverrides overrides) {
+        if (!visited.add(mechanism)) return;
+        MechanismNode node = node(mechanism);
+        node.declarations().forEach((name, declaration) ->
+                addTelemetry(path, name, declaration, values, overrides));
+        node.children().forEach((name, child) ->
+                collectTelemetry(path + "/" + name, child, visited, values, overrides));
+    }
+
+    private static void addTelemetry(
+            String mechanismPath,
+            String valuePath,
+            Object declaration,
+            Map<String, TelemetryValue> values,
+            RuntimeOverrides overrides) {
+        if (declaration instanceof TelemetryValue value) {
+            values.put(mechanismPath + "/" + valuePath, value);
+        } else if (declaration instanceof MotorDevice motor) {
+            values.put(mechanismPath + "/" + valuePath + "/disabled", overrides.motorDisabled(motor));
+        } else if (declaration instanceof ControlBinding control) {
+            values.put(mechanismPath + "/" + valuePath + "/disabled", overrides.controlDisabled(control));
+            if (control.output() != null) {
+                values.put(mechanismPath + "/" + valuePath + "/output/disabled",
+                        overrides.motorDisabled(control.output()));
+            }
+            int customLoop = 0;
+            for (ControlLoop loop : control.loops()) {
+                String loopName = loop instanceof ca.frc6390.athena.mechanism.control.PidGains ? "pid"
+                        : loop instanceof ca.frc6390.athena.mechanism.control.FeedforwardGains ? "feedforward"
+                        : "loop" + customLoop++;
+                addTelemetry(mechanismPath, valuePath + "/" + loopName, loop, values, overrides);
+            }
+        } else if (declaration instanceof TelemetrySource source) {
+            source.telemetry().forEach((name, value) -> addTelemetry(
+                    mechanismPath, valuePath + "/" + name, value, values, overrides));
+        } else if (declaration instanceof Iterable<?> nested) {
+            int index = 0;
+            for (Object value : nested) {
+                addTelemetry(mechanismPath, valuePath + "/" + index++, value, values, overrides);
+            }
+        }
+    }
+
     Map<String, HookBinding> hooks(Mechanism mechanism) {
         Map<String, HookBinding> hooks = new LinkedHashMap<>();
         collectHooks("", mechanism, Collections.newSetFromMap(new IdentityHashMap<>()), hooks);

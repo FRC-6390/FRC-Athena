@@ -30,4 +30,9 @@ public interface ControlLoopRuntime {
      */
     default void applied(ControlLoopContext context, Output requested, Output applied) {
     }
+
+    /** Returns cached contributions from the most recent calculation without doing new work. */
+    default ControlLoopTrace trace() {
+        return ControlLoopTrace.ZERO;
+    }
 }

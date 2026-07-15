@@ -1,86 +1,32 @@
-# Autonomous and driver-assist examples
+# Native autonomous examples
 
-This project is a catalog, not one giant competition auto. Each selectable auto is implemented in
-its own Java file and registered by `AutoExamples`.
-
-## Complexity ladder
+This standalone robot shows Athena's autonomous API without a second command scheduler. Every auto
+is an ordinary `Action`, every path is a `PathAction`, and each selectable auto lives in one file.
 
 | File | What it demonstrates |
 | --- | --- |
-| `PathPlannerSimpleAuto` | One PathPlanner `.auto` file through `PathPlannerPathProvider` |
-| `PathPlannerMarkersAuto` | PathPlanner event markers through `NamedCommands` |
-| `PathPlannerMultiPathAuto` | Several path files and mechanism actions sequenced in Java |
-| `ConditionalPathPlannerAuto` | Sensor-dependent scoring and lane choices evaluated at the branch |
-| `DynamicPathPlannerAuto` | A short `PathPlannerPath` generated from live localization |
-| `ChoreoSimpleAuto` | One Choreo trajectory through `ChoreoPathAdapter` |
-| `ChoreoMarkersAuto` | Choreo events through `AutoFactory.bind` |
-| `ChoreoMultiPathSplitAuto` | Multiple trajectories, named events, and split indices |
-| `ConditionalChoreoAuto` | A Choreo routine that selects its next trajectory at runtime |
-| `CustomProviderMarkersAuto` | Athena `PathGraph` metadata driven by `ExampleMarkerPathProvider` |
-| `TeleopAssistRoutines` | Pathfinding, live-target paths, heading assist, and a scoring mini-auto |
+| `ChoreoMarkersAuto` | Bind Choreo event names directly to mechanism Actions |
+| `ChoreoMultiPathSplitAuto` | Sequence split points, a second path, and mechanism Actions |
+| `ConditionalChoreoAuto` | Choose the next path from live robot state at the branch point |
 
-The mechanism and drivetrain classes are deliberately small vendor-integration boundaries. Replace
-their method bodies with real mechanism actions, localization, and drivetrain output; keep the auto
-classes focused on orchestration.
+`ExampleDrive` owns the follower through `kinematics.follow(...)`; `AutoContext` only connects that
+follower to Choreo. It does not construct Choreo `AutoFactory`, adapt WPILib commands, or run
+another scheduler. `AutoExamples` only registers the one-file routines. Translation and heading
+gains are ordinary Athena gain objects, so their existing mechanism telemetry/runtime overrides
+are discovered automatically.
 
-## GUI assets expected by the examples
+Create these trajectories under `src/main/deploy/choreo` before executing the example:
 
-Create these in PathPlanner under `src/main/deploy/pathplanner`:
+- `Choreo-Markers-And-States`, with any desired `choreo-prepare-score`, `choreo-score`,
+  `choreo-intake`, and `choreo-stow` events.
+- `Choreo-Two-Piece`, with at least two splits, and `Choreo-Exit`.
+- `Choreo-Collect`, `Choreo-Return-To-Score`, and `Choreo-Safe-Exit`.
 
-- Autos: `PP-Leave`, `PP-Markers-And-States`, `PP-To-Center-Piece`,
-  `PP-Center-To-Score`, `PP-Exit`, `PP-Center-Lane`, and `PP-Safe-Lane`.
-- Named commands used by markers: `pp-prepare-score`, `pp-score`, `pp-intake`, and `pp-stow`.
-- Configure the robot in the PathPlanner GUI so `pathplanner/settings.json` is deployed.
+Publish Athena locally and compile the standalone project from the repository root:
 
-Create these in Choreo under `src/main/deploy/choreo`:
-
-- Trajectories: `Choreo-Leave`, `Choreo-Markers-And-States`, `Choreo-Two-Piece`,
-  `Choreo-Exit`, `Choreo-Collect`, `Choreo-Return-To-Score`, and `Choreo-Safe-Exit`.
-- Put at least two splits in `Choreo-Two-Piece`.
-- Events: the four `choreo-*` names registered by `ChoreoMarkersAuto`, plus
-  `deploy-intake` on split 0.
-
-Generated GUI files are season/tool-version-specific, so this catalog names the expected assets
-instead of checking in fake or stale trajectory JSON.
-
-## Marker ownership
-
-There are three marker systems in the sample, and they are intentionally not presented as one:
-
-- PathPlanner follows its own path timing and dispatches `NamedCommands`.
-- Choreo follows its own trajectory timing and dispatches factory bindings or routine triggers.
-- A custom Athena `PathProvider` can report its events to `PathGraph.trigger(name)`. The example
-  provider keeps calling `trigger` while each marker command is active, so multi-cycle markers finish.
-
-`Autos.marker(...)` records Athena marker metadata; it does not automatically connect a vendor
-event stream to `PathGraph`. A future bridge could normalize these, but doing it implicitly today
-would risk firing a command twice.
-
-## Teleop usage
-
-`TeleopAssistRoutines` returns ordinary WPILib commands. Schedule them through Athena control
-signals with `onTrue` or `whileTrue`, or through another deliberate command policy. The heading
-example owns the drivetrain while active but continuously mixes
-the driver's translation with automatic rotation. The pathfinding and generated-path examples own
-all drivetrain axes and should cancel immediately when the driver releases the assist control.
-
-The distinction matters: a full path follower and a default drive command both require the same
-subsystem, so they cannot run concurrently merely by putting them in parallel. Shared control needs
-an explicit ownership policy at the drivetrain boundary.
-
-Athena auto routines return `CommandAction`s. Vendor routines in this project are adapted with
-`WpilibCommands.wrap(...)`, which schedules the original WPILib command and therefore preserves its
-requirements, interruption behavior, and composed-command lifecycle.
-
-## Running the sample
-
-From the repository root, publish Athena locally and compile the standalone example:
-
-```powershell
-./gradlew.bat compileAutoFollowingExample
+```sh
+./gradlew compileAutoFollowingExample
 ```
 
-`AutoRuntime` selects the first registered routine by default, which is `PP 1 - Leave` here. The
-robot-init hook configures PathPlanner before registering the runtime with Athena. Vendor-backed
-routines will only execute successfully after their named assets and PathPlanner GUI robot settings
-have been deployed.
+The first registered routine is selected by default. A dashboard chooser can call
+`AutoRuntime.select(name)` during autonomous init when multiple routines are deployed.

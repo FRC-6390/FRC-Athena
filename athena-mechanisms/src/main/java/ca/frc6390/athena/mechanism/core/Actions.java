@@ -154,6 +154,7 @@ public final class Actions {
         return new DoOnce(action);
     }
 
+
     public static Action doOnce(ActionBinding action) {
         return new RuntimeAction(action);
     }
@@ -652,7 +653,8 @@ public final class Actions {
 
         @Override
         public Sequence then(Action action) {
-            next = Objects.requireNonNull(action, "action");
+            Action safeAction = Objects.requireNonNull(action, "action");
+            next = next == null ? safeAction : Actions.then(next, safeAction);
             return this;
         }
 

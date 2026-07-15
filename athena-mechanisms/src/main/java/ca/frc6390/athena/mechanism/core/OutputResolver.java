@@ -9,12 +9,16 @@ import java.util.Objects;
  * Resolves requested mechanism Actions into hardware output requests.
  */
 final class OutputResolver {
-    private OutputResolver() {
+    private final RuntimeOverrides overrides;
+    private OutputResolver(RuntimeOverrides overrides) {
+        this.overrides = Objects.requireNonNull(overrides, "overrides");
     }
 
     static OutputResolver empty() {
-        return new OutputResolver();
+        return new OutputResolver(new RuntimeOverrides());
     }
+
+    RuntimeOverrides overrides() { return overrides; }
 
     public ResolvedOutput resolve(OutputRequest request) {
         Objects.requireNonNull(request, "request");
@@ -123,17 +127,18 @@ final class OutputResolver {
         }
     }
 
-    private static OutputRequest outputRequest(ControlBinding control, MotorDevice motor, Output output) {
+    private OutputRequest outputRequest(ControlBinding control, MotorDevice motor, Output output) {
         if (output == null) {
             return null;
         }
-        if (control != null && (control.isDisabled()
-                || (control.output() != null && control.output().isDisabled()))) {
+        if (control != null && (overrides.disabled(control)
+                || (control.output() != null && overrides.disabled(control.output())))) {
             return null;
         }
-        if (motor != null && motor.isDisabled()) {
+        if (motor != null && overrides.disabled(motor)) {
             return null;
         }
+        if (control != null && control.motors().stream().anyMatch(overrides::disabled)) return null;
         if (control != null) {
             return OutputRequest.of(control, output);
         }
@@ -197,6 +202,26 @@ final class OutputResolver {
     }
 
     private static Output output(Action action) {
+        // Freeze dynamic suppliers once per runtime cycle. Output application, arbitration, and
+        // telemetry must all observe the same value without evaluating robot code again.
+        if (action instanceof Actions.DynamicMotorPercent value) {
+            return Outputs.percent(value.percent());
+        }
+        if (action instanceof Actions.DynamicMotorVoltage value) {
+            return Outputs.voltage(value.volts());
+        }
+        if (action instanceof Actions.DynamicControlPercent value) {
+            return Outputs.percent(value.percent());
+        }
+        if (action instanceof Actions.DynamicControlVoltage value) {
+            return Outputs.voltage(value.volts());
+        }
+        if (action instanceof Actions.DynamicControlPosition value) {
+            return Outputs.position(value.position());
+        }
+        if (action instanceof Actions.DynamicControlVelocity value) {
+            return Outputs.velocity(value.velocity());
+        }
         return action instanceof Output output ? output : null;
     }
 }

@@ -5,12 +5,17 @@ import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
+import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicReference;
+import edu.wpi.first.math.geometry.Pose2d;
 
 /**
  * Production swerve kinematics shared by drive actions, odometry, and optional simulation.
@@ -23,6 +28,7 @@ public final class SwerveKinematics implements SimModel.Source {
 
     private final List<Module> modules;
     private final double maxSpeedMetersPerSecond;
+    private final AtomicReference<RobotVelocity> requestedSimulationVelocity = new AtomicReference<>();
     private SimModel simulationModel;
 
     public SwerveKinematics(double maxSpeedMetersPerSecond, Module... modules) {
@@ -63,7 +69,9 @@ public final class SwerveKinematics implements SimModel.Source {
 
     /** Converts a requested robot-relative velocity into one composed module action. */
     public Action drive(RobotVelocity velocity) {
-        List<SwerveModuleTarget> targets = targets(velocity);
+        RobotVelocity safeVelocity = velocity == null ? RobotVelocity.zero() : velocity;
+        requestedSimulationVelocity.set(safeVelocity);
+        List<SwerveModuleTarget> targets = targets(safeVelocity);
         Action[] actions = new Action[modules.size()];
         for (int index = 0; index < modules.size(); index++) {
             actions[index] = modules.get(index).module().target(targets.get(index));
@@ -123,6 +131,17 @@ public final class SwerveKinematics implements SimModel.Source {
         return maxSpeedMetersPerSecond;
     }
 
+    /** Creates the path follower for this exact module layout. */
+    public SwervePathFollower follow(
+            FollowerBackend backend,
+            Supplier<Pose2d> pose,
+            Function<Pose2d, Action> resetPose,
+            PidGains translationGains,
+            PidGains headingGains) {
+        return new SwervePathFollower(
+                this, backend, pose, resetPose, translationGains, headingGains);
+    }
+
     /** Creates odometry backed by this layout's measured wheel travel and an IMU heading. */
     public SwerveOdometry odometry(ImuSource imu) {
         return new SwerveOdometry(this, imu);
@@ -156,12 +175,15 @@ public final class SwerveKinematics implements SimModel.Source {
     }
 
     private void stepPose(SimModel.Context context, double seconds) {
-        List<SwerveModuleTarget> states = new ArrayList<>(modules.size());
-        for (Module positioned : modules) {
-            SwerveModule module = positioned.module();
-            states.add(new SwerveModuleTarget(moduleSpeed(module, context), moduleAngle(module, context)));
+        RobotVelocity robot = requestedSimulationVelocity.getAndSet(null);
+        if (robot == null) {
+            List<SwerveModuleTarget> states = new ArrayList<>(modules.size());
+            for (Module positioned : modules) {
+                SwerveModule module = positioned.module();
+                states.add(new SwerveModuleTarget(moduleSpeed(module, context), moduleAngle(module, context)));
+            }
+            robot = velocity(states);
         }
-        RobotVelocity robot = velocity(states);
         PoseSnapshot pose = context.pose();
         double cos = Math.cos(pose.headingRadians());
         double sin = Math.sin(pose.headingRadians());

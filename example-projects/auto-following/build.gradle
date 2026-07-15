@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'edu.wpi.first.GradleRIO' version '2026.1.1'
+    id 'edu.wpi.first.GradleRIO' version '2026.2.1'
 }
 
 java {
@@ -12,7 +12,6 @@ repositories {
     mavenLocal()
     mavenCentral()
     maven { url = uri('file:///C:/Users/Public/wpilib/2026/maven') }
-    maven { url = uri('https://maven.frc6390.ca/FRC-6390/FRC-Athena') }
     maven { url = uri('https://frcmaven.wpi.edu/artifactory/release') }
     maven { url = uri('https://3015rangerrobotics.github.io/pathplannerlib/repo') }
     maven { url = uri('https://frcmaven.wpi.edu/artifactory/sleipnirgroup-mvn-release/') }
@@ -45,7 +44,6 @@ dependencies {
     annotationProcessor wpi.java.deps.wpilibAnnotations()
     implementation wpi.java.deps.wpilib()
     implementation wpi.java.vendor.java()
-    implementation 'com.pathplanner.lib:PathplannerLib-java:2026.1.2'
     implementation 'choreo:ChoreoLib-java:2026.0.3'
 
     roborioDebug wpi.java.deps.wpilibJniDebug(wpi.platforms.roborio)
