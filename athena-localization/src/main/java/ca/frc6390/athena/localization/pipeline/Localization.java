@@ -50,6 +50,7 @@ public final class Localization implements PoseSignal {
     private final double groupWindowSeconds;
     private final double maxTranslationDisagreementMeters;
     private final double maxHeadingDisagreementRadians;
+    private final int minimumSourceCount;
     private final double innovationGate;
     private final MeasurementStdDevs stateStdDevs;
     private final MeasurementStdDevs defaultVisionStdDevs;
@@ -65,6 +66,7 @@ public final class Localization implements PoseSignal {
                 0.03,
                 Double.POSITIVE_INFINITY,
                 Double.POSITIVE_INFINITY,
+                1,
                 Double.POSITIVE_INFINITY,
                 DEFAULT_STATE_STD_DEVS,
                 DEFAULT_VISION_STD_DEVS,
@@ -80,6 +82,7 @@ public final class Localization implements PoseSignal {
             double groupWindowSeconds,
             double maxTranslationDisagreementMeters,
             double maxHeadingDisagreementRadians,
+            int minimumSourceCount,
             double innovationGate,
             MeasurementStdDevs stateStdDevs,
             MeasurementStdDevs defaultVisionStdDevs,
@@ -92,6 +95,7 @@ public final class Localization implements PoseSignal {
         this.groupWindowSeconds = groupWindowSeconds;
         this.maxTranslationDisagreementMeters = maxTranslationDisagreementMeters;
         this.maxHeadingDisagreementRadians = maxHeadingDisagreementRadians;
+        this.minimumSourceCount = minimumSourceCount;
         this.innovationGate = innovationGate;
         this.stateStdDevs = Objects.requireNonNull(stateStdDevs, "stateStdDevs");
         this.defaultVisionStdDevs = Objects.requireNonNull(defaultVisionStdDevs, "defaultVisionStdDevs");
@@ -150,6 +154,16 @@ public final class Localization implements PoseSignal {
         return configured(debugName, publishNetworkTables, groupWindowSeconds,
                 maxTranslationDisagreementMeters, nonNegative(radians, "Heading disagreement"),
                 innovationGate, stateStdDevs, defaultVisionStdDevs);
+    }
+
+    /** Requires a fused camera group to contain at least this many distinct sources. */
+    public Localization minimumSourceCount(int count) {
+        if (count < 1) {
+            throw new IllegalArgumentException("Minimum source count must be at least one.");
+        }
+        return new Localization(strategy, inputs, filters, debugName, publishNetworkTables,
+                groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
+                count, innovationGate, stateStdDevs, defaultVisionStdDevs, state);
     }
 
     /** Rejects vision whose squared residual divided by measurement variance exceeds this value. */
@@ -458,11 +472,13 @@ public final class Localization implements PoseSignal {
                 best = cluster;
             }
         }
-        return best;
+        return distinctSourceCount(best) >= minimumSourceCount ? best : List.of();
     }
 
     private boolean agrees(PoseMeasurementSample first, PoseMeasurementSample second) {
-        if (translationDistance(first.pose(), second.pose()) > maxTranslationDisagreementMeters) {
+        if (trustsTranslation(first)
+                && trustsTranslation(second)
+                && translationDistance(first.pose(), second.pose()) > maxTranslationDisagreementMeters) {
             return false;
         }
         if (!trustsHeading(first) || !trustsHeading(second)) {
@@ -476,9 +492,19 @@ public final class Localization implements PoseSignal {
         return sample.stdDevs() == null || sample.stdDevs().headingRadians() <= Math.PI;
     }
 
+    private static boolean trustsTranslation(PoseMeasurementSample sample) {
+        return sample.stdDevs() == null
+                || (sample.stdDevs().xMeters() < 1.0e6 && sample.stdDevs().yMeters() < 1.0e6);
+    }
+
     private static boolean betterCluster(
             List<PoseMeasurementSample> candidate,
             List<PoseMeasurementSample> current) {
+        int candidateSources = distinctSourceCount(candidate);
+        int currentSources = distinctSourceCount(current);
+        if (candidateSources != currentSources) {
+            return candidateSources > currentSources;
+        }
         if (candidate.size() != current.size()) {
             return candidate.size() > current.size();
         }
@@ -494,6 +520,13 @@ public final class Localization implements PoseSignal {
         }
         return candidate.stream().mapToDouble(PoseMeasurementSample::timestampSeconds).max().orElse(0.0)
                 > current.stream().mapToDouble(PoseMeasurementSample::timestampSeconds).max().orElse(0.0);
+    }
+
+    private static int distinctSourceCount(List<PoseMeasurementSample> samples) {
+        return (int) samples.stream()
+                .map(sample -> sample.source() == null ? sample : sample.source())
+                .distinct()
+                .count();
     }
 
     private boolean accepts(Measurement measurement, PoseSnapshot pose) {
@@ -518,7 +551,7 @@ public final class Localization implements PoseSignal {
     private Localization copy(List<PoseSignal> nextInputs, List<LocalizationFilter> nextFilters) {
         return new Localization(strategy, nextInputs, nextFilters, debugName, publishNetworkTables,
                 groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
-                innovationGate, stateStdDevs, defaultVisionStdDevs, state);
+                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, state);
     }
 
     private Localization configured(
@@ -531,7 +564,8 @@ public final class Localization implements PoseSignal {
             MeasurementStdDevs processStdDevs,
             MeasurementStdDevs visionStdDevs) {
         return new Localization(strategy, inputs, filters, name, publish, groupWindow,
-                translationDisagreement, headingDisagreement, gate, processStdDevs, visionStdDevs, state);
+                translationDisagreement, headingDisagreement, minimumSourceCount,
+                gate, processStdDevs, visionStdDevs, state);
     }
 
     private static PoseSignal snapshot(List<Measurement> measurements) {
@@ -613,6 +647,8 @@ public final class Localization implements PoseSignal {
         private static final double RECOVERY_MAX_INTERVAL_SECONDS = 0.25;
         private static final double RECOVERY_TRANSLATION_METERS = 0.75;
         private static final double RECOVERY_HEADING_RADIANS = Math.toRadians(25.0);
+        private static final double RECOVERY_MAX_TRANSLATION_STEP_METERS = 0.25;
+        private static final double RECOVERY_MAX_HEADING_STEP_RADIANS = Math.toRadians(5.0);
         private final SwerveDriveKinematics kinematics;
         private final MeasurementStdDevs stateStdDevs;
         private final MeasurementStdDevs defaultVisionStdDevs;
@@ -678,7 +714,8 @@ public final class Localization implements PoseSignal {
                 visionRecovery.remove(source);
                 return;
             }
-            if (Double.isFinite(innovationGate) && innovation(sample, stdDevs) > innovationGate) {
+            boolean recovering = Double.isFinite(innovationGate) && innovation(sample, stdDevs) > innovationGate;
+            if (recovering) {
                 VisionRecovery recovery = visionRecovery.computeIfAbsent(source, ignored -> new VisionRecovery());
                 if (!recovery.accepts(sample)) {
                     return;
@@ -686,7 +723,8 @@ public final class Localization implements PoseSignal {
             } else {
                 visionRecovery.remove(source);
             }
-            estimator.addVisionMeasurement(toWpilib(sample.pose()), sample.timestampSeconds(), vector(stdDevs));
+            PoseSnapshot acceptedPose = recovering ? boundedRecoveryPose(sample) : sample.pose();
+            estimator.addVisionMeasurement(toWpilib(acceptedPose), sample.timestampSeconds(), vector(stdDevs));
         }
 
         private static final class VisionRecovery {
@@ -722,6 +760,24 @@ public final class Localization implements PoseSignal {
             Pose2d predicted = estimator.sampleAt(sample.timestampSeconds()).orElse(estimator.getEstimatedPosition());
             return Math.abs(wrapRadians(
                     sample.pose().headingRadians() - predicted.getRotation().getRadians()));
+        }
+
+        private PoseSnapshot boundedRecoveryPose(PoseMeasurementSample sample) {
+            Pose2d predicted = estimator.sampleAt(sample.timestampSeconds()).orElse(estimator.getEstimatedPosition());
+            double dx = sample.pose().xMeters() - predicted.getX();
+            double dy = sample.pose().yMeters() - predicted.getY();
+            double distance = Math.hypot(dx, dy);
+            double scale = distance > RECOVERY_MAX_TRANSLATION_STEP_METERS
+                    ? RECOVERY_MAX_TRANSLATION_STEP_METERS / distance
+                    : 1.0;
+            double dh = wrapRadians(sample.pose().headingRadians() - predicted.getRotation().getRadians());
+            double boundedHeading = predicted.getRotation().getRadians()
+                    + Math.max(-RECOVERY_MAX_HEADING_STEP_RADIANS,
+                            Math.min(RECOVERY_MAX_HEADING_STEP_RADIANS, dh));
+            return new PoseSnapshot(
+                    predicted.getX() + dx * scale,
+                    predicted.getY() + dy * scale,
+                    boundedHeading);
         }
 
         private static SwerveModulePosition[] positions(SwerveOdometry odometry) {

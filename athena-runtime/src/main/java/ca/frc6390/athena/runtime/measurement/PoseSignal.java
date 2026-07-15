@@ -56,4 +56,13 @@ public interface PoseSignal extends MeasurementSignal {
     default PoseSignal translationOnly() {
         return PoseSignals.translationOnly(this);
     }
+
+    /**
+     * Uses this source for field heading while leaving translation to odometry or other pose inputs.
+     *
+     * @return heading-only pose signal
+     */
+    default PoseSignal headingOnly() {
+        return PoseSignals.headingOnly(this);
+    }
 }

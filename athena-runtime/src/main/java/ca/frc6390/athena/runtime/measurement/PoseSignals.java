@@ -7,6 +7,7 @@ import java.util.function.Function;
 /** Pose-signal transformations shared by all pose-producing backends. */
 public final class PoseSignals {
     private static final double UNTRUSTED_HEADING_STD_DEV_RADIANS = 1.0e6;
+    private static final double UNTRUSTED_TRANSLATION_STD_DEV_METERS = 1.0e6;
 
     private PoseSignals() {
     }
@@ -36,6 +37,13 @@ public final class PoseSignals {
         Objects.requireNonNull(source, "source");
         return derived(source, measurements -> measurements.stream()
                 .map(PoseSignals::withoutHeading)
+                .toList());
+    }
+
+    static PoseSignal headingOnly(PoseSignal source) {
+        Objects.requireNonNull(source, "source");
+        return derived(source, measurements -> measurements.stream()
+                .map(PoseSignals::withoutTranslation)
                 .toList());
     }
 
@@ -69,6 +77,12 @@ public final class PoseSignals {
                     stdDevs.xMeters(),
                     stdDevs.yMeters(),
                     UNTRUSTED_HEADING_STD_DEV_RADIANS));
+        }
+        if (sample instanceof HeadingOnlyPoseMeasurement) {
+            return new HeadingOnlyPoseMeasurement(sample, MeasurementStdDevs.of(
+                    UNTRUSTED_TRANSLATION_STD_DEV_METERS,
+                    UNTRUSTED_TRANSLATION_STD_DEV_METERS,
+                    stdDevs.headingRadians()));
         }
         return new ConfiguredPoseMeasurement(sample, stdDevs);
     }
@@ -118,6 +132,18 @@ public final class PoseSignals {
         return new TranslationOnlyPoseMeasurement(sample, stdDevs);
     }
 
+    private static Measurement withoutTranslation(Measurement measurement) {
+        if (!(measurement instanceof PoseMeasurementSample sample)) {
+            return measurement;
+        }
+        MeasurementStdDevs configured = sample.stdDevs();
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(
+                UNTRUSTED_TRANSLATION_STD_DEV_METERS,
+                UNTRUSTED_TRANSLATION_STD_DEV_METERS,
+                configured == null ? Double.POSITIVE_INFINITY : configured.headingRadians());
+        return new HeadingOnlyPoseMeasurement(sample, stdDevs);
+    }
+
     private record ConfiguredPoseMeasurement(
             PoseMeasurementSample delegate,
             MeasurementStdDevs stdDevs) implements PoseMeasurementSample {
@@ -140,6 +166,24 @@ public final class PoseSignals {
             PoseMeasurementSample delegate,
             MeasurementStdDevs stdDevs) implements PoseMeasurementSample {
         private TranslationOnlyPoseMeasurement {
+            Objects.requireNonNull(delegate, "delegate");
+            Objects.requireNonNull(stdDevs, "stdDevs");
+        }
+
+        @Override public ca.frc6390.athena.runtime.filter.PoseSnapshot pose() { return delegate.pose(); }
+        @Override public ca.frc6390.athena.runtime.control.RobotVelocity speeds() { return delegate.speeds(); }
+        @Override public double timestampSeconds() { return delegate.timestampSeconds(); }
+        @Override public double latencySeconds() { return delegate.latencySeconds(); }
+        @Override public double ambiguity() { return delegate.ambiguity(); }
+        @Override public int targetCount() { return delegate.targetCount(); }
+        @Override public double averageTargetDistanceMeters() { return delegate.averageTargetDistanceMeters(); }
+        @Override public Object source() { return delegate.source(); }
+    }
+
+    private record HeadingOnlyPoseMeasurement(
+            PoseMeasurementSample delegate,
+            MeasurementStdDevs stdDevs) implements PoseMeasurementSample {
+        private HeadingOnlyPoseMeasurement {
             Objects.requireNonNull(delegate, "delegate");
             Objects.requireNonNull(stdDevs, "stdDevs");
         }

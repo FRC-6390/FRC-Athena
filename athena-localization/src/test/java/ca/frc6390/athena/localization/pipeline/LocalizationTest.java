@@ -159,6 +159,47 @@ class LocalizationTest {
     }
 
     @Test
+    void covarianceIntersectionRequiresDistinctCameraSources() {
+        Object firstCamera = new Object();
+        Object secondCamera = new Object();
+        Sample firstFrame = sample(2.0, 3.0, 0.1, 1.00, 0.02, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstCamera);
+        Sample secondFrameSameCamera = sample(2.02, 3.0, 0.1, 1.01, 0.02, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstCamera);
+        Localization oneCamera = Localizations.covarianceIntersection()
+                .input(signal(firstFrame, secondFrameSameCamera))
+                .minimumSourceCount(2);
+
+        assertTrue(oneCamera.measurements().isEmpty());
+
+        Sample agreeingSecondCamera = sample(2.01, 3.02, 0.12, 1.01, 0.02, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondCamera);
+        Localization twoCameras = Localizations.covarianceIntersection()
+                .input(signal(firstFrame, agreeingSecondCamera))
+                .minimumSourceCount(2);
+
+        assertEquals(1, twoCameras.measurements().size());
+    }
+
+    @Test
+    void headingOnlyConsensusIgnoresCameraTranslationDisagreement() {
+        PoseSignal first = signal(sample(1.0, 1.0, 0.10, 1.0, 0.02, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).headingOnly();
+        PoseSignal second = signal(sample(8.0, 6.0, 0.12, 1.0, 0.02, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).headingOnly();
+        Localization localization = Localizations.covarianceIntersection()
+                .input(first, second)
+                .maxTranslationDisagreementMeters(0.5)
+                .maxHeadingDisagreementRadians(0.1)
+                .minimumSourceCount(2);
+
+        assertEquals(1, localization.measurements().size());
+        PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
+        assertTrue(fused.stdDevs().xMeters() > 1.0e5);
+        assertEquals(4, fused.targetCount());
+    }
+
+    @Test
     void perSourceTagCovarianceAndDistanceScalingSurviveAFilterStage() {
         Object singleCamera = new Object();
         Object multiCamera = new Object();

@@ -93,7 +93,15 @@ class WpilibLocalizationParityTest {
         rig.stepAthenaOnly(0.04, vision(5.01, 2.0, 0.2, 0.04,
                 MeasurementStdDevs.of(0.2, 0.2, 0.1), camera));
 
-        assertTrue(rig.athena.pose().xMeters() > 0.0);
+        double firstCorrection = rig.athena.pose().xMeters();
+        assertTrue(firstCorrection > 0.0);
+        assertTrue(firstCorrection <= 0.25);
+
+        rig.stepAthenaOnly(0.06, vision(5.0, 2.0, 0.2, 0.06,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera));
+
+        assertTrue(rig.athena.pose().xMeters() > firstCorrection);
+        assertTrue(rig.athena.pose().xMeters() < 0.5);
     }
 
     @Test

@@ -78,6 +78,21 @@ class PoseSignalTest {
         assertEquals(1.0e6, result.stdDevs().headingRadians(), 1.0e-9);
     }
 
+    @Test
+    void headingOnlyPreservesHeadingCovarianceAndDisablesTranslationFusion() {
+        PoseMeasurementSample sample = Measurements.pose(new PoseSnapshot(1.0, 2.0, 0.5))
+                .visionMetadata(0.1, 2, 1.0);
+        PoseSignal configured = ((PoseSignal) () -> List.of(sample))
+                .headingOnly()
+                .multiTagStdDevs(0.2, 0.3, 0.1);
+
+        PoseMeasurementSample result = (PoseMeasurementSample) configured.measurements().get(0);
+
+        assertEquals(1.0e6, result.stdDevs().xMeters(), 1.0e-9);
+        assertEquals(1.0e6, result.stdDevs().yMeters(), 1.0e-9);
+        assertEquals(0.1, result.stdDevs().headingRadians(), 1.0e-9);
+    }
+
     private static final class CustomPoseMeasurement implements PoseMeasurementSample {
         @Override public PoseSnapshot pose() { return new PoseSnapshot(0.0, 0.0, 0.0); }
         @Override public ca.frc6390.athena.runtime.control.RobotVelocity speeds() {
