@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.localization.pipeline.Localization;
+import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
@@ -14,6 +17,7 @@ import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulationField;
 import ca.frc6390.athena.vision.runtime.VisionSimulationProvider;
 import ca.frc6390.athena.vision.runtime.VisionSimulationTarget;
+import ca.frc6390.athena.vision.runtime.VisionGraph;
 import ca.frc6390.athena.vision.runtime.VisionSimulations;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -98,5 +102,26 @@ class PhotonVisionSimulationProviderTest {
         PoseMeasurementSample pose = (PoseMeasurementSample) bound.pose().measurements().get(0);
         assertEquals(1, pose.targetCount());
         assertEquals(0.0, pose.pose().xMeters(), 1.0e-9);
+    }
+
+    @Test
+    void simulatedCameraCapturedBeforeBindingFeedsLocalizationThroughRuntimeCache() {
+        CameraDevice camera = Cameras.photonVision("localization-front")
+                .mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+        var declaredPose = camera.pose().singleTagStdDevs(0.2, 0.2, 0.1);
+        Localization localization = Localizations.latestValid().input(declaredPose);
+        VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
+                List.of(camera),
+                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, 5.0, 2.0, 1.0, 0.0)));
+        CameraDevice bound = simulation.bind(camera);
+        VisionGraph graph = VisionGraph.of(bound);
+
+        simulation.update(new PoseSnapshot(2.0, 2.0, 0.0));
+        graph.refresh();
+        localization.refresh(ActionContext.empty(), 1.0, 0.02);
+
+        assertEquals(2.0, localization.pose().xMeters(), 1.0e-9);
+        assertEquals(2.0, localization.pose().yMeters(), 1.0e-9);
+        assertEquals(1, localization.acceptedMeasurements().size());
     }
 }

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.vision.device;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -74,11 +75,7 @@ public final class GenericCameraDevice implements CameraDevice {
 
     @Override
     public PoseSignal pose() {
-        PoseSignal runtimeSignal = signals.runtimePoseSignal;
-        if (runtimeSignal != null) {
-            return runtimeSignal;
-        }
-        return sourcePose();
+        return new BoundPoseSignal(this, signals);
     }
 
     @Override
@@ -88,11 +85,7 @@ public final class GenericCameraDevice implements CameraDevice {
 
     @Override
     public TargetSignal targets() {
-        TargetSignal runtimeSignal = signals.runtimeTargetSignal;
-        if (runtimeSignal != null) {
-            return runtimeSignal;
-        }
-        return sourceTargets();
+        return new BoundTargetSignal(this, signals);
     }
 
     @Override
@@ -133,6 +126,36 @@ public final class GenericCameraDevice implements CameraDevice {
         private List<? extends Measurement> targetMeasurements() {
             List<? extends Measurement> values = targetMeasurements.get();
             return values == null ? List.of() : values;
+        }
+    }
+
+    /** Resolves the runtime cache lazily so declarations captured before startup stay live. */
+    private record BoundPoseSignal(GenericCameraDevice camera, SignalBinding signals) implements PoseSignal {
+        @Override
+        public List<Measurement> measurements() {
+            PoseSignal runtime = signals.runtimePoseSignal;
+            return runtime == null ? List.copyOf(signals.poseMeasurements()) : runtime.measurements();
+        }
+
+        @Override
+        public Map<String, Object> metadata() {
+            PoseSignal runtime = signals.runtimePoseSignal;
+            return runtime == null ? Map.of() : runtime.metadata();
+        }
+    }
+
+    /** Resolves the runtime cache lazily so declarations captured before startup stay live. */
+    private record BoundTargetSignal(GenericCameraDevice camera, SignalBinding signals) implements TargetSignal {
+        @Override
+        public List<Measurement> measurements() {
+            TargetSignal runtime = signals.runtimeTargetSignal;
+            return runtime == null ? List.copyOf(signals.targetMeasurements()) : runtime.measurements();
+        }
+
+        @Override
+        public Map<String, Object> metadata() {
+            TargetSignal runtime = signals.runtimeTargetSignal;
+            return runtime == null ? Map.of() : runtime.metadata();
         }
     }
 }

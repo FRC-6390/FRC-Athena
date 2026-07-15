@@ -230,6 +230,28 @@ public final class MechanismScheduler {
         return Set.copyOf(encoders);
     }
 
+    /** Returns every motor declaration required by the registered mechanism graph. */
+    public Set<MotorDevice> motorDevices() {
+        Set<MotorDevice> motors = new LinkedHashSet<>();
+        for (Object declaration : graph.declarations(runtimes.keySet())) {
+            collectMotors(declaration, motors);
+        }
+        return Set.copyOf(motors);
+    }
+
+    private static void collectMotors(Object declaration, Set<MotorDevice> motors) {
+        if (declaration instanceof MotorDevice motor) {
+            if (motor.follower() != null) {
+                collectMotors(motor.follower().leader(), motors);
+            }
+            motors.add(motor);
+        } else if (declaration instanceof ControlBinding control) {
+            control.motors().forEach(motor -> collectMotors(motor, motors));
+        } else if (declaration instanceof Iterable<?> values) {
+            values.forEach(value -> collectMotors(value, motors));
+        }
+    }
+
     private static void collectEncoders(Object declaration, Set<EncoderDevice> encoders) {
         if (declaration instanceof EncoderDevice encoder) {
             encoders.add(encoder);
@@ -246,13 +268,9 @@ public final class MechanismScheduler {
      * @return follower motor declarations
      */
     public Set<MotorDevice> followerMotors() {
-        Set<MotorDevice> followers = new LinkedHashSet<>();
-        for (Object declaration : graph.declarations(runtimes.keySet())) {
-            if (declaration instanceof MotorDevice motor && motor.follower() != null) {
-                followers.add(motor);
-            }
-        }
-        return Set.copyOf(followers);
+        return motorDevices().stream()
+                .filter(motor -> motor.follower() != null)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private void activateLease(Object key, Action action, boolean restart) {

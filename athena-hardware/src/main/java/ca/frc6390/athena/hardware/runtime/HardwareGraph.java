@@ -63,6 +63,11 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         HardwareIdentity identity = HardwareIdentity.motor(device);
         MotorHandle existing = motors.get(identity);
         if (existing != null) {
+            if (!existing.device().equals(device)) {
+                throw new IllegalStateException("Conflicting motor declarations target " + identity.key()
+                        + ". First declaration: " + existing.device()
+                        + "; conflicting declaration: " + device);
+            }
             return existing;
         }
         MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());

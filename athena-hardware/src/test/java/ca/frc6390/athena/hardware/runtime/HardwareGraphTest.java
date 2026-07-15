@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
@@ -87,6 +88,20 @@ class HardwareGraphTest {
         assertEquals(1, motorBackend.last.closeCalls);
         assertEquals(1, encoderBackend.last.closeCalls);
         assertEquals(1, imuBackend.last.closeCalls);
+    }
+
+    @Test
+    void graphRejectsConflictingConfigurationForSamePhysicalMotor() {
+        FakeMotorBackend backend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(backend));
+        MotorDevice first = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).brake().currentLimit(40);
+        MotorDevice conflicting = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).coast().currentLimit(60);
+
+        graph.motor(first);
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> graph.motor(conflicting));
+
+        assertTrue(failure.getMessage().contains("Conflicting motor declarations"));
+        assertTrue(failure.getMessage().contains(HardwareIdentity.motor(first).key()));
     }
 
     @Test

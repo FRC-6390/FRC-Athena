@@ -84,6 +84,17 @@ class RobotRuntimeTest {
     }
 
     @Test
+    void registrationEagerlyActivatesOrdinaryDeclaredMotors() {
+        FollowerMotorBackend backend = new FollowerMotorBackend();
+
+        RobotRuntime.using(HardwareGraph.using(BackendRegistry.of(backend)))
+                .register(new MotorMechanism());
+
+        assertEquals(1, backend.created);
+        assertNotNull(backend.leader);
+    }
+
+    @Test
     void discoversVisionVendorAdaptersFromServiceDescriptorsOnRootClasspath() {
         List<String> adapterNames = CameraAdapters.discover().stream()
                 .map(adapter -> adapter.getClass().getName())
@@ -428,7 +439,7 @@ class RobotRuntimeTest {
 
         runtime.robotPeriodic(1.0, 0.02);
 
-        assertTrue(reads.get() > 0);
+        assertEquals(1, reads.get());
         assertEquals(6.0, output.pose().xMeters(), 1.0e-9);
         assertEquals(1, runtime.localizationMeasurements().size());
     }

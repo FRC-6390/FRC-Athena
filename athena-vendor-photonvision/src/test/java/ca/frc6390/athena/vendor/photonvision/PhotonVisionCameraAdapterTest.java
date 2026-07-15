@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 import ca.frc6390.athena.api.hardware.CameraKinds;
@@ -131,6 +132,21 @@ class PhotonVisionCameraAdapterTest {
     }
 
     @Test
+    void multiTagStrategyFallsBackToSingleTagLowestAmbiguityPose() {
+        AtomicBoolean fallbackRead = new AtomicBoolean();
+
+        Optional<String> estimate = PhotonVisionCameraAdapter.multiTagThenSingleTag(
+                Optional.empty(),
+                () -> {
+                    fallbackRead.set(true);
+                    return Optional.of("single-tag");
+                });
+
+        assertEquals(Optional.of("single-tag"), estimate);
+        assertTrue(fallbackRead.get());
+    }
+
+    @Test
     void supportAndUnconfiguredAdapterBehaviorAreExplicit() {
         PhotonVisionCameraAdapter adapter = new PhotonVisionCameraAdapter();
 
@@ -164,4 +180,5 @@ class PhotonVisionCameraAdapterTest {
         public void close() {
         }
     }
+
 }

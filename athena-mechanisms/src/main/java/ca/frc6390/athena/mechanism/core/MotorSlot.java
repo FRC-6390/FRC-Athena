@@ -48,6 +48,26 @@ public final class MotorSlot<O> extends Slot<O, MotorDevice> {
         return configure(motor -> motor.currentLimit(amps));
     }
 
+    /**
+     * Configures the controller supply-side current limit after this slot is filled.
+     *
+     * @param amps non-negative supply current limit in amps
+     * @return this slot
+     */
+    public MotorSlot<O> supplyCurrentLimit(int amps) {
+        return configure(motor -> motor.supplyCurrentLimit(amps));
+    }
+
+    /**
+     * Configures the motor stator-side current limit after this slot is filled.
+     *
+     * @param amps non-negative stator current limit in amps
+     * @return this slot
+     */
+    public MotorSlot<O> statorCurrentLimit(int amps) {
+        return configure(motor -> motor.statorCurrentLimit(amps));
+    }
+
     public MotorSlot<O> inverted() {
         return inverted(true);
     }

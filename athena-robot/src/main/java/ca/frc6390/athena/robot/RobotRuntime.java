@@ -219,7 +219,7 @@ public final class RobotRuntime {
         RuntimeGraphDiscovery.Result services = RuntimeGraphDiscovery.inspect(mechanism);
         registerDiscoveredCameras(services.cameras());
         localization(services.localizations().toArray(Localization[]::new));
-        mechanisms.followerMotors().stream().filter(motor -> !motor.isDisabled()).forEach(hardwareGraph::motor);
+        mechanisms.motorDevices().stream().filter(motor -> !motor.isDisabled()).forEach(hardwareGraph::motor);
         mechanisms.encoderDevices().forEach(hardwareGraph::encoder);
         mechanisms.imuDevices().forEach(hardwareGraph::imu);
         if (simulationSession != null) {

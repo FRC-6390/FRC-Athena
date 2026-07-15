@@ -3,6 +3,7 @@ package ca.frc6390.athena.vendor.photonvision;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import ca.frc6390.athena.api.hardware.CameraKind;
 import ca.frc6390.athena.api.hardware.CameraKinds;
@@ -18,6 +19,8 @@ import ca.frc6390.athena.vision.device.PhotonVisionDevice;
 import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
 import ca.frc6390.athena.vision.runtime.CameraAdapter;
+import edu.wpi.first.apriltag.AprilTagFields;
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
@@ -53,7 +56,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         this(
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
-                new CoprocessorMultiTagPoseClient(device.mountPose()));
+                defaultPoseClient(device.mountPose()));
     }
 
     /**
@@ -350,7 +353,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         }
     }
 
-    private static final class PhotonPoseEstimatorClient implements PhotonPoseClient {
+    static final class PhotonPoseEstimatorClient implements PhotonPoseClient {
         private final PhotonPoseEstimator estimator;
         private final PhotonPoseEstimator.PoseStrategy strategy;
 
@@ -382,7 +385,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 case CLOSEST_TO_REFERENCE_POSE -> estimator.estimateClosestToReferencePose(
                         result, Pose3d.kZero);
                 case AVERAGE_BEST_TARGETS -> estimator.estimateAverageBestTargetsPose(result);
-                case MULTI_TAG_PNP_ON_COPROCESSOR -> estimator.estimateCoprocMultiTagPose(result);
+                case MULTI_TAG_PNP_ON_COPROCESSOR -> multiTagThenSingleTag(
+                        estimator.estimateCoprocMultiTagPose(result),
+                        () -> estimator.estimateLowestAmbiguityPose(result));
                 case PNP_DISTANCE_TRIG_SOLVE -> estimator.estimatePnpDistanceTrigSolvePose(result);
                 default -> estimator.estimateCoprocMultiTagPose(result)
                         .or(() -> estimator.estimateLowestAmbiguityPose(result));
@@ -402,35 +407,29 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         }
     }
 
-    private static final class CoprocessorMultiTagPoseClient implements PhotonPoseClient {
-        private final Transform3d robotToCamera;
+    static <T> Optional<T> multiTagThenSingleTag(Optional<T> multiTag, Supplier<Optional<T>> singleTag) {
+        Optional<T> primary = multiTag == null ? Optional.empty() : multiTag;
+        return primary.isPresent() ? primary : Objects.requireNonNull(singleTag, "singleTag").get();
+    }
 
-        private CoprocessorMultiTagPoseClient(CameraMountPose mount) {
-            CameraMountPose safe = mount == null || !mount.isFinite() ? CameraMountPose.identity() : mount;
-            robotToCamera = new Transform3d(
-                    new Translation3d(safe.xMeters(), safe.yMeters(), safe.zMeters()),
-                    new Rotation3d(
-                            Math.toRadians(safe.rollDegrees()),
-                            Math.toRadians(safe.pitchDegrees()),
-                            Math.toRadians(safe.yawDegrees())));
-        }
+    private static PhotonPoseClient defaultPoseClient(CameraMountPose mount) {
+        Transform3d robotToCamera = transform(mount);
+        PhotonPoseEstimator estimator = new PhotonPoseEstimator(
+                AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField),
+                robotToCamera);
+        return new PhotonPoseEstimatorClient(
+                estimator,
+                PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR);
+    }
 
-        @Override
-        public Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result) {
-            if (result == null || result.getMultiTagResult().isEmpty()) {
-                return Optional.empty();
-            }
-            Pose3d fieldToRobot = Pose3d.kZero
-                    .plus(result.getMultiTagResult().get().estimatedPose.best)
-                    .plus(robotToCamera.inverse());
-            var pose = fieldToRobot.toPose2d();
-            List<PhotonTrackedTarget> targets = result.getTargets();
-            return Optional.of(new PhotonVisionPoseEstimate(
-                    new PoseSnapshot(pose.getX(), pose.getY(), pose.getRotation().getRadians()),
-                    result.getTimestampSeconds(),
-                    PhotonPoseEstimatorClient.ambiguity(targets),
-                    targets.size()));
-        }
+    private static Transform3d transform(CameraMountPose mount) {
+        CameraMountPose safe = mount == null || !mount.isFinite() ? CameraMountPose.identity() : mount;
+        return new Transform3d(
+                new Translation3d(safe.xMeters(), safe.yMeters(), safe.zMeters()),
+                new Rotation3d(
+                        Math.toRadians(safe.rollDegrees()),
+                        Math.toRadians(safe.pitchDegrees()),
+                        Math.toRadians(safe.yawDegrees())));
     }
 
     static record PhotonVisionResult(

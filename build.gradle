@@ -347,7 +347,6 @@ project(':athena-wpilib') {
         testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
-        testImplementation "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
@@ -424,11 +423,13 @@ project(':athena-vendor-studica') {
 project(':athena-vendor-photonvision') {
     dependencies {
         api project(':athena-vision')
+        testImplementation project(':athena-localization')
         compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
         compileOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
         compileOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
         compileOnly "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
         compileOnly "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "edu.wpi.first.apriltag:apriltag-java:${rootProject.findProperty('aprilTagVersion')}"
         compileOnly "com.fasterxml.jackson.core:jackson-core:2.19.4"
         compileOnly "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
         compileOnly "us.hebi.quickbuf:quickbuf-runtime:1.4"
@@ -439,6 +440,8 @@ project(':athena-vendor-photonvision') {
         testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.apriltag:apriltag-java:${rootProject.findProperty('aprilTagVersion')}"
         testImplementation "com.fasterxml.jackson.core:jackson-core:2.19.4"
         testImplementation "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
         testImplementation "us.hebi.quickbuf:quickbuf-runtime:1.4"
