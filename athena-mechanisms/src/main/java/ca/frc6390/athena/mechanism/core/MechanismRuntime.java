@@ -126,10 +126,19 @@ final class MechanismRuntime {
         this.scheduler.reset();
     }
 
-    void activateLease(Object key, Action action, long recency) {
+    void activateLease(Object key, Action action, long recency, long requestEpoch) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(action, "action");
-        activeLeases.computeIfAbsent(key, ignored -> new ActiveLease(action, recency, actionContext, pathRuntimes));
+        activeLeases.computeIfAbsent(
+                key,
+                ignored -> new ActiveLease(action, recency, requestEpoch, actionContext, pathRuntimes));
+    }
+
+    void refreshLease(Object key, long requestEpoch) {
+        ActiveLease lease = activeLeases.get(Objects.requireNonNull(key, "key"));
+        if (lease != null) {
+            lease.requestEpoch = requestEpoch;
+        }
     }
 
     void releaseLease(Object key) {
@@ -187,10 +196,14 @@ final class MechanismRuntime {
             timedContext = withTimeInState(safeMechanismContext, 0.0);
         }
         List<CandidateOutput> candidates = new ArrayList<>();
-        addCandidates(candidates, actionRecency, scheduler.evaluate(action, timedContext));
+        addCandidates(candidates, Long.MIN_VALUE, actionRecency, scheduler.evaluate(action, timedContext));
         activeLeases.values().stream()
                 .sorted(Comparator.comparingLong(ActiveLease::recency))
-                .forEach(lease -> addCandidates(candidates, lease.recency(), lease.evaluate(safeMechanismContext)));
+                .forEach(lease -> addCandidates(
+                        candidates,
+                        lease.requestEpoch(),
+                        lease.recency(),
+                        lease.evaluate(safeMechanismContext)));
 
         List<CandidateOutput> selected = arbitrate(candidates);
         Set<MotorDevice> drivenNow = new LinkedHashSet<>();
@@ -211,11 +224,13 @@ final class MechanismRuntime {
 
     private void addCandidates(
             List<CandidateOutput> candidates,
+            long requestEpoch,
             long recency,
             StateScheduler.Result active) {
         List<ResolvedOutput> resolved = resolver.resolve(mechanism, active.action(), active.context());
         for (ResolvedOutput output : resolved) {
-            candidates.add(new CandidateOutput(output, active.context(), recency, candidates.size()));
+            candidates.add(new CandidateOutput(
+                    output, active.context(), requestEpoch, recency, candidates.size()));
         }
     }
 
@@ -242,31 +257,41 @@ final class MechanismRuntime {
     private record CandidateOutput(
             ResolvedOutput output,
             MechanismContext context,
+            long requestEpoch,
             long recency,
             int order) {
         private boolean newerThan(CandidateOutput other) {
-            return recency > other.recency || recency == other.recency && order > other.order;
+            return requestEpoch > other.requestEpoch
+                    || requestEpoch == other.requestEpoch && (recency > other.recency
+                    || recency == other.recency && order > other.order);
         }
     }
 
     private static final class ActiveLease {
         private final Action action;
         private final long recency;
+        private long requestEpoch;
         private final StateScheduler scheduler;
         private double startSeconds = Double.NaN;
 
         private ActiveLease(
                 Action action,
                 long recency,
+                long requestEpoch,
                 ActionContext actionContext,
                 Map<PathAction, PathRuntime> pathRuntimes) {
             this.action = action;
             this.recency = recency;
+            this.requestEpoch = requestEpoch;
             this.scheduler = new StateScheduler(actionContext, pathRuntimes);
         }
 
         private long recency() {
             return recency;
+        }
+
+        private long requestEpoch() {
+            return requestEpoch;
         }
 
         private StateScheduler.Result evaluate(MechanismContext context) {

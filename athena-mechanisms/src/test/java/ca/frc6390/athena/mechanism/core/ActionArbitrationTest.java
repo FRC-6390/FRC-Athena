@@ -135,6 +135,26 @@ class ActionArbitrationTest {
     }
 
     @Test
+    void heldActionReclaimsOutputOnTheTickAfterANewerEdgeRequest() {
+        boolean[] held = {true};
+        boolean[] edge = {false};
+        RecordingContext hardware = new RecordingContext();
+        HeldWithEdgeOverride mechanism = new HeldWithEdgeOverride(held, edge);
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
+
+        scheduler.teleopPeriodic(0.0, 0.02);
+        assertEquals(0.25, hardware.motor(ARM).percent, 1.0e-9);
+
+        edge[0] = true;
+        scheduler.teleopPeriodic(0.02, 0.02);
+        assertEquals(0.0, hardware.motor(ARM).percent, 1.0e-9);
+
+        edge[0] = false;
+        scheduler.teleopPeriodic(0.04, 0.02);
+        assertEquals(0.25, hardware.motor(ARM).percent, 1.0e-9);
+    }
+
+    @Test
     void releasingOneLeaseNeutralizesOnlyItsMotor() {
         boolean[] arm = {true};
         boolean[] rollers = {true};
@@ -213,6 +233,18 @@ class ActionArbitrationTest {
     private static final class TargetMechanism implements Mechanism {
         private final Action arm = ARM.percent(0.25);
         private final Action rollers = ROLLERS.percent(0.70);
+    }
+
+    private static final class HeldWithEdgeOverride implements Mechanism {
+        private final Action heldAction = ARM.percent(0.25);
+        private final Action edgeAction = ARM.neutral();
+        private final HookBinding heldBinding;
+        private final HookBinding edgeBinding;
+
+        private HeldWithEdgeOverride(boolean[] held, boolean[] edge) {
+            heldBinding = Events.when(() -> held[0]).active().whileActive(heldAction);
+            edgeBinding = Events.when(() -> edge[0]).rising().onStart(edgeAction);
+        }
     }
 
     private static final class ExternalControls implements Mechanism {

@@ -40,6 +40,8 @@ public final class MechanismScheduler {
     private final Map<Object, List<LeaseRegistration>> leaseTargets = new IdentityHashMap<>();
     private final OutputResolver resolver;
     private long requestSequence;
+    private long leaseEpoch;
+    private boolean evaluatingPeriodic;
     private Runnable simulationStep = () -> {
     };
 
@@ -276,6 +278,8 @@ public final class MechanismScheduler {
     private void activateLease(Object key, Action action, boolean restart) {
         List<LeaseRegistration> existing = leaseTargets.get(key);
         if (existing != null && !restart) {
+            existing.forEach(registration -> registration.runtime()
+                    .refreshLease(registration.runtimeKey(), requestEpoch()));
             return;
         }
         if (existing != null) {
@@ -290,7 +294,7 @@ public final class MechanismScheduler {
                     : Actions.parallel(partition.getValue().toArray(Action[]::new));
             MechanismRuntime runtime = runtimeFor(partition.getKey());
             Object runtimeKey = new Object();
-            runtime.activateLease(runtimeKey, partitioned, recency);
+            runtime.activateLease(runtimeKey, partitioned, recency, requestEpoch());
             registrations.add(new LeaseRegistration(runtimeKey, runtime));
         }
         leaseTargets.put(key, List.copyOf(registrations));
@@ -343,16 +347,26 @@ public final class MechanismScheduler {
 
     public List<ResolvedOutput> periodic(MechanismContext mechanismContext, EventContext eventContext) {
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
+        leaseEpoch++;
+        evaluatingPeriodic = true;
         sampleSignals();
         List<ResolvedOutput> outputs = new ArrayList<>();
-        for (MechanismRuntime runtime : runtimes.values()) {
-            runtime.runHooks(eventContext, false);
+        try {
+            for (MechanismRuntime runtime : runtimes.values()) {
+                runtime.runHooks(eventContext, false);
+            }
+        } finally {
+            evaluatingPeriodic = false;
         }
         digitalInputs.forEach(DigitalInputDevice::clearLatchedEdges);
         for (MechanismRuntime runtime : runtimes.values()) {
             runtime.periodicOutputsInto(safeMechanismContext, outputs);
         }
         return outputs;
+    }
+
+    private long requestEpoch() {
+        return evaluatingPeriodic ? leaseEpoch : leaseEpoch + 1;
     }
 
     private void refreshDigitalInputs() {
