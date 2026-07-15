@@ -599,10 +599,15 @@ public final class Localization implements PoseSignal {
     }
 
     private static final class KalmanEngine {
+        private static final int RECOVERY_SAMPLE_COUNT = 3;
+        private static final double RECOVERY_MAX_INTERVAL_SECONDS = 0.25;
+        private static final double RECOVERY_TRANSLATION_METERS = 0.75;
+        private static final double RECOVERY_HEADING_RADIANS = Math.toRadians(25.0);
         private final SwerveDriveKinematics kinematics;
         private final MeasurementStdDevs stateStdDevs;
         private final MeasurementStdDevs defaultVisionStdDevs;
-        private final Map<Object, Double> lastVisionTimestamps = new IdentityHashMap<>();
+        private final Map<Object, Double> lastSeenVisionTimestamps = new IdentityHashMap<>();
+        private final Map<Object, VisionRecovery> visionRecovery = new IdentityHashMap<>();
         private SwerveDrivePoseEstimator estimator;
 
         private KalmanEngine(
@@ -635,7 +640,8 @@ public final class Localization implements PoseSignal {
                         vector(defaultVisionStdDevs));
             } else if (reset != null) {
                 estimator.resetPosition(heading, positions, toWpilib(reset));
-                lastVisionTimestamps.clear();
+                lastSeenVisionTimestamps.clear();
+                visionRecovery.clear();
             }
             estimator.updateWithTime(timestampSeconds, heading, positions);
             vision.stream()
@@ -648,16 +654,40 @@ public final class Localization implements PoseSignal {
 
         private void addVision(PoseMeasurementSample sample, double innovationGate) {
             Object source = sample.source() == null ? sample : sample.source();
-            double previous = lastVisionTimestamps.getOrDefault(source, Double.NEGATIVE_INFINITY);
+            double previous = lastSeenVisionTimestamps.getOrDefault(source, Double.NEGATIVE_INFINITY);
             if (sample.timestampSeconds() <= previous) {
                 return;
             }
+            lastSeenVisionTimestamps.put(source, sample.timestampSeconds());
             MeasurementStdDevs stdDevs = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
             if (Double.isFinite(innovationGate) && innovation(sample, stdDevs) > innovationGate) {
-                return;
+                VisionRecovery recovery = visionRecovery.computeIfAbsent(source, ignored -> new VisionRecovery());
+                if (!recovery.accepts(sample)) {
+                    return;
+                }
+            } else {
+                visionRecovery.remove(source);
             }
             estimator.addVisionMeasurement(toWpilib(sample.pose()), sample.timestampSeconds(), vector(stdDevs));
-            lastVisionTimestamps.put(source, sample.timestampSeconds());
+        }
+
+        private static final class VisionRecovery {
+            private PoseSnapshot previousPose;
+            private double previousTimestamp = Double.NEGATIVE_INFINITY;
+            private int consistentSamples;
+
+            private boolean accepts(PoseMeasurementSample sample) {
+                boolean strongObservation = sample.targetCount() >= 2;
+                boolean continuous = previousPose != null
+                        && sample.timestampSeconds() - previousTimestamp <= RECOVERY_MAX_INTERVAL_SECONDS
+                        && translationDistance(previousPose, sample.pose()) <= RECOVERY_TRANSLATION_METERS
+                        && Math.abs(wrapRadians(previousPose.headingRadians() - sample.pose().headingRadians()))
+                                <= RECOVERY_HEADING_RADIANS;
+                consistentSamples = strongObservation && continuous ? consistentSamples + 1 : strongObservation ? 1 : 0;
+                previousPose = sample.pose();
+                previousTimestamp = sample.timestampSeconds();
+                return consistentSamples >= RECOVERY_SAMPLE_COUNT;
+            }
         }
 
         private double innovation(PoseMeasurementSample sample, MeasurementStdDevs stdDevs) {

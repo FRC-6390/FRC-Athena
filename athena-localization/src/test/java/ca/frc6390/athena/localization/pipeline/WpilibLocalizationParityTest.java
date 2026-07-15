@@ -1,6 +1,7 @@
 package ca.frc6390.athena.localization.pipeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -78,6 +79,23 @@ class WpilibLocalizationParityTest {
         rig.step(1.5, distances(1.2, 1.2, 1.2, 1.2), angles(0.0, 0.0, 0.0, 0.0), 15.0);
     }
 
+    @Test
+    void innovationGateAcquiresAConsistentFieldPoseAwayFromOdometryOrigin() {
+        ParityRig rig = new ParityRig(9.0);
+        Object camera = new Object();
+
+        rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera));
+        rig.stepAthenaOnly(0.02, vision(5.02, 2.01, 0.2, 0.02,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera));
+        assertEquals(0.0, rig.athena.pose().xMeters(), 1.0e-9);
+
+        rig.stepAthenaOnly(0.04, vision(5.01, 2.0, 0.2, 0.04,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera));
+
+        assertTrue(rig.athena.pose().xMeters() > 0.0);
+    }
+
     private static double[] distances(double frontLeft, double frontRight, double backLeft, double backRight) {
         return new double[] {frontLeft, frontRight, backLeft, backRight};
     }
@@ -123,10 +141,7 @@ class WpilibLocalizationParityTest {
         private final MutablePoseSignal visionSource = new MutablePoseSignal();
         private final Localization visionStage = Localizations.filter().input(visionSource);
         private final SwerveOdometry odometry = athenaKinematics.odometry(imu);
-        private final Localization athena = Localizations.kalman()
-                .input(odometry, visionStage)
-                .stateStdDevs(STATE_STD_DEVS.xMeters(), STATE_STD_DEVS.headingRadians())
-                .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians());
+        private final Localization athena;
         private final ActionContext context = new ActionContext() {
             @Override
             public EncoderHandle encoder(EncoderDevice device) {
@@ -138,6 +153,25 @@ class WpilibLocalizationParityTest {
         };
         private SwerveDrivePoseEstimator wpilib;
         private PoseSnapshot pendingReset;
+
+        private ParityRig() {
+            this(Double.POSITIVE_INFINITY);
+        }
+
+        private ParityRig(double innovationGate) {
+            athena = Localizations.kalman()
+                    .input(odometry, visionStage)
+                    .stateStdDevs(STATE_STD_DEVS.xMeters(), STATE_STD_DEVS.headingRadians())
+                    .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians())
+                    .maxNormalizedVisionResidual(innovationGate);
+        }
+
+        private void stepAthenaOnly(double timestampSeconds, VisionSample... vision) {
+            setModuleInputs(distances(0.0, 0.0, 0.0, 0.0), angles(0.0, 0.0, 0.0, 0.0));
+            imu.yawDegrees = 0.0;
+            visionSource.measurements = List.of(vision);
+            athena.refresh(context, timestampSeconds, 0.02);
+        }
 
         private void step(
                 double timestampSeconds,
