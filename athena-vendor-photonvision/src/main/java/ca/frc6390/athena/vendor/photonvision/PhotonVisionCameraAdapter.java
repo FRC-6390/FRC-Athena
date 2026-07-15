@@ -56,7 +56,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         this(
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
-                defaultPoseClient(device.mountPose()));
+                defaultPoseClient(device::mountPose));
     }
 
     /**
@@ -81,7 +81,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         this(
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
-                new PhotonPoseEstimatorClient(poseEstimator, poseStrategy));
+                new PhotonPoseEstimatorClient(poseEstimator, poseStrategy, device::mountPose));
     }
 
     PhotonVisionCameraAdapter(PhotonVisionDevice device, PhotonClient client) {
@@ -356,16 +356,28 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     static final class PhotonPoseEstimatorClient implements PhotonPoseClient {
         private final PhotonPoseEstimator estimator;
         private final PhotonPoseEstimator.PoseStrategy strategy;
+        private final Supplier<CameraMountPose> mountPose;
 
         private PhotonPoseEstimatorClient(PhotonPoseEstimator estimator, PhotonPoseEstimator.PoseStrategy strategy) {
+            this(estimator, strategy, null);
+        }
+
+        private PhotonPoseEstimatorClient(
+                PhotonPoseEstimator estimator,
+                PhotonPoseEstimator.PoseStrategy strategy,
+                Supplier<CameraMountPose> mountPose) {
             this.estimator = Objects.requireNonNull(estimator, "estimator");
             this.strategy = strategy == null
                     ? PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR
                     : strategy;
+            this.mountPose = mountPose;
         }
 
         @Override
         public Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result) {
+            if (mountPose != null) {
+                estimator.setRobotToCameraTransform(transform(mountPose.get()));
+            }
             return estimateWithConfiguredStrategy(result).map(estimate -> {
                 Pose3d pose3d = estimate.estimatedPose;
                 var pose2d = pose3d.toPose2d();
@@ -412,14 +424,16 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         return primary.isPresent() ? primary : Objects.requireNonNull(singleTag, "singleTag").get();
     }
 
-    private static PhotonPoseClient defaultPoseClient(CameraMountPose mount) {
-        Transform3d robotToCamera = transform(mount);
+    private static PhotonPoseClient defaultPoseClient(Supplier<CameraMountPose> mount) {
+        Supplier<CameraMountPose> safeMount = mount == null ? CameraMountPose::identity : mount;
+        Transform3d robotToCamera = transform(safeMount.get());
         PhotonPoseEstimator estimator = new PhotonPoseEstimator(
                 AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField),
                 robotToCamera);
         return new PhotonPoseEstimatorClient(
                 estimator,
-                PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR);
+                PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                safeMount);
     }
 
     private static Transform3d transform(CameraMountPose mount) {

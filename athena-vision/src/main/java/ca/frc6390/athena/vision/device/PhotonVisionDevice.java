@@ -43,6 +43,11 @@ public final class PhotonVisionDevice implements CameraDevice {
     }
 
     @Override
+    public PhotonVisionDevice mount(Supplier<CameraMountPose> pose) {
+        return new PhotonVisionDevice(camera.mount(pose));
+    }
+
+    @Override
     public PhotonVisionDevice bindPose(Supplier<? extends List<? extends Measurement>> poseMeasurements) {
         return new PhotonVisionDevice(camera.bindPose(poseMeasurements));
     }

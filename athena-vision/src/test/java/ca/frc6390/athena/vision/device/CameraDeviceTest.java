@@ -48,6 +48,18 @@ class CameraDeviceTest {
     }
 
     @Test
+    void dynamicMountIsEvaluatedWhenTheCameraPoseIsRead() {
+        CameraMountPose[] mount = {CameraMountPose.identity()};
+        PhotonVisionDevice camera = Cameras.photonVision("turret").mount(() -> mount[0]);
+
+        assertEquals(CameraMountPose.identity(), camera.mountPose());
+
+        mount[0] = new CameraMountPose(0.1, -0.2, 0.3, 45.0, 0.0, 0.0);
+
+        assertEquals(mount[0], camera.mountPose());
+    }
+
+    @Test
     void nullSuppliersAndNullSupplierResultsReadAsEmpty() {
         CameraDevice nullSuppliers = Cameras.photonVision("front").bindPose(null).bindTargets(null);
         CameraDevice nullResults = Cameras.photonVision("rear")

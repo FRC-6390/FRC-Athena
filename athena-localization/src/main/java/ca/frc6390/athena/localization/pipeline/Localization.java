@@ -445,13 +445,45 @@ public final class Localization implements PoseSignal {
         PoseMeasurementSample newest = samples.stream()
                 .max(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
                 .orElseThrow();
-        return samples.stream()
+        List<PoseMeasurementSample> recent = samples.stream()
                 .filter(sample -> newest.timestampSeconds() - sample.timestampSeconds() <= groupWindowSeconds)
-                .filter(sample -> translationDistance(sample.pose(), newest.pose()) <= maxTranslationDisagreementMeters)
-                .filter(sample -> Math.abs(wrapRadians(
-                        sample.pose().headingRadians() - newest.pose().headingRadians()))
-                        <= maxHeadingDisagreementRadians)
                 .toList();
+        List<PoseMeasurementSample> best = List.of();
+        for (PoseMeasurementSample anchor : recent) {
+            List<PoseMeasurementSample> cluster = recent.stream()
+                    .filter(sample -> agrees(anchor, sample))
+                    .toList();
+            if (betterCluster(cluster, best)) {
+                best = cluster;
+            }
+        }
+        return best;
+    }
+
+    private boolean agrees(PoseMeasurementSample first, PoseMeasurementSample second) {
+        return translationDistance(first.pose(), second.pose()) <= maxTranslationDisagreementMeters
+                && Math.abs(wrapRadians(first.pose().headingRadians() - second.pose().headingRadians()))
+                        <= maxHeadingDisagreementRadians;
+    }
+
+    private static boolean betterCluster(
+            List<PoseMeasurementSample> candidate,
+            List<PoseMeasurementSample> current) {
+        if (candidate.size() != current.size()) {
+            return candidate.size() > current.size();
+        }
+        int candidateTargets = candidate.stream().mapToInt(PoseMeasurementSample::targetCount).sum();
+        int currentTargets = current.stream().mapToInt(PoseMeasurementSample::targetCount).sum();
+        if (candidateTargets != currentTargets) {
+            return candidateTargets > currentTargets;
+        }
+        double candidateAmbiguity = candidate.stream().mapToDouble(PoseMeasurementSample::ambiguity).sum();
+        double currentAmbiguity = current.stream().mapToDouble(PoseMeasurementSample::ambiguity).sum();
+        if (Double.compare(candidateAmbiguity, currentAmbiguity) != 0) {
+            return candidateAmbiguity < currentAmbiguity;
+        }
+        return candidate.stream().mapToDouble(PoseMeasurementSample::timestampSeconds).max().orElse(0.0)
+                > current.stream().mapToDouble(PoseMeasurementSample::timestampSeconds).max().orElse(0.0);
     }
 
     private boolean accepts(Measurement measurement, PoseSnapshot pose) {

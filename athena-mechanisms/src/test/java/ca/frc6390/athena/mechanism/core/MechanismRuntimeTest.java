@@ -681,6 +681,29 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void safetyGuardRebasesProfileBeforeReversingAwayFromRangeBoundary() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 0.9;
+        actions.encoder(ENCODER).velocity = 1.0;
+        ControlBinding control = Controls.position(MOTOR)
+                .feedback(ENCODER)
+                .pid(1.0, 0.0, 0.0)
+                .constraint(Constraints.range(Range.of(0.0, 1.0)))
+                .profile(MotionProfiles.trapezoid(2.0, 2.0));
+        TestMechanism mechanism = new TestMechanism(control.position(1.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+
+        runtime.set(control.position(1.0));
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        actions.encoder(ENCODER).velocity = 0.0;
+        runtime.set(control.position(0.5));
+        runtime.periodic(contextAt(0.02), EventContext.empty());
+
+        assertTrue(actions.motor(MOTOR).voltage < 0.0);
+    }
+
+    @Test
     void constraintCanReadRelatedAthenaFeedback() {
         EncoderDevice related = EncoderDevice.of(EncoderKinds.CANCODER, 2);
         RecordingActionContext actions = new RecordingActionContext(MOTOR);

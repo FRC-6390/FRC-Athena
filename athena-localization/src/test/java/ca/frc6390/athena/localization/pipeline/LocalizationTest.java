@@ -120,6 +120,27 @@ class LocalizationTest {
     }
 
     @Test
+    void covarianceIntersectionDoesNotLetNewestOutlierAnchorTheCameraGroup() {
+        Sample firstGood = sample(2.0, 3.0, 0.1, 0.98, 0.04, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+        Sample secondGood = sample(2.1, 3.1, 0.12, 0.99, 0.03, 2, 2.1,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+        Sample newestOutlier = sample(12.0, 7.0, Math.PI, 1.0, 0.8, 1, 6.0,
+                MeasurementStdDevs.of(0.1, 0.1, 0.1), new Object());
+        Localization localization = Localizations.covarianceIntersection()
+                .input(signal(firstGood, secondGood, newestOutlier))
+                .groupWithinSeconds(0.03)
+                .maxTranslationDisagreementMeters(0.5)
+                .maxHeadingDisagreementRadians(0.25);
+
+        PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
+
+        assertTrue(fused.pose().xMeters() >= 2.0 && fused.pose().xMeters() <= 2.1);
+        assertTrue(fused.pose().yMeters() >= 3.0 && fused.pose().yMeters() <= 3.1);
+        assertEquals(4, fused.targetCount());
+    }
+
+    @Test
     void perSourceTagCovarianceAndDistanceScalingSurviveAFilterStage() {
         Object singleCamera = new Object();
         Object multiCamera = new Object();

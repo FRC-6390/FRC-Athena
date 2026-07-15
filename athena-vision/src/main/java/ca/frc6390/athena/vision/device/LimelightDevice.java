@@ -43,6 +43,11 @@ public final class LimelightDevice implements CameraDevice {
     }
 
     @Override
+    public LimelightDevice mount(Supplier<CameraMountPose> pose) {
+        return new LimelightDevice(camera.mount(pose));
+    }
+
+    @Override
     public LimelightDevice bindPose(Supplier<? extends List<? extends Measurement>> poseMeasurements) {
         return new LimelightDevice(camera.bindPose(poseMeasurements));
     }

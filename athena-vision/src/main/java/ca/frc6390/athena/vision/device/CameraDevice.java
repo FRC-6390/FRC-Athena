@@ -41,6 +41,18 @@ public interface CameraDevice {
     CameraDevice mount(CameraMountPose pose);
 
     /**
+     * Returns a copy whose robot-relative mount pose is evaluated when the camera is read.
+     *
+     * <p>Use this for cameras attached to moving mechanisms such as turrets.</p>
+     *
+     * @param pose mount-pose supplier
+     * @return updated camera device
+     */
+    default CameraDevice mount(Supplier<CameraMountPose> pose) {
+        return mount(pose == null ? CameraMountPose.identity() : pose.get());
+    }
+
+    /**
      * Returns a copy with a mount pose.
      *
      * @param xMeters x position

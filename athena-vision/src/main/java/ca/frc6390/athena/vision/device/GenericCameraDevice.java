@@ -17,25 +17,25 @@ import ca.frc6390.athena.vision.signal.TargetSignal;
 public final class GenericCameraDevice implements CameraDevice {
     private final CameraKind kind;
     private final String name;
-    private final CameraMountPose mountPose;
+    private final Supplier<CameraMountPose> mountPose;
     private final SignalBinding signals;
     private final boolean poseBound;
     private final boolean targetBound;
 
     public GenericCameraDevice(CameraKind kind, String name) {
-        this(kind, name, CameraMountPose.identity(), new SignalBinding(), false, false);
+        this(kind, name, CameraMountPose::identity, new SignalBinding(), false, false);
     }
 
     private GenericCameraDevice(
             CameraKind kind,
             String name,
-            CameraMountPose mountPose,
+            Supplier<CameraMountPose> mountPose,
             SignalBinding signals,
             boolean poseBound,
             boolean targetBound) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.name = name == null || name.isBlank() ? kind.key() : name;
-        this.mountPose = mountPose == null ? CameraMountPose.identity() : mountPose;
+        this.mountPose = mountPose == null ? CameraMountPose::identity : mountPose;
         this.signals = Objects.requireNonNull(signals, "signals");
         this.poseBound = poseBound;
         this.targetBound = targetBound;
@@ -53,11 +53,18 @@ public final class GenericCameraDevice implements CameraDevice {
 
     @Override
     public CameraMountPose mountPose() {
-        return mountPose;
+        CameraMountPose pose = mountPose.get();
+        return pose == null ? CameraMountPose.identity() : pose;
     }
 
     @Override
     public GenericCameraDevice mount(CameraMountPose pose) {
+        CameraMountPose safe = pose == null ? CameraMountPose.identity() : pose;
+        return new GenericCameraDevice(kind, name, () -> safe, signals, poseBound, targetBound);
+    }
+
+    @Override
+    public GenericCameraDevice mount(Supplier<CameraMountPose> pose) {
         return new GenericCameraDevice(kind, name, pose, signals, poseBound, targetBound);
     }
 

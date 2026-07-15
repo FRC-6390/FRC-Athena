@@ -114,7 +114,6 @@ final class OutputApplier {
         ControlRuntimeState state = controlRuntimes(control);
         double position = firstFeedbackPosition(control);
         double velocity = firstFeedbackVelocity(control);
-
         Output transformed = applyTargetTransforms(
                 control,
                 output.output(),
@@ -173,7 +172,7 @@ final class OutputApplier {
                 position,
                 velocity);
         if (guarded instanceof Output.Neutral && !(saturated instanceof Output.Neutral)) {
-            resetLoops(state, loopContext);
+            resetControlState(state, guarded, mechanismContext, position, 0.0);
         }
         return appliedOutput.set(guarded, ControlRoute.OPEN_LOOP, null);
     }

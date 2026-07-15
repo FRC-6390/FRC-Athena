@@ -43,6 +43,11 @@ public final class HeliosDevice implements CameraDevice {
     }
 
     @Override
+    public HeliosDevice mount(Supplier<CameraMountPose> pose) {
+        return new HeliosDevice(camera.mount(pose));
+    }
+
+    @Override
     public HeliosDevice bindPose(Supplier<? extends List<? extends Measurement>> poseMeasurements) {
         return new HeliosDevice(camera.bindPose(poseMeasurements));
     }
