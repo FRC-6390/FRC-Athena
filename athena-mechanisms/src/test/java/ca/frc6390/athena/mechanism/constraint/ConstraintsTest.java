@@ -33,4 +33,16 @@ class ConstraintsTest {
 
         assertEquals(0.0, result.value(), 1.0e-9);
     }
+
+    @Test
+    void overrideCanSampleAnEditableValueWhileActive() {
+        double[] override = {2.0};
+        Constraint<Double> safety = Constraints.override(() -> true, () -> override[0]);
+        ConstraintContext<Double> requested =
+                new ConstraintContext<>(8.0, 24.0, MechanismContext.empty());
+
+        assertEquals(2.0, safety.evaluate(requested).value(), 1.0e-9);
+        override[0] = 4.5;
+        assertEquals(4.5, safety.evaluate(requested).value(), 1.0e-9);
+    }
 }
