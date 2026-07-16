@@ -161,6 +161,16 @@ public interface MotorHandle {
         return false;
     }
 
+    /** Enables/configures the primary encoder when an integrated encoder is declared. */
+    default void enableIntegratedEncoder() {
+        // Most controllers expose their integrated encoder without extra configuration.
+    }
+
+    /** Enables/configures a controller-attached absolute encoder when one is declared. */
+    default void enableAbsoluteEncoder() {
+        // Default no-op for controllers whose absolute channel is always available.
+    }
+
     /**
      * Returns controller-attached absolute encoder position in rotations.
      *

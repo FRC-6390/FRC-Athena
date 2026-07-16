@@ -179,6 +179,9 @@ final class OutputResolver {
         if (action instanceof Actions.DynamicControlVelocity controlState) {
             return controlState.control();
         }
+        if (action instanceof InterpolatedControlAction interpolated) {
+            return interpolated.control();
+        }
         return null;
     }
 
@@ -221,6 +224,12 @@ final class OutputResolver {
         }
         if (action instanceof Actions.DynamicControlVelocity value) {
             return Outputs.velocity(value.velocity());
+        }
+        if (action instanceof InterpolatedControlAction interpolated) {
+            double target = interpolated.target();
+            return interpolated.control().mode() == ControlMode.VELOCITY
+                    ? Outputs.velocity(target)
+                    : Outputs.position(target);
         }
         return action instanceof Output output ? output : null;
     }

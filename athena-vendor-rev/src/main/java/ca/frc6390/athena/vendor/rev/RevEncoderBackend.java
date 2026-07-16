@@ -13,16 +13,31 @@ import ca.frc6390.athena.hardware.device.HardwareAddress;
 public final class RevEncoderBackend implements EncoderBackend {
     @Override
     public boolean supports(EncoderKind kind) {
-        return kind == EncoderKinds.REV_THROUGH_BORE || kind.key().equals("rev:through-bore");
+        return kind == EncoderKinds.REV_THROUGH_BORE
+                || kind == EncoderKinds.REV_THROUGH_BORE_V2
+                || kind == EncoderKinds.REV_THROUGH_BORE_QUADRATURE
+                || kind.key().startsWith("rev:through-bore");
     }
 
     @Override
     public boolean supports(EncoderDevice device) {
-        return supports(device.kind()) && device.connection() instanceof HardwareAddress.Dio;
+        if (!supports(device.kind())) {
+            return false;
+        }
+        return isQuadrature(device.kind())
+                ? device.connection() instanceof HardwareAddress.Quadrature
+                : device.connection() instanceof HardwareAddress.Dio;
     }
 
     @Override
     public EncoderHandle create(EncoderDevice device) {
-        return new RevThroughBoreEncoderHandle(device);
+        return isQuadrature(device.kind())
+                ? new RevThroughBoreQuadratureEncoderHandle(device)
+                : new RevThroughBoreEncoderHandle(device);
+    }
+
+    private static boolean isQuadrature(EncoderKind kind) {
+        return kind == EncoderKinds.REV_THROUGH_BORE_QUADRATURE
+                || kind.key().equals("rev:through-bore-quadrature");
     }
 }

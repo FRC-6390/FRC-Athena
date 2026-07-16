@@ -90,13 +90,17 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         Objects.requireNonNull(device, "device");
         EncoderHandle handle;
         if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated) {
-            handle = encoders.computeIfAbsent(
-                    HardwareIdentity.encoder(device),
-                    ignored -> adjustable(new IntegratedEncoderHandle(device, motor(integrated.motor()))));
+            MotorHandle motor = motor(integrated.motor());
+            handle = encoders.computeIfAbsent(HardwareIdentity.encoder(device), ignored -> {
+                motor.enableIntegratedEncoder();
+                return adjustable(new IntegratedEncoderHandle(device, motor));
+            });
         } else if (device.source() instanceof EncoderDevice.EncoderSource.MotorAbsolute absolute) {
-            handle = encoders.computeIfAbsent(
-                    HardwareIdentity.encoder(device),
-                    ignored -> adjustable(new AbsoluteMotorEncoderHandle(device, motor(absolute.motor()))));
+            MotorHandle motor = motor(absolute.motor());
+            handle = encoders.computeIfAbsent(HardwareIdentity.encoder(device), ignored -> {
+                motor.enableAbsoluteEncoder();
+                return adjustable(new AbsoluteMotorEncoderHandle(device, motor));
+            });
         } else {
             handle = encoders.computeIfAbsent(HardwareIdentity.encoder(device), ignored -> {
                 EncoderHandle created = backends

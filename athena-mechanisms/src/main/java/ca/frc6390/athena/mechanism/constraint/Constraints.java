@@ -69,6 +69,15 @@ public final class Constraints {
         };
     }
 
+    /** Replaces a requested value while a condition is active. */
+    public static <T> Constraint<T> override(BooleanSupplier active, T value) {
+        Objects.requireNonNull(active, "active");
+        Objects.requireNonNull(value, "value");
+        return context -> active.getAsBoolean()
+                ? new ConstraintResult.Corrected<>(context.requested(), value)
+                : new ConstraintResult.Allowed<>(context.requested());
+    }
+
     @SafeVarargs
     public static <T> Constraint<T> all(Constraint<T>... constraints) {
         List<Constraint<T>> collected = new ArrayList<>();

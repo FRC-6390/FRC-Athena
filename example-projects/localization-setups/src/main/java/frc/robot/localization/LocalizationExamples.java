@@ -1,7 +1,7 @@
 package frc.robot.localization;
 
-import ca.frc6390.athena.localization.pipeline.FieldBounds;
 import ca.frc6390.athena.localization.pipeline.LocalizationFilters;
+import ca.frc6390.athena.runtime.geometry.Rectangle2d;
 import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.localization.pipeline.VisionFilters;
@@ -29,7 +29,7 @@ public final class LocalizationExamples implements Mechanism {
                 .filter(VisionFilters.maxLatencySeconds(0.15))
                 .filter(VisionFilters.maxAmbiguity(0.20))
                 .filter(VisionFilters.maxAverageTagDistanceMeters(6.0))
-                .filter(FieldBounds.field(16.54, 8.21))
+                .filter(LocalizationFilters.inside(Rectangle2d.field(16.54, 8.21)))
                 .name("filteredVision");
         fusedVision = Localizations.covarianceIntersection()
                 .input(filteredVision)

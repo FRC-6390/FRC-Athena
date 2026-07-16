@@ -13,6 +13,7 @@ import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.runtime.RuntimeBindings;
 import ca.frc6390.athena.hardware.runtime.RuntimeScope;
 import ca.frc6390.athena.hardware.signal.MotorStallSignal;
+import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
 
 /**
  * Reusable motor declaration for robot constants.
@@ -41,7 +42,7 @@ public record MotorDevice(
         VendorOptions vendorOptions,
         MotorFollowerBinding follower,
         boolean isDisabled) {
-    private static final RuntimeBindings<MotorDevice, MotorHandle> RUNTIMES = new RuntimeBindings<>();
+    private static final RuntimeBindings<MotorDevice, RuntimeMotor> RUNTIMES = new RuntimeBindings<>();
     /**
      * Creates a motor ref on the default roboRIO CAN bus.
      *
@@ -199,7 +200,7 @@ public record MotorDevice(
 
     /**
      * Sets the portable controller current limit. CTRE maps this to supply current and
-     * REV maps it to the smart current limit. An explicit
+     * REV maps it to the smart phase-current limit. An explicit
      * {@link #supplyCurrentLimit(int)} or vendor-specific supply limit overrides it on
      * CTRE. A value of zero disables the portable limit.
      *
@@ -212,9 +213,10 @@ public record MotorDevice(
     }
 
     /**
-     * Sets the controller supply-side current limit. This limits current drawn from
-     * the battery and is supported by CTRE TalonFX-family controllers. It overrides
-     * {@link #currentLimit(int)} there; a CTRE vendor option overrides this value.
+     * Sets the controller supply-side current limit. CTRE TalonFX-family controllers
+     * enforce this directly. REV SPARK controllers have no supply-current limiter, so
+     * Athena conservatively includes this value when selecting the smart phase-current
+     * limit. It overrides {@link #currentLimit(int)}; a vendor option overrides this value.
      * A value of zero leaves the explicit supply limit unset.
      *
      * @param amps non-negative supply current limit in amps
@@ -227,9 +229,10 @@ public record MotorDevice(
 
     /**
      * Sets the motor stator-side current limit. This limits current through the motor
-     * windings and therefore limits produced torque. It is supported by CTRE
-     * TalonFX-family controllers; a CTRE vendor option overrides this value. A value
-     * of zero disables the stator limit.
+     * windings and therefore limits produced torque. CTRE TalonFX-family controllers
+     * enforce it directly; REV maps it to the smart phase-current limit. When both
+     * supply and stator limits are declared for REV, Athena uses the lower value. A
+     * vendor option overrides this mapping. A value of zero disables the stator limit.
      *
      * @param amps non-negative stator current limit in amps
      * @return updated motor declaration
@@ -242,6 +245,18 @@ public record MotorDevice(
     /** Returns the effective supply and stator limits used by Athena. */
     public MotorCurrentLimits currentLimits() {
         int supply = supplyCurrentLimitAmps > 0 ? supplyCurrentLimitAmps : currentLimitAmps;
+        MotorControllerKind controller = kind.controllerKind();
+        String controllerKey = controller == null ? kind.key() : controller.key();
+        if (controllerKey.startsWith("rev:spark-")) {
+            int smartLimit = supply <= 0
+                    ? statorCurrentLimitAmps
+                    : statorCurrentLimitAmps <= 0
+                            ? supply
+                            : Math.min(supply, statorCurrentLimitAmps);
+            // A SPARK Smart Current Limit regulates motor phase current, so expose
+            // the mapped limit in Athena's stator domain for telemetry and stalls.
+            return new MotorCurrentLimits(0, smartLimit);
+        }
         return new MotorCurrentLimits(supply, statorCurrentLimitAmps);
     }
 
@@ -251,24 +266,50 @@ public record MotorDevice(
     }
 
     /** Returns the motor's latest applied voltage snapshot. */
-    public double appliedVoltage() { return runtime().appliedVoltage(); }
+    public double appliedVoltage() { return runtime().handle().appliedVoltage(); }
 
     /** Returns the motor's latest supply-current snapshot. */
-    public double supplyCurrentAmps() { return runtime().supplyCurrentAmps(); }
+    public double supplyCurrentAmps() { return runtime().handle().supplyCurrentAmps(); }
 
     /** Returns the motor's latest stator-current snapshot. */
-    public double statorCurrentAmps() { return runtime().statorCurrentAmps(); }
+    public double statorCurrentAmps() { return runtime().handle().statorCurrentAmps(); }
 
     /** Returns the motor's latest integrated velocity snapshot. */
-    public double velocityRotationsPerSecond() { return runtime().integratedVelocityRotationsPerSecond(); }
+    public double velocityRotationsPerSecond() { return runtime().handle().integratedVelocityRotationsPerSecond(); }
+
+    /** Returns the latest command Athena applied to this motor. */
+    public MotorCommandSnapshot command() { return runtime().command(); }
+
+    /** Updates the runtime command snapshot after Athena applies an output. */
+    public void recordCommand(MotorCommandSnapshot command) {
+        RuntimeMotor runtime = RUNTIMES.find(this);
+        if (runtime != null) {
+            runtime.command(Objects.requireNonNull(command, "command"));
+        }
+    }
 
     /** Binds this declaration to its owning runtime handle. */
     public AutoCloseable bindRuntime(RuntimeScope scope, MotorHandle handle) {
-        return RUNTIMES.bind(this, scope, handle);
+        return RUNTIMES.bind(this, scope, new RuntimeMotor(handle));
     }
 
-    private MotorHandle runtime() {
+    private RuntimeMotor runtime() {
         return RUNTIMES.get(this, "Motor " + defaultName());
+    }
+
+    private static final class RuntimeMotor {
+        private final MotorHandle handle;
+        private volatile MotorCommandSnapshot command = MotorCommandSnapshot.neutral();
+
+        private RuntimeMotor(MotorHandle handle) {
+            this.handle = Objects.requireNonNull(handle, "handle");
+        }
+
+        private MotorHandle handle() { return handle; }
+
+        private MotorCommandSnapshot command() { return command; }
+
+        private void command(MotorCommandSnapshot value) { command = value; }
     }
 
     /**

@@ -150,6 +150,7 @@ class HardwareGraphTest {
         assertEquals(12.5, encoder.positionRotations(), 1.0e-9);
         assertEquals(3.25, encoder.velocityRotationsPerSecond(), 1.0e-9);
         assertEquals(1, motorBackend.created);
+        assertEquals(1, motorHandle.enableIntegratedEncoderCalls);
     }
 
     @Test
@@ -240,6 +241,7 @@ class HardwareGraphTest {
         assertEquals(0.25, encoder.absolutePositionRotations(), 1.0e-9);
         assertEquals(1.5, encoder.velocityRotationsPerSecond(), 1.0e-9);
         assertEquals(1, motorBackend.created);
+        assertEquals(1, motorHandle.enableAbsoluteEncoderCalls);
     }
 
     @Test
@@ -472,6 +474,8 @@ class HardwareGraphTest {
         private boolean failRefresh;
         private MotorHandle followLeader;
         private boolean followInverted;
+        private int enableIntegratedEncoderCalls;
+        private int enableAbsoluteEncoderCalls;
 
         private FakeMotorHandle(MotorDevice device) {
             this.device = device;
@@ -519,6 +523,16 @@ class HardwareGraphTest {
         @Override
         public double absoluteVelocityRotationsPerSecond() {
             return absoluteVelocity;
+        }
+
+        @Override
+        public void enableIntegratedEncoder() {
+            enableIntegratedEncoderCalls++;
+        }
+
+        @Override
+        public void enableAbsoluteEncoder() {
+            enableAbsoluteEncoderCalls++;
         }
 
         @Override

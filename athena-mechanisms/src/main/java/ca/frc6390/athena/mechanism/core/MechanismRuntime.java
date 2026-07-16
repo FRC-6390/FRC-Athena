@@ -133,10 +133,15 @@ final class MechanismRuntime {
         this.scheduler.reset();
     }
 
-    void activateLease(Object key, Action action, long recency) {
+    void activateLease(Object key, Action action, long recency, Set<MotorDevice> reservedMotors) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(action, "action");
-        activeLeases.computeIfAbsent(key, ignored -> new ActiveLease(action, recency, actionContext, pathRuntimes));
+        activeLeases.computeIfAbsent(key, ignored -> new ActiveLease(
+                action,
+                recency,
+                actionContext,
+                pathRuntimes,
+                reservedMotors));
     }
 
     void releaseLease(Object key) {
@@ -221,7 +226,7 @@ final class MechanismRuntime {
                         lease.recency(),
                         lease.evaluate(safeMechanismContext)));
 
-        List<CandidateOutput> selected = arbitrate(candidates);
+        List<CandidateOutput> selected = arbitrate(candidates, leaseReservations());
         Set<MotorDevice> drivenNow = new LinkedHashSet<>();
         applier.beginCycle();
         for (CandidateOutput candidate : selected) {
@@ -233,6 +238,7 @@ final class MechanismRuntime {
         for (MotorDevice motor : previouslyDrivenMotors) {
             if (!drivenNow.contains(motor)) {
                 actionContext.motor(motor).stop();
+                motor.recordCommand(ca.frc6390.athena.hardware.signal.MotorCommandSnapshot.neutral());
             }
         }
         previouslyDrivenMotors.clear();
@@ -399,10 +405,28 @@ final class MechanismRuntime {
         double get();
     }
 
-    private static List<CandidateOutput> arbitrate(List<CandidateOutput> candidates) {
+    private Map<MotorDevice, Long> leaseReservations() {
+        Map<MotorDevice, Long> reservations = new LinkedHashMap<>();
+        for (ActiveLease lease : activeLeases.values()) {
+            if (lease.scheduler().complete()) {
+                continue;
+            }
+            for (MotorDevice motor : lease.reservedMotors()) {
+                reservations.merge(motor, lease.recency(), Math::max);
+            }
+        }
+        return reservations;
+    }
+
+    private static List<CandidateOutput> arbitrate(
+            List<CandidateOutput> candidates,
+            Map<MotorDevice, Long> reservations) {
         Map<MotorDevice, CandidateOutput> winners = new LinkedHashMap<>();
         for (CandidateOutput candidate : candidates) {
             for (MotorDevice motor : candidate.output().request().motors()) {
+                if (candidate.recency() < reservations.getOrDefault(motor, Long.MIN_VALUE)) {
+                    continue;
+                }
                 CandidateOutput current = winners.get(motor);
                 if (current == null || candidate.newerThan(current)) {
                     winners.put(motor, candidate);
@@ -434,16 +458,19 @@ final class MechanismRuntime {
         private final Action action;
         private final long recency;
         private final StateScheduler scheduler;
+        private final Set<MotorDevice> reservedMotors;
         private double startSeconds = Double.NaN;
 
         private ActiveLease(
                 Action action,
                 long recency,
                 ActionContext actionContext,
-                Map<PathAction, PathRuntime> pathRuntimes) {
+                Map<PathAction, PathRuntime> pathRuntimes,
+                Set<MotorDevice> reservedMotors) {
             this.action = action;
             this.recency = recency;
             this.scheduler = new StateScheduler(actionContext, pathRuntimes);
+            this.reservedMotors = reservedMotors == null ? Set.of() : Set.copyOf(reservedMotors);
         }
 
         private long recency() {
@@ -452,6 +479,10 @@ final class MechanismRuntime {
 
         private Action action() {
             return action;
+        }
+
+        private Set<MotorDevice> reservedMotors() {
+            return reservedMotors;
         }
 
         private StateScheduler scheduler() {
@@ -836,6 +867,12 @@ final class MechanismRuntime {
             }
             if (action instanceof Actions.DynamicControlVelocity velocity) {
                 return new ControlTarget(velocity.control(), ControlMode.VELOCITY, velocity.velocity());
+            }
+            if (action instanceof InterpolatedControlAction interpolated) {
+                return new ControlTarget(
+                        interpolated.control(),
+                        interpolated.control().mode(),
+                        interpolated.target());
             }
             return null;
         }

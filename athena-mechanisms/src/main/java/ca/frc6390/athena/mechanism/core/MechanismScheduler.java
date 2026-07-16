@@ -375,7 +375,7 @@ public final class MechanismScheduler {
                     : Actions.parallel(partition.getValue().toArray(Action[]::new));
             MechanismRuntime runtime = runtimeFor(partition.getKey());
             Object runtimeKey = new Object();
-            runtime.activateLease(runtimeKey, partitioned, recency);
+            runtime.activateLease(runtimeKey, partitioned, recency, actionMotors(partitioned));
             registrations.add(new LeaseRegistration(runtimeKey, runtime));
         }
         leaseTargets.put(key, List.copyOf(registrations));
@@ -414,6 +414,14 @@ public final class MechanismScheduler {
                     + "a declaration owned by one.");
         }
         partitions.computeIfAbsent(target.root(), ignored -> new ArrayList<>()).add(action);
+    }
+
+    private static Set<MotorDevice> actionMotors(Action action) {
+        Set<MotorDevice> motors = new LinkedHashSet<>();
+        for (Object declaration : actionDeclarations(action)) {
+            collectMotors(declaration, motors);
+        }
+        return Set.copyOf(motors);
     }
 
     public MechanismScheduler request(Action action) {
@@ -764,6 +772,9 @@ public final class MechanismScheduler {
         }
         if (action instanceof Actions.DynamicControlVelocity control) {
             return control.control();
+        }
+        if (action instanceof InterpolatedControlAction interpolated) {
+            return interpolated.control();
         }
         return null;
     }

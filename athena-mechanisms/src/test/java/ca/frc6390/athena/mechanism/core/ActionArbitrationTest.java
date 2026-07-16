@@ -78,6 +78,29 @@ class ActionArbitrationTest {
     }
 
     @Test
+    void newerSequenceReservesMotorsUsedByItsLaterSteps() {
+        boolean[] armReady = {false};
+        RecordingContext hardware = new RecordingContext();
+        ReservedSequence mechanism = new ReservedSequence(armReady);
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
+
+        scheduler.request(mechanism.reverse);
+        scheduler.teleopPeriodic(0.0, 0.02);
+        assertEquals(-0.5, hardware.motor(ARM).percent, 1.0e-9);
+        assertEquals(-0.5, hardware.motor(ROLLERS).percent, 1.0e-9);
+
+        scheduler.request(mechanism.collect);
+        scheduler.teleopPeriodic(0.02, 0.02);
+        assertEquals(0.3, hardware.motor(ARM).percent, 1.0e-9);
+        assertEquals(0.0, hardware.motor(ROLLERS).percent, 1.0e-9);
+
+        armReady[0] = true;
+        scheduler.teleopPeriodic(0.04, 0.02);
+        assertEquals(0.3, hardware.motor(ARM).percent, 1.0e-9);
+        assertEquals(0.7, hardware.motor(ROLLERS).percent, 1.0e-9);
+    }
+
+    @Test
     void directRequestsCoexistByResourceAndRerequestingUpdatesRecency() {
         RecordingContext hardware = new RecordingContext();
         DirectActions mechanism = new DirectActions();
@@ -228,6 +251,17 @@ class ActionArbitrationTest {
             inwardBinding = Events.when(() -> inward[0]).active().whileActive(this.inward);
             outwardBinding = Events.when(() -> outward[0]).active().whileActive(this.outward);
             rollerBinding = Events.when(() -> rollers[0]).active().whileActive(intake);
+        }
+    }
+
+    private static final class ReservedSequence implements Mechanism {
+        private final Action reverse = Actions.parallel(ARM.percent(-0.5), ROLLERS.percent(-0.5));
+        private final Action collect;
+
+        private ReservedSequence(boolean[] armReady) {
+            collect = Actions.sequence()
+                    .until(() -> armReady[0], ARM.percent(0.3))
+                    .then(Actions.parallel(ARM.percent(0.3), ROLLERS.percent(0.7)));
         }
     }
 

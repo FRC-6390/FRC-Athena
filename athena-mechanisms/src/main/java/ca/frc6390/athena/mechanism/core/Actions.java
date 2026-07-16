@@ -746,7 +746,8 @@ public final class Actions {
         if (action instanceof ControlPosition
                 || action instanceof DynamicControlPosition
                 || action instanceof ControlVelocity
-                || action instanceof DynamicControlVelocity) {
+                || action instanceof DynamicControlVelocity
+                || action instanceof InterpolatedControlAction) {
             return true;
         }
         return false;

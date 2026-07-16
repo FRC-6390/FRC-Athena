@@ -10,6 +10,7 @@ import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
+import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.constraint.ConstraintContext;
@@ -90,12 +91,14 @@ final class OutputApplier {
             MotorHandle handle = context.motor(motor);
             drivenMotors.add(handle);
             apply(handle, applied);
+            motor.recordCommand(command(applied.output()));
             appliedMotorCommands.put(motor, new AppliedMotorCommand(mode(applied.output()), value(applied.output())));
         }
     }
 
     void stopAll() {
         drivenMotors.forEach(MotorHandle::stop);
+        appliedMotorCommands.keySet().forEach(motor -> motor.recordCommand(MotorCommandSnapshot.neutral()));
         resetControls();
     }
 
@@ -589,6 +592,22 @@ final class OutputApplier {
         } else if (output instanceof Output.Neutral || output instanceof Output.Fault) {
             motor.stop();
         }
+    }
+
+    private static MotorCommandSnapshot command(Output output) {
+        if (output instanceof Output.Percent percent) {
+            return new MotorCommandSnapshot(MotorCommandSnapshot.Mode.PERCENT, percent.percent());
+        }
+        if (output instanceof Output.Voltage voltage) {
+            return new MotorCommandSnapshot(MotorCommandSnapshot.Mode.VOLTAGE, voltage.volts());
+        }
+        if (output instanceof Output.Position position) {
+            return new MotorCommandSnapshot(MotorCommandSnapshot.Mode.POSITION, position.position());
+        }
+        if (output instanceof Output.Velocity velocity) {
+            return new MotorCommandSnapshot(MotorCommandSnapshot.Mode.VELOCITY, velocity.velocity());
+        }
+        return MotorCommandSnapshot.neutral();
     }
 
     private static boolean usesDeviceNativeFeedback(ControlBinding control) {

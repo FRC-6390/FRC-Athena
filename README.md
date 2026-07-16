@@ -121,13 +121,37 @@ HardwareBus CANIVORE = HardwareBus.can("canivore");
 MotorDevice drive = CANIVORE.motor(MotorKinds.KRAKEN_X60, 1);
 MotorDevice intake = RIO.motor(MotorKinds.NEO_550, 2);
 MotorDevice flexNeo = RIO.motor(MotorControllerKinds.SPARK_FLEX, MotorKinds.NEO, 3);
+
+MotorDevice leader = RIO.motor(MotorKinds.NEO, 10)
+        .supplyCurrentLimit(40)
+        .statorCurrentLimit(60);
+MotorDevice followerA = RIO.motor(MotorKinds.NEO, 11).follow(leader);
+MotorDevice followerB = RIO.motor(MotorKinds.NEO, 12).follow(leader);
+MotorDevice followerC = RIO.motor(MotorKinds.NEO, 13).follow(leader);
+MotorDevice followerD = RIO.motor(MotorKinds.NEO, 14).follow(leader);
+
+MotorDevice configuredNeo = RIO.motor(MotorKinds.NEO, 15)
+        .vendor(RevMotorOptions.class, rev -> rev
+                .voltageCompensation(12.0)
+                .telemetrySignalPeriodMs(20)
+                .forwardSoftLimitRotations(100.0));
+
 EncoderDevice angle = CANIVORE.encoder(EncoderKinds.CANCODER, 9);
 ImuDevice pigeon = RIO.imu(ImuKinds.PIGEON_2, 0);
 
-EncoderDevice throughBore = RIO.dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
+EncoderDevice throughBoreV1 = RIO.dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
+EncoderDevice throughBoreV2 = RIO.dio(3).encoder(EncoderKinds.REV_THROUGH_BORE_V2);
+EncoderDevice throughBoreQuadrature = RIO.quadrature(4, 5)
+        .encoder(EncoderKinds.REV_THROUGH_BORE_QUADRATURE);
 ImuDevice navx = RIO.spi(SpiPort.MXP).imu(ImuKinds.NAVX);
-DigitalInputDevice home = RIO.dio(3).digitalInput("arm home");
+DigitalInputDevice home = RIO.dio(6).digitalInput("arm home");
 ```
+
+For REV SPARK controllers, Athena maps CTRE-style supply/stator declarations onto REV's
+motor-phase current limiter. If both are set, the lower value wins. A
+`RevMotorOptions.smartCurrentLimit(...)` value explicitly overrides that mapping. Initial
+REV configuration resets stale safe parameters and persists settings by default, so follower
+relationships and safety configuration survive controller power cycles.
 
 `MotorKinds` identifies the physical motor so simulation can select its real motor constants.
 Each built-in motor has a usual controller (`KRAKEN_X60` uses Talon FX, `NEO` uses Spark MAX,

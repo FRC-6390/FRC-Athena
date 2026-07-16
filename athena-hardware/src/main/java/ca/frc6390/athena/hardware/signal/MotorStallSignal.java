@@ -9,7 +9,7 @@ public record MotorStallSignal(
         MotorDevice motor,
         double currentLimitFraction,
         double velocityThresholdRotationsPerSecond,
-        double voltageThreshold,
+        double commandedVoltageThreshold,
         double durationSeconds,
         double rearmSeconds) {
     public MotorStallSignal {
@@ -17,7 +17,7 @@ public record MotorStallSignal(
         if (!(currentLimitFraction > 0.0) || !Double.isFinite(currentLimitFraction)) {
             throw new IllegalArgumentException("Current-limit fraction must be positive and finite.");
         }
-        if (velocityThresholdRotationsPerSecond < 0.0 || voltageThreshold < 0.0
+        if (velocityThresholdRotationsPerSecond < 0.0 || commandedVoltageThreshold < 0.0
                 || durationSeconds < 0.0 || rearmSeconds < 0.0) {
             throw new IllegalArgumentException("Stall thresholds and timing cannot be negative.");
         }
@@ -30,27 +30,28 @@ public record MotorStallSignal(
 
     public MotorStallSignal atCurrentLimit(double fraction) {
         return new MotorStallSignal(motor, fraction, velocityThresholdRotationsPerSecond,
-                voltageThreshold, durationSeconds, rearmSeconds);
+                commandedVoltageThreshold, durationSeconds, rearmSeconds);
     }
 
     public MotorStallSignal velocityBelow(double rotationsPerSecond) {
         return new MotorStallSignal(motor, currentLimitFraction, rotationsPerSecond,
-                voltageThreshold, durationSeconds, rearmSeconds);
+                commandedVoltageThreshold, durationSeconds, rearmSeconds);
     }
 
-    public MotorStallSignal appliedVoltageAbove(double volts) {
+    /** Sets the minimum open-loop command, expressed as equivalent volts. */
+    public MotorStallSignal commandedVoltageAbove(double volts) {
         return new MotorStallSignal(motor, currentLimitFraction, velocityThresholdRotationsPerSecond,
                 volts, durationSeconds, rearmSeconds);
     }
 
     public MotorStallSignal forSeconds(double seconds) {
         return new MotorStallSignal(motor, currentLimitFraction, velocityThresholdRotationsPerSecond,
-                voltageThreshold, seconds, rearmSeconds);
+                commandedVoltageThreshold, seconds, rearmSeconds);
     }
 
     public MotorStallSignal rearmAfterSeconds(double seconds) {
         return new MotorStallSignal(motor, currentLimitFraction, velocityThresholdRotationsPerSecond,
-                voltageThreshold, durationSeconds, seconds);
+                commandedVoltageThreshold, durationSeconds, seconds);
     }
 
     public double currentThresholdAmps() {
@@ -58,10 +59,24 @@ public record MotorStallSignal(
     }
 
     public boolean instantaneousActive() {
+        return commanded()
+                && currentAmps() >= currentThresholdAmps()
+                && Math.abs(velocityRotationsPerSecond()) <= velocityThresholdRotationsPerSecond;
+    }
+
+    /** Returns whether Athena's latest command requests movement. */
+    public boolean commanded() {
+        return motor.command().requestsMovement(commandedVoltageThreshold, velocityThresholdRotationsPerSecond);
+    }
+
+    /** Returns the current channel selected from the configured current limits. */
+    public double currentAmps() {
         MotorCurrentLimits limits = motor.currentLimits();
-        double current = limits.statorAmps() > 0 ? motor.statorCurrentAmps() : motor.supplyCurrentAmps();
-        return current >= currentThresholdAmps()
-                && Math.abs(motor.velocityRotationsPerSecond()) <= velocityThresholdRotationsPerSecond
-                && Math.abs(motor.appliedVoltage()) >= voltageThreshold;
+        return limits.statorAmps() > 0 ? motor.statorCurrentAmps() : motor.supplyCurrentAmps();
+    }
+
+    /** Returns the motor's measured velocity used by this detector. */
+    public double velocityRotationsPerSecond() {
+        return motor.velocityRotationsPerSecond();
     }
 }

@@ -10,6 +10,7 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanner;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
+import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -354,6 +355,15 @@ public record ControlBinding(
 
     public Action set(DoubleSupplier target) {
         return mode == ControlMode.VELOCITY ? velocity(target) : position(target);
+    }
+
+    /** Creates an interpolated position or velocity action for this binding. */
+    public InterpolatedControlAction interpolate(InterpolationModel model, DoubleSupplier input) {
+        requireOutput();
+        return new InterpolatedControlAction(
+                this,
+                Objects.requireNonNull(model, "model"),
+                Objects.requireNonNull(input, "input"));
     }
 
     public Action percent(double percent) {

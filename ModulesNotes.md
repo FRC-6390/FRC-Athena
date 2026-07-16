@@ -115,7 +115,7 @@
   - [x] Root runtime scheduling now decides when pipelines evaluate.
 - [x] Test surfaces needed: input chaining, nested pipeline estimates, filter rejection, field-bounds filtering, weighted-average behavior, latest-valid behavior, reset actions, and behavior when no pose-capable measurements exist are covered by focused JUnit tests.
   - [x] Root `RobotRuntime` now owns localization max-age filtering and disabled-mode refresh policy for localization snapshots.
-- [x] Upkeep: removed the old public config/spec layer, old localization contexts, `LocalizationRef`, `LocalizationFilterRef`, `LocalizationEstimatorRef`, `FieldBoundsRef`, and stale vision frame estimator files. Current Java sources use uniform `PoseSignal -> Localization -> Localization` composition with `Localizations`, `LocalizationFilter`, and `FieldBoundsFilter`.
+- [x] Upkeep: removed the old public config/spec layer, old localization contexts, `LocalizationRef`, `LocalizationFilterRef`, `LocalizationEstimatorRef`, `FieldBoundsRef`, and stale vision frame estimator files. Current Java sources use uniform `PoseSignal -> Localization -> Localization` composition with `Localizations`, `LocalizationFilter`, and shared `Geometry2d` shapes through `LocalizationFilters.inside(...)`.
 - [x] Package cleanup: localization APIs now live in `localization.pipeline`; the old `localization.ref` package was removed.
 - [x] Architecture: localization now consumes a runtime-level pose sample contract instead of reflecting into concrete measurement records.
   - [x] Replace temporary reflective bridge with `PoseMeasurementSample`.

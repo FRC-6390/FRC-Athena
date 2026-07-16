@@ -40,9 +40,9 @@ This is the current public API Rebuilt actually imports.
 - Hardware values: `GearRatio`, `Range`, `EncoderUnit`.
 - Simulation declarations: composable `SimModel` and `SimulationSession`.
 - Mechanisms: `Mechanism`, `Action`, `Actions`, `Events`, `HookBinding`, `EventContext`, `LifecycleMode`, `LifecyclePhase`, `RobotRuntime`, `PathAction`, `Paths`.
-- Control values: `ControlBinding`, `PidGains`, `FeedforwardGains`, `Constraint`, `MotionProfile`, `MotionPlanner`.
+- Control values: `ControlBinding`, `PidGains`, `FeedforwardGains`, `Constraint`, `MotionProfile`, `MotionPlanner`, `InterpolationModel`, `InterpolationKinds`.
 - Runtime helpers: `ModifiedAxis`, `RobotVelocity`, `PoseSnapshot`, `Measurement`, `Measurements`, `MeasurementStdDevs`.
-- Localization: `PoseSignal`, `Localization`, `Localizations`, `FieldBounds`, and `LocalizationFilters`.
+- Localization: `PoseSignal`, `Localization`, `Localizations`, shared `Geometry2d` shapes, and `LocalizationFilters`.
 - Vision: `Cameras`, `HeliosDevice`, `LimelightDevice`, `PhotonVisionDevice`, `CameraMountPose`.
 - Commands: `CommandAction`.
 - Drivetrain geometry: `WheelBase`, `TrackWidth`.
@@ -292,6 +292,12 @@ when the control is neutralized. Derivative is taken from measurement to avoid t
 contains `kS`, `kV`, `kA`, and constant `kG`. Device offload is allowed only when every targeted motor supports the
 same voltage-semantic request and the selected feedback source is actually configured by the backend.
 
+Position and velocity bindings can create a data-driven target with
+`control.interpolate(InterpolationKinds.LINEAR, input).at(point, value)`. Points are sorted, endpoint values are
+clamped, and the input plus dynamic points and values are sampled once per control evaluation. `InterpolationModel`
+is the custom-model boundary; it receives the sampled input and ordered `InterpolationData`, so a mechanism can use
+regression or another team model without introducing a separate scheduler or output path.
+
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |
 | `MechanismState` | `Action` | RENAME | Public behavior request type. |
@@ -471,7 +477,7 @@ Catalogs are public only when they create the kept robot API.
 | `Events` | `Events` | KEEP | Rebuilt uses it. |
 | `Paths` | `Paths` | KEEP | Rebuilt autos use it. |
 | `Cameras` | `Cameras` | KEEP | Rebuilt localization uses it. |
-| `FieldBounds` | `FieldBounds` | KEEP | Rebuilt localization uses it. |
+| `FieldBounds` | `Rectangle2d` with `LocalizationFilters.inside(...)` | REPLACED | Field bounds now use the shared geometry API. |
 | `LocalizationFilters` | `LocalizationFilters` | KEEP | Rebuilt localization uses it. |
 | `Localizations` | `Localizations` | KEEP | Rebuilt localization uses it. |
 | `Measurements` | `Measurements` | KEEP | Rebuilt localization uses it. |

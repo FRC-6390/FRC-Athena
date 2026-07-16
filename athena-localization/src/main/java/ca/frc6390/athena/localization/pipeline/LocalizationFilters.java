@@ -3,6 +3,7 @@ package ca.frc6390.athena.localization.pipeline;
 import java.util.Objects;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
+import ca.frc6390.athena.runtime.geometry.Geometry2d;
 
 /**
  * Built-in localization filters.
@@ -39,6 +40,17 @@ public final class LocalizationFilters {
             }
             return !(measurement instanceof PoseMeasurementSample sample)
                     || distance(sample.pose(), baseline.pose()) <= max;
+        };
+    }
+
+    /** Accepts only poses contained by the supplied geometry. */
+    public static LocalizationFilter inside(Geometry2d geometry) {
+        Objects.requireNonNull(geometry, "geometry");
+        return (pipeline, measurement, pose) -> {
+            if (pose != null) {
+                return geometry.contains(pose);
+            }
+            return !(measurement instanceof PoseMeasurementSample sample) || geometry.contains(sample.pose());
         };
     }
 
