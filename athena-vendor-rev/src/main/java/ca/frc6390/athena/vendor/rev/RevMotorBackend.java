@@ -22,4 +22,9 @@ public final class RevMotorBackend implements MotorBackend {
         return new RevMotorHandle(
                 device, device.vendorOptions().find(RevMotorOptions.class).orElse(new RevMotorOptions()));
     }
+
+    @Override
+    public boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
+        return follower.canbus().equalsIgnoreCase(leader.canbus()) && supports(leader.kind());
+    }
 }

@@ -383,6 +383,11 @@ final class SimulationCoordinator implements SimModel.Context {
         }
 
         @Override
+        public boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
+            return delegate.supportsHardwareFollowing(follower, leader);
+        }
+
+        @Override
         public MotorHandle create(MotorDevice device) {
             return SimulationCoordinator.this.motor(device);
         }

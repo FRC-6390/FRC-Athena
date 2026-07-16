@@ -16,6 +16,11 @@ public final class SimMotorBackend implements MotorBackend {
     }
 
     @Override
+    public boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
+        return follower.canbus().equalsIgnoreCase(leader.canbus());
+    }
+
+    @Override
     public MotorHandle create(MotorDevice device) {
         return new SimMotorHandle(device);
     }

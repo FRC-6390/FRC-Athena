@@ -26,4 +26,9 @@ public final class CtreMotorBackend implements MotorBackend {
         return new CtreMotorHandle(
                 device, device.vendorOptions().find(CtreMotorOptions.class).orElse(new CtreMotorOptions()));
     }
+
+    @Override
+    public boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
+        return follower.canbus().equalsIgnoreCase(leader.canbus()) && supports(leader.kind());
+    }
 }

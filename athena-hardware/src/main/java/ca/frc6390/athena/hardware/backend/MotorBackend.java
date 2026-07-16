@@ -15,6 +15,11 @@ public interface MotorBackend {
      */
     boolean supports(MotorKind kind);
 
+    /** Returns whether this backend can configure the declared follower relationship in hardware. */
+    default boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
+        return false;
+    }
+
     /**
      * Creates a runtime motor handle from a declaration.
      *

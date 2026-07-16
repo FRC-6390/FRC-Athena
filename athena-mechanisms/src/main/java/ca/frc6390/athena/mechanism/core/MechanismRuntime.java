@@ -303,6 +303,8 @@ final class MechanismRuntime {
         node.declarations().values().forEach(declaration -> {
             if (declaration instanceof MotorDevice motor) {
                 motors.add(motor);
+            } else if (declaration instanceof ControlBinding control) {
+                motors.addAll(control.motors());
             }
         });
         motors.addAll(commands.keySet());

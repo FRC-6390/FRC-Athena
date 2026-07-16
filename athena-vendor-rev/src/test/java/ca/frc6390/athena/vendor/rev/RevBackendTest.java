@@ -66,9 +66,8 @@ class RevBackendTest {
 
     @Test
     void realRevConfigUsesSmartLimitForNeoAndSecondaryLimitForBrushedMotor() throws Exception {
-        MotorDevice leader = MotorDevice.of(MotorKinds.NEO, 1);
         SparkBaseConfig neo = RevMotorHandle.activationConfig(
-                MotorDevice.of(MotorKinds.NEO, 2).follow(leader).currentLimit(35),
+                MotorDevice.of(MotorKinds.NEO, 2).currentLimit(35),
                 new RevMotorOptions(),
                 false);
         SparkBaseConfig cim = RevMotorHandle.activationConfig(
@@ -80,7 +79,7 @@ class RevBackendTest {
         Map<Integer, Object> cimParameters = parameters(cim);
         assertEquals(35, neoParameters.get(SparkParameters.kSmartCurrentStallLimit.value));
         assertFalse(neoParameters.containsKey(SparkParameters.kCurrentChop.value));
-        assertEquals(1, neoParameters.get(SparkParameters.kFollowerModeLeaderId.value));
+        assertEquals(0, neoParameters.get(SparkParameters.kFollowerModeLeaderId.value));
         assertEquals(30.0f, cimParameters.get(SparkParameters.kCurrentChop.value));
         assertFalse(cimParameters.containsKey(SparkParameters.kSmartCurrentStallLimit.value));
         assertEquals(8192, parameters(cim.encoder).get(SparkParameters.kEncoderCountsPerRev.value));

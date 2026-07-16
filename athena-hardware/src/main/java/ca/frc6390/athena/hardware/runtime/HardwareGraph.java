@@ -12,6 +12,7 @@ import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.backend.HardwareIdentity;
 import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.MotorBackend;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
@@ -23,6 +24,8 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final BackendRegistry backends;
     private final Map<HardwareIdentity, MotorHandle> motors = new LinkedHashMap<>();
+    private final Map<HardwareIdentity, List<ActionContext.SoftwareMotorFollower>> softwareFollowers =
+            new LinkedHashMap<>();
     private final Map<HardwareIdentity, EncoderHandle> encoders = new LinkedHashMap<>();
     private final Map<HardwareIdentity, ImuHandle> imus = new LinkedHashMap<>();
     private final Map<HardwareIdentity, RuntimeException> refreshFailures = new LinkedHashMap<>();
@@ -71,18 +74,36 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             return existing;
         }
         MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());
-        MotorHandle handle = backends
+        MotorBackend backend = backends
                 .motorBackendFor(device.kind())
                 .orElseThrow(() -> new IllegalStateException(
-                        backends.missingBackendMessage("motor", device.kind().key())))
-                .create(device);
+                        backends.missingBackendMessage("motor", device.kind().key())));
+        boolean softwareFollow = leader != null
+                && !backend.supportsHardwareFollowing(device, device.follower().leader());
+        MotorDevice backendDevice = softwareFollow
+                ? device.independent().inverted(false)
+                : device;
+        MotorHandle created = backend.create(backendDevice);
+        MotorHandle handle = softwareFollow
+                ? new SoftwareFollowerMotorHandle(device, created)
+                : created;
         handle.activate();
-        if (leader != null) {
-            handle.follow(leader, device.isInverted());
+        if (leader != null && !softwareFollow) {
+            handle.follow(backendHandle(leader), device.isInverted());
+        } else if (softwareFollow) {
+            softwareFollowers.computeIfAbsent(
+                    HardwareIdentity.motor(device.follower().leader()),
+                    ignored -> new ArrayList<>())
+                    .add(new ActionContext.SoftwareMotorFollower(device, handle));
         }
         motors.put(identity, handle);
         runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, handle));
         return handle;
+    }
+
+    @Override
+    public synchronized List<ActionContext.SoftwareMotorFollower> softwareFollowers(MotorDevice leader) {
+        return List.copyOf(softwareFollowers.getOrDefault(HardwareIdentity.motor(leader), List.of()));
     }
 
     @Override
@@ -122,6 +143,12 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
 
     private static EncoderHandle adjustable(EncoderHandle handle) {
         return handle.supportsPositionSetting() ? handle : new PositionAdjustableEncoderHandle(handle);
+    }
+
+    private static MotorHandle backendHandle(MotorHandle handle) {
+        return handle instanceof SoftwareFollowerMotorHandle software
+                ? software.backendHandle()
+                : handle;
     }
 
     /**
@@ -193,6 +220,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         closeAll(imus);
         closeAll(encoders);
         closeAll(motors);
+        softwareFollowers.clear();
     }
 
     private static void closeAll(Map<?, ?> handles) {

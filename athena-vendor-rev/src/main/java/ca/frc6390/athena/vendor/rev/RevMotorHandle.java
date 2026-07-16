@@ -109,9 +109,6 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             throw new IllegalArgumentException("REV motor " + device.defaultName()
                     + " can only follow another REV motor.");
         }
-        if (device.follower() != null && device.follower().leader().id() == revLeader.device.id()) {
-            return;
-        }
         if (!controller.follow(device, options, revLeader.device.id(), inverted)) {
             throw new IllegalStateException("Failed to configure follower " + device.defaultName());
         }
@@ -345,11 +342,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
                     .busVoltagePeriodMs(options.telemetrySignalPeriodMs())
                     .outputCurrentPeriodMs(options.telemetrySignalPeriodMs());
         }
-        if (device.follower() == null) {
-            config.disableFollowerMode();
-        } else {
-            config.follow(device.follower().leader().id(), device.isInverted());
-        }
+        config.disableFollowerMode();
         return config;
     }
 

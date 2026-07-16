@@ -1,5 +1,8 @@
 package ca.frc6390.athena.mechanism.core;
 
+import ca.frc6390.athena.hardware.device.DigitalInputDevice;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import java.util.Collection;
@@ -11,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.DoubleSupplier;
 
 final class RobotGraph {
     private final Map<Mechanism, MechanismNode> mechanismNodes = new IdentityHashMap<>();
@@ -89,12 +93,31 @@ final class RobotGraph {
         if (declaration instanceof TelemetryValue value) {
             values.put(mechanismPath + "/" + valuePath, value);
         } else if (declaration instanceof MotorDevice motor) {
-            values.put(mechanismPath + "/" + valuePath + "/disabled", overrides.motorDisabled(motor));
+            addMotorTelemetry(mechanismPath + "/" + valuePath, motor, values, overrides);
+        } else if (declaration instanceof EncoderDevice encoder) {
+            addEncoderTelemetry(mechanismPath + "/" + valuePath, encoder, values);
+        } else if (declaration instanceof ImuDevice imu) {
+            addImuTelemetry(mechanismPath + "/" + valuePath, imu, values);
+        } else if (declaration instanceof DigitalInputDevice input) {
+            values.put(mechanismPath + "/" + valuePath + "/active", TelemetryValue.bool(input::active));
+            values.put(mechanismPath + "/" + valuePath + "/raw", TelemetryValue.bool(input::raw));
         } else if (declaration instanceof ControlBinding control) {
-            values.put(mechanismPath + "/" + valuePath + "/disabled", overrides.controlDisabled(control));
-            if (control.output() != null) {
-                values.put(mechanismPath + "/" + valuePath + "/output/disabled",
-                        overrides.motorDisabled(control.output()));
+            String controlPath = mechanismPath + "/" + valuePath;
+            values.put(controlPath + "/disabled", overrides.controlDisabled(control));
+            values.put(controlPath + "/mode", TelemetryValue.string(() -> control.mode().name()));
+            values.put(controlPath + "/slot", TelemetryValue.number(() -> control.slot()));
+            for (int index = 0; index < control.motors().size(); index++) {
+                addMotorTelemetry(
+                        controlPath + "/motors/" + index,
+                        control.motors().get(index),
+                        values,
+                        overrides);
+            }
+            if (control.feedback() != null) {
+                values.put(controlPath + "/feedback/position",
+                        safeNumber(control.feedback().position()::position));
+                values.put(controlPath + "/feedback/velocity",
+                        safeNumber(control.feedback().velocity()::velocity));
             }
             int customLoop = 0;
             for (ControlLoop loop : control.loops()) {
@@ -112,6 +135,54 @@ final class RobotGraph {
                 addTelemetry(mechanismPath, valuePath + "/" + index++, value, values, overrides);
             }
         }
+    }
+
+    private static void addMotorTelemetry(
+            String path,
+            MotorDevice motor,
+            Map<String, TelemetryValue> values,
+            RuntimeOverrides overrides) {
+        values.put(path + "/disabled", overrides.motorDisabled(motor));
+        values.put(path + "/positionRotations", safeNumber(motor::positionRotations));
+        values.put(path + "/velocityRotationsPerSecond", safeNumber(motor::velocityRotationsPerSecond));
+        values.put(path + "/appliedVoltage", safeNumber(motor::appliedVoltage));
+        values.put(path + "/supplyCurrentAmps", safeNumber(motor::supplyCurrentAmps));
+        values.put(path + "/statorCurrentAmps", safeNumber(motor::statorCurrentAmps));
+        values.put(path + "/command/mode", TelemetryValue.string(() -> motor.command().mode().name()));
+        values.put(path + "/command/value", TelemetryValue.number(() -> motor.command().value()));
+    }
+
+    private static void addEncoderTelemetry(
+            String path,
+            EncoderDevice encoder,
+            Map<String, TelemetryValue> values) {
+        values.put(path + "/position", safeNumber(encoder::position));
+        values.put(path + "/absolutePosition", safeNumber(encoder::absolutePosition));
+        values.put(path + "/velocity", safeNumber(encoder::velocity));
+    }
+
+    private static void addImuTelemetry(
+            String path,
+            ImuDevice imu,
+            Map<String, TelemetryValue> values) {
+        values.put(path + "/yawDegrees", safeNumber(imu::yawDegrees));
+        values.put(path + "/angleDegrees", safeNumber(imu::angleDegrees));
+        values.put(path + "/pitchDegrees", safeNumber(imu::pitchDegrees));
+        values.put(path + "/rollDegrees", safeNumber(imu::rollDegrees));
+        values.put(path + "/yawRateDegreesPerSecond", safeNumber(imu::yawRateDegreesPerSecond));
+        values.put(path + "/linearAccelerationXG", safeNumber(imu::linearAccelerationXG));
+        values.put(path + "/linearAccelerationYG", safeNumber(imu::linearAccelerationYG));
+        values.put(path + "/linearAccelerationZG", safeNumber(imu::linearAccelerationZG));
+    }
+
+    private static TelemetryValue safeNumber(DoubleSupplier reader) {
+        return TelemetryValue.number(() -> {
+            try {
+                return reader.getAsDouble();
+            } catch (RuntimeException exception) {
+                return Double.NaN;
+            }
+        });
     }
 
     Map<String, HookBinding> hooks(Mechanism mechanism) {

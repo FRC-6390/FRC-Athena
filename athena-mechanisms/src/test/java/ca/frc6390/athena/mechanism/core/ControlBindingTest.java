@@ -22,6 +22,21 @@ import org.junit.jupiter.api.Test;
 
 class ControlBindingTest {
     @Test
+    void controlFactoriesAcceptAnyNumberOfMotors() {
+        MotorDevice first = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
+        MotorDevice second = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
+        MotorDevice third = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
+
+        ControlBinding position = Controls.position(first, second, third);
+        ControlBinding velocity = Controls.velocity(first, second, third);
+
+        assertEquals(List.of(first, second, third), position.motors());
+        assertEquals(List.of(first, second, third), velocity.motors());
+        assertSame(first, position.output());
+        assertEquals(List.of(second, third), position.followers());
+    }
+
+    @Test
     void motorsArePrecomputedAndImmutable() {
         MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);

@@ -87,12 +87,26 @@ final class OutputApplier {
                 return null;
             });
         }
+        Set<MotorHandle> appliedHandles = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
         for (MotorDevice motor : motors(output.request())) {
-            MotorHandle handle = context.motor(motor);
-            drivenMotors.add(handle);
-            apply(handle, applied);
-            motor.recordCommand(command(applied.output()));
-            appliedMotorCommands.put(motor, new AppliedMotorCommand(mode(applied.output()), value(applied.output())));
+            applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
+        }
+    }
+
+    private void applyMotorAndSoftwareFollowers(
+            MotorDevice motor,
+            MotorHandle handle,
+            AppliedOutput applied,
+            Set<MotorHandle> appliedHandles) {
+        if (!appliedHandles.add(handle)) {
+            return;
+        }
+        drivenMotors.add(handle);
+        apply(handle, applied);
+        motor.recordCommand(command(applied.output()));
+        appliedMotorCommands.put(motor, new AppliedMotorCommand(mode(applied.output()), value(applied.output())));
+        for (ActionContext.SoftwareMotorFollower follower : context.softwareFollowers(motor)) {
+            applyMotorAndSoftwareFollowers(follower.device(), follower.handle(), applied, appliedHandles);
         }
     }
 

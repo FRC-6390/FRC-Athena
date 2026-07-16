@@ -277,6 +277,9 @@ public record MotorDevice(
     /** Returns the motor's latest integrated velocity snapshot. */
     public double velocityRotationsPerSecond() { return runtime().handle().integratedVelocityRotationsPerSecond(); }
 
+    /** Returns the motor's latest integrated position snapshot. */
+    public double positionRotations() { return runtime().handle().integratedPositionRotations(); }
+
     /** Returns the latest command Athena applied to this motor. */
     public MotorCommandSnapshot command() { return runtime().command(); }
 
@@ -323,9 +326,6 @@ public record MotorDevice(
         if (id == leader.id() && canbus.equals(leader.canbus())) {
             throw new IllegalArgumentException("A motor cannot follow itself.");
         }
-        if (!canbus.equals(leader.canbus())) {
-            throw new IllegalArgumentException("A motor and its leader must use the same CAN bus.");
-        }
         return new MotorDevice(
                 kind,
                 id,
@@ -337,6 +337,22 @@ public record MotorDevice(
                 statorCurrentLimitAmps,
                 vendorOptions,
                 new MotorFollowerBinding(leader),
+                isDisabled);
+    }
+
+    /** Returns this motor without a hardware follower declaration. */
+    public MotorDevice independent() {
+        return new MotorDevice(
+                kind,
+                id,
+                canbus,
+                isInverted,
+                neutralMode,
+                currentLimitAmps,
+                supplyCurrentLimitAmps,
+                statorCurrentLimitAmps,
+                vendorOptions,
+                null,
                 isDisabled);
     }
 

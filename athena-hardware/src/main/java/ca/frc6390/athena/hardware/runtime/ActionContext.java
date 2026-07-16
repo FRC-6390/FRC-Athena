@@ -6,6 +6,7 @@ import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import java.util.List;
 
 /**
  * Runtime access used by ref actions.
@@ -29,6 +30,20 @@ public interface ActionContext {
      */
     default MotorHandle motor(MotorDevice ref) {
         throw new UnsupportedOperationException("Runtime motor access is not available.");
+    }
+
+    /** Returns followers whose commands must be mirrored by Athena instead of vendor hardware. */
+    default List<SoftwareMotorFollower> softwareFollowers(MotorDevice leader) {
+        return List.of();
+    }
+
+    /** One runtime follower target driven from its leader's resolved command. */
+    record SoftwareMotorFollower(MotorDevice device, MotorHandle handle) {
+        public SoftwareMotorFollower {
+            if (device == null || handle == null) {
+                throw new NullPointerException("Software follower device and handle are required.");
+            }
+        }
     }
 
     default ImuHandle imu(ImuDevice ref) {

@@ -594,6 +594,11 @@ class RobotRuntimeTest {
         }
 
         @Override
+        public boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
+            return follower.canbus().equalsIgnoreCase(leader.canbus());
+        }
+
+        @Override
         public MotorHandle create(MotorDevice device) {
             created++;
             FollowerMotorHandle handle = new FollowerMotorHandle(device);

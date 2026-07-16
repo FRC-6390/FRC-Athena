@@ -1,6 +1,7 @@
 package ca.frc6390.athena.hardware.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -117,6 +118,37 @@ class HardwareGraphTest {
         assertEquals(2, backend.created);
         assertSame(leaderHandle, followerHandle.followLeader);
         assertEquals(true, followerHandle.followInverted);
+    }
+
+    @Test
+    void crossBusFollowerUsesAthenaCommandMirroringInsteadOfHardwareFollow() {
+        FakeMotorBackend backend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(backend));
+        MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).canbus("rio");
+        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2)
+                .canbus("canivore")
+                .follow(leader)
+                .inverted();
+
+        graph.motor(follower);
+        ActionContext.SoftwareMotorFollower softwareFollower = graph.softwareFollowers(leader).get(0);
+        FakeMotorHandle backendFollower = backend.last;
+
+        assertEquals(follower, softwareFollower.device());
+        assertEquals(null, backendFollower.followLeader);
+        assertFalse(backendFollower.device().isInverted());
+        assertEquals(null, backendFollower.device().follower());
+
+        softwareFollower.handle().setPercentOutput(0.25);
+        assertEquals(-0.25, backendFollower.percent, 1.0e-9);
+        softwareFollower.handle().setVoltage(6.0);
+        assertEquals(-6.0, backendFollower.voltage, 1.0e-9);
+        softwareFollower.handle().setPositionTargetRotations(3.0);
+        assertEquals(-3.0, backendFollower.positionTarget, 1.0e-9);
+        softwareFollower.handle().setVelocityTargetRotationsPerSecond(4.0);
+        assertEquals(-4.0, backendFollower.velocityTarget, 1.0e-9);
+        softwareFollower.handle().stop();
+        assertEquals(1, backendFollower.stopCalls);
     }
 
     @Test
@@ -426,6 +458,11 @@ class HardwareGraphTest {
             last = new FakeMotorHandle(device);
             return last;
         }
+
+        @Override
+        public boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
+            return follower.canbus().equalsIgnoreCase(leader.canbus());
+        }
     }
 
     private static final class FakeEncoderBackend implements EncoderBackend {
@@ -476,6 +513,11 @@ class HardwareGraphTest {
         private boolean followInverted;
         private int enableIntegratedEncoderCalls;
         private int enableAbsoluteEncoderCalls;
+        private double percent;
+        private double voltage;
+        private double positionTarget;
+        private double velocityTarget;
+        private int stopCalls;
 
         private FakeMotorHandle(MotorDevice device) {
             this.device = device;
@@ -504,6 +546,12 @@ class HardwareGraphTest {
             followLeader = leader;
             followInverted = inverted;
         }
+
+        @Override public void setPercentOutput(double value) { percent = value; }
+        @Override public void setVoltage(double value) { voltage = value; }
+        @Override public void setPositionTargetRotations(double value) { positionTarget = value; }
+        @Override public void setVelocityTargetRotationsPerSecond(double value) { velocityTarget = value; }
+        @Override public void stop() { stopCalls++; }
 
         @Override
         public double integratedPositionRotations() {
