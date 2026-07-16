@@ -211,20 +211,28 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
     private static void publish(
             SimModel model,
             SimulationSession session,
-            double positionRotations,
-            double velocityRotationsPerSecond) {
+            double mechanismPositionRotations,
+            double mechanismVelocityRotationsPerSecond) {
+        double motorPositionRotations = mechanismPositionRotations * gearing(model);
+        double motorVelocityRotationsPerSecond = mechanismVelocityRotationsPerSecond * gearing(model);
         for (MotorDevice motor : model.motors()) {
-            session.motor(motor).state(positionRotations, velocityRotationsPerSecond);
+            session.motor(motor).state(motorPositionRotations, motorVelocityRotationsPerSecond);
         }
         for (EncoderDevice encoderDevice : linkedEncoders(model)) {
+            boolean motorIntegrated = model.motors().stream()
+                    .anyMatch(motor -> motor.encoder().equals(encoderDevice));
             SimEncoderHandle encoder = session.encoder(encoderDevice);
-            encoder.positionRotations(positionRotations)
-                    .absolutePositionRotations(positionRotations)
-                    .velocityRotationsPerSecond(velocityRotationsPerSecond);
+            double position = motorIntegrated ? motorPositionRotations : mechanismPositionRotations;
+            double velocity = motorIntegrated
+                    ? motorVelocityRotationsPerSecond
+                    : mechanismVelocityRotationsPerSecond;
+            encoder.positionRotations(position)
+                    .absolutePositionRotations(position)
+                    .velocityRotationsPerSecond(velocity);
         }
         for (SimLimit limit : limits(model)) {
             SimDigitalInputHandle input = session.digitalInput(limit.sensor());
-            boolean active = Math.abs(positionRotations - limit.position()) <= limit.tolerance();
+            boolean active = Math.abs(mechanismPositionRotations - limit.position()) <= limit.tolerance();
             input.raw(limit.sensor().isInverted() ? !active : active);
         }
     }

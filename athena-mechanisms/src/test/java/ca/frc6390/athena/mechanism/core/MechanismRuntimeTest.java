@@ -310,6 +310,24 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void fluentTimeoutCanWrapAnEntireThenChain() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        TestMechanism mechanism = new TestMechanism(
+                Actions.waitSeconds(0.2)
+                        .then(MOTOR.percent(0.4))
+                        .timeout(0.5));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        runtime.periodic(contextAt(0.2), EventContext.empty());
+        assertEquals(0.4, actions.motor(MOTOR).percent, 1.0e-9);
+
+        runtime.periodic(contextAt(0.5), EventContext.empty());
+        assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
     void sequenceAdvancesWhenPositionControlEntersTolerance() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding position = Controls.position(MOTOR).feedback(ENCODER);

@@ -82,6 +82,10 @@ public final class Actions {
         return new Action.Then(mechanismAction(action), mechanismAction(next));
     }
 
+    static Action timeout(DeviceAction action, double seconds) {
+        return timeout(mechanismAction(action), seconds);
+    }
+
     private static Action mechanismAction(DeviceAction action) {
         if (action instanceof Action mechanismAction) {
             return mechanismAction;

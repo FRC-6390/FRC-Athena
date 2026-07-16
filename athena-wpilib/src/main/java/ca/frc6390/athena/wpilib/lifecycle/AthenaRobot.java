@@ -1,5 +1,6 @@
 package ca.frc6390.athena.wpilib.lifecycle;
 
+import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
@@ -19,8 +20,12 @@ import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import java.util.Objects;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -34,6 +39,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private MechanismTracePublisher tracePublisher;
     private MechanismTelemetryPublisher mechanismTelemetryPublisher;
     private AutoPreviewPublisher autoPreviewPublisher;
+    private final List<SendableChooser<String>> dashboardAutoChoosers = new ArrayList<>();
     private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
     private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.SUMMARY;
 
@@ -72,6 +78,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         runtime = createRuntime(RobotBase.isSimulation(), digitalInputs);
         ActionRequests.bind(runtime::request);
         runtime.register(this);
+        configureAutoChoosers();
         tracePublisher = new MechanismTracePublisher().profile(
                 RobotBase.isSimulation() && traceProfile == MechanismTracePublisher.Profile.SUMMARY
                         ? MechanismTracePublisher.Profile.CAPTURE
@@ -191,7 +198,21 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     private void publishAutoPreview() {
         if (autoPreviewPublisher != null) {
-            autoPreviewPublisher.publish(athena().selectedAutoPreviews());
+            autoPreviewPublisher.publish(athena().selectedAutoPreviews(), athena().runningAutoName());
+        }
+    }
+
+    private void configureAutoChoosers() {
+        dashboardAutoChoosers.clear();
+        for (AutoChooser model : athena().autoChoosers()) {
+            SendableChooser<String> dashboard = new SendableChooser<>();
+            dashboard.setDefaultOption(model.defaultName(), model.defaultName());
+            model.optionNames().stream()
+                    .filter(name -> !name.equals(model.defaultName()))
+                    .forEach(name -> dashboard.addOption(name, name));
+            dashboard.onChange(model::selectIfPresent);
+            SmartDashboard.putData(model.dashboardName(), dashboard);
+            dashboardAutoChoosers.add(dashboard);
         }
     }
 

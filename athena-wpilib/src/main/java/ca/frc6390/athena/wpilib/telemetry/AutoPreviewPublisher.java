@@ -18,6 +18,7 @@ import java.util.Objects;
 public final class AutoPreviewPublisher implements AutoCloseable {
     private static final String ROOT = "/Athena/Auto";
     private final StringPublisher selected;
+    private final StringPublisher running;
     private final StringArrayPublisher plan;
     private final StringArrayPublisher pathKeys;
     private final StructArrayPublisher<Pose2d> combinedPath;
@@ -32,6 +33,7 @@ public final class AutoPreviewPublisher implements AutoCloseable {
     AutoPreviewPublisher(NetworkTableInstance networkTables) {
         this.networkTables = Objects.requireNonNull(networkTables, "networkTables");
         selected = networkTables.getStringTopic(ROOT + "/Selected").publish();
+        running = networkTables.getStringTopic(ROOT + "/Running").publish();
         plan = networkTables.getStringArrayTopic(ROOT + "/Plan").publish();
         pathKeys = networkTables.getStringArrayTopic(ROOT + "/PathKeys").publish();
         combinedPath = networkTables.getStructArrayTopic(ROOT + "/Path", Pose2d.struct).publish();
@@ -40,14 +42,16 @@ public final class AutoPreviewPublisher implements AutoCloseable {
     }
 
     /** Publishes only when selection or declarative plan geometry changes. */
-    public void publish(List<AutoPreview> previews) {
+    public void publish(List<AutoPreview> previews, String runningName) {
         AutoPreview preview = previews == null || previews.isEmpty()
                 ? new AutoPreview("", List.of(), List.of()) : previews.get(0);
-        String signature = signature(preview);
+        String safeRunningName = runningName == null ? "" : runningName;
+        String signature = signature(preview) + ":" + safeRunningName;
         if (lastSignature.equals(signature)) return;
         lastSignature = signature;
 
         selected.set(preview.name());
+        running.set(safeRunningName);
         plan.set(preview.steps().toArray(String[]::new));
         pathKeys.set(preview.paths().stream().map(PathPreview::key).toArray(String[]::new));
 
@@ -94,6 +98,7 @@ public final class AutoPreviewPublisher implements AutoCloseable {
 
     @Override public void close() {
         selected.close();
+        running.close();
         plan.close();
         pathKeys.close();
         combinedPath.close();

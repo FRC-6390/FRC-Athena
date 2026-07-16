@@ -60,8 +60,27 @@ class RevBackendTest {
         assertEquals(0, options.smartCurrentLimitAmps());
         assertEquals(0.0, options.openLoopRampSeconds());
         assertEquals(1.25, options.closedLoopRampSeconds());
-        assertTrue(options.resetSafeParameters());
+        assertFalse(options.resetSafeParameters());
         assertTrue(options.persistParameters());
+    }
+
+    @Test
+    void defaultConfigurationPreservesUndeclaredHardwareClientCurrentLimits() throws Exception {
+        RevMotorOptions options = new RevMotorOptions();
+        SparkBaseConfig config = RevMotorHandle.activationConfig(
+                MotorDevice.of(MotorKinds.NEO, 2), options, false);
+        Map<Integer, Object> motorParameters = parameters(config);
+
+        assertFalse(options.resetSafeParameters());
+        assertFalse(motorParameters.containsKey(SparkParameters.kSmartCurrentStallLimit.value));
+        assertFalse(motorParameters.containsKey(SparkParameters.kSmartCurrentFreeLimit.value));
+        assertFalse(motorParameters.containsKey(SparkParameters.kSmartCurrentConfig.value));
+        assertFalse(motorParameters.containsKey(SparkParameters.kCurrentChop.value));
+        assertFalse(motorParameters.containsKey(SparkParameters.kOpenLoopRampRate.value));
+        assertFalse(motorParameters.containsKey(SparkParameters.kClosedLoopRampRate.value));
+        assertFalse(motorParameters.containsKey(SparkParameters.kCompensatedNominalVoltage.value));
+        assertTrue(parameters(config.softLimit).isEmpty());
+        assertTrue(parameters(config.limitSwitch).isEmpty());
     }
 
     @Test
@@ -83,8 +102,8 @@ class RevBackendTest {
         assertEquals(30.0f, cimParameters.get(SparkParameters.kCurrentChop.value));
         assertFalse(cimParameters.containsKey(SparkParameters.kSmartCurrentStallLimit.value));
         assertEquals(8192, parameters(cim.encoder).get(SparkParameters.kEncoderCountsPerRev.value));
-        assertEquals(0.0f, cimParameters.get(SparkParameters.kOpenLoopRampRate.value));
-        assertEquals(0.0f, cimParameters.get(SparkParameters.kClosedLoopRampRate.value));
+        assertFalse(cimParameters.containsKey(SparkParameters.kOpenLoopRampRate.value));
+        assertFalse(cimParameters.containsKey(SparkParameters.kClosedLoopRampRate.value));
     }
 
     @Test
@@ -199,7 +218,7 @@ class RevBackendTest {
         assertEquals(35, RevMotorHandle.effectiveSmartCurrentLimit(
                 MotorDevice.of(MotorKinds.NEO, 1).supplyCurrentLimit(35),
                 new RevMotorOptions()));
-        assertEquals(40, RevMotorHandle.effectiveSmartCurrentLimit(
+        assertEquals(60, RevMotorHandle.effectiveSmartCurrentLimit(
                 MotorDevice.of(MotorKinds.NEO, 2).statorCurrentLimit(60),
                 new RevMotorOptions()));
         assertEquals(60, RevMotorHandle.effectiveSmartCurrentLimit(

@@ -326,12 +326,18 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
                 config.secondaryCurrentLimit(currentLimit);
             }
         }
-        config.openLoopRampRate(options.openLoopRampSeconds());
-        config.closedLoopRampRate(options.closedLoopRampSeconds());
-        if (options.voltageCompensationVolts() > 0.0) {
-            config.voltageCompensation(options.voltageCompensationVolts());
-        } else {
-            config.disableVoltageCompensation();
+        if (options.openLoopRampConfigured()) {
+            config.openLoopRampRate(options.openLoopRampSeconds());
+        }
+        if (options.closedLoopRampConfigured()) {
+            config.closedLoopRampRate(options.closedLoopRampSeconds());
+        }
+        if (options.voltageCompensationConfigured()) {
+            if (options.voltageCompensationVolts() > 0.0) {
+                config.voltageCompensation(options.voltageCompensationVolts());
+            } else {
+                config.disableVoltageCompensation();
+            }
         }
         if (isBrushless(device) || options.primaryEncoderCountsPerRevolution() > 0) {
             configurePrimaryEncoder(config, options);
@@ -347,28 +353,37 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     }
 
     private static void configureLimits(SparkBaseConfig config, RevMotorOptions options, boolean flex) {
-        boolean forwardSoft = Double.isFinite(options.forwardSoftLimitRotations());
-        boolean reverseSoft = Double.isFinite(options.reverseSoftLimitRotations());
-        config.softLimit.forwardSoftLimitEnabled(forwardSoft)
-                .reverseSoftLimitEnabled(reverseSoft);
-        if (forwardSoft) {
-            config.softLimit.forwardSoftLimit(options.forwardSoftLimitRotations());
+        if (options.forwardSoftLimitConfigured()) {
+            boolean enabled = Double.isFinite(options.forwardSoftLimitRotations());
+            config.softLimit.forwardSoftLimitEnabled(enabled);
+            if (enabled) {
+                config.softLimit.forwardSoftLimit(options.forwardSoftLimitRotations());
+            }
         }
-        if (reverseSoft) {
-            config.softLimit.reverseSoftLimit(options.reverseSoftLimitRotations());
+        if (options.reverseSoftLimitConfigured()) {
+            boolean enabled = Double.isFinite(options.reverseSoftLimitRotations());
+            config.softLimit.reverseSoftLimitEnabled(enabled);
+            if (enabled) {
+                config.softLimit.reverseSoftLimit(options.reverseSoftLimitRotations());
+            }
         }
         if (!flex && (options.forwardLimitSwitchEnabled() || options.reverseLimitSwitchEnabled())) {
             config.limitSwitch.setSparkMaxDataPortConfig();
         }
-        config.limitSwitch
-                .forwardLimitSwitchType(options.forwardLimitSwitchNormallyClosed()
-                        ? Type.kNormallyClosed : Type.kNormallyOpen)
-                .forwardLimitSwitchTriggerBehavior(options.forwardLimitSwitchEnabled()
-                        ? Behavior.kStopMovingMotor : Behavior.kKeepMovingMotor)
-                .reverseLimitSwitchType(options.reverseLimitSwitchNormallyClosed()
-                        ? Type.kNormallyClosed : Type.kNormallyOpen)
-                .reverseLimitSwitchTriggerBehavior(options.reverseLimitSwitchEnabled()
-                        ? Behavior.kStopMovingMotor : Behavior.kKeepMovingMotor);
+        if (options.forwardLimitSwitchConfigured()) {
+            config.limitSwitch
+                    .forwardLimitSwitchType(options.forwardLimitSwitchNormallyClosed()
+                            ? Type.kNormallyClosed : Type.kNormallyOpen)
+                    .forwardLimitSwitchTriggerBehavior(options.forwardLimitSwitchEnabled()
+                            ? Behavior.kStopMovingMotor : Behavior.kKeepMovingMotor);
+        }
+        if (options.reverseLimitSwitchConfigured()) {
+            config.limitSwitch
+                    .reverseLimitSwitchType(options.reverseLimitSwitchNormallyClosed()
+                            ? Type.kNormallyClosed : Type.kNormallyOpen)
+                    .reverseLimitSwitchTriggerBehavior(options.reverseLimitSwitchEnabled()
+                            ? Behavior.kStopMovingMotor : Behavior.kKeepMovingMotor);
+        }
     }
 
     private static void configurePrimaryEncoder(SparkBaseConfig config, RevMotorOptions options) {

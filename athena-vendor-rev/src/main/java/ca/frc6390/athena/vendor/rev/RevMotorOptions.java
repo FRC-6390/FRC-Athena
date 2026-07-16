@@ -13,8 +13,10 @@ public final class RevMotorOptions {
 
     private int smartCurrentLimitAmps;
     private double openLoopRampSeconds;
+    private boolean openLoopRampConfigured;
     private double closedLoopRampSeconds;
-    private boolean resetSafeParameters = true;
+    private boolean closedLoopRampConfigured;
+    private boolean resetSafeParameters;
     private boolean persistParameters = true;
     private int primaryEncoderCountsPerRevolution;
     private int primaryEncoderSignalPeriodMs;
@@ -22,11 +24,16 @@ public final class RevMotorOptions {
     private int absoluteEncoderAverageDepth;
     private AbsoluteEncoderProfile absoluteEncoderProfile = AbsoluteEncoderProfile.GENERIC;
     private double voltageCompensationVolts;
+    private boolean voltageCompensationConfigured;
     private int telemetrySignalPeriodMs;
     private double forwardSoftLimitRotations = Double.NaN;
+    private boolean forwardSoftLimitConfigured;
     private double reverseSoftLimitRotations = Double.NaN;
+    private boolean reverseSoftLimitConfigured;
     private boolean forwardLimitSwitchEnabled;
+    private boolean forwardLimitSwitchConfigured;
     private boolean reverseLimitSwitchEnabled;
+    private boolean reverseLimitSwitchConfigured;
     private boolean forwardLimitSwitchNormallyClosed;
     private boolean reverseLimitSwitchNormallyClosed;
 
@@ -49,6 +56,7 @@ public final class RevMotorOptions {
      */
     public RevMotorOptions openLoopRampSeconds(double seconds) {
         openLoopRampSeconds = sanitize(seconds);
+        openLoopRampConfigured = true;
         return this;
     }
 
@@ -60,10 +68,14 @@ public final class RevMotorOptions {
      */
     public RevMotorOptions closedLoopRampSeconds(double seconds) {
         closedLoopRampSeconds = sanitize(seconds);
+        closedLoopRampConfigured = true;
         return this;
     }
 
-    /** Controls whether initial activation resets stale safe parameters. Defaults to true. */
+    /**
+     * Controls whether initial activation resets safe parameters before applying Athena's partial
+     * configuration. Defaults to false so settings owned by the REV Hardware Client are preserved.
+     */
     public RevMotorOptions resetSafeParameters(boolean reset) {
         resetSafeParameters = reset;
         return this;
@@ -111,6 +123,7 @@ public final class RevMotorOptions {
     /** Enables voltage compensation at the requested nominal voltage; zero disables it. */
     public RevMotorOptions voltageCompensation(double volts) {
         voltageCompensationVolts = sanitize(volts);
+        voltageCompensationConfigured = true;
         return this;
     }
 
@@ -123,18 +136,21 @@ public final class RevMotorOptions {
     /** Enables the SPARK forward soft limit in raw primary-encoder rotations. */
     public RevMotorOptions forwardSoftLimitRotations(double rotations) {
         forwardSoftLimitRotations = finiteOrNaN(rotations);
+        forwardSoftLimitConfigured = true;
         return this;
     }
 
     /** Enables the SPARK reverse soft limit in raw primary-encoder rotations. */
     public RevMotorOptions reverseSoftLimitRotations(double rotations) {
         reverseSoftLimitRotations = finiteOrNaN(rotations);
+        reverseSoftLimitConfigured = true;
         return this;
     }
 
     /** Enables/disables the forward data-port limit switch and selects its polarity. */
     public RevMotorOptions forwardLimitSwitch(boolean enabled, boolean normallyClosed) {
         forwardLimitSwitchEnabled = enabled;
+        forwardLimitSwitchConfigured = true;
         forwardLimitSwitchNormallyClosed = normallyClosed;
         return this;
     }
@@ -142,6 +158,7 @@ public final class RevMotorOptions {
     /** Enables/disables the reverse data-port limit switch and selects its polarity. */
     public RevMotorOptions reverseLimitSwitch(boolean enabled, boolean normallyClosed) {
         reverseLimitSwitchEnabled = enabled;
+        reverseLimitSwitchConfigured = true;
         reverseLimitSwitchNormallyClosed = normallyClosed;
         return this;
     }
@@ -164,6 +181,8 @@ public final class RevMotorOptions {
         return openLoopRampSeconds;
     }
 
+    boolean openLoopRampConfigured() { return openLoopRampConfigured; }
+
     /**
      * Returns closed-loop ramp seconds.
      *
@@ -172,6 +191,8 @@ public final class RevMotorOptions {
     public double closedLoopRampSeconds() {
         return closedLoopRampSeconds;
     }
+
+    boolean closedLoopRampConfigured() { return closedLoopRampConfigured; }
 
     public boolean resetSafeParameters() { return resetSafeParameters; }
 
@@ -189,15 +210,25 @@ public final class RevMotorOptions {
 
     public double voltageCompensationVolts() { return voltageCompensationVolts; }
 
+    boolean voltageCompensationConfigured() { return voltageCompensationConfigured; }
+
     public int telemetrySignalPeriodMs() { return telemetrySignalPeriodMs; }
 
     public double forwardSoftLimitRotations() { return forwardSoftLimitRotations; }
 
+    boolean forwardSoftLimitConfigured() { return forwardSoftLimitConfigured; }
+
     public double reverseSoftLimitRotations() { return reverseSoftLimitRotations; }
+
+    boolean reverseSoftLimitConfigured() { return reverseSoftLimitConfigured; }
 
     public boolean forwardLimitSwitchEnabled() { return forwardLimitSwitchEnabled; }
 
+    boolean forwardLimitSwitchConfigured() { return forwardLimitSwitchConfigured; }
+
     public boolean reverseLimitSwitchEnabled() { return reverseLimitSwitchEnabled; }
+
+    boolean reverseLimitSwitchConfigured() { return reverseLimitSwitchConfigured; }
 
     public boolean forwardLimitSwitchNormallyClosed() { return forwardLimitSwitchNormallyClosed; }
 

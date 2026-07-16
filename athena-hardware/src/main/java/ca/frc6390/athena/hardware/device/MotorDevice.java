@@ -52,7 +52,7 @@ public record MotorDevice(
      */
     public static MotorDevice of(MotorKind kind, int id) {
         return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST,
-                40, 0, 0, VendorOptions.empty(), null, false);
+                0, 0, 0, VendorOptions.empty(), null, false);
     }
 
     /** Creates a motor with an explicit controller and physical motor pairing. */

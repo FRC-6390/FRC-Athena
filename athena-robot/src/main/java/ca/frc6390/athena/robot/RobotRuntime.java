@@ -1,6 +1,6 @@
 package ca.frc6390.athena.robot;
 
-import ca.frc6390.athena.auto.AutoRuntime;
+import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.auto.AutoPlan;
 import ca.frc6390.athena.auto.AutoPreview;
 import ca.frc6390.athena.auto.PathProvider;
@@ -55,7 +55,7 @@ public final class RobotRuntime {
     private final SimulationSession simulationSession;
     private final MechanismScheduler mechanisms;
     private final CommandGraph commands = new CommandGraph();
-    private final List<AutoRuntime> autos = new ArrayList<>();
+    private final List<AutoChooser> autoChoosers = new ArrayList<>();
     private final List<PathProvider> pathProviders = new ArrayList<>();
     private List<AutoPreview> cachedAutoPreviews = List.of();
     private long cachedAutoPreviewRevision = Long.MIN_VALUE;
@@ -229,6 +229,8 @@ public final class RobotRuntime {
         RuntimeGraphDiscovery.Result services = RuntimeGraphDiscovery.inspect(mechanism);
         registerDiscoveredCameras(services.cameras());
         localization(services.localizations().toArray(Localization[]::new));
+        services.pathProviders().forEach(this::registerPathProvider);
+        services.autoChoosers().forEach(this::registerAutoChooser);
         mechanisms.motorDevices().stream().filter(motor -> !motor.isDisabled()).forEach(hardwareGraph::motor);
         mechanisms.encoderDevices().forEach(hardwareGraph::encoder);
         mechanisms.imuDevices().forEach(hardwareGraph::imu);
@@ -425,30 +427,47 @@ public final class RobotRuntime {
         return List.copyOf(values);
     }
 
-    /**
-     * Adds an autonomous runtime whose selected ordinary Action is owned by the mechanism scheduler.
-     *
-     * @param autoRuntime autonomous runtime
-     * @return this runtime
-     */
-    public RobotRuntime auto(AutoRuntime autoRuntime) {
-        autos.add(Objects.requireNonNull(autoRuntime, "autoRuntime"));
-        cachedAutoPreviewRevision = Long.MIN_VALUE;
-        return this;
+    /** Returns auto-discovered chooser declarations for dashboard adapters. */
+    public List<AutoChooser> autoChoosers() {
+        return List.copyOf(autoChoosers);
     }
 
-    /** Binds every PathAction reachable from a declaration object to its provider runtime. */
-    public RobotRuntime paths(Object declarations, PathProvider provider) {
-        Objects.requireNonNull(provider, "provider");
+    /** Running auto name for telemetry, or an empty string outside autonomous. */
+    public String runningAutoName() {
+        return autoChoosers.stream()
+                .map(AutoChooser::runningName)
+                .flatMap(java.util.Optional::stream)
+                .findFirst()
+                .orElse("");
+    }
+
+    private void registerPathProvider(PathProvider provider) {
         if (pathProviders.stream().noneMatch(value -> value == provider)) {
-            pathProviders.add(provider);
+            pathProviders.add(Objects.requireNonNull(provider, "provider"));
             cachedAutoPreviewRevision = Long.MIN_VALUE;
         }
-        mechanisms.paths(Objects.requireNonNull(declarations, "declarations"), path -> {
-            PathRuntime runtime = provider.runtime();
-            return simulationSession == null ? runtime : simulationPathRuntime(provider, runtime);
-        });
-        return this;
+    }
+
+    private void registerAutoChooser(AutoChooser chooser) {
+        if (autoChoosers.stream().anyMatch(value -> value == chooser)) return;
+        AutoChooser safeChooser = Objects.requireNonNull(chooser, "chooser");
+        safeChooser.options().values().forEach(action -> mechanisms.paths(action, this::pathRuntime));
+        autoChoosers.add(safeChooser);
+        cachedAutoPreviewRevision = Long.MIN_VALUE;
+    }
+
+    private PathRuntime pathRuntime(PathAction path) {
+        List<PathProvider> owners = pathProviders.stream().filter(provider -> provider.owns(path)).toList();
+        if (owners.isEmpty()) {
+            throw new IllegalStateException("No path provider owns '" + path.key() + "'. "
+                    + "Declare its PathProvider as a Robot field before the AutoChooser.");
+        }
+        if (owners.size() > 1) {
+            throw new IllegalStateException("Multiple path providers own '" + path.key() + "'.");
+        }
+        PathProvider provider = owners.get(0);
+        PathRuntime runtime = provider.runtime();
+        return simulationSession == null ? runtime : simulationPathRuntime(provider, runtime);
     }
 
     private PathRuntime simulationPathRuntime(PathProvider provider, PathRuntime delegate) {
@@ -493,13 +512,13 @@ public final class RobotRuntime {
     /** Builds dashboard-safe previews of the currently selected autonomous Actions. */
     public List<AutoPreview> selectedAutoPreviews() {
         long revision = 1L;
-        for (AutoRuntime auto : autos) revision = 31L * revision + auto.revision();
+        for (AutoChooser chooser : autoChoosers) revision = 31L * revision + chooser.revision();
         for (PathProvider provider : pathProviders) revision = 31L * revision + provider.previewRevision();
         if (revision == cachedAutoPreviewRevision) return cachedAutoPreviews;
 
         List<AutoPreview> previews = new ArrayList<>();
-        for (AutoRuntime auto : autos) {
-            AutoPlan plan = AutoPlan.inspect(auto.preparedAction());
+        for (AutoChooser chooser : autoChoosers) {
+            AutoPlan plan = AutoPlan.inspect(chooser.selectedAction());
             List<String> steps = new ArrayList<>(plan.steps());
             List<PathPreview> paths = new ArrayList<>();
             for (var path : plan.paths()) {
@@ -520,7 +539,7 @@ public final class RobotRuntime {
                 }
                 if (!found) steps.add("NO GEOMETRY " + path.key());
             }
-            previews.add(new AutoPreview(auto.selectedName(), steps, paths));
+            previews.add(new AutoPreview(chooser.selectedName(), steps, paths));
         }
         cachedAutoPreviews = List.copyOf(previews);
         cachedAutoPreviewRevision = revision;
@@ -718,13 +737,13 @@ public final class RobotRuntime {
     }
 
     private void startAutos() {
-        for (AutoRuntime auto : autos) {
-            if (!auto.active()) mechanisms.request(auto.initialize());
+        for (AutoChooser chooser : autoChoosers) {
+            if (chooser.runningAction().isEmpty()) mechanisms.request(chooser.start());
         }
     }
 
     private void endAutos() {
-        for (AutoRuntime auto : autos) auto.end().ifPresent(mechanisms::cancel);
+        for (AutoChooser chooser : autoChoosers) chooser.stop().ifPresent(mechanisms::cancel);
     }
 
     private void refreshLocalizations(MechanismContext context) {

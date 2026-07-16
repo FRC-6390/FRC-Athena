@@ -20,7 +20,7 @@ class MotorStallIntegrationTest {
 
         assertEquals(36.0, fortyAmpMotor.stall().currentThresholdAmps(), 1.0e-9);
         assertEquals(54.0, sixtyAmpMotor.stall().currentThresholdAmps(), 1.0e-9);
-        assertEquals(40, fortyAmpMotor.currentLimits().supplyAmps());
+        assertEquals(0, fortyAmpMotor.currentLimits().supplyAmps());
         assertEquals(60, sixtyAmpMotor.currentLimits().statorAmps());
     }
 

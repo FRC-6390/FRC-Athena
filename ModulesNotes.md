@@ -198,23 +198,23 @@
 ## athena-auto
 
 - [x] Code optimization: the module is now a small indexed routine set instead of the old chooser/config/registry chain; this removes global lookup and duplicate DTO construction.
-  - [x] Keep routine indexing normalized and duplicate-checked in `AutoRuntime`.
+  - [x] Keep chooser indexing normalized and duplicate-checked in `AutoChooser`.
   - [x] Keep path-backed routine creation lazy through `Autos.path(...)`.
-- [x] Runtime optimization: `AutoRuntime` creates the selected `CommandAction` lazily and reuses it until selection/reset, and `athena-robot` mounts it into the root lifecycle.
+- [x] Runtime optimization: `AutoChooser` keeps selection inert and Athena freezes the selected Action for each autonomous period.
   - [x] Add lifecycle ownership methods: `initialize()`, `execute()`, `periodic()`, `isFinished()`, `end(...)`, and `reset()`.
   - [x] End the active command when selection/reset interrupts the current routine.
   - [x] Add `PathGraph` marker-command lifecycle ownership for path events.
   - [x] `CommandGraph` now owns local command requirement arbitration and cancellation policy.
-  - [x] Final robot runtime mounts `AutoRuntime`, `PathGraph`, and `CommandGraph` into one lifecycle.
+  - [x] Final robot runtime mounts the discovered `AutoChooser`, path providers, and `CommandGraph` into one lifecycle.
 - [x] Test surfaces needed: routine name normalization, duplicate detection, selected routine fallback, reset behavior, provider-backed path routines, marker binding validation, marker dispatch, and lifecycle behavior when integrated with `RobotRuntime`.
-  - [x] Added `AutoRuntimeTest` coverage for routine normalization, duplicate detection, first-routine selection, provider-backed routine loading/reset, marker validation, local command lifecycle dispatch, `PathGraph` marker dispatch, duplicate marker rejection across routines, and active marker ending.
+  - [x] Added `AutoChooserTest` coverage for normalization, duplicates, inert selection, frozen running ownership, and exact cancellation.
   - [x] `athena-robot` adds integrated root scheduling coverage for autos and command cancellation.
 - [x] Upkeep: old `AutoChooserConfig`, `AutoChooserSpec`, `AutoRoutineConfig`, `AutoRoutineSpec`, `AutoRegistry`, `AutoSource`, `AutoExecution`, input store/scope, and missing-source exception surfaces are gone from disk. Vendor path modules now use `PathProvider` and `Paths.*` entry points.
 - [x] Architecture: autos now express selected autonomous work as named command Actions, path providers, validated marker metadata, and root-mounted runtime lifecycle.
-  - [x] Add `PathMarkerBinding` validation through `AutoRoutine`.
+  - [x] Add marker validation through ordinary `PathAction` trees.
   - [x] Widen `PathProvider` so providers expose `PathAction`, `CommandAction`, and `PathRuntime` from one boundary.
   - [x] Add `PathGraph` as the executable marker-dispatch boundary for routine marker bindings.
-  - [x] `AutoRuntime` is mounted into the final root `RobotRuntime` in `athena-robot`.
+  - [x] Auto-discovered `AutoChooser` declarations are mounted into the final root `RobotRuntime`.
 
 ## athena-dashboard
 
@@ -393,7 +393,7 @@
   - [x] Mechanism `StateScheduler` now lowers Action trees into cached scheduler nodes and no longer uses generated string path keys for runtime node identity.
 - [x] Path, command, and auto integration has a working local boundary and root graph ownership.
   - [x] `PathProvider` now exposes path Action creation, command-Action loading, and path runtime creation from one boundary.
-  - [x] `AutoRuntime` owns selected command-Action lifecycle locally.
+  - [x] `AutoChooser` separates selected and running Action lifecycle.
   - [x] `PathGraph` owns executable marker-command dispatch for validated routine marker bindings.
   - [x] PathPlanner and executable Choreo adapters implement the common provider boundary.
   - [x] Auto routines validate marker binding metadata.

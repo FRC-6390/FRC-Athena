@@ -26,10 +26,12 @@ class AutoPreviewPublisherTest {
                             new PathPreview.Pose(1.0, 2.0, 0.0),
                             new PathPreview.Pose(3.0, 4.0, 1.0)), List.of(
                             new PathPreview.Event("shoot", 0.5,
-                                    new PathPreview.Pose(2.0, 3.0, 0.5))))))));
+                                    new PathPreview.Pose(2.0, 3.0, 0.5))))))), "Score Two");
 
             assertEquals("Score Two", instance.getStringTopic(
                     "/Athena/Auto/Selected").subscribe("").get());
+            assertEquals("Score Two", instance.getStringTopic(
+                    "/Athena/Auto/Running").subscribe("").get());
             assertArrayEquals(new String[] {"SEQUENCE", "  PATH choreo:out"}, instance
                     .getStringArrayTopic("/Athena/Auto/Plan").subscribe(new String[0]).get());
             assertEquals(2, path.get().length);

@@ -10,6 +10,7 @@ import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.LinkedHashMap;
 import java.util.ArrayList;
@@ -24,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class MechanismIntrospector {
     private static final Map<Class<?>, Field[]> FIELDS_BY_TYPE = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, Method[]> METHODS_BY_TYPE = new ConcurrentHashMap<>();
 
     private MechanismIntrospector() {
     }
@@ -44,11 +46,19 @@ final class MechanismIntrospector {
             if (field.isSynthetic()) {
                 continue;
             }
+            String fieldName = field.getName();
+            Telemetry telemetry = field.getAnnotation(Telemetry.class);
+            if (telemetry != null) {
+                putDeclaration(
+                        declarations,
+                        AnnotatedTelemetry.name(fieldName, telemetry),
+                        AnnotatedTelemetry.field(field, mechanism, telemetry));
+                continue;
+            }
             Object value = read(field, mechanism);
             if (value == null) {
                 continue;
             }
-            String fieldName = field.getName();
             if (value instanceof Mechanism child && !Modifier.isStatic(field.getModifiers())) {
                 children.put(fieldName, child);
             } else if (value instanceof Action action) {
@@ -60,9 +70,16 @@ final class MechanismIntrospector {
             } else {
                 Object declaration = declaration(value);
                 if (declaration != null) {
-                    declarations.put(fieldName, declaration);
+                    putDeclaration(declarations, fieldName, declaration);
                 }
             }
+        }
+
+        for (Method method : methods(mechanism.getClass())) {
+            Telemetry telemetry = method.getAnnotation(Telemetry.class);
+            if (telemetry == null || method.isSynthetic() || method.isBridge()) continue;
+            String telemetryName = AnnotatedTelemetry.name(method.getName(), telemetry);
+            putDeclaration(declarations, telemetryName, AnnotatedTelemetry.method(method, mechanism, telemetry));
         }
 
         return new MechanismNode(name, mechanism, children, actions, declarations, hooks);
@@ -70,6 +87,10 @@ final class MechanismIntrospector {
 
     private static Field[] fields(Class<?> type) {
         return FIELDS_BY_TYPE.computeIfAbsent(type, MechanismIntrospector::discoverFields);
+    }
+
+    private static Method[] methods(Class<?> type) {
+        return METHODS_BY_TYPE.computeIfAbsent(type, MechanismIntrospector::discoverMethods);
     }
 
     private static Field[] discoverFields(Class<?> type) {
@@ -82,6 +103,25 @@ final class MechanismIntrospector {
             current = current.getSuperclass();
         }
         return fields.values().toArray(Field[]::new);
+    }
+
+    private static Method[] discoverMethods(Class<?> type) {
+        Map<String, Method> methods = new LinkedHashMap<>();
+        Class<?> current = type;
+        while (current != null && current != Object.class) {
+            for (Method method : current.getDeclaredMethods()) {
+                String signature = method.getName() + java.util.Arrays.toString(method.getParameterTypes());
+                methods.putIfAbsent(signature, method);
+            }
+            current = current.getSuperclass();
+        }
+        return methods.values().toArray(Method[]::new);
+    }
+
+    private static void putDeclaration(Map<String, Object> declarations, String name, Object declaration) {
+        if (declarations.putIfAbsent(name, declaration) != null) {
+            throw new IllegalArgumentException("Duplicate mechanism declaration path '" + name + "'.");
+        }
     }
 
     private static Object read(Field field, Object instance) {

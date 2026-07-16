@@ -11,6 +11,7 @@ import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.mechanism.core.Paths;
 import choreo.trajectory.EventMarker;
 import choreo.trajectory.SwerveSample;
 import choreo.trajectory.Trajectory;
@@ -28,12 +29,12 @@ class ChoreoPathProviderTest {
     void loaderNormalizesCachesAndDiscoversMetadata() {
         FakeClient client = new FakeClient(Map.of("Score", trajectory()));
         ChoreoPathProvider provider = new ChoreoPathProvider(client, null, null, null, () -> false);
-        assertEquals("Score", provider.path(" Score ").name());
+        assertEquals("Score", Paths.choreo(" Score ").name());
         assertTrue(provider.trajectory(" Score ").isPresent());
         assertTrue(provider.trajectory("Score").isPresent());
         assertEquals(1, client.loads.size());
         assertEquals(List.of("Intake", "Shoot"), provider.markerNames("Score"));
-        var preview = provider.preview(provider.path("Score")
+        var preview = provider.preview(Paths.choreo("Score")
                 .marker("Intake", Actions.neutral()).marker("Shoot", Actions.neutral())).orElseThrow();
         assertEquals(2, preview.poses().size());
         assertEquals(List.of("Intake", "Shoot"), preview.events().stream().map(event -> event.name()).toList());
@@ -55,7 +56,7 @@ class ChoreoPathProviderTest {
                 pose -> { resetCalls.incrementAndGet(); return reset; },
                 sample -> { followCalls.incrementAndGet(); return drive; },
                 () -> false);
-        PathAction path = provider.path("Score").resetOdometry()
+        PathAction path = Paths.choreo("Score").resetOdometry()
                 .marker("Intake", intake).marker("Shoot", shoot);
         PathRuntime runtime = provider.runtime();
 

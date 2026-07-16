@@ -40,6 +40,66 @@ final class PathIntrospector {
         }
         if (value instanceof PathAction path) {
             paths.add(path);
+            path.markers().values().forEach(marker -> collect(marker, paths, visited));
+            return;
+        }
+        if (value instanceof Actions.Sequence sequence) {
+            sequence.steps().forEach(step -> collect(step.action(), paths, visited));
+            collect(sequence.next(), paths, visited);
+            return;
+        }
+        if (value instanceof Actions.Cycle cycle) {
+            cycle.steps().forEach(step -> collect(step.action(), paths, visited));
+            return;
+        }
+        if (value instanceof Actions.Parallel parallel) {
+            parallel.Actions().forEach(action -> collect(action, paths, visited));
+            return;
+        }
+        if (value instanceof Actions.Race race) {
+            race.Actions().forEach(action -> collect(action, paths, visited));
+            return;
+        }
+        if (value instanceof Actions.Deadline deadline) {
+            collect(deadline.primary(), paths, visited);
+            deadline.others().forEach(action -> collect(action, paths, visited));
+            return;
+        }
+        if (value instanceof Actions.Choice choice) {
+            collect(choice.active(), paths, visited);
+            collect(choice.inactive(), paths, visited);
+            return;
+        }
+        if (value instanceof Actions.WhenBranch branch) {
+            collect(branch.active(), paths, visited);
+            return;
+        }
+        if (value instanceof Actions.Timeout timeout) {
+            collect(timeout.action(), paths, visited);
+            return;
+        }
+        if (value instanceof Actions.Then then) {
+            collect(then.action(), paths, visited);
+            collect(then.next(), paths, visited);
+            return;
+        }
+        if (value instanceof Action.Then then) {
+            collect(then.action(), paths, visited);
+            collect(then.next(), paths, visited);
+            return;
+        }
+        if (value instanceof Actions.Conditional conditional) {
+            collect(conditional.action(), paths, visited);
+            collect(conditional.next(), paths, visited);
+            return;
+        }
+        if (value instanceof Action.Conditional conditional) {
+            collect(conditional.action(), paths, visited);
+            collect(conditional.next(), paths, visited);
+            return;
+        }
+        if (value instanceof Actions.WithinTolerance within) {
+            collect(within.action(), paths, visited);
             return;
         }
         Class<?> type = value.getClass();

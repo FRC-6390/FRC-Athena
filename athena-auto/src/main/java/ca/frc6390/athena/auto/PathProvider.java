@@ -8,13 +8,13 @@ import java.util.Optional;
  * External provider for path-backed autonomous Actions and mechanism path runtimes.
  */
 public interface PathProvider {
-    /**
-     * Creates a path Action for the provider.
-     *
-     * @param pathName provider-specific path name
-     * @return path Action
-     */
-    PathAction path(String pathName);
+    /** Source key owned by this provider, such as {@code choreo}. */
+    String source();
+
+    /** Returns whether this provider owns the supplied path Action. */
+    default boolean owns(PathAction path) {
+        return path != null && source().equals(path.source());
+    }
 
     /**
      * Creates the mechanism path runtime that executes provider path Actions.

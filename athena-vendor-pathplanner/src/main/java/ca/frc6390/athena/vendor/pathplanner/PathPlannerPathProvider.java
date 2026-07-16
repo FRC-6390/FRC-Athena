@@ -10,7 +10,6 @@ import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
 import ca.frc6390.athena.mechanism.core.PathAction;
-import ca.frc6390.athena.mechanism.core.Paths;
 import com.pathplanner.lib.auto.AutoBuilder;
 import edu.wpi.first.wpilibj2.command.Command;
 
@@ -24,7 +23,6 @@ public final class PathPlannerPathProvider implements PathProvider {
     public static final String KEY = "pathplanner";
 
     private final PathPlannerClient client;
-    private final Map<String, PathAction> pathCache = new ConcurrentHashMap<>();
     private volatile List<String> pathNameCache;
 
     /**
@@ -38,14 +36,9 @@ public final class PathPlannerPathProvider implements PathProvider {
         this.client = Objects.requireNonNull(client, "client");
     }
 
-    /**
-     * Creates a PathPlanner path Action.
-     *
-     * @param pathName PathPlanner auto name
-     * @return path Action
-     */
-    public PathAction path(String pathName) {
-        return pathCache.computeIfAbsent(normalize(pathName), Paths::pathPlanner);
+    @Override
+    public String source() {
+        return KEY;
     }
 
     public CommandAction load(String pathName) {

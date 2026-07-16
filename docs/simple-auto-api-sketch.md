@@ -6,9 +6,9 @@ Status: design exploration. This document intentionally comes before an implemen
 
 Choreo and PathPlanner are good at authored full-field motion, but they are heavy for a two-meter
 assist, a live scoring target, or a routine that shares some drivetrain authority with the driver.
-The current integration also crosses three lifecycle systems: Athena `AutoRuntime`, Athena
-`CommandGraph`, and the WPILib scheduler used by both vendor libraries. That makes interruption,
-requirements, marker ownership, and driver takeover harder to reason about.
+Authored vendor motion still crosses Athena Actions and the vendor execution layer. Interruption,
+marker ownership, and driver takeover therefore need to remain explicit even though selectable autos
+are now ordinary Actions in an auto-discovered `AutoChooser`.
 
 The small API should optimize for:
 

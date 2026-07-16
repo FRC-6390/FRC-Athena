@@ -11,7 +11,9 @@ import ca.frc6390.athena.drivetrain.swerve.SwerveModules;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModuleTarget;
 import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.HardwareBus;
+import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
@@ -27,6 +29,30 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class WpilibSimPhysicsEngineTest {
+    @Test
+    void gearedMotorSimulationPublishesRotorUnitsToItsIntegratedEncoder() {
+        double reduction = 5.27;
+        double wheelDiameterMeters = 0.1016;
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 101);
+        EncoderDevice driveDistance = motor.encoder()
+                .gearRatio(GearRatio.reduction(reduction, 1.0))
+                .wheelDiameterMeters(wheelDiameterMeters)
+                .units(EncoderUnit.METERS);
+        SimulationSession session = sessionWith(
+                "geared-drive",
+                SimModel.motor(motor)
+                        .encoder(driveDistance)
+                        .gearRatio(GearRatio.reduction(reduction, 1.0)));
+
+        session.hardwareGraph().motor(motor).setVoltage(12.0);
+        session.step(1.0);
+
+        double wheelMetersPerSecond = driveDistance.velocityFromRotationsPerSecond(
+                session.encoder(driveDistance).velocityRotationsPerSecond());
+        assertTrue(wheelMetersPerSecond > 4.0,
+                "MK5N R3 wheel speed was incorrectly reduced twice: " + wheelMetersPerSecond);
+    }
+
     @Test
     void motorModelPublishesWpilibPhysicsBackToAthenaHandles() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);

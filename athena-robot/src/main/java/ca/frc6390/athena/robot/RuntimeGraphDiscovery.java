@@ -1,5 +1,7 @@
 package ca.frc6390.athena.robot;
 
+import ca.frc6390.athena.auto.AutoChooser;
+import ca.frc6390.athena.auto.PathProvider;
 import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
@@ -22,7 +24,17 @@ final class RuntimeGraphDiscovery {
 
     static Result inspect(Mechanism root) {
         List<Localization> declared = new ArrayList<>();
-        collectMechanism(root, identitySet(), identitySet(), declared);
+        List<AutoChooser> autoChoosers = new ArrayList<>();
+        List<PathProvider> pathProviders = new ArrayList<>();
+        collectMechanism(
+                root,
+                identitySet(),
+                identitySet(),
+                declared,
+                identitySet(),
+                autoChoosers,
+                identitySet(),
+                pathProviders);
 
         Set<Localization> nested = identitySet();
         for (Localization localization : declared) {
@@ -38,14 +50,18 @@ final class RuntimeGraphDiscovery {
         for (Localization localization : roots) {
             collectCameras(localization, seenSignals, seenCameras, cameras);
         }
-        return new Result(roots, cameras);
+        return new Result(roots, cameras, autoChoosers, pathProviders);
     }
 
     private static void collectMechanism(
             Mechanism mechanism,
             Set<Mechanism> seenMechanisms,
             Set<Localization> seenLocalizations,
-            List<Localization> localizations) {
+            List<Localization> localizations,
+            Set<AutoChooser> seenAutoChoosers,
+            List<AutoChooser> autoChoosers,
+            Set<PathProvider> seenPathProviders,
+            List<PathProvider> pathProviders) {
         if (!seenMechanisms.add(mechanism)) {
             return;
         }
@@ -55,10 +71,24 @@ final class RuntimeGraphDiscovery {
             }
             Object value = read(field, mechanism);
             if (value instanceof Mechanism child) {
-                collectMechanism(child, seenMechanisms, seenLocalizations, localizations);
+                collectMechanism(
+                        child,
+                        seenMechanisms,
+                        seenLocalizations,
+                        localizations,
+                        seenAutoChoosers,
+                        autoChoosers,
+                        seenPathProviders,
+                        pathProviders);
             }
             if (value instanceof Localization localization && seenLocalizations.add(localization)) {
                 localizations.add(localization);
+            }
+            if (value instanceof AutoChooser chooser && seenAutoChoosers.add(chooser)) {
+                autoChoosers.add(chooser);
+            }
+            if (value instanceof PathProvider provider && seenPathProviders.add(provider)) {
+                pathProviders.add(provider);
             }
         }
     }
@@ -121,10 +151,16 @@ final class RuntimeGraphDiscovery {
         return Collections.newSetFromMap(new IdentityHashMap<>());
     }
 
-    record Result(List<Localization> localizations, List<CameraDevice> cameras) {
+    record Result(
+            List<Localization> localizations,
+            List<CameraDevice> cameras,
+            List<AutoChooser> autoChoosers,
+            List<PathProvider> pathProviders) {
         Result {
             localizations = List.copyOf(localizations);
             cameras = List.copyOf(cameras);
+            autoChoosers = List.copyOf(autoChoosers);
+            pathProviders = List.copyOf(pathProviders);
         }
     }
 }

@@ -5,8 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ca.frc6390.athena.auto.AutoRuntime;
+import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.auto.Autos;
+import ca.frc6390.athena.auto.PathProvider;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
@@ -36,6 +37,10 @@ import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Events;
 import ca.frc6390.athena.mechanism.core.HookBinding;
+import ca.frc6390.athena.mechanism.core.MechanismContext;
+import ca.frc6390.athena.mechanism.core.PathAction;
+import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.mechanism.core.Paths;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
@@ -202,41 +207,48 @@ class RobotRuntimeTest {
     @Test
     void selectedAutoIsAnOrdinaryMechanismActionAndCancelsWhenDisabled() {
         SimulationSession simulation = SimulationSession.create();
-        MotorMechanism mechanism = new MotorMechanism();
-        AutoRuntime autoRuntime = Autos.runtime(Autos.routine("auto", mechanism.initial));
-        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism).auto(autoRuntime);
+        AutoMechanism mechanism = new AutoMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
         runtime.autoPeriodic(0.02, 0.02);
         assertEquals(12.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
-        assertTrue(autoRuntime.active());
+        assertEquals("Forward", mechanism.autos.runningName().orElseThrow());
         runtime.disabledPeriodic(0.04, 0.02);
         assertEquals(0.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
-        assertEquals(false, autoRuntime.active());
+        assertTrue(mechanism.autos.runningAction().isEmpty());
     }
 
     @Test
-    void genericAutonomousPeriodicInitializesSelectedActionOnlyOnce() {
-        MotorMechanism mechanism = new MotorMechanism();
-        AtomicInteger creations = new AtomicInteger();
-        AutoRuntime autoRuntime = Autos.runtime(Autos.routine("auto", () -> {
-            creations.incrementAndGet();
-            return mechanism.initial;
-        }));
-        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
-                .register(mechanism).auto(autoRuntime);
-
-        runtime.periodic(
-                new ca.frc6390.athena.mechanism.core.MechanismContext(0.0, 0.0, 0.02, true, true, false),
-                new ca.frc6390.athena.mechanism.core.EventContext(
-                        0.0,
-                        0.02,
-                        ca.frc6390.athena.mechanism.core.LifecycleMode.AUTONOMOUS,
-                        ca.frc6390.athena.mechanism.core.LifecyclePhase.PERIODIC,
-                        true,
-                        false));
+    void chooserChangesNeverReplaceTheRunningAuto() {
+        SimulationSession simulation = SimulationSession.create();
+        AutoMechanism mechanism = new AutoMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
         runtime.autoPeriodic(0.02, 0.02);
-        assertEquals(1, creations.get());
+        mechanism.autos.select("Reverse");
+        runtime.autoPeriodic(0.04, 0.02);
+
+        assertEquals(12.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+        assertEquals("Forward", mechanism.autos.runningName().orElseThrow());
+        assertEquals("Reverse", mechanism.autos.selectedName());
+
+        runtime.disabledPeriodic(0.06, 0.02);
+        runtime.autoPeriodic(0.08, 0.02);
+        assertEquals(-12.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+        assertEquals("Reverse", mechanism.autos.runningName().orElseThrow());
+    }
+
+    @Test
+    void registrationDiscoversProviderAndNestedPathsFromTheChooser() {
+        SimulationSession simulation = SimulationSession.create();
+        PathAutoMechanism mechanism = new PathAutoMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
+
+        runtime.autoPeriodic(0.02, 0.02);
+
+        assertEquals(6.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+        assertTrue(runtime.selectedAutoPreviews().get(0).steps().stream()
+                .anyMatch(step -> step.contains("PATH test:leave")));
     }
 
     @Test
@@ -573,6 +585,31 @@ class RobotRuntimeTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 42);
         @SuppressWarnings("unused")
         private final Action initial = motor.percent(1.0);
+    }
+
+    private static final class AutoMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 47);
+        private final Action forward = motor.percent(1.0);
+        private final Action reverse = motor.percent(-1.0);
+        private final AutoChooser autos = Autos.chooser("Auto Chooser")
+                .defaultAuto("Forward", forward)
+                .auto("Reverse", reverse);
+    }
+
+    private static final class PathAutoMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 48);
+        private final Action drive = motor.percent(0.5);
+        private final PathProvider paths = new PathProvider() {
+            @Override public String source() { return "test"; }
+            @Override public PathRuntime runtime() {
+                return new PathRuntime() {
+                    @Override public Action output(PathAction path, MechanismContext context) { return drive; }
+                    @Override public boolean isFinished(PathAction path, MechanismContext context) { return false; }
+                };
+            }
+        };
+        private final AutoChooser autos = Autos.chooser("Auto Chooser")
+                .defaultAuto("Leave", Actions.sequence().run(Paths.of("test", "leave")));
     }
 
     private static final class FollowerMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {

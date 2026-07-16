@@ -11,9 +11,10 @@ is an ordinary `Action`, every path is a `PathAction`, and each selectable auto 
 
 `ExampleDrive` owns the follower through `kinematics.follow(...)`; `AutoContext` only connects that
 follower to Choreo. It does not construct Choreo `AutoFactory`, adapt WPILib commands, or run
-another scheduler. `AutoExamples` only registers the one-file routines. Translation and heading
-gains are ordinary Athena gain objects, so their existing mechanism telemetry/runtime overrides
-are discovered automatically.
+another scheduler. The Robot declares one `AutoChooser`; Athena discovers it and the Choreo provider,
+publishes the chooser, and binds every nested path automatically. Translation and heading gains are
+ordinary Athena gain objects, so their existing mechanism telemetry/runtime overrides are discovered
+automatically.
 
 Create these trajectories under `src/main/deploy/choreo` before executing the example:
 
@@ -28,5 +29,6 @@ Publish Athena locally and compile the standalone project from the repository ro
 ./gradlew compileAutoFollowingExample
 ```
 
-The first registered routine is selected by default. A dashboard chooser can call
-`AutoRuntime.select(name)` during autonomous init when multiple routines are deployed.
+The action passed to `defaultAuto(...)` is selected initially. Its first path name becomes the
+chooser label automatically; explicit string labels remain optional. Dashboard changes update the
+next selection and preview only; Athena freezes that selection when autonomous begins.

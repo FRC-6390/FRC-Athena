@@ -64,10 +64,43 @@ final class RobotGraph {
             Collection<Mechanism> mechanisms, RuntimeOverrides overrides) {
         Map<String, TelemetryValue> values = new LinkedHashMap<>();
         Set<Mechanism> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        // A declaration referenced by a control or TelemetrySource must not also be published
+        // as a second writable topic. Otherwise each NT entry can overwrite the same runtime
+        // value in turn, making dashboard changes appear to revert immediately.
+        Set<Object> directDeclarations = directDeclarations(mechanisms);
+        Set<Object> publishedDeclarations = Collections.newSetFromMap(new IdentityHashMap<>());
         for (Mechanism mechanism : mechanisms) {
-            collectTelemetry(node(mechanism).name(), mechanism, visited, values, overrides);
+            collectTelemetry(node(mechanism).name(), mechanism, visited, values, overrides,
+                    directDeclarations, publishedDeclarations);
         }
         return Collections.unmodifiableMap(values);
+    }
+
+    private Set<Object> directDeclarations(Collection<Mechanism> mechanisms) {
+        Set<Object> declarations = Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Mechanism> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Mechanism mechanism : mechanisms) {
+            collectDirectDeclarations(mechanism, visited, declarations);
+        }
+        return declarations;
+    }
+
+    private void collectDirectDeclarations(
+            Mechanism mechanism,
+            Set<Mechanism> visited,
+            Set<Object> declarations) {
+        if (!visited.add(mechanism)) return;
+        MechanismNode node = node(mechanism);
+        node.declarations().values().forEach(declaration -> addDirectDeclaration(declaration, declarations));
+        node.children().values().forEach(child -> collectDirectDeclarations(child, visited, declarations));
+    }
+
+    private static void addDirectDeclaration(Object declaration, Set<Object> declarations) {
+        if (declaration instanceof Iterable<?> nested) {
+            nested.forEach(value -> addDirectDeclaration(value, declarations));
+            return;
+        }
+        declarations.add(declaration);
     }
 
     private void collectTelemetry(
@@ -75,13 +108,17 @@ final class RobotGraph {
             Mechanism mechanism,
             Set<Mechanism> visited,
             Map<String, TelemetryValue> values,
-            RuntimeOverrides overrides) {
+            RuntimeOverrides overrides,
+            Set<Object> directDeclarations,
+            Set<Object> publishedDeclarations) {
         if (!visited.add(mechanism)) return;
         MechanismNode node = node(mechanism);
         node.declarations().forEach((name, declaration) ->
-                addTelemetry(path, name, declaration, values, overrides));
+                addTelemetry(path, name, declaration, values, overrides,
+                        directDeclarations, publishedDeclarations, false));
         node.children().forEach((name, child) ->
-                collectTelemetry(path + "/" + name, child, visited, values, overrides));
+                collectTelemetry(path + "/" + name, child, visited, values, overrides,
+                        directDeclarations, publishedDeclarations));
     }
 
     private static void addTelemetry(
@@ -89,7 +126,14 @@ final class RobotGraph {
             String valuePath,
             Object declaration,
             Map<String, TelemetryValue> values,
-            RuntimeOverrides overrides) {
+            RuntimeOverrides overrides,
+            Set<Object> directDeclarations,
+            Set<Object> publishedDeclarations,
+            boolean referenced) {
+        if ((referenced && directDeclarations.contains(declaration))
+                || !publishedDeclarations.add(declaration)) {
+            return;
+        }
         if (declaration instanceof TelemetryValue value) {
             values.put(mechanismPath + "/" + valuePath, value);
         } else if (declaration instanceof MotorDevice motor) {
@@ -111,7 +155,9 @@ final class RobotGraph {
                         controlPath + "/motors/" + index,
                         control.motors().get(index),
                         values,
-                        overrides);
+                        overrides,
+                        directDeclarations,
+                        publishedDeclarations);
             }
             if (control.feedback() != null) {
                 values.put(controlPath + "/feedback/position",
@@ -124,17 +170,31 @@ final class RobotGraph {
                 String loopName = loop instanceof ca.frc6390.athena.mechanism.control.PidGains ? "pid"
                         : loop instanceof ca.frc6390.athena.mechanism.control.FeedforwardGains ? "feedforward"
                         : "loop" + customLoop++;
-                addTelemetry(mechanismPath, valuePath + "/" + loopName, loop, values, overrides);
+                addTelemetry(mechanismPath, valuePath + "/" + loopName, loop, values, overrides,
+                        directDeclarations, publishedDeclarations, true);
             }
         } else if (declaration instanceof TelemetrySource source) {
             source.telemetry().forEach((name, value) -> addTelemetry(
-                    mechanismPath, valuePath + "/" + name, value, values, overrides));
+                    mechanismPath, valuePath + "/" + name, value, values, overrides,
+                    directDeclarations, publishedDeclarations, true));
         } else if (declaration instanceof Iterable<?> nested) {
             int index = 0;
             for (Object value : nested) {
-                addTelemetry(mechanismPath, valuePath + "/" + index++, value, values, overrides);
+                addTelemetry(mechanismPath, valuePath + "/" + index++, value, values, overrides,
+                        directDeclarations, publishedDeclarations, false);
             }
         }
+    }
+
+    private static void addMotorTelemetry(
+            String path,
+            MotorDevice motor,
+            Map<String, TelemetryValue> values,
+            RuntimeOverrides overrides,
+            Set<Object> directDeclarations,
+            Set<Object> publishedDeclarations) {
+        if (directDeclarations.contains(motor) || !publishedDeclarations.add(motor)) return;
+        addMotorTelemetry(path, motor, values, overrides);
     }
 
     private static void addMotorTelemetry(

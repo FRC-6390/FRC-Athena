@@ -149,9 +149,10 @@ DigitalInputDevice home = RIO.dio(6).digitalInput("arm home");
 
 For REV SPARK controllers, Athena maps CTRE-style supply/stator declarations onto REV's
 motor-phase current limiter. If both are set, the lower value wins. A
-`RevMotorOptions.smartCurrentLimit(...)` value explicitly overrides that mapping. Initial
-REV configuration resets stale safe parameters and persists settings by default, so follower
-relationships and safety configuration survive controller power cycles.
+`RevMotorOptions.smartCurrentLimit(...)` value explicitly overrides that mapping. Initial REV
+configuration preserves undeclared parameters (including values set with the REV Hardware Client)
+and persists Athena's declared settings by default. Use
+`RevMotorOptions.resetSafeParameters(true)` to explicitly reset safe parameters first.
 
 `MotorKinds` identifies the physical motor so simulation can select its real motor constants.
 Each built-in motor has a usual controller (`KRAKEN_X60` uses Talon FX, `NEO` uses Spark MAX,

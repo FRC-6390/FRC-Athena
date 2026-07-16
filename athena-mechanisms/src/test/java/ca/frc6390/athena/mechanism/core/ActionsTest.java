@@ -70,6 +70,17 @@ class ActionsTest {
     }
 
     @Test
+    void timeoutIsAvailableOnDeviceActionsAndComposedActions() {
+        Action timedDeviceAction = MOTOR.percent(0.2).timeout(0.5);
+        Action timedComposition = MOTOR.percent(0.2).then(MOTOR.voltage(3.0)).timeout(1.0);
+
+        assertEquals(0.5, ((Actions.Timeout) timedDeviceAction).seconds());
+        Actions.Timeout timeout = (Actions.Timeout) timedComposition;
+        assertEquals(1.0, timeout.seconds());
+        assertEquals(Action.Then.class, timeout.action().getClass());
+    }
+
+    @Test
     void untilWithinOnlyAcceptsClosedLoopTargetsAndValidTolerance() {
         ControlBinding position = Controls.position(MOTOR);
         Action openLoop = MOTOR.percent(0.2);

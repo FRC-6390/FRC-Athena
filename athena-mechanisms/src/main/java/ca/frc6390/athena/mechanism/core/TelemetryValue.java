@@ -39,6 +39,11 @@ public final class TelemetryValue {
         Geometry2d geometry = Objects.requireNonNull(value, "value");
         return new TelemetryValue(Type.GEOMETRY, false, () -> geometry, null);
     }
+    /** Creates read-only field geometry telemetry evaluated when telemetry is sampled. */
+    public static TelemetryValue dynamicGeometry(Supplier<? extends Geometry2d> value) {
+        Objects.requireNonNull(value, "value");
+        return new TelemetryValue(Type.GEOMETRY, false, value::get, null);
+    }
     /** Creates a writable numeric value for an application-specific mechanism setting. */
     public static TelemetryValue number(double initialValue) {
         MutableDouble value = new MutableDouble(initialValue);

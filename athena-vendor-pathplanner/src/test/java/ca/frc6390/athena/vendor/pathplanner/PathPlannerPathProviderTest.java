@@ -12,6 +12,7 @@ import java.util.List;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
 import ca.frc6390.athena.mechanism.core.PathAction;
+import ca.frc6390.athena.mechanism.core.Paths;
 import edu.wpi.first.wpilibj2.command.Command;
 import org.junit.jupiter.api.Test;
 
@@ -28,14 +29,10 @@ class PathPlannerPathProviderTest {
     }
 
     @Test
-    void pathNamesAreNormalizedAndCached() {
-        PathPlannerPathProvider provider = new PathPlannerPathProvider(new FakeClient(List.of()));
+    void declarativePathActionsAreCreatedWithoutTheProvider() {
+        PathAction first = Paths.pathPlanner("  Blue Auto  ");
+        PathAction defaultPath = Paths.pathPlanner(" ");
 
-        PathAction first = provider.path("  Blue Auto  ");
-        PathAction second = provider.path("Blue Auto");
-        PathAction defaultPath = provider.path(" ");
-
-        assertSame(first, second);
         assertEquals("pathplanner", first.source());
         assertEquals("Blue Auto", first.name());
         assertEquals("pathplanner:Blue Auto", first.key());
@@ -82,7 +79,7 @@ class PathPlannerPathProviderTest {
         FakeClient client = new FakeClient(List.of());
         PathPlannerPathProvider provider = new PathPlannerPathProvider(client);
         PathRuntime runtime = provider.runtime();
-        PathAction path = provider.path("Drive Out");
+        PathAction path = Paths.pathPlanner("Drive Out");
 
         runtime.initialize(path, null);
         runtime.execute(path, null);

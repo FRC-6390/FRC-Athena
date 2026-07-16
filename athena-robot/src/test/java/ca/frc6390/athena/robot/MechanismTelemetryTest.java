@@ -1,6 +1,8 @@
 package ca.frc6390.athena.robot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -12,11 +14,39 @@ import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.core.Telemetry;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import org.junit.jupiter.api.Test;
 
 class MechanismTelemetryTest {
+    @Test
+    void annotatedFieldsAndMethodsUseTelemetryValueRuntimeWithoutWrapperFields() {
+        AnnotatedMechanism mechanism = new AnnotatedMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+
+        assertEquals(0.5, runtime.mechanismTelemetry()
+                .get("annotatedMechanism/outputPercent").number(), 1e-9);
+        assertTrue(runtime.mechanismTelemetry()
+                .get("annotatedMechanism/status/ready").bool());
+        assertEquals("idle", runtime.mechanismTelemetry()
+                .get("annotatedMechanism/state").value());
+        assertEquals(7.0, runtime.mechanismTelemetry()
+                .get("annotatedMechanism/custom").number(), 1e-9);
+        assertEquals(TelemetryValue.Type.GEOMETRY, runtime.mechanismTelemetry()
+                .get("annotatedMechanism/field/zone").type());
+
+        runtime.mechanismTelemetry().get("annotatedMechanism/outputPercent").set(2.0);
+        assertEquals(1.0, mechanism.outputPercent, 1e-9);
+    }
+
+    @Test
+    void rejectsInvalidWritableAnnotationDuringRegistration() {
+        assertThrows(IllegalArgumentException.class, () -> RobotRuntime
+                .simulated(SimulationSession.create())
+                .register(new InvalidAnnotatedMechanism()));
+    }
+
     @Test
     void discoversExistingDeclarationsAndAppliesRuntimeDisable() {
         TunedMechanism mechanism = new TunedMechanism();
@@ -25,17 +55,19 @@ class MechanismTelemetryTest {
 
         assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/motor/disabled"));
         assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/control/disabled"));
-        assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/control/pid/p"));
-        assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/control/feedforward/velocity"));
+        assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/pid/p"));
+        assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/feedforward/velocity"));
         assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/position"));
         assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/motor/positionRotations"));
         assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/motor/appliedVoltage"));
         assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/encoder/absolutePosition"));
         assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/control/feedback/position"));
-        assertTrue(runtime.mechanismTelemetry().containsKey("tunedMechanism/control/motors/0/command/value"));
+        assertFalse(runtime.mechanismTelemetry().containsKey("tunedMechanism/control/motors/0/disabled"));
+        assertFalse(runtime.mechanismTelemetry().containsKey("tunedMechanism/control/pid/disabled"));
+        assertFalse(runtime.mechanismTelemetry().containsKey("tunedMechanism/control/feedforward/disabled"));
 
-        runtime.mechanismTelemetry().get("tunedMechanism/control/pid/p").set(3.0);
-        runtime.mechanismTelemetry().get("tunedMechanism/control/feedforward/velocity").set(1.5);
+        runtime.mechanismTelemetry().get("tunedMechanism/pid/p").set(3.0);
+        runtime.mechanismTelemetry().get("tunedMechanism/feedforward/velocity").set(1.5);
         assertEquals(3.0, mechanism.pid.p(), 1e-9);
         assertEquals(1.5, mechanism.feedforward.velocityGain(), 1e-9);
 
@@ -48,10 +80,15 @@ class MechanismTelemetryTest {
         assertEquals(4.0, runtime.mechanismTelemetry()
                 .get("tunedMechanism/control/feedback/velocity").number(), 1e-9);
         assertEquals(0.5, runtime.mechanismTelemetry()
-                .get("tunedMechanism/control/motors/0/command/value").number(), 1e-9);
+                .get("tunedMechanism/motor/command/value").number(), 1e-9);
 
-        runtime.mechanismTelemetry().get("tunedMechanism/motor/disabled").set(true);
+        runtime.mechanismTelemetry().get("tunedMechanism/control/disabled").set(true);
         runtime.robotPeriodic(0.02, 0.02);
+        assertEquals(0.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+
+        runtime.mechanismTelemetry().get("tunedMechanism/control/disabled").set(false);
+        runtime.mechanismTelemetry().get("tunedMechanism/motor/disabled").set(true);
+        runtime.robotPeriodic(0.04, 0.02);
         assertEquals(0.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
     }
 
@@ -69,6 +106,18 @@ class MechanismTelemetryTest {
                 .containsKey("controlOnlyMechanism/control/motors/0/positionRotations"));
     }
 
+    @Test
+    void keepsEmbeddedLoopControlsButOmitsTheirDirectMotorAlias() {
+        EmbeddedLoopMechanism mechanism = new EmbeddedLoopMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+
+        assertTrue(runtime.mechanismTelemetry().containsKey("embeddedLoopMechanism/motor/disabled"));
+        assertTrue(runtime.mechanismTelemetry().containsKey("embeddedLoopMechanism/control/disabled"));
+        assertTrue(runtime.mechanismTelemetry().containsKey("embeddedLoopMechanism/control/pid/disabled"));
+        assertFalse(runtime.mechanismTelemetry()
+                .containsKey("embeddedLoopMechanism/control/motors/0/disabled"));
+    }
+
     private static final class TunedMechanism implements Mechanism {
         final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         final EncoderDevice encoder = motor.encoder();
@@ -77,10 +126,39 @@ class MechanismTelemetryTest {
         final ControlBinding control = Controls.position(motor)
                 .feedback(encoder).pid(pid).feedforward(feedforward);
         final TelemetryValue position = TelemetryValue.number(encoder::position);
-        final Action run = motor.percent(0.5);
+        final Action run = control.percent(0.5);
     }
 
     private static final class ControlOnlyMechanism implements Mechanism {
         final ControlBinding control = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 9));
+    }
+
+    private static final class EmbeddedLoopMechanism implements Mechanism {
+        final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 10);
+        final ControlBinding control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
+    }
+
+    private static final class AnnotatedMechanism implements Mechanism {
+        @Telemetry("field/zone")
+        private static final ca.frc6390.athena.runtime.geometry.Rectangle2d ZONE =
+                ca.frc6390.athena.runtime.geometry.Rectangle2d.of(1.0, 2.0, 3.0, 4.0);
+        @Telemetry(writable = true, min = 0.0, max = 1.0)
+        private double outputPercent = 0.5;
+        private final TelemetryValue custom = TelemetryValue.number(7.0);
+
+        @Telemetry("status/ready")
+        private boolean ready() {
+            return true;
+        }
+
+        @Telemetry
+        private String state() {
+            return "idle";
+        }
+    }
+
+    private static final class InvalidAnnotatedMechanism implements Mechanism {
+        @Telemetry(writable = true)
+        private final double immutable = 1.0;
     }
 }

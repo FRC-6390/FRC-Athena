@@ -42,6 +42,10 @@ public interface Action extends DeviceAction {
         return new Then(this, next);
     }
 
+    default Action timeout(double seconds) {
+        return Actions.timeout(this, seconds);
+    }
+
 
     record Conditional(Action action, ActionCondition condition, Action next) implements Action {
         public Conditional {

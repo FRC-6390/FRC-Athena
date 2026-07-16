@@ -343,7 +343,7 @@ The old DTO/builder layer is not a 2027 API category. Rebuilt uses declarations 
 | `DifferentialDrivetrainSpec` | removed | REMOVE | Rebuilt is swerve-only. |
 | `CommandSpec` | `CommandAction` | RENAME | Rebuilt experimental controls import it as command behavior descriptor. |
 | `AutoChooserSpec` | removed | REMOVE | Old chooser DTO. |
-| `AutoRoutineSpec` | removed | REMOVE | Old routine DTO; final autos use `AutoRoutine`/`AutoRuntime` around command/action behavior, not specs. |
+| `AutoRoutineSpec` | removed | REMOVE | Old routine DTO; final autos are ordinary Actions selected by `AutoChooser`. |
 | `RobotLifecycleSpec` | removed | REMOVE | `AthenaRobot` and `RobotRuntime` own lifecycle. |
 | all `*Config` builders | removed | REMOVE | Old V3 builder public API, not used by Rebuilt. |
 | `HeliOSConfig` | removed | REMOVE | Use `Cameras.helios` and `HeliosDevice` declarations. |
@@ -376,7 +376,7 @@ Runtimes execute. Robot code should touch one public runtime host, not a collect
 | `AthenaTimedRobot` | `AthenaRobot` | RENAME | WPILib runtime host should own lifecycle and `RobotRuntime`. |
 | `CommandRunner` | removed | REMOVE | Old command execution surface. |
 | `WpilibCommandScheduler` | removed | REMOVE | Rebuilt controls use WPILib commands directly. |
-| `AutoExecution` | `AutoRuntime` | IMPLEMENT | Needed for selected autos, but old chooser/spec execution is removed. |
+| `AutoExecution` | internal `RobotRuntime` lifecycle | IMPLEMENTED | `AutoChooser` is declarative; root runtime owns start and cancellation. |
 | `AutoRegistry` | removed | REMOVE | Old global registry. |
 | `AutoInputStore` | removed | REMOVE | Old auto input store. |
 | `AutoInputScope` | removed | REMOVE | Old auto input scope. |
@@ -526,7 +526,7 @@ These modules need old public surface removed. Feature support stays when it can
 
 - `AthenaRobot`: WPILib-facing runtime host that wraps `RobotRuntime`.
 - Broader tests for root runtime behavior, especially controls, simulation, localization, hooks, and autos.
-- Remaining `AutoRuntime` work: selected-auto execution without the old chooser/spec registry.
+- Selected-auto lifecycle is owned by `RobotRuntime`; chooser changes remain inert until the next autonomous period.
 - Remaining vision simulation work: testable PhotonVision provider seam without constructing vendor sim objects in root runtime tests.
 
 ## First Removal Order

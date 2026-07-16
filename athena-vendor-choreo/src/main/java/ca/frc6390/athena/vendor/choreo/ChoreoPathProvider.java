@@ -8,7 +8,6 @@ import ca.frc6390.athena.drivetrain.swerve.SwervePathSample;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
-import ca.frc6390.athena.mechanism.core.Paths;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import choreo.Choreo;
 import choreo.trajectory.SwerveSample;
@@ -88,9 +87,7 @@ public final class ChoreoPathProvider implements PathProvider {
         return new ChoreoPathProvider(new ChoreoLibClient(), safeFollower, mirrorForAlliance);
     }
 
-    @Override public PathAction path(String pathName) { return Paths.choreo(normalize(pathName)); }
-    public PathAction split(String pathName, int splitIndex) { return path(pathName).split(splitIndex); }
-
+    @Override public String source() { return KEY; }
     public Optional<Trajectory<? extends TrajectorySample<?>>> trajectory(String pathName) {
         return trajectoryCache.computeIfAbsent(normalize(pathName), client::loadTrajectory);
     }

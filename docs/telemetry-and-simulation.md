@@ -51,18 +51,36 @@ is not needed.
 
 ## Custom telemetry and live tuning
 
-Mechanisms can declare their own sparse values without calling `SmartDashboard.put*` every loop:
+Mechanisms can publish fields and zero-argument methods with `@Telemetry` without calling
+`SmartDashboard.put*` every loop:
 
 ```java
-public final TelemetryValue armPosition = TelemetryValue.number(encoder::position);
-public final TelemetryValue homed = TelemetryValue.bool(homeSwitch::active);
-public final TelemetryValue target = TelemetryValue.number(20.0);
+@Telemetry
+private double armPosition() { return encoder.position(); }
+
+@Telemetry
+private boolean homed() { return homeSwitch.active(); }
+
+@Telemetry(writable = true, min = 0.0, max = 30.0)
+private double target = 20.0;
 
 private final ControlBinding control = Controls.position(armMotor)
         .feedback(encoder)
         .pid(2.0, 0.0, 0.0)
         .ff(0.1, 0.4, 0.0);
-public final Action move = control.position(target::number);
+public final Action move = control.position(() -> target);
+```
+
+Annotated methods are read-only. Annotated fields are read-only unless they explicitly request
+`writable = true`; writable numeric fields may also specify `min` and `max`. A relative topic path
+can be supplied with `@Telemetry("status/ready")`. Athena inspects annotations once when the
+mechanism is registered and then uses cached readers and writers.
+
+`TelemetryValue` fields remain supported for custom reader/writer behavior and dynamic declarations:
+
+```java
+public final TelemetryValue custom =
+        TelemetryValue.writableNumber(this::readCustom, this::writeCustom);
 ```
 
 Values appear directly under `/Athena/Mechanisms/<mechanism path>/<field path>` and are sampled at
@@ -73,8 +91,8 @@ closed-loop configuration is only resent when its effective gain values actually
 
 CAN identity, bus selection, inversion, follower topology, and controller current limits remain
 deployment-time hardware configuration. Application-specific setpoints have no existing device or
-control declaration to discover, so those remain explicit writable `TelemetryValue.number(...)`
-fields as shown above.
+control declaration to discover, so those should be explicitly marked as writable `@Telemetry`
+fields.
 
 ## Autonomous preview
 
@@ -83,14 +101,15 @@ geometry they already load for execution, so Choreo paths, splits, marker Action
 parallel groups, and both sides of conditional branches are visible before enable.
 
 - `/Athena/Auto/Selected`: selected routine name.
+- `/Athena/Auto/Running`: frozen action currently owned by autonomous, empty outside autonomous.
 - `/Athena/Auto/Plan`: readable ordered Action-tree description.
 - `/Athena/Auto/Path`: combined `Pose2d[]` that can be added directly to an AdvantageScope field.
 - `/Athena/Auto/Paths/*`: one `Pose2d[]` per path or conditional branch for independent coloring.
 - `/Athena/Auto/Events`: marker poses, paired by index with `/Athena/Auto/EventLabels`.
 
-Call `AutoRuntime.select(...)` when the chooser changes—not only at autonomous init—so the preview
-tracks the disabled-period selection. The selected Action is prepared once, and that same instance
-is activated when autonomous begins.
+Declare an `AutoChooser` as a Robot field. Athena publishes it and updates the preview automatically.
+Changing the chooser is inert: the selected Action is frozen and activated only when autonomous
+begins, and selection changes cannot replace the running Action.
 
 ## Mechanism simulation
 
