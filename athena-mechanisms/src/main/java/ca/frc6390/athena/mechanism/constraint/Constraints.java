@@ -7,7 +7,6 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 /**
  * Factories and composition for mechanism constraints.
@@ -74,17 +73,8 @@ public final class Constraints {
     public static <T> Constraint<T> override(BooleanSupplier active, T value) {
         Objects.requireNonNull(active, "active");
         Objects.requireNonNull(value, "value");
-        return override(active, () -> value);
-    }
-
-    /** Replaces a requested value with a runtime-sampled value while a condition is active. */
-    public static <T> Constraint<T> override(BooleanSupplier active, Supplier<? extends T> value) {
-        Objects.requireNonNull(active, "active");
-        Objects.requireNonNull(value, "value");
         return context -> active.getAsBoolean()
-                ? new ConstraintResult.Corrected<>(
-                        context.requested(),
-                        Objects.requireNonNull(value.get(), "override value"))
+                ? new ConstraintResult.Corrected<>(context.requested(), value)
                 : new ConstraintResult.Allowed<>(context.requested());
     }
 

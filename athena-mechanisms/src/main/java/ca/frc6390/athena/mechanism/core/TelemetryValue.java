@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import ca.frc6390.athena.runtime.geometry.Geometry2d;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
@@ -8,7 +9,7 @@ import java.util.function.Supplier;
 
 /** A lightweight mechanism-owned value that may be published or tuned live. */
 public final class TelemetryValue {
-    public enum Type { NUMBER, BOOLEAN, STRING }
+    public enum Type { NUMBER, BOOLEAN, STRING, GEOMETRY }
     private final Type type;
     private final boolean writable;
     private final Supplier<Object> reader;
@@ -32,6 +33,11 @@ public final class TelemetryValue {
     }
     public static TelemetryValue string(Supplier<String> value) {
         return new TelemetryValue(Type.STRING, false, Objects.requireNonNull(value, "value")::get, null);
+    }
+    /** Creates read-only field geometry telemetry for WPILib field visualization. */
+    public static TelemetryValue geometry(Geometry2d value) {
+        Geometry2d geometry = Objects.requireNonNull(value, "value");
+        return new TelemetryValue(Type.GEOMETRY, false, () -> geometry, null);
     }
     /** Creates a writable numeric value for an application-specific mechanism setting. */
     public static TelemetryValue number(double initialValue) {
