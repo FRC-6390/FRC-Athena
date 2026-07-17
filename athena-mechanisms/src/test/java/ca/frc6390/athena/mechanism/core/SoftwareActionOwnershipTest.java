@@ -1,13 +1,14 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
-class OwnedActionTest {
+class SoftwareActionOwnershipTest {
     @Test
-    void dynamicallyCreatedSoftwareActionUsesItsExplicitMechanismOwner() {
+    void declarationFreeActionUsesTheSingleRobotRoot() {
         SoftwareMechanism mechanism = new SoftwareMechanism();
         MechanismScheduler scheduler = MechanismScheduler.create().register(mechanism);
 
@@ -18,27 +19,11 @@ class OwnedActionTest {
     }
 
     @Test
-    void ownedActionRunsWhenNestedInASequence() {
-        SoftwareMechanism mechanism = new SoftwareMechanism();
-        MechanismScheduler scheduler = MechanismScheduler.create().register(mechanism);
-
-        scheduler.request(Actions.sequence()
-                .run(mechanism.resetTo(7))
-                .run(mechanism.resetTo(11)));
-        scheduler.robotPeriodic(0.0, 0.02);
-        scheduler.robotPeriodic(0.02, 0.02);
-
-        assertEquals(11, mechanism.value.get());
-    }
-
-    @Test
-    void externalHookCanLeaseADynamicActionOwnedByAnotherMechanism() {
+    void externalHookCanLeaseAParameterizedSoftwareActionWithoutOwnershipAnnotations() {
         boolean[] pressed = {false};
         SoftwareMechanism mechanism = new SoftwareMechanism();
-        ExternalControls controls = new ExternalControls(pressed, mechanism);
-        MechanismScheduler scheduler = MechanismScheduler.create()
-                .register(mechanism)
-                .register(controls);
+        RobotRoot robot = new RobotRoot(mechanism, new ExternalControls(pressed, mechanism));
+        MechanismScheduler scheduler = MechanismScheduler.create().register(robot);
 
         scheduler.teleopPeriodic(0.0, 0.02);
         pressed[0] = true;
@@ -47,11 +32,24 @@ class OwnedActionTest {
         assertEquals(23, mechanism.value.get());
     }
 
+    @Test
+    void ambiguousIndependentRootsStillRejectDeclarationFreeActions() {
+        MechanismScheduler scheduler = MechanismScheduler.create()
+                .register(new SoftwareMechanism())
+                .register(new SoftwareMechanism());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> scheduler.request(Actions.doOnce(() -> { })));
+    }
+
+    private record RobotRoot(SoftwareMechanism mechanism, ExternalControls controls) implements Mechanism {
+    }
+
     private static final class SoftwareMechanism implements Mechanism {
         private final AtomicInteger value = new AtomicInteger();
 
         private Action resetTo(int next) {
-            return own(Actions.doOnce(() -> value.set(next)));
+            return Actions.doOnce(() -> value.set(next));
         }
     }
 

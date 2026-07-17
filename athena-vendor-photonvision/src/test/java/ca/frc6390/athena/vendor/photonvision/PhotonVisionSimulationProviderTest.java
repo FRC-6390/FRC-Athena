@@ -94,7 +94,7 @@ class PhotonVisionSimulationProviderTest {
                 VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, 3.0, 0.0, 1.0, 0.0)));
         CameraDevice bound = simulation.bind(camera);
 
-        simulation.update(new PoseSnapshot(0.0, 0.0, 0.0));
+        simulation.update(new PoseSnapshot(0.0, 0.0, 0.0), 1.25);
 
         assertEquals(1, bound.targets().measurements().size());
         assertEquals(11, ((TargetMeasurementSample) bound.targets().measurements().get(0)).targetId());
@@ -102,6 +102,7 @@ class PhotonVisionSimulationProviderTest {
         PoseMeasurementSample pose = (PoseMeasurementSample) bound.pose().measurements().get(0);
         assertEquals(1, pose.targetCount());
         assertEquals(0.0, pose.pose().xMeters(), 1.0e-9);
+        assertEquals(1.25, pose.timestampSeconds(), 1.0e-9);
     }
 
     @Test

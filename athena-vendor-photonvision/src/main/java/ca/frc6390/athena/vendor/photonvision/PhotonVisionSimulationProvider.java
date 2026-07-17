@@ -84,6 +84,11 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
 
         @Override
         public void update(PoseSnapshot robotPose) {
+            update(robotPose, 0.0);
+        }
+
+        @Override
+        public void update(PoseSnapshot robotPose, double timestampSeconds) {
             if (robotPose == null) {
                 return;
             }
@@ -96,7 +101,7 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
             cameraDeclarations.values().forEach(camera -> {
                 List<Measurement> targets = simulatedTargets(robotPose, camera, field);
                 latestTargets.put(key(camera), targets);
-                latestPoses.put(key(camera), simulatedPose(robotPose, camera, targets));
+                latestPoses.put(key(camera), simulatedPose(robotPose, camera, targets, timestampSeconds));
             });
         }
 
@@ -172,11 +177,13 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
         private static List<Measurement> simulatedPose(
                 PoseSnapshot robotPose,
                 CameraDevice camera,
-                List<Measurement> targets) {
+                List<Measurement> targets,
+                double timestampSeconds) {
             if (targets == null || targets.isEmpty()) {
                 return List.of();
             }
             return List.of((Measurement) Measurements.pose(robotPose)
+                    .timing(timestampSeconds, 0.0)
                     .visionMetadata(0.0, targets.size())
                     .source(camera));
         }

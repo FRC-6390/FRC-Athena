@@ -645,6 +645,7 @@ public final class Localization implements PoseSignal {
     private static final class KalmanEngine {
         private static final Object UNKNOWN_VISION_SOURCE = new Object();
         private static final int RECOVERY_SAMPLE_COUNT = 3;
+        private static final int SINGLE_TAG_RECOVERY_SAMPLE_COUNT = 5;
         private static final double RECOVERY_MAX_INTERVAL_SECONDS = 0.25;
         private static final double RECOVERY_TRANSLATION_METERS = 0.75;
         private static final double RECOVERY_HEADING_RADIANS = Math.toRadians(25.0);
@@ -709,7 +710,7 @@ public final class Localization implements PoseSignal {
             }
             lastSeenVisionTimestamps.put(source, sample.timestampSeconds());
             MeasurementStdDevs stdDevs = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
-            if (headingResidual(sample) > maxHeadingResidualRadians) {
+            if (trustsHeading(sample) && headingResidual(sample) > maxHeadingResidualRadians) {
                 visionRecovery.remove(source);
                 return;
             }
@@ -730,7 +731,6 @@ public final class Localization implements PoseSignal {
             private int consistentSamples;
 
             private boolean accepts(PoseMeasurementSample sample) {
-                boolean strongObservation = sample.targetCount() >= 2;
                 boolean continuous = previousPose != null
                         && sample.timestampSeconds() - previousTimestamp <= RECOVERY_MAX_INTERVAL_SECONDS
                         && (!trustsTranslation(sample)
@@ -739,10 +739,13 @@ public final class Localization implements PoseSignal {
                                 || Math.abs(wrapRadians(
                                         previousPose.headingRadians() - sample.pose().headingRadians()))
                                         <= RECOVERY_HEADING_RADIANS);
-                consistentSamples = strongObservation && continuous ? consistentSamples + 1 : strongObservation ? 1 : 0;
+                consistentSamples = continuous ? consistentSamples + 1 : 1;
                 previousPose = sample.pose();
                 previousTimestamp = sample.timestampSeconds();
-                return consistentSamples >= RECOVERY_SAMPLE_COUNT;
+                int requiredSamples = sample.targetCount() >= 2
+                        ? RECOVERY_SAMPLE_COUNT
+                        : SINGLE_TAG_RECOVERY_SAMPLE_COUNT;
+                return consistentSamples >= requiredSamples;
             }
         }
 

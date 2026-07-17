@@ -809,8 +809,9 @@ public final class MechanismScheduler {
             }
             return computedTarget;
         }
+        Set<Object> declarations = actionDeclarations(action);
         Set<RequestTarget> targets = new HashSet<>();
-        for (Object declaration : actionDeclarations(action)) {
+        for (Object declaration : declarations) {
             RequestTarget target = declarationTargets.get(declaration);
             if (target != null) {
                 targets.add(target);
@@ -828,7 +829,12 @@ public final class MechanismScheduler {
             }
             return new RequestTarget(sharedRoot, sharedRoot);
         }
-        return targets.isEmpty() ? null : targets.iterator().next();
+        if (!targets.isEmpty()) return targets.iterator().next();
+        if (declarations.isEmpty() && runtimes.size() == 1) {
+            Mechanism root = runtimes.keySet().iterator().next();
+            return new RequestTarget(root, root);
+        }
+        return null;
     }
 
     private static Set<Object> actionDeclarations(Action action) {
@@ -841,10 +847,7 @@ public final class MechanismScheduler {
         if (action == null) {
             return;
         }
-        if (action instanceof Actions.Owned owned) {
-            declarations.add(owned.owner());
-            collectActionDeclarations(owned.action(), declarations);
-        } else if (action instanceof Actions.Parallel parallel) {
+        if (action instanceof Actions.Parallel parallel) {
             parallel.Actions().forEach(child -> collectActionDeclarations(child, declarations));
         } else if (action instanceof Actions.Computed computed) {
             collectActionDeclarations(computed.evaluate(MechanismContext.empty()), declarations);

@@ -23,4 +23,12 @@ public interface VisionSimulation {
      * @param robotPose field-relative robot pose
      */
     void update(PoseSnapshot robotPose);
+
+    /**
+     * Updates observations using the simulation session's monotonic timestamp.
+     * Existing simulation implementations can continue implementing the pose-only method.
+     */
+    default void update(PoseSnapshot robotPose, double timestampSeconds) {
+        update(robotPose);
+    }
 }

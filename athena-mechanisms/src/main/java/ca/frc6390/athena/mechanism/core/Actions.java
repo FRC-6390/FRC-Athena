@@ -119,14 +119,6 @@ public final class Actions {
         return new Fault(reason);
     }
 
-    /**
-     * Assigns an explicit mechanism owner to an action that has no hardware-backed
-     * declaration from which the scheduler can infer ownership.
-     */
-    public static Action owned(Mechanism owner, Action action) {
-        return new Owned(owner, action);
-    }
-
     public static Action dynamic(Supplier<Output> output) {
         Objects.requireNonNull(output, "output");
         return dynamic(ctx -> output.get());
@@ -270,13 +262,6 @@ public final class Actions {
     }
 
     public record Neutral() implements Action, Output.Neutral {
-    }
-
-    public record Owned(Mechanism owner, Action action) implements Action {
-        public Owned {
-            Objects.requireNonNull(owner, "owner");
-            Objects.requireNonNull(action, "action");
-        }
     }
 
     public record ControlNeutral(ControlBinding control) implements Action, Output.Neutral {

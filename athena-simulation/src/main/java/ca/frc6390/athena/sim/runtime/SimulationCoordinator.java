@@ -50,6 +50,7 @@ final class SimulationCoordinator implements SimModel.Context {
     private SimPhysicsEngine physicsEngine = new SimModelRunner();
     private PoseSnapshot pose = new PoseSnapshot(0.0, 0.0, 0.0);
     private VisionSimulationField visionField = VisionSimulationField.EMPTY;
+    private double elapsedSeconds;
 
     /**
      * Registers a simulation model and materializes its hardware handles.
@@ -285,7 +286,8 @@ final class SimulationCoordinator implements SimModel.Context {
             }
         });
         imus.values().forEach(handle -> handle.step(seconds));
-        visionSimulations.forEach(simulation -> simulation.update(pose));
+        elapsedSeconds += seconds;
+        visionSimulations.forEach(simulation -> simulation.update(pose, elapsedSeconds));
     }
 
     @Override
