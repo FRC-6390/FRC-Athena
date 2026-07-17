@@ -19,6 +19,9 @@ import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.TorqueCurrentConfigs;
 import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
+import com.ctre.phoenix6.controls.DutyCycleOut;
+import com.ctre.phoenix6.controls.NeutralOut;
+import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.hardware.TalonFXS;
@@ -361,6 +364,9 @@ public final class CtreMotorHandle implements MotorHandle {
 
     private static final class PhoenixTalonController implements TalonController {
         private final TalonFX talon;
+        private final DutyCycleOut dutyCycle = new DutyCycleOut(0.0);
+        private final VoltageOut voltage = new VoltageOut(0.0);
+        private final NeutralOut neutral = new NeutralOut();
         private final PositionVoltage positionVoltage = new PositionVoltage(0.0);
         private final VelocityVoltage velocityVoltage = new VelocityVoltage(0.0);
 
@@ -477,6 +483,9 @@ public final class CtreMotorHandle implements MotorHandle {
     private static final class PhoenixTalonFxsController implements TalonController {
         private final TalonFXS talon;
         private final MotorArrangementValue arrangement;
+        private final DutyCycleOut dutyCycle = new DutyCycleOut(0.0);
+        private final VoltageOut voltage = new VoltageOut(0.0);
+        private final NeutralOut neutral = new NeutralOut();
         private final PositionVoltage positionVoltage = new PositionVoltage(0.0);
         private final VelocityVoltage velocityVoltage = new VelocityVoltage(0.0);
 
@@ -504,12 +513,12 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void setPercent(double percent) {
-            talon.set(percent);
+            requireOk(talon.setControl(dutyCycle.withOutput(percent)), "percent output");
         }
 
         @Override
         public void setVoltage(double volts) {
-            talon.setVoltage(volts);
+            requireOk(talon.setControl(voltage.withOutput(volts)), "voltage output");
         }
 
         @Override
@@ -574,7 +583,7 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void stop() {
-            talon.stopMotor();
+            requireOk(talon.setControl(neutral), "neutral output");
         }
 
         @Override
@@ -640,5 +649,11 @@ public final class CtreMotorHandle implements MotorHandle {
                 .withSupplyCurrentLimitEnable(supplyAmps > 0)
                 .withStatorCurrentLimit(Math.max(0, statorAmps))
                 .withStatorCurrentLimitEnable(statorAmps > 0);
+    }
+
+    private static void requireOk(StatusCode status, String operation) {
+        if (!status.isOK()) {
+            throw new IllegalStateException("CTRE " + operation + " failed: " + status);
+        }
     }
 }

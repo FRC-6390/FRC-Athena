@@ -369,13 +369,16 @@ final class OutputApplier {
                     Double.compare(goal, target.position()) != 0);
         }
         if (request instanceof Output.Velocity target) {
-            if (hasTargetConstraints(control) && !Double.isFinite(position)) {
+            if (hasTargetConstraints(control) && !Double.isFinite(velocity)) {
                 return null;
             }
-            if (!allowsDirection(control, position, Math.signum(target.velocity()), mechanismContext)) {
+            ConstraintResult<Double> result = Constraints.evaluate(
+                    control.constraints(),
+                    new ConstraintContext<>(velocity, target.velocity(), mechanismContext));
+            if (!result.accepted()) {
                 return null;
             }
-            double requestedVelocity = target.velocity();
+            double requestedVelocity = result.value();
             double maximumAcceleration = overrides.tuning(control).maxAcceleration();
             double referenceVelocity = requestedVelocity;
             double referenceAcceleration = 0.0;
@@ -399,10 +402,11 @@ final class OutputApplier {
                     Double.compare(referenceVelocity, requestedVelocity) != 0);
         }
         if (request instanceof Output.Percent target) {
-            if (hasTargetConstraints(control) && !Double.isFinite(position)) {
+            double feedback = constraintFeedback(control, position, velocity);
+            if (hasTargetConstraints(control) && !Double.isFinite(feedback)) {
                 return null;
             }
-            return allowsDirection(control, position, Math.signum(target.percent()), mechanismContext)
+            return allowsDirection(control, feedback, Math.signum(target.percent()), mechanismContext)
                     ? new StagedRequest(
                             request,
                             new MotionReference(finiteOrZero(position), finiteOrZero(velocity), 0.0),
@@ -411,10 +415,11 @@ final class OutputApplier {
                     : null;
         }
         if (request instanceof Output.Voltage target) {
-            if (hasTargetConstraints(control) && !Double.isFinite(position)) {
+            double feedback = constraintFeedback(control, position, velocity);
+            if (hasTargetConstraints(control) && !Double.isFinite(feedback)) {
                 return null;
             }
-            return allowsDirection(control, position, Math.signum(target.volts()), mechanismContext)
+            return allowsDirection(control, feedback, Math.signum(target.volts()), mechanismContext)
                     ? new StagedRequest(
                             request,
                             new MotionReference(finiteOrZero(position), finiteOrZero(velocity), 0.0),
@@ -445,26 +450,27 @@ final class OutputApplier {
 
     private boolean allowsDirection(
             ControlBinding control,
-            double position,
+            double current,
             double direction,
             MechanismContext context) {
         if (direction == 0.0) {
             return true;
         }
         RuntimeOverrides.ControlTuning tuning = overrides.tuning(control);
-        if (Double.isFinite(position)
-                && (direction < 0.0 && position <= tuning.minimumPosition()
-                || direction > 0.0 && position >= tuning.maximumPosition())) {
+        if (control.mode() == ControlMode.POSITION
+                && Double.isFinite(current)
+                && (direction < 0.0 && current <= tuning.minimumPosition()
+                || direction > 0.0 && current >= tuning.maximumPosition())) {
             return false;
         }
         if (!hasTargetConstraints(control)) return true;
         ConstraintResult<Double> result = Constraints.evaluate(
                 control.constraints(),
-                new ConstraintContext<>(position, position + direction, context));
+                new ConstraintContext<>(current, current + direction, context));
         if (!result.accepted()) {
             return false;
         }
-        return direction > 0.0 ? result.value() > position : result.value() < position;
+        return direction > 0.0 ? result.value() > current : result.value() < current;
     }
 
     private Output guardFinalOutput(
@@ -477,8 +483,12 @@ final class OutputApplier {
         if (direction == 0.0 || !hasTargetConstraints(control)) {
             return output;
         }
-        if (!allowsDirection(control, position, direction, context)) {
+        double feedback = constraintFeedback(control, position, velocity);
+        if (!allowsDirection(control, feedback, direction, context)) {
             return Outputs.neutral();
+        }
+        if (control.mode() != ControlMode.POSITION) {
+            return output;
         }
         MotionProfile profile = effectiveProfile(control);
         if (profile == null || velocity == 0.0 || Math.signum(velocity) != direction) {
@@ -519,6 +529,10 @@ final class OutputApplier {
             return Outputs.voltage(Math.max(-12.0, Math.min(12.0, voltage.volts())));
         }
         return output;
+    }
+
+    private static double constraintFeedback(ControlBinding control, double position, double velocity) {
+        return control.mode() == ControlMode.VELOCITY ? velocity : position;
     }
 
     private static boolean hasTargetConstraints(ControlBinding control) {

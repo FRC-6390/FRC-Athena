@@ -945,6 +945,66 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void velocityRangeDoesNotTreatAccumulatedEncoderPositionAsTheControlledValue() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 150.0;
+        actions.encoder(ENCODER).velocity = 0.0;
+        ControlBinding control = Controls.velocity(MOTOR)
+                .feedback(ENCODER)
+                .pid(0.2, 0.0, 0.0)
+                .constraints(
+                        Constraints.range(Range.of(0.0, 100.0)),
+                        Constraints.motion(100.0, 200.0),
+                        Constraints.clamp(12.0));
+        TestMechanism mechanism = new TestMechanism(control.velocity(33.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(0.8, actions.motor(MOTOR).voltage, 1.0e-9);
+    }
+
+    @Test
+    void velocityRangeConstrainsTheRequestedVelocity() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 150.0;
+        actions.encoder(ENCODER).velocity = 20.0;
+        ControlBinding control = Controls.velocity(MOTOR)
+                .feedback(ENCODER)
+                .pid(0.2, 0.0, 0.0)
+                .constraint(Constraints.range(Range.of(0.0, 100.0)));
+        TestMechanism mechanism = new TestMechanism(control.velocity(150.0));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+
+        assertEquals(12.0, actions.motor(MOTOR).voltage, 1.0e-9);
+    }
+
+    @Test
+    void rangedVelocityControlKeepsRespondingAcrossCollectShootCollectRequests() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        actions.encoder(ENCODER).position = 150.0;
+        actions.encoder(ENCODER).velocity = 0.0;
+        VelocityCompositeMechanism mechanism = new VelocityCompositeMechanism();
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism);
+
+        scheduler.request(mechanism.collect);
+        scheduler.teleopPeriodic(0.0, 0.02);
+        assertEquals(0.8, actions.motor(MOTOR).voltage, 1.0e-9);
+
+        scheduler.request(mechanism.shoot);
+        scheduler.teleopPeriodic(0.02, 0.02);
+        assertEquals(1.6, actions.motor(MOTOR).voltage, 1.0e-9);
+
+        scheduler.request(mechanism.collect);
+        scheduler.teleopPeriodic(0.04, 0.02);
+        assertEquals(2.0, actions.motor(MOTOR).voltage, 1.0e-9);
+    }
+
+    @Test
     void controlFeedforwardLoopTransformsVelocityRequestIntoMotorVoltage() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding control = Controls.velocity(MOTOR)
@@ -1574,6 +1634,18 @@ class MechanismRuntimeTest {
         private TestMechanism(Action initial) {
             this.initial = initial;
         }
+    }
+
+    private static final class VelocityCompositeMechanism implements Mechanism {
+        private final ControlBinding speed = Controls.velocity(MOTOR)
+                .feedback(ENCODER)
+                .pid(0.2, 0.0, 0.0)
+                .constraints(
+                        Constraints.range(Range.of(0.0, 100.0)),
+                        Constraints.motion(100.0, 200.0),
+                        Constraints.clamp(12.0));
+        private final Action collect = speed.velocity(10.0);
+        private final Action shoot = speed.velocity(33.0);
     }
 
     private static final class ParentMechanism implements Mechanism {
