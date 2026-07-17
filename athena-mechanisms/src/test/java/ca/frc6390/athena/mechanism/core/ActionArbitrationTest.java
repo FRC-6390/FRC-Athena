@@ -227,6 +227,72 @@ class ActionArbitrationTest {
     }
 
     @Test
+    void newerRobotCompositeOverridesHeldChildActionAcrossMechanismRuntimes() {
+        boolean[] childHeld = {true};
+        RecordingContext hardware = new RecordingContext();
+        ChildWithHeldAction child = new ChildWithHeldAction(childHeld);
+        RobotCompositeActions robot = new RobotCompositeActions();
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware)
+                .register(child)
+                .register(robot);
+
+        scheduler.teleopPeriodic(0.0, 0.02);
+        assertEquals(-0.20, hardware.motor(ARM).percent, 1.0e-9);
+
+        scheduler.request(robot.collect);
+        scheduler.teleopPeriodic(0.02, 0.02);
+
+        assertEquals(0.65, hardware.motor(ARM).percent, 1.0e-9);
+        assertEquals(0.75, hardware.motor(ROLLERS).percent, 1.0e-9);
+    }
+
+    @Test
+    void releasedChildActionDoesNotNeutralizeMotorDrivenByRobotComposite() {
+        boolean[] childHeld = {true};
+        RecordingContext hardware = new RecordingContext();
+        ChildWithHeldAction child = new ChildWithHeldAction(childHeld);
+        RobotCompositeActions robot = new RobotCompositeActions();
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware)
+                .register(child)
+                .register(robot);
+
+        scheduler.teleopPeriodic(0.0, 0.02);
+        childHeld[0] = false;
+        scheduler.request(robot.collect);
+        scheduler.teleopPeriodic(0.02, 0.02);
+
+        assertEquals(0.65, hardware.motor(ARM).percent, 1.0e-9);
+        assertEquals(0, hardware.motor(ARM).stopCalls);
+    }
+
+    @Test
+    void robotCompositesCanRunCollectShootCollectAcrossMechanismRuntimes() {
+        boolean[] childHeld = {true};
+        RecordingContext hardware = new RecordingContext();
+        ChildWithHeldAction child = new ChildWithHeldAction(childHeld);
+        RobotCompositeActions robot = new RobotCompositeActions();
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware)
+                .register(child)
+                .register(robot);
+
+        scheduler.teleopPeriodic(0.0, 0.02);
+        scheduler.request(robot.collect);
+        scheduler.teleopPeriodic(0.02, 0.02);
+        assertEquals(0.65, hardware.motor(ARM).percent, 1.0e-9);
+        assertEquals(0.75, hardware.motor(ROLLERS).percent, 1.0e-9);
+
+        scheduler.request(robot.shoot);
+        scheduler.teleopPeriodic(0.04, 0.02);
+        assertEquals(-0.80, hardware.motor(ARM).percent, 1.0e-9);
+        assertEquals(1.0, hardware.motor(ROLLERS).percent, 1.0e-9);
+
+        scheduler.request(robot.collect);
+        scheduler.teleopPeriodic(0.06, 0.02);
+        assertEquals(0.65, hardware.motor(ARM).percent, 1.0e-9);
+        assertEquals(0.75, hardware.motor(ROLLERS).percent, 1.0e-9);
+    }
+
+    @Test
     void newerRequestOverridesOnlyTheConflictingCompositeChild() {
         boolean[] composite = {true};
         boolean[] rollerOverride = {false};
@@ -329,6 +395,20 @@ class ActionArbitrationTest {
             compositeBinding = Events.when(() -> composite[0]).active().whileActive(this.composite);
             overrideBinding = Events.when(() -> rollerOverride[0]).active().whileActive(this.rollerOverride);
         }
+    }
+
+    private static final class ChildWithHeldAction implements Mechanism {
+        private final Action home = ARM.percent(-0.20);
+        private final HookBinding homeBinding;
+
+        private ChildWithHeldAction(boolean[] held) {
+            homeBinding = Events.when(() -> held[0]).active().whileActive(home);
+        }
+    }
+
+    private static final class RobotCompositeActions implements Mechanism {
+        private final Action collect = Actions.parallel(ARM.percent(0.65), ROLLERS.percent(0.75));
+        private final Action shoot = Actions.parallel(ARM.percent(-0.80), ROLLERS.percent(1.0));
     }
 
     private static final class PersistentActions implements Mechanism {

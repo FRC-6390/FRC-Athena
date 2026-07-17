@@ -38,6 +38,7 @@ public final class MechanismScheduler {
     private final RobotGraph graph = new RobotGraph();
     private final Map<PathAction, PathRuntime> pathRuntimes = new LinkedHashMap<>();
     private final Map<Object, List<LeaseRegistration>> leaseTargets = new IdentityHashMap<>();
+    private final Map<Object, LeaseReservation> leaseReservations = new IdentityHashMap<>();
     private final OutputResolver resolver;
     private long requestSequence;
     private Runnable simulationStep = () -> {
@@ -423,6 +424,7 @@ public final class MechanismScheduler {
         Map<Mechanism, List<Action>> partitions = partitions(Objects.requireNonNull(action, "action"));
         List<LeaseRegistration> registrations = new ArrayList<>(partitions.size());
         long recency = ++requestSequence;
+        leaseReservations.put(key, new LeaseReservation(recency, actionResources(action)));
         for (Map.Entry<Mechanism, List<Action>> partition : partitions.entrySet()) {
             Action partitioned = partition.getValue().size() == 1
                     ? partition.getValue().get(0)
@@ -437,6 +439,7 @@ public final class MechanismScheduler {
 
     private void releaseLease(Object key) {
         List<LeaseRegistration> registrations = leaseTargets.remove(key);
+        leaseReservations.remove(key);
         if (registrations != null) {
             for (LeaseRegistration registration : registrations) {
                 registration.runtime().releaseLease(registration.runtimeKey());
@@ -571,10 +574,34 @@ public final class MechanismScheduler {
             runtime.runHooks(eventContext, false);
         }
         digitalInputs.forEach(DigitalInputDevice::clearLatchedEdges);
+        Map<Object, Long> reservations = globalLeaseReservations();
+        Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntime = new IdentityHashMap<>();
+        Set<MotorDevice> globallyDriven = new LinkedHashSet<>();
         for (MechanismRuntime runtime : runtimes.values()) {
-            runtime.periodicOutputsInto(safeMechanismContext, outputs);
+            Set<MotorDevice> driven = runtime.periodicOutputsInto(safeMechanismContext, outputs, reservations);
+            drivenByRuntime.put(runtime, driven);
+            globallyDriven.addAll(driven);
+        }
+        for (MechanismRuntime runtime : runtimes.values()) {
+            runtime.finishOutputCycle(globallyDriven, drivenByRuntime.getOrDefault(runtime, Set.of()));
         }
         return outputs;
+    }
+
+    private Map<Object, Long> globalLeaseReservations() {
+        Map<Object, Long> reservations = new LinkedHashMap<>();
+        for (Map.Entry<Object, LeaseReservation> entry : leaseReservations.entrySet()) {
+            List<LeaseRegistration> registrations = leaseTargets.get(entry.getKey());
+            if (registrations == null || registrations.stream()
+                    .allMatch(registration -> registration.runtime().leaseComplete(registration.runtimeKey()))) {
+                continue;
+            }
+            LeaseReservation lease = entry.getValue();
+            for (Object resource : lease.resources()) {
+                reservations.merge(resource, lease.recency(), Math::max);
+            }
+        }
+        return reservations;
     }
 
     private void refreshDigitalInputs() {
@@ -941,6 +968,12 @@ public final class MechanismScheduler {
     }
 
     private record LeaseRegistration(Object runtimeKey, MechanismRuntime runtime) {
+    }
+
+    private record LeaseReservation(long recency, Set<Object> resources) {
+        private LeaseReservation {
+            resources = Set.copyOf(resources);
+        }
     }
 
     private static final class MemoryMotor implements MotorHandle {

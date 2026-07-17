@@ -497,6 +497,25 @@ class RobotRuntimeTest {
     }
 
     @Test
+    void discoveredCameraLocalizationRefreshesWhileDisabledByDefault() {
+        AtomicInteger reads = new AtomicInteger();
+        CameraDevice camera = Cameras.photonVision("disabled-front").bindPose(() -> {
+            reads.incrementAndGet();
+            return List.of(Measurements.pose(new PoseSnapshot(7.0, 3.0, 0.5)));
+        });
+        Localization output = Localizations.latestValid().input(camera.pose());
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
+                .register(new LocalizationMechanism(output));
+
+        runtime.disabledPeriodic(1.0, 0.02);
+
+        assertEquals(1, reads.get());
+        assertEquals(7.0, output.pose().xMeters(), 1.0e-9);
+        assertEquals(3.0, output.pose().yMeters(), 1.0e-9);
+        assertEquals(0.5, output.pose().headingRadians(), 1.0e-9);
+    }
+
+    @Test
     void refreshesDiscoveredSwerveKalmanLocalizationFromIntegratedDriveEncoders() {
         SimulationSession simulation = SimulationSession.create();
         SwerveLocalizationMechanism mechanism = new SwerveLocalizationMechanism();
@@ -512,7 +531,7 @@ class RobotRuntimeTest {
     }
 
     @Test
-    void localizationRefreshPolicyAppliesRootAgeAndDisabledRules() {
+    void localizationRefreshPolicyAppliesRootAgeAndDisabledOptOut() {
         AtomicInteger reads = new AtomicInteger();
         Localization localization = Localizations.latestValid()
                 .input(() -> {
@@ -525,7 +544,7 @@ class RobotRuntimeTest {
 
         runtime.robotPeriodic(5.0, 0.02);
         runtime.disabledPeriodic(5.02, 0.02);
-        runtime.localizationRefreshWhileDisabled(true).disabledPeriodic(5.04, 0.02);
+        runtime.localizationRefreshWhileDisabled(false).disabledPeriodic(5.04, 0.02);
 
         assertTrue(runtime.localizationMeasurements().isEmpty());
         assertEquals(2, reads.get());

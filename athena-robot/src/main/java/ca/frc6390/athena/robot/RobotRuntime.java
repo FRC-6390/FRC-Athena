@@ -75,7 +75,7 @@ public final class RobotRuntime {
     private RuntimeWorkers workers = RuntimeWorkers.none();
     private Function<DigitalInputDevice, BooleanSupplier> digitalInputResolver;
     private double localizationMaxAgeSeconds = Double.POSITIVE_INFINITY;
-    private boolean localizationRefreshWhileDisabled;
+    private boolean localizationRefreshWhileDisabled = true;
     private RuntimeFailureReporter failureReporter = RuntimeFailureReporter.stderr();
     private final Set<String> reportedFailures = new LinkedHashSet<>();
 
@@ -430,7 +430,7 @@ public final class RobotRuntime {
     }
 
     /**
-     * Controls whether localization refreshes while the robot is disabled.
+     * Controls whether localization refreshes while the robot is disabled. Enabled by default.
      *
      * @param enabled true to refresh while disabled
      * @return this runtime

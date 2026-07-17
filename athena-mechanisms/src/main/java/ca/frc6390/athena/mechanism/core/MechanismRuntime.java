@@ -186,13 +186,22 @@ final class MechanismRuntime {
     void periodicOutputsInto(
             MechanismContext mechanismContext,
             List<ResolvedOutput> outputs) {
+        Set<MotorDevice> driven = periodicOutputsInto(mechanismContext, outputs, leaseReservations());
+        finishOutputCycle(driven, driven);
+    }
+
+    Set<MotorDevice> periodicOutputsInto(
+            MechanismContext mechanismContext,
+            List<ResolvedOutput> outputs,
+            Map<Object, Long> reservations) {
         Objects.requireNonNull(outputs, "outputs");
+        Objects.requireNonNull(reservations, "reservations");
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
         if (!safeMechanismContext.enabled()) {
             applier.stopAll();
             previouslyDrivenMotors.clear();
             simulationStep.run();
-            if (traceLevel == MechanismTraceLevel.OFF) return;
+            if (traceLevel == MechanismTraceLevel.OFF) return Set.of();
             ActiveLease tracedLease = tracedLease();
             Action tracedAction = tracedLease == null ? action : tracedLease.action();
             StateScheduler tracedScheduler = tracedLease == null ? scheduler : tracedLease.scheduler();
@@ -211,7 +220,7 @@ final class MechanismRuntime {
                     List.of(),
                     traceLevel == MechanismTraceLevel.CAPTURE ? motorTraces(Map.of()) : List.of(),
                     traceLevel == MechanismTraceLevel.CAPTURE ? hookTraces() : List.of());
-            return;
+            return Set.of();
         }
         if (Double.isNaN(stateStartSeconds)) {
             stateStartSeconds = safeMechanismContext.nowSeconds();
@@ -232,7 +241,7 @@ final class MechanismRuntime {
             addCandidates(candidates, "lease", lease.recency(), lease.evaluate(safeMechanismContext));
         }
 
-        List<CandidateOutput> selected = arbitrate(candidates, leaseReservations());
+        List<CandidateOutput> selected = arbitrate(candidates, reservations);
         Set<MotorDevice> drivenNow = new LinkedHashSet<>();
         applier.beginCycle();
         for (CandidateOutput candidate : selected) {
@@ -241,8 +250,18 @@ final class MechanismRuntime {
             applier.apply(candidate.output(), candidate.context());
         }
         applier.endCycle();
+        simulationStep.run();
+        if (traceLevel != MechanismTraceLevel.OFF) {
+            traceSnapshot = buildTrace(timedContext, candidates, selected);
+        }
+        return drivenNow;
+    }
+
+    void finishOutputCycle(Set<MotorDevice> globallyDriven, Set<MotorDevice> locallyDriven) {
+        Objects.requireNonNull(globallyDriven, "globallyDriven");
+        Objects.requireNonNull(locallyDriven, "locallyDriven");
         for (MotorDevice motor : previouslyDrivenMotors) {
-            if (!drivenNow.contains(motor)) {
+            if (!globallyDriven.contains(motor)) {
                 try {
                     actionContext.motor(motor).stop();
                 } catch (RuntimeException exception) {
@@ -253,11 +272,7 @@ final class MechanismRuntime {
             }
         }
         previouslyDrivenMotors.clear();
-        previouslyDrivenMotors.addAll(drivenNow);
-        simulationStep.run();
-        if (traceLevel != MechanismTraceLevel.OFF) {
-            traceSnapshot = buildTrace(timedContext, candidates, selected);
-        }
+        previouslyDrivenMotors.addAll(locallyDriven);
     }
 
     private void addCandidates(
