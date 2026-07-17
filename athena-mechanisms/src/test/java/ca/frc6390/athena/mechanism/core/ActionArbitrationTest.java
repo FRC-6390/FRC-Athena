@@ -179,6 +179,33 @@ class ActionArbitrationTest {
     }
 
     @Test
+    void heldActionRenewsAtTeleopInitAfterAutonomousOverride() {
+        boolean[] held = {true};
+        boolean[] stop = {false};
+        RecordingContext hardware = new RecordingContext();
+        HeldWithPersistentStop mechanism = new HeldWithPersistentStop(held, stop);
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
+
+        scheduler.periodic(
+                new MechanismContext(0.0, 0.0, 0.02, true, true, false),
+                new EventContext(0.0, 0.02, LifecycleMode.AUTONOMOUS,
+                        LifecyclePhase.PERIODIC, true, false));
+        stop[0] = true;
+        scheduler.periodic(
+                new MechanismContext(0.02, 0.0, 0.02, true, true, false),
+                new EventContext(0.02, 0.02, LifecycleMode.AUTONOMOUS,
+                        LifecyclePhase.PERIODIC, true, false));
+        assertEquals(0.0, hardware.motor(ARM).percent, 1.0e-9);
+
+        scheduler.periodic(
+                new MechanismContext(0.04, 0.0, 0.02, true, false, false),
+                new EventContext(0.04, 0.02, LifecycleMode.TELEOP,
+                        LifecyclePhase.INIT, true, false));
+
+        assertEquals(0.25, hardware.motor(ARM).percent, 1.0e-9);
+    }
+
+    @Test
     void releasingOneLeaseNeutralizesOnlyItsMotor() {
         boolean[] arm = {true};
         boolean[] rollers = {true};

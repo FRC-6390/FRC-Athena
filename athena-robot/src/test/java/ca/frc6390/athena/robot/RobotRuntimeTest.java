@@ -36,7 +36,10 @@ import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Events;
+import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.HookBinding;
+import ca.frc6390.athena.mechanism.core.LifecycleMode;
+import ca.frc6390.athena.mechanism.core.LifecyclePhase;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
@@ -216,6 +219,31 @@ class RobotRuntimeTest {
         runtime.disabledPeriodic(0.04, 0.02);
         assertEquals(0.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
         assertTrue(mechanism.autos.runningAction().isEmpty());
+    }
+
+    @Test
+    void shooterActionCanBeRequestedImmediatelyAfterAutonomousExit() {
+        SimulationSession simulation = SimulationSession.create();
+        PracticeTransitionMechanism mechanism = new PracticeTransitionMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
+
+        runtime.periodic(
+                new MechanismContext(0.02, 0.0, 0.02, true, true, true),
+                new EventContext(0.02, 0.02, LifecycleMode.AUTONOMOUS,
+                        LifecyclePhase.PERIODIC, true, true));
+        assertEquals(6.0, simulation.motor(mechanism.shooter.motor).appliedVoltage(), 1e-9);
+
+        runtime.periodic(
+                new MechanismContext(0.04, 0.0, 0.02, true, true, true),
+                new EventContext(0.04, 0.02, LifecycleMode.AUTONOMOUS,
+                        LifecyclePhase.EXIT, true, true));
+        runtime.request(mechanism.shooter.shoot);
+        runtime.periodic(
+                new MechanismContext(0.06, 0.0, 0.02, true, false, true),
+                new EventContext(0.06, 0.02, LifecycleMode.TELEOP,
+                        LifecyclePhase.INIT, true, true));
+
+        assertEquals(12.0, simulation.motor(mechanism.shooter.motor).appliedVoltage(), 1e-9);
     }
 
     @Test
@@ -594,6 +622,37 @@ class RobotRuntimeTest {
         private final AutoChooser autos = Autos.chooser("Auto Chooser")
                 .defaultAuto("Forward", forward)
                 .auto("Reverse", reverse);
+    }
+
+    private static final class PracticeTransitionMechanism
+            implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final MotorDevice driveMotor = MotorDevice.of(MotorKinds.KRAKEN_X60, 57);
+        private final Action autoDrive = driveMotor.percent(0.25);
+        private final PracticeShooter shooter = new PracticeShooter();
+        private final PathProvider paths = new PathProvider() {
+            @Override public String source() { return "practice"; }
+            @Override public PathRuntime runtime() {
+                return new PathRuntime() {
+                    @Override public Action output(PathAction path, MechanismContext context) { return autoDrive; }
+                    @Override public java.util.Map<String, Action> activeMarkers(
+                            PathAction path,
+                            MechanismContext context) {
+                        return path.markers();
+                    }
+                    @Override public boolean isFinished(PathAction path, MechanismContext context) { return false; }
+                };
+            }
+        };
+        private final AutoChooser autos = Autos.chooser("Practice Match")
+                .defaultAuto("Drive and shoot", Paths.of("practice", "match")
+                        .marker("Shoot", shooter.autoShoot));
+    }
+
+    private static final class PracticeShooter
+            implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 58);
+        private final Action autoShoot = motor.percent(0.5);
+        private final Action shoot = motor.percent(1.0);
     }
 
     private static final class PathAutoMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {

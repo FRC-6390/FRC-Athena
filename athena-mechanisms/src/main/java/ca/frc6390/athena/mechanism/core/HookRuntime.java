@@ -104,6 +104,7 @@ final class HookRuntime {
         boolean currentSource = sourceSamples.computeIfAbsent(event, value -> value.sourceActive(safeContext));
         boolean active = event.active(safeContext, previousSource, currentSource);
         boolean wasActive = previousEventActive.getOrDefault(hook, false);
+        boolean lifecycleInit = safeContext.phase() == LifecyclePhase.INIT;
         triggeredThisCycle.put(hook, active != wasActive);
 
         for (HookBinding.HookAction binding : hook.actions()) {
@@ -115,11 +116,11 @@ final class HookRuntime {
                 continue;
             }
             if (leases != null && binding.action() instanceof Action action) {
-                runLeasedAction(event, binding, action, wasActive, active);
+                runLeasedAction(event, binding, action, wasActive, active, lifecycleInit);
                 continue;
             }
             if (leases != null && isHeldPhase(binding.phase())) {
-                runCapturedBinding(event, binding, actionContext, wasActive, active);
+                runCapturedBinding(event, binding, actionContext, wasActive, active, lifecycleInit);
                 continue;
             }
             if (binding.phase().shouldRun(event, wasActive, active)) {
@@ -143,12 +144,13 @@ final class HookRuntime {
             HookBinding.HookAction binding,
             Action action,
             boolean wasActive,
-            boolean active) {
+            boolean active,
+            boolean lifecycleInit) {
         boolean shouldRun = binding.phase().shouldRun(event, wasActive, active);
         if (isHeldPhase(binding.phase())) {
             boolean held = binding.phase() == HookBinding.Phase.WHILE_ACTIVE ? active : !active;
             if (held) {
-                leases.activate(binding, action, false);
+                leases.activate(binding, action, lifecycleInit);
             } else {
                 leases.release(binding);
             }
@@ -162,7 +164,8 @@ final class HookRuntime {
             HookBinding.HookAction binding,
             ActionContext actionContext,
             boolean wasActive,
-            boolean active) {
+            boolean active,
+            boolean lifecycleInit) {
         boolean held = binding.phase() == HookBinding.Phase.WHILE_ACTIVE ? active : !active;
         boolean wasHeld = binding.phase() == HookBinding.Phase.WHILE_ACTIVE ? wasActive : !wasActive;
         if (held) {
@@ -171,7 +174,7 @@ final class HookRuntime {
                 Action action = captured.size() == 1
                         ? captured.get(0)
                         : Actions.parallel(captured.toArray(Action[]::new));
-                leases.activate(binding, action, false);
+                leases.activate(binding, action, lifecycleInit);
             }
         } else if (wasHeld) {
             leases.release(binding);
