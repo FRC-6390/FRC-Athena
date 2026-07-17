@@ -116,6 +116,32 @@ The vendordep provides the standard Athena robot stack for teams using WPILib's 
 
 The Athena vendor adapter artifacts are included by the single Athena vendordep, but they do not bring the real third-party vendor libraries with them. A robot that uses CTRE hardware still installs CTRE's vendordep, a robot that uses REV still installs REV's vendordep, and so on. If a matching third-party library is not present, Athena skips that adapter during service discovery.
 
+## roboRIO System Tuning
+
+`AthenaRobot` automatically monitors system memory. On a positively identified low-memory roboRIO,
+it also stops NI's optional web services, enables conservative kernel overcommit, and uses existing
+swap or creates a bounded 32 MiB fallback swap file. roboRIO 2, simulation, and unknown Linux targets
+are monitor-only by default. Tuning runs once on a low-priority daemon and a failed operation is
+reported without stopping robot code.
+
+No setup is required. A robot can explicitly select another policy in its constructor:
+
+```java
+systemTuning(SystemTuning.standard());   // Monitor only
+systemTuning(SystemTuning.lowMemory());  // Force tuning on a real Linux robot
+systemTuning(SystemTuning.disabled());   // Disable tuning and periodic sampling
+```
+
+The latest snapshot is available from `systemStatus()`. AdvantageScope and other NT4 clients can
+inspect `/Athena/System`, including target/profile, pressure, total and available RAM, process RSS,
+Java heap usage and limit, direct-buffer memory, swap usage, applied changes, and failures. Athena
+turns off mechanism trace capture under memory pressure and pauses auto-preview publication at
+critical pressure; hardware control, actions, localization, and vision continue running.
+
+System tuning cannot change the Java process's `-Xmx` after startup. Use the published heap maximum
+to distinguish a Java heap cap from native/process memory exhaustion before changing deployment JVM
+arguments.
+
 ## Hardware Connections
 
 `HardwareBus` is the unified entry point for hardware declarations. Integer device IDs remain CAN shorthand. For other interfaces, select the connection from the bus and declare the device on it.

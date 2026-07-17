@@ -17,6 +17,11 @@ import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTracePublisher;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.AutoPreviewPublisher;
+import ca.frc6390.athena.wpilib.telemetry.SystemTelemetryPublisher;
+import ca.frc6390.athena.wpilib.system.MemoryPressure;
+import ca.frc6390.athena.wpilib.system.SystemRuntime;
+import ca.frc6390.athena.wpilib.system.SystemStatus;
+import ca.frc6390.athena.wpilib.system.SystemTuning;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DigitalInput;
@@ -42,9 +47,13 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private MechanismTelemetryPublisher mechanismTelemetryPublisher;
     private TelemetrySchema mechanismTelemetrySchema;
     private AutoPreviewPublisher autoPreviewPublisher;
+    private SystemRuntime systemRuntime;
+    private SystemTelemetryPublisher systemTelemetryPublisher;
     private final List<SendableChooser<String>> dashboardAutoChoosers = new ArrayList<>();
     private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
     private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.OFF;
+    private SystemTuning systemTuning = SystemTuning.automatic();
+    private int reportedSystemFailures;
 
     /**
      * Returns the owned Athena mechanism runtime.
@@ -68,6 +77,22 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         if (tracePublisher != null) {
             tracePublisher.profile(traceProfile);
         }
+    }
+
+    /** Selects roboRIO memory monitoring and tuning. Safe to call from the robot constructor. */
+    public final void systemTuning(SystemTuning tuning) {
+        if (runtime != null) {
+            throw new IllegalStateException("System tuning must be selected before robotInit.");
+        }
+        systemTuning = Objects.requireNonNull(tuning, "tuning");
+    }
+
+    /** Returns the latest JVM and roboRIO system-health snapshot. */
+    public final SystemStatus systemStatus() {
+        if (systemRuntime == null) {
+            throw new IllegalStateException("System monitoring has not started yet.");
+        }
+        return systemRuntime.status();
     }
 
     public final CommandAction Action(Action Action) {
@@ -98,6 +123,10 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
                         : traceProfile);
         mechanismTelemetryPublisher = new MechanismTelemetryPublisher();
         autoPreviewPublisher = new AutoPreviewPublisher();
+        systemRuntime = SystemRuntime.create(systemTuning, RobotBase.isReal());
+        systemTelemetryPublisher = new SystemTelemetryPublisher();
+        systemRuntime.start();
+        publishSystemTelemetry();
         publishMechanismTelemetry();
         run(LifecycleMode.ROBOT, LifecyclePhase.INIT, true, simulationActive());
         publishAutoPreview();
@@ -189,6 +218,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         double timestamp = timestampSeconds();
         double dtSeconds = elapsed(timestamp);
         if (tracePublisher != null) {
+            tracePublisher.profile(effectiveTraceProfile());
             athena().mechanismTraceLevel(tracePublisher.traceLevel());
         }
         EventContext eventContext = new EventContext(timestamp, dtSeconds, mode, phase, enabled, simulation);
@@ -198,6 +228,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     private void publishTraces() {
+        publishSystemTelemetry();
         if (tracePublisher != null) {
             tracePublisher.publish(athena().mechanismTraces());
         }
@@ -212,9 +243,31 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     private void publishAutoPreview() {
-        if (autoPreviewPublisher != null) {
+        if (autoPreviewPublisher != null && pressure() != MemoryPressure.CRITICAL) {
             autoPreviewPublisher.publish(athena().selectedAutoPreviews(), athena().runningAutoName());
         }
+    }
+
+    private void publishSystemTelemetry() {
+        if (systemRuntime == null || systemTelemetryPublisher == null) return;
+        systemRuntime.update();
+        SystemStatus status = systemRuntime.status();
+        systemTelemetryPublisher.publish(status);
+        while (reportedSystemFailures < status.failures().size()) {
+            DriverStation.reportWarning(
+                    "Athena system tuning: " + status.failures().get(reportedSystemFailures++), false);
+        }
+    }
+
+    private MemoryPressure pressure() {
+        return systemRuntime == null ? MemoryPressure.NORMAL : systemRuntime.status().pressure();
+    }
+
+    private MechanismTracePublisher.Profile effectiveTraceProfile() {
+        if (pressure() != MemoryPressure.NORMAL) return MechanismTracePublisher.Profile.OFF;
+        return RobotBase.isSimulation() && traceProfile == MechanismTracePublisher.Profile.SUMMARY
+                ? MechanismTracePublisher.Profile.CAPTURE
+                : traceProfile;
     }
 
     private void configureAutoChoosers() {
@@ -270,6 +323,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         if (tracePublisher != null) tracePublisher.close();
         if (mechanismTelemetryPublisher != null) mechanismTelemetryPublisher.close();
         if (autoPreviewPublisher != null) autoPreviewPublisher.close();
+        if (systemTelemetryPublisher != null) systemTelemetryPublisher.close();
+        if (systemRuntime != null) systemRuntime.close();
         digitalInputs.values().forEach(DigitalInput::close);
         digitalInputs.clear();
         super.close();
