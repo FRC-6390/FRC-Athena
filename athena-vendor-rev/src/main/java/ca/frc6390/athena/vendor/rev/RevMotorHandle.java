@@ -5,6 +5,7 @@ import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.api.hardware.MotorTechnology;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import com.revrobotics.AbsoluteEncoder;
@@ -68,6 +69,19 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         return device;
     }
 
+    @Override
+    public boolean supportsRuntimeConfiguration() {
+        return true;
+    }
+
+    @Override
+    public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
+        Objects.requireNonNull(configuration, "configuration");
+        if (!controller.configureRuntime(configuration, isBrushless(device))) {
+            throw new IllegalStateException("Failed to configure " + device.defaultName());
+        }
+    }
+
     /**
      * Returns REV-specific options.
      *
@@ -89,6 +103,9 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void refreshInputs() {
+        if (!controller.isConnected()) {
+            throw new IllegalStateException("REV motor is disconnected: " + device.defaultName());
+        }
         if (integratedEncoderEnabled) {
             positionRotations = controller.positionRotations();
             velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
@@ -421,7 +438,13 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     }
 
     interface SparkController {
+        default boolean isConnected() { return true; }
+
         boolean configure(MotorDevice device, RevMotorOptions options);
+
+        default boolean configureRuntime(MotorRuntimeConfig configuration, boolean brushless) {
+            return false;
+        }
 
         void setPercent(double percent);
 
@@ -489,6 +512,27 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         public boolean configure(MotorDevice device, RevMotorOptions options) {
             SparkBaseConfig config = activationConfig(device, options, flex);
             return apply(config, options.resetSafeParameters(), options.persistParameters());
+        }
+
+        @Override
+        public boolean isConnected() {
+            return spark.getFirmwareVersion() != 0;
+        }
+
+        @Override
+        public boolean configureRuntime(MotorRuntimeConfig configuration, boolean brushless) {
+            SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
+            config.idleMode(configuration.neutralMode() == MotorNeutralMode.BRAKE
+                    ? IdleMode.kBrake : IdleMode.kCoast);
+            config.inverted(configuration.inverted());
+            int supply = configuration.supplyCurrentLimitAmps();
+            int stator = configuration.statorCurrentLimitAmps();
+            int effective = supply <= 0 ? stator : stator <= 0 ? supply : Math.min(supply, stator);
+            if (effective > 0) {
+                if (brushless) config.smartCurrentLimit(effective);
+                else config.secondaryCurrentLimit(effective);
+            }
+            return apply(config, false, false);
         }
 
         @Override

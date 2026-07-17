@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 import ca.frc6390.athena.api.hardware.CameraKinds;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.Measurements;
@@ -128,5 +129,48 @@ class CameraDeviceTest {
         assertEquals(2, targetReads.get());
         assertSame(camera, cachedPoseSignal.camera());
         assertSame(camera, cachedTargetSignal.camera());
+    }
+
+    @Test
+    void oneCameraFailureDoesNotDiscardHealthyCameraMeasurements() {
+        AtomicInteger failedReads = new AtomicInteger();
+        PoseMeasurementSample pose = Measurements.pose(new PoseSnapshot(3.0, 2.0, 0.25));
+        CameraDevice failed = Cameras.photonVision("failed")
+                .bindPose(() -> {
+                    failedReads.incrementAndGet();
+                    throw new IllegalStateException("camera offline");
+                });
+        CameraDevice healthy = Cameras.photonVision("healthy").bindPose(() -> List.of(pose));
+        VisionGraph graph = VisionGraph.of(failed, healthy);
+
+        graph.refresh();
+
+        assertEquals(List.of(pose), graph.poseMeasurements());
+        assertEquals(1, graph.refreshFailures().size());
+        assertSame(failed, graph.refreshFailures().get(0).camera());
+
+        graph.refresh();
+        assertEquals(1, failedReads.get());
+        assertEquals(List.of(pose), graph.poseMeasurements());
+    }
+
+    @Test
+    void warningCameraRetriesAfterFailure() {
+        AtomicInteger reads = new AtomicInteger();
+        PoseMeasurementSample pose = Measurements.pose(new PoseSnapshot(1.0, 1.0, 0.0));
+        CameraDevice camera = Cameras.photonVision("retry")
+                .failurePolicy(FailurePolicy.WARN)
+                .bindPose(() -> {
+                    if (reads.incrementAndGet() == 1) throw new IllegalStateException("temporary outage");
+                    return List.of(pose);
+                });
+        VisionGraph graph = VisionGraph.of(camera);
+
+        graph.refresh();
+        assertTrue(graph.poseMeasurements().isEmpty());
+        graph.refresh();
+
+        assertEquals(List.of(pose), graph.poseMeasurements());
+        assertEquals(2, reads.get());
     }
 }

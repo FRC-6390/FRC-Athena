@@ -5,6 +5,7 @@ import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import java.util.Objects;
 
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 
 /**
@@ -32,6 +33,7 @@ public final class SimMotorHandle implements MotorHandle {
     private SimMotorHandle leader;
     private boolean followerInverted;
     private boolean locked;
+    private MotorRuntimeConfig runtimeConfiguration;
 
     /**
      * Creates a simulation motor handle.
@@ -40,11 +42,27 @@ public final class SimMotorHandle implements MotorHandle {
      */
     public SimMotorHandle(MotorDevice device) {
         this.device = Objects.requireNonNull(device, "device");
+        runtimeConfiguration = MotorRuntimeConfig.declared(device);
     }
 
     @Override
     public MotorDevice device() {
         return device;
+    }
+
+    @Override
+    public boolean supportsRuntimeConfiguration() {
+        return true;
+    }
+
+    @Override
+    public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
+        runtimeConfiguration = Objects.requireNonNull(configuration, "configuration");
+    }
+
+    /** Returns the effective temporary configuration used by this simulated controller. */
+    public MotorRuntimeConfig runtimeConfiguration() {
+        return runtimeConfiguration;
     }
 
     @Override
@@ -66,7 +84,7 @@ public final class SimMotorHandle implements MotorHandle {
 
     @Override
     public void setPercentOutput(double percent) {
-        percentOutput = clamp(percent, -1.0, 1.0);
+        percentOutput = outputDirection() * clamp(percent, -1.0, 1.0);
         commandKind = CommandKind.PERCENT;
         commandValue = percentOutput;
         velocityRotationsPerSecond = locked ? 0.0 : percentOutput;
@@ -74,7 +92,7 @@ public final class SimMotorHandle implements MotorHandle {
 
     @Override
     public void setVoltage(double volts) {
-        double safeVolts = finiteOrZero(volts);
+        double safeVolts = outputDirection() * finiteOrZero(volts);
         percentOutput = clamp(safeVolts / 12.0, -1.0, 1.0);
         commandKind = CommandKind.VOLTAGE;
         commandValue = safeVolts;
@@ -193,13 +211,13 @@ public final class SimMotorHandle implements MotorHandle {
 
     @Override
     public double supplyCurrentAmps() {
-        int limit = device.currentLimits().supplyAmps();
+        int limit = runtimeConfiguration.supplyCurrentLimitAmps();
         return locked && Math.abs(percentOutput) > 0.01 ? limit : Math.abs(percentOutput) * Math.min(limit, 10.0);
     }
 
     @Override
     public double statorCurrentAmps() {
-        int limit = device.currentLimits().statorAmps();
+        int limit = runtimeConfiguration.statorCurrentLimitAmps();
         if (limit <= 0) {
             return supplyCurrentAmps();
         }
@@ -230,5 +248,9 @@ public final class SimMotorHandle implements MotorHandle {
 
     private double direction() {
         return followerInverted ? -1.0 : 1.0;
+    }
+
+    private double outputDirection() {
+        return runtimeConfiguration.inverted() ? -1.0 : 1.0;
     }
 }

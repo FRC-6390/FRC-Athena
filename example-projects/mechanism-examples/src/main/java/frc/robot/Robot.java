@@ -3,6 +3,8 @@ package frc.robot;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.wpilib.lifecycle.AthenaRobot;
+import ca.frc6390.athena.wpilib.telemetry.MechanismTracePublisher;
+import frc.robot.examples.FieldTelemetry;
 import frc.robot.mechanisms.FollowerElevator;
 import frc.robot.mechanisms.IndexedIntake;
 import frc.robot.mechanisms.LimitedManualArm;
@@ -33,5 +35,10 @@ public final class Robot extends AthenaRobot {
     public final Turret turret = new Turret();
     public final TemplateRoller templateRoller = new TemplateRoller().motor.fill(
             Constants.RIO.motor(MotorControllerKinds.SPARK_FLEX, MotorKinds.NEO, 15));
+    public final FieldTelemetry fieldTelemetry = new FieldTelemetry();
     public final Controls controls = new Controls(this);
+
+    public Robot() {
+        traceTelemetry(MechanismTracePublisher.Profile.CAPTURE);
+    }
 }

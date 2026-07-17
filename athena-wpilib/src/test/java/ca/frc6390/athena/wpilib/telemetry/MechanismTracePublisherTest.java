@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.mechanism.core.MechanismTraceSnapshot;
+import ca.frc6390.athena.mechanism.core.MechanismTraceLevel;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -20,6 +21,31 @@ class MechanismTracePublisherTest {
                 MechanismTracePublisher.parseProfile("OFF", MechanismTracePublisher.Profile.SUMMARY));
         assertEquals(MechanismTracePublisher.Profile.SUMMARY,
                 MechanismTracePublisher.parseProfile("unknown", MechanismTracePublisher.Profile.SUMMARY));
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        try (MechanismTracePublisher publisher = new MechanismTracePublisher(instance)) {
+            assertEquals(MechanismTraceLevel.SUMMARY, publisher.traceLevel());
+            assertEquals(MechanismTraceLevel.OFF,
+                    publisher.profile(MechanismTracePublisher.Profile.OFF).traceLevel());
+        } finally {
+            instance.close();
+        }
+    }
+
+    @Test
+    void summaryProfilePublishesAtTenHertz() {
+        NetworkTableInstance nt = NetworkTableInstance.create();
+        String statePath = "/Athena/Mechanisms/robot/Trace/State";
+        try (MechanismTracePublisher publisher = new MechanismTracePublisher(nt)
+                .profile(MechanismTracePublisher.Profile.SUMMARY)) {
+            publisher.publish(List.of(snapshot(1.0)));
+            long firstChange = nt.getEntry(statePath).getLastChange();
+            publisher.publish(List.of(snapshot(1.05)));
+            assertEquals(firstChange, nt.getEntry(statePath).getLastChange());
+            publisher.publish(List.of(snapshot(1.11)));
+            assertTrue(nt.getEntry(statePath).getLastChange() > firstChange);
+        } finally {
+            nt.close();
+        }
     }
 
     @Test
@@ -79,9 +105,13 @@ class MechanismTracePublisherTest {
     }
 
     private static MechanismTraceSnapshot snapshot() {
+        return snapshot(1.5);
+    }
+
+    private static MechanismTraceSnapshot snapshot(double timestampSeconds) {
         return new MechanismTraceSnapshot(
                 "robot",
-                1.5,
+                timestampSeconds,
                 0.75,
                 true,
                 "shoot",

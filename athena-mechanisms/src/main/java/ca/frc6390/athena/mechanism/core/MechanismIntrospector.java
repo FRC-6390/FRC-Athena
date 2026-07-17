@@ -9,6 +9,7 @@ import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
+import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.lang.reflect.Array;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -48,6 +50,28 @@ final class MechanismIntrospector {
             }
             String fieldName = field.getName();
             Telemetry telemetry = field.getAnnotation(Telemetry.class);
+            if (ControlSysId.class.isAssignableFrom(field.getType())) {
+                Object value = read(field, mechanism);
+                if (value instanceof ControlSysId sysId) {
+                    String prefix = telemetry == null
+                            ? fieldName : AnnotatedTelemetry.name(fieldName, telemetry);
+                    putAction(actions, prefix + "/QuasistaticForward", sysId.quasistaticForward());
+                    putAction(actions, prefix + "/QuasistaticReverse", sysId.quasistaticReverse());
+                    putAction(actions, prefix + "/DynamicForward", sysId.dynamicForward());
+                    putAction(actions, prefix + "/DynamicReverse", sysId.dynamicReverse());
+                }
+                continue;
+            }
+            if (telemetry != null && Action.class.isAssignableFrom(field.getType())) {
+                Object value = read(field, mechanism);
+                if (value instanceof Action action) {
+                    String actionName = AnnotatedTelemetry.name(fieldName, telemetry);
+                    if (actions.putIfAbsent(actionName, action) != null) {
+                        throw new IllegalArgumentException("Duplicate mechanism action path '" + actionName + "'.");
+                    }
+                }
+                continue;
+            }
             if (telemetry != null) {
                 putDeclaration(
                         declarations,
@@ -61,6 +85,9 @@ final class MechanismIntrospector {
             }
             if (value instanceof Mechanism child && !Modifier.isStatic(field.getModifiers())) {
                 children.put(fieldName, child);
+            } else if (!Modifier.isStatic(field.getModifiers())
+                    && addMechanismChildren(children, fieldName, value)) {
+                // Mechanism collections are structural children, not generic declarations.
             } else if (value instanceof Action action) {
                 actions.put(fieldName, action);
             } else if (value instanceof HookBinding hook) {
@@ -83,6 +110,49 @@ final class MechanismIntrospector {
         }
 
         return new MechanismNode(name, mechanism, children, actions, declarations, hooks);
+    }
+
+    private static void putAction(Map<String, Action> actions, String name, Action action) {
+        if (actions.putIfAbsent(name, action) != null) {
+            throw new IllegalArgumentException("Duplicate mechanism action path '" + name + "'.");
+        }
+    }
+
+    private static boolean addMechanismChildren(
+            Map<String, Mechanism> children, String fieldName, Object value) {
+        boolean found = false;
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getValue() instanceof Mechanism child) {
+                    putChild(children, fieldName + "/" + String.valueOf(entry.getKey()), child);
+                    found = true;
+                }
+            }
+        } else if (value instanceof Iterable<?> iterable) {
+            int index = 0;
+            for (Object element : iterable) {
+                if (element instanceof Mechanism child) {
+                    putChild(children, fieldName + "/" + index, child);
+                    found = true;
+                }
+                index++;
+            }
+        } else if (value.getClass().isArray()) {
+            for (int index = 0; index < Array.getLength(value); index++) {
+                Object element = Array.get(value, index);
+                if (element instanceof Mechanism child) {
+                    putChild(children, fieldName + "/" + index, child);
+                    found = true;
+                }
+            }
+        }
+        return found;
+    }
+
+    private static void putChild(Map<String, Mechanism> children, String path, Mechanism child) {
+        if (children.putIfAbsent(path, child) != null) {
+            throw new IllegalArgumentException("Duplicate mechanism child path '" + path + "'.");
+        }
     }
 
     private static Field[] fields(Class<?> type) {

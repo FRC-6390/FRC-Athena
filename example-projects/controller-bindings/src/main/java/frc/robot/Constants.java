@@ -10,4 +10,8 @@ public interface Constants {
         double DEADBAND = 0.08;
         double SLOW_SCALE = 0.4;
     }
+
+    interface Operator {
+        int PORT = 1;
+    }
 }

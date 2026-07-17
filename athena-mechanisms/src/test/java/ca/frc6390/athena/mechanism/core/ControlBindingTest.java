@@ -17,10 +17,21 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.motion.MotionProfiles;
+import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ControlBindingTest {
+    @Test
+    void limitDeclarationsExistOnlyOnConstraintsApi() {
+        assertThrows(NoSuchMethodException.class,
+                () -> ControlBinding.class.getMethod("positionRange", double.class, double.class));
+        assertThrows(NoSuchMethodException.class,
+                () -> ControlBinding.class.getMethod("motionLimits", double.class, double.class));
+        assertThrows(NoSuchMethodException.class,
+                () -> ControlBinding.class.getMethod("maxOutput", double.class));
+    }
+
     @Test
     void controlFactoriesAcceptAnyNumberOfMotors() {
         MotorDevice first = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
@@ -34,6 +45,23 @@ class ControlBindingTest {
         assertEquals(List.of(first, second, third), velocity.motors());
         assertSame(first, position.output());
         assertEquals(List.of(second, third), position.followers());
+    }
+
+    @Test
+    void positionFactoryAcceptsScalarSinkAndContinuousInput() {
+        RobotVelocityPool.AngularChannel angular = new RobotVelocityPool().angularChannel();
+
+        ControlBinding control = Controls.position(angular)
+                .feedback(() -> 0.0, () -> 0.0)
+                .continuous(-Math.PI, Math.PI)
+                .constraint(Constraints.clamp(2.0));
+
+        assertSame(angular, control.sink());
+        assertEquals(-Math.PI, control.continuousRange().minimum(), 1.0e-9);
+        assertEquals(Math.PI, control.continuousRange().maximum(), 1.0e-9);
+        assertThrows(IllegalArgumentException.class, () -> control.continuous(1.0, 1.0));
+        assertThrows(IllegalStateException.class,
+                () -> Controls.velocity(angular).continuous(-Math.PI, Math.PI));
     }
 
     @Test

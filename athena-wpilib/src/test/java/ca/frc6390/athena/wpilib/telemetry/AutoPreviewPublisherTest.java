@@ -41,4 +41,18 @@ class AutoPreviewPublisherTest {
             instance.close();
         }
     }
+
+    @Test
+    void unchangedPreviewIdentityDoesNotRewriteNetworkTables() {
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        List<AutoPreview> previews = List.of(new AutoPreview("Idle", List.of("IDLE"), List.of()));
+        try (AutoPreviewPublisher publisher = new AutoPreviewPublisher(instance)) {
+            publisher.publish(previews, "");
+            long firstChange = instance.getEntry("/Athena/Auto/Selected").getLastChange();
+            publisher.publish(previews, "");
+            assertEquals(firstChange, instance.getEntry("/Athena/Auto/Selected").getLastChange());
+        } finally {
+            instance.close();
+        }
+    }
 }

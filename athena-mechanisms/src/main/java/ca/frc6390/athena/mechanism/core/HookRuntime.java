@@ -183,7 +183,7 @@ final class HookRuntime {
     }
 
     private static boolean isImmediateDeviceMutation(ActionBinding action) {
-        return action instanceof Actions.EncoderSetPosition || action instanceof Actions.ImuSetYaw;
+        return action instanceof Actions.EncoderSetPosition || action instanceof Actions.ImuYawMutation;
     }
 
     /**

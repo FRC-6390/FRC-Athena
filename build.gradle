@@ -135,6 +135,22 @@ tasks.register('publishToLocalWpilib') {
     dependsOn tasks.named('installLocalWpilibVendordep')
 }
 
+def athenaBuildTasks = subprojects.collect { it.tasks.named('build') }
+def athenaMavenLocalPublishTasks = subprojects.collect { it.tasks.named('publishToMavenLocal') }
+
+athenaMavenLocalPublishTasks.each { publishTask ->
+    publishTask.configure {
+        mustRunAfter athenaBuildTasks
+    }
+}
+
+tasks.register('buildAndPublish') {
+    group = 'Publishing'
+    description = 'Builds and verifies all Athena modules, then publishes them to the local WPILib installation.'
+    dependsOn athenaBuildTasks
+    dependsOn tasks.named('publishToLocalWpilib')
+}
+
 def exampleProjects = [
         'tank-drive',
         'swerve-drive',
@@ -152,16 +168,16 @@ def exampleGradleCommand = System.getProperty('os.name').toLowerCase(Locale.ROOT
 exampleProjects.each { exampleName ->
     tasks.register("compile${exampleName.split('-').collect { it.capitalize() }.join('')}Example", Exec) {
         group = 'Verification'
-        description = "Compiles the ${exampleName} example project against locally published Athena artifacts."
+        description = "Builds the ${exampleName} example project against locally published Athena artifacts."
         dependsOn subprojects.collect { it.tasks.named('publishToMavenLocal') }
         workingDir = file("${rootDir}/example-projects/${exampleName}")
-        commandLine exampleGradleCommand, 'compileJava'
+        commandLine exampleGradleCommand, 'build'
     }
 }
 
 tasks.register('compileExamples') {
     group = 'Verification'
-    description = 'Compiles all standalone example robot projects against locally published Athena artifacts.'
+    description = 'Builds all standalone example robot projects against locally published Athena artifacts.'
     dependsOn exampleProjects.collect { exampleName ->
         tasks.named("compile${exampleName.split('-').collect { it.capitalize() }.join('')}Example")
     }
@@ -374,6 +390,7 @@ project(':athena-wpilib') {
         testImplementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        testImplementation "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
         testImplementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"

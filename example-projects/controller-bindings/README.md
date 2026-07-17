@@ -14,6 +14,11 @@ This project shows the current Athena controller flow without WPILib command-bas
 | Right bumper | Holds the intake collect action |
 | Left bumper | Holds the intake eject action |
 
+`AdvancedControls` uses a second gamepad to keep the gesture examples independent from the driver bindings.
+It demonstrates shared single/double/triple/ranged click recognition, debounced buttons, long and short holds,
+key-repeat behavior, axis hysteresis, explicitly controlled toggle state, `allOf`/`anyOf`/`noneOf`, timed chords,
+ordered input sequences, `CommandAction` requirements, and WPILib command wrapping.
+
 The bumper signals are composed so pressing both requests neither direction. Held actions own their
 target devices while the signal is active and release that ownership when the signal becomes false,
 so a separate release-time stop binding is not required.

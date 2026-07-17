@@ -15,7 +15,6 @@ import ca.frc6390.athena.mechanism.core.ControlOutput;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.motion.MotionPlanners;
-import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import frc.robot.Constants;
 
@@ -33,9 +32,8 @@ public final class Turret implements Mechanism {
             .loop(ControlLoops.targetTransform(binding -> context ->
                     ControlOutput.position(context.target() - chassisImu.angleDegrees())))
             .pid(0.144, 0.0, 0.006)
-            .constraint(Constraints.range(travel))
-            .planner(MotionPlanners.boundedAngular(360.0))
-            .profile(MotionProfiles.trapezoid(180.0, 540.0));
+            .constraints(Constraints.range(travel), Constraints.motion(180.0, 540.0))
+            .planner(MotionPlanners.boundedAngular(360.0));
 
     public final Action forward = fieldHeading.position(0.0).untilWithin(1.5);
     public final Action left = fieldHeading.position(90.0).untilWithin(1.5);

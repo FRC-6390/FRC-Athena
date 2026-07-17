@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.api.hardware.CameraKind;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.vision.signal.GenericPoseSignal;
 import ca.frc6390.athena.vision.signal.GenericTargetSignal;
@@ -21,9 +22,11 @@ public final class GenericCameraDevice implements CameraDevice {
     private final SignalBinding signals;
     private final boolean poseBound;
     private final boolean targetBound;
+    private final FailurePolicy failurePolicy;
 
     public GenericCameraDevice(CameraKind kind, String name) {
-        this(kind, name, CameraMountPose::identity, new SignalBinding(), false, false);
+        this(kind, name, CameraMountPose::identity, new SignalBinding(), false, false,
+                FailurePolicy.DISABLE_MECHANISM);
     }
 
     private GenericCameraDevice(
@@ -32,13 +35,15 @@ public final class GenericCameraDevice implements CameraDevice {
             Supplier<CameraMountPose> mountPose,
             SignalBinding signals,
             boolean poseBound,
-            boolean targetBound) {
+            boolean targetBound,
+            FailurePolicy failurePolicy) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.name = name == null || name.isBlank() ? kind.key() : name;
         this.mountPose = mountPose == null ? CameraMountPose::identity : mountPose;
         this.signals = Objects.requireNonNull(signals, "signals");
         this.poseBound = poseBound;
         this.targetBound = targetBound;
+        this.failurePolicy = failurePolicy == null ? FailurePolicy.DISABLE_MECHANISM : failurePolicy;
     }
 
     @Override
@@ -60,24 +65,35 @@ public final class GenericCameraDevice implements CameraDevice {
     @Override
     public GenericCameraDevice mount(CameraMountPose pose) {
         CameraMountPose safe = pose == null ? CameraMountPose.identity() : pose;
-        return new GenericCameraDevice(kind, name, () -> safe, signals, poseBound, targetBound);
+        return new GenericCameraDevice(kind, name, () -> safe, signals, poseBound, targetBound, failurePolicy);
     }
 
     @Override
     public GenericCameraDevice mount(Supplier<CameraMountPose> pose) {
-        return new GenericCameraDevice(kind, name, pose, signals, poseBound, targetBound);
+        return new GenericCameraDevice(kind, name, pose, signals, poseBound, targetBound, failurePolicy);
     }
 
     @Override
     public GenericCameraDevice bindPose(Supplier<? extends List<? extends Measurement>> poseMeasurements) {
         signals.bindPose(poseMeasurements);
-        return new GenericCameraDevice(kind, name, mountPose, signals, true, targetBound);
+        return new GenericCameraDevice(kind, name, mountPose, signals, true, targetBound, failurePolicy);
     }
 
     @Override
     public GenericCameraDevice bindTargets(Supplier<? extends List<? extends Measurement>> targetMeasurements) {
         signals.bindTargets(targetMeasurements);
-        return new GenericCameraDevice(kind, name, mountPose, signals, poseBound, true);
+        return new GenericCameraDevice(kind, name, mountPose, signals, poseBound, true, failurePolicy);
+    }
+
+    @Override
+    public FailurePolicy failurePolicy() {
+        return failurePolicy;
+    }
+
+    @Override
+    public GenericCameraDevice failurePolicy(FailurePolicy policy) {
+        return new GenericCameraDevice(kind, name, mountPose, signals, poseBound, targetBound,
+                Objects.requireNonNull(policy, "policy"));
     }
 
     @Override

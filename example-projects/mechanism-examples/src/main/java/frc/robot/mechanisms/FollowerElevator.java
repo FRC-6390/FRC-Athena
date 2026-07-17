@@ -8,7 +8,6 @@ import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
-import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import frc.robot.Constants;
 
 public final class FollowerElevator implements Mechanism {
@@ -21,8 +20,7 @@ public final class FollowerElevator implements Mechanism {
     private final ControlBinding lift = Controls.position(leader)
             .feedback(leader.encoder())
             .pid(6.0, 0.0, 0.0)
-            .constraint(Constraints.range(travel))
-            .profile(MotionProfiles.trapezoid(1.0, 2.0));
+            .constraints(Constraints.range(travel), Constraints.motion(1.0, 2.0));
 
     public final Action bottom = lift.position(0.0).untilWithin(0.03);
     public final Action middle = lift.position(0.8).untilWithin(0.03);

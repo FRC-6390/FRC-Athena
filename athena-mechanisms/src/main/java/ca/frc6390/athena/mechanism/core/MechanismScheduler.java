@@ -42,11 +42,14 @@ public final class MechanismScheduler {
     private long requestSequence;
     private Runnable simulationStep = () -> {
     };
+    private volatile TelemetrySchema telemetrySchema;
+    private MechanismTraceLevel traceLevel = MechanismTraceLevel.CAPTURE;
 
     private MechanismScheduler(OutputResolver resolver, ActionContext hardwareContext) {
         this.resolver = Objects.requireNonNull(resolver, "resolver");
         actionContext = new OverlayActionContext(registeredHandles,
                 hardwareContext == null ? ActionContext.empty() : hardwareContext);
+        resolver.overrides().actionContext(actionContext);
     }
 
     public static MechanismScheduler create() {
@@ -85,9 +88,11 @@ public final class MechanismScheduler {
         }
         graph.node(mechanism);
         runtimes.computeIfAbsent(mechanism, this::runtime);
+        runtimes.get(mechanism).traceLevel(traceLevel);
         indexActionTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
         indexDeclarationTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
         refreshDigitalInputs();
+        telemetrySchema = null;
         return this;
     }
 
@@ -188,9 +193,50 @@ public final class MechanismScheduler {
         return List.copyOf(runtimes.keySet());
     }
 
-    /** Returns custom and writable telemetry using stable mechanism field paths. */
-    public Map<String, TelemetryValue> telemetryValues() {
-        return graph.telemetry(runtimes.keySet(), resolver.overrides());
+    /** Selects how much trace detail runtimes materialize each cycle. */
+    public MechanismScheduler traceLevel(MechanismTraceLevel level) {
+        traceLevel = Objects.requireNonNull(level, "level");
+        for (MechanismRuntime runtime : runtimes.values()) runtime.traceLevel(level);
+        return this;
+    }
+
+    public MechanismTraceLevel traceLevel() { return traceLevel; }
+
+    /** Suppresses one failed declaration and neutralizes it when it is a motor. */
+    public void disableDeclaration(Object declaration) {
+        if (declaration instanceof MotorDevice motor) {
+            resolver.overrides().disabled(motor, true);
+            try {
+                actionContext.motor(motor).stop();
+            } catch (RuntimeException ignored) {
+                // A failed device may be unable to accept the neutral command.
+            }
+        } else if (declaration instanceof ControlBinding control) {
+            resolver.overrides().disabled(control, true);
+            control.motors().forEach(this::disableDeclaration);
+        }
+    }
+
+    /** Suppresses every output owned by the mechanism that declares the failed object. */
+    public boolean disableOwner(Object declaration) {
+        RequestTarget target = declarationTargets.get(declaration);
+        if (target == null) {
+            return false;
+        }
+        for (Object owned : graph.declarations(List.of(target.owner()))) {
+            disableDeclaration(owned);
+        }
+        return true;
+    }
+
+    /** Returns the hierarchical, mechanism-scoped telemetry contract. */
+    public TelemetrySchema telemetrySchema() {
+        TelemetrySchema cached = telemetrySchema;
+        if (cached == null) {
+            cached = graph.telemetrySchema(runtimes.keySet(), resolver.overrides(), this);
+            telemetrySchema = cached;
+        }
+        return cached;
     }
 
     /**
@@ -199,6 +245,7 @@ public final class MechanismScheduler {
      * @return latest mechanism traces
      */
     public List<MechanismTraceSnapshot> traceSnapshots() {
+        if (traceLevel == MechanismTraceLevel.OFF) return List.of();
         List<MechanismTraceSnapshot> traces = new ArrayList<>();
         runtimes.forEach((mechanism, runtime) -> {
             MechanismTraceSnapshot root = runtime.traceSnapshot();
@@ -227,6 +274,13 @@ public final class MechanismScheduler {
             Mechanism mechanism,
             String hookPrefix,
             MechanismTraceSnapshot root) {
+        if (traceLevel == MechanismTraceLevel.SUMMARY) {
+            return new MechanismTraceSnapshot(
+                    path, root.timestampSeconds(), root.timeInStateSeconds(), root.enabled(),
+                    root.requestedAction(), root.requestedActionType(), root.scheduledActionType(),
+                    root.schedulerStep(), root.schedulerComplete(), root.activeLeaseCount(),
+                    List.of(), List.of(), List.of(), List.of());
+        }
         Set<String> motorNames = new LinkedHashSet<>();
         for (Object declaration : graph.declarations(List.of(mechanism))) {
             if (declaration instanceof MotorDevice motor) {
@@ -437,6 +491,26 @@ public final class MechanismScheduler {
         return this;
     }
 
+    /** Returns whether a requested action is actively evaluating. */
+    public boolean isRunning(Action action) {
+        List<LeaseRegistration> registrations = leaseTargets.get(Objects.requireNonNull(action, "action"));
+        if (registrations == null) return false;
+        for (LeaseRegistration registration : registrations) {
+            if (!registration.runtime().leaseComplete(registration.runtimeKey())) return true;
+        }
+        return false;
+    }
+
+    /** Returns whether a requested action has reached completion and remains registered. */
+    public boolean isComplete(Action action) {
+        List<LeaseRegistration> registrations = leaseTargets.get(Objects.requireNonNull(action, "action"));
+        if (registrations == null || registrations.isEmpty()) return false;
+        for (LeaseRegistration registration : registrations) {
+            if (!registration.runtime().leaseComplete(registration.runtimeKey())) return false;
+        }
+        return true;
+    }
+
     private void cancelNested(Action action, Set<Action> visited) {
         if (action == null || !visited.add(action)) return;
         releaseLease(action);
@@ -459,6 +533,8 @@ public final class MechanismScheduler {
             cancelNested(timeout.action(), visited);
         } else if (action instanceof Actions.WithinTolerance within) {
             cancelNested(within.action(), visited);
+        } else if (action instanceof Actions.VelocityContribution contribution) {
+            cancelNested(contribution.driveAction(), visited);
         } else if (action instanceof Actions.Conditional conditional) {
             cancelNested(conditional.action(), visited); cancelNested(conditional.next(), visited);
         } else if (action instanceof Action.Conditional conditional) {
@@ -674,7 +750,9 @@ public final class MechanismScheduler {
             collectActionDeclarations(computed.evaluate(MechanismContext.empty()), declarations);
         } else if (action instanceof Actions.HardwareComputed computed) {
             declarations.addAll(computed.declarations());
-        } else if (action instanceof Actions.ImuSetYaw setYaw) {
+        } else if (action instanceof Actions.VelocityContribution contribution) {
+            collectActionDeclarations(contribution.driveAction(), declarations);
+        } else if (action instanceof Actions.ImuYawMutation setYaw) {
             declarations.addAll(setYaw.imu().dependencies());
         } else if (action instanceof Actions.Race race) {
             race.Actions().forEach(child -> collectActionDeclarations(child, declarations));
@@ -734,6 +812,9 @@ public final class MechanismScheduler {
         declarations.addAll(control.motors());
         if (control.feedback() != null) {
             declarations.addAll(control.feedback().dependencies());
+        }
+        if (control.sink() != null) {
+            declarations.addAll(control.sink().dependencies());
         }
         declarations.addAll(control.dependencies());
         for (ControlLoop loop : control.loops()) {
@@ -826,6 +907,17 @@ public final class MechanismScheduler {
             }
             return fallback.imu(ref);
         }
+
+        @Override
+        public List<ActionContext.SoftwareMotorFollower> softwareFollowers(MotorDevice leader) {
+            List<ActionContext.SoftwareMotorFollower> registeredFollowers = registered.softwareFollowers(leader);
+            return registeredFollowers.isEmpty() ? fallback.softwareFollowers(leader) : registeredFollowers;
+        }
+
+        @Override
+        public void hardwareFailure(Object declaration, RuntimeException exception) {
+            fallback.hardwareFailure(declaration, exception);
+        }
     }
 
     private record RequestTarget(Mechanism root, Mechanism owner) {
@@ -842,14 +934,22 @@ public final class MechanismScheduler {
         private final MotorDevice device;
         private double position;
         private double velocity;
+        private ca.frc6390.athena.hardware.backend.MotorRuntimeConfig runtimeConfig;
 
         private MemoryMotor(MotorDevice device) {
             this.device = Objects.requireNonNull(device, "device");
+            runtimeConfig = ca.frc6390.athena.hardware.backend.MotorRuntimeConfig.declared(device);
         }
 
         @Override
         public MotorDevice device() {
             return device;
+        }
+
+        @Override public boolean supportsRuntimeConfiguration() { return true; }
+        @Override public void applyRuntimeConfiguration(
+                ca.frc6390.athena.hardware.backend.MotorRuntimeConfig configuration) {
+            runtimeConfig = Objects.requireNonNull(configuration, "configuration");
         }
 
         @Override

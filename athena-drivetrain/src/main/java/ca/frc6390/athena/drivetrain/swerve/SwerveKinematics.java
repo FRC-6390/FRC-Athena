@@ -7,12 +7,15 @@ import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.control.RobotVelocityPool;
+import ca.frc6390.athena.runtime.control.VelocityFrame;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicReference;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -79,9 +82,25 @@ public final class SwerveKinematics implements SimModel.Source {
         return Actions.parallel(actions);
     }
 
+    /** Continuously recomputes module targets from a velocity supplier. */
+    public Action drive(Supplier<RobotVelocity> velocity) {
+        Supplier<RobotVelocity> safeVelocity = Objects.requireNonNull(velocity, "velocity");
+        return Actions.compute(() -> drive(safeVelocity.get()));
+    }
+
+    /** Drives one pooled request after normalizing every channel into robot coordinates. */
+    public Action drive(RobotVelocityPool velocities, DoubleSupplier headingRadians) {
+        RobotVelocityPool safeVelocities = Objects.requireNonNull(velocities, "velocities");
+        DoubleSupplier safeHeading = Objects.requireNonNull(headingRadians, "headingRadians");
+        return drive(() -> safeVelocities.robotRelative(safeHeading.getAsDouble()));
+    }
+
     /** Converts robot-relative velocity into ordered module targets. */
     public List<SwerveModuleTarget> targets(RobotVelocity velocity) {
         RobotVelocity safe = velocity == null ? RobotVelocity.zero() : velocity;
+        if (safe.frame() != VelocityFrame.ROBOT) {
+            throw new IllegalArgumentException("Swerve module targets require a robot-relative velocity.");
+        }
         List<SwerveModuleTarget> targets = new ArrayList<>(modules.size());
         double greatestSpeed = 0.0;
         for (Module module : modules) {

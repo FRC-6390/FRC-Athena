@@ -1,6 +1,7 @@
 package ca.frc6390.athena.wpilib.telemetry;
 
 import ca.frc6390.athena.mechanism.core.MechanismTraceSnapshot;
+import ca.frc6390.athena.mechanism.core.MechanismTraceLevel;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.PubSubOption;
 import edu.wpi.first.networktables.StringArrayPublisher;
@@ -22,6 +23,8 @@ public final class MechanismTracePublisher implements AutoCloseable {
     private final StringSubscriber profileOverride;
     private final Map<String, Channel> channels = new LinkedHashMap<>();
     private Profile profile = Profile.SUMMARY;
+    private String lastProfileOverride = "";
+    private Profile resolvedProfile = Profile.SUMMARY;
 
     /** Runtime publishing profile. */
     public enum Profile {
@@ -60,7 +63,17 @@ public final class MechanismTracePublisher implements AutoCloseable {
     /** Selects the amount of live NT4 telemetry. */
     public MechanismTracePublisher profile(Profile profile) {
         this.profile = profile == null ? Profile.SUMMARY : profile;
+        resolvedProfile = parseProfile(lastProfileOverride, this.profile);
         return this;
+    }
+
+    /** Returns the live runtime trace level, including the NT profile override. */
+    public MechanismTraceLevel traceLevel() {
+        return switch (activeProfile()) {
+            case OFF -> MechanismTraceLevel.OFF;
+            case SUMMARY -> MechanismTraceLevel.SUMMARY;
+            case CAPTURE -> MechanismTraceLevel.CAPTURE;
+        };
     }
 
     @Override
@@ -71,7 +84,12 @@ public final class MechanismTracePublisher implements AutoCloseable {
     }
 
     private Profile activeProfile() {
-        return parseProfile(profileOverride.get(), profile);
+        String override = profileOverride.get();
+        if (!lastProfileOverride.equals(override)) {
+            lastProfileOverride = override;
+            resolvedProfile = parseProfile(override, profile);
+        }
+        return resolvedProfile;
     }
 
     static Profile parseProfile(String value, Profile fallback) {
@@ -95,14 +113,27 @@ public final class MechanismTracePublisher implements AutoCloseable {
         if (value == null || value.isBlank()) {
             return "mechanism";
         }
-        return java.util.Arrays.stream(value.split("/"))
-                .map(MechanismTracePublisher::topicSegment)
-                .collect(java.util.stream.Collectors.joining("/"));
+        StringBuilder result = new StringBuilder(value.length());
+        int segmentStart = 0;
+        for (int index = 0; index <= value.length(); index++) {
+            if (index == value.length() || value.charAt(index) == '/') {
+                if (result.length() > 0) result.append('/');
+                if (index == segmentStart) {
+                    result.append("mechanism");
+                } else {
+                    for (int character = segmentStart; character < index; character++) {
+                        result.append(topicCharacter(value.charAt(character)));
+                    }
+                }
+                segmentStart = index + 1;
+            }
+        }
+        return result.toString();
     }
 
-    private static String topicSegment(String value) {
-        String safe = value == null ? "mechanism" : value.trim().replaceAll("[^A-Za-z0-9_.-]", "_");
-        return safe.isBlank() ? "mechanism" : safe;
+    private static char topicCharacter(char value) {
+        return Character.isLetterOrDigit(value) || value == '_' || value == '.' || value == '-'
+                ? value : '_';
     }
 
     private static int code(String value) {
@@ -173,6 +204,11 @@ public final class MechanismTracePublisher implements AutoCloseable {
         private String lastRequestedActionType = "";
         private String lastScheduledActionType = "";
         private int publishedMetadataSize;
+        private CandidateFrame[] candidateFrames = new CandidateFrame[0];
+        private ControlFrame[] controlFrames = new ControlFrame[0];
+        private MotorFrame[] motorFrames = new MotorFrame[0];
+        private HookFrame[] hookFrames = new HookFrame[0];
+        private double lastPublishSeconds = Double.NEGATIVE_INFINITY;
 
         private Channel(NetworkTableInstance nt, String root) {
             PubSubOption period = PubSubOption.periodic(PERIOD_SECONDS);
@@ -188,30 +224,54 @@ public final class MechanismTracePublisher implements AutoCloseable {
         }
 
         private void publish(MechanismTraceSnapshot trace, Profile profile) {
+            double periodSeconds = profile == Profile.CAPTURE ? PERIOD_SECONDS : 0.10;
+            double elapsed = trace.timestampSeconds() - lastPublishSeconds;
+            if (elapsed >= 0.0 && elapsed < periodSeconds) return;
+            lastPublishSeconds = trace.timestampSeconds();
             publishLabels(trace);
             state.set(stateFrame(trace));
             if (profile != Profile.CAPTURE) {
                 publishMetadataIfChanged();
                 return;
             }
-            candidates.set(trace.candidates().stream().map(candidate -> {
+            if (candidateFrames.length != trace.candidates().size()) {
+                candidateFrames = new CandidateFrame[trace.candidates().size()];
+            }
+            for (int index = 0; index < candidateFrames.length; index++) {
+                MechanismTraceSnapshot.ActionCandidate candidate = trace.candidates().get(index);
                 register(candidate.actionType());
-                candidate.motors().forEach(this::register);
-                return candidateFrame(candidate);
-            }).toArray(CandidateFrame[]::new));
-            controls.set(trace.controls().stream().map(control -> {
+                for (String motor : candidate.motors()) register(motor);
+                candidateFrames[index] = candidateFrame(candidate);
+            }
+            candidates.set(candidateFrames);
+            if (controlFrames.length != trace.controls().size()) {
+                controlFrames = new ControlFrame[trace.controls().size()];
+            }
+            for (int index = 0; index < controlFrames.length; index++) {
+                MechanismTraceSnapshot.Control control = trace.controls().get(index);
                 register(control.name());
                 register(control.route());
-                return controlFrame(control);
-            }).toArray(ControlFrame[]::new));
-            motors.set(trace.motors().stream().map(motor -> {
+                controlFrames[index] = controlFrame(control);
+            }
+            controls.set(controlFrames);
+            if (motorFrames.length != trace.motors().size()) {
+                motorFrames = new MotorFrame[trace.motors().size()];
+            }
+            for (int index = 0; index < motorFrames.length; index++) {
+                MechanismTraceSnapshot.Motor motor = trace.motors().get(index);
                 register(motor.name());
-                return motorFrame(motor);
-            }).toArray(MotorFrame[]::new));
-            hooks.set(trace.hooks().stream().map(hook -> {
+                motorFrames[index] = motorFrame(motor);
+            }
+            motors.set(motorFrames);
+            if (hookFrames.length != trace.hooks().size()) {
+                hookFrames = new HookFrame[trace.hooks().size()];
+            }
+            for (int index = 0; index < hookFrames.length; index++) {
+                MechanismTraceSnapshot.Hook hook = trace.hooks().get(index);
                 register(hook.name());
-                return hookFrame(hook);
-            }).toArray(HookFrame[]::new));
+                hookFrames[index] = hookFrame(hook);
+            }
+            hooks.set(hookFrames);
             publishMetadataIfChanged();
         }
 

@@ -41,6 +41,9 @@ public final class Controls implements Mechanism {
         operator.leftY().above(0.75, 0.65)
                 .whileTrue(robot.templateRoller.run)
                 .onFalse(robot.templateRoller.stop);
+        operator.leftY().below(-0.75, -0.65)
+                .whileTrue(robot.shooter.distanceShot)
+                .onFalse(robot.shooter.stop);
 
         sysId.a().whileActive(robot.turret.sysId.quasistaticForward()).onDeactive(robot.turret.neutral);
         sysId.b().whileActive(robot.turret.sysId.quasistaticReverse()).onDeactive(robot.turret.neutral);

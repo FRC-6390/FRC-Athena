@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.runtime;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import java.util.Objects;
 
@@ -10,7 +11,7 @@ import java.util.Objects;
 final class SoftwareFollowerMotorHandle implements MotorHandle, AutoCloseable {
     private final MotorDevice device;
     private final MotorHandle delegate;
-    private final double direction;
+    private double direction;
 
     SoftwareFollowerMotorHandle(MotorDevice device, MotorHandle delegate) {
         this.device = Objects.requireNonNull(device, "device");
@@ -21,6 +22,16 @@ final class SoftwareFollowerMotorHandle implements MotorHandle, AutoCloseable {
     MotorHandle backendHandle() { return delegate; }
 
     @Override public MotorDevice device() { return device; }
+
+    @Override public boolean supportsRuntimeConfiguration() { return delegate.supportsRuntimeConfiguration(); }
+
+    @Override public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
+        Objects.requireNonNull(configuration, "configuration");
+        direction = configuration.inverted() ? -1.0 : 1.0;
+        delegate.applyRuntimeConfiguration(new MotorRuntimeConfig(
+                configuration.neutralMode(), false,
+                configuration.supplyCurrentLimitAmps(), configuration.statorCurrentLimitAmps()));
+    }
     @Override public void activate() { delegate.activate(); }
     @Override public void refreshInputs() { delegate.refreshInputs(); }
     @Override public double appliedVoltage() { return delegate.appliedVoltage(); }

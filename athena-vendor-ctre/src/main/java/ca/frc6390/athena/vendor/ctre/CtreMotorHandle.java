@@ -5,6 +5,7 @@ import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
@@ -69,6 +70,27 @@ public final class CtreMotorHandle implements MotorHandle {
         return device;
     }
 
+    @Override
+    public boolean supportsRuntimeConfiguration() {
+        return true;
+    }
+
+    @Override
+    public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
+        Objects.requireNonNull(configuration, "configuration");
+        if (!controller.configureOutput(
+                configuration.neutralMode() == MotorNeutralMode.BRAKE,
+                device.follower() == null && configuration.inverted())) {
+            throw new IllegalStateException("Failed to configure output for " + device.defaultName());
+        }
+        if (!controller.configureCurrentLimits(
+                configuration.supplyCurrentLimitAmps(),
+                configuration.statorCurrentLimitAmps(),
+                options.torqueCurrentLimitAmps())) {
+            throw new IllegalStateException("Failed to configure current limits for " + device.defaultName());
+        }
+    }
+
     /**
      * Returns CTRE-specific options.
      *
@@ -106,6 +128,9 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void refreshInputs() {
+        if (!controller.isConnected()) {
+            throw new IllegalStateException("CTRE motor is disconnected: " + device.defaultName());
+        }
         positionRotations = controller.positionRotations();
         velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
         appliedVoltage = controller.appliedVoltage();
@@ -279,6 +304,8 @@ public final class CtreMotorHandle implements MotorHandle {
     }
 
     interface TalonController {
+        default boolean isConnected() { return true; }
+
         void setPercent(double percent);
 
         void setVoltage(double volts);
@@ -340,6 +367,8 @@ public final class CtreMotorHandle implements MotorHandle {
         private PhoenixTalonController(MotorDevice device) {
             talon = new TalonFX(device.id(), new CANBus(device.canbus()));
         }
+
+        @Override public boolean isConnected() { return talon.isConnected(); }
 
         @Override
         public void setPercent(double percent) {
@@ -455,6 +484,8 @@ public final class CtreMotorHandle implements MotorHandle {
             talon = new TalonFXS(device.id(), new CANBus(device.canbus()));
             arrangement = arrangement(device);
         }
+
+        @Override public boolean isConnected() { return talon.isConnected(); }
 
         private static MotorArrangementValue arrangement(MotorDevice device) {
             if (!(device.kind().motorKind() instanceof MotorKinds motor)) {

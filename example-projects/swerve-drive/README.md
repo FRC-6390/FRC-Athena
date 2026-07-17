@@ -9,10 +9,17 @@ This is a standalone Athena/WPILib robot project for a four-module field-oriente
 - Per-module absolute encoder offsets. Replace the zero values in `Constants.ModuleOffsets` with measured rotations.
 - `SwerveKinematics.rectangular(...)` for module targets, desaturation, optimization, and odometry-compatible geometry.
 - Field-oriented and robot-oriented driving from processed `DoubleSupplier` axes.
+- A `RobotVelocityPool` with independent driver and automatic channels feeding one `pooledDrive` action.
 - Current `ControlSignal` bindings: Y selects field-oriented, A selects robot-oriented, and Start resets the relative heading.
 - A teleop-only drive action through `Events.teleopPeriodic()`.
 
 Athena reads the absolute steering angle on every target update. The module chooses the shortest steering path, reverses wheel direction when appropriate, and holds its previous angle at zero speed. `steerPid(...)` is voltage-based.
+
+`RobotVelocity` is an immutable, frame-aware value. Use `RobotVelocity.field(...)` or
+`RobotVelocity.robot(...)`, then compose requests with `plus`, `minus`, `times`, `interpolate`, and
+`clamp`. The velocity pool converts every active channel to robot coordinates using the supplied
+heading before adding them, so driver translation, heading assist, autonomous output, and other
+corrections can share one module command path.
 
 ## Discovery and simulation
 

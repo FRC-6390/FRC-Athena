@@ -220,6 +220,7 @@ public final class ChoreoPathProvider implements PathProvider {
 
         @Override public void end(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context, boolean interrupted) {
             active.remove(path);
+            if (follower != null) follower.stop();
         }
 
         private ActivePath requireActive(PathAction path) {
@@ -239,7 +240,7 @@ public final class ChoreoPathProvider implements PathProvider {
         }
         return follower.follow(new SwervePathSample(
                 sample.getPose(),
-                new RobotVelocity(sample.vx, sample.vy, sample.omega)), dtSeconds);
+                RobotVelocity.field(sample.vx, sample.vy, sample.omega)), dtSeconds);
     }
 
     private static final class ActivePath {

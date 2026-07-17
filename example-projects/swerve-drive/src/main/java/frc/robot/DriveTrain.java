@@ -11,10 +11,15 @@ import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
+import ca.frc6390.athena.mechanism.core.Events;
+import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 
 public final class DriveTrain implements Mechanism {
     private static final double MAX_SPEED_METERS_PER_SECOND = 4.0;
@@ -29,6 +34,8 @@ public final class DriveTrain implements Mechanism {
     public final ImuDevice imu = Constants.RIO.imu(ImuKinds.PIGEON_2, 20);
     public final ImuSource heading = imu.relative();
     public final Action resetHeading = heading.setYaw(0.0);
+    public final HookBinding alignDriverHeadingAfterAuto = Events.autonomousExit()
+            .onStart(heading.setYaw(DriveTrain::allianceDriverHeadingDegrees));
     public final SwerveKinematics kinematics = SwerveKinematics.rectangular(
             WHEELBASE_METERS,
             TRACK_WIDTH_METERS,
@@ -37,22 +44,34 @@ public final class DriveTrain implements Mechanism {
             frontRight,
             backLeft,
             backRight);
+    public final RobotVelocityPool velocity = new RobotVelocityPool();
+    public final RobotVelocityPool.Channel driverVelocity = velocity.channel()
+            .enabled(DriverStation::isTeleopEnabled);
+    public final RobotVelocityPool.Channel automaticVelocity = velocity.channel()
+            .enabled(DriverStation::isAutonomousEnabled);
+    public final Action pooledDrive = kinematics.drive(
+            velocity,
+            () -> Math.toRadians(heading.yawDegrees()));
 
     public Action drive(
             DoubleSupplier forward,
             DoubleSupplier strafe,
             DoubleSupplier rotation,
             BooleanSupplier fieldOriented) {
-        return Actions.compute(() -> {
-            RobotVelocity velocity = new RobotVelocity(
+        driverVelocity.set(() -> {
+            RobotVelocity requested = RobotVelocity.robot(
                     linearSpeed(forward.getAsDouble()),
                     linearSpeed(strafe.getAsDouble()),
                     rotationSpeed(rotation.getAsDouble()));
             if (fieldOriented.getAsBoolean()) {
-                velocity = velocity.fieldToRobot(Math.toRadians(heading.yawDegrees()));
+                requested = RobotVelocity.field(
+                        requested.xMetersPerSecond(),
+                        requested.yMetersPerSecond(),
+                        requested.angularRadiansPerSecond());
             }
-            return kinematics.drive(velocity);
+            return requested;
         });
+        return pooledDrive;
     }
 
     private static SwerveModule module(
@@ -80,6 +99,10 @@ public final class DriveTrain implements Mechanism {
 
     private static double rotationSpeed(double input) {
         return clamp(input) * MAX_ROTATION_RADIANS_PER_SECOND;
+    }
+
+    private static double allianceDriverHeadingDegrees() {
+        return DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red ? -180.0 : 0.0;
     }
 }
 

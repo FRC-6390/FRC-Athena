@@ -10,7 +10,7 @@ import ca.frc6390.athena.mechanism.core.ControlLoops;
 import ca.frc6390.athena.mechanism.core.ControlOutput;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
-import ca.frc6390.athena.mechanism.motion.MotionProfiles;
+import ca.frc6390.athena.mechanism.constraint.Constraints;
 import frc.robot.Constants;
 
 public final class ExperimentalArm implements Mechanism {
@@ -25,7 +25,7 @@ public final class ExperimentalArm implements Mechanism {
     private final ControlBinding arm = Controls.position(motor)
             .feedback(motor.encoder())
             .pid(0.96, 0.0, 0.024)
-            .profile(MotionProfiles.trapezoid(75.0, 180.0))
+            .constraint(Constraints.motion(75.0, 180.0))
             .loop(ControlLoops.arbitraryFeedforward(binding -> context ->
                     ControlOutput.voltage(0.45 * Math.cos(Math.toRadians(context.position())))));
 

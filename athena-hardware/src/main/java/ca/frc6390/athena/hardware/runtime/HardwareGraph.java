@@ -17,6 +17,7 @@ import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.api.FailurePolicy;
 
 /**
  * Runtime-owned hardware graph that resolves declarations to cached handles.
@@ -29,6 +30,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final Map<HardwareIdentity, EncoderHandle> encoders = new LinkedHashMap<>();
     private final Map<HardwareIdentity, ImuHandle> imus = new LinkedHashMap<>();
     private final Map<HardwareIdentity, RuntimeException> refreshFailures = new LinkedHashMap<>();
+    private final Map<Object, RuntimeException> bindingFailures = new LinkedHashMap<>();
+    private final Map<Object, RuntimeException> operationFailures = new LinkedHashMap<>();
     private final Map<Object, AutoCloseable> runtimeBindings = new IdentityHashMap<>();
     private final RuntimeScope runtimeScope = new RuntimeScope("hardware-" + Integer.toHexString(System.identityHashCode(this)));
 
@@ -65,12 +68,29 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         Objects.requireNonNull(device, "device");
         HardwareIdentity identity = HardwareIdentity.motor(device);
         MotorHandle existing = motors.get(identity);
-        if (existing != null) {
-            if (!existing.device().equals(device)) {
-                throw new IllegalStateException("Conflicting motor declarations target " + identity.key()
-                        + ". First declaration: " + existing.device()
-                        + "; conflicting declaration: " + device);
+        if (existing != null && !existing.device().equals(device)) {
+            throw new IllegalStateException("Conflicting motor declarations target " + identity.key()
+                    + ". First declaration: " + existing.device()
+                    + "; conflicting declaration: " + device);
+        }
+        try {
+            return createMotor(device);
+        } catch (RuntimeException exception) {
+            if (device.failurePolicy() == FailurePolicy.PANIC) {
+                throw exception;
             }
+            bindingFailures.put(device, exception);
+            MotorHandle unavailable = new UnavailableMotorHandle(device);
+            motors.putIfAbsent(HardwareIdentity.motor(device), unavailable);
+            runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, unavailable));
+            return unavailable;
+        }
+    }
+
+    private MotorHandle createMotor(MotorDevice device) {
+        HardwareIdentity identity = HardwareIdentity.motor(device);
+        MotorHandle existing = motors.get(identity);
+        if (existing != null) {
             return existing;
         }
         MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());
@@ -109,6 +129,21 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     @Override
     public synchronized EncoderHandle encoder(EncoderDevice device) {
         Objects.requireNonNull(device, "device");
+        try {
+            return createEncoder(device);
+        } catch (RuntimeException exception) {
+            if (device.failurePolicy() == FailurePolicy.PANIC) {
+                throw exception;
+            }
+            bindingFailures.put(device, exception);
+            EncoderHandle unavailable = new UnavailableEncoderHandle(device);
+            encoders.putIfAbsent(HardwareIdentity.encoder(device), unavailable);
+            runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, unavailable));
+            return unavailable;
+        }
+    }
+
+    private EncoderHandle createEncoder(EncoderDevice device) {
         EncoderHandle handle;
         if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated) {
             MotorHandle motor = motor(integrated.motor());
@@ -159,6 +194,21 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      */
     public synchronized ImuHandle imu(ImuDevice device) {
         Objects.requireNonNull(device, "device");
+        try {
+            return createImu(device);
+        } catch (RuntimeException exception) {
+            if (device.failurePolicy() == FailurePolicy.PANIC) {
+                throw exception;
+            }
+            bindingFailures.put(device, exception);
+            ImuHandle unavailable = new UnavailableImuHandle(device);
+            imus.putIfAbsent(HardwareIdentity.imu(device), unavailable);
+            runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, unavailable));
+            return unavailable;
+        }
+    }
+
+    private ImuHandle createImu(ImuDevice device) {
         ImuHandle handle = imus.computeIfAbsent(HardwareIdentity.imu(device), ignored -> {
             ImuHandle created = backends
                     .imuBackendFor(device)
@@ -179,9 +229,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         List<RefreshTask> tasks;
         synchronized (this) {
             tasks = new ArrayList<>(motors.size() + encoders.size() + imus.size());
-            motors.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle::refreshInputs)));
-            encoders.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle::refreshInputs)));
-            imus.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle::refreshInputs)));
+            motors.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle.device(), handle::refreshInputs)));
+            encoders.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle.device(), handle::refreshInputs)));
+            imus.forEach((identity, handle) -> tasks.add(new RefreshTask(identity, handle.device(), handle::refreshInputs)));
         }
         Map<HardwareIdentity, RuntimeException> failures = new LinkedHashMap<>();
         tasks.forEach(task -> refresh(task.identity(), task.refresh(), failures));
@@ -198,8 +248,39 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      */
     public synchronized List<RefreshFailure> refreshFailures() {
         return refreshFailures.entrySet().stream()
-                .map(entry -> new RefreshFailure(entry.getKey(), entry.getValue()))
+                .map(entry -> new RefreshFailure(
+                        entry.getKey(), declaration(entry.getKey()), entry.getValue()))
                 .toList();
+    }
+
+    /** Returns declarations that could not be bound during graph construction. */
+    public synchronized List<BindingFailure> bindingFailures() {
+        return bindingFailures.entrySet().stream()
+                .map(entry -> new BindingFailure(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    @Override
+    public synchronized void hardwareFailure(Object declaration, RuntimeException exception) {
+        operationFailures.put(
+                Objects.requireNonNull(declaration, "declaration"),
+                Objects.requireNonNull(exception, "exception"));
+    }
+
+    /** Returns and clears output/setup failures reported since the previous drain. */
+    public synchronized List<BindingFailure> drainOperationFailures() {
+        List<BindingFailure> failures = operationFailures.entrySet().stream()
+                .map(entry -> new BindingFailure(entry.getKey(), entry.getValue()))
+                .toList();
+        operationFailures.clear();
+        return failures;
+    }
+
+    private Object declaration(HardwareIdentity identity) {
+        if (motors.containsKey(identity)) return motors.get(identity).device();
+        if (encoders.containsKey(identity)) return encoders.get(identity).device();
+        if (imus.containsKey(identity)) return imus.get(identity).device();
+        throw new IllegalStateException("No declaration exists for " + identity.key());
     }
 
     private static void refresh(
@@ -241,9 +322,18 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      * @param identity hardware identity
      * @param exception thrown exception
      */
-    public record RefreshFailure(HardwareIdentity identity, RuntimeException exception) {
+    public record RefreshFailure(HardwareIdentity identity, Object declaration, RuntimeException exception) {
         public RefreshFailure {
             Objects.requireNonNull(identity, "identity");
+            Objects.requireNonNull(declaration, "declaration");
+            Objects.requireNonNull(exception, "exception");
+        }
+    }
+
+    /** A declaration that could not create its backend handle. */
+    public record BindingFailure(Object declaration, RuntimeException exception) {
+        public BindingFailure {
+            Objects.requireNonNull(declaration, "declaration");
             Objects.requireNonNull(exception, "exception");
         }
     }
@@ -353,10 +443,44 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         }
     }
 
-    private record RefreshTask(HardwareIdentity identity, Runnable refresh) {
+    private record RefreshTask(HardwareIdentity identity, Object declaration, Runnable refresh) {
         private RefreshTask {
             Objects.requireNonNull(identity, "identity");
+            Objects.requireNonNull(declaration, "declaration");
             Objects.requireNonNull(refresh, "refresh");
         }
+    }
+
+    private record UnavailableMotorHandle(MotorDevice device) implements MotorHandle {
+        @Override public void setPercentOutput(double percent) { }
+        @Override public void setVoltage(double volts) { }
+        @Override public double appliedVoltage() { return 0.0; }
+        @Override public double supplyCurrentAmps() { return 0.0; }
+        @Override public double statorCurrentAmps() { return 0.0; }
+        @Override public double integratedPositionRotations() { return 0.0; }
+        @Override public double integratedVelocityRotationsPerSecond() { return 0.0; }
+        @Override public double absolutePositionRotations() { return 0.0; }
+        @Override public double absoluteVelocityRotationsPerSecond() { return 0.0; }
+        @Override public void setIntegratedPositionRotations(double rotations) { }
+        @Override public boolean supportsIntegratedPositionSetting() { return true; }
+    }
+
+    private record UnavailableEncoderHandle(EncoderDevice device) implements EncoderHandle {
+        @Override public double positionRotations() { return 0.0; }
+        @Override public double absolutePositionRotations() { return 0.0; }
+        @Override public double velocityRotationsPerSecond() { return 0.0; }
+        @Override public void setPositionRotations(double rotations) { }
+        @Override public boolean supportsPositionSetting() { return true; }
+    }
+
+    private record UnavailableImuHandle(ImuDevice device) implements ImuHandle {
+        @Override public double yawDegrees() { return 0.0; }
+        @Override public double pitchDegrees() { return 0.0; }
+        @Override public double rollDegrees() { return 0.0; }
+        @Override public double yawRateDegreesPerSecond() { return 0.0; }
+        @Override public double linearAccelerationXG() { return 0.0; }
+        @Override public double linearAccelerationYG() { return 0.0; }
+        @Override public double linearAccelerationZG() { return 0.0; }
+        @Override public void setYawDegrees(double yawDegrees) { }
     }
 }

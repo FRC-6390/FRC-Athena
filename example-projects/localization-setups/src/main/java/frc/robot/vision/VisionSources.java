@@ -1,12 +1,16 @@
 package frc.robot.vision;
 
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
+import ca.frc6390.athena.runtime.measurement.Measurements;
+import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.config.Cameras;
 import ca.frc6390.athena.vision.device.CameraMountPose;
 import ca.frc6390.athena.vision.device.HeliosDevice;
 import ca.frc6390.athena.vision.device.LimelightDevice;
 import ca.frc6390.athena.vision.device.PhotonVisionDevice;
+import ca.frc6390.athena.vision.signal.TargetSignal;
 import edu.wpi.first.math.util.Units;
+import java.util.List;
 
 public final class VisionSources {
     public final LimelightDevice frontLimelight = Cameras.limelight("limelight-front")
@@ -15,6 +19,9 @@ public final class VisionSources {
             .mount(new CameraMountPose(-0.28, -0.18, 0.55, 180.0, -12.0, 0.0));
     public final HeliosDevice driverHelios = Cameras.helios("10.63.90.11")
             .mount(new CameraMountPose(0.0, 0.0, 0.7, 0.0, -20.0, 0.0));
+    public final CameraDevice customCamera = Cameras.camera(
+            () -> "team:target-camera", "custom-target-camera")
+            .bindTargets(() -> List.of(Measurements.target(42, 3.5, -8.0, 2.7, 0.95)));
 
     public final PoseSignal limelightPose = frontLimelight.pose()
             .megatag2Blue()
@@ -31,4 +38,7 @@ public final class VisionSources {
             .singleTagStdDevs(0.9, 0.9, Units.degreesToRadians(35.0))
             .multiTagStdDevs(0.3, 0.3, Units.degreesToRadians(8.0))
             .distanceStdDevScaling(1.5, 2.0);
+    public final TargetSignal limelightTargets = frontLimelight.targets();
+    public final TargetSignal photonTargets = rearPhoton.targets();
+    public final TargetSignal customTargets = customCamera.targets();
 }

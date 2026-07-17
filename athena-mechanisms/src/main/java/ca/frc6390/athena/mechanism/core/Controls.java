@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.runtime.control.ControlSink;
 
 /**
  * Factories for control bindings.
@@ -13,12 +14,22 @@ public final class Controls {
         return of(ControlMode.POSITION).output(output);
     }
 
+    /** Creates a position control whose calculated result is applied to a scalar destination. */
+    public static ControlBinding position(ControlSink output) {
+        return of(ControlMode.POSITION).output(output);
+    }
+
     /** Creates one position control that commands every supplied motor. */
     public static ControlBinding position(MotorDevice output, MotorDevice... additionalOutputs) {
         return outputs(ControlMode.POSITION, output, additionalOutputs);
     }
 
     public static ControlBinding velocity(MotorDevice output) {
+        return of(ControlMode.VELOCITY).output(output);
+    }
+
+    /** Creates a velocity control whose calculated result is applied to a scalar destination. */
+    public static ControlBinding velocity(ControlSink output) {
         return of(ControlMode.VELOCITY).output(output);
     }
 

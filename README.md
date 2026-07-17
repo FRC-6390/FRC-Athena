@@ -36,7 +36,13 @@ For runtime performance work, run the JMH benchmarks with GC allocation profilin
 
 ## Local Development
 
-Publish local snapshots to Maven Local when testing Athena from a robot project on the same machine:
+Build, test, and publish Athena into the local WPILib Maven/vendordep installation with one command:
+
+```powershell
+.\gradlew.bat buildAndPublish
+```
+
+Publish only to Maven Local when testing Athena from a project that uses `mavenLocal()` directly:
 
 ```powershell
 .\gradlew.bat publishToMavenLocal
@@ -114,6 +120,19 @@ The Athena vendor adapter artifacts are included by the single Athena vendordep,
 
 `HardwareBus` is the unified entry point for hardware declarations. Integer device IDs remain CAN shorthand. For other interfaces, select the connection from the bus and declare the device on it.
 
+Device and camera failures default to `FailurePolicy.DISABLE_MECHANISM`: Athena reports an error to Driver Station, neutralizes the owning mechanism, and keeps the robot program running. Override individual declarations when a different response is required:
+
+```java
+MotorDevice requiredDrive = CANIVORE.motor(MotorKinds.KRAKEN_X60, 1)
+        .failurePolicy(FailurePolicy.PANIC);
+MotorDevice optionalRoller = RIO.motor(MotorKinds.NEO_550, 2)
+        .failurePolicy(FailurePolicy.DISABLE_DEVICE);
+CameraDevice temporaryCamera = Cameras.photonVision("front")
+        .failurePolicy(FailurePolicy.WARN);
+```
+
+`WARN` retains the last valid hardware snapshot and retries each cycle. Cameras emit no measurements while unavailable, preventing stale frames from entering localization. `PANIC` is the only policy that intentionally propagates the failure out of the runtime loop.
+
 ```java
 HardwareBus RIO = HardwareBus.rio();
 HardwareBus CANIVORE = HardwareBus.can("canivore");
@@ -182,3 +201,6 @@ The roboRIO bus exposes CAN, DIO, analog, SPI, I2C, serial, and USB. Named CAN b
 Mechanisms are the main robot behavior abstraction. Swerve is not a special runtime graph anymore: a drivetrain should be a normal `Mechanism`, and swerve modules are normal mechanism components. Hardware declarations resolve through `HardwareGraph`; vendor modules provide backend implementations through service loading.
 
 Simulation runs through the normal `RobotRuntime` with `SimulationSession` selecting simulated hardware backends. `SimModel` is one composable API for provider-backed leaves, nested models, and custom runtime rules. Production `SwerveKinematics` owns module targeting and forward kinematics and contributes its model automatically, so drive code and simulation share one layout without calling WPILib kinematics. Robot actions are evaluated by the normal runtime tick; simulation periodic advances physics from the already-applied hardware commands.
+
+The standalone robot examples are indexed in [`example-projects/README.md`](example-projects/README.md).
+The feature coverage matrix is [`example-projects/COVERAGE.md`](example-projects/COVERAGE.md).

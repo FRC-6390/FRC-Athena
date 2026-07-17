@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.device;
 import java.util.Locale;
 import java.util.Objects;
 import ca.frc6390.athena.api.hardware.ImuKind;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.RuntimeBindings;
@@ -16,21 +17,27 @@ import ca.frc6390.athena.hardware.signal.ImuSource;
 public record ImuDevice(
         ImuKind kind,
         String bus,
-        HardwareAddress connection) implements ImuSource {
+        HardwareAddress connection,
+        FailurePolicy failurePolicy) implements ImuSource {
     private static final RuntimeBindings<ImuDevice, ImuHandle> RUNTIMES = new RuntimeBindings<>();
+
+    public ImuDevice(ImuKind kind, String bus, HardwareAddress connection) {
+        this(kind, bus, connection, FailurePolicy.DISABLE_MECHANISM);
+    }
 
     public static ImuDevice of(ImuKind kind, int id) {
         return connected(kind, "rio", new HardwareAddress.Can(id));
     }
 
     static ImuDevice connected(ImuKind kind, String bus, HardwareAddress connection) {
-        return new ImuDevice(kind, bus, connection);
+        return new ImuDevice(kind, bus, connection, FailurePolicy.DISABLE_MECHANISM);
     }
 
     public ImuDevice {
         Objects.requireNonNull(kind, "kind");
         bus = bus == null || bus.isBlank() ? "rio" : bus;
         Objects.requireNonNull(connection, "connection");
+        failurePolicy = failurePolicy == null ? FailurePolicy.DISABLE_MECHANISM : failurePolicy;
     }
 
     public int id() {
@@ -44,7 +51,12 @@ public record ImuDevice(
 
     public ImuDevice canbus(String canbus) {
         requireCan();
-        return new ImuDevice(kind, canbus, connection);
+        return new ImuDevice(kind, canbus, connection, failurePolicy);
+    }
+
+    /** Selects how Athena responds if this IMU cannot be created or stops responding. */
+    public ImuDevice failurePolicy(FailurePolicy policy) {
+        return new ImuDevice(kind, bus, connection, Objects.requireNonNull(policy, "policy"));
     }
 
     public String defaultName() {

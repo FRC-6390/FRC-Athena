@@ -11,6 +11,7 @@ import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
+import ca.frc6390.athena.api.FailurePolicy;
 
 /**
  * Runtime graph for camera declarations and cached vision measurements.
@@ -21,6 +22,7 @@ public final class VisionGraph {
     private List<Measurement> poseMeasurements = List.of();
     private List<Measurement> targetMeasurements = List.of();
     private boolean aggregateDirty;
+    private List<RefreshFailure> refreshFailures = List.of();
 
     private VisionGraph(Map<String, CameraRuntime> cameras) {
         this.cameras = Map.copyOf(cameras);
@@ -71,14 +73,31 @@ public final class VisionGraph {
     public void refresh() {
         List<Measurement> poses = new ArrayList<>();
         List<Measurement> targets = new ArrayList<>();
+        List<RefreshFailure> failures = new ArrayList<>();
         for (CameraRuntime camera : cameraList) {
-            camera.refresh();
+            try {
+                camera.refresh();
+            } catch (RuntimeException exception) {
+                camera.failed();
+                failures.add(new RefreshFailure(camera.camera(), exception));
+            }
             poses.addAll(camera.poseMeasurements());
             targets.addAll(camera.targetMeasurements());
         }
         poseMeasurements = poses.isEmpty() ? List.of() : List.copyOf(poses);
         targetMeasurements = targets.isEmpty() ? List.of() : List.copyOf(targets);
         aggregateDirty = false;
+        refreshFailures = failures.isEmpty() ? List.of() : List.copyOf(failures);
+    }
+
+    /** Returns camera failures captured during the latest refresh. */
+    public List<RefreshFailure> refreshFailures() {
+        return refreshFailures;
+    }
+
+    /** Suppresses future measurements from one camera declaration. */
+    public void disable(CameraDevice camera) {
+        camera(camera).disable();
     }
 
     /**
@@ -156,6 +175,7 @@ public final class VisionGraph {
         private final TargetSignal cachedTargetSignal;
         private List<Measurement> poseMeasurements = List.of();
         private List<Measurement> targetMeasurements = List.of();
+        private boolean disabled;
 
         private CameraRuntime(CameraDevice camera) {
             this.camera = Objects.requireNonNull(camera, "camera");
@@ -170,11 +190,32 @@ public final class VisionGraph {
          * Refreshes this camera's cached signal values.
          */
         public void refresh() {
+            if (disabled) {
+                poseMeasurements = List.of();
+                targetMeasurements = List.of();
+                return;
+            }
             poseMeasurements = snapshot(poseSignal.measurements());
             targetMeasurements = snapshot(targetSignal.measurements());
             if (owner != null) {
                 owner.aggregateDirty = true;
             }
+        }
+
+        private void failed() {
+            poseMeasurements = List.of();
+            targetMeasurements = List.of();
+            if (camera.failurePolicy() != FailurePolicy.WARN) {
+                disabled = true;
+            }
+            if (owner != null) {
+                owner.aggregateDirty = true;
+            }
+        }
+
+        private void disable() {
+            disabled = true;
+            failed();
         }
 
         /**
@@ -279,5 +320,13 @@ public final class VisionGraph {
 
     private static List<Measurement> snapshot(List<Measurement> measurements) {
         return measurements == null || measurements.isEmpty() ? List.of() : List.copyOf(measurements);
+    }
+
+    /** One camera refresh failure captured without aborting other cameras. */
+    public record RefreshFailure(CameraDevice camera, RuntimeException exception) {
+        public RefreshFailure {
+            Objects.requireNonNull(camera, "camera");
+            Objects.requireNonNull(exception, "exception");
+        }
     }
 }

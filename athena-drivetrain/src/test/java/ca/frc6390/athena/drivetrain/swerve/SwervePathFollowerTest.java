@@ -1,6 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
@@ -11,6 +12,8 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.control.RobotVelocityPool;
+import ca.frc6390.athena.runtime.control.VelocityFrame;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,8 +35,8 @@ class SwervePathFollowerTest {
 
         RobotVelocity actual = follower.calculateVelocity(new SwervePathSample(
                 new Pose2d(2.0, 4.0, Rotation2d.fromDegrees(-179.0)),
-                new RobotVelocity(0.5, -0.25, 0.1)), 0.02);
-        RobotVelocity expected = new RobotVelocity(
+                RobotVelocity.field(0.5, -0.25, 0.1)), 0.02);
+        RobotVelocity expected = RobotVelocity.field(
                 2.5, 3.75, 0.1 + 3.0 * Math.toRadians(2.0))
                 .fieldToRobot(Math.toRadians(179.0));
 
@@ -56,7 +59,8 @@ class SwervePathFollowerTest {
                 translation,
                 PidGains.of(0.0, 0.0, 0.0));
         SwervePathSample sample = new SwervePathSample(
-                new Pose2d(2.0, 0.0, new Rotation2d()), RobotVelocity.zero());
+                new Pose2d(2.0, 0.0, new Rotation2d()),
+                RobotVelocity.zero(VelocityFrame.FIELD));
 
         assertEquals(2.0, follower.calculateVelocity(sample, 0.02).xMetersPerSecond(), 1.0e-9);
         follower.telemetry().get("translation/p").set(3.0);
@@ -68,6 +72,30 @@ class SwervePathFollowerTest {
         Action reset = follower.resetPose(resetTarget);
         ((Actions.DoOnce) reset).action().run();
         assertEquals(resetTarget, pose.get());
+    }
+
+    @Test
+    void pooledFollowerPublishesVelocityReturnsSharedDriveAndClearsOnStop() {
+        SwerveKinematics kinematics = kinematics();
+        RobotVelocityPool pool = new RobotVelocityPool();
+        RobotVelocityPool.Channel auto = pool.channel();
+        Action sharedDrive = kinematics.drive(pool, () -> 0.0);
+        SwervePathFollower follower = kinematics.follow(
+                FollowerBackend.CHOREO,
+                Pose2d::new,
+                ignored -> Actions.doOnce(() -> { }),
+                PidGains.of(0.0, 0.0, 0.0),
+                PidGains.of(0.0, 0.0, 0.0))
+                .pooled(auto, sharedDrive);
+
+        Action output = follower.follow(new SwervePathSample(
+                new Pose2d(),
+                RobotVelocity.field(1.5, -0.25, 0.4)), 0.02);
+
+        assertSame(sharedDrive, output);
+        assertEquals(RobotVelocity.robot(1.5, -0.25, 0.4), auto.velocity());
+        follower.stop();
+        assertFalse(auto.isActive());
     }
 
     private static SwerveKinematics kinematics() {

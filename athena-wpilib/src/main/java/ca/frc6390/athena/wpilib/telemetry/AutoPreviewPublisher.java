@@ -17,6 +17,7 @@ import java.util.Objects;
 /** Publishes a selected auto's Action plan and AdvantageScope-compatible path geometry. */
 public final class AutoPreviewPublisher implements AutoCloseable {
     private static final String ROOT = "/Athena/Auto";
+    private static final AutoPreview EMPTY_PREVIEW = new AutoPreview("", List.of(), List.of());
     private final StringPublisher selected;
     private final StringPublisher running;
     private final StringArrayPublisher plan;
@@ -27,6 +28,8 @@ public final class AutoPreviewPublisher implements AutoCloseable {
     private final NetworkTableInstance networkTables;
     private final Map<String, StructArrayPublisher<Pose2d>> pathPublishers = new LinkedHashMap<>();
     private String lastSignature = "";
+    private List<AutoPreview> lastPreviews;
+    private String lastRunningName = "";
 
     public AutoPreviewPublisher() { this(NetworkTableInstance.getDefault()); }
 
@@ -43,9 +46,12 @@ public final class AutoPreviewPublisher implements AutoCloseable {
 
     /** Publishes only when selection or declarative plan geometry changes. */
     public void publish(List<AutoPreview> previews, String runningName) {
-        AutoPreview preview = previews == null || previews.isEmpty()
-                ? new AutoPreview("", List.of(), List.of()) : previews.get(0);
         String safeRunningName = runningName == null ? "" : runningName;
+        if (previews == lastPreviews && lastRunningName.equals(safeRunningName)) return;
+        lastPreviews = previews;
+        lastRunningName = safeRunningName;
+        AutoPreview preview = previews == null || previews.isEmpty()
+                ? EMPTY_PREVIEW : previews.get(0);
         String signature = signature(preview) + ":" + safeRunningName;
         if (lastSignature.equals(signature)) return;
         lastSignature = signature;

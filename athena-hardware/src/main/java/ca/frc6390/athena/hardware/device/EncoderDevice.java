@@ -5,6 +5,7 @@ import java.util.Objects;
 
 import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
@@ -24,8 +25,19 @@ public record EncoderDevice(
         double gearRatio,
         double conversion,
         double offset,
-        EncoderUnit units) implements PositionSignal, VelocitySignal {
+        EncoderUnit units,
+        FailurePolicy failurePolicy) implements PositionSignal, VelocitySignal {
     private static final RuntimeBindings<EncoderDevice, EncoderHandle> RUNTIMES = new RuntimeBindings<>();
+
+    public EncoderDevice(
+            EncoderSource source,
+            boolean isInverted,
+            double gearRatio,
+            double conversion,
+            double offset,
+            EncoderUnit units) {
+        this(source, isInverted, gearRatio, conversion, offset, units, FailurePolicy.DISABLE_MECHANISM);
+    }
 
     public static EncoderDevice of(EncoderKind kind, int id) {
         return connected(kind, "rio", new HardwareAddress.Can(id));
@@ -38,7 +50,8 @@ public record EncoderDevice(
                 1.0,
                 1.0,
                 0.0,
-                EncoderUnit.RAW);
+                EncoderUnit.RAW,
+                FailurePolicy.DISABLE_MECHANISM);
     }
 
     static EncoderDevice integratedMotor(MotorDevice motor) {
@@ -48,7 +61,8 @@ public record EncoderDevice(
                 1.0,
                 1.0,
                 0.0,
-                EncoderUnit.RAW);
+                EncoderUnit.RAW,
+                motor.failurePolicy());
     }
 
     static EncoderDevice motorAbsolute(MotorDevice motor) {
@@ -58,7 +72,8 @@ public record EncoderDevice(
                 1.0,
                 1.0,
                 0.0,
-                EncoderUnit.RAW);
+                EncoderUnit.RAW,
+                motor.failurePolicy());
     }
 
     public EncoderDevice {
@@ -73,6 +88,7 @@ public record EncoderDevice(
             throw new IllegalArgumentException("Encoder offset must be finite.");
         }
         units = units == null ? EncoderUnit.RAW : units;
+        failurePolicy = failurePolicy == null ? FailurePolicy.DISABLE_MECHANISM : failurePolicy;
     }
 
     public EncoderKind kind() {
@@ -121,7 +137,8 @@ public record EncoderDevice(
                     gearRatio,
                     conversion,
                     offset,
-                    units);
+                    units,
+                    failurePolicy);
         }
         return this;
     }
@@ -131,11 +148,11 @@ public record EncoderDevice(
     }
 
     public EncoderDevice inverted(boolean inverted) {
-        return new EncoderDevice(source, inverted, gearRatio, conversion, offset, units);
+        return new EncoderDevice(source, inverted, gearRatio, conversion, offset, units, failurePolicy);
     }
 
     public EncoderDevice gearRatio(double gearRatio) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy);
     }
 
     public EncoderDevice gearRatio(GearRatio gearRatio) {
@@ -144,7 +161,7 @@ public record EncoderDevice(
     }
 
     public EncoderDevice conversion(double conversion) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy);
     }
 
     public EncoderDevice wheelDiameterMeters(double diameterMeters) {
@@ -159,11 +176,17 @@ public record EncoderDevice(
     }
 
     public EncoderDevice units(EncoderUnit units) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy);
     }
 
     public EncoderDevice offset(double offset) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy);
+    }
+
+    /** Selects how Athena responds if this encoder cannot be created or stops responding. */
+    public EncoderDevice failurePolicy(FailurePolicy policy) {
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units,
+                Objects.requireNonNull(policy, "policy"));
     }
 
     /**

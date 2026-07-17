@@ -7,6 +7,7 @@ import java.util.function.DoubleSupplier;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.api.hardware.MotorControllerKind;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.hardware.vendor.VendorOptions;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
@@ -41,7 +42,8 @@ public record MotorDevice(
         int statorCurrentLimitAmps,
         VendorOptions vendorOptions,
         MotorFollowerBinding follower,
-        boolean isDisabled) {
+        boolean isDisabled,
+        FailurePolicy failurePolicy) {
     private static final RuntimeBindings<MotorDevice, RuntimeMotor> RUNTIMES = new RuntimeBindings<>();
     /**
      * Creates a motor ref on the default roboRIO CAN bus.
@@ -52,7 +54,7 @@ public record MotorDevice(
      */
     public static MotorDevice of(MotorKind kind, int id) {
         return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST,
-                0, 0, 0, VendorOptions.empty(), null, false);
+                0, 0, 0, VendorOptions.empty(), null, false, FailurePolicy.DISABLE_MECHANISM);
     }
 
     /** Creates a motor with an explicit controller and physical motor pairing. */
@@ -69,6 +71,7 @@ public record MotorDevice(
             throw new IllegalArgumentException("Motor current limits cannot be negative.");
         }
         vendorOptions = vendorOptions == null ? VendorOptions.empty() : vendorOptions;
+        failurePolicy = failurePolicy == null ? FailurePolicy.DISABLE_MECHANISM : failurePolicy;
     }
 
     public MotorDevice(
@@ -83,7 +86,17 @@ public record MotorDevice(
             MotorNeutralMode neutralMode, int currentLimitAmps,
             VendorOptions vendorOptions, MotorFollowerBinding follower, boolean isDisabled) {
         this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                0, 0, vendorOptions, follower, isDisabled);
+                0, 0, vendorOptions, follower, isDisabled, FailurePolicy.DISABLE_MECHANISM);
+    }
+
+    public MotorDevice(
+            MotorKind kind, int id, String canbus, boolean isInverted,
+            MotorNeutralMode neutralMode, int currentLimitAmps,
+            int supplyCurrentLimitAmps, int statorCurrentLimitAmps,
+            VendorOptions vendorOptions, MotorFollowerBinding follower, boolean isDisabled) {
+        this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower,
+                isDisabled, FailurePolicy.DISABLE_MECHANISM);
     }
 
     public MotorDevice disabled() {
@@ -93,7 +106,14 @@ public record MotorDevice(
     public MotorDevice disabled(boolean disabled) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode,
                 currentLimitAmps, supplyCurrentLimitAmps, statorCurrentLimitAmps,
-                vendorOptions, follower, disabled);
+                vendorOptions, follower, disabled, failurePolicy);
+    }
+
+    /** Selects how Athena responds if this motor cannot be created or stops responding. */
+    public MotorDevice failurePolicy(FailurePolicy policy) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode,
+                currentLimitAmps, supplyCurrentLimitAmps, statorCurrentLimitAmps,
+                vendorOptions, follower, isDisabled, Objects.requireNonNull(policy, "policy"));
     }
 
     /**
@@ -144,7 +164,7 @@ public record MotorDevice(
     public MotorDevice canbus(String canbus) {
         return new MotorDevice(
                 kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
     }
 
     /**
@@ -156,7 +176,7 @@ public record MotorDevice(
     public MotorDevice inverted(boolean inverted) {
         return new MotorDevice(
                 kind, id, canbus, inverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
     }
 
     /**
@@ -195,7 +215,7 @@ public record MotorDevice(
     public MotorDevice neutralMode(MotorNeutralMode neutralMode) {
         return new MotorDevice(
                 kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
     }
 
     /**
@@ -209,7 +229,7 @@ public record MotorDevice(
      */
     public MotorDevice currentLimit(int amps) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode, amps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
     }
 
     /**
@@ -224,7 +244,7 @@ public record MotorDevice(
      */
     public MotorDevice supplyCurrentLimit(int amps) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                amps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled);
+                amps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
     }
 
     /**
@@ -239,7 +259,7 @@ public record MotorDevice(
      */
     public MotorDevice statorCurrentLimit(int amps) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, amps, vendorOptions, follower, isDisabled);
+                supplyCurrentLimitAmps, amps, vendorOptions, follower, isDisabled, failurePolicy);
     }
 
     /** Returns the effective supply and stator limits used by Athena. */
@@ -337,7 +357,8 @@ public record MotorDevice(
                 statorCurrentLimitAmps,
                 vendorOptions,
                 new MotorFollowerBinding(leader),
-                isDisabled);
+                isDisabled,
+                failurePolicy);
     }
 
     /** Returns this motor without a hardware follower declaration. */
@@ -353,7 +374,8 @@ public record MotorDevice(
                 statorCurrentLimitAmps,
                 vendorOptions,
                 null,
-                isDisabled);
+                isDisabled,
+                failurePolicy);
     }
 
     public String defaultName() {
@@ -385,7 +407,8 @@ public record MotorDevice(
                     statorCurrentLimitAmps,
                     vendorOptions.with(optionType, options),
                     follower,
-                    isDisabled);
+                    isDisabled,
+                    failurePolicy);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalArgumentException(
                     "Vendor option type must expose a no-argument constructor: " + optionType.getName(),

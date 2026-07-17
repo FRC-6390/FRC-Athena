@@ -11,9 +11,10 @@ import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.mechanism.core.Action;
-import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.control.RobotVelocityPool;
+import edu.wpi.first.wpilibj.DriverStation;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 
@@ -37,6 +38,15 @@ public final class DriveTrain implements Mechanism {
             backLeft,
             backRight);
     public final SwerveOdometry odometry = kinematics.odometry(heading);
+    public final RobotVelocityPool velocity = new RobotVelocityPool();
+    public final RobotVelocityPool.Channel driverVelocity = velocity.channel()
+            .enabled(DriverStation::isTeleopEnabled);
+    public final RobotVelocityPool.Channel targetingVelocity = velocity.channel()
+            .enabled(DriverStation::isTeleopEnabled);
+    private DoubleSupplier fieldHeadingRadians = () -> Math.toRadians(heading.yawDegrees());
+    public final Action pooledDrive = kinematics.drive(
+            velocity,
+            () -> fieldHeadingRadians.getAsDouble());
 
     public Action drive(
             DoubleSupplier forward,
@@ -44,16 +54,21 @@ public final class DriveTrain implements Mechanism {
             DoubleSupplier rotation,
             BooleanSupplier fieldOriented,
             DoubleSupplier fieldHeadingRadians) {
-        return Actions.compute(() -> {
-            RobotVelocity velocity = new RobotVelocity(
+        this.fieldHeadingRadians = fieldHeadingRadians;
+        driverVelocity.set(() -> {
+            RobotVelocity requested = RobotVelocity.robot(
                     linearSpeed(forward.getAsDouble()),
                     linearSpeed(strafe.getAsDouble()),
                     rotationSpeed(rotation.getAsDouble()));
             if (fieldOriented.getAsBoolean()) {
-                velocity = velocity.fieldToRobot(fieldHeadingRadians.getAsDouble());
+                requested = RobotVelocity.field(
+                        requested.xMetersPerSecond(),
+                        requested.yMetersPerSecond(),
+                        requested.angularRadiansPerSecond());
             }
-            return kinematics.drive(velocity);
+            return requested;
         });
+        return pooledDrive;
     }
 
     private static SwerveModule module(

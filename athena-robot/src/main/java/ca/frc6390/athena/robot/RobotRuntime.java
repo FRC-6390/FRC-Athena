@@ -10,7 +10,9 @@ import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.mechanism.core.EventContext;
@@ -74,6 +76,8 @@ public final class RobotRuntime {
     private Function<DigitalInputDevice, BooleanSupplier> digitalInputResolver;
     private double localizationMaxAgeSeconds = Double.POSITIVE_INFINITY;
     private boolean localizationRefreshWhileDisabled;
+    private RuntimeFailureReporter failureReporter = RuntimeFailureReporter.stderr();
+    private final Set<String> reportedFailures = new LinkedHashSet<>();
 
     private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
         this.hardwareGraph = Objects.requireNonNull(hardwareGraph, "hardwareGraph");
@@ -118,6 +122,12 @@ public final class RobotRuntime {
      */
     public HardwareGraph hardwareGraph() {
         return hardwareGraph;
+    }
+
+    /** Selects where recoverable runtime failures are reported. */
+    public RobotRuntime failureReporter(RuntimeFailureReporter reporter) {
+        failureReporter = Objects.requireNonNull(reporter, "reporter");
+        return this;
     }
 
     /**
@@ -234,6 +244,7 @@ public final class RobotRuntime {
         mechanisms.motorDevices().stream().filter(motor -> !motor.isDisabled()).forEach(hardwareGraph::motor);
         mechanisms.encoderDevices().forEach(hardwareGraph::encoder);
         mechanisms.imuDevices().forEach(hardwareGraph::imu);
+        processHardwareBindingFailures();
         if (simulationSession != null) {
             registerSimulationModels();
             mechanisms.bindInMemoryRuntime();
@@ -332,7 +343,11 @@ public final class RobotRuntime {
                 if (simulation != null) {
                     simulation.bind(camera);
                 } else {
-                    CameraAdapters.bindDiscovered(camera);
+                    try {
+                        CameraAdapters.bindDiscovered(camera);
+                    } catch (RuntimeException exception) {
+                        handleFailure("camera", camera, camera.failurePolicy(), exception);
+                    }
                 }
             }
         }
@@ -353,7 +368,7 @@ public final class RobotRuntime {
         return VisionSimulations.createDiscovered(unboundCameras, simulationSession.visionField()).orElse(null);
     }
 
-    private static CameraDevice[] bindCameras(VisionSimulation simulation, CameraDevice... cameras) {
+    private CameraDevice[] bindCameras(VisionSimulation simulation, CameraDevice... cameras) {
         if (cameras == null || cameras.length == 0) {
             return cameras;
         }
@@ -365,9 +380,18 @@ public final class RobotRuntime {
             } else if (simulation != null) {
                 bound[i] = simulation.bind(camera);
             } else {
-                bound[i] = CameraAdapters.bindDiscovered(camera);
-                if (!bound[i].hasBoundSignals() && RuntimeDependencyChecks.enabled()) {
-                    throw new IllegalStateException(CameraAdapters.missingAdapterMessage(camera));
+                try {
+                    bound[i] = CameraAdapters.bindDiscovered(camera);
+                    if (!bound[i].hasBoundSignals() && RuntimeDependencyChecks.enabled()) {
+                        handleFailure(
+                                "camera",
+                                camera,
+                                camera.failurePolicy(),
+                                new IllegalStateException(CameraAdapters.missingAdapterMessage(camera)));
+                    }
+                } catch (RuntimeException exception) {
+                    bound[i] = camera;
+                    handleFailure("camera", camera, camera.failurePolicy(), exception);
                 }
             }
         }
@@ -568,6 +592,15 @@ public final class RobotRuntime {
         return this;
     }
 
+    /** Cancels a requested mechanism action. */
+    public RobotRuntime cancel(Action action) {
+        mechanisms.cancel(action);
+        return this;
+    }
+
+    public boolean isActionRunning(Action action) { return mechanisms.isRunning(action); }
+    public boolean isActionComplete(Action action) { return mechanisms.isComplete(action); }
+
     /**
      * Runs robot periodic.
      *
@@ -588,9 +621,16 @@ public final class RobotRuntime {
         return mechanisms.traceSnapshots();
     }
 
-    /** Returns mechanism-owned telemetry and live-tuning declarations. */
-    public Map<String, ca.frc6390.athena.mechanism.core.TelemetryValue> mechanismTelemetry() {
-        return mechanisms.telemetryValues();
+    /** Controls core trace materialization independently of a telemetry transport. */
+    public RobotRuntime mechanismTraceLevel(
+            ca.frc6390.athena.mechanism.core.MechanismTraceLevel level) {
+        mechanisms.traceLevel(level);
+        return this;
+    }
+
+    /** Returns the hierarchical mechanism-owned telemetry and live-tuning contract. */
+    public ca.frc6390.athena.mechanism.core.TelemetrySchema mechanismTelemetrySchema() {
+        return mechanisms.telemetrySchema();
     }
 
     /**
@@ -662,7 +702,7 @@ public final class RobotRuntime {
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
         workers.runDue(safeMechanismContext.nowSeconds());
         hardwareGraph.refreshInputs();
-        visionGraphs.forEach(VisionGraph::refresh);
+        refreshFailures();
         refreshLocalizations(safeMechanismContext);
         boolean autonomous = safeEventContext.mode() == LifecycleMode.AUTONOMOUS && safeEventContext.enabled();
         // Autonomous-init hooks select the routine. Start it on the first periodic cycle,
@@ -700,7 +740,7 @@ public final class RobotRuntime {
         MechanismContext mechanismContext = new MechanismContext(nowSeconds, 0.0, dtSeconds, enabled, autonomous, simulation);
         workers.runDue(nowSeconds);
         hardwareGraph.refreshInputs();
-        visionGraphs.forEach(VisionGraph::refresh);
+        refreshFailures();
         refreshLocalizations(mechanismContext);
         commands.periodic();
         EventContext eventContext = new EventContext(
@@ -719,7 +759,7 @@ public final class RobotRuntime {
         }
         simulationSession.step(dtSeconds);
         hardwareGraph.refreshInputs();
-        visionGraphs.forEach(VisionGraph::refresh);
+        refreshFailures();
         refreshLocalizations(new MechanismContext(
                 nowSeconds + dtSeconds,
                 0.0,
@@ -734,6 +774,82 @@ public final class RobotRuntime {
             return simulationSession.withDigitalInputs(() -> mechanisms.periodic(mechanismContext, eventContext));
         }
         return mechanisms.periodic(mechanismContext, eventContext);
+    }
+
+    private void processHardwareBindingFailures() {
+        for (HardwareGraph.BindingFailure failure : hardwareGraph.bindingFailures()) {
+            handleHardwareFailure("binding", failure.declaration(), failure.exception());
+        }
+    }
+
+    private void refreshFailures() {
+        for (HardwareGraph.BindingFailure failure : hardwareGraph.drainOperationFailures()) {
+            handleHardwareFailure("operation", failure.declaration(), failure.exception());
+        }
+        for (HardwareGraph.RefreshFailure failure : hardwareGraph.refreshFailures()) {
+            handleHardwareFailure("refresh", failure.declaration(), failure.exception());
+        }
+        for (VisionGraph graph : visionGraphs) {
+            graph.refresh();
+            for (VisionGraph.RefreshFailure failure : graph.refreshFailures()) {
+                handleFailure("camera", failure.camera(), failure.camera().failurePolicy(), failure.exception());
+            }
+        }
+    }
+
+    private void handleHardwareFailure(String phase, Object declaration, RuntimeException exception) {
+        FailurePolicy policy;
+        String type;
+        if (declaration instanceof MotorDevice motor) {
+            policy = motor.failurePolicy();
+            type = "motor";
+        } else if (declaration instanceof EncoderDevice encoder) {
+            policy = encoder.failurePolicy();
+            type = "encoder";
+        } else if (declaration instanceof ImuDevice imu) {
+            policy = imu.failurePolicy();
+            type = "IMU";
+        } else {
+            policy = FailurePolicy.DISABLE_MECHANISM;
+            type = "hardware";
+        }
+        handleFailure(type + " " + phase, declaration, policy, exception);
+    }
+
+    private void handleFailure(
+            String type,
+            Object declaration,
+            FailurePolicy policy,
+            RuntimeException exception) {
+        if (policy == FailurePolicy.PANIC) {
+            throw exception;
+        }
+        if (policy == FailurePolicy.DISABLE_DEVICE) {
+            mechanisms.disableDeclaration(declaration);
+        } else if (policy == FailurePolicy.DISABLE_MECHANISM
+                && !mechanisms.disableOwner(declaration)) {
+            mechanisms.disableDeclaration(declaration);
+        }
+        String identity = declarationIdentity(declaration);
+        String message = "Athena " + type + " failure for " + identity
+                + "; policy=" + policy + ". " + exception.getMessage();
+        String key = type + ":" + identity + ":" + exception.getClass().getName();
+        if (!reportedFailures.add(key)) {
+            return;
+        }
+        if (policy == FailurePolicy.WARN) {
+            failureReporter.warning(message, exception);
+        } else {
+            failureReporter.error(message, exception);
+        }
+    }
+
+    private static String declarationIdentity(Object declaration) {
+        if (declaration instanceof MotorDevice motor) return motor.defaultName();
+        if (declaration instanceof EncoderDevice encoder) return encoder.defaultName();
+        if (declaration instanceof ImuDevice imu) return imu.defaultName();
+        if (declaration instanceof CameraDevice camera) return camera.kind().key() + ":" + camera.name();
+        return declaration.getClass().getSimpleName();
     }
 
     private void startAutos() {

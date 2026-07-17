@@ -10,9 +10,13 @@ import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.core.Telemetry;
+import ca.frc6390.athena.mechanism.interpolation.InterpolationKinds;
 import frc.robot.Constants;
 
 public final class VelocityShooter implements Mechanism {
+    @Telemetry(value = "shotDistanceMeters", writable = true, min = 1.0, max = 8.0)
+    public double shotDistanceMeters = 3.0;
     private final MotorDevice leader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 1).coast();
     private final MotorDevice follower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 2)
             .follow(leader)
@@ -32,5 +36,15 @@ public final class VelocityShooter implements Mechanism {
     public final Action stop = wheel.neutral();
     public final Action idle = wheel.velocity(35.0);
     public final Action podium = wheel.velocity(78.0).untilWithin(2.0);
+    public final Action distanceShot = wheel.interpolate(InterpolationKinds.LINEAR, () -> shotDistanceMeters)
+            .at(1.0, 45.0)
+            .at(3.0, 68.0)
+            .at(5.0, 82.0)
+            .at(8.0, 96.0);
     public final Action reverse = wheel.velocity(-25.0);
+
+    @Telemetry("measuredVelocityRps")
+    public double measuredVelocity() {
+        return velocity.velocity();
+    }
 }

@@ -10,7 +10,6 @@ import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
-import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import frc.robot.Constants;
 
 public final class PositionElevator implements Mechanism {
@@ -22,8 +21,7 @@ public final class PositionElevator implements Mechanism {
     private final ControlBinding lift = Controls.position(motor)
             .feedback(height)
             .pid(6.0, 0.0, 0.0)
-            .constraint(Constraints.range(travel))
-            .profile(MotionProfiles.trapezoid(0.8, 1.8));
+            .constraints(Constraints.range(travel), Constraints.motion(0.8, 1.8));
 
     public final Action home = lift.position(0.0).untilWithin(0.03);
     public final Action low = lift.position(0.35).untilWithin(0.03);

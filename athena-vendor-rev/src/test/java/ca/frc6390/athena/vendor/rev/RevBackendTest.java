@@ -13,6 +13,7 @@ import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
+import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.HardwareBus;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -25,6 +26,20 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class RevBackendTest {
+    @Test
+    void runtimeMotorConfigurationIsAppliedWithoutReplacingTheDeclaration() {
+        RecordingSparkController controller = new RecordingSparkController();
+        MotorDevice declaration = MotorDevice.of(MotorKinds.NEO, 18).coast();
+        RevMotorHandle handle = new RevMotorHandle(declaration, new RevMotorOptions(), controller);
+        MotorRuntimeConfig runtime = new MotorRuntimeConfig(MotorNeutralMode.BRAKE, true, 31, 42);
+
+        handle.applyRuntimeConfiguration(runtime);
+
+        assertTrue(handle.supportsRuntimeConfiguration());
+        assertEquals(MotorNeutralMode.COAST, handle.device().neutralMode());
+        assertEquals(runtime, controller.runtimeConfiguration);
+    }
+
     @Test
     void motorBackendSupportsBuiltInAndEquivalentKeys() {
         RevMotorBackend backend = new RevMotorBackend();
@@ -394,12 +409,19 @@ class RevBackendTest {
         private MotorDevice followDevice;
         private int enableAbsoluteEncoderCalls;
         private boolean closed;
+        private MotorRuntimeConfig runtimeConfiguration;
 
         @Override
         public boolean configure(MotorDevice device, RevMotorOptions options) {
             configureCalls++;
             this.device = device;
             this.options = options;
+            return true;
+        }
+
+        @Override
+        public boolean configureRuntime(MotorRuntimeConfig configuration, boolean brushless) {
+            runtimeConfiguration = configuration;
             return true;
         }
 

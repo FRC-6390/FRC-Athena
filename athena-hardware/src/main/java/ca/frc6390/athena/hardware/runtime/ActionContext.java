@@ -50,6 +50,11 @@ public interface ActionContext {
         throw new UnsupportedOperationException("Runtime IMU access is not available.");
     }
 
+    /** Records a recoverable runtime hardware operation failure. */
+    default void hardwareFailure(Object declaration, RuntimeException exception) {
+        // Contexts without an owning hardware graph have nowhere to publish failures.
+    }
+
     /**
      * Empty context for tests that only execute pure runnable actions.
      *

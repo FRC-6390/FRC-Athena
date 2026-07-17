@@ -18,6 +18,7 @@ import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.hardware.backend.BackendRegistry;
 import ca.frc6390.athena.hardware.backend.EncoderBackend;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
@@ -277,12 +278,15 @@ class HardwareGraphTest {
     }
 
     @Test
-    void missingBackendsAndDefaultHandleMethodsFailFast() {
+    void panicPolicyAndDefaultHandleMethodsFailFast() {
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(), List.of(), List.of()));
 
-        assertThrows(IllegalStateException.class, () -> graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 1)));
-        assertThrows(IllegalStateException.class, () -> graph.encoder(EncoderDevice.of(EncoderKinds.CANCODER, 1)));
-        assertThrows(IllegalStateException.class, () -> graph.imu(ImuDevice.of(ImuKinds.PIGEON_2, 1)));
+        assertThrows(IllegalStateException.class, () -> graph.motor(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 1).failurePolicy(FailurePolicy.PANIC)));
+        assertThrows(IllegalStateException.class, () -> graph.encoder(
+                EncoderDevice.of(EncoderKinds.CANCODER, 1).failurePolicy(FailurePolicy.PANIC)));
+        assertThrows(IllegalStateException.class, () -> graph.imu(
+                ImuDevice.of(ImuKinds.PIGEON_2, 1).failurePolicy(FailurePolicy.PANIC)));
 
         MotorHandle defaultMotor = new MotorHandle() {
             @Override
@@ -441,6 +445,23 @@ class HardwareGraphTest {
         assertEquals(limit, simLimit.sensor());
         assertEquals(1.5, simLimit.position(), 1.0e-9);
         assertEquals(0.1, simLimit.tolerance(), 1.0e-9);
+    }
+
+    @Test
+    void missingBackendUsesSafeHandleByDefaultButPanicPropagates() {
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(), List.of(), List.of()));
+        MotorDevice tolerant = MotorDevice.of(MotorKinds.KRAKEN_X60, 31);
+
+        MotorHandle handle = graph.motor(tolerant);
+        handle.setVoltage(12.0);
+
+        assertEquals(0.0, handle.appliedVoltage());
+        assertEquals(1, graph.bindingFailures().size());
+        assertSame(tolerant, graph.bindingFailures().get(0).declaration());
+
+        MotorDevice panic = MotorDevice.of(MotorKinds.KRAKEN_X60, 32)
+                .failurePolicy(FailurePolicy.PANIC);
+        assertThrows(IllegalStateException.class, () -> graph.motor(panic));
     }
 
     private static final class FakeMotorBackend implements MotorBackend {

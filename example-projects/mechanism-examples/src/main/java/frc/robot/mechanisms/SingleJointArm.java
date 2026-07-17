@@ -11,7 +11,6 @@ import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
-import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import frc.robot.Constants;
 
 public final class SingleJointArm implements Mechanism {
@@ -21,8 +20,7 @@ public final class SingleJointArm implements Mechanism {
     private final ControlBinding position = Controls.position(motor)
             .feedback(encoder)
             .pid(0.84, 0.0, 0.024)
-            .constraint(Constraints.range(travel))
-            .profile(MotionProfiles.trapezoid(90.0, 220.0));
+            .constraints(Constraints.range(travel), Constraints.motion(90.0, 220.0));
 
     public final Action stow = position.position(0.0).untilWithin(2.0);
     public final Action pickup = position.position(35.0).untilWithin(2.0);

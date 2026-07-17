@@ -13,7 +13,6 @@ import ca.frc6390.athena.mechanism.core.Events;
 import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
-import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import frc.robot.Constants;
 import java.util.function.BooleanSupplier;
 
@@ -30,8 +29,11 @@ public final class GuardedArm implements Mechanism {
     private final ControlBinding position = Controls.position(motor)
             .feedback(motor.encoder())
             .pid(0.72, 0.0, 0.0)
-            .constraints(Constraints.range(travel), Constraints.lower(home), Constraints.upper(hardStop))
-            .profile(MotionProfiles.trapezoid(70.0, 180.0));
+            .constraints(
+                    Constraints.range(travel),
+                    Constraints.lower(home),
+                    Constraints.upper(hardStop),
+                    Constraints.motion(70.0, 180.0));
 
     @SuppressWarnings("unused")
     public final HookBinding zeroWhenHomed = Events.when(home).rising().onStart(motor.encoder().setPosition(0.0));

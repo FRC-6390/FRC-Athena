@@ -5,6 +5,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 
 /** Converts cached annotated members into the existing telemetry runtime representation. */
 final class AnnotatedTelemetry {
@@ -24,6 +27,12 @@ final class AnnotatedTelemetry {
         }
 
         if (!annotation.writable()) {
+            if (type.isPrimitive() && isNumber(type)) {
+                return TelemetryValue.number(() -> readPrimitiveNumber(field, instance));
+            }
+            if (type == boolean.class) {
+                return TelemetryValue.bool(() -> readPrimitiveBoolean(field, instance));
+            }
             return readOnly(type, () -> read(field, instance), field);
         }
         if (Modifier.isFinal(field.getModifiers())) {
@@ -35,16 +44,32 @@ final class AnnotatedTelemetry {
         if (isNumber(type)) {
             requireBounds(annotation, field);
             return TelemetryValue.writableNumber(
-                    () -> ((Number) read(field, instance)).doubleValue(),
+                    type.isPrimitive()
+                            ? () -> readPrimitiveNumber(field, instance)
+                            : () -> ((Number) read(field, instance)).doubleValue(),
                     value -> writeNumber(field, instance, clamp(value, annotation.min(), annotation.max())));
         }
         if (type == boolean.class || type == Boolean.class) {
             if (hasBounds(annotation)) throw invalid(field, "boolean telemetry cannot have numeric bounds");
             return TelemetryValue.writableBoolean(
-                    () -> (Boolean) read(field, instance),
+                    type == boolean.class
+                            ? () -> readPrimitiveBoolean(field, instance)
+                            : () -> (Boolean) read(field, instance),
                     value -> write(field, instance, value));
         }
-        throw invalid(field, "writable telemetry supports only numeric and boolean fields");
+        if (type == String.class) {
+            if (hasBounds(annotation)) throw invalid(field, "string telemetry cannot have numeric bounds");
+            return TelemetryValue.writableString(
+                    () -> String.valueOf(read(field, instance)),
+                    value -> write(field, instance, value));
+        }
+        if (type.isEnum()) {
+            if (hasBounds(annotation)) throw invalid(field, "enum telemetry cannot have numeric bounds");
+            return TelemetryValue.writableString(
+                    () -> String.valueOf(read(field, instance)),
+                    value -> write(field, instance, enumValue(type, value, field)));
+        }
+        throw invalid(field, "writable telemetry supports numeric, boolean, string, and enum fields");
     }
 
     static TelemetryValue method(Method method, Object instance, Telemetry annotation) {
@@ -61,7 +86,18 @@ final class AnnotatedTelemetry {
             throw invalid(method, "read-only telemetry method cannot have writable bounds");
         }
         makeAccessible(method, instance);
-        return readOnly(method.getReturnType(), () -> invoke(method, instance), method);
+        MethodHandle handle = methodHandle(method, instance);
+        Class<?> type = method.getReturnType();
+        if (isNumber(type)) {
+            MethodHandle numeric = handle.asType(MethodType.methodType(double.class));
+            return TelemetryValue.number(() -> invokeNumber(numeric, method));
+        }
+        if (type == boolean.class || type == Boolean.class) {
+            MethodHandle bool = handle.asType(MethodType.methodType(boolean.class));
+            return TelemetryValue.bool(() -> invokeBoolean(bool, method));
+        }
+        MethodHandle object = handle.asType(MethodType.methodType(Object.class));
+        return readOnly(type, () -> invokeObject(object, method), method);
     }
 
     static String name(String fallback, Telemetry annotation) {
@@ -100,6 +136,15 @@ final class AnnotatedTelemetry {
                 || type == float.class || type == double.class || Number.class.isAssignableFrom(type);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Object enumValue(Class<?> type, String value, Field field) {
+        String requested = value == null ? "" : value.trim();
+        for (Object constant : type.getEnumConstants()) {
+            if (((Enum<?>) constant).name().equalsIgnoreCase(requested)) return constant;
+        }
+        throw invalid(field, "unknown " + type.getSimpleName() + " value '" + requested + "'");
+    }
+
     private static void writeNumber(Field field, Object instance, double value) {
         if (!Double.isFinite(value)) return;
         Class<?> type = field.getType();
@@ -128,17 +173,50 @@ final class AnnotatedTelemetry {
         }
     }
 
-    private static Object invoke(Method method, Object instance) {
+    private static MethodHandle methodHandle(Method method, Object instance) {
         try {
-            return method.invoke(Modifier.isStatic(method.getModifiers()) ? null : instance);
+            MethodHandle handle = MethodHandles.lookup().unreflect(method);
+            return Modifier.isStatic(method.getModifiers()) ? handle : handle.bindTo(instance);
         } catch (IllegalAccessException exception) {
-            throw new IllegalStateException("Unable to invoke telemetry method " + method.getName(), exception);
-        } catch (InvocationTargetException exception) {
-            Throwable cause = exception.getCause();
-            if (cause instanceof RuntimeException runtime) throw runtime;
-            if (cause instanceof Error error) throw error;
-            throw new IllegalStateException("Telemetry method " + method.getName() + " failed", cause);
+            throw new IllegalStateException("Unable to bind telemetry method " + method.getName(), exception);
         }
+    }
+
+    private static double readPrimitiveNumber(Field field, Object instance) {
+        try {
+            return field.getDouble(Modifier.isStatic(field.getModifiers()) ? null : instance);
+        } catch (IllegalAccessException exception) {
+            throw new IllegalStateException("Unable to read telemetry field " + field.getName(), exception);
+        }
+    }
+
+    private static boolean readPrimitiveBoolean(Field field, Object instance) {
+        try {
+            return field.getBoolean(Modifier.isStatic(field.getModifiers()) ? null : instance);
+        } catch (IllegalAccessException exception) {
+            throw new IllegalStateException("Unable to read telemetry field " + field.getName(), exception);
+        }
+    }
+
+    private static double invokeNumber(MethodHandle handle, Method method) {
+        try { return (double) handle.invokeExact(); }
+        catch (Throwable failure) { throw invocationFailure(method, failure); }
+    }
+
+    private static boolean invokeBoolean(MethodHandle handle, Method method) {
+        try { return (boolean) handle.invokeExact(); }
+        catch (Throwable failure) { throw invocationFailure(method, failure); }
+    }
+
+    private static Object invokeObject(MethodHandle handle, Method method) {
+        try { return (Object) handle.invokeExact(); }
+        catch (Throwable failure) { throw invocationFailure(method, failure); }
+    }
+
+    private static RuntimeException invocationFailure(Method method, Throwable failure) {
+        if (failure instanceof RuntimeException runtime) return runtime;
+        if (failure instanceof Error error) throw error;
+        return new IllegalStateException("Telemetry method " + method.getName() + " failed", failure);
     }
 
     private static void makeAccessible(Field field, Object instance) {

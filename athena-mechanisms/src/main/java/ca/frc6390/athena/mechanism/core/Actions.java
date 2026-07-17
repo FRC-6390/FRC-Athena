@@ -8,6 +8,8 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.sysid.SysIdState;
+import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -78,6 +80,10 @@ public final class Actions {
         return new ImuSetYaw(imu, yawDegrees);
     }
 
+    static Action setYaw(ImuSource imu, DoubleSupplier yawDegrees) {
+        return new DynamicImuSetYaw(imu, yawDegrees);
+    }
+
     static Action then(DeviceAction action, DeviceAction next) {
         return new Action.Then(mechanismAction(action), mechanismAction(next));
     }
@@ -121,6 +127,17 @@ public final class Actions {
     /** Creates one direction of a control-binding SysId routine. */
     public static Action sysId(ControlSysId routine, SysIdState state) {
         return new ControlSysIdAction(routine, state);
+    }
+
+    /**
+     * Publishes one scoped velocity contribution while returning the shared drivetrain action.
+     * The channel is cleared automatically when this action stops running.
+     */
+    public static Action contributeVelocity(
+            RobotVelocityPool.Channel channel,
+            Supplier<RobotVelocity> velocity,
+            Action driveAction) {
+        return new VelocityContribution(channel, velocity, driveAction);
     }
 
     public static Action dynamic(Function<MechanismContext, Output> output) {
@@ -424,7 +441,33 @@ public final class Actions {
         }
     }
 
-    public record ImuSetYaw(ImuSource imu, double yawDegrees) implements Action {
+    public interface ImuYawMutation extends Action {
+        ImuSource imu();
+
+        double requestedYawDegrees();
+
+        @Override
+        default void apply(ActionContext context) {
+            imu().applyYaw(context, requestedYawDegrees());
+        }
+    }
+
+    public record VelocityContribution(
+            RobotVelocityPool.Channel channel,
+            Supplier<RobotVelocity> velocity,
+            Action driveAction) implements Action {
+        public VelocityContribution {
+            Objects.requireNonNull(channel, "channel");
+            Objects.requireNonNull(velocity, "velocity");
+            Objects.requireNonNull(driveAction, "driveAction");
+        }
+
+        RobotVelocity sample() {
+            return Objects.requireNonNull(velocity.get(), "velocity supplier returned null");
+        }
+    }
+
+    public record ImuSetYaw(ImuSource imu, double yawDegrees) implements ImuYawMutation {
         public ImuSetYaw {
             Objects.requireNonNull(imu, "imu");
             if (!Double.isFinite(yawDegrees)) {
@@ -432,8 +475,20 @@ public final class Actions {
             }
         }
         @Override
-        public void apply(ActionContext context) {
-            imu.applyYaw(context, yawDegrees);
+        public double requestedYawDegrees() {
+            return yawDegrees;
+        }
+    }
+
+    public record DynamicImuSetYaw(ImuSource imu, DoubleSupplier yawDegrees) implements ImuYawMutation {
+        public DynamicImuSetYaw {
+            Objects.requireNonNull(imu, "imu");
+            Objects.requireNonNull(yawDegrees, "yawDegrees");
+        }
+
+        @Override
+        public double requestedYawDegrees() {
+            return requireFinite(yawDegrees.getAsDouble(), "IMU yaw");
         }
     }
 

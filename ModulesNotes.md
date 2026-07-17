@@ -228,11 +228,10 @@
 ## athena-telemetry
 
 - [x] Code optimization: removed the public telemetry registry, key/value DTOs, sink, and NetworkTables writer wrappers instead of maintaining a second output system beside runtime signals.
-- [x] Runtime optimization: no telemetry publication loop remains. Future telemetry should consume runtime-owned graph data and publish through a sink boundary.
-- [x] Test surfaces needed: no telemetry tests are needed while the module is absent from the public 2027 API.
-  - [x] Future coverage is intentionally deferred unless telemetry returns through a final sink boundary.
-- [x] Upkeep: old telemetry examples and WPILib NetworkTables adapters are deleted.
-- [x] Architecture: telemetry is intentionally absent from the public 2027 surface. The correct replacement is a runtime `Sink`, not a standalone registry module.
+- [x] Runtime optimization: the replacement consumes the runtime-owned mechanism graph through `TelemetrySchema`; the old standalone telemetry module still has no publication loop.
+- [x] Test surfaces needed: mechanism ownership, typed custom values, writable setup controls, action scheduling, and NT4 schema publication are covered in `athena-mechanisms`, `athena-robot`, and `athena-wpilib`.
+- [x] Upkeep: old registry examples and writer wrappers remain deleted; current examples use mechanism declarations and `@Telemetry`.
+- [x] Architecture: telemetry is a hierarchical view of `RobotRuntime`, not a second registry. The WPILib adapter publishes that schema under `/Athena/Mechanisms`.
 
 ## athena-superstructure
 
@@ -274,7 +273,7 @@
   - [x] Added direct WPILib parity coverage in `athena-localization` for odometry, vision correction, delayed samples, and resets.
   - [x] Direct `TimedRobot` host construction is intentionally scoped to robot-style integration fixtures because WPILib robot-base construction terminates the Gradle test worker in this environment.
 - [x] Upkeep: `AthenaRobot` now imports `RobotRuntime` from `athena-robot`, not the mechanism slice.
-- [x] Architecture: WPILib is now an adapter/host boundary, not a place for command scheduling, telemetry, controller binding, or drivetrain runtime logic.
+- [x] Architecture: WPILib remains an adapter/host boundary. Its telemetry publisher maps the core mechanism schema and action lifecycle to NT4/Sendable APIs without owning telemetry declarations or mechanism scheduling.
 
 ## athena-vendor-photonvision
 
@@ -365,8 +364,9 @@
 
 - [x] Code optimization: old example Java sources were removed because they preserved deleted V3/spec/ref APIs.
 - [x] Runtime optimization: examples now run as a standalone GradleRIO workspace instead of an Athena root submodule.
-- [x] Gradle status: `example-projects` contains `blank`, `tank-drive`, and `swerve-drive`.
-- [x] Test surfaces needed: `./gradlew.bat -p example-projects build` compiles the example workspace against the published local Athena snapshot.
+- [x] Gradle status: `example-projects` contains eight standalone projects listed in `example-projects/README.md`.
+- [x] Test surfaces needed: root `compileExamples` publishes Athena locally and runs `build` in every standalone example.
+- [x] Coverage tracking: `example-projects/COVERAGE.md` maps supported team-facing APIs to compile-checked examples and identifies internal SPI that intentionally has no robot example.
 - [x] Upkeep: keep examples focused on current final API usage.
 - [x] Architecture: examples should demonstrate final API usage, not act as a compatibility layer for removed concepts.
 

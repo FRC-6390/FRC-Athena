@@ -41,7 +41,12 @@ public final class PidGains implements ControlLoop, TelemetrySource {
 
     public PidGains iZone(double value) { return new PidGains(p, i, d, value); }
 
-    @Override public ControlLoopRuntime bind(ControlLoopBinding binding) { return new Runtime(); }
+    /** Creates independent PID state backed by these live-editable gains. */
+    public PidController controller() { return new PidController(this); }
+
+    @Override public ControlLoopRuntime bind(ControlLoopBinding binding) {
+        return new Runtime(binding.control().continuousRange());
+    }
     @Override public ControlLoopRole role() { return ControlLoopRole.DEVICE_CONFIGURABLE; }
 
     @Override
@@ -74,63 +79,41 @@ public final class PidGains implements ControlLoop, TelemetrySource {
     }
 
     private final class Runtime implements ControlLoopRuntime {
-        private double integral;
-        private double previousMeasurement;
-        private boolean first = true;
-        private double proportionalVolts;
-        private double integralVolts;
-        private double derivativeVolts;
+        private final PidController controller;
+
+        private Runtime(ca.frc6390.athena.hardware.device.Range continuousRange) {
+            PidController configured = PidGains.this.controller()
+                    .outputRange(-MAX_OUTPUT_VOLTS, MAX_OUTPUT_VOLTS);
+            controller = continuousRange == null
+                    ? configured
+                    : configured.continuous(continuousRange.minimum(), continuousRange.maximum());
+        }
 
         @Override public void reset(ControlLoopContext context) {
-            integral = previousMeasurement = proportionalVolts = integralVolts = derivativeVolts = 0.0;
-            first = true;
+            controller.reset();
         }
 
         @Override public ControlOutput calculate(ControlLoopContext context) {
-            if (disabled) return ControlOutput.voltage(0.0);
             double measurement = context.request() instanceof Output.Velocity ? context.velocity() : context.position();
-            double error = context.target() - measurement;
-            if (!Double.isFinite(error)) return ControlOutput.neutral();
-            double dt = Double.isFinite(context.dtSeconds()) && context.dtSeconds() > 0.0
-                    ? context.dtSeconds() : 0.0;
-            double derivative = first || dt == 0.0 ? 0.0 : -(measurement - previousMeasurement) / dt;
-            if (dt > 0.0 && (iZone <= 0.0 || Math.abs(error) <= iZone)) {
-                integral = antiWindupIntegral(integral + error * dt, error, derivative);
-            } else if (iZone > 0.0 && Math.abs(error) > iZone) {
-                integral = 0.0;
+            if (!Double.isFinite(measurement) || !Double.isFinite(context.target())) {
+                return ControlOutput.neutral();
             }
-            first = false;
-            previousMeasurement = measurement;
-            proportionalVolts = p * error;
-            integralVolts = i * integral;
-            derivativeVolts = d * derivative;
-            return ControlOutput.voltage(proportionalVolts + integralVolts + derivativeVolts);
+            return ControlOutput.voltage(controller.calculate(
+                    measurement, context.target(), context.dtSeconds()));
         }
 
         @Override public ControlLoopTrace trace() {
-            return new ControlLoopTrace(proportionalVolts, integralVolts, derivativeVolts, 0, 0, 0, 0);
+            return new ControlLoopTrace(
+                    controller.proportionalOutput(),
+                    controller.integralOutput(),
+                    controller.derivativeOutput(),
+                    0, 0, 0, 0);
         }
 
         @Override public void applied(ControlLoopContext context, Output requested, Output applied) {
-            if (i == 0.0 || !(requested instanceof Output.Voltage requestedVoltage)
+            if (!(requested instanceof Output.Voltage requestedVoltage)
                     || !(applied instanceof Output.Voltage appliedVoltage)) return;
-            double excess = requestedVoltage.volts() - appliedVoltage.volts();
-            double volts = i * integral;
-            if (excess > 0.0 && volts > 0.0) integral -= Math.min(excess, volts) / i;
-            else if (excess < 0.0 && volts < 0.0) integral -= Math.max(excess, volts) / i;
-        }
-
-        private double antiWindupIntegral(double candidate, double error, double derivative) {
-            if (i == 0.0) return 0.0;
-            double nonIntegral = p * error + d * derivative;
-            double current = nonIntegral + i * integral;
-            double next = nonIntegral + i * candidate;
-            double delta = i * (candidate - integral);
-            if (next > MAX_OUTPUT_VOLTS && delta > 0.0)
-                return current < MAX_OUTPUT_VOLTS ? integral + (MAX_OUTPUT_VOLTS - current) / i : integral;
-            if (next < -MAX_OUTPUT_VOLTS && delta < 0.0)
-                return current > -MAX_OUTPUT_VOLTS ? integral + (-MAX_OUTPUT_VOLTS - current) / i : integral;
-            return candidate;
+            controller.applied(requestedVoltage.volts(), appliedVoltage.volts());
         }
     }
 }

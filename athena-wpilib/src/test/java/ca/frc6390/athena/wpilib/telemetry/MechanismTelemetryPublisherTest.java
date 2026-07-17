@@ -1,52 +1,146 @@
 package ca.frc6390.athena.wpilib.telemetry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.core.Telemetry;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
+import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
-import edu.wpi.first.networktables.NetworkTableInstance;
+import ca.frc6390.athena.sim.runtime.SimulationSession;
 import edu.wpi.first.math.geometry.Pose2d;
-import java.util.Map;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class MechanismTelemetryPublisherTest {
     @Test
-    void dashboardWritesUpdateTunableWithoutRepublishingCustomValuesEveryLoop() {
+    void publishesWritableCustomValuesUnderTheirOwningMechanism() {
+        DashboardMechanism mechanism = new DashboardMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
         NetworkTableInstance instance = NetworkTableInstance.create();
-        try {
-            TelemetryValue gain = TelemetryValue.number(2.0);
-            MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance);
-            TelemetryValue value = gain;
-            publisher.publish(Map.of("robot/shooter/p", value), 0.0);
-            assertEquals(2.0, instance.getEntry(
-                    "/Athena/Mechanisms/robot/shooter/p").getDouble(-1), 1e-9);
+        try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)) {
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.0);
+            String topic = "/Athena/Mechanisms/dashboardMechanism/Values/outputPercent";
+            assertEquals(0.2, instance.getEntry(topic).getDouble(-1), 1e-9);
 
-            instance.getEntry("/Athena/Mechanisms/robot/shooter/p").setDouble(3.5);
-            publisher.publish(Map.of("robot/shooter/p", value), 0.02);
-            assertEquals(3.5, gain.number(), 1e-9);
+            instance.getEntry(topic).setDouble(0.6);
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.02);
+            assertEquals(0.6, mechanism.outputPercent, 1e-9);
+
+            String restore = "/Athena/Mechanisms/dashboardMechanism/Devices/motor/Config/Restore";
+            instance.getEntry(restore).setBoolean(true);
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.04);
+            assertEquals(false, instance.getEntry(restore).getBoolean(true));
         } finally {
             instance.close();
         }
     }
 
     @Test
-    void rectangleGeometryPublishesAClosedPoseArrayForFieldVisualization() {
+    void publishesGeometryAndCommandSendableAtMechanismScopedPaths() {
+        DashboardMechanism mechanism = new DashboardMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
         NetworkTableInstance instance = NetworkTableInstance.create();
-        try (var subscriber = instance.getStructArrayTopic(
-                "/Athena/Mechanisms/robot/shooter/blueLeftTrenchZone",
-                Pose2d.struct).subscribe(new Pose2d[0])) {
-            MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance);
-            publisher.publish(Map.of(
-                    "robot/shooter/blueLeftTrenchZone",
-                    TelemetryValue.geometry(Rectangle2d.of(1.0, 2.0, 3.0, 4.0))), 0.0);
+        String geometryPath = "/Athena/Mechanisms/dashboardMechanism/Values/field/zone";
+        try (var geometry = instance.getStructArrayTopic(geometryPath, Pose2d.struct).subscribe(new Pose2d[0]);
+                MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)) {
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.0);
 
-            Pose2d[] outline = subscriber.get();
+            Pose2d[] outline = geometry.get();
             assertEquals(5, outline.length);
-            assertEquals(1.0, outline[0].getX(), 1e-9);
-            assertEquals(2.0, outline[0].getY(), 1e-9);
             assertEquals(outline[0], outline[outline.length - 1]);
+
+            String actionPath = "/Athena/Mechanisms/dashboardMechanism/Actions/run";
+            assertEquals("Command", instance.getEntry(actionPath + "/.type").getString(""));
+            assertEquals("run", instance.getEntry(actionPath + "/.name").getString(""));
+            assertEquals(mechanism.run.getClass().getSimpleName(),
+                    instance.getEntry(actionPath + "/ActionType").getString(""));
+            assertTrue(instance.getEntry(actionPath + "/Running").exists());
+            assertTrue(instance.getEntry(actionPath + "/Complete").exists());
+
+            instance.getEntry(actionPath + "/running").setBoolean(true);
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.02);
+            assertTrue(runtime.isActionRunning(mechanism.run));
+            instance.getEntry(actionPath + "/running").setBoolean(false);
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.04);
+            assertEquals(false, runtime.isActionRunning(mechanism.run));
+
+            var action = runtime.mechanismTelemetrySchema()
+                    .find("dashboardMechanism/Actions").orElseThrow().actions().get("run");
+            var command = new MechanismTelemetryPublisher.ActionCommand(action);
+            command.initialize();
+            assertTrue(runtime.isActionRunning(mechanism.run));
+            command.end(true);
+            assertEquals(false, runtime.isActionRunning(mechanism.run));
         } finally {
             instance.close();
+        }
+    }
+
+    @Test
+    void steadyStateSuppressesWritesAndWritableCallbacks() {
+        DashboardMechanism mechanism = new DashboardMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+        var schema = runtime.mechanismTelemetrySchema();
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)) {
+            String temperaturePath = "/Athena/Mechanisms/dashboardMechanism/Values/temperature";
+            String gainPath = "/Athena/Mechanisms/dashboardMechanism/Values/gain";
+            publisher.publish(schema, 0.0);
+            long initialChange = instance.getEntry(temperaturePath).getLastChange();
+
+            for (int index = 1; index <= 20; index++) publisher.publish(schema, index * 0.02);
+            assertEquals(initialChange, instance.getEntry(temperaturePath).getLastChange());
+            assertEquals(0, mechanism.gainWrites.get());
+
+            mechanism.temperature = 42.0;
+            publisher.publish(schema, 0.5);
+            assertTrue(instance.getEntry(temperaturePath).getLastChange() > initialChange);
+
+            instance.getEntry(gainPath).setDouble(3.0);
+            publisher.publish(schema, 0.52);
+            publisher.publish(schema, 0.54);
+            assertEquals(1, mechanism.gainWrites.get());
+            assertEquals(3.0, mechanism.gain, 1e-9);
+
+            mechanism.gain = 4.0;
+            publisher.publish(schema, 0.7);
+            assertEquals(4.0, instance.getEntry(gainPath).getDouble(-1.0), 1e-9);
+            assertEquals(1, mechanism.gainWrites.get());
+        } finally {
+            instance.close();
+        }
+    }
+
+    private static final class DashboardMechanism implements Mechanism {
+        private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
+        public final Action run = motor.percent(0.2);
+
+        @Telemetry(writable = true, min = 0.0, max = 1.0)
+        private double outputPercent = 0.2;
+
+        @Telemetry("field/zone")
+        private final Rectangle2d zone = Rectangle2d.of(1.0, 2.0, 3.0, 4.0);
+
+        private double temperature = 20.0;
+        private double gain = 1.0;
+        private final AtomicInteger gainWrites = new AtomicInteger();
+        @Telemetry("gain")
+        private final TelemetryValue gainValue = TelemetryValue.writableNumber(
+                () -> gain,
+                value -> {
+                    gain = value;
+                    gainWrites.incrementAndGet();
+                });
+
+        @Telemetry
+        private double temperature() {
+            return temperature;
         }
     }
 }

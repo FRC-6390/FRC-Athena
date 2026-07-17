@@ -323,6 +323,8 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     }
 
     interface PhotonClient extends AutoCloseable {
+        default boolean isConnected() { return true; }
+
         List<PhotonVisionResult> unreadResults(PhotonPoseClient poseClient);
 
         @Override
@@ -345,6 +347,11 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             return camera.getAllUnreadResults().stream()
                     .map(result -> PhotonVisionResult.fromPhoton(result, poseClient))
                     .toList();
+        }
+
+        @Override
+        public boolean isConnected() {
+            return camera.isConnected();
         }
 
         @Override
@@ -510,6 +517,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         }
 
         private void refresh() {
+            if (!client.isConnected()) {
+                throw new IllegalStateException("PhotonVision camera is disconnected: " + source);
+            }
             List<PhotonVisionResult> results = client.unreadResults(poseClient);
             if (!results.isEmpty()) {
                 latest = results.get(results.size() - 1);

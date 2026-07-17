@@ -83,7 +83,7 @@ class MeasurementSignalPolicyTest {
 
     @Test
     void robotVelocityConvertsFieldRelativeAndClampsMagnitude() {
-        RobotVelocity robot = new RobotVelocity(2.0, 0.0, 3.0).fieldToRobot(Math.PI / 2.0);
+        RobotVelocity robot = RobotVelocity.field(2.0, 0.0, 3.0).fieldToRobot(Math.PI / 2.0);
 
         assertEquals(0.0, robot.xMetersPerSecond(), 1.0e-9);
         assertEquals(-2.0, robot.yMetersPerSecond(), 1.0e-9);

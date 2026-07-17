@@ -45,6 +45,7 @@ dependencies {
     implementation wpi.java.deps.wpilib()
     implementation wpi.java.vendor.java()
     implementation 'choreo:ChoreoLib-java:2026.0.3'
+    implementation 'com.pathplanner.lib:PathplannerLib-java:2026.1.2'
 
     roborioDebug wpi.java.deps.wpilibJniDebug(wpi.platforms.roborio)
     roborioDebug wpi.java.vendor.jniDebug(wpi.platforms.roborio)

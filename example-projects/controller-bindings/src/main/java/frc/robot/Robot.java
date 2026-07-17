@@ -6,4 +6,5 @@ public final class Robot extends AthenaRobot {
     public final DriveTrain driveTrain = new DriveTrain();
     public final Intake intake = new Intake();
     public final Controls controls = new Controls(this);
+    public final AdvancedControls advancedControls = new AdvancedControls(this);
 }

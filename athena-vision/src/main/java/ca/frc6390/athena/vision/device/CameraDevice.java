@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.api.hardware.CameraKind;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
@@ -11,6 +12,14 @@ import ca.frc6390.athena.vision.signal.TargetSignal;
  * Robot-facing camera declaration.
  */
 public interface CameraDevice {
+    /** Returns the response Athena applies if this camera fails. */
+    default FailurePolicy failurePolicy() {
+        return FailurePolicy.DISABLE_MECHANISM;
+    }
+
+    /** Returns a camera declaration with the requested failure response. */
+    CameraDevice failurePolicy(FailurePolicy policy);
+
     /**
      * Returns the camera kind.
      *

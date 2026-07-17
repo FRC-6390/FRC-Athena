@@ -2,6 +2,9 @@
 
 This standalone Athena/WPILib project shows inspectable pose pipelines built from swerve odometry and three camera APIs.
 
+It also shows target streams from Limelight and PhotonVision, a supplier-bound team camera kind, a custom
+`CameraAdapter`, and target-driven drivetrain Actions for aiming and approaching while maintaining standoff range.
+
 ## Pipeline
 
 The example deliberately keeps each stage as a public field so robot code and telemetry can inspect every result:
@@ -12,6 +15,8 @@ swerve odometry -----------------------> estimatedFieldPose
 ```
 
 - `VisionSources` configures Limelight, PhotonVision, and Helios camera mounts and per-source standard deviations.
+- `TargetingExamples` reads the newest typed target sample and turns yaw/range error into live swerve Actions.
+- `ExampleCameraAdapter` is the minimal service-provider shape for a team-owned camera library.
 - `filteredVision` rejects invalid, stale, ambiguous, distant, and off-field measurements.
 - `fusedVision` uses covariance intersection for camera samples close in time while rejecting disagreement.
 - `weightedFieldPose` and `latestCameraPose` show alternative reusable localization stages.

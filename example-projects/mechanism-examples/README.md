@@ -71,6 +71,26 @@ This also shows the explicit controller-plus-physical-motor overload for a non-d
 
 `PositionElevator`, `VelocityShooter`, `TwoJointArm`, `LimitedManualArm`, and `TemplateRoller` declare `SimModel` fields beside the devices they represent. Athena finds those models automatically in simulation and runs the same actions, constraints, profiles, and control bindings used on the robot. Limits declared with `SimModel.limit(...)` drive the same `DigitalInputDevice` declarations used by real code.
 
+`examples/SimulationHarness` shows the lower-level `SimulationSession` API used by tests and non-WPILib hosts:
+explicit model registration, simulated handles, custom physics stepping, pose reset, and a vision field layout.
+
+## Interpolation, stalls, and telemetry
+
+`VelocityShooter.distanceShot` linearly interpolates wheel speed from the live-tunable
+`shotDistanceMeters` field. The field and measured velocity use `@Telemetry`, while `FieldTelemetry` shows
+custom `TelemetryValue` declarations and circle, rectangle, and polygon field overlays. `Robot` selects the
+capture trace profile so arbitration, control, motor, and hook channels are available during diagnostics.
+
+`IndexedIntake.stopOnStall` derives a timed/rearming stall event from the motor's configured current limit,
+commanded voltage, and measured velocity. The rising edge requests the ordinary neutral action.
+
+## Hardware and runtime extension references
+
+`examples/HardwareConnections` compile-checks named CAN buses, PWM and quadrature encoders, analog, SPI, I2C,
+serial, USB, NavX ports, and CTRE/REV-specific options. `examples/RuntimeWorkerExamples` shows optional inline
+runtime workers and failure reporting. These are reference declarations rather than additional mechanisms, so
+copy only the connections and workers used by a real robot.
+
 ## Stop versus release
 
 The shooter and roller `stop` actions use `neutral()`. That stops Athena control output and lets the motor use its configured coast mode. Arms and elevators configure brake mode so their neutral behavior resists motion. Use `percent(0.0)` only when commanding zero output is intentionally part of an active control action; it is not the same as releasing control.

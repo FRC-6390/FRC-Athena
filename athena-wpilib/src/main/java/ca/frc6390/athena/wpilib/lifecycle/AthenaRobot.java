@@ -7,6 +7,7 @@ import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import ca.frc6390.athena.mechanism.core.LifecyclePhase;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
+import ca.frc6390.athena.mechanism.core.TelemetrySchema;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ActionRequests;
 import ca.frc6390.athena.robot.RobotRuntime;
@@ -17,6 +18,7 @@ import ca.frc6390.athena.wpilib.telemetry.MechanismTracePublisher;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.AutoPreviewPublisher;
 import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
@@ -38,6 +40,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private double lastSimulationTimestampSeconds;
     private MechanismTracePublisher tracePublisher;
     private MechanismTelemetryPublisher mechanismTelemetryPublisher;
+    private TelemetrySchema mechanismTelemetrySchema;
     private AutoPreviewPublisher autoPreviewPublisher;
     private final List<SendableChooser<String>> dashboardAutoChoosers = new ArrayList<>();
     private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
@@ -76,8 +79,18 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         lastTimestampSeconds = timestampSeconds();
         lastSimulationTimestampSeconds = lastTimestampSeconds;
         runtime = createRuntime(RobotBase.isSimulation(), digitalInputs);
+        runtime.failureReporter(new ca.frc6390.athena.robot.RuntimeFailureReporter() {
+            @Override public void error(String message, Throwable cause) {
+                DriverStation.reportError(message, cause == null ? new StackTraceElement[0] : cause.getStackTrace());
+            }
+
+            @Override public void warning(String message, Throwable cause) {
+                DriverStation.reportWarning(message, cause == null ? new StackTraceElement[0] : cause.getStackTrace());
+            }
+        });
         ActionRequests.bind(runtime::request);
         runtime.register(this);
+        mechanismTelemetrySchema = runtime.mechanismTelemetrySchema();
         configureAutoChoosers();
         tracePublisher = new MechanismTracePublisher().profile(
                 RobotBase.isSimulation() && traceProfile == MechanismTracePublisher.Profile.SUMMARY
@@ -176,6 +189,9 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private void run(LifecycleMode mode, LifecyclePhase phase, boolean enabled, boolean simulation) {
         double timestamp = timestampSeconds();
         double dtSeconds = elapsed(timestamp);
+        if (tracePublisher != null) {
+            athena().mechanismTraceLevel(tracePublisher.traceLevel());
+        }
         EventContext eventContext = new EventContext(timestamp, dtSeconds, mode, phase, enabled, simulation);
         athena().periodic(
                 new MechanismContext(timestamp, 0.0, dtSeconds, enabled, mode == LifecycleMode.AUTONOMOUS, simulation),
@@ -192,7 +208,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     private void publishMechanismTelemetry() {
         if (mechanismTelemetryPublisher != null) {
-            mechanismTelemetryPublisher.publish(athena().mechanismTelemetry());
+            mechanismTelemetryPublisher.publish(mechanismTelemetrySchema);
         }
     }
 
@@ -253,6 +269,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @Override
     public void close() {
         if (tracePublisher != null) tracePublisher.close();
+        if (mechanismTelemetryPublisher != null) mechanismTelemetryPublisher.close();
         if (autoPreviewPublisher != null) autoPreviewPublisher.close();
         digitalInputs.values().forEach(DigitalInput::close);
         digitalInputs.clear();

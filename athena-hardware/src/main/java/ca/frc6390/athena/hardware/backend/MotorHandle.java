@@ -27,6 +27,20 @@ public interface MotorHandle {
         // default no-op
     }
 
+    /** Returns whether this backend can apply portable motor configuration at runtime. */
+    default boolean supportsRuntimeConfiguration() {
+        return false;
+    }
+
+    /**
+     * Applies a temporary motor configuration without changing the immutable declaration or
+     * persisting it across robot-program restarts.
+     */
+    default void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
+        throw new UnsupportedOperationException(
+                "Runtime configuration is not available for " + device().defaultName());
+    }
+
     /** Returns the latest applied motor voltage. */
     default double appliedVoltage() {
         throw new UnsupportedOperationException("Applied voltage is not available for " + device().defaultName());

@@ -2,17 +2,23 @@
 
 - `tank-drive` - supplier-backed arcade drive, followers, device configuration, automatic discovery, and simulation
 - `swerve-drive` - absolute module offsets, slot-configured SDS modules, field-oriented control, heading reset, optimization, and simulation
-- `auto-following` - graduated one-auto-per-file PathPlanner and Choreo examples covering markers,
-  mechanism actions, multipath routines, Choreo splits, runtime conditions, generated paths, a custom
-  marker provider, WPILib command adaptation, and autonomous-style teleop assists
-- `localization-setups` - swerve odometry, three camera sources, inspectable filtering/fusion stages, Kalman estimation, and pose resets
-- `mechanism-examples` - open/closed-loop mechanisms, composition, constraints, profiles, neutral release, simulation, and a non-swerve mechanism template with configured slots
+- `auto-following` - Choreo markers/splits/branches, PathPlanner `AutoBuilder` integration, a generated
+  vendor-neutral path provider with preview geometry, chooser composition, and WPILib command adaptation
+- `localization-setups` - swerve odometry, three camera sources, inspectable filtering/fusion stages,
+  Kalman estimation, pose resets, camera target reads, target-driven aiming, and a custom camera adapter
+- `mechanism-examples` - open/closed-loop mechanisms, composition, constraints, profiles, interpolation,
+  stall handling, SysId, telemetry/live tuning, hardware/vendor declarations, runtime workers, explicit
+  simulation harnesses, and a non-swerve mechanism template with configured slots
 - `rule-examples` - ranges, Boolean boundaries, conditional actions, timeouts, hooks, unified DIO declarations, and simulated limits
 - `custom-controls` - button-bound software control loops, arbitrary feedforward, modular/CRT position decoding,
   absolute-relative fusion, filtered velocity, redundant feedback, neutral output, and simulation
-- `controller-bindings` - composed controller signals, sign-preserving axis processing, toggle state, teleop gating, and live supplier actions
+- `controller-bindings` - composed controller signals, sign-preserving axis processing, toggles, click counts,
+  holds/repeats, debounce, hysteresis, chords, ordered sequences, command arbitration, and teleop gating
 
 Each folder is a standalone WPILib robot project.
+
+See [`COVERAGE.md`](COVERAGE.md) for the maintained feature-to-example matrix and deliberately
+non-example internal surfaces.
 
 The base vendordeps are:
 

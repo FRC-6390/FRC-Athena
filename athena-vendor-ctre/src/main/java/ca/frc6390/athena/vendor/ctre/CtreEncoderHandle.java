@@ -72,6 +72,9 @@ public final class CtreEncoderHandle implements EncoderHandle {
 
     @Override
     public void refreshInputs() {
+        if (!controller.isConnected()) {
+            throw new IllegalStateException("CTRE encoder is disconnected: " + device.defaultName());
+        }
         positionRotations = controller.positionRotations();
         absolutePositionRotations = controller.absolutePositionRotations();
         velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
@@ -85,6 +88,8 @@ public final class CtreEncoderHandle implements EncoderHandle {
     }
 
     interface CANCoderController {
+        default boolean isConnected() { return true; }
+
         double positionRotations();
 
         double absolutePositionRotations();
@@ -100,6 +105,8 @@ public final class CtreEncoderHandle implements EncoderHandle {
         private PhoenixCANCoderController(EncoderDevice device) {
             encoder = new CANcoder(device.id(), new CANBus(device.canbus()));
         }
+
+        @Override public boolean isConnected() { return encoder.isConnected(); }
 
         @Override
         public double positionRotations() {

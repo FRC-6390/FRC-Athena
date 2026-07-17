@@ -14,6 +14,7 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import edu.wpi.first.math.geometry.Pose2d;
 
 /** Minimal swerve mechanism showing the kinematics-owned path API. */
@@ -27,12 +28,18 @@ public final class ExampleDrive implements Mechanism {
     public final SwerveModule backRight = module(4, 8, 12);
     public final SwerveKinematics kinematics = SwerveKinematics.rectangular(
             0.55, 0.55, MAX_SPEED, frontLeft, frontRight, backLeft, backRight);
+    public final RobotVelocityPool velocity = new RobotVelocityPool();
+    public final RobotVelocityPool.Channel autoVelocity = velocity.channel();
+    public final Action pooledDrive = kinematics.drive(
+            velocity,
+            () -> pose.getRotation().getRadians());
     public final SwervePathFollower pathFollower = kinematics.follow(
             FollowerBackend.CHOREO,
             this::pose,
             this::resetPose,
             PidGains.of(4.0, 0.0, 0.0),
-            PidGains.of(3.0, 0.0, 0.0));
+            PidGains.of(3.0, 0.0, 0.0))
+            .pooled(autoVelocity, pooledDrive);
 
     public Pose2d pose() {
         return pose;

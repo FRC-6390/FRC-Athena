@@ -49,6 +49,9 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
     @Override
     public void refreshInputs() {
+        if (!controller.isConnected()) {
+            throw new IllegalStateException("CTRE IMU is disconnected: " + device.defaultName());
+        }
         yawDegrees = controller.yawDegrees();
         pitchDegrees = controller.pitchDegrees();
         rollDegrees = controller.rollDegrees();
@@ -137,6 +140,8 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
     }
 
     interface Pigeon2Controller extends AutoCloseable {
+        default boolean isConnected() { return true; }
+
         double yawDegrees();
 
         double pitchDegrees();
@@ -165,6 +170,8 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         private PhoenixPigeon2Controller(ImuDevice device) {
             pigeon = new Pigeon2(device.id(), new CANBus(device.canbus()));
         }
+
+        @Override public boolean isConnected() { return pigeon.isConnected(); }
 
         @Override
         public double yawDegrees() {

@@ -11,13 +11,16 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.constraint.ConstraintContext;
 import ca.frc6390.athena.mechanism.constraint.ConstraintResult;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
+import ca.frc6390.athena.mechanism.constraint.ConstraintStage;
 import ca.frc6390.athena.mechanism.motion.MotionProfileRuntime;
 import ca.frc6390.athena.mechanism.motion.MotionReference;
+import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +33,7 @@ import java.util.ArrayList;
  */
 final class OutputApplier {
     private final ActionContext context;
+    private final RuntimeOverrides overrides;
     private final Map<ControlBinding, ControlRuntimeState> controlRuntimes = new IdentityHashMap<>();
     private final Set<ControlBinding> controlsAppliedThisCycle =
             java.util.Collections.newSetFromMap(new IdentityHashMap<>());
@@ -37,13 +41,27 @@ final class OutputApplier {
     private final AppliedOutput appliedOutput = new AppliedOutput();
     private final List<MechanismTraceSnapshot.Control> controlTraces = new ArrayList<>();
     private final Map<MotorDevice, AppliedMotorCommand> appliedMotorCommands = new IdentityHashMap<>();
+    private boolean captureTrace = true;
 
-    private OutputApplier(ActionContext context) {
+    private OutputApplier(ActionContext context, RuntimeOverrides overrides) {
         this.context = Objects.requireNonNull(context, "context");
+        this.overrides = Objects.requireNonNull(overrides, "overrides");
     }
 
     static OutputApplier using(ActionContext context) {
-        return new OutputApplier(context);
+        return new OutputApplier(context, new RuntimeOverrides());
+    }
+
+    static OutputApplier using(ActionContext context, RuntimeOverrides overrides) {
+        return new OutputApplier(context, overrides);
+    }
+
+    void captureTrace(boolean enabled) {
+        captureTrace = enabled;
+        if (!enabled) {
+            controlTraces.clear();
+            appliedMotorCommands.clear();
+        }
     }
 
     public void applyAll(List<ResolvedOutput> outputs) {
@@ -76,9 +94,16 @@ final class OutputApplier {
         AppliedOutput applied = RuntimeHardwareAccess.call(context, () -> resolveControlOutput(
                 output,
                 mechanismContext == null ? MechanismContext.empty() : mechanismContext));
-        if (output.request().control() != null) {
+        if (captureTrace && output.request().control() != null) {
             ControlBinding control = output.request().control();
             controlTraces.add(applied.trace(control, controlRuntimes.get(control)));
+            if (control.sink() != null) {
+                applySink(control.sink(), applied.output());
+            }
+        }
+        Set<MotorHandle> appliedHandles = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (MotorDevice motor : motors(output.request())) {
+            applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
         }
         if (output.output() instanceof Actions.ControlSysIdVoltage sysId) {
             double fallbackVoltage = applied.output() instanceof Output.Voltage voltage ? voltage.volts() : 0.0;
@@ -86,10 +111,6 @@ final class OutputApplier {
                 sysId.routine().record(context, sysId.state(), fallbackVoltage);
                 return null;
             });
-        }
-        Set<MotorHandle> appliedHandles = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
-        for (MotorDevice motor : motors(output.request())) {
-            applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
         }
     }
 
@@ -102,17 +123,38 @@ final class OutputApplier {
             return;
         }
         drivenMotors.add(handle);
-        apply(handle, applied);
+        try {
+            apply(handle, applied);
+        } catch (RuntimeException exception) {
+            if (motor.failurePolicy() == FailurePolicy.PANIC) {
+                throw exception;
+            }
+            context.hardwareFailure(motor, exception);
+            motor.recordCommand(MotorCommandSnapshot.neutral());
+            return;
+        }
         motor.recordCommand(command(applied.output()));
-        appliedMotorCommands.put(motor, new AppliedMotorCommand(mode(applied.output()), value(applied.output())));
+        if (captureTrace) {
+            appliedMotorCommands.put(motor, new AppliedMotorCommand(mode(applied.output()), value(applied.output())));
+        }
         for (ActionContext.SoftwareMotorFollower follower : context.softwareFollowers(motor)) {
             applyMotorAndSoftwareFollowers(follower.device(), follower.handle(), applied, appliedHandles);
         }
     }
 
     void stopAll() {
-        drivenMotors.forEach(MotorHandle::stop);
+        drivenMotors.forEach(motor -> {
+            try {
+                motor.stop();
+            } catch (RuntimeException exception) {
+                if (motor.device().failurePolicy() == FailurePolicy.PANIC) throw exception;
+                context.hardwareFailure(motor.device(), exception);
+            }
+        });
         appliedMotorCommands.keySet().forEach(motor -> motor.recordCommand(MotorCommandSnapshot.neutral()));
+        controlRuntimes.keySet().forEach(control -> {
+            if (control.sink() != null) control.sink().release();
+        });
         resetControls();
     }
 
@@ -128,7 +170,11 @@ final class OutputApplier {
     }
 
     void endCycle() {
-        controlRuntimes.keySet().removeIf(control -> !controlsAppliedThisCycle.contains(control));
+        controlRuntimes.keySet().removeIf(control -> {
+            boolean inactive = !controlsAppliedThisCycle.contains(control);
+            if (inactive && control.sink() != null) control.sink().release();
+            return inactive;
+        });
         controlsAppliedThisCycle.clear();
     }
 
@@ -202,7 +248,8 @@ final class OutputApplier {
             return appliedOutput.set(Outputs.neutral(), ControlRoute.OPEN_LOOP, null)
                     .withTrace(output.output(), transformed, staged, position, velocity, staged.constrained(), true, false);
         }
-        Output saturated = saturate(resolved);
+        Output constrainedOutput = applyOutputConstraints(control, resolved, mechanismContext);
+        Output saturated = saturate(control, constrainedOutput);
         notifyApplied(state, loopContext, resolved, saturated);
         Output guarded = guardFinalOutput(
                 control,
@@ -257,6 +304,14 @@ final class OutputApplier {
                 return Outputs.neutral();
             }
         }
+        RuntimeOverrides.ControlTuning tuning = overrides.tuning(control);
+        if (transformed instanceof Output.Position positionTarget && overrides.hasTuning(control)) {
+            transformed = Outputs.position(Math.max(tuning.minimumPosition(),
+                    Math.min(tuning.maximumPosition(), positionTarget.position())));
+        } else if (transformed instanceof Output.Velocity velocityTarget) {
+            transformed = Outputs.velocity(Math.max(-tuning.maxVelocity(),
+                    Math.min(tuning.maxVelocity(), velocityTarget.velocity())));
+        }
         return transformed;
     }
 
@@ -268,11 +323,12 @@ final class OutputApplier {
             double position,
             double velocity) {
         if (request instanceof Output.Position target) {
-            if ((!control.constraints().isEmpty() || control.planner() != null)
+            if ((hasTargetConstraints(control) || control.planner() != null)
                     && !Double.isFinite(position)) {
                 return null;
             }
-            if (control.profile() != null
+            MotionProfile profile = effectiveProfile(control);
+            if (profile != null
                     && (!Double.isFinite(position) || !Double.isFinite(velocity))) {
                 return null;
             }
@@ -287,14 +343,14 @@ final class OutputApplier {
                 return null;
             }
             double goal = result.value();
-            if (control.profile() == null) {
+            if (profile == null) {
                 return new StagedRequest(
                         Outputs.position(goal),
                         MotionReference.stationary(goal),
                         goal,
                         Double.compare(goal, target.position()) != 0);
             }
-            MotionReference reference = state.profileRuntime.step(
+            MotionReference reference = state.profileRuntime(profile).step(
                     position,
                     velocity,
                     goal,
@@ -306,20 +362,37 @@ final class OutputApplier {
                     Double.compare(goal, target.position()) != 0);
         }
         if (request instanceof Output.Velocity target) {
-            if (!control.constraints().isEmpty() && !Double.isFinite(position)) {
+            if (hasTargetConstraints(control) && !Double.isFinite(position)) {
                 return null;
             }
             if (!allowsDirection(control, position, Math.signum(target.velocity()), mechanismContext)) {
                 return null;
             }
+            double requestedVelocity = target.velocity();
+            double maximumAcceleration = overrides.tuning(control).maxAcceleration();
+            double referenceVelocity = requestedVelocity;
+            double referenceAcceleration = 0.0;
+            if (maximumAcceleration < Double.MAX_VALUE) {
+                if (!state.velocityReferenceInitialized) {
+                    state.velocityReference = finiteOrZero(velocity);
+                    state.velocityReferenceInitialized = true;
+                }
+                double dt = Math.max(0.0, mechanismContext.dtSeconds());
+                double maximumDelta = maximumAcceleration * dt;
+                double delta = Math.max(-maximumDelta,
+                        Math.min(maximumDelta, requestedVelocity - state.velocityReference));
+                referenceVelocity = state.velocityReference + delta;
+                referenceAcceleration = dt > 0.0 ? delta / dt : 0.0;
+                state.velocityReference = referenceVelocity;
+            }
             return new StagedRequest(
-                    request,
-                    new MotionReference(finiteOrZero(position), target.velocity(), 0.0),
-                    target.velocity(),
-                    false);
+                    Outputs.velocity(referenceVelocity),
+                    new MotionReference(finiteOrZero(position), referenceVelocity, referenceAcceleration),
+                    requestedVelocity,
+                    Double.compare(referenceVelocity, requestedVelocity) != 0);
         }
         if (request instanceof Output.Percent target) {
-            if (!control.constraints().isEmpty() && !Double.isFinite(position)) {
+            if (hasTargetConstraints(control) && !Double.isFinite(position)) {
                 return null;
             }
             return allowsDirection(control, position, Math.signum(target.percent()), mechanismContext)
@@ -331,7 +404,7 @@ final class OutputApplier {
                     : null;
         }
         if (request instanceof Output.Voltage target) {
-            if (!control.constraints().isEmpty() && !Double.isFinite(position)) {
+            if (hasTargetConstraints(control) && !Double.isFinite(position)) {
                 return null;
             }
             return allowsDirection(control, position, Math.signum(target.volts()), mechanismContext)
@@ -368,9 +441,16 @@ final class OutputApplier {
             double position,
             double direction,
             MechanismContext context) {
-        if (direction == 0.0 || control.constraints().isEmpty()) {
+        if (direction == 0.0) {
             return true;
         }
+        RuntimeOverrides.ControlTuning tuning = overrides.tuning(control);
+        if (Double.isFinite(position)
+                && (direction < 0.0 && position <= tuning.minimumPosition()
+                || direction > 0.0 && position >= tuning.maximumPosition())) {
+            return false;
+        }
+        if (!hasTargetConstraints(control)) return true;
         ConstraintResult<Double> result = Constraints.evaluate(
                 control.constraints(),
                 new ConstraintContext<>(position, position + direction, context));
@@ -387,17 +467,18 @@ final class OutputApplier {
             double position,
             double velocity) {
         double direction = outputDirection(output);
-        if (direction == 0.0 || control.constraints().isEmpty()) {
+        if (direction == 0.0 || !hasTargetConstraints(control)) {
             return output;
         }
         if (!allowsDirection(control, position, direction, context)) {
             return Outputs.neutral();
         }
-        if (control.profile() == null || velocity == 0.0 || Math.signum(velocity) != direction) {
+        MotionProfile profile = effectiveProfile(control);
+        if (profile == null || velocity == 0.0 || Math.signum(velocity) != direction) {
             return output;
         }
         double reactionSeconds = Math.max(0.0, context.dtSeconds());
-        double stoppingDistance = velocity * velocity / (2.0 * control.profile().maxAcceleration())
+        double stoppingDistance = velocity * velocity / (2.0 * profile.maxAcceleration())
                 + Math.abs(velocity) * reactionSeconds;
         double stoppingPosition = position + Math.copySign(stoppingDistance, velocity);
         ConstraintResult<Double> stopping = Constraints.evaluate(
@@ -423,7 +504,7 @@ final class OutputApplier {
         return 0.0;
     }
 
-    private static Output saturate(Output output) {
+    private Output saturate(ControlBinding control, Output output) {
         if (output instanceof Output.Percent percent) {
             return Outputs.percent(Math.max(-1.0, Math.min(1.0, percent.percent())));
         }
@@ -431,6 +512,49 @@ final class OutputApplier {
             return Outputs.voltage(Math.max(-12.0, Math.min(12.0, voltage.volts())));
         }
         return output;
+    }
+
+    private static boolean hasTargetConstraints(ControlBinding control) {
+        return Constraints.hasStage(control.constraints(), ConstraintStage.TARGET);
+    }
+
+    private static Output applyOutputConstraints(
+            ControlBinding control,
+            Output output,
+            MechanismContext context) {
+        Double requested = scalarValue(output);
+        if (requested == null) return output;
+        ConstraintResult<Double> result = Constraints.evaluateOutput(
+                control.constraints(),
+                new ConstraintContext<>(requested, requested, context));
+        if (!result.accepted()) return Outputs.neutral();
+        double value = result.value();
+        if (output instanceof Output.Percent) return Outputs.percent(value);
+        if (output instanceof Output.Voltage) return Outputs.voltage(value);
+        if (output instanceof Output.Position) return Outputs.position(value);
+        if (output instanceof Output.Velocity) return Outputs.velocity(value);
+        return output;
+    }
+
+    private static Double scalarValue(Output output) {
+        if (output instanceof Output.Percent value) return value.percent();
+        if (output instanceof Output.Voltage value) return value.volts();
+        if (output instanceof Output.Position value) return value.position();
+        if (output instanceof Output.Velocity value) return value.velocity();
+        return null;
+    }
+
+    private static void applySink(ca.frc6390.athena.runtime.control.ControlSink sink, Output output) {
+        Double value = scalarValue(output);
+        if (value == null) {
+            sink.release();
+        } else {
+            sink.apply(value);
+        }
+    }
+
+    private MotionProfile effectiveProfile(ControlBinding control) {
+        return overrides.hasProfile(control) ? overrides.profile(control) : null;
     }
 
     private static boolean isFinite(Output output) {
@@ -505,6 +629,8 @@ final class OutputApplier {
                 new MotionReference(safePosition, safeVelocity, 0.0)));
         state.hasLastRequest = false;
         state.lastRequestType = null;
+        state.velocityReference = safeVelocity;
+        state.velocityReferenceInitialized = false;
         if (state.profileRuntime != null) {
             state.profileRuntime.reset(safePosition, safeVelocity);
         }
@@ -518,7 +644,8 @@ final class OutputApplier {
         if (!(request instanceof Output.Position || request instanceof Output.Velocity) || control.output() == null) {
             return null;
         }
-        if (!control.constraints().isEmpty() || control.profile() != null || control.planner() != null) {
+        if (!control.constraints().isEmpty() || effectiveProfile(control) != null
+                || control.planner() != null) {
             return null;
         }
         MotorClosedLoopConfig config = closedLoopConfig(control);
@@ -803,7 +930,10 @@ final class OutputApplier {
         private final ControlBinding binding;
         private final List<ControlLoopRuntime> runtimes;
         private final ControlLoopRole[] roles;
-        private final MotionProfileRuntime profileRuntime;
+        private MotionProfileRuntime profileRuntime;
+        private MotionProfile activeProfile;
+        private double velocityReference;
+        private boolean velocityReferenceInitialized;
         private boolean hasLastRequest;
         private Class<?> lastRequestType;
         private ControlRoute cachedRequestRoute;
@@ -823,7 +953,16 @@ final class OutputApplier {
                 runtimeArray[i] = loop.bind(loopBinding);
             }
             runtimes = List.of(runtimeArray);
-            profileRuntime = binding.profile() == null ? null : new MotionProfileRuntime(binding.profile());
+            activeProfile = binding.profile();
+            profileRuntime = activeProfile == null ? null : new MotionProfileRuntime(activeProfile);
+        }
+
+        private MotionProfileRuntime profileRuntime(MotionProfile profile) {
+            if (!Objects.equals(activeProfile, profile)) {
+                activeProfile = profile;
+                profileRuntime = new MotionProfileRuntime(profile);
+            }
+            return profileRuntime;
         }
 
         private boolean requestTypeChanged(Class<?> type) {

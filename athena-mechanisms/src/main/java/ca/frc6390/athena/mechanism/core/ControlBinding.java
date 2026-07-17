@@ -11,6 +11,8 @@ import ca.frc6390.athena.mechanism.motion.MotionPlanner;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
+import ca.frc6390.athena.runtime.control.ControlSink;
+import ca.frc6390.athena.hardware.device.Range;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -32,7 +34,9 @@ public record ControlBinding(
         MotionProfile profile,
         MotionPlanner planner,
         List<MotorDevice> motors,
-        boolean isDisabled) {
+        boolean isDisabled,
+        ControlSink sink,
+        Range continuousRange) {
     public ControlBinding {
         Objects.requireNonNull(mode, "mode");
         slot = Math.max(0, slot);
@@ -43,6 +47,9 @@ public record ControlBinding(
         loops = loops == null ? List.of() : List.copyOf(loops);
         constraints = constraints == null ? List.of() : List.copyOf(constraints);
         validateMotorTargets(output, followers);
+        if (output != null && sink != null) {
+            throw new IllegalArgumentException("A control binding cannot target both a motor and a scalar sink.");
+        }
         motors = motorList(output, followers);
     }
 
@@ -53,7 +60,8 @@ public record ControlBinding(
             FeedbackBinding feedback,
             List<Object> dependencies,
             List<ControlLoop> loops) {
-        this(mode, output, 0, followers, feedback, dependencies, loops, null, null, null, null, false);
+        this(mode, output, 0, followers, feedback, dependencies, loops,
+                null, null, null, null, false, null, null);
     }
 
     public ControlBinding(
@@ -64,7 +72,8 @@ public record ControlBinding(
             FeedbackBinding feedback,
             List<Object> dependencies,
             List<ControlLoop> loops) {
-        this(mode, output, slot, followers, feedback, dependencies, loops, null, null, null, null, false);
+        this(mode, output, slot, followers, feedback, dependencies, loops,
+                null, null, null, null, false, null, null);
     }
 
     public ControlBinding(
@@ -80,7 +89,7 @@ public record ControlBinding(
             MotionPlanner planner,
             List<MotorDevice> motors) {
         this(mode, output, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, motors, false);
+                constraints, profile, planner, motors, false, null, null);
     }
 
     public ControlBinding output(MotorDevice output) {
@@ -88,8 +97,25 @@ public record ControlBinding(
         if (followers.contains(safeOutput)) {
             throw new IllegalArgumentException("Control output cannot also be a follower.");
         }
-        return copy(safeOutput, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner);
+        return new ControlBinding(mode, safeOutput, slot, followers, feedback, dependencies, loops,
+                constraints, profile, planner, null, isDisabled, null, continuousRange);
+    }
+
+    /** Routes the calculated scalar result to a non-motor destination. */
+    public ControlBinding output(ControlSink sink) {
+        return new ControlBinding(mode, null, slot, List.of(), feedback, dependencies, loops,
+                constraints, profile, planner, null, isDisabled,
+                Objects.requireNonNull(sink, "sink"), continuousRange);
+    }
+
+    /** Configures wrapped error calculation for a continuous position input. */
+    public ControlBinding continuous(double minimum, double maximum) {
+        requirePositionControl("Continuous input");
+        if (!Double.isFinite(minimum) || !Double.isFinite(maximum) || maximum <= minimum) {
+            throw new IllegalArgumentException("Continuous input bounds must be finite and ordered.");
+        }
+        return new ControlBinding(mode, output, slot, followers, feedback, dependencies, loops,
+                constraints, profile, planner, null, isDisabled, sink, Range.of(minimum, maximum));
     }
 
     public ControlBinding slot(int slot) {
@@ -98,6 +124,9 @@ public record ControlBinding(
 
     public ControlBinding follower(MotorDevice follower) {
         Objects.requireNonNull(follower, "follower");
+        if (output == null) {
+            throw new IllegalStateException("Motor followers require a motor output.");
+        }
         if (follower.equals(output)) {
             throw new IllegalArgumentException("Control output cannot follow itself.");
         }
@@ -242,7 +271,7 @@ public record ControlBinding(
 
     public ControlBinding disabled(boolean disabled) {
         return new ControlBinding(mode, output, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, null, disabled);
+                constraints, profile, planner, null, disabled, sink, continuousRange);
     }
 
     /** Returns the latest configured position feedback. */
@@ -346,7 +375,9 @@ public record ControlBinding(
                 profile,
                 planner,
                 null,
-                isDisabled);
+                isDisabled,
+                sink,
+                continuousRange);
     }
 
     public Action set(double target) {
@@ -429,8 +460,8 @@ public record ControlBinding(
     }
 
     private void requireOutput() {
-        if (output == null) {
-            throw new IllegalStateException("Control actions require an output motor.");
+        if (output == null && sink == null) {
+            throw new IllegalStateException("Control actions require an output destination.");
         }
     }
 

@@ -14,7 +14,6 @@ import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
-import ca.frc6390.athena.mechanism.motion.MotionProfiles;
 import edu.wpi.first.math.util.Units;
 import frc.robot.Constants;
 
@@ -45,16 +44,16 @@ public final class TwoJointArm implements Mechanism {
             .constraints(
                     Constraints.range(shoulderTravel),
                     Constraints.require(context -> context.requested() >= 5.0
-                            || wristEncoder.position() <= 45.0))
-            .profile(MotionProfiles.trapezoid(80.0, 180.0));
+                            || wristEncoder.position() <= 45.0),
+                    Constraints.motion(80.0, 180.0));
     private final ControlBinding wrist = Controls.position(wristMotor)
             .feedback(wristEncoder)
             .pid(0.72, 0.0, 0.012)
             .constraints(
                     Constraints.range(wristTravel),
                     Constraints.require(context -> context.requested() <= 45.0
-                            || shoulderEncoder.position() >= 5.0))
-            .profile(MotionProfiles.trapezoid(120.0, 280.0));
+                            || shoulderEncoder.position() >= 5.0),
+                    Constraints.motion(120.0, 280.0));
 
     public final Action stow = Actions.sequence()
             .until(homeSwitch::active, shoulderMotor.percent(() -> homeSwitch.active() ? 0.0 : -0.15))

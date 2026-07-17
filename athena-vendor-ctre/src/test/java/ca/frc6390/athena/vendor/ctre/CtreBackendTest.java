@@ -14,6 +14,7 @@ import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.backend.FocPolicy;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
+import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.HardwareBus;
@@ -23,6 +24,22 @@ import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import org.junit.jupiter.api.Test;
 
 class CtreBackendTest {
+    @Test
+    void runtimeMotorConfigurationIsAppliedWithoutReplacingTheDeclaration() {
+        RecordingTalonController controller = new RecordingTalonController();
+        MotorDevice declaration = MotorDevice.of(MotorKinds.KRAKEN_X60, 19).coast();
+        CtreMotorHandle handle = new CtreMotorHandle(declaration, new CtreMotorOptions(), controller);
+
+        handle.applyRuntimeConfiguration(new MotorRuntimeConfig(MotorNeutralMode.BRAKE, true, 32, 57));
+
+        assertTrue(handle.supportsRuntimeConfiguration());
+        assertEquals(MotorNeutralMode.COAST, handle.device().neutralMode());
+        assertTrue(controller.brake);
+        assertTrue(controller.inverted);
+        assertEquals(32, controller.supplyCurrentLimitAmps);
+        assertEquals(57, controller.statorCurrentLimitAmps);
+    }
+
     @Test
     void motorBackendSupportsBuiltInAndEquivalentKeys() {
         CtreMotorBackend backend = new CtreMotorBackend();
