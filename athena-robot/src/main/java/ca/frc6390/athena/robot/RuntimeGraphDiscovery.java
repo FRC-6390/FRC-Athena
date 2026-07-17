@@ -26,6 +26,7 @@ final class RuntimeGraphDiscovery {
         List<Localization> declared = new ArrayList<>();
         List<AutoChooser> autoChoosers = new ArrayList<>();
         List<PathProvider> pathProviders = new ArrayList<>();
+        Map<Localization, Mechanism> localizationOwners = new IdentityHashMap<>();
         collectMechanism(
                 root,
                 identitySet(),
@@ -34,7 +35,8 @@ final class RuntimeGraphDiscovery {
                 identitySet(),
                 autoChoosers,
                 identitySet(),
-                pathProviders);
+                pathProviders,
+                localizationOwners);
 
         Set<Localization> nested = identitySet();
         for (Localization localization : declared) {
@@ -47,10 +49,16 @@ final class RuntimeGraphDiscovery {
         List<CameraDevice> cameras = new ArrayList<>();
         Set<CameraDevice> seenCameras = identitySet();
         Set<MeasurementSignal> seenSignals = identitySet();
+        Map<CameraDevice, Mechanism> cameraOwners = new IdentityHashMap<>();
         for (Localization localization : roots) {
+            int firstCamera = cameras.size();
             collectCameras(localization, seenSignals, seenCameras, cameras);
+            Mechanism owner = localizationOwners.get(localization);
+            if (owner != null) {
+                for (int i = firstCamera; i < cameras.size(); i++) cameraOwners.put(cameras.get(i), owner);
+            }
         }
-        return new Result(roots, cameras, autoChoosers, pathProviders);
+        return new Result(roots, cameras, cameraOwners, autoChoosers, pathProviders);
     }
 
     private static void collectMechanism(
@@ -61,7 +69,8 @@ final class RuntimeGraphDiscovery {
             Set<AutoChooser> seenAutoChoosers,
             List<AutoChooser> autoChoosers,
             Set<PathProvider> seenPathProviders,
-            List<PathProvider> pathProviders) {
+            List<PathProvider> pathProviders,
+            Map<Localization, Mechanism> localizationOwners) {
         if (!seenMechanisms.add(mechanism)) {
             return;
         }
@@ -79,10 +88,12 @@ final class RuntimeGraphDiscovery {
                         seenAutoChoosers,
                         autoChoosers,
                         seenPathProviders,
-                        pathProviders);
+                        pathProviders,
+                        localizationOwners);
             }
             if (value instanceof Localization localization && seenLocalizations.add(localization)) {
                 localizations.add(localization);
+                localizationOwners.put(localization, mechanism);
             }
             if (value instanceof AutoChooser chooser && seenAutoChoosers.add(chooser)) {
                 autoChoosers.add(chooser);
@@ -154,11 +165,13 @@ final class RuntimeGraphDiscovery {
     record Result(
             List<Localization> localizations,
             List<CameraDevice> cameras,
+            Map<CameraDevice, Mechanism> cameraOwners,
             List<AutoChooser> autoChoosers,
             List<PathProvider> pathProviders) {
         Result {
             localizations = List.copyOf(localizations);
             cameras = List.copyOf(cameras);
+            cameraOwners = Map.copyOf(cameraOwners);
             autoChoosers = List.copyOf(autoChoosers);
             pathProviders = List.copyOf(pathProviders);
         }

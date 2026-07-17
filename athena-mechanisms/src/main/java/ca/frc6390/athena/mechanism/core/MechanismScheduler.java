@@ -42,6 +42,8 @@ public final class MechanismScheduler {
     private final Map<Object, Long> reservationScratch = new IdentityHashMap<>();
     private final Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntimeScratch = new IdentityHashMap<>();
     private final Set<MotorDevice> globallyDrivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Map<Object, Set<MotorDevice>> faultSuppressions = new IdentityHashMap<>();
+    private final Map<MotorDevice, Integer> faultSuppressionCounts = new IdentityHashMap<>();
     private final OutputResolver resolver;
     private long requestSequence;
     private Runnable simulationStep = () -> {
@@ -204,20 +206,34 @@ public final class MechanismScheduler {
         return this;
     }
 
+    /** Associates a runtime-discovered declaration with a registered mechanism. */
+    public MechanismScheduler declarationOwner(Object declaration, Mechanism owner) {
+        RequestTarget target = declarationTargets.get(Objects.requireNonNull(owner, "owner"));
+        if (target == null) throw new IllegalArgumentException("Mechanism is not registered: " + owner.getClass().getName());
+        indexDeclarationTarget(Objects.requireNonNull(declaration, "declaration"), target);
+        return this;
+    }
+
+    /** Gives a rebound runtime declaration the same owner as its source declaration. */
+    public MechanismScheduler declarationAlias(Object declaration, Object source) {
+        RequestTarget target = declarationTargets.get(Objects.requireNonNull(source, "source"));
+        if (target != null) indexDeclarationTarget(Objects.requireNonNull(declaration, "declaration"), target);
+        return this;
+    }
+
     public MechanismTraceLevel traceLevel() { return traceLevel; }
 
     /** Suppresses one failed declaration and neutralizes it when it is a motor. */
     public void disableDeclaration(Object declaration) {
         if (declaration instanceof MotorDevice motor) {
-            resolver.overrides().disabled(motor, true);
+            suppressFault(declaration, Set.of(motor));
             try {
                 actionContext.motor(motor).stop();
             } catch (RuntimeException ignored) {
                 // A failed device may be unable to accept the neutral command.
             }
         } else if (declaration instanceof ControlBinding control) {
-            resolver.overrides().disabled(control, true);
-            control.motors().forEach(this::disableDeclaration);
+            suppressFault(declaration, new LinkedHashSet<>(control.motors()));
         }
     }
 
@@ -227,10 +243,38 @@ public final class MechanismScheduler {
         if (target == null) {
             return false;
         }
+        Set<MotorDevice> motors = new LinkedHashSet<>();
         for (Object owned : graph.declarations(List.of(target.owner()))) {
-            disableDeclaration(owned);
+            if (owned instanceof MotorDevice motor) motors.add(motor);
+            else if (owned instanceof ControlBinding control) motors.addAll(control.motors());
         }
+        suppressFault(declaration, motors);
         return true;
+    }
+
+    /** Clears the transient suppression created by a recovered declaration. */
+    public void recoverFailure(Object declaration) {
+        Set<MotorDevice> motors = faultSuppressions.remove(declaration);
+        if (motors == null) return;
+        for (MotorDevice motor : motors) {
+            int remaining = faultSuppressionCounts.getOrDefault(motor, 0) - 1;
+            if (remaining <= 0) {
+                faultSuppressionCounts.remove(motor);
+                resolver.overrides().faulted(motor, false);
+            } else {
+                faultSuppressionCounts.put(motor, remaining);
+            }
+        }
+    }
+
+    private void suppressFault(Object declaration, Set<MotorDevice> motors) {
+        if (motors.isEmpty() || faultSuppressions.containsKey(declaration)) return;
+        Set<MotorDevice> snapshot = Set.copyOf(motors);
+        faultSuppressions.put(declaration, snapshot);
+        for (MotorDevice motor : snapshot) {
+            faultSuppressionCounts.merge(motor, 1, Integer::sum);
+            resolver.overrides().faulted(motor, true);
+        }
     }
 
     /** Returns the hierarchical, mechanism-scoped telemetry contract. */
@@ -723,6 +767,7 @@ public final class MechanismScheduler {
         }
         MechanismNode node = graph.node(mechanism);
         RequestTarget target = new RequestTarget(root, mechanism);
+        indexDeclarationTarget(mechanism, target);
         for (Object declaration : node.declarations().values()) {
             indexDeclarationTarget(declaration, target);
         }
@@ -796,7 +841,10 @@ public final class MechanismScheduler {
         if (action == null) {
             return;
         }
-        if (action instanceof Actions.Parallel parallel) {
+        if (action instanceof Actions.Owned owned) {
+            declarations.add(owned.owner());
+            collectActionDeclarations(owned.action(), declarations);
+        } else if (action instanceof Actions.Parallel parallel) {
             parallel.Actions().forEach(child -> collectActionDeclarations(child, declarations));
         } else if (action instanceof Actions.Computed computed) {
             collectActionDeclarations(computed.evaluate(MechanismContext.empty()), declarations);

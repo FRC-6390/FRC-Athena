@@ -14,7 +14,7 @@ class PropertiesStateStoreTest {
     @Test
     void atomicallyPersistsReloadsAndDeletesOriginalState() {
         PropertiesStateStore store = new PropertiesStateStore(temporaryDirectory.resolve("system-state.properties"));
-        SystemTuningState expected = new SystemTuningState("0", "60", true, true, false);
+        SystemTuningState expected = new SystemTuningState("0", "100", "60", true, true, false);
 
         assertTrue(store.save(expected).success());
         assertEquals(expected, store.load().orElseThrow());

@@ -653,6 +653,10 @@ final class MechanismRuntime {
             Node node = schedule.runtime(context);
             MechanismContext local = withTimeInState(context, context.nowSeconds() - node.startSeconds);
 
+            if (action instanceof Actions.Owned owned) {
+                Evaluation child = evaluate(schedule.named("owned", owned.action()), context);
+                return schedule.result(child.output(), child.complete(), child.context());
+            }
             if (action instanceof Actions.Sequence sequence) {
                 return evaluateSequence(sequence, schedule, context, local, node);
             }
@@ -1128,7 +1132,9 @@ final class MechanismRuntime {
             }
 
             private void lowerKnownChildren() {
-                if (action instanceof Actions.Sequence sequence) {
+                if (action instanceof Actions.Owned owned) {
+                    named("owned", owned.action());
+                } else if (action instanceof Actions.Sequence sequence) {
                     int index = 0;
                     for (Actions.SequenceStep step : sequence.steps()) {
                         indexed(index++, step.action());

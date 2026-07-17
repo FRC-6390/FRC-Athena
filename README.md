@@ -121,9 +121,10 @@ The Athena vendor adapter artifacts are included by the single Athena vendordep,
 `AthenaRobot` automatically monitors system and JVM health. On a positively identified low-memory
 roboRIO, it prefers a verified 64 MiB compressed zram device, falls back to a verified 32 MiB swap
 file only when enough disk headroom remains, stops NI's optional web services, and enables kernel
-overcommit only after swap backing is verified. roboRIO 2, simulation, and unknown Linux targets are
-monitor-only by default. Tuning runs once on a low-priority daemon and a failed operation is reported
-without stopping robot code.
+overcommit plus aggressive VFS-cache reclaim independently of optional swap support. The explicit
+`lowMemory()` profile raises zram to 96 MiB, fallback swap to 64 MiB, and reacts earlier to pressure.
+roboRIO 2, simulation, and unknown Linux targets are monitor-only by default. Tuning runs once on a
+low-priority daemon and a failed operation is reported without stopping robot code.
 
 No setup is required. A robot can explicitly select another policy in its constructor:
 
@@ -169,7 +170,9 @@ heap limit is in range. Apply the emitted arguments inside the existing GradleRI
 
 ```groovy
 frcJava(getArtifactTypeClass('FRCJavaArtifact')) {
-    jvmArgs.addAll("-Xms32m", "-Xmx128m", "-XX:MaxDirectMemorySize=32m")
+    jvmArgs.addAll("-Xms16m", "-Xmx96m", "-Xss512k",
+            "-XX:MaxDirectMemorySize=24m", "-XX:ReservedCodeCacheSize=32m",
+            "-XX:MinHeapFreeRatio=5", "-XX:MaxHeapFreeRatio=20")
 }
 ```
 

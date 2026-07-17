@@ -40,6 +40,7 @@ import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulations;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +79,8 @@ public final class RobotRuntime {
     private boolean localizationRefreshWhileDisabled = true;
     private RuntimeFailureReporter failureReporter = RuntimeFailureReporter.stderr();
     private final Set<String> reportedFailures = new LinkedHashSet<>();
+    private final Set<Object> activeRecoverableFailures = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Map<Object, Integer> recoverySamples = new IdentityHashMap<>();
 
     private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
         this.hardwareGraph = Objects.requireNonNull(hardwareGraph, "hardwareGraph");
@@ -237,6 +240,7 @@ public final class RobotRuntime {
     public RobotRuntime register(Mechanism mechanism) {
         mechanisms.register(mechanism);
         RuntimeGraphDiscovery.Result services = RuntimeGraphDiscovery.inspect(mechanism);
+        services.cameraOwners().forEach(mechanisms::declarationOwner);
         registerDiscoveredCameras(services.cameras());
         localization(services.localizations().toArray(Localization[]::new));
         services.pathProviders().forEach(this::registerPathProvider);
@@ -382,6 +386,7 @@ public final class RobotRuntime {
             } else {
                 try {
                     bound[i] = CameraAdapters.bindDiscovered(camera);
+                    mechanisms.declarationAlias(bound[i], camera);
                     if (!bound[i].hasBoundSignals() && RuntimeDependencyChecks.enabled()) {
                         handleFailure(
                                 "camera",
@@ -783,18 +788,23 @@ public final class RobotRuntime {
     }
 
     private void refreshFailures() {
+        Set<Object> failedThisCycle = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
         for (HardwareGraph.BindingFailure failure : hardwareGraph.drainOperationFailures()) {
+            failedThisCycle.add(failure.declaration());
             handleHardwareFailure("operation", failure.declaration(), failure.exception());
         }
         for (HardwareGraph.RefreshFailure failure : hardwareGraph.refreshFailures()) {
+            failedThisCycle.add(failure.declaration());
             handleHardwareFailure("refresh", failure.declaration(), failure.exception());
         }
         for (VisionGraph graph : visionGraphs) {
             graph.refresh();
             for (VisionGraph.RefreshFailure failure : graph.refreshFailures()) {
+                failedThisCycle.add(failure.camera());
                 handleFailure("camera", failure.camera(), failure.camera().failurePolicy(), failure.exception());
             }
         }
+        recoverHealthyDeclarations(failedThisCycle);
     }
 
     private void handleHardwareFailure(String phase, Object declaration, RuntimeException exception) {
@@ -830,6 +840,10 @@ public final class RobotRuntime {
                 && !mechanisms.disableOwner(declaration)) {
             mechanisms.disableDeclaration(declaration);
         }
+        if (policy == FailurePolicy.DISABLE_DEVICE || policy == FailurePolicy.DISABLE_MECHANISM) {
+            activeRecoverableFailures.add(declaration);
+            recoverySamples.remove(declaration);
+        }
         String identity = declarationIdentity(declaration);
         String message = "Athena " + type + " failure for " + identity
                 + "; policy=" + policy + ". " + exception.getMessage();
@@ -841,6 +855,22 @@ public final class RobotRuntime {
             failureReporter.warning(message, exception);
         } else {
             failureReporter.error(message, exception);
+        }
+    }
+
+    private void recoverHealthyDeclarations(Set<Object> failedThisCycle) {
+        for (Object declaration : List.copyOf(activeRecoverableFailures)) {
+            if (failedThisCycle.contains(declaration)) {
+                recoverySamples.remove(declaration);
+                continue;
+            }
+            int healthySamples = recoverySamples.merge(declaration, 1, Integer::sum);
+            if (healthySamples < 3) continue;
+            mechanisms.recoverFailure(declaration);
+            activeRecoverableFailures.remove(declaration);
+            recoverySamples.remove(declaration);
+            String identity = declarationIdentity(declaration);
+            reportedFailures.removeIf(key -> key.contains(":" + identity + ":"));
         }
     }
 

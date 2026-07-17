@@ -91,11 +91,13 @@ public final class SystemRuntime implements AutoCloseable {
 
             SystemTuningState state = stateStore.load().orElseGet(() -> new SystemTuningState(
                     access.readSysctl("vm.overcommit_memory"),
+                    access.readSysctl("vm.vfs_cache_pressure"),
                     access.readSysctl("vm.swappiness"),
                     access.niWebServerRunning(),
                     false,
                     false));
-            if (!integer(state.overcommitMemory()) || !integer(state.swappiness())) {
+            if (!integer(state.overcommitMemory()) || !integer(state.vfsCachePressure())
+                    || !integer(state.swappiness())) {
                 failures.add("State: original sysctl values could not be captured; no OS changes were made");
                 return;
             }
@@ -104,6 +106,12 @@ public final class SystemRuntime implements AutoCloseable {
             if (tuning.stopNiWebServer() && state.webServerRunning()) {
                 applyRequired("WebServer", access.stopNiWebServer());
             }
+            // Strict overcommit is the usual source of native mmap failures on a roboRIO 1.
+            // This setting is useful even without swap: it defers the kernel's conservative
+            // commit-accounting rejection until pages are actually touched. Do not make the
+            // most important tuning operation depend on optional zram/file-swap support.
+            applyRequired("Overcommit", access.setSysctl("vm.overcommit_memory", 1));
+            applyRequired("VFS cache pressure", access.setSysctl("vm.vfs_cache_pressure", 1000));
             boolean zram = access.hasActiveZram();
             boolean fallbackSwap = access.hasActiveSwapFile();
             if (!zram && access.zramSupported()) {
@@ -139,10 +147,9 @@ public final class SystemRuntime implements AutoCloseable {
             }
             boolean memoryBacking = zram || fallbackSwap || memory.swapTotal() > 0;
             if (memoryBacking) {
-                applyRequired("Overcommit", access.setSysctl("vm.overcommit_memory", 1));
                 applyRequired("Swappiness", access.setSysctl("vm.swappiness", zram ? 100 : 20));
             } else {
-                failures.add("Overcommit: not enabled because no swap backing could be verified");
+                applied.add("Swappiness unchanged because no swap backing could be verified");
             }
         } finally {
             tuningComplete = true;
@@ -161,6 +168,7 @@ public final class SystemRuntime implements AutoCloseable {
         if (state.athenaZram()) restored &= applyRequired("Zram restore", access.disableZram());
         if (state.athenaSwapFile()) restored &= applyRequired("Swap restore", access.disableSwapFile());
         restored &= restoreSysctl("vm.overcommit_memory", state.overcommitMemory());
+        restored &= restoreSysctl("vm.vfs_cache_pressure", state.vfsCachePressure());
         restored &= restoreSysctl("vm.swappiness", state.swappiness());
         if (state.webServerRunning()) restored &= applyRequired("WebServer restore", access.startNiWebServer());
         if (restored) applyRequired("State restore", stateStore.delete());

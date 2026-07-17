@@ -61,7 +61,16 @@ public final class SystemTuning {
     }
 
     public static SystemTuning lowMemory() {
-        return defaults(Profile.LOW_MEMORY);
+        return new SystemTuning(
+                Profile.LOW_MEMORY,
+                96L * MIB,
+                64L * MIB,
+                24L * MIB,
+                0.20,
+                0.10,
+                2,
+                6,
+                true);
     }
 
     public static SystemTuning restoreDefaults() {

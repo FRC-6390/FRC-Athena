@@ -13,7 +13,12 @@ class JvmRecommendationsTest {
         JvmRecommendations.Recommendation rioOne = JvmRecommendations.forTarget(
                 true, "NI roboRIO 1.0", 256 * MIB, 256 * MIB);
         assertFalse(rioOne.arguments().isEmpty());
-        assertTrue(rioOne.arguments().contains("-Xmx128m"));
+        assertTrue(rioOne.arguments().contains("-Xmx96m"));
+        assertTrue(rioOne.arguments().contains("-Xss512k"));
+        assertTrue(rioOne.arguments().contains("-XX:MaxDirectMemorySize=24m"));
+        assertTrue(rioOne.arguments().contains("-XX:ReservedCodeCacheSize=32m"));
+        assertTrue(rioOne.arguments().contains("-XX:MinHeapFreeRatio=5"));
+        assertTrue(rioOne.arguments().contains("-XX:MaxHeapFreeRatio=20"));
         assertFalse(rioOne.healthy());
 
         assertTrue(JvmRecommendations.forTarget(

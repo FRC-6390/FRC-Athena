@@ -188,9 +188,12 @@ class RobotRuntimeTest {
         RuntimeWorkers workers = RuntimeWorkers.async(
                 executor,
                 RuntimeWorker.every("async-unstable", 0.001, () -> {
-                    secondRun.countDown();
-                    if (runs.incrementAndGet() == 1) {
-                        throw new IllegalStateException("first");
+                    try {
+                        if (runs.incrementAndGet() == 1) {
+                            throw new IllegalStateException("first");
+                        }
+                    } finally {
+                        secondRun.countDown();
                     }
                 }));
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).workers(workers);
@@ -302,6 +305,30 @@ class RobotRuntimeTest {
 
         assertEquals(1, runtime.hardwareRefreshFailures().size());
         assertEquals(HardwareIdentity.motor(mechanism.motor), runtime.hardwareRefreshFailures().get(0).identity());
+    }
+
+    @Test
+    void recoveredHardwareReenablesItsMechanismAfterHealthySamples() throws InterruptedException {
+        FailingRefreshMotorBackend backend = new FailingRefreshMotorBackend();
+        MotorMechanism mechanism = new MotorMechanism();
+        RobotRuntime runtime = RobotRuntime.using(HardwareGraph.using(BackendRegistry.of(backend)))
+                .register(mechanism);
+        runtime.request(mechanism.initial);
+        runtime.robotPeriodic(0.0, 0.02);
+        assertEquals(1.0, backend.handle.percent, 1e-9);
+
+        backend.handle.failRefresh = true;
+        runtime.robotPeriodic(0.02, 0.02);
+        assertEquals(0.0, backend.handle.percent, 1e-9);
+
+        backend.handle.failRefresh = false;
+        Thread.sleep(110L);
+        runtime.robotPeriodic(0.04, 0.02);
+        runtime.robotPeriodic(0.06, 0.02);
+        runtime.robotPeriodic(0.08, 0.02);
+
+        assertEquals(1.0, backend.handle.percent, 1e-9);
+        assertTrue(runtime.hardwareRefreshFailures().isEmpty());
     }
 
     @Test
@@ -773,6 +800,7 @@ class RobotRuntimeTest {
     private static final class FailingRefreshMotorHandle implements MotorHandle {
         private final MotorDevice device;
         private boolean failRefresh;
+        private double percent;
 
         private FailingRefreshMotorHandle(MotorDevice device) {
             this.device = device;
@@ -792,6 +820,7 @@ class RobotRuntimeTest {
 
         @Override
         public void setPercentOutput(double percent) {
+            this.percent = percent;
         }
     }
 

@@ -17,10 +17,14 @@ final class JvmRecommendations {
                 && totalMemory > 0 && totalMemory <= 512L * MIB;
         if (!rioOne) return new Recommendation(List.of(), true);
         List<String> arguments = List.of(
-                "-Xms32m",
-                "-Xmx128m",
-                "-XX:MaxDirectMemorySize=32m");
-        boolean healthy = heapMaximum >= 96L * MIB && heapMaximum <= 160L * MIB;
+                "-Xms16m",
+                "-Xmx96m",
+                "-Xss512k",
+                "-XX:MaxDirectMemorySize=24m",
+                "-XX:ReservedCodeCacheSize=32m",
+                "-XX:MinHeapFreeRatio=5",
+                "-XX:MaxHeapFreeRatio=20");
+        boolean healthy = heapMaximum >= 72L * MIB && heapMaximum <= 112L * MIB;
         return new Recommendation(arguments, healthy);
     }
 }

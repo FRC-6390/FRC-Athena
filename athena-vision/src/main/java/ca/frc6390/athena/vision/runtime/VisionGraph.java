@@ -11,7 +11,6 @@ import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
-import ca.frc6390.athena.api.FailurePolicy;
 
 /**
  * Runtime graph for camera declarations and cached vision measurements.
@@ -175,7 +174,7 @@ public final class VisionGraph {
         private final TargetSignal cachedTargetSignal;
         private List<Measurement> poseMeasurements = List.of();
         private List<Measurement> targetMeasurements = List.of();
-        private boolean disabled;
+        private boolean manuallyDisabled;
 
         private CameraRuntime(CameraDevice camera) {
             this.camera = Objects.requireNonNull(camera, "camera");
@@ -190,7 +189,7 @@ public final class VisionGraph {
          * Refreshes this camera's cached signal values.
          */
         public void refresh() {
-            if (disabled) {
+            if (manuallyDisabled) {
                 poseMeasurements = List.of();
                 targetMeasurements = List.of();
                 return;
@@ -205,16 +204,13 @@ public final class VisionGraph {
         private void failed() {
             poseMeasurements = List.of();
             targetMeasurements = List.of();
-            if (camera.failurePolicy() != FailurePolicy.WARN) {
-                disabled = true;
-            }
             if (owner != null) {
                 owner.aggregateDirty = true;
             }
         }
 
         private void disable() {
-            disabled = true;
+            manuallyDisabled = true;
             failed();
         }
 

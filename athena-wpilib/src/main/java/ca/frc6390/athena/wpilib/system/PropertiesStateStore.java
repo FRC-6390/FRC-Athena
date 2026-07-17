@@ -24,6 +24,7 @@ final class PropertiesStateStore implements SystemTuningStateStore {
             properties.load(input);
             return Optional.of(new SystemTuningState(
                     properties.getProperty("vm.overcommit_memory", ""),
+                    properties.getProperty("vm.vfs_cache_pressure", "100"),
                     properties.getProperty("vm.swappiness", ""),
                     Boolean.parseBoolean(properties.getProperty("webServerRunning", "false")),
                     Boolean.parseBoolean(properties.getProperty("athenaZram", "false")),
@@ -36,8 +37,9 @@ final class PropertiesStateStore implements SystemTuningStateStore {
     @Override
     public SystemAccess.Result save(SystemTuningState state) {
         Properties properties = new Properties();
-        properties.setProperty("version", "1");
+        properties.setProperty("version", "2");
         properties.setProperty("vm.overcommit_memory", state.overcommitMemory());
+        properties.setProperty("vm.vfs_cache_pressure", state.vfsCachePressure());
         properties.setProperty("vm.swappiness", state.swappiness());
         properties.setProperty("webServerRunning", Boolean.toString(state.webServerRunning()));
         properties.setProperty("athenaZram", Boolean.toString(state.athenaZram()));

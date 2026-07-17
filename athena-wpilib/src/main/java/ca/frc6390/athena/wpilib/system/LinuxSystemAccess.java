@@ -20,6 +20,7 @@ final class LinuxSystemAccess implements SystemAccess {
     private static final Path ZRAM_DISKSIZE = Path.of("/sys/block/zram0/disksize");
     private static final Path ZRAM_RESET = Path.of("/sys/block/zram0/reset");
     private static final String WEB_SERVER = "/usr/local/natinst/share/NIWebServer/SystemWebServer";
+    private static final Path WEB_SERVER_INIT = Path.of("/etc/init.d/systemWebServer");
     private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(10);
     private final boolean realRobot;
     private String detectedTarget;
@@ -50,18 +51,44 @@ final class LinuxSystemAccess implements SystemAccess {
 
     @Override
     public Memory memory() {
+        return parseMemory(
+                readLines(Path.of("/proc/meminfo")),
+                readLines(Path.of("/proc/self/status")));
+    }
+
+    static Memory parseMemory(List<String> meminfo, List<String> processStatus) {
         long total = -1;
         long available = -1;
+        long free = -1;
+        long buffers = -1;
+        long cached = -1;
+        long reclaimable = -1;
+        long shared = 0;
         long swapTotal = -1;
         long swapFree = -1;
-        for (String line : readLines(Path.of("/proc/meminfo"))) {
+        for (String line : meminfo) {
             if (line.startsWith("MemTotal:")) total = kib(line);
             else if (line.startsWith("MemAvailable:")) available = kib(line);
+            else if (line.startsWith("MemFree:")) free = kib(line);
+            else if (line.startsWith("Buffers:")) buffers = kib(line);
+            else if (line.startsWith("Cached:")) cached = kib(line);
+            else if (line.startsWith("SReclaimable:")) reclaimable = kib(line);
+            else if (line.startsWith("Shmem:")) shared = Math.max(0, kib(line));
             else if (line.startsWith("SwapTotal:")) swapTotal = kib(line);
             else if (line.startsWith("SwapFree:")) swapFree = kib(line);
         }
+        // The older roboRIO 1 kernel may not expose MemAvailable. This approximation mirrors
+        // the reclaimable components used by Linux closely enough for pressure shedding.
+        if (available < 0 && free >= 0) {
+            available = free
+                    + Math.max(0, buffers)
+                    + Math.max(0, cached)
+                    + Math.max(0, reclaimable)
+                    - shared;
+            if (total >= 0) available = Math.min(total, Math.max(0, available));
+        }
         long rss = -1;
-        for (String line : readLines(Path.of("/proc/self/status"))) {
+        for (String line : processStatus) {
             if (line.startsWith("VmRSS:")) {
                 rss = kib(line);
                 break;
@@ -138,6 +165,9 @@ final class LinuxSystemAccess implements SystemAccess {
     @Override
     public Result stopNiWebServer() {
         if (!niWebServerRunning()) return Result.success("NI web services already stopped");
+        if (Files.isExecutable(WEB_SERVER_INIT)) {
+            command("sudo", "-n", WEB_SERVER_INIT.toString(), "stop");
+        }
         command("sudo", "-n", "/usr/bin/pkill", "-TERM", "-f", "^" + WEB_SERVER);
         command("sudo", "-n", "/usr/bin/pkill", "-TERM", "-f",
                 "^.*/NIWebServiceContainer");
@@ -149,6 +179,12 @@ final class LinuxSystemAccess implements SystemAccess {
     @Override
     public Result startNiWebServer() {
         if (niWebServerRunning()) return Result.success("NI web services already running");
+        if (Files.isExecutable(WEB_SERVER_INIT)) {
+            CommandResult init = command("sudo", "-n", WEB_SERVER_INIT.toString(), "start");
+            if (init.success && waitForWebServer(true)) {
+                return Result.success("NI web services restored and verified");
+            }
+        }
         CommandResult result = command(
                 "sudo", "-n", "/sbin/start-stop-daemon", "-S", "-b", "-x", WEB_SERVER,
                 "--", "-timeout", "50", "-child-timeout", "20", "-system");
@@ -365,7 +401,9 @@ final class LinuxSystemAccess implements SystemAccess {
     }
 
     private static boolean allowedSysctl(String key) {
-        return key.equals("vm.overcommit_memory") || key.equals("vm.swappiness");
+        return key.equals("vm.overcommit_memory")
+                || key.equals("vm.vfs_cache_pressure")
+                || key.equals("vm.swappiness");
     }
 
     private static CommandResult command(String... arguments) {

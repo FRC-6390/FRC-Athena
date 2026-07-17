@@ -20,7 +20,8 @@ class SystemRuntimeTest {
 
         assertTrue(runtime.status().tuningComplete());
         assertTrue(runtime.status().tuningVerified());
-        assertEquals(List.of("webStop", "swap=32", "vm.overcommit_memory=1", "vm.swappiness=20"),
+        assertEquals(List.of("webStop", "vm.overcommit_memory=1", "vm.vfs_cache_pressure=1000",
+                        "swap=32", "vm.swappiness=20"),
                 lowMemory.calls);
 
         FakeAccess rioTwo = new FakeAccess(2_048 * MIB, 1_000 * MIB);
@@ -57,11 +58,12 @@ class SystemRuntimeTest {
     @Test
     void restoreUsesPersistedOriginalStateAndRemovesAthenaResources() {
         FakeAccess access = new FakeAccess(256 * MIB, 80 * MIB);
-        FakeStore store = new FakeStore(new SystemTuningState("0", "60", true, true, true));
+        FakeStore store = new FakeStore(new SystemTuningState("0", "100", "60", true, true, true));
         SystemRuntime runtime = new SystemRuntime(SystemTuning.restoreDefaults(), access, store);
         runtime.applyPlan();
 
-        assertEquals(List.of("zramOff", "swapOff", "vm.overcommit_memory=0", "vm.swappiness=60", "webStart"),
+        assertEquals(List.of("zramOff", "swapOff", "vm.overcommit_memory=0",
+                        "vm.vfs_cache_pressure=100", "vm.swappiness=60", "webStart"),
                 access.calls);
         assertTrue(store.deleted);
         assertTrue(runtime.status().tuningVerified());
@@ -76,20 +78,32 @@ class SystemRuntimeTest {
 
         runtime.applyPlan();
         assertFalse(runtime.status().tuningVerified());
-        assertEquals(2, runtime.status().failures().size());
+        assertEquals(3, runtime.status().failures().size());
         assertTrue(runtime.status().failures().get(0).contains("permission denied"));
     }
 
     @Test
-    void doesNotEnableOvercommitWhenSwapCannotBeVerified() {
+    void enablesOvercommitEvenWhenSwapCannotBeVerified() {
         FakeAccess access = new FakeAccess(256 * MIB, 40 * MIB);
         access.failSwap = true;
         SystemRuntime runtime = new SystemRuntime(SystemTuning.automatic(), access);
         runtime.applyPlan();
 
-        assertFalse(access.calls.contains("vm.overcommit_memory=1"));
+        assertTrue(access.calls.contains("vm.overcommit_memory=1"));
         assertTrue(runtime.status().failures().stream()
-                .anyMatch(failure -> failure.contains("no swap backing")));
+                .anyMatch(failure -> failure.startsWith("Swap:")));
+    }
+
+    @Test
+    void explicitLowMemoryProfileUsesMoreHeadroomThanAutomatic() {
+        SystemTuning automatic = SystemTuning.automatic();
+        SystemTuning lowMemory = SystemTuning.lowMemory();
+
+        assertTrue(lowMemory.zramBytes() > automatic.zramBytes());
+        assertTrue(lowMemory.swapBytes() > automatic.swapBytes());
+        assertTrue(lowMemory.warningAvailableFraction() > automatic.warningAvailableFraction());
+        assertTrue(lowMemory.criticalAvailableFraction() > automatic.criticalAvailableFraction());
+        assertTrue(lowMemory.escalationSamples() < automatic.escalationSamples());
     }
 
     private static final class FakeAccess implements SystemAccess {
@@ -111,7 +125,11 @@ class SystemRuntimeTest {
         @Override public String target() { return target; }
         @Override public Memory memory() { return memory; }
         @Override public String swapKind() { return zram ? "ZRAM" : "NONE"; }
-        @Override public String readSysctl(String key) { return key.endsWith("swappiness") ? "60" : "0"; }
+        @Override public String readSysctl(String key) {
+            if (key.endsWith("swappiness")) return "60";
+            if (key.endsWith("vfs_cache_pressure")) return "100";
+            return "0";
+        }
         @Override public boolean niWebServerRunning() { return true; }
         @Override public boolean zramSupported() { return zramSupported; }
         @Override public boolean hasActiveZram() { return zram; }

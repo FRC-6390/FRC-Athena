@@ -150,7 +150,7 @@ class CameraDeviceTest {
         assertSame(failed, graph.refreshFailures().get(0).camera());
 
         graph.refresh();
-        assertEquals(1, failedReads.get());
+        assertEquals(2, failedReads.get());
         assertEquals(List.of(pose), graph.poseMeasurements());
     }
 
@@ -172,5 +172,25 @@ class CameraDeviceTest {
 
         assertEquals(List.of(pose), graph.poseMeasurements());
         assertEquals(2, reads.get());
+    }
+
+    @Test
+    void disabledDevicePolicyCameraRetriesAndRecoversAfterAnOutage() {
+        AtomicInteger reads = new AtomicInteger();
+        PoseMeasurementSample pose = Measurements.pose(new PoseSnapshot(2.0, 3.0, 0.5));
+        CameraDevice camera = Cameras.photonVision("recover")
+                .failurePolicy(FailurePolicy.DISABLE_DEVICE)
+                .bindPose(() -> {
+                    if (reads.incrementAndGet() == 1) throw new IllegalStateException("temporary outage");
+                    return List.of(pose);
+                });
+        VisionGraph graph = VisionGraph.of(camera);
+
+        graph.refresh();
+        assertTrue(graph.poseMeasurements().isEmpty());
+        graph.refresh();
+
+        assertEquals(List.of(pose), graph.poseMeasurements());
+        assertTrue(graph.refreshFailures().isEmpty());
     }
 }
