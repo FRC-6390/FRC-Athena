@@ -54,6 +54,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.OFF;
     private SystemTuning systemTuning = SystemTuning.automatic();
     private int reportedSystemFailures;
+    private MemoryPressure reportedPressure = MemoryPressure.NORMAL;
+    private boolean reportedJvmConfiguration;
 
     /**
      * Returns the owned Athena mechanism runtime.
@@ -229,7 +231,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     private void publishTraces() {
         publishSystemTelemetry();
-        if (tracePublisher != null) {
+        if (tracePublisher != null && pressure() == MemoryPressure.NORMAL) {
             tracePublisher.publish(athena().mechanismTraces());
         }
         publishMechanismTelemetry();
@@ -253,9 +255,26 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         systemRuntime.update();
         SystemStatus status = systemRuntime.status();
         systemTelemetryPublisher.publish(status);
+        mechanismTelemetryPublisher.readOnlyPeriodSeconds(switch (status.pressure()) {
+            case NORMAL -> 0.10;
+            case WARNING -> 0.50;
+            case CRITICAL -> 1.00;
+        });
         while (reportedSystemFailures < status.failures().size()) {
             DriverStation.reportWarning(
                     "Athena system tuning: " + status.failures().get(reportedSystemFailures++), false);
+        }
+        if (status.pressure() != reportedPressure) {
+            DriverStation.reportWarning(
+                    "Athena memory pressure is " + status.pressure() + ": " + status.pressureReason(), false);
+            reportedPressure = status.pressure();
+        }
+        if (!reportedJvmConfiguration && !status.jvmConfigurationHealthy()
+                && !status.recommendedJvmArguments().isEmpty()) {
+            reportedJvmConfiguration = true;
+            DriverStation.reportWarning(
+                    "Athena recommends roboRIO JVM arguments: "
+                            + String.join(" ", status.recommendedJvmArguments()), false);
         }
     }
 

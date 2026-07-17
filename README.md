@@ -118,29 +118,63 @@ The Athena vendor adapter artifacts are included by the single Athena vendordep,
 
 ## roboRIO System Tuning
 
-`AthenaRobot` automatically monitors system memory. On a positively identified low-memory roboRIO,
-it also stops NI's optional web services, enables conservative kernel overcommit, and uses existing
-swap or creates a bounded 32 MiB fallback swap file. roboRIO 2, simulation, and unknown Linux targets
-are monitor-only by default. Tuning runs once on a low-priority daemon and a failed operation is
-reported without stopping robot code.
+`AthenaRobot` automatically monitors system and JVM health. On a positively identified low-memory
+roboRIO, it prefers a verified 64 MiB compressed zram device, falls back to a verified 32 MiB swap
+file only when enough disk headroom remains, stops NI's optional web services, and enables kernel
+overcommit only after swap backing is verified. roboRIO 2, simulation, and unknown Linux targets are
+monitor-only by default. Tuning runs once on a low-priority daemon and a failed operation is reported
+without stopping robot code.
 
 No setup is required. A robot can explicitly select another policy in its constructor:
 
 ```java
 systemTuning(SystemTuning.standard());   // Monitor only
 systemTuning(SystemTuning.lowMemory());  // Force tuning on a real Linux robot
+systemTuning(SystemTuning.restoreDefaults()); // Restore the captured pre-Athena state
 systemTuning(SystemTuning.disabled());   // Disable tuning and periodic sampling
 ```
 
-The latest snapshot is available from `systemStatus()`. AdvantageScope and other NT4 clients can
-inspect `/Athena/System`, including target/profile, pressure, total and available RAM, process RSS,
-Java heap usage and limit, direct-buffer memory, swap usage, applied changes, and failures. Athena
-turns off mechanism trace capture under memory pressure and pauses auto-preview publication at
-critical pressure; hardware control, actions, localization, and vision continue running.
+Sizes, disk reserve, pressure thresholds, and hysteresis are configurable without exposing shell
+commands:
 
-System tuning cannot change the Java process's `-Xmx` after startup. Use the published heap maximum
-to distinguish a Java heap cap from native/process memory exhaustion before changing deployment JVM
-arguments.
+```java
+systemTuning(SystemTuning.automatic()
+        .zramMegabytes(64)
+        .swapMegabytes(32)
+        .minimumFreeDiskMegabytes(24)
+        .pressureThresholds(0.14, 0.07)
+        .pressureHysteresis(3, 6));
+```
+
+Athena records original sysctl and NI web-service state plus ownership of swap resources in
+`/home/lvuser/athena/system-state.properties`. Each operation is idempotent and read back from the
+kernel. `restoreDefaults()` removes only Athena-owned swap, restores captured sysctls, restarts the
+web service only when it originally ran, and removes the state file after every restoration verifies.
+
+The latest snapshot is available from `systemStatus()`. AdvantageScope and other NT4 clients can
+inspect `/Athena/System`, including target/profile, hysteretic pressure and its reason, total/current/
+lowest available RAM, process RSS, available-memory trend and exhaustion estimate, heap/non-heap/
+direct-buffer usage, allocation rate, GC count/time/load, process and system CPU, live threads,
+swap kind and usage, pressure transitions, tuning verification, applied changes, and failures.
+
+At warning pressure Athena stops trace capture and changes read-only diagnostic telemetry from 10 Hz
+to 2 Hz. At critical pressure it changes diagnostics to 1 Hz and pauses auto previews. Writable
+dashboard controls and actions still run every robot cycle. Hardware refresh, actions, localization,
+normal vision processing, and mechanism control are never shed.
+
+System tuning cannot change the Java process's `-Xmx` after startup. On a roboRIO 1-class target,
+`/Athena/System/JVM/RecommendedArguments` and `/Athena/System/JVM/GradleRioSnippet` publish a bounded
+startup recommendation and `/Athena/System/JVM/ConfigurationHealthy` reports whether the running
+heap limit is in range. Apply the emitted arguments inside the existing GradleRIO artifact:
+
+```groovy
+frcJava(getArtifactTypeClass('FRCJavaArtifact')) {
+    jvmArgs.addAll("-Xms32m", "-Xmx128m", "-XX:MaxDirectMemorySize=32m")
+}
+```
+
+GradleRIO already selects Serial GC by default. Athena does not silently rewrite `build.gradle` or
+the deployed robot command.
 
 ## Hardware Connections
 

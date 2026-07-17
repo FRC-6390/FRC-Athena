@@ -117,6 +117,31 @@ class MechanismTelemetryPublisherTest {
         }
     }
 
+    @Test
+    void pressurePeriodThrottlesOnlyReadOnlyValues() {
+        DashboardMechanism mechanism = new DashboardMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+        var schema = runtime.mechanismTelemetrySchema();
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        String temperaturePath = "/Athena/Mechanisms/dashboardMechanism/Values/temperature";
+        String gainPath = "/Athena/Mechanisms/dashboardMechanism/Values/gain";
+        try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)
+                .readOnlyPeriodSeconds(0.5)) {
+            publisher.publish(schema, 0.0);
+            mechanism.temperature = 42.0;
+            instance.getEntry(gainPath).setDouble(3.0);
+
+            publisher.publish(schema, 0.02);
+            assertEquals(20.0, instance.getEntry(temperaturePath).getDouble(-1), 1e-9);
+            assertEquals(3.0, mechanism.gain, 1e-9);
+
+            publisher.publish(schema, 0.5);
+            assertEquals(42.0, instance.getEntry(temperaturePath).getDouble(-1), 1e-9);
+        } finally {
+            instance.close();
+        }
+    }
+
     private static final class DashboardMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         public final Action run = motor.percent(0.2);

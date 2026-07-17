@@ -27,7 +27,7 @@ import java.util.Set;
 /** Publishes Athena's mechanism-scoped telemetry schema to NT4 dashboards. */
 public final class MechanismTelemetryPublisher implements AutoCloseable {
     public static final String ROOT = "/Athena/Mechanisms";
-    private static final double CUSTOM_PERIOD_SECONDS = 0.10;
+    private static final double DEFAULT_CUSTOM_PERIOD_SECONDS = 0.10;
 
     private final NetworkTableInstance instance;
     private final List<ValueChannel> values = new ArrayList<>();
@@ -36,6 +36,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     private final Set<String> reportedFailures = new HashSet<>();
     private TelemetrySchema boundSchema;
     private double lastCustomPublish = Double.NEGATIVE_INFINITY;
+    private double customPeriodSeconds = DEFAULT_CUSTOM_PERIOD_SECONDS;
 
     public MechanismTelemetryPublisher() {
         this(NetworkTableInstance.getDefault());
@@ -50,12 +51,21 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         publish(schema, Timer.getFPGATimestamp());
     }
 
+    /** Sets the read-only diagnostic value period without delaying writable controls or actions. */
+    public MechanismTelemetryPublisher readOnlyPeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds < 0.02 || periodSeconds > 5.0) {
+            throw new IllegalArgumentException("Telemetry period must be between 0.02 and 5 seconds.");
+        }
+        customPeriodSeconds = periodSeconds;
+        return this;
+    }
+
     void publish(TelemetrySchema schema, double timestampSeconds) {
         Objects.requireNonNull(schema, "schema");
         if (schema != boundSchema) {
             bind(schema);
         }
-        boolean publishReadOnly = timestampSeconds - lastCustomPublish >= CUSTOM_PERIOD_SECONDS;
+        boolean publishReadOnly = timestampSeconds - lastCustomPublish >= customPeriodSeconds;
         if (publishReadOnly) {
             lastCustomPublish = timestampSeconds;
         }
