@@ -170,9 +170,16 @@ final class OutputApplier {
     }
 
     void endCycle() {
+        Set<ca.frc6390.athena.runtime.control.ControlSink> activeSinks =
+                java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (ControlBinding control : controlsAppliedThisCycle) {
+            if (control.sink() != null) activeSinks.add(control.sink());
+        }
         controlRuntimes.keySet().removeIf(control -> {
             boolean inactive = !controlsAppliedThisCycle.contains(control);
-            if (inactive && control.sink() != null) control.sink().release();
+            if (inactive && control.sink() != null && !activeSinks.contains(control.sink())) {
+                control.sink().release();
+            }
             return inactive;
         });
         controlsAppliedThisCycle.clear();

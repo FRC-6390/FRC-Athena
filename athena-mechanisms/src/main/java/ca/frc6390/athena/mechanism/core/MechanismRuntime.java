@@ -140,12 +140,12 @@ final class MechanismRuntime {
         this.scheduler.reset();
     }
 
-    void activateLease(Object key, Action action, long recency, Set<MotorDevice> reservedMotors) {
+    void activateLease(Object key, Action action, long recency, Set<Object> reservedResources) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(action, "action");
         if (!activeLeases.containsKey(key)) {
             ActiveLease lease = new ActiveLease(
-                    action, recency, actionContext, pathRuntimes, reservedMotors);
+                    action, recency, actionContext, pathRuntimes, reservedResources);
             activeLeases.put(key, lease);
             leasesByRecency.add(lease);
             leasesByRecency.sort(Comparator.comparingLong(ActiveLease::recency));
@@ -426,14 +426,14 @@ final class MechanismRuntime {
         double get();
     }
 
-    private Map<MotorDevice, Long> leaseReservations() {
-        Map<MotorDevice, Long> reservations = new LinkedHashMap<>();
+    private Map<Object, Long> leaseReservations() {
+        Map<Object, Long> reservations = new LinkedHashMap<>();
         for (ActiveLease lease : leasesByRecency) {
             if (lease.scheduler().complete()) {
                 continue;
             }
-            for (MotorDevice motor : lease.reservedMotors()) {
-                reservations.merge(motor, lease.recency(), Math::max);
+            for (Object resource : lease.reservedResources()) {
+                reservations.merge(resource, lease.recency(), Math::max);
             }
         }
         return reservations;
@@ -446,27 +446,35 @@ final class MechanismRuntime {
 
     private static List<CandidateOutput> arbitrate(
             List<CandidateOutput> candidates,
-            Map<MotorDevice, Long> reservations) {
-        Map<MotorDevice, CandidateOutput> winners = new LinkedHashMap<>();
+            Map<Object, Long> reservations) {
+        Map<Object, CandidateOutput> winners = new LinkedHashMap<>();
         for (CandidateOutput candidate : candidates) {
-            for (MotorDevice motor : candidate.output().request().motors()) {
-                if (candidate.recency() < reservations.getOrDefault(motor, Long.MIN_VALUE)) {
+            for (Object resource : outputResources(candidate.output().request())) {
+                if (candidate.recency() < reservations.getOrDefault(resource, Long.MIN_VALUE)) {
                     continue;
                 }
-                CandidateOutput current = winners.get(motor);
+                CandidateOutput current = winners.get(resource);
                 if (current == null || candidate.newerThan(current)) {
-                    winners.put(motor, candidate);
+                    winners.put(resource, candidate);
                 }
             }
         }
         List<CandidateOutput> selected = new ArrayList<>();
         for (CandidateOutput candidate : candidates) {
-            List<MotorDevice> motors = candidate.output().request().motors();
-            if (!motors.isEmpty() && motors.stream().allMatch(motor -> winners.get(motor) == candidate)) {
+            List<Object> resources = outputResources(candidate.output().request());
+            if (!resources.isEmpty() && resources.stream().allMatch(resource -> winners.get(resource) == candidate)) {
                 selected.add(candidate);
             }
         }
         return selected;
+    }
+
+    private static List<Object> outputResources(OutputRequest request) {
+        List<Object> resources = new ArrayList<>(request.motors());
+        if (request.control() != null && request.control().sink() != null) {
+            resources.add(request.control().sink());
+        }
+        return List.copyOf(resources);
     }
 
     private record CandidateOutput(
@@ -484,7 +492,7 @@ final class MechanismRuntime {
         private final Action action;
         private final long recency;
         private final StateScheduler scheduler;
-        private final Set<MotorDevice> reservedMotors;
+        private final Set<Object> reservedResources;
         private double startSeconds = Double.NaN;
 
         private ActiveLease(
@@ -492,11 +500,11 @@ final class MechanismRuntime {
                 long recency,
                 ActionContext actionContext,
                 Map<PathAction, PathRuntime> pathRuntimes,
-                Set<MotorDevice> reservedMotors) {
+                Set<Object> reservedResources) {
             this.action = action;
             this.recency = recency;
             this.scheduler = new StateScheduler(actionContext, pathRuntimes);
-            this.reservedMotors = reservedMotors == null ? Set.of() : Set.copyOf(reservedMotors);
+            this.reservedResources = reservedResources == null ? Set.of() : Set.copyOf(reservedResources);
         }
 
         private long recency() {
@@ -507,8 +515,8 @@ final class MechanismRuntime {
             return action;
         }
 
-        private Set<MotorDevice> reservedMotors() {
-            return reservedMotors;
+        private Set<Object> reservedResources() {
+            return reservedResources;
         }
 
         private StateScheduler scheduler() {

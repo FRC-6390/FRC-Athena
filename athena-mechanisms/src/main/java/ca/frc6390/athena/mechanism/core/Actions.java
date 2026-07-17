@@ -813,8 +813,8 @@ public final class Actions {
     }
 
     private static void requireControlOutput(ControlBinding control) {
-        if (control.output() == null) {
-            throw new IllegalStateException("Control actions require an output motor.");
+        if (control.output() == null && control.sink() == null) {
+            throw new IllegalStateException("Control actions require an output destination.");
         }
     }
 

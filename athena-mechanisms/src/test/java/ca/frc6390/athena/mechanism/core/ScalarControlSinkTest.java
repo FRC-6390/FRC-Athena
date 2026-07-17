@@ -11,6 +11,44 @@ import org.junit.jupiter.api.Test;
 
 class ScalarControlSinkTest {
     @Test
+    void schedulerOwnsPrivateSinkBindingThroughItsPublicAction() {
+        AimMechanism mechanism = new AimMechanism();
+        MechanismScheduler scheduler = MechanismScheduler.create()
+                .register(mechanism)
+                .bindInMemoryRuntime();
+
+        scheduler.request(mechanism.aim).periodic(
+                new MechanismContext(0.0, 0.0, 0.02, true, false, false),
+                EventContext.empty());
+
+        assertTrue(mechanism.angular.isActive());
+        assertEquals(1.0, mechanism.angular.radiansPerSecond(), 1.0e-9);
+
+        scheduler.cancel(mechanism.aim).periodic(
+                new MechanismContext(0.02, 0.0, 0.02, true, false, false),
+                EventContext.empty());
+        assertFalse(mechanism.angular.isActive());
+    }
+
+    @Test
+    void newestActionWinsSharedSinkAndPreviousActionResumes() {
+        SharedSinkMechanism mechanism = new SharedSinkMechanism();
+        MechanismScheduler scheduler = MechanismScheduler.create()
+                .register(mechanism)
+                .bindInMemoryRuntime();
+        MechanismContext context = new MechanismContext(0.0, 0.0, 0.02, true, false, false);
+
+        scheduler.request(mechanism.slow).periodic(context, EventContext.empty());
+        assertEquals(1.0, mechanism.angular.radiansPerSecond(), 1.0e-9);
+
+        scheduler.request(mechanism.fast).periodic(context, EventContext.empty());
+        assertEquals(2.0, mechanism.angular.radiansPerSecond(), 1.0e-9);
+
+        scheduler.cancel(mechanism.fast).periodic(context, EventContext.empty());
+        assertEquals(1.0, mechanism.angular.radiansPerSecond(), 1.0e-9);
+    }
+
+    @Test
     void pidOutputIsClampedAndAppliedToAngularChannel() {
         RobotVelocityPool pool = new RobotVelocityPool();
         RobotVelocityPool.AngularChannel angular = pool.angularChannel();
@@ -60,5 +98,28 @@ class ScalarControlSinkTest {
                 .apply(new ResolvedOutput(OutputRequest.of(control, target), target));
 
         assertEquals(0.75, angular.radiansPerSecond(), 1.0e-9);
+    }
+
+    private static final class AimMechanism implements Mechanism {
+        private final RobotVelocityPool pool = new RobotVelocityPool();
+        private final RobotVelocityPool.AngularChannel angular = pool.angularChannel();
+        private final ControlBinding heading = Controls.position(angular)
+                .feedback(() -> 0.0)
+                .pid(2.0, 0.0, 0.0)
+                .constraint(Constraints.clamp(1.0));
+        public final Action aim = heading.position(2.0);
+    }
+
+    private static final class SharedSinkMechanism implements Mechanism {
+        private final RobotVelocityPool pool = new RobotVelocityPool();
+        private final RobotVelocityPool.AngularChannel angular = pool.angularChannel();
+        private final ControlBinding slowControl = Controls.position(angular)
+                .feedback(() -> 0.0)
+                .pid(1.0, 0.0, 0.0);
+        private final ControlBinding fastControl = Controls.position(angular)
+                .feedback(() -> 0.0)
+                .pid(1.0, 0.0, 0.0);
+        public final Action slow = slowControl.position(1.0);
+        public final Action fast = fastControl.position(2.0);
     }
 }

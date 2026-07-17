@@ -152,6 +152,23 @@ public record ControlBinding(
         return feedback(new FeedbackBinding(encoder, encoder));
     }
 
+    /** Uses one position signal as feedback when no independent velocity signal is required. */
+    public ControlBinding feedback(PositionSignal position) {
+        Objects.requireNonNull(position, "position");
+        VelocitySignal stationaryVelocity = new VelocitySignal() {
+            @Override
+            public double velocity() {
+                return 0.0;
+            }
+
+            @Override
+            public List<?> dependencies() {
+                return position.dependencies();
+            }
+        };
+        return feedback(position, stationaryVelocity);
+    }
+
     public ControlBinding feedback(PositionSignal position, VelocitySignal velocity) {
         return feedback(new FeedbackBinding(position, velocity));
     }

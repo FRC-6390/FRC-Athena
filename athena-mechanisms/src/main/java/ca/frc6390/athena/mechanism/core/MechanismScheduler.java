@@ -429,7 +429,7 @@ public final class MechanismScheduler {
                     : Actions.parallel(partition.getValue().toArray(Action[]::new));
             MechanismRuntime runtime = runtimeFor(partition.getKey());
             Object runtimeKey = new Object();
-            runtime.activateLease(runtimeKey, partitioned, recency, actionMotors(partitioned));
+            runtime.activateLease(runtimeKey, partitioned, recency, actionResources(partitioned));
             registrations.add(new LeaseRegistration(runtimeKey, runtime));
         }
         leaseTargets.put(key, List.copyOf(registrations));
@@ -470,12 +470,25 @@ public final class MechanismScheduler {
         partitions.computeIfAbsent(target.root(), ignored -> new ArrayList<>()).add(action);
     }
 
-    private static Set<MotorDevice> actionMotors(Action action) {
-        Set<MotorDevice> motors = new LinkedHashSet<>();
+    private static Set<Object> actionResources(Action action) {
+        Set<Object> resources = new LinkedHashSet<>();
         for (Object declaration : actionDeclarations(action)) {
-            collectMotors(declaration, motors);
+            if (declaration instanceof ControlBinding control && control.sink() != null) {
+                resources.add(control.sink());
+            }
+            collectActionResources(declaration, resources);
         }
-        return Set.copyOf(motors);
+        return Set.copyOf(resources);
+    }
+
+    private static void collectActionResources(Object declaration, Set<Object> resources) {
+        if (declaration instanceof MotorDevice motor) {
+            resources.add(motor);
+        } else if (declaration instanceof ControlBinding control) {
+            resources.addAll(control.motors());
+        } else if (declaration instanceof Iterable<?> values) {
+            values.forEach(value -> collectActionResources(value, resources));
+        }
     }
 
     public MechanismScheduler request(Action action) {

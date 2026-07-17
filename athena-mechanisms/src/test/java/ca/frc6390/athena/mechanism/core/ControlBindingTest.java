@@ -121,6 +121,22 @@ class ControlBindingTest {
     }
 
     @Test
+    void positionSignalFeedbackDoesNotRequireSyntheticVelocityAtCallSite() {
+        Object dependency = new Object();
+        PositionSignal position = new PositionSignal() {
+            @Override public double position() { return 1.25; }
+            @Override public List<?> dependencies() { return List.of(dependency); }
+        };
+
+        ControlBinding control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
+                .feedback(position);
+
+        assertSame(position, control.feedback().position());
+        assertEquals(0.0, control.feedback().velocity().velocity(), 1.0e-9);
+        assertEquals(java.util.Set.of(dependency), control.feedback().dependencies());
+    }
+
+    @Test
     void measurementsAndTargetConditionsUseConfiguredFeedback() {
         double[] position = {0.08};
         double[] velocity = {1.5};
