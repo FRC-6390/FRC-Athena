@@ -250,7 +250,9 @@ public final class Events {
         @Override
         public boolean sourceActive(EventContext context) {
             EventContext safeContext = context == null ? EventContext.empty() : context;
-            return safeContext.mode() == mode && safeContext.phase() == phase;
+            boolean matchingMode = safeContext.mode() == mode
+                    || mode == LifecycleMode.ROBOT && phase == LifecyclePhase.PERIODIC;
+            return matchingMode && safeContext.phase() == phase;
         }
 
         @Override

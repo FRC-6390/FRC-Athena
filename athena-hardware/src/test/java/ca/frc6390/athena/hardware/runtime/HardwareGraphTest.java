@@ -169,6 +169,28 @@ class HardwareGraphTest {
     }
 
     @Test
+    void failedRefreshesBackOffAndRecoverWithoutAnExceptionStorm() {
+        FakeMotorBackend motorBackend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));
+        FakeMotorHandle motor = assertInstanceOf(
+                FakeMotorHandle.class,
+                graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 1)));
+        motor.failRefresh = true;
+
+        graph.refreshInputs(1_000_000_000L);
+        graph.refreshInputs(1_050_000_000L);
+
+        assertEquals(1, motor.refreshCalls);
+        assertEquals(1, graph.refreshFailures().size());
+
+        motor.failRefresh = false;
+        graph.refreshInputs(1_100_000_000L);
+
+        assertEquals(2, motor.refreshCalls);
+        assertTrue(graph.refreshFailures().isEmpty());
+    }
+
+    @Test
     void integratedEncoderHandleReadsThroughCachedMotorHandle() {
         FakeMotorBackend motorBackend = new FakeMotorBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));

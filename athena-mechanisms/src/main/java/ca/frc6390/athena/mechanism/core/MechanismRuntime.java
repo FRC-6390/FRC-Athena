@@ -31,6 +31,10 @@ final class MechanismRuntime {
     private final Map<Object, ActiveLease> activeLeases = new IdentityHashMap<>();
     private final List<ActiveLease> leasesByRecency = new ArrayList<>();
     private final Set<MotorDevice> previouslyDrivenMotors = new LinkedHashSet<>();
+    private final List<CandidateOutput> candidateScratch = new ArrayList<>();
+    private final List<CandidateOutput> selectedScratch = new ArrayList<>();
+    private final Map<Object, CandidateOutput> winnerScratch = new IdentityHashMap<>();
+    private final Set<MotorDevice> drivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<PathAction, PathRuntime> pathRuntimes;
     private Runnable simulationStep = () -> {
     };
@@ -235,14 +239,16 @@ final class MechanismRuntime {
             scheduler.reset();
             timedContext = withTimeInState(safeMechanismContext, 0.0);
         }
-        List<CandidateOutput> candidates = new ArrayList<>();
+        List<CandidateOutput> candidates = candidateScratch;
+        candidates.clear();
         addCandidates(candidates, "base", actionRecency, scheduler.evaluate(action, timedContext));
         for (ActiveLease lease : leasesByRecency) {
             addCandidates(candidates, "lease", lease.recency(), lease.evaluate(safeMechanismContext));
         }
 
         List<CandidateOutput> selected = arbitrate(candidates, reservations);
-        Set<MotorDevice> drivenNow = new LinkedHashSet<>();
+        Set<MotorDevice> drivenNow = drivenScratch;
+        drivenNow.clear();
         applier.beginCycle();
         for (CandidateOutput candidate : selected) {
             outputs.add(candidate.output());
@@ -459,37 +465,61 @@ final class MechanismRuntime {
         return lease != null && lease.scheduler().complete();
     }
 
-    private static List<CandidateOutput> arbitrate(
+    private List<CandidateOutput> arbitrate(
             List<CandidateOutput> candidates,
             Map<Object, Long> reservations) {
-        Map<Object, CandidateOutput> winners = new LinkedHashMap<>();
-        for (CandidateOutput candidate : candidates) {
-            for (Object resource : outputResources(candidate.output().request())) {
-                if (candidate.recency() < reservations.getOrDefault(resource, Long.MIN_VALUE)) {
-                    continue;
-                }
-                CandidateOutput current = winners.get(resource);
-                if (current == null || candidate.newerThan(current)) {
-                    winners.put(resource, candidate);
-                }
+        Map<Object, CandidateOutput> winners = winnerScratch;
+        winners.clear();
+        for (int index = 0; index < candidates.size(); index++) {
+            CandidateOutput candidate = candidates.get(index);
+            OutputRequest request = candidate.output().request();
+            List<MotorDevice> motors = request.motors();
+            for (int motorIndex = 0; motorIndex < motors.size(); motorIndex++) {
+                selectWinner(motors.get(motorIndex), candidate, reservations, winners);
+            }
+            if (request.control() != null && request.control().sink() != null) {
+                selectWinner(request.control().sink(), candidate, reservations, winners);
             }
         }
-        List<CandidateOutput> selected = new ArrayList<>();
-        for (CandidateOutput candidate : candidates) {
-            List<Object> resources = outputResources(candidate.output().request());
-            if (!resources.isEmpty() && resources.stream().allMatch(resource -> winners.get(resource) == candidate)) {
+        List<CandidateOutput> selected = selectedScratch;
+        selected.clear();
+        for (int index = 0; index < candidates.size(); index++) {
+            CandidateOutput candidate = candidates.get(index);
+            if (winsAllResources(candidate, winners)) {
                 selected.add(candidate);
             }
         }
         return selected;
     }
 
-    private static List<Object> outputResources(OutputRequest request) {
-        List<Object> resources = new ArrayList<>(request.motors());
-        if (request.control() != null && request.control().sink() != null) {
-            resources.add(request.control().sink());
+    private static void selectWinner(
+            Object resource,
+            CandidateOutput candidate,
+            Map<Object, Long> reservations,
+            Map<Object, CandidateOutput> winners) {
+        if (candidate.recency() < reservations.getOrDefault(resource, Long.MIN_VALUE)) {
+            return;
         }
-        return List.copyOf(resources);
+        CandidateOutput current = winners.get(resource);
+        if (current == null || candidate.newerThan(current)) {
+            winners.put(resource, candidate);
+        }
+    }
+
+    private static boolean winsAllResources(
+            CandidateOutput candidate,
+            Map<Object, CandidateOutput> winners) {
+        OutputRequest request = candidate.output().request();
+        List<MotorDevice> motors = request.motors();
+        boolean hasResource = !motors.isEmpty();
+        for (int index = 0; index < motors.size(); index++) {
+            if (winners.get(motors.get(index)) != candidate) return false;
+        }
+        if (request.control() != null && request.control().sink() != null) {
+            hasResource = true;
+            if (winners.get(request.control().sink()) != candidate) return false;
+        }
+        return hasResource;
     }
 
     private record CandidateOutput(
@@ -500,6 +530,18 @@ final class MechanismRuntime {
             int order) {
         private boolean newerThan(CandidateOutput other) {
             return recency > other.recency || recency == other.recency && order > other.order;
+        }
+    }
+
+    static final class ScheduledOutputs implements Action {
+        private final List<Action> actions;
+
+        private ScheduledOutputs(List<Action> actions) {
+            this.actions = actions;
+        }
+
+        List<Action> actions() {
+            return actions;
         }
     }
 
@@ -758,7 +800,7 @@ final class MechanismRuntime {
                     Evaluation markerOutput = evaluate(schedule.named("pathMarker:" + name, marker), context);
                     if (markerOutput.output() != null) node.groupOutputs.add(markerOutput.output());
                 });
-                return schedule.result(groupOutput(node.groupOutputs), false, local);
+                return schedule.result(groupOutput(node), false, local);
             }
             return schedule.result(action, false, local);
         }
@@ -846,7 +888,7 @@ final class MechanismRuntime {
             if (mode == GroupMode.PARALLEL && allComplete) {
                 return schedule.result(null, true, context);
             }
-            return schedule.result(groupOutput(outputs), false, context);
+            return schedule.result(groupOutput(node), false, context);
         }
 
         private Evaluation evaluateConditional(
@@ -931,14 +973,15 @@ final class MechanismRuntime {
             return null;
         }
 
-        private static Action groupOutput(List<Action> actions) {
+        private static Action groupOutput(Node node) {
+            List<Action> actions = node.groupOutputs;
             if (actions.isEmpty()) {
                 return null;
             }
             if (actions.size() == 1) {
                 return actions.get(0);
             }
-            return new Actions.Parallel(actions);
+            return node.scheduledOutputs;
         }
 
         private enum GroupMode {
@@ -1003,6 +1046,7 @@ final class MechanismRuntime {
             private MechanismContext lastPathContext;
             private boolean pathComplete;
             private final List<Action> groupOutputs = new ArrayList<>();
+            private final ScheduledOutputs scheduledOutputs = new ScheduledOutputs(groupOutputs);
 
             private Node(double startSeconds) {
                 this.startSeconds = startSeconds;

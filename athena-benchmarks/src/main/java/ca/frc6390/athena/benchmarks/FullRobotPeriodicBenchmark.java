@@ -7,6 +7,7 @@ import ca.frc6390.athena.localization.pipeline.Localizations;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.core.MechanismTraceLevel;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
 import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
@@ -51,6 +52,7 @@ public class FullRobotPeriodicBenchmark {
         @Setup
         public void setup() {
             runtime = RobotRuntime.simulated(SimulationSession.create());
+            runtime.mechanismTraceLevel(MechanismTraceLevel.OFF);
             for (int i = 0; i < 12; i++) {
                 MotorMechanism mechanism = new MotorMechanism(i * 4);
                 runtime.register(mechanism);

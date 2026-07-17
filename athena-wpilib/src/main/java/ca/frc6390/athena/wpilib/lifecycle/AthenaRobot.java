@@ -44,7 +44,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private AutoPreviewPublisher autoPreviewPublisher;
     private final List<SendableChooser<String>> dashboardAutoChoosers = new ArrayList<>();
     private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
-    private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.SUMMARY;
+    private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.OFF;
 
     /**
      * Returns the owned Athena mechanism runtime.
@@ -64,7 +64,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     /** Selects the live mechanism telemetry profile. Safe to call from the robot constructor. */
     public final void traceTelemetry(MechanismTracePublisher.Profile profile) {
-        traceProfile = profile == null ? MechanismTracePublisher.Profile.SUMMARY : profile;
+        traceProfile = profile == null ? MechanismTracePublisher.Profile.OFF : profile;
         if (tracePublisher != null) {
             tracePublisher.profile(traceProfile);
         }
@@ -106,7 +106,6 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @Override
     public final void robotPeriodic() {
         CommandScheduler.getInstance().run();
-        run(LifecycleMode.ROBOT, LifecyclePhase.PERIODIC, true, simulationActive());
     }
 
     @Override

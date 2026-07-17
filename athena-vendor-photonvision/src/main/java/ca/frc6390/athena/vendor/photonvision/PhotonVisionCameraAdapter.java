@@ -344,9 +344,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
         @Override
         public List<PhotonVisionResult> unreadResults(PhotonPoseClient poseClient) {
-            return camera.getAllUnreadResults().stream()
-                    .map(result -> PhotonVisionResult.fromPhoton(result, poseClient))
-                    .toList();
+            List<PhotonPipelineResult> results = camera.getAllUnreadResults();
+            if (results.isEmpty()) return List.of();
+            return List.of(PhotonVisionResult.fromPhoton(results.get(results.size() - 1), poseClient));
         }
 
         @Override

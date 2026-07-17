@@ -9,6 +9,7 @@ import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
@@ -21,6 +22,7 @@ import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.MechanismScheduler;
+import ca.frc6390.athena.mechanism.core.MechanismTraceLevel;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 
@@ -41,13 +43,16 @@ public class MechanismSchedulerBenchmark {
         private MechanismScheduler runtime;
         private double nowSeconds;
 
+        @Param({"OFF", "SUMMARY", "CAPTURE"})
+        public MechanismTraceLevel traceLevel;
+
         /**
          * Creates the runtime and warms handle caches.
          */
         @Setup
         public void setup() {
             SimulationSession session = SimulationSession.create();
-            runtime = MechanismScheduler.create(session.hardwareGraph());
+            runtime = MechanismScheduler.create(session.hardwareGraph()).traceLevel(traceLevel);
             for (int i = 0; i < 32; i++) {
                 MotorMechanism mechanism = new MotorMechanism(i * 8);
                 runtime.register(mechanism);

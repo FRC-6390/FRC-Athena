@@ -14,6 +14,9 @@ public final class RuntimeHardwareAccess {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(action, "action");
         ActionContext previous = CURRENT.get();
+        if (previous == context) {
+            return action.get();
+        }
         CURRENT.set(context);
         try {
             return action.get();

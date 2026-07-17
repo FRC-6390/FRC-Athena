@@ -643,6 +643,7 @@ public final class Localization implements PoseSignal {
     }
 
     private static final class KalmanEngine {
+        private static final Object UNKNOWN_VISION_SOURCE = new Object();
         private static final int RECOVERY_SAMPLE_COUNT = 3;
         private static final double RECOVERY_MAX_INTERVAL_SECONDS = 0.25;
         private static final double RECOVERY_TRANSLATION_METERS = 0.75;
@@ -701,7 +702,7 @@ public final class Localization implements PoseSignal {
                 PoseMeasurementSample sample,
                 double innovationGate,
                 double maxHeadingResidualRadians) {
-            Object source = sample.source() == null ? sample : sample.source();
+            Object source = sample.source() == null ? UNKNOWN_VISION_SOURCE : sample.source();
             double previous = lastSeenVisionTimestamps.getOrDefault(source, Double.NEGATIVE_INFINITY);
             if (sample.timestampSeconds() <= previous) {
                 return;

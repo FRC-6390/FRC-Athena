@@ -41,6 +41,9 @@ final class OutputApplier {
     private final AppliedOutput appliedOutput = new AppliedOutput();
     private final List<MechanismTraceSnapshot.Control> controlTraces = new ArrayList<>();
     private final Map<MotorDevice, AppliedMotorCommand> appliedMotorCommands = new IdentityHashMap<>();
+    private final Set<MotorHandle> appliedHandles = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<ca.frc6390.athena.runtime.control.ControlSink> activeSinks =
+            java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private boolean captureTrace = true;
 
     private OutputApplier(ActionContext context, RuntimeOverrides overrides) {
@@ -91,9 +94,10 @@ final class OutputApplier {
         if (output.request().control() != null) {
             controlsAppliedThisCycle.add(output.request().control());
         }
-        AppliedOutput applied = RuntimeHardwareAccess.call(context, () -> resolveControlOutput(
-                output,
-                mechanismContext == null ? MechanismContext.empty() : mechanismContext));
+        MechanismContext safeContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
+        AppliedOutput applied = RuntimeHardwareAccess.current() == context
+                ? resolveControlOutput(output, safeContext)
+                : RuntimeHardwareAccess.call(context, () -> resolveControlOutput(output, safeContext));
         if (captureTrace && output.request().control() != null) {
             ControlBinding control = output.request().control();
             controlTraces.add(applied.trace(control, controlRuntimes.get(control)));
@@ -101,7 +105,7 @@ final class OutputApplier {
                 applySink(control.sink(), applied.output());
             }
         }
-        Set<MotorHandle> appliedHandles = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        appliedHandles.clear();
         for (MotorDevice motor : motors(output.request())) {
             applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
         }
@@ -170,8 +174,7 @@ final class OutputApplier {
     }
 
     void endCycle() {
-        Set<ca.frc6390.athena.runtime.control.ControlSink> activeSinks =
-                java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        activeSinks.clear();
         for (ControlBinding control : controlsAppliedThisCycle) {
             if (control.sink() != null) activeSinks.add(control.sink());
         }

@@ -81,6 +81,10 @@ final class OutputResolver {
             resolveStates(parallel.Actions(), context, outputs);
             return;
         }
+        if (action instanceof MechanismRuntime.ScheduledOutputs scheduled) {
+            resolveStates(scheduled.actions(), context, outputs);
+            return;
+        }
         if (action instanceof Actions.Race race) {
             resolveStates(race.Actions(), context, outputs);
             return;

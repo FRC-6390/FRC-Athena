@@ -275,6 +275,9 @@ project(':athena-benchmarks') {
         implementation project(':athena-robot')
         implementation "org.openjdk.jmh:jmh-core:1.37"
         annotationProcessor "org.openjdk.jmh:jmh-generator-annprocess:1.37"
+        runtimeOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        runtimeOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        runtimeOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
     }
 
     tasks.register('jmh', JavaExec) {

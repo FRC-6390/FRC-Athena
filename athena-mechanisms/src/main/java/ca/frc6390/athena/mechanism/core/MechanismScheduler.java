@@ -39,6 +39,9 @@ public final class MechanismScheduler {
     private final Map<PathAction, PathRuntime> pathRuntimes = new LinkedHashMap<>();
     private final Map<Object, List<LeaseRegistration>> leaseTargets = new IdentityHashMap<>();
     private final Map<Object, LeaseReservation> leaseReservations = new IdentityHashMap<>();
+    private final Map<Object, Long> reservationScratch = new IdentityHashMap<>();
+    private final Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntimeScratch = new IdentityHashMap<>();
+    private final Set<MotorDevice> globallyDrivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final OutputResolver resolver;
     private long requestSequence;
     private Runnable simulationStep = () -> {
@@ -567,6 +570,12 @@ public final class MechanismScheduler {
     }
 
     public List<ResolvedOutput> periodic(MechanismContext mechanismContext, EventContext eventContext) {
+        return ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess.call(
+                actionContext,
+                () -> periodicBound(mechanismContext, eventContext));
+    }
+
+    private List<ResolvedOutput> periodicBound(MechanismContext mechanismContext, EventContext eventContext) {
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
         sampleSignals();
         List<ResolvedOutput> outputs = new ArrayList<>();
@@ -575,8 +584,10 @@ public final class MechanismScheduler {
         }
         digitalInputs.forEach(DigitalInputDevice::clearLatchedEdges);
         Map<Object, Long> reservations = globalLeaseReservations();
-        Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntime = new IdentityHashMap<>();
-        Set<MotorDevice> globallyDriven = new LinkedHashSet<>();
+        Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntime = drivenByRuntimeScratch;
+        Set<MotorDevice> globallyDriven = globallyDrivenScratch;
+        drivenByRuntime.clear();
+        globallyDriven.clear();
         for (MechanismRuntime runtime : runtimes.values()) {
             Set<MotorDevice> driven = runtime.periodicOutputsInto(safeMechanismContext, outputs, reservations);
             drivenByRuntime.put(runtime, driven);
@@ -589,7 +600,8 @@ public final class MechanismScheduler {
     }
 
     private Map<Object, Long> globalLeaseReservations() {
-        Map<Object, Long> reservations = new LinkedHashMap<>();
+        Map<Object, Long> reservations = reservationScratch;
+        reservations.clear();
         for (Map.Entry<Object, LeaseReservation> entry : leaseReservations.entrySet()) {
             List<LeaseRegistration> registrations = leaseTargets.get(entry.getKey());
             if (registrations == null || registrations.stream()
