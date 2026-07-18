@@ -181,6 +181,45 @@ class ControlSysIdTest {
         assertThrows(IllegalArgumentException.class, () -> sysId.timeout(Double.NaN));
     }
 
+    @Test
+    void nonFiniteFeedbackIsRejectedBeforeItCanCorruptTheLog() {
+        RecordingContext hardware = new RecordingContext();
+        hardware.encoder.positionRotations = Double.NaN;
+        RecordingLog log = new RecordingLog();
+        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(
+                control,
+                control.sysId().logger(log).dynamicForward());
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
+
+        scheduler.request(mechanism.test);
+
+        assertThrows(IllegalArgumentException.class, () -> scheduler.teleopPeriodic(0.0, 0.02));
+        assertEquals(0, log.samples.size());
+    }
+
+    @Test
+    void oneRoutineLoggerRemainsValidAcrossSequentialDirections() {
+        RecordingContext hardware = new RecordingContext();
+        RecordingLog log = new RecordingLog();
+        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlSysId sysId = control.sysId().logger(log);
+        MultiTestMechanism mechanism = new MultiTestMechanism(control, sysId);
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
+
+        scheduler.request(mechanism.forward);
+        scheduler.teleopPeriodic(0.0, 0.02);
+        scheduler.cancel(mechanism.forward);
+        scheduler.teleopPeriodic(0.02, 0.02);
+        scheduler.request(mechanism.reverse);
+        scheduler.teleopPeriodic(0.04, 0.02);
+
+        assertEquals(2, log.samples.size());
+        assertEquals(SysIdState.DYNAMIC_FORWARD, log.samples.get(0).state());
+        assertEquals(SysIdState.DYNAMIC_REVERSE, log.samples.get(1).state());
+        assertEquals(1, log.endCalls);
+    }
+
     private static void assertTestOutput(SysIdState state, double expectedVoltage, double elapsedSeconds) {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
@@ -239,6 +278,18 @@ class ControlSysIdTest {
         private HeldMechanism(ControlBinding control, boolean[] held, Action action) {
             this.control = control;
             binding = Events.when(() -> held[0]).active().whileActive(action);
+        }
+    }
+
+    private static final class MultiTestMechanism implements Mechanism {
+        private final ControlBinding control;
+        private final Action forward;
+        private final Action reverse;
+
+        private MultiTestMechanism(ControlBinding control, ControlSysId sysId) {
+            this.control = control;
+            forward = sysId.dynamicForward();
+            reverse = sysId.dynamicReverse();
         }
     }
 

@@ -154,10 +154,10 @@ public final class ControlSysId {
             SysIdState state,
             double fallbackAppliedVoltage) {
         Objects.requireNonNull(context, "context");
-        if (!active) {
+        if (activeLog == null) {
             activeLog = configuredLog == null ? discoverLog() : configuredLog;
-            active = true;
         }
+        active = true;
         double voltage = readOrFallback(
                 context.motor(control.output())::appliedVoltage,
                 fallbackAppliedVoltage);
@@ -180,7 +180,6 @@ public final class ControlSysId {
             activeLog.end();
         }
         active = false;
-        activeLog = null;
     }
 
     private SysIdLog discoverLog() {
