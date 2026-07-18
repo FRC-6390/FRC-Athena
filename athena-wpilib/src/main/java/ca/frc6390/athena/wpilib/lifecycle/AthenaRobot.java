@@ -56,6 +56,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private int reportedSystemFailures;
     private MemoryPressure reportedPressure = MemoryPressure.NORMAL;
     private boolean reportedJvmConfiguration;
+    private boolean closed;
 
     /**
      * Returns the owned Athena mechanism runtime.
@@ -338,15 +339,60 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     @Override
-    public void close() {
-        if (tracePublisher != null) tracePublisher.close();
-        if (mechanismTelemetryPublisher != null) mechanismTelemetryPublisher.close();
-        if (autoPreviewPublisher != null) autoPreviewPublisher.close();
-        if (systemTelemetryPublisher != null) systemTelemetryPublisher.close();
-        if (systemRuntime != null) systemRuntime.close();
-        digitalInputs.values().forEach(DigitalInput::close);
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        RobotRuntime closingRuntime = runtime;
+        runtime = null;
+        RuntimeException failure = null;
+        try {
+            closeRuntime(closingRuntime);
+        } catch (RuntimeException exception) {
+            failure = exception;
+        }
+        failure = closeResource(failure, tracePublisher, "mechanism trace publisher");
+        failure = closeResource(failure, mechanismTelemetryPublisher, "mechanism telemetry publisher");
+        failure = closeResource(failure, autoPreviewPublisher, "auto preview publisher");
+        failure = closeResource(failure, systemTelemetryPublisher, "system telemetry publisher");
+        failure = closeResource(failure, systemRuntime, "system runtime");
+        for (DigitalInput input : digitalInputs.values()) {
+            failure = closeResource(failure, input, "digital input");
+        }
         digitalInputs.clear();
-        super.close();
+        try {
+            super.close();
+        } catch (RuntimeException exception) {
+            failure = appendFailure(failure, exception);
+        }
+        if (failure != null) throw failure;
+    }
+
+    static void closeRuntime(RobotRuntime runtime) {
+        if (runtime == null) return;
+        ActionRequests.clear();
+        runtime.close();
+    }
+
+    private static RuntimeException closeResource(
+            RuntimeException failure,
+            AutoCloseable resource,
+            String description) {
+        if (resource == null) return failure;
+        try {
+            resource.close();
+            return failure;
+        } catch (Exception exception) {
+            RuntimeException wrapped = exception instanceof RuntimeException runtimeException
+                    ? runtimeException
+                    : new IllegalStateException("Failed to close " + description + ".", exception);
+            return appendFailure(failure, wrapped);
+        }
+    }
+
+    private static RuntimeException appendFailure(RuntimeException failure, RuntimeException additional) {
+        if (failure == null) return additional;
+        failure.addSuppressed(additional);
+        return failure;
     }
 
 }

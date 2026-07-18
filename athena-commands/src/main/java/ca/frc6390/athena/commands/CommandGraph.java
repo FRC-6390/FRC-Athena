@@ -46,8 +46,10 @@ public final class CommandGraph {
         for (ActiveCommand active : ListSnapshot.copyOf(activeCommands.values())) {
             if (active.execute()) {
                 finished.add(active.Action().name());
-                activeCommands.remove(active.Action().name());
-                releaseRequirements(active.Action());
+                if (activeCommands.remove(active.Action().name(), active)) {
+                    active.end(false);
+                    releaseRequirements(active.Action());
+                }
             }
         }
         return finished;
@@ -89,7 +91,7 @@ public final class CommandGraph {
      * @return active command names
      */
     public Collection<String> activeCommandNames() {
-        return activeCommands.keySet();
+        return java.util.List.copyOf(activeCommands.keySet());
     }
 
     private void cancelConflicts(Collection<String> requirements) {
@@ -121,11 +123,7 @@ public final class CommandGraph {
 
         private boolean execute() {
             Action.onExecute().run();
-            if (Action.isFinished().getAsBoolean()) {
-                end(false);
-                return true;
-            }
-            return false;
+            return Action.isFinished().getAsBoolean();
         }
 
         private void end(boolean interrupted) {

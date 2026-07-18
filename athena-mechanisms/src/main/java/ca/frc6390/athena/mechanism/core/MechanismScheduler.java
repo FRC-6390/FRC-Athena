@@ -27,6 +27,7 @@ import java.util.function.Function;
  * Mechanism scheduler used by the root robot runtime.
  */
 public final class MechanismScheduler {
+    private static final int COMPLETION_HISTORY_LIMIT = 256;
     private final MappedActionContext registeredHandles = new MappedActionContext();
     private final ActionContext actionContext;
     private final Map<Mechanism, MechanismRuntime> runtimes = new IdentityHashMap<>();
@@ -39,6 +40,7 @@ public final class MechanismScheduler {
     private final Map<PathAction, PathRuntime> pathRuntimes = new LinkedHashMap<>();
     private final Map<Object, List<LeaseRegistration>> leaseTargets = new IdentityHashMap<>();
     private final Map<Object, LeaseReservation> leaseReservations = new IdentityHashMap<>();
+    private final List<Object> completedLeaseKeys = new ArrayList<>();
     private final Map<Object, Long> reservationScratch = new IdentityHashMap<>();
     private final Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntimeScratch = new IdentityHashMap<>();
     private final Set<MotorDevice> globallyDrivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
@@ -461,6 +463,7 @@ public final class MechanismScheduler {
     }
 
     private void activateLease(Object key, Action action, boolean restart) {
+        forgetCompletion(key);
         List<LeaseRegistration> existing = leaseTargets.get(key);
         if (existing != null && !restart) {
             return;
@@ -566,8 +569,9 @@ public final class MechanismScheduler {
 
     /** Returns whether a requested action has reached completion and remains registered. */
     public boolean isComplete(Action action) {
-        List<LeaseRegistration> registrations = leaseTargets.get(Objects.requireNonNull(action, "action"));
-        if (registrations == null || registrations.isEmpty()) return false;
+        Action safeAction = Objects.requireNonNull(action, "action");
+        List<LeaseRegistration> registrations = leaseTargets.get(safeAction);
+        if (registrations == null || registrations.isEmpty()) return completed(safeAction);
         for (LeaseRegistration registration : registrations) {
             if (!registration.runtime().leaseComplete(registration.runtimeKey())) return false;
         }
@@ -576,6 +580,7 @@ public final class MechanismScheduler {
 
     private void cancelNested(Action action, Set<Action> visited) {
         if (action == null || !visited.add(action)) return;
+        forgetCompletion(action);
         releaseLease(action);
         if (action instanceof PathAction path) {
             path.markers().values().forEach(marker -> cancelNested(marker, visited));
@@ -623,24 +628,58 @@ public final class MechanismScheduler {
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
         sampleSignals();
         List<ResolvedOutput> outputs = new ArrayList<>();
-        for (MechanismRuntime runtime : runtimes.values()) {
-            runtime.runHooks(eventContext, false);
-        }
-        digitalInputs.forEach(DigitalInputDevice::clearLatchedEdges);
-        Map<Object, Long> reservations = globalLeaseReservations();
         Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntime = drivenByRuntimeScratch;
         Set<MotorDevice> globallyDriven = globallyDrivenScratch;
         drivenByRuntime.clear();
         globallyDriven.clear();
-        for (MechanismRuntime runtime : runtimes.values()) {
-            Set<MotorDevice> driven = runtime.periodicOutputsInto(safeMechanismContext, outputs, reservations);
-            drivenByRuntime.put(runtime, driven);
-            globallyDriven.addAll(driven);
-        }
-        for (MechanismRuntime runtime : runtimes.values()) {
-            runtime.finishOutputCycle(globallyDriven, drivenByRuntime.getOrDefault(runtime, Set.of()));
+        try {
+            for (MechanismRuntime runtime : runtimes.values()) {
+                runtime.runHooks(eventContext, false);
+            }
+            Map<Object, Long> reservations = globalLeaseReservations();
+            for (MechanismRuntime runtime : runtimes.values()) {
+                Set<MotorDevice> driven = runtime.periodicOutputsInto(safeMechanismContext, outputs, reservations);
+                drivenByRuntime.put(runtime, driven);
+                globallyDriven.addAll(driven);
+            }
+        } finally {
+            digitalInputs.forEach(DigitalInputDevice::clearLatchedEdges);
+            for (MechanismRuntime runtime : runtimes.values()) {
+                runtime.finishOutputCycle(globallyDriven, drivenByRuntime.getOrDefault(runtime, Set.of()));
+            }
+            retireCompletedRequests();
         }
         return outputs;
+    }
+
+    private void retireCompletedRequests() {
+        List<Object> completed = new ArrayList<>();
+        for (Map.Entry<Object, List<LeaseRegistration>> entry : leaseTargets.entrySet()) {
+            if (!(entry.getKey() instanceof Action)) continue;
+            List<LeaseRegistration> registrations = entry.getValue();
+            if (!registrations.isEmpty() && registrations.stream()
+                    .allMatch(registration -> registration.runtime().leaseComplete(registration.runtimeKey()))) {
+                completed.add(entry.getKey());
+            }
+        }
+        for (Object key : completed) {
+            rememberCompletion(key);
+            releaseLease(key);
+        }
+    }
+
+    private void rememberCompletion(Object key) {
+        forgetCompletion(key);
+        completedLeaseKeys.add(key);
+        if (completedLeaseKeys.size() > COMPLETION_HISTORY_LIMIT) completedLeaseKeys.remove(0);
+    }
+
+    private void forgetCompletion(Object key) {
+        completedLeaseKeys.removeIf(existing -> existing == key);
+    }
+
+    private boolean completed(Object key) {
+        return completedLeaseKeys.stream().anyMatch(existing -> existing == key);
     }
 
     private Map<Object, Long> globalLeaseReservations() {

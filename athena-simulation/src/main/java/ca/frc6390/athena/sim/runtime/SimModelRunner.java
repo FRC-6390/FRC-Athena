@@ -57,6 +57,13 @@ final class SimModelRunner implements SimPhysicsEngine {
         }
         state.position = nextPosition;
 
+        double motorRotationsPerMechanismRotation = motorRotationsPerMechanismRotation(simulation);
+        for (MotorDevice motor : simulation.motors()) {
+            session.motor(motor).state(
+                    state.position * motorRotationsPerMechanismRotation,
+                    state.velocity * motorRotationsPerMechanismRotation);
+        }
+
         for (EncoderDevice encoderDevice : linkedEncoders) {
             session.encoder(encoderDevice)
                     .positionRotations(state.position)
@@ -140,6 +147,10 @@ final class SimModelRunner implements SimPhysicsEngine {
             speed *= Math.abs(simulation.gearRatio().ratio());
         }
         return Math.max(1.0, speed);
+    }
+
+    private static double motorRotationsPerMechanismRotation(SimModel simulation) {
+        return simulation.gearRatio() == null ? 1.0 : 1.0 / Math.abs(simulation.gearRatio().ratio());
     }
 
     private static double closedLoopGain(SimModel simulation) {

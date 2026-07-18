@@ -4,12 +4,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.frc6390.athena.mechanism.core.ActionRequests;
+import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import ca.frc6390.athena.mechanism.core.LifecyclePhase;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
+import ca.frc6390.athena.robot.RobotRuntime;
+import ca.frc6390.athena.sim.runtime.SimulationSession;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.DoubleSupplier;
@@ -57,6 +62,21 @@ class AthenaRobotTest {
     void createsSimulationRuntimeOnlyWhenWpilibReportsSimulation() {
         assertNotNull(AthenaRobot.createRuntime(true).simulationSession());
         assertNull(AthenaRobot.createRuntime(false).simulationSession());
+    }
+
+    @Test
+    void closingRuntimeClearsGlobalActionRequests() {
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create());
+        ActionRequests.bind(runtime::request);
+        try {
+            AthenaRobot.closeRuntime(runtime);
+
+            assertThrows(IllegalStateException.class, () -> ActionRequests.request(Actions.neutral()));
+            assertThrows(IllegalStateException.class, () -> runtime.request(Actions.neutral()));
+        } finally {
+            ActionRequests.clear();
+            runtime.close();
+        }
     }
 
     private static AthenaRobotLifecycle lifecycle(ManualClock clock, List<Call> calls) {

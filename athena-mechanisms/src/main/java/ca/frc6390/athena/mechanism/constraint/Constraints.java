@@ -142,17 +142,7 @@ public final class Constraints {
         if (copy.stream().anyMatch(constraint -> constraint.stage() != stage)) {
             throw new IllegalArgumentException("A constraint group cannot mix target and output constraints.");
         }
-        return new Constraint<>() {
-            @Override
-            public ConstraintResult<T> evaluate(ConstraintContext<T> context) {
-                return Constraints.evaluate(copy, context, stage);
-            }
-
-            @Override
-            public ConstraintStage stage() {
-                return stage;
-            }
-        };
+        return new ConstraintGroup<>(copy, stage);
     }
 
     /** Returns whether a constraint collection contains the requested stage. */
@@ -174,6 +164,13 @@ public final class Constraints {
                 if (constraint instanceof RangeConstraint bounded) {
                     minimum = Math.max(minimum, bounded.range().minimum());
                     maximum = Math.min(maximum, bounded.range().maximum());
+                } else if (constraint instanceof ConstraintGroup<?> group) {
+                    @SuppressWarnings("unchecked")
+                    List<? extends Constraint<Double>> children =
+                            (List<? extends Constraint<Double>>) (List<?>) group.constraints();
+                    Range nested = positionRange(children);
+                    minimum = Math.max(minimum, nested.minimum());
+                    maximum = Math.min(maximum, nested.maximum());
                 }
             }
         }
@@ -194,6 +191,16 @@ public final class Constraints {
                     declared = true;
                     velocity = Math.min(velocity, motion.profile().maxVelocity());
                     acceleration = Math.min(acceleration, motion.profile().maxAcceleration());
+                } else if (constraint instanceof ConstraintGroup<?> group) {
+                    @SuppressWarnings("unchecked")
+                    List<? extends Constraint<Double>> children =
+                            (List<? extends Constraint<Double>>) (List<?>) group.constraints();
+                    MotionProfile nested = motionProfile(children);
+                    if (nested != null) {
+                        declared = true;
+                        velocity = Math.min(velocity, nested.maxVelocity());
+                        acceleration = Math.min(acceleration, nested.maxAcceleration());
+                    }
                 }
             }
         }
@@ -238,5 +245,18 @@ public final class Constraints {
         return corrected
                 ? new ConstraintResult.Corrected<>(context.requested(), requested)
                 : new ConstraintResult.Allowed<>(requested);
+    }
+
+    private record ConstraintGroup<T>(List<Constraint<T>> constraints, ConstraintStage stage)
+            implements Constraint<T> {
+        private ConstraintGroup {
+            constraints = List.copyOf(constraints);
+            Objects.requireNonNull(stage, "stage");
+        }
+
+        @Override
+        public ConstraintResult<T> evaluate(ConstraintContext<T> context) {
+            return Constraints.evaluate(constraints, context, stage);
+        }
     }
 }

@@ -3,6 +3,7 @@ package ca.frc6390.athena.mechanism.core;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -243,6 +244,7 @@ final class MechanismRuntime {
         candidates.clear();
         addCandidates(candidates, "base", actionRecency, scheduler.evaluate(action, timedContext));
         for (ActiveLease lease : leasesByRecency) {
+            if (lease.scheduler().complete()) continue;
             addCandidates(candidates, "lease", lease.recency(), lease.evaluate(safeMechanismContext));
         }
 
@@ -250,12 +252,15 @@ final class MechanismRuntime {
         Set<MotorDevice> drivenNow = drivenScratch;
         drivenNow.clear();
         applier.beginCycle();
-        for (CandidateOutput candidate : selected) {
-            outputs.add(candidate.output());
-            drivenNow.addAll(candidate.output().request().motors());
-            applier.apply(candidate.output(), candidate.context());
+        try {
+            for (CandidateOutput candidate : selected) {
+                outputs.add(candidate.output());
+                drivenNow.addAll(candidate.output().request().motors());
+                applier.apply(candidate.output(), candidate.context());
+            }
+        } finally {
+            applier.endCycle();
         }
-        applier.endCycle();
         simulationStep.run();
         if (traceLevel != MechanismTraceLevel.OFF) {
             traceSnapshot = buildTrace(timedContext, candidates, selected);
@@ -669,23 +674,42 @@ final class MechanismRuntime {
                 return evaluateGroup(deadline.Actions(), schedule, context, node, GroupMode.DEADLINE, 0);
             }
             if (action instanceof Actions.Computed computed) {
-                Evaluation child = evaluate(schedule.named("computed", computed.evaluate(local)), context);
-                return schedule.result(child.output(), false, child.context());
+                if (node.terminal) return schedule.result(null, true, local);
+                SchedulerNode childNode = schedule.named("computed", computed.evaluate(local));
+                Evaluation child = evaluate(childNode, context);
+                node.terminal = child.complete();
+                if (child.complete()) childNode.reset();
+                return schedule.result(child.output(), child.complete(), child.context());
             }
             if (action instanceof Actions.HardwareComputed computed) {
-                Evaluation child = evaluate(schedule.named("hardwareComputed", computed.evaluate(actionContext)), context);
-                return schedule.result(child.output(), false, child.context());
+                if (node.terminal) return schedule.result(null, true, local);
+                SchedulerNode childNode = schedule.named("hardwareComputed", computed.evaluate(actionContext));
+                Evaluation child = evaluate(childNode, context);
+                node.terminal = child.complete();
+                if (child.complete()) childNode.reset();
+                return schedule.result(child.output(), child.complete(), child.context());
             }
             if (action instanceof Actions.VelocityContribution contribution) {
+                if (node.terminal) return schedule.result(null, true, local);
                 contribution.channel().set(contribution.sample());
-                Evaluation child = evaluate(schedule.named("velocityDrive", contribution.driveAction()), context);
+                SchedulerNode childNode = schedule.named("velocityDrive", contribution.driveAction());
+                Evaluation child = evaluate(childNode, context);
+                if (child.complete()) {
+                    contribution.channel().clear();
+                    childNode.reset();
+                    node.terminal = true;
+                }
                 return schedule.result(child.output(), child.complete(), child.context());
             }
             if (action instanceof Actions.ControlSysIdAction sysId) {
+                if (node.terminal) return schedule.result(null, true, local);
                 if (sysId.routine().timedOut(local.timeInStateSeconds())) {
                     sysId.routine().end();
+                    node.entered = false;
+                    node.terminal = true;
                     return schedule.result(null, true, local);
                 }
+                node.entered = true;
                 return schedule.result(sysId.output(local.timeInStateSeconds()), false, local);
             }
             if (action instanceof Actions.Choice choice) {
@@ -695,10 +719,14 @@ final class MechanismRuntime {
                 return evaluate(schedule.named("when", branch.choose(local)), context);
             }
             if (action instanceof Actions.Timeout timeout) {
+                if (node.terminal) return schedule.result(null, true, local);
                 if (timeout.expired(local)) {
+                    schedule.named("timeout", timeout.action()).reset();
+                    node.terminal = true;
                     return schedule.result(null, true, local);
                 }
                 Evaluation child = evaluate(schedule.named("timeout", timeout.action()), context);
+                if (child.complete()) node.terminal = true;
                 return schedule.result(child.output(), child.complete(), child.context());
             }
             if (action instanceof Actions.WithinTolerance within) {
@@ -714,7 +742,8 @@ final class MechanismRuntime {
                         conditional.next(),
                         schedule,
                         context,
-                        local);
+                        local,
+                        node);
             }
             if (action instanceof Action.Conditional conditional) {
                 return evaluateConditional(
@@ -723,13 +752,14 @@ final class MechanismRuntime {
                         conditional.next(),
                         schedule,
                         context,
-                        local);
+                        local,
+                        node);
             }
             if (action instanceof Actions.Then then) {
-                return evaluateThen(then.action(), then.next(), schedule, context);
+                return evaluateThen(then.action(), then.next(), schedule, context, node);
             }
             if (action instanceof Action.Then then) {
-                return evaluateThen(then.action(), then.next(), schedule, context);
+                return evaluateThen(then.action(), then.next(), schedule, context, node);
             }
             if (action instanceof Actions.RuntimeAction runtimeAction) {
                 if (!node.entered) {
@@ -740,15 +770,28 @@ final class MechanismRuntime {
             }
             if (action instanceof Actions.EncoderSetPosition setPosition) {
                 if (!node.entered) {
-                    actionContext.encoder(setPosition.encoder()).setPositionRotations(
-                            setPosition.encoder().rotationsFromPosition(setPosition.position()));
+                    try {
+                        actionContext.encoder(setPosition.encoder()).setPositionRotations(
+                                setPosition.encoder().rotationsFromPosition(setPosition.position()));
+                    } catch (RuntimeException exception) {
+                        handleHardwareMutationFailure(
+                                setPosition.encoder(), setPosition.encoder().failurePolicy(), exception);
+                    }
                     node.entered = true;
                 }
                 return schedule.result(null, true, local);
             }
             if (action instanceof Actions.ImuYawMutation setYaw) {
                 if (!node.entered) {
-                    setYaw.apply(actionContext);
+                    try {
+                        setYaw.apply(actionContext);
+                    } catch (RuntimeException exception) {
+                        Object declaration = imuDeclaration(setYaw);
+                        FailurePolicy policy = declaration instanceof ImuDevice imu
+                                ? imu.failurePolicy()
+                                : FailurePolicy.WARN;
+                        handleHardwareMutationFailure(declaration, policy, exception);
+                    }
                     node.entered = true;
                 }
                 return schedule.result(null, true, local);
@@ -795,8 +838,13 @@ final class MechanismRuntime {
                 if (pathOutput != null) {
                     Evaluation drive = evaluate(schedule.named("pathOutput", pathOutput), context);
                     if (drive.output() != null) node.groupOutputs.add(drive.output());
+                } else {
+                    schedule.removeNamed("pathOutput");
                 }
-                runtime.activeMarkers(pathState, local).forEach((name, marker) -> {
+                Map<String, Action> activeMarkers = Objects.requireNonNull(
+                        runtime.activeMarkers(pathState, local), "active path markers");
+                schedule.retainMarkerChildren(activeMarkers.keySet());
+                activeMarkers.forEach((name, marker) -> {
                     Evaluation markerOutput = evaluate(schedule.named("pathMarker:" + name, marker), context);
                     if (markerOutput.output() != null) node.groupOutputs.add(markerOutput.output());
                 });
@@ -811,7 +859,16 @@ final class MechanismRuntime {
                 MechanismContext context,
                 MechanismContext local,
                 Node node) {
+            if (node.terminal) {
+                return sequence.next() == null
+                        ? schedule.result(null, true, local)
+                        : evaluate(schedule.named("next", sequence.next()), context);
+            }
             if (local.timeInStateSeconds() >= sequence.timeoutSeconds()) {
+                if (node.index < sequence.steps().size()) {
+                    schedule.indexed(node.index, sequence.steps().get(node.index).action()).reset();
+                }
+                node.terminal = true;
                 return sequence.next() == null
                         ? schedule.result(null, true, local)
                         : evaluate(schedule.named("next", sequence.next()), context);
@@ -867,25 +924,34 @@ final class MechanismRuntime {
                 Node node,
                 GroupMode mode,
                 int deadlineIndex) {
+            if (node.terminal) {
+                return schedule.result(null, true, context);
+            }
             List<Action> outputs = node.groupOutputs;
             outputs.clear();
             boolean anyComplete = false;
             boolean allComplete = !actions.isEmpty();
+            boolean deadlineComplete = false;
             for (int i = 0; i < actions.size(); i++) {
                 Evaluation child = evaluate(schedule.indexed(i, actions.get(i)), context);
                 anyComplete |= child.complete();
                 allComplete &= child.complete();
                 if (mode == GroupMode.DEADLINE && i == deadlineIndex && child.complete()) {
-                    return schedule.result(null, true, child.context());
+                    deadlineComplete = true;
                 }
                 if (child.output() != null) {
                     outputs.add(child.output());
                 }
             }
-            if (mode == GroupMode.RACE && anyComplete) {
+            if ((mode == GroupMode.RACE && anyComplete)
+                    || (mode == GroupMode.DEADLINE && deadlineComplete)) {
+                schedule.resetChildren();
+                node.terminal = true;
                 return schedule.result(null, true, context);
             }
             if (mode == GroupMode.PARALLEL && allComplete) {
+                schedule.resetChildren();
+                node.terminal = true;
                 return schedule.result(null, true, context);
             }
             return schedule.result(groupOutput(node), false, context);
@@ -897,8 +963,13 @@ final class MechanismRuntime {
                 Action next,
                 SchedulerNode schedule,
                 MechanismContext context,
-                MechanismContext local) {
-            if (condition.test(local)) {
+                MechanismContext local,
+                Node node) {
+            if (node.terminal || condition.test(local)) {
+                if (!node.terminal) {
+                    schedule.named("conditional", wrapped).reset();
+                    node.terminal = true;
+                }
                 return next == null ? schedule.result(null, true, local) : evaluate(schedule.named("next", next), context);
             }
             Evaluation child = evaluate(schedule.named("conditional", wrapped), context);
@@ -912,9 +983,14 @@ final class MechanismRuntime {
                 Action wrapped,
                 Action next,
                 SchedulerNode schedule,
-                MechanismContext context) {
-            Evaluation child = evaluate(schedule.named("thenState", wrapped), context);
+                MechanismContext context,
+                Node node) {
+            if (node.terminal) return evaluate(schedule.named("thenNext", next), context);
+            SchedulerNode childNode = schedule.named("thenState", wrapped);
+            Evaluation child = evaluate(childNode, context);
             if (child.complete()) {
+                childNode.reset();
+                node.terminal = true;
                 return evaluate(schedule.named("thenNext", next), context);
             }
             return child;
@@ -949,6 +1025,22 @@ final class MechanismRuntime {
                 return RuntimeHardwareAccess.call(actionContext, control.feedback().velocity()::velocity);
             }
             return actionContext.motor(control.output()).integratedVelocityRotationsPerSecond();
+        }
+
+        private void handleHardwareMutationFailure(
+                Object declaration,
+                FailurePolicy policy,
+                RuntimeException exception) {
+            if (policy == FailurePolicy.PANIC) throw exception;
+            actionContext.hardwareFailure(declaration, exception);
+        }
+
+        private static Object imuDeclaration(Actions.ImuYawMutation mutation) {
+            if (mutation.imu() instanceof ImuDevice imu) return imu;
+            for (Object dependency : mutation.imu().dependencies()) {
+                if (dependency instanceof ImuDevice imu) return imu;
+            }
+            return mutation.imu();
         }
 
         private static ControlTarget controlTarget(Action action) {
@@ -1045,6 +1137,7 @@ final class MechanismRuntime {
             private PathRuntime pathRuntime;
             private MechanismContext lastPathContext;
             private boolean pathComplete;
+            private boolean terminal;
             private final List<Action> groupOutputs = new ArrayList<>();
             private final ScheduledOutputs scheduledOutputs = new ScheduledOutputs(groupOutputs);
 
@@ -1086,6 +1179,7 @@ final class MechanismRuntime {
                 }
                 SchedulerNode child = indexedChildren.get(index);
                 if (child == null || child.action() != childState) {
+                    if (child != null) child.reset();
                     child = lower(childState);
                     indexedChildren.set(index, child);
                 }
@@ -1095,6 +1189,7 @@ final class MechanismRuntime {
             private SchedulerNode named(String name, Action childState) {
                 SchedulerNode child = namedChildren.get(name);
                 if (child == null || child.action() != childState) {
+                    if (child != null) child.reset();
                     child = lower(childState);
                     namedChildren.put(name, child);
                 }
@@ -1102,7 +1197,7 @@ final class MechanismRuntime {
             }
 
             private void reset() {
-                if (action instanceof Actions.ControlSysIdAction sysId) {
+                if (runtime != null && runtime.entered && action instanceof Actions.ControlSysIdAction sysId) {
                     sysId.routine().end();
                 }
                 if (action instanceof Actions.VelocityContribution contribution) {
@@ -1121,6 +1216,26 @@ final class MechanismRuntime {
                     }
                 }
                 namedChildren.values().forEach(SchedulerNode::reset);
+            }
+
+            private void resetChildren() {
+                for (SchedulerNode child : indexedChildren) {
+                    if (child != null) child.reset();
+                }
+                namedChildren.values().forEach(SchedulerNode::reset);
+            }
+
+            private void removeNamed(String name) {
+                SchedulerNode removed = namedChildren.remove(name);
+                if (removed != null) removed.reset();
+            }
+
+            private void retainMarkerChildren(Set<String> activeMarkers) {
+                List<String> inactive = namedChildren.keySet().stream()
+                        .filter(name -> name.startsWith("pathMarker:"))
+                        .filter(name -> !activeMarkers.contains(name.substring("pathMarker:".length())))
+                        .toList();
+                inactive.forEach(this::removeNamed);
             }
 
             private Evaluation result(Action output, boolean complete, MechanismContext context) {

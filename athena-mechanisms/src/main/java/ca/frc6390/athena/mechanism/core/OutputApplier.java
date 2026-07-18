@@ -8,6 +8,7 @@ import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
@@ -365,6 +366,12 @@ final class OutputApplier {
                     velocity,
                     goal,
                     mechanismContext.dtSeconds());
+            Range positionRange = Constraints.positionRange(control.constraints());
+            double boundedPosition = positionRange.clamp(reference.position());
+            if (Double.compare(boundedPosition, reference.position()) != 0) {
+                state.profileRuntime(profile).reset(boundedPosition, 0.0);
+                reference = MotionReference.stationary(boundedPosition);
+            }
             return new StagedRequest(
                     Outputs.position(reference.position()),
                     reference,
@@ -488,24 +495,6 @@ final class OutputApplier {
         }
         double feedback = constraintFeedback(control, position, velocity);
         if (!allowsDirection(control, feedback, direction, context)) {
-            return Outputs.neutral();
-        }
-        if (control.mode() != ControlMode.POSITION) {
-            return output;
-        }
-        MotionProfile profile = effectiveProfile(control);
-        if (profile == null || velocity == 0.0 || Math.signum(velocity) != direction) {
-            return output;
-        }
-        double reactionSeconds = Math.max(0.0, context.dtSeconds());
-        double stoppingDistance = velocity * velocity / (2.0 * profile.maxAcceleration())
-                + Math.abs(velocity) * reactionSeconds;
-        double stoppingPosition = position + Math.copySign(stoppingDistance, velocity);
-        ConstraintResult<Double> stopping = Constraints.evaluate(
-                control.constraints(),
-                new ConstraintContext<>(position, stoppingPosition, context));
-        if (!stopping.accepted()
-                || stopping instanceof ConstraintResult.Corrected<?>) {
             return Outputs.neutral();
         }
         return output;

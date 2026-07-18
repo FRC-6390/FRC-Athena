@@ -20,6 +20,7 @@ import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
@@ -310,6 +311,28 @@ class SimulationSessionTest {
         assertTrue(session.encoder(encoder).positionRotations() > 0.0);
         assertTrue(session.encoder(encoder).velocityRotationsPerSecond() > 0.0);
         session.withDigitalInputs(() -> assertTrue(limit.active()));
+    }
+
+    @Test
+    void defaultModelRunnerPublishesMechanismStateToIntegratedMotorEncoderWithGearing() {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 14);
+        EncoderDevice mechanismEncoder = EncoderDevice.of(EncoderKinds.CANCODER, 14);
+        SimulationSession session = SimulationSession.create().model(
+                "geared-axis",
+                SimModel.motor(motor)
+                        .encoder(mechanismEncoder)
+                        .gearRatio(GearRatio.reduction(2.0, 1.0)));
+        HardwareGraph graph = session.hardwareGraph();
+
+        graph.motor(motor).setPercentOutput(1.0);
+        session.step(0.06);
+
+        assertEquals(0.9, session.encoder(mechanismEncoder).positionRotations(), 1.0e-9);
+        assertEquals(15.0, session.encoder(mechanismEncoder).velocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(1.8, session.motor(motor).integratedPositionRotations(), 1.0e-9);
+        assertEquals(30.0, session.motor(motor).integratedVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(1.8, graph.encoder(motor.encoder()).positionRotations(), 1.0e-9);
+        assertEquals(30.0, graph.encoder(motor.encoder()).velocityRotationsPerSecond(), 1.0e-9);
     }
 
     @Test

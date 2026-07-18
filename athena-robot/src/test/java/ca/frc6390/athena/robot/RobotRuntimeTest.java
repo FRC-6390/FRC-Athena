@@ -1,8 +1,10 @@
 package ca.frc6390.athena.robot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.auto.AutoChooser;
@@ -205,6 +207,46 @@ class RobotRuntimeTest {
             assertTrue(runs.get() >= 2);
         } finally {
             runtime.stopWorkers();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void closeCancelsWorkersCommandsAndHardwareAndRejectsFurtherWork() throws Exception {
+        FollowerMotorBackend backend = new FollowerMotorBackend();
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+        CountDownLatch workerStarted = new CountDownLatch(1);
+        AtomicInteger workerRuns = new AtomicInteger();
+        AtomicInteger commandEnds = new AtomicInteger();
+        RobotRuntime runtime = RobotRuntime.using(HardwareGraph.using(BackendRegistry.of(backend)))
+                .register(new MotorMechanism())
+                .workers(RuntimeWorkers.async(
+                        executor,
+                        RuntimeWorker.every("lifecycle", 0.01, () -> {
+                            workerRuns.incrementAndGet();
+                            workerStarted.countDown();
+                        })))
+                .startWorkers()
+                .schedule(CommandAction.create("active")
+                        .onEnd(commandEnds::incrementAndGet)
+                        .build());
+        try {
+            assertTrue(workerStarted.await(1, TimeUnit.SECONDS));
+
+            runtime.close();
+            runtime.close();
+            int runsAfterClose = workerRuns.get();
+            Thread.sleep(50L);
+
+            assertEquals(runsAfterClose, workerRuns.get());
+            assertEquals(1, commandEnds.get());
+            assertEquals(1, backend.leader.closeCalls);
+            assertFalse(executor.isShutdown());
+            assertThrows(IllegalStateException.class, () -> runtime.request(Actions.neutral()));
+            assertThrows(IllegalStateException.class, () -> runtime.robotPeriodic(0.0, 0.02));
+            assertThrows(IllegalStateException.class, () -> runtime.register(new MotorMechanism()));
+        } finally {
+            runtime.close();
             executor.shutdownNow();
         }
     }
@@ -753,9 +795,10 @@ class RobotRuntimeTest {
         }
     }
 
-    private static final class FollowerMotorHandle implements MotorHandle {
+    private static final class FollowerMotorHandle implements MotorHandle, AutoCloseable {
         private final MotorDevice device;
         private MotorHandle followLeader;
+        private int closeCalls;
 
         private FollowerMotorHandle(MotorDevice device) {
             this.device = device;
@@ -769,6 +812,11 @@ class RobotRuntimeTest {
         @Override
         public void follow(MotorHandle leader, boolean inverted) {
             followLeader = leader;
+        }
+
+        @Override
+        public void close() {
+            closeCalls++;
         }
     }
 

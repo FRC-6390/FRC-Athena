@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import ca.frc6390.athena.api.FailurePolicy;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import java.util.Collection;
@@ -110,7 +112,7 @@ final class HookRuntime {
         for (HookBinding.HookAction binding : hook.actions()) {
             if (isImmediateDeviceMutation(binding.action())) {
                 if (binding.phase().shouldRun(event, wasActive, active)) {
-                    binding.action().apply(actionContext);
+                    applyImmediateMutation(binding.action(), actionContext);
                     immediateMutation.run();
                 }
                 continue;
@@ -187,6 +189,35 @@ final class HookRuntime {
 
     private static boolean isImmediateDeviceMutation(ActionBinding action) {
         return action instanceof Actions.EncoderSetPosition || action instanceof Actions.ImuYawMutation;
+    }
+
+    private static void applyImmediateMutation(ActionBinding action, ActionContext context) {
+        Object declaration;
+        FailurePolicy policy;
+        if (action instanceof Actions.EncoderSetPosition encoderAction) {
+            declaration = encoderAction.encoder();
+            policy = encoderAction.encoder().failurePolicy();
+        } else if (action instanceof Actions.ImuYawMutation imuAction) {
+            declaration = imuDeclaration(imuAction);
+            policy = declaration instanceof ImuDevice imu ? imu.failurePolicy() : FailurePolicy.WARN;
+        } else {
+            action.apply(context);
+            return;
+        }
+        try {
+            action.apply(context);
+        } catch (RuntimeException exception) {
+            if (policy == FailurePolicy.PANIC) throw exception;
+            context.hardwareFailure(declaration, exception);
+        }
+    }
+
+    private static Object imuDeclaration(Actions.ImuYawMutation mutation) {
+        if (mutation.imu() instanceof ImuDevice imu) return imu;
+        for (Object dependency : mutation.imu().dependencies()) {
+            if (dependency instanceof ImuDevice imu) return imu;
+        }
+        return mutation.imu();
     }
 
     /**

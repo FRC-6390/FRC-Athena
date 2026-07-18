@@ -3,6 +3,7 @@ package ca.frc6390.athena.commands;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -103,6 +104,53 @@ class CommandActionTest {
         assertTrue(graph.cancel(" second "));
         assertEquals(1, secondEnd.get());
         assertTrue(graph.activeCommandNames().isEmpty());
+    }
+
+    @Test
+    void commandCanReplaceItselfByNameDuringExecution() {
+        CommandGraph graph = new CommandGraph();
+        AtomicInteger firstEnd = new AtomicInteger();
+        AtomicInteger replacementExecute = new AtomicInteger();
+        AtomicInteger replacementEnd = new AtomicInteger();
+        CommandAction replacement = CommandAction.create("drive")
+                .requires("drivetrain")
+                .onExecute(replacementExecute::incrementAndGet)
+                .until(() -> true)
+                .onEnd(replacementEnd::incrementAndGet)
+                .build();
+        CommandAction first = CommandAction.create("drive")
+                .requires("drivetrain")
+                .onExecute(() -> graph.schedule(replacement))
+                .until(() -> true)
+                .onEnd(firstEnd::incrementAndGet)
+                .build();
+
+        graph.schedule(first);
+        assertEquals(SetOrder.of("drive"), new java.util.LinkedHashSet<>(graph.periodic()));
+        assertEquals(SetOrder.of("drive"), new java.util.LinkedHashSet<>(graph.activeCommandNames()));
+        assertEquals(1, firstEnd.get());
+        assertEquals(0, replacementExecute.get());
+
+        assertEquals(SetOrder.of("drive"), new java.util.LinkedHashSet<>(graph.periodic()));
+        assertTrue(graph.activeCommandNames().isEmpty());
+        assertEquals(1, replacementExecute.get());
+        assertEquals(1, replacementEnd.get());
+    }
+
+    @Test
+    void activeCommandNamesIsAnImmutableSnapshot() {
+        AtomicInteger end = new AtomicInteger();
+        CommandGraph graph = new CommandGraph().schedule(CommandAction.create("drive")
+                .requires("drivetrain")
+                .onEnd(end::incrementAndGet)
+                .build());
+        var names = graph.activeCommandNames();
+
+        assertThrows(UnsupportedOperationException.class, names::clear);
+        assertEquals(SetOrder.of("drive"), new java.util.LinkedHashSet<>(graph.activeCommandNames()));
+        assertTrue(graph.cancel("drive"));
+        assertEquals(1, end.get());
+        assertEquals(SetOrder.of("drive"), new java.util.LinkedHashSet<>(names));
     }
 
     private static final class SetOrder {

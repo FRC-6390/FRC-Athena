@@ -53,7 +53,7 @@ import java.util.function.BooleanSupplier;
 /**
  * Root Athena runtime that composes hardware, mechanisms, drivetrain, vision, localization, autos, commands, and sim.
  */
-public final class RobotRuntime {
+public final class RobotRuntime implements AutoCloseable {
     private final HardwareGraph hardwareGraph;
     private final SimulationSession simulationSession;
     private final MechanismScheduler mechanisms;
@@ -81,6 +81,7 @@ public final class RobotRuntime {
     private final Set<String> reportedFailures = new LinkedHashSet<>();
     private final Set<Object> activeRecoverableFailures = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<Object, Integer> recoverySamples = new IdentityHashMap<>();
+    private volatile boolean closed;
 
     private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
         this.hardwareGraph = Objects.requireNonNull(hardwareGraph, "hardwareGraph");
@@ -124,11 +125,13 @@ public final class RobotRuntime {
      * @return hardware graph
      */
     public HardwareGraph hardwareGraph() {
+        ensureOpen();
         return hardwareGraph;
     }
 
     /** Selects where recoverable runtime failures are reported. */
     public RobotRuntime failureReporter(RuntimeFailureReporter reporter) {
+        ensureOpen();
         failureReporter = Objects.requireNonNull(reporter, "reporter");
         return this;
     }
@@ -148,6 +151,7 @@ public final class RobotRuntime {
      * @return simulation session or null
      */
     public SimulationSession simulationSession() {
+        ensureOpen();
         return simulationSession;
     }
 
@@ -158,6 +162,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime workers(RuntimeWorkers workers) {
+        ensureOpen();
         this.workers.close();
         this.workers = workers == null ? RuntimeWorkers.none() : workers;
         return this;
@@ -169,6 +174,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime startWorkers() {
+        ensureOpen();
         workers.start();
         return this;
     }
@@ -179,6 +185,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime stopWorkers() {
+        ensureOpen();
         workers.close();
         return this;
     }
@@ -191,6 +198,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime digitalInputs(Function<DigitalInputDevice, BooleanSupplier> resolver) {
+        ensureOpen();
         digitalInputResolver = Objects.requireNonNull(resolver, "resolver");
         bindDigitalInputs();
         return this;
@@ -228,6 +236,7 @@ public final class RobotRuntime {
      * @return command graph
      */
     public CommandGraph commands() {
+        ensureOpen();
         return commands;
     }
 
@@ -238,6 +247,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime register(Mechanism mechanism) {
+        ensureOpen();
         mechanisms.register(mechanism);
         RuntimeGraphDiscovery.Result services = RuntimeGraphDiscovery.inspect(mechanism);
         services.cameraOwners().forEach(mechanisms::declarationOwner);
@@ -306,6 +316,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime cameras(CameraDevice... cameras) {
+        ensureOpen();
         CameraDevice[] additions = cameras == null ? new CameraDevice[0] : Arrays.stream(cameras)
                 .filter(Objects::nonNull)
                 .filter(registeredCameras::add)
@@ -329,6 +340,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime vision(VisionGraph visionGraph) {
+        ensureOpen();
         VisionGraph safeGraph = bindVisionGraphForSimulation(Objects.requireNonNull(visionGraph, "visionGraph"));
         visionGraphs.add(safeGraph);
         return this;
@@ -410,6 +422,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime localization(Localization... pipelines) {
+        ensureOpen();
         if (pipelines != null) {
             for (Localization pipeline : pipelines) {
                 if (pipeline != null) {
@@ -430,6 +443,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime localizationMaxAge(double seconds) {
+        ensureOpen();
         localizationMaxAgeSeconds = Double.isFinite(seconds) && seconds >= 0.0 ? seconds : Double.POSITIVE_INFINITY;
         return this;
     }
@@ -441,6 +455,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime localizationRefreshWhileDisabled(boolean enabled) {
+        ensureOpen();
         localizationRefreshWhileDisabled = enabled;
         return this;
     }
@@ -582,6 +597,7 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime schedule(CommandAction Action) {
+        ensureOpen();
         commands.schedule(Action);
         return this;
     }
@@ -593,12 +609,14 @@ public final class RobotRuntime {
      * @return this runtime
      */
     public RobotRuntime request(Action Action) {
+        ensureOpen();
         mechanisms.request(Action);
         return this;
     }
 
     /** Cancels a requested mechanism action. */
     public RobotRuntime cancel(Action action) {
+        ensureOpen();
         mechanisms.cancel(action);
         return this;
     }
@@ -629,6 +647,7 @@ public final class RobotRuntime {
     /** Controls core trace materialization independently of a telemetry transport. */
     public RobotRuntime mechanismTraceLevel(
             ca.frc6390.athena.mechanism.core.MechanismTraceLevel level) {
+        ensureOpen();
         mechanisms.traceLevel(level);
         return this;
     }
@@ -689,6 +708,7 @@ public final class RobotRuntime {
      * @return no mechanism outputs
      */
     public List<ResolvedOutput> simulationPeriodic(double nowSeconds, double dtSeconds) {
+        ensureOpen();
         publishSimulationStep(nowSeconds, dtSeconds, true, false);
         return List.of();
     }
@@ -701,6 +721,7 @@ public final class RobotRuntime {
      * @return mechanism outputs
      */
     public List<ResolvedOutput> periodic(MechanismContext mechanismContext, EventContext eventContext) {
+        ensureOpen();
         MechanismContext safeMechanismContext = mechanismContext == null
                 ? MechanismContext.empty()
                 : mechanismContext;
@@ -742,6 +763,7 @@ public final class RobotRuntime {
             boolean enabled,
             boolean autonomous,
             boolean simulation) {
+        ensureOpen();
         MechanismContext mechanismContext = new MechanismContext(nowSeconds, 0.0, dtSeconds, enabled, autonomous, simulation);
         workers.runDue(nowSeconds);
         hardwareGraph.refreshInputs();
@@ -907,5 +929,41 @@ public final class RobotRuntime {
             }
             localizationSnapshots.get(i).refresh(signal);
         }
+    }
+
+    /** Stops runtime activity and releases owned hardware bindings and handles. */
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        RuntimeException failure = null;
+        try {
+            workers.close();
+        } catch (RuntimeException exception) {
+            failure = exception;
+        }
+        try {
+            commands.cancelAll();
+        } catch (RuntimeException exception) {
+            failure = appendFailure(failure, exception);
+        }
+        try {
+            hardwareGraph.close();
+        } catch (RuntimeException exception) {
+            failure = appendFailure(failure, exception);
+        }
+        if (failure != null) throw failure;
+    }
+
+    private void ensureOpen() {
+        if (closed) {
+            throw new IllegalStateException("Robot runtime is closed.");
+        }
+    }
+
+    private static RuntimeException appendFailure(RuntimeException failure, RuntimeException additional) {
+        if (failure == null) return additional;
+        failure.addSuppressed(additional);
+        return failure;
     }
 }

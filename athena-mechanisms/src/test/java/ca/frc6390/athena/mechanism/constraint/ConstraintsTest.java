@@ -87,4 +87,19 @@ class ConstraintsTest {
         assertEquals(30.0, motion.maxAcceleration(), 1.0e-9);
     }
 
+    @Test
+    void groupedRangeAndMotionDeclarationsExposeTheirMetadata() {
+        Constraint<Double> grouped = Constraints.all(
+                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(-2.0, 4.0)),
+                Constraints.motion(3.0, 7.0));
+
+        var range = Constraints.positionRange(List.of(grouped));
+        var motion = Constraints.motionProfile(List.of(grouped));
+
+        assertEquals(-2.0, range.minimum(), 1.0e-9);
+        assertEquals(4.0, range.maximum(), 1.0e-9);
+        assertEquals(3.0, motion.maxVelocity(), 1.0e-9);
+        assertEquals(7.0, motion.maxAcceleration(), 1.0e-9);
+    }
+
 }

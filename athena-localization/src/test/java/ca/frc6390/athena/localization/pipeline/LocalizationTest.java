@@ -80,6 +80,25 @@ class LocalizationTest {
     }
 
     @Test
+    void forkedLocalizationBuildersKeepIndependentRuntimeState() {
+        Sample first = sample(1.0, 0.0, 0.0, 1.0, 0.0, 1, 1.0,
+                MeasurementStdDevs.of(1.0, 1.0, 1.0), new Object());
+        Sample second = sample(2.0, 0.0, 0.0, 1.0, 0.0, 1, 1.0,
+                MeasurementStdDevs.of(1.0, 1.0, 1.0), new Object());
+        Localization base = Localizations.latestValid();
+        Localization firstBranch = base.input(signal(first));
+        Localization secondBranch = base.input(signal(second));
+
+        PoseSignal firstSnapshot = firstBranch.refresh(null, 10.0, 0.02);
+        PoseSignal secondSnapshot = secondBranch.refresh(null, 10.0, 0.02);
+
+        assertSame(first, firstSnapshot.measurements().get(0));
+        assertSame(second, secondSnapshot.measurements().get(0));
+        assertSame(first, firstBranch.measurements().get(0));
+        assertSame(second, secondBranch.measurements().get(0));
+    }
+
+    @Test
     void weightedAverageUsesTranslationVarianceAndCircularHeadingAverage() {
         Sample weak = sample(0.0, 0.0, Math.toRadians(179.0), 4.0, 0.0, 1, 1.0,
                 MeasurementStdDevs.of(2.0, 2.0, 0.4), new Object());

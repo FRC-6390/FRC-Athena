@@ -93,6 +93,82 @@ class HardwareGraphTest {
     }
 
     @Test
+    void valueIdenticalMotorDeclarationsAreEachRuntimeBound() {
+        FakeMotorBackend backend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(backend));
+        MotorDevice first = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
+        MotorDevice second = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
+
+        FakeMotorHandle handle = assertInstanceOf(FakeMotorHandle.class, graph.motor(first));
+        handle.position = 4.25;
+
+        assertSame(handle, graph.motor(second));
+        assertEquals(4.25, second.positionRotations(), 1.0e-9);
+        assertEquals(1, backend.created);
+    }
+
+    @Test
+    void transientCreationFailuresRetryAndRebindDeclarations() {
+        FakeMotorBackend motorBackend = new FakeMotorBackend();
+        FakeEncoderBackend encoderBackend = new FakeEncoderBackend();
+        FakeImuBackend imuBackend = new FakeImuBackend();
+        motorBackend.failuresRemaining = 1;
+        encoderBackend.failuresRemaining = 1;
+        imuBackend.failuresRemaining = 1;
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(
+                List.of(motorBackend),
+                List.of(encoderBackend),
+                List.of(imuBackend)));
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 11);
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
+        ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 13);
+
+        assertEquals(0.0, graph.motor(motor).integratedPositionRotations(), 1.0e-9);
+        assertEquals(0.0, graph.encoder(encoder).positionRotations(), 1.0e-9);
+        assertEquals(0.0, graph.imu(imu).yawDegrees(), 1.0e-9);
+        assertEquals(3, graph.bindingFailures().size());
+
+        FakeMotorHandle recoveredMotor = assertInstanceOf(FakeMotorHandle.class, graph.motor(motor));
+        graph.encoder(encoder);
+        FakeEncoderHandle recoveredEncoder = encoderBackend.last;
+        FakeImuHandle recoveredImu = assertInstanceOf(FakeImuHandle.class, graph.imu(imu));
+        recoveredMotor.position = 1.25;
+        recoveredEncoder.position = 2.5;
+        recoveredImu.yaw = 37.0;
+
+        assertEquals(1.25, motor.positionRotations(), 1.0e-9);
+        assertEquals(2.5, encoder.position(), 1.0e-9);
+        assertEquals(37.0, imu.yawDegrees(), 1.0e-9);
+        assertTrue(graph.bindingFailures().isEmpty());
+        assertEquals(2, motorBackend.created);
+        assertEquals(2, encoderBackend.created);
+        assertEquals(2, imuBackend.created);
+    }
+
+    @Test
+    void refreshInputsAutomaticallyRetriesFailedBindingsWithBackoff() {
+        FakeEncoderBackend backend = new FakeEncoderBackend();
+        backend.failuresRemaining = 2;
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(
+                List.of(), List.of(backend), List.of()));
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 14);
+
+        graph.encoder(encoder);
+        graph.refreshInputs(0L);
+        graph.refreshInputs(99_999_999L);
+
+        assertEquals(2, backend.created);
+        assertEquals(1, graph.bindingFailures().size());
+
+        graph.refreshInputs(100_000_000L);
+        backend.last.position = 0.625;
+
+        assertEquals(3, backend.created);
+        assertEquals(0.625, encoder.position(), 1.0e-9);
+        assertTrue(graph.bindingFailures().isEmpty());
+    }
+
+    @Test
     void graphRejectsConflictingConfigurationForSamePhysicalMotor() {
         FakeMotorBackend backend = new FakeMotorBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(backend));
@@ -488,6 +564,7 @@ class HardwareGraphTest {
 
     private static final class FakeMotorBackend implements MotorBackend {
         private int created;
+        private int failuresRemaining;
         private FakeMotorHandle last;
 
         @Override
@@ -498,6 +575,9 @@ class HardwareGraphTest {
         @Override
         public MotorHandle create(MotorDevice device) {
             created++;
+            if (failuresRemaining-- > 0) {
+                throw new IllegalStateException("transient motor creation failure");
+            }
             last = new FakeMotorHandle(device);
             return last;
         }
@@ -510,6 +590,7 @@ class HardwareGraphTest {
 
     private static final class FakeEncoderBackend implements EncoderBackend {
         private int created;
+        private int failuresRemaining;
         private FakeEncoderHandle last;
 
         @Override
@@ -520,6 +601,9 @@ class HardwareGraphTest {
         @Override
         public EncoderHandle create(EncoderDevice device) {
             created++;
+            if (failuresRemaining-- > 0) {
+                throw new IllegalStateException("transient encoder creation failure");
+            }
             last = new FakeEncoderHandle(device);
             return last;
         }
@@ -527,6 +611,7 @@ class HardwareGraphTest {
 
     private static final class FakeImuBackend implements ImuBackend {
         private int created;
+        private int failuresRemaining;
         private FakeImuHandle last;
 
         @Override
@@ -537,6 +622,9 @@ class HardwareGraphTest {
         @Override
         public ImuHandle create(ImuDevice device) {
             created++;
+            if (failuresRemaining-- > 0) {
+                throw new IllegalStateException("transient IMU creation failure");
+            }
             last = new FakeImuHandle(device);
             return last;
         }

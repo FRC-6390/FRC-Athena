@@ -551,7 +551,7 @@ public final class Localization implements PoseSignal {
     private Localization copy(List<PoseSignal> nextInputs, List<LocalizationFilter> nextFilters) {
         return new Localization(strategy, nextInputs, nextFilters, debugName, publishNetworkTables,
                 groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
-                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, state);
+                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, new State());
     }
 
     private Localization configured(
@@ -565,7 +565,7 @@ public final class Localization implements PoseSignal {
             MeasurementStdDevs visionStdDevs) {
         return new Localization(strategy, inputs, filters, name, publish, groupWindow,
                 translationDisagreement, headingDisagreement, minimumSourceCount,
-                gate, processStdDevs, visionStdDevs, state);
+                gate, processStdDevs, visionStdDevs, new State());
     }
 
     private static PoseSignal snapshot(List<Measurement> measurements) {

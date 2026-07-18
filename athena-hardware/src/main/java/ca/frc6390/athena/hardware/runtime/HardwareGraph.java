@@ -40,9 +40,11 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final Map<HardwareIdentity, RefreshBackoff> refreshBackoffs = new LinkedHashMap<>();
     private RefreshTask[] refreshTasks = new RefreshTask[0];
     private int refreshTaskHandleCount = -1;
-    private final Map<Object, RuntimeException> bindingFailures = new LinkedHashMap<>();
+    private final Map<Object, RuntimeException> bindingFailures = new IdentityHashMap<>();
+    private final Map<Object, RefreshBackoff> bindingRetryBackoffs = new IdentityHashMap<>();
     private final Map<Object, RuntimeException> operationFailures = new LinkedHashMap<>();
     private final Map<Object, AutoCloseable> runtimeBindings = new IdentityHashMap<>();
+    private final Map<Object, Object> runtimeBindingHandles = new IdentityHashMap<>();
     private final RuntimeScope runtimeScope = new RuntimeScope("hardware-" + Integer.toHexString(System.identityHashCode(this)));
 
     /**
@@ -91,8 +93,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             }
             bindingFailures.put(device, exception);
             MotorHandle unavailable = new UnavailableMotorHandle(device);
-            motors.putIfAbsent(identity(device), unavailable);
-            runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, unavailable));
+            bindRuntime(device, unavailable);
             return unavailable;
         }
     }
@@ -101,6 +102,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         HardwareIdentity identity = identity(device);
         MotorHandle existing = motors.get(identity);
         if (existing != null) {
+            bindRuntime(device, existing);
+            bindingFailures.remove(device);
             return existing;
         }
         MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());
@@ -127,7 +130,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             softwareFollowerViews.remove(leaderIdentity);
         }
         motors.put(identity, handle);
-        runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, handle));
+        bindRuntime(device, handle);
+        bindingFailures.remove(device);
         return handle;
     }
 
@@ -150,8 +154,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             }
             bindingFailures.put(device, exception);
             EncoderHandle unavailable = new UnavailableEncoderHandle(device);
-            encoders.putIfAbsent(identity(device), unavailable);
-            runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, unavailable));
+            bindRuntime(device, unavailable);
             return unavailable;
         }
     }
@@ -181,7 +184,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                 return adjustable(created);
             });
         }
-        runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, handle));
+        bindRuntime(device, handle);
+        bindingFailures.remove(device);
         return handle;
     }
 
@@ -215,8 +219,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             }
             bindingFailures.put(device, exception);
             ImuHandle unavailable = new UnavailableImuHandle(device);
-            imus.putIfAbsent(identity(device), unavailable);
-            runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, unavailable));
+            bindRuntime(device, unavailable);
             return unavailable;
         }
     }
@@ -231,8 +234,37 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             created.activate();
             return created;
         });
-        runtimeBindings.computeIfAbsent(device, ignored -> device.bindRuntime(runtimeScope, handle));
+        bindRuntime(device, handle);
+        bindingFailures.remove(device);
         return handle;
+    }
+
+    private void bindRuntime(MotorDevice device, MotorHandle handle) {
+        replaceRuntimeBinding(device, handle, () -> device.bindRuntime(runtimeScope, handle));
+    }
+
+    private void bindRuntime(EncoderDevice device, EncoderHandle handle) {
+        replaceRuntimeBinding(device, handle, () -> device.bindRuntime(runtimeScope, handle));
+    }
+
+    private void bindRuntime(ImuDevice device, ImuHandle handle) {
+        replaceRuntimeBinding(device, handle, () -> device.bindRuntime(runtimeScope, handle));
+    }
+
+    private void replaceRuntimeBinding(Object device, Object handle, RuntimeBindingFactory factory) {
+        if (runtimeBindingHandles.get(device) == handle) return;
+        AutoCloseable previous = runtimeBindings.remove(device);
+        if (previous != null) closeBinding(previous);
+        runtimeBindings.put(device, factory.bind());
+        runtimeBindingHandles.put(device, handle);
+    }
+
+    private static void closeBinding(AutoCloseable binding) {
+        try {
+            binding.close();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to replace hardware runtime binding.", exception);
+        }
     }
 
     /**
@@ -245,6 +277,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     void refreshInputs(long nowNanos) {
         RefreshTask[] tasks;
         synchronized (this) {
+            retryBindings(nowNanos);
             int handleCount = motors.size() + encoders.size() + imus.size();
             if (handleCount != refreshTaskHandleCount) {
                 List<RefreshTask> rebuilt = new ArrayList<>(handleCount);
@@ -258,6 +291,32 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         }
         for (RefreshTask task : tasks) {
             refresh(task, nowNanos);
+        }
+    }
+
+    private void retryBindings(long nowNanos) {
+        for (Object declaration : new ArrayList<>(bindingFailures.keySet())) {
+            RefreshBackoff backoff = bindingRetryBackoffs.get(declaration);
+            if (backoff != null && nowNanos < backoff.retryAtNanos()) continue;
+            resolve(declaration);
+            if (!bindingFailures.containsKey(declaration)) {
+                bindingRetryBackoffs.remove(declaration);
+                continue;
+            }
+            int failureCount = backoff == null ? 1 : backoff.failureCount() + 1;
+            bindingRetryBackoffs.put(declaration, new RefreshBackoff(
+                    failureCount,
+                    nowNanos + retryDelayMillis(failureCount) * 1_000_000L));
+        }
+    }
+
+    private void resolve(Object declaration) {
+        if (declaration instanceof MotorDevice motor) {
+            motor(motor);
+        } else if (declaration instanceof EncoderDevice encoder) {
+            encoder(encoder);
+        } else if (declaration instanceof ImuDevice imu) {
+            imu(imu);
         }
     }
 
@@ -316,19 +375,23 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             refreshBackoffs.remove(task.identity());
         } catch (RuntimeException exception) {
             int failureCount = backoff == null ? 1 : backoff.failureCount() + 1;
-            long delayMillis = Math.min(2_000L, 100L << Math.min(failureCount - 1, 4));
             refreshFailures.put(task.identity(), exception);
             refreshFailureSnapshotDirty = true;
             refreshBackoffs.put(task.identity(), new RefreshBackoff(
                     failureCount,
-                    nowNanos + delayMillis * 1_000_000L));
+                    nowNanos + retryDelayMillis(failureCount) * 1_000_000L));
         }
+    }
+
+    private static long retryDelayMillis(int failureCount) {
+        return Math.min(2_000L, 100L << Math.min(failureCount - 1, 4));
     }
 
     @Override
     public synchronized void close() {
         closeAll(runtimeBindings);
         runtimeBindings.clear();
+        runtimeBindingHandles.clear();
         closeAll(imus);
         closeAll(encoders);
         closeAll(motors);
@@ -341,6 +404,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         refreshFailureSnapshot = List.of();
         refreshFailureSnapshotDirty = false;
         refreshBackoffs.clear();
+        bindingRetryBackoffs.clear();
         refreshTasks = new RefreshTask[0];
         refreshTaskHandleCount = -1;
     }
@@ -504,6 +568,11 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private record RefreshBackoff(int failureCount, long retryAtNanos) {
+    }
+
+    @FunctionalInterface
+    private interface RuntimeBindingFactory {
+        AutoCloseable bind();
     }
 
     private record UnavailableMotorHandle(MotorDevice device) implements MotorHandle {
